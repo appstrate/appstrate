@@ -80,6 +80,24 @@ describe("ProcessOrchestrator", () => {
       await orchestrator.removeIsolationBoundary(boundary);
       expect(existsSync(boundary.workspace.path)).toBe(false);
     });
+
+    it("advertises coherent loopback sidecar endpoints at boundary creation", async () => {
+      // The sidecar port pair is allocated when the BOUNDARY is created (not
+      // lazily in createSidecar) so pi.ts can bake the URLs into the agent
+      // env before the sidecar exists — the parallel-boot ordering fix.
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.initialize();
+
+      const boundary = await orchestrator.createIsolationBoundary("test-run-endpoints");
+      const { sidecarUrl, llmProxyUrl, forwardProxyUrl, noProxy } = boundary.sidecarEndpoints;
+      const port = Number(new URL(sidecarUrl).port);
+      expect(port).toBeGreaterThan(0);
+      expect(llmProxyUrl).toBe(`${sidecarUrl}/llm`);
+      expect(new URL(forwardProxyUrl).port).toBe(String(port + 1));
+      expect(noProxy).toContain("localhost");
+
+      await orchestrator.removeIsolationBoundary(boundary);
+    });
   });
 
   describe("ensureImages", () => {

@@ -1,0 +1,126 @@
+name: Firecracker
+
+# End-to-end smoke of the Firecracker orchestrator (RUN_ADAPTER=firecracker):
+# builds the guest kernel/rootfs artifacts, runs the focused unit tests, then
+# boots a REAL microVM through the orchestrator (apps/api/src/modules/firecracker/scripts/dev/).
+# GitHub's Linux runners expose KVM, so this runs on ubuntu-latest.
+#
+# Scoped to the paths that can break the guest boot machinery — the generic
+# check/test workflows already cover the platform-side TypeScript.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/src/modules/firecracker/**"
+      - "apps/api/src/services/orchestrator/**"
+      - "apps/api/src/services/run-launcher/**"
+      - "apps/api/src/services/connect/**"
+      - "apps/api/src/lib/modules/**"
+      - "packages/core/**"
+      - "packages/env/**"
+      - "runtime-pi/Dockerfile"
+      - "runtime-pi/sidecar/**"
+      - ".github/workflows/firecracker.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/api/src/modules/firecracker/**"
+      - "apps/api/src/services/orchestrator/**"
+      - "apps/api/src/services/run-launcher/**"
+      - "apps/api/src/services/connect/**"
+      - "apps/api/src/lib/modules/**"
+      - "packages/core/**"
+      - "packages/env/**"
+      - "runtime-pi/Dockerfile"
+      - "runtime-pi/sidecar/**"
+      - ".github/workflows/firecracker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firecracker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    # Cold cache pays the full ~20 min kernel build + the rootfs docker
+    # builds before the smoke even starts — 30 min would loop forever
+    # without ever saving the kernel cache.
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm && test -w /dev/kvm
+
+      - name: Install Firecracker
+        # Pinned release + published checksum — never `latest` (supply chain).
+        # Keep FC_VERSION/FC_SHA256 in sync with apps/api/src/modules/firecracker/scripts/dev/lima.yaml.
+        run: |
+          FC_VERSION="v1.16.0"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64)  FC_SHA256="bd04e26952d4e158085778c6230a0b383d2619c319182e27eaa9d61a212e92d6" ;;
+            aarch64) FC_SHA256="531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7" ;;
+            *) echo "unsupported arch $ARCH" >&2; exit 1 ;;
+          esac
+          curl -fsSL -o /tmp/firecracker.tgz "https://github.com/firecracker-microvm/firecracker/releases/download/${FC_VERSION}/firecracker-${FC_VERSION}-${ARCH}.tgz"
+          echo "${FC_SHA256}  /tmp/firecracker.tgz" | sha256sum -c -
+          tar -xzf /tmp/firecracker.tgz -C /tmp
+          sudo install -m 0755 "/tmp/release-${FC_VERSION}-${ARCH}/firecracker-${FC_VERSION}-${ARCH}" /usr/local/bin/firecracker
+          firecracker --version
+
+      # The kernel is BUILT (CI kernels lack nftables — see build-kernel.sh).
+      # First build ~20 min; afterwards this cache short-circuits it.
+      # Explicit restore/build/save split (NOT the monolithic actions/cache):
+      # the monolithic post-step only saves on job SUCCESS, so a failing or
+      # cancelled smoke — exactly what an iterating branch produces — would
+      # discard the 20-min build and re-pay it on every push.
+      - name: Restore guest kernel cache
+        id: kernel-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
+        with:
+          path: data/firecracker/vmlinux
+          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('apps/api/src/modules/firecracker/scripts/build-kernel.sh') }}
+
+      - name: Build guest kernel
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: bash apps/api/src/modules/firecracker/scripts/build-kernel.sh data/firecracker/vmlinux
+
+      - name: Save guest kernel cache
+        if: >-
+          always() && steps.kernel-cache.outputs.cache-hit != 'true' &&
+          hashFiles('data/firecracker/vmlinux') != ''
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
+        with:
+          path: data/firecracker/vmlinux
+          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('apps/api/src/modules/firecracker/scripts/build-kernel.sh') }}
+
+      - name: Run smoke suite
+        run: bash apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh
+        env:
+          BETTER_AUTH_SECRET: ci-dummy-secret
+          CONNECTION_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          UPLOAD_SIGNING_SECRET: ci-dummy-upload-signing-secret
+
+      - name: Upload guest console on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: firecracker-run-dirs
+          path: data/firecracker/runs/**/console.log
+          if-no-files-found: ignore

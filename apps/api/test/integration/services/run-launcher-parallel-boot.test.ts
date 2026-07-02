@@ -21,7 +21,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import type {
-  ContainerOrchestrator,
+  RunOrchestrator,
   IsolationBoundary,
   SidecarLaunchSpec,
   WorkloadHandle,
@@ -54,7 +54,7 @@ interface TimingObservations {
 }
 
 function createTimingFake(config: TimingFakeConfig): {
-  orchestrator: ContainerOrchestrator;
+  orchestrator: RunOrchestrator;
   obs: TimingObservations;
 } {
   const obs: TimingObservations = {
@@ -64,7 +64,7 @@ function createTimingFake(config: TimingFakeConfig): {
     agentStartedAt: null,
   };
 
-  const orchestrator: ContainerOrchestrator = {
+  const orchestrator: RunOrchestrator = {
     async initialize() {},
     async shutdown() {},
     async cleanupOrphans(): Promise<CleanupReport> {
@@ -76,6 +76,12 @@ function createTimingFake(config: TimingFakeConfig): {
         id: `net_${runId}`,
         name: `appstrate-exec-${runId}`,
         workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+        sidecarEndpoints: {
+          sidecarUrl: "http://fake-sidecar.test:19080",
+          llmProxyUrl: "http://fake-sidecar.test:19080/llm",
+          forwardProxyUrl: "http://fake-sidecar.test:19081",
+          noProxy: "fake-sidecar.test,localhost,127.0.0.1",
+        },
       };
     },
     async removeIsolationBoundary() {},

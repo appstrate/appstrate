@@ -18,22 +18,24 @@
  * Re-test with `stdout: "pipe"` after upgrading Bun to check if the fix is still needed.
  */
 
-import { mkdir, rm, readdir, open as fsOpen, stat } from "node:fs/promises";
+import { mkdir, rm, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
 import type {
-  ContainerOrchestrator,
+  RunOrchestrator,
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
+  IsolationBoundaryOptions,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
 } from "@appstrate/core/platform-types";
-import { applySpecToSidecarEnv } from "./sidecar-env.ts";
+import { buildBaseSidecarEnv } from "./sidecar-env.ts";
+import { drainStream, tailFileLines } from "./subprocess-util.ts";
 
 const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
@@ -93,11 +95,6 @@ async function reapOrphanWorkspaceDirs(): Promise<number> {
   return count;
 }
 
-/** Poll interval for tailing the stdout file (ms). */
-const TAIL_POLL_MS = 50;
-/** Read buffer size for tailing (bytes). */
-const TAIL_BUFFER_SIZE = 16_384;
-
 type BunProcess = ReturnType<typeof Bun.spawn>;
 
 interface ProcessHandle {
@@ -129,7 +126,7 @@ function cleanProcessEnv(): Record<string, string> {
   return env;
 }
 
-export class ProcessOrchestrator implements ContainerOrchestrator {
+export class ProcessOrchestrator implements RunOrchestrator {
   private processes = new Map<string, ProcessHandle>();
   private sidecarPorts = new Map<string, number>();
   private pendingSpecs = new Map<string, PendingSpec>();
@@ -232,29 +229,57 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     return { workloads, isolationBoundaries, workspaces };
   }
 
-  async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+  async createIsolationBoundary(
+    runId: string,
+    opts?: IsolationBoundaryOptions,
+  ): Promise<IsolationBoundary> {
     const dir = join(DATA_DIR, runId);
     // Create both the pidfile boundary dir and the shared workspace
     // dir in parallel — independent fs operations, no ordering
     // constraint. Workspace lives under os.tmpdir() rather than
     // DATA_DIR so a host-side `rm -rf data/` doesn't accidentally
     // wipe the workspace for an active run.
+    //
+    // The sidecar port pair is allocated HERE (not in createSidecar) so
+    // the boundary can expose agent-visible sidecar endpoints before the
+    // sidecar exists. This also removes the former createSidecar ↔
+    // createWorkload ordering hazard: both are launched in a Promise.all
+    // by pi.ts, and the old lazy allocation meant the agent env could be
+    // built before the port was known.
+    //
+    // skipSidecar runs never bind the port — don't probe one at all. The
+    // probe would only widen the probe→bind TOCTOU window for nothing;
+    // port 0 in the placeholder endpoints fails loudly if anything dials
+    // them by mistake.
     const workspacePath = workspaceDirFor(runId);
-    await Promise.all([
+    const [port] = await Promise.all([
+      opts?.skipSidecar ? Promise.resolve(0) : this.findAvailablePort(),
       mkdir(dir, { recursive: true }),
       // 0o700: the workspace sits under the shared `os.tmpdir()` and
       // holds the agent's run inputs/outputs — keep it readable only by
       // the platform uid, not world-readable to other local users.
       mkdir(workspacePath, { recursive: true, mode: 0o700 }),
     ]);
+    if (!opts?.skipSidecar) this.sidecarPorts.set(runId, port);
     return {
       id: dir,
       name: `process-${runId}`,
       workspace: { kind: "directory", path: workspacePath },
+      sidecarEndpoints: {
+        sidecarUrl: `http://localhost:${port}`,
+        llmProxyUrl: `http://localhost:${port}/llm`,
+        forwardProxyUrl: `http://localhost:${port + 1}`,
+        noProxy: "localhost,127.0.0.1",
+      },
     };
   }
 
   async removeIsolationBoundary(boundary: IsolationBoundary): Promise<void> {
+    // Port allocation is boundary-scoped (see createIsolationBoundary) —
+    // release it here so a run that never spawned a sidecar (skipSidecar)
+    // doesn't leak one map entry per run.
+    const runId = boundary.name.replace(/^process-/, "");
+    this.sidecarPorts.delete(runId);
     // Race boundary teardown and workspace teardown — independent
     // paths, errors swallowed individually so a stuck workspace can't
     // block the pidfile dir cleanup.
@@ -271,22 +296,27 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     boundary: IsolationBoundary,
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
-    const [port, platformApiUrl] = await Promise.all([
-      this.findAvailablePort(),
-      this.resolvePlatformApiUrl(),
-    ]);
+    // Allocated by createIsolationBoundary — the boundary's
+    // sidecarEndpoints already advertise this port to the agent env.
+    const port = this.sidecarPorts.get(runId);
+    if (!port) {
+      throw new Error(
+        `Process orchestrator: no sidecar port allocated for run ${runId} — ` +
+          `createIsolationBoundary must run before createSidecar`,
+      );
+    }
+    const platformApiUrl = await this.resolvePlatformApiUrl();
     const id = `sidecar-${runId}`;
 
-    const env: Record<string, string> = {
-      ...cleanProcessEnv(),
-      PORT: String(port),
-      PLATFORM_API_URL: platformApiUrl,
-      RUN_TOKEN: spec.runToken,
-      // Hand the workspace handle to the sidecar so its integration
-      // runtime adapter can wire the same shared surface into runner
-      // subprocesses that opt in via mcp-server _meta.workspace.
-      WORKSPACE_HANDLE_JSON: JSON.stringify(boundary.workspace),
-    };
+    // No `runId`: RUN_ID only serves container labeling and this
+    // topology spawns no containers.
+    const env = buildBaseSidecarEnv({
+      spec,
+      baseEnv: cleanProcessEnv(),
+      port: String(port),
+      platformApiUrl,
+      workspace: boundary.workspace,
+    });
     // This run is NOT containerized (process orchestrator), so its integrations
     // must spawn as host subprocesses too. The sidecar selects its integration
     // runtime purely from INTEGRATION_RUNTIME_ADAPTER (no auto-detection), so we
@@ -295,21 +325,22 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     if (!env.INTEGRATION_RUNTIME_ADAPTER) {
       env.INTEGRATION_RUNTIME_ADAPTER = "process";
     }
-    applySpecToSidecarEnv(spec, env);
 
+    // Sidecar stdout goes to a FILE, not a drained pipe, for two reasons:
+    //   - connect-runs capture the credential bundle by tailing it via
+    //     streamLogs (the APPSTRATE_CONNECT_RESULT sentinel) — a drained
+    //     pipe is invisible to streamLogs, so capture would always fail;
+    //   - that same sentinel line carries the captured credentials, and
+    //     drainStream logger.warn's every line — the bundle must never
+    //     reach the platform logs.
+    const stdoutPath = join(boundary.id, "sidecar-stdout.log");
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {
       env,
-      stdout: "pipe",
+      stdout: Bun.file(stdoutPath),
       stderr: "pipe",
     });
-    this.drainStderr(proc, id);
-    // The sidecar's `info`-level lines go to stdout; drain them too so
-    // the buffer never fills up (Bun pipes hang at ~64KB without a
-    // reader, freezing whatever was about to be written next — e.g. the
-    // integration-runtime's spawn progress logs).
-    this.drainStderr(proc, id, undefined, "stdout");
-    this.processes.set(id, { proc, role: "sidecar", runId });
-    this.sidecarPorts.set(runId, port);
+    drainStream(proc, `process:${id}`);
+    this.processes.set(id, { proc, role: "sidecar", runId, stdoutPath });
     await this.writePidfile(runId, "sidecar", proc.pid);
 
     // No /health gate — the agent's MCP client retries its handshake against
@@ -335,21 +366,12 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     await mkdir(workDir, { recursive: true });
 
     const id = `workload-${spec.runId}-${spec.role}`;
-    const sidecarPort = this.sidecarPorts.get(spec.runId);
-    const sidecarUrl = sidecarPort ? `http://localhost:${sidecarPort}` : "http://localhost:8080";
 
+    // Sidecar-relative URLs (SIDECAR_URL, MODEL_BASE_URL, HTTP(S)_PROXY,
+    // NO_PROXY) arrive in spec.env — pi.ts builds them from the boundary's
+    // sidecarEndpoints, so this orchestrator no longer patches them in.
     const env: Record<string, string> = { ...cleanProcessEnv(), ...spec.env };
     env.WORKSPACE_DIR = resolve(workDir);
-    if (sidecarPort) {
-      env.SIDECAR_URL = sidecarUrl;
-      env.MODEL_BASE_URL = `${sidecarUrl}/llm`;
-      env.HTTP_PROXY = `http://localhost:${sidecarPort + 1}`;
-      env.HTTPS_PROXY = `http://localhost:${sidecarPort + 1}`;
-      env.http_proxy = `http://localhost:${sidecarPort + 1}`;
-      env.https_proxy = `http://localhost:${sidecarPort + 1}`;
-      env.NO_PROXY = "localhost,127.0.0.1";
-      env.no_proxy = "localhost,127.0.0.1";
-    }
 
     this.pendingSpecs.set(id, { entrypoint: AGENT_ENTRY, workDir, env });
     this.processes.set(id, { proc: null, role: spec.role, runId: spec.runId, workDir });
@@ -373,7 +395,8 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
 
     const stderrTail: string[] = [];
     ph.stderrTail = stderrTail;
-    this.drainStderr(proc, handle.id, stderrTail);
+    // The tail feeds the agent-exit error log — see ProcessHandle.stderrTail.
+    drainStream(proc, `process:${handle.id}`, { tail: stderrTail });
     ph.proc = proc;
     ph.stdoutPath = stdoutPath;
     this.pendingSpecs.delete(handle.id);
@@ -439,33 +462,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     ph.proc.exited.then(() => {
       exited = true;
     });
-
-    const fh = await fsOpen(ph.stdoutPath, "r");
-    const buf = Buffer.alloc(TAIL_BUFFER_SIZE);
-    const decoder = new TextDecoder();
-    let partial = "";
-
-    try {
-      while (!signal?.aborted) {
-        const { bytesRead } = await fh.read(buf, 0, buf.length);
-
-        if (bytesRead > 0) {
-          partial += decoder.decode(buf.subarray(0, bytesRead), { stream: true });
-          const lines = partial.split("\n");
-          partial = lines.pop() ?? "";
-          for (const line of lines) {
-            if (line.length > 0) yield line;
-          }
-        } else if (exited) {
-          if (partial.length > 0) yield partial;
-          break;
-        } else {
-          await new Promise((r) => setTimeout(r, TAIL_POLL_MS));
-        }
-      }
-    } finally {
-      await fh.close();
-    }
+    yield* tailFileLines(ph.stdoutPath, () => exited, signal);
   }
 
   async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
@@ -515,12 +512,23 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     await rm(join(DATA_DIR, runId, `${role}.pid`), { force: true }).catch(() => {});
   }
 
-  private async findAvailablePort(retries = 3): Promise<number> {
+  private async findAvailablePort(retries = 5): Promise<number> {
+    // Ports already reserved by concurrent run starts (probed at boundary
+    // creation but only bound when their sidecar boots): the OS can hand
+    // the same ephemeral port out again in that window, so a candidate
+    // pair overlapping a reservation must be rejected here — the loser
+    // would otherwise die with EADDRINUSE at sidecar boot.
+    const reserved = new Set<number>();
+    for (const p of this.sidecarPorts.values()) {
+      reserved.add(p);
+      reserved.add(p + 1);
+    }
     for (let attempt = 0; attempt < retries; attempt++) {
       const s1 = Bun.serve({ port: 0, fetch: () => new Response() });
       const port = s1.port ?? 0;
       s1.stop(true);
       if (!port) continue;
+      if (reserved.has(port) || reserved.has(port + 1)) continue;
       try {
         const s2 = Bun.serve({ port: port + 1, fetch: () => new Response() });
         s2.stop(true);
@@ -530,55 +538,5 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       }
     }
     throw new Error("Failed to find available port after retries");
-  }
-
-  /**
-   * Drain stderr from a subprocess. Each line is logged at warn level
-   * for live tailing; the same line is appended to {@link tail} (capped
-   * at the last 50 lines) so the platform can surface stderr in the
-   * agent-exit error log even when the process dies before the live
-   * warn lines reach the user's filtered view.
-   */
-  private drainStderr(
-    proc: BunProcess,
-    label: string,
-    tail?: string[],
-    stream: "stderr" | "stdout" = "stderr",
-  ): void {
-    const stderr = stream === "stderr" ? proc.stderr : proc.stdout;
-    if (!stderr || typeof stderr === "number") return;
-
-    const reader = (stderr as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-
-    const append = (line: string) => {
-      logger.warn(`[process:${label}:${stream}] ${line}`);
-      if (tail) {
-        tail.push(line);
-        if (tail.length > 50) tail.shift();
-      }
-    };
-
-    const drain = async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split("\n");
-          buf = lines.pop() ?? "";
-          for (const line of lines) {
-            if (line.trim()) append(line);
-          }
-        }
-        if (buf.trim()) append(buf);
-      } catch {
-        // Stream closed
-      } finally {
-        reader.releaseLock();
-      }
-    };
-    drain().catch(() => {});
   }
 }

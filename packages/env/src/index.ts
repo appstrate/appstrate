@@ -427,14 +427,23 @@ const envSchema = z
     // `traceparent` for external callers.
     OTEL_TRUST_INCOMING_TRACE: boolEnv("false"),
 
-    // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
-    RUN_ADAPTER: z.enum(["docker", "process"]).default("process"),
+    // Run — execution backend id resolved against the orchestrator registry
+    // at boot. Core provides "docker" (isolated containers) and "process"
+    // (default, Bun subprocesses, no isolation); modules can contribute more
+    // (e.g. the built-in `firecracker` module — one microVM per run, see
+    // docs/architecture/FIRECRACKER.md). Kept as an open string: the value
+    // is validated after modules load, where an unknown id is a fatal boot
+    // error listing the registered backends.
+    RUN_ADAPTER: z.string().default("process"),
 
     // Integration runtime backend the Docker orchestrator pins onto the
-    // sidecar (operator override; same value set as RUN_ADAPTER). The
-    // process orchestrator deliberately reads the raw environment instead —
-    // it must distinguish "unset" (pin to "process") from an explicit
-    // operator override, which a schema default would erase.
+    // sidecar (operator override; same value set as core RUN_ADAPTER
+    // backends). The process orchestrator deliberately reads the raw
+    // environment instead — it must distinguish "unset" (pin to "process")
+    // from an explicit operator override, which a schema default would
+    // erase. The firecracker orchestrator always pins "process": the
+    // sidecar runs INSIDE the guest, so its integration runners are guest
+    // subprocesses.
     INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),
 
     // Docker images (override for GHCR / custom registries)

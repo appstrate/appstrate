@@ -3,7 +3,7 @@
 /**
  * P4 — connect-run launcher (the production ConnectToolExecutor) unit tests.
  *
- * Drives `createConnectRunExecutor` against a MOCK ContainerOrchestrator (no
+ * Drives `createConnectRunExecutor` against a MOCK RunOrchestrator (no
  * Docker, no real sidecar). Asserts:
  *   - the spec it hands `createSidecar` carries CONNECT_LOGIN_JSON-worthy data
  *     (connectLoginSpec + integrations) with the right connectLogin block;
@@ -14,8 +14,13 @@
  */
 
 import { describe, it, expect, beforeAll } from "bun:test";
+import { _resetCacheForTesting } from "@appstrate/env";
+import {
+  registerOrchestrator,
+  _resetOrchestratorRegistryForTesting,
+} from "../../../src/services/orchestrator/registry.ts";
 import type {
-  ContainerOrchestrator,
+  RunOrchestrator,
   IsolationBoundary,
   WorkloadHandle,
   SidecarLaunchSpec,
@@ -93,7 +98,7 @@ interface MockCalls {
  * timeout path) until `stopWorkload` is called.
  */
 function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang?: boolean }): {
-  orch: ContainerOrchestrator;
+  orch: RunOrchestrator;
   calls: MockCalls;
 } {
   const calls: MockCalls = {
@@ -105,13 +110,19 @@ function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang
   };
   let stopped = false;
 
-  const orch: Partial<ContainerOrchestrator> = {
+  const orch: Partial<RunOrchestrator> = {
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
       calls.createdBoundaries.push(runId);
       return {
         id: `net-${runId}`,
         name: `net-${runId}`,
         workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+        sidecarEndpoints: {
+          sidecarUrl: "http://sidecar:8080",
+          llmProxyUrl: "http://sidecar:8080/llm",
+          forwardProxyUrl: "http://sidecar:8081",
+          noProxy: "sidecar,localhost,127.0.0.1",
+        },
       };
     },
     async createSidecar(
@@ -154,7 +165,7 @@ function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang
     },
   };
 
-  return { orch: orch as ContainerOrchestrator, calls };
+  return { orch: orch as RunOrchestrator, calls };
 }
 
 describe("buildConnectLoginSpec", () => {
@@ -296,5 +307,36 @@ describe("createConnectRunExecutor.run", () => {
     await expect(executor.run(execution())).rejects.toThrow(/timed out after 30ms/);
     expect(calls.removedWorkloads).toBe(1);
     expect(calls.removedBoundaries).toBe(1);
+  });
+
+  it("fails fast when the global backend cannot run sidecar-only workloads", async () => {
+    // No injected orchestrator → the executor gates on the GLOBAL backend
+    // capability. A backend that boots its workload through the agent
+    // (e.g. a one-shot microVM) cannot run a connect-run (sidecar-only) —
+    // it would silently never start, so the executor must refuse up front
+    // instead of reporting "sidecar exited without emitting a result".
+    const prevAdapter = process.env.RUN_ADAPTER;
+    process.env.RUN_ADAPTER = "fake-vm";
+    registerOrchestrator(
+      "fake-vm",
+      {
+        isolatesWorkloads: true,
+        supportsSidecarOnly: false,
+        create: () => ({}) as never,
+      },
+      "test",
+    );
+    _resetCacheForTesting();
+    try {
+      const executor = createConnectRunExecutor({ resolveMcpServer: fakeMcpResolver });
+      await expect(executor.run(execution())).rejects.toThrow(
+        /connect-runs are not supported with RUN_ADAPTER="fake-vm"/,
+      );
+    } finally {
+      if (prevAdapter === undefined) delete process.env.RUN_ADAPTER;
+      else process.env.RUN_ADAPTER = prevAdapter;
+      _resetOrchestratorRegistryForTesting();
+      _resetCacheForTesting();
+    }
   });
 });

@@ -18,6 +18,7 @@ import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
 import type { ChatEngineHandler } from "./chat-engine-contract.ts";
 import type { SubscriptionEngineBinding } from "./subscription-engines.ts";
+import type { OrchestratorRegistration } from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -267,6 +268,34 @@ export interface AppstrateModule {
    * ```
    */
   modelProviders?(): readonly ModelProviderDefinition[];
+
+  /**
+   * Execution backends (run orchestrators) contributed by this module,
+   * keyed by `RUN_ADAPTER` value.
+   *
+   * Collected once at load time, before any orchestrator is instantiated.
+   * Two modules (or a module and core) declaring the same id is a fatal
+   * boot error — the second registration would silently shadow the first
+   * at `RUN_ADAPTER` resolution time.
+   *
+   * Security note: the registration's `isolatesWorkloads` capability is
+   * trusted as declared. A module listed in `MODULES` is operator-installed
+   * code running in the API process — the declaration carries the same
+   * trust as the platform's own backends. Unknown/unregistered ids always
+   * degrade to "no capability" (fail-closed).
+   *
+   * @example
+   * ```ts
+   * orchestrators: () => ({
+   *   firecracker: {
+   *     isolatesWorkloads: true,
+   *     supportsSidecarOnly: false,
+   *     create: () => new FirecrackerOrchestrator(),
+   *   },
+   * })
+   * ```
+   */
+  orchestrators?(): Record<string, OrchestratorRegistration>;
 
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;

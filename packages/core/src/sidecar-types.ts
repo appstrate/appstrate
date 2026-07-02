@@ -56,7 +56,7 @@ export interface SidecarConfig {
  * each orchestrator resolves it from its own context (Docker network
  * detection for the docker adapter, loopback for the process adapter)
  * right before spawning the container — see
- * `ContainerOrchestrator.resolvePlatformApiUrl`. Letting callers supply
+ * `RunOrchestrator.resolvePlatformApiUrl`. Letting callers supply
  * a URL here would duplicate that resolution and let the two answers
  * drift apart.
  */

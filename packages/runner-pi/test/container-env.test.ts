@@ -14,54 +14,72 @@ const model = {
   baseUrl: "https://api.anthropic.com",
 };
 
+// Sidecar-backed calls must pass the topology explicitly — buildRuntimePiEnv
+// throws instead of defaulting (the Docker magic string is gone; the
+// orchestrator's sidecarEndpoints is the single topology owner).
+const sidecar = { sidecarUrl: "http://sidecar:8080" };
+
 describe("buildRuntimePiEnv", () => {
   it("emits the minimal required set", () => {
-    const env = buildRuntimePiEnv({ model, agentPrompt: "do thing" });
+    const env = buildRuntimePiEnv({ model, agentPrompt: "do thing", ...sidecar });
     expect(env.AGENT_PROMPT).toBe("do thing");
     expect(env.MODEL_API).toBe(model.api);
     expect(env.MODEL_ID).toBe(model.modelId);
     expect(env.SIDECAR_URL).toBe("http://sidecar:8080");
   });
 
+  it("throws when a sidecar-backed run omits sidecarUrl", () => {
+    expect(() => buildRuntimePiEnv({ model, agentPrompt: "p" })).toThrow(/sidecarUrl is required/);
+  });
+
   it("skips MODEL_BASE_URL when no proxy is configured", () => {
-    const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+    const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
     expect(env.MODEL_BASE_URL).toBeUndefined();
     expect(env.MODEL_API_KEY).toBeUndefined();
   });
 
   it("emits AGENT_TIMEOUT_SECONDS only for a positive finite budget", () => {
-    expect(buildRuntimePiEnv({ model, agentPrompt: "p" }).AGENT_TIMEOUT_SECONDS).toBeUndefined();
     expect(
-      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 300 }).AGENT_TIMEOUT_SECONDS,
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar }).AGENT_TIMEOUT_SECONDS,
+    ).toBeUndefined();
+    expect(
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, timeoutSeconds: 300 })
+        .AGENT_TIMEOUT_SECONDS,
     ).toBe("300");
     expect(
-      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 1.5 }).AGENT_TIMEOUT_SECONDS,
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, timeoutSeconds: 1.5 })
+        .AGENT_TIMEOUT_SECONDS,
     ).toBe("1.5");
     // Non-positive / non-finite budgets are dropped (no enforcement key).
     expect(
-      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: 0 }).AGENT_TIMEOUT_SECONDS,
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, timeoutSeconds: 0 })
+        .AGENT_TIMEOUT_SECONDS,
     ).toBeUndefined();
     expect(
-      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: -5 }).AGENT_TIMEOUT_SECONDS,
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, timeoutSeconds: -5 })
+        .AGENT_TIMEOUT_SECONDS,
     ).toBeUndefined();
     expect(
-      buildRuntimePiEnv({ model, agentPrompt: "p", timeoutSeconds: Infinity })
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, timeoutSeconds: Infinity })
         .AGENT_TIMEOUT_SECONDS,
     ).toBeUndefined();
   });
 
   it("omits RUN_ENGINE for Pi (byte-identical) and emits it only for claude", () => {
-    expect(buildRuntimePiEnv({ model, agentPrompt: "p" }).RUN_ENGINE).toBeUndefined();
-    expect(buildRuntimePiEnv({ model, agentPrompt: "p", engine: "pi" }).RUN_ENGINE).toBeUndefined();
-    expect(buildRuntimePiEnv({ model, agentPrompt: "p", engine: "claude" }).RUN_ENGINE).toBe(
-      "claude",
-    );
+    expect(buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar }).RUN_ENGINE).toBeUndefined();
+    expect(
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, engine: "pi" }).RUN_ENGINE,
+    ).toBeUndefined();
+    expect(
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, engine: "claude" }).RUN_ENGINE,
+    ).toBe("claude");
   });
 
   it("routes LLM traffic through the sidecar when apiKey + proxy url are set", () => {
     const env = buildRuntimePiEnv({
       model: { ...model, apiKey: "sk-ant-secret", apiKeyPlaceholder: "sk-ant-placeholder" },
       agentPrompt: "p",
+      ...sidecar,
       sidecarProxyLlmUrl: "http://sidecar:8080/llm",
     });
     expect(env.MODEL_BASE_URL).toBe("http://sidecar:8080/llm");
@@ -72,6 +90,7 @@ describe("buildRuntimePiEnv", () => {
     const env = buildRuntimePiEnv({
       model: { ...model, apiKey: "sk-test" },
       agentPrompt: "p",
+      ...sidecar,
       sidecarProxyLlmUrl: "http://sidecar:8080/llm",
     });
     expect(env.MODEL_API_KEY).toBe("sk-test");
@@ -128,6 +147,7 @@ describe("buildRuntimePiEnv", () => {
         cost: { input: 3, output: 15 },
       },
       agentPrompt: "p",
+      ...sidecar,
     });
     expect(env.MODEL_INPUT).toBe(JSON.stringify(["text", "image"]));
     expect(env.MODEL_CONTEXT_WINDOW).toBe("200000");
@@ -140,19 +160,21 @@ describe("buildRuntimePiEnv", () => {
     const env = buildRuntimePiEnv({
       model: { ...model, reasoning: null },
       agentPrompt: "p",
+      ...sidecar,
     });
     expect(env.MODEL_REASONING).toBeUndefined();
 
     const env2 = buildRuntimePiEnv({
       model: { ...model, reasoning: false },
       agentPrompt: "p",
+      ...sidecar,
     });
     expect(env2.MODEL_REASONING).toBe("false");
   });
 
   it("serialises OUTPUT_SCHEMA when provided", () => {
     const schema = { type: "object", properties: { summary: { type: "string" } } };
-    const env = buildRuntimePiEnv({ model, agentPrompt: "p", outputSchema: schema });
+    const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, outputSchema: schema });
     expect(env.OUTPUT_SCHEMA).toBe(JSON.stringify(schema));
   });
 
@@ -160,7 +182,9 @@ describe("buildRuntimePiEnv", () => {
     const env = buildRuntimePiEnv({
       model,
       agentPrompt: "p",
+      ...sidecar,
       forwardProxyUrl: "http://sidecar:8081",
+      noProxy: "sidecar,localhost,127.0.0.1",
     });
     expect(env.HTTP_PROXY).toBe("http://sidecar:8081");
     expect(env.HTTPS_PROXY).toBe("http://sidecar:8081");
@@ -170,10 +194,22 @@ describe("buildRuntimePiEnv", () => {
     expect(env.no_proxy).toBe("sidecar,localhost,127.0.0.1");
   });
 
+  it("throws when forwardProxyUrl is set without noProxy", () => {
+    expect(() =>
+      buildRuntimePiEnv({
+        model,
+        agentPrompt: "p",
+        ...sidecar,
+        forwardProxyUrl: "http://sidecar:8081",
+      }),
+    ).toThrow(/noProxy is required/);
+  });
+
   it("accepts a custom noProxy list", () => {
     const env = buildRuntimePiEnv({
       model,
       agentPrompt: "p",
+      ...sidecar,
       forwardProxyUrl: "http://proxy:3128",
       noProxy: "internal.corp,10.0.0.0/8",
     });
@@ -181,7 +217,7 @@ describe("buildRuntimePiEnv", () => {
   });
 
   it("does not emit proxy env vars when forwardProxyUrl is unset", () => {
-    const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+    const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
     expect(env.HTTP_PROXY).toBeUndefined();
     expect(env.HTTPS_PROXY).toBeUndefined();
     expect(env.NO_PROXY).toBeUndefined();
@@ -210,13 +246,14 @@ describe("buildRuntimePiEnv", () => {
     const env = buildRuntimePiEnv({
       model,
       agentPrompt: "p",
+      ...sidecar,
       traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
     });
     expect(env.TRACEPARENT).toBe("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
   });
 
   it("does not emit TRACEPARENT when no parent trace is supplied", () => {
-    const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+    const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
     expect(env.TRACEPARENT).toBeUndefined();
   });
 
@@ -224,7 +261,7 @@ describe("buildRuntimePiEnv", () => {
     const original = process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
     process.env.SIDECAR_MAX_REQUEST_BODY_BYTES = "20971520";
     try {
-      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
       expect(env.SIDECAR_MAX_REQUEST_BODY_BYTES).toBe("20971520");
     } finally {
       if (original === undefined) delete process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
@@ -236,7 +273,7 @@ describe("buildRuntimePiEnv", () => {
     const original = process.env.TOOL_RESULT_BYTE_LIMIT;
     process.env.TOOL_RESULT_BYTE_LIMIT = "16384";
     try {
-      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
       expect(env.TOOL_RESULT_BYTE_LIMIT).toBe("16384");
     } finally {
       if (original === undefined) delete process.env.TOOL_RESULT_BYTE_LIMIT;
@@ -248,7 +285,7 @@ describe("buildRuntimePiEnv", () => {
     const original = process.env.TOOL_RESULT_BYTE_LIMIT;
     delete process.env.TOOL_RESULT_BYTE_LIMIT;
     try {
-      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
       expect(env.TOOL_RESULT_BYTE_LIMIT).toBeUndefined();
     } finally {
       if (original !== undefined) process.env.TOOL_RESULT_BYTE_LIMIT = original;
@@ -259,7 +296,7 @@ describe("buildRuntimePiEnv", () => {
     const original = process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
     delete process.env.SIDECAR_MAX_REQUEST_BODY_BYTES;
     try {
-      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
       expect(env.SIDECAR_MAX_REQUEST_BODY_BYTES).toBeUndefined();
     } finally {
       if (original !== undefined) process.env.SIDECAR_MAX_REQUEST_BODY_BYTES = original;
@@ -273,7 +310,7 @@ describe("buildRuntimePiEnv", () => {
     const original = process.env.SIDECAR_MAX_MCP_ENVELOPE_BYTES;
     process.env.SIDECAR_MAX_MCP_ENVELOPE_BYTES = "33554432";
     try {
-      const env = buildRuntimePiEnv({ model, agentPrompt: "p" });
+      const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
       expect(env.SIDECAR_MAX_MCP_ENVELOPE_BYTES).toBeUndefined();
     } finally {
       if (original === undefined) delete process.env.SIDECAR_MAX_MCP_ENVELOPE_BYTES;
