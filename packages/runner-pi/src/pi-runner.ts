@@ -113,6 +113,17 @@ export interface PiRunnerOptions {
   authStoragePath?: string;
   /** Pi SDK thinking level. Defaults to `"medium"`. */
   thinkingLevel?: "low" | "medium" | "high";
+  /**
+   * Tool names whose first successful execution ends the run. When one of
+   * these tools completes without error the runner aborts the Pi session
+   * instead of paying one more LLM round-trip for a trailing text-only turn
+   * whose content is never delivered (the platform's communication contract
+   * routes everything through tools). Appstrate passes `["output"]` when the
+   * agent declares the `output` runtime tool. The abort raced here is
+   * recognised by the bridge and does NOT count as a terminal failure.
+   * Default: none (external consumers keep the SDK's natural stop).
+   */
+  terminalTools?: string[];
 }
 
 /**
@@ -457,7 +468,16 @@ export class PiRunner implements Runner {
       }),
     });
 
-    const bridge = installSessionBridge(session, internalSink, context.runId);
+    const terminalTools = this.opts.terminalTools ?? [];
+    const bridge = installSessionBridge(session, internalSink, context.runId, {
+      terminalTools,
+      // Early-stop: abort the SDK loop as soon as a terminal tool has
+      // executed successfully. `session.abort()` resolves once the agent
+      // is idle; detached because the bridge callback is synchronous.
+      onTerminalTool: () => {
+        void session.abort().catch(() => {});
+      },
+    });
     // Hand the bridge to `run()` immediately so a throw from
     // `session.prompt()` further down does not lose the accumulator.
     onBridgeReady?.(bridge);
@@ -688,11 +708,31 @@ function terminalErrorMessage(errorMessage: string | undefined): string {
     : "The agent's final model turn ended in an error";
 }
 
+export interface SessionBridgeOptions {
+  /**
+   * Tool names whose first successful `tool_execution_end` marks the run
+   * as complete. See {@link PiRunnerOptions.terminalTools}.
+   */
+  terminalTools?: string[];
+  /**
+   * Invoked once, synchronously, when a terminal tool completes without
+   * error. The runner uses this to abort the SDK loop early.
+   */
+  onTerminalTool?: () => void;
+}
+
 export function installSessionBridge(
   session: BridgeableSession,
   sink: InternalSink,
   runId: string,
+  options: SessionBridgeOptions = {},
 ): SessionBridgeHandle {
+  const terminalTools = options.terminalTools ?? [];
+  // Set once a terminal tool (e.g. `output`) has executed successfully.
+  // From that point the run is semantically complete: the early-stop abort
+  // the runner fires may surface as a trailing `stopReason: "aborted"`
+  // assistant turn, which must NOT be read as a terminal failure.
+  let terminalToolCompleted = false;
   // Token usage accumulator across all assistant turns (shared zero-shape).
   const totalUsage: TokenUsage = zeroTokenUsage();
   let totalCost = 0;
@@ -778,7 +818,14 @@ export function installSessionBridge(
         // bare `runs.error`. A transient error turn the agent later
         // recovers from also logs here (harmless — the trail no longer
         // drives status).
-        if (isTerminalErrorStop(last.stopReason)) {
+        // Suppress the verdict for the abort we raced ourselves after a
+        // terminal tool completed — the run is already semantically done
+        // (mirrored in `getTerminalError()` so log trail and stamped
+        // status stay consistent).
+        if (
+          isTerminalErrorStop(last.stopReason) &&
+          !(terminalToolCompleted && last.stopReason === "aborted")
+        ) {
           fire(
             buildError({ runId, timestamp: Date.now() }, terminalErrorMessage(last.errorMessage)),
           );
@@ -838,6 +885,13 @@ export function installSessionBridge(
             },
           ),
         );
+        // Early-stop on the first SUCCESSFUL terminal tool. A failed call
+        // (e.g. output-schema validation error) does not qualify — the
+        // model gets its retry turn as before.
+        if (!terminalToolCompleted && e.isError !== true && terminalTools.includes(tool)) {
+          terminalToolCompleted = true;
+          options.onTerminalTool?.();
+        }
         break;
       }
 
@@ -863,6 +917,11 @@ export function installSessionBridge(
       // `terminalErrorMessage` are shared with the live `appstrate.error`
       // emit above, so the stamped status and the `run_logs` trail can
       // never disagree on what counts as a terminal failure.
+      // A trailing "aborted" turn AFTER a successful terminal tool is the
+      // runner's own early-stop, not a failure.
+      if (terminalToolCompleted && lastAssistantStopReason === "aborted") {
+        return undefined;
+      }
       if (!isTerminalErrorStop(lastAssistantStopReason)) {
         return undefined;
       }

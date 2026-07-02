@@ -153,12 +153,12 @@ function buildOutputDef(outputSchema: Record<string, unknown> | null): RuntimeTo
   // output schema the agent MUST call it (once, valid); otherwise it may
   // finish without it (a side-effect-only run is a valid success).
   const description = outputSchema
-    ? "Call exactly once before finishing with the complete output object that satisfies " +
-      "the declared schema (all required fields must be provided). Calling again replaces " +
-      "the previous output."
-    : "Optional — call at most once to return a JSON object as the run result. " +
-      "If your task produces no result to return, finish without calling it. " +
-      "Calling again replaces the previous output.";
+    ? "Call exactly once, as your final action, with the complete output object that " +
+      "satisfies the declared schema (all required fields must be provided). A successful " +
+      "call ends the run immediately — do all other work first."
+    : "Optional — call at most once, as your final action, to return a JSON object as the " +
+      "run result. If your task produces no result to return, finish without calling it. " +
+      "A successful call ends the run immediately — do all other work first.";
   return {
     descriptor: {
       name: "output",

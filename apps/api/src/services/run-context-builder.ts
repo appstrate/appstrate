@@ -120,6 +120,28 @@ export async function buildRunContext(params: {
   const skipConfigFetch =
     params.config !== undefined && params.modelId !== undefined && params.proxyId !== undefined;
 
+  // Phase 1.4 — resolve any declared `dependencies.integrations` into
+  // ready-to-spawn specs (manifest + bundle bytes + delivery env with
+  // live credentials). Kicked off FIRST: its inputs are all available at
+  // entry and it is the slowest independent chain (storage fetch +
+  // credential decrypt + possible OAuth refresh), so it runs concurrently
+  // with the config/checkpoint/bundle and model/proxy resolution below
+  // instead of serializing after them. Failures here are per-integration
+  // warnings; the run proceeds with the surviving subset. The resolver
+  // reads the version from `dependencies.integrations[id]` (§4.1) and the
+  // tool/scope selection from `integrations_configuration[id]` (§4.4).
+  const integrationSpawnsPromise = resolveIntegrationSpawns({
+    applicationId,
+    actor,
+    agentManifest: agent.manifest as Record<string, unknown>,
+    resolvedConnections: params.resolvedConnections ?? null,
+    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+  });
+  // Guard against an unhandled rejection when a step below throws before
+  // the spawn resolution is awaited; the await further down still surfaces
+  // the original error.
+  integrationSpawnsPromise.catch(() => {});
+
   // Step 1: load all independent data in parallel
   const persistenceScope = scopeFromActor(actor);
   const [configFull, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
@@ -206,19 +228,8 @@ export async function buildRunContext(params: {
     ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   };
 
-  // Phase 1.4 — resolve any declared `dependencies.integrations` into
-  // ready-to-spawn specs (manifest + bundle bytes + delivery env with
-  // live credentials). Failures here are per-integration warnings; the
-  // run proceeds with the surviving subset. The resolver reads the version
-  // from `dependencies.integrations[id]` (§4.1) and the tool/scope selection
-  // from `integrations_configuration[id]` (§4.4).
-  const integrationSpawns = await resolveIntegrationSpawns({
-    applicationId,
-    actor,
-    agentManifest: agent.manifest as Record<string, unknown>,
-    resolvedConnections: params.resolvedConnections ?? null,
-    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
-  });
+  // Converge the integration spawn resolution kicked off at entry.
+  const integrationSpawns = await integrationSpawnsPromise;
 
   // AFPS: snake_case. The editor writes `runtime_tools`; reading the wrong key
   // here would silently drop every author's runtime-tool selection.

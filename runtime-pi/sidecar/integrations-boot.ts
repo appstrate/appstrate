@@ -1015,6 +1015,21 @@ export async function bootIntegrations(
     });
     throw err;
   }
+  // ─── Phase 1.5 (kickoff) — MITM run-CA mint, raced with adapter.prepare ───
+  // The CA mint (openssl keygen + self-sign, ~100 ms) only needs the runId;
+  // it has no dependency on the adapter context, so it runs concurrently
+  // with `adapter.prepare` instead of serializing after it — the agent's
+  // boot-report gate waits on the slower of the two, not their sum. The
+  // result is awaited (with its breadcrumb) right after the adapter phase.
+  const mitmIntegrationCount = specs.filter(
+    (s) => s.httpDeliveryAuths && Object.keys(s.httpDeliveryAuths).length > 0,
+  ).length;
+  const caStart = performance.now();
+  const runCaPromise = mitmIntegrationCount > 0 ? prepareRunCa(runId, "afps-ca-") : null;
+  // Rejection is handled at the await below; this guard only prevents an
+  // unhandled-rejection crash if adapter.prepare throws first.
+  runCaPromise?.catch(() => {});
+
   const adapterPrepareStart = performance.now();
   const adapterCtx = await adapter.prepare(runId);
   const adapterPrepareMs = performance.now() - adapterPrepareStart;
@@ -1044,19 +1059,16 @@ export async function bootIntegrations(
     data: { adapter: adapter.id, prepareMs: Math.round(adapterPrepareMs) },
   });
 
-  // ─── Phase 1.5 — MITM bring-up (run-CA + cert minter), only when needed ───
-  // Mint the CA once per run, regardless of how many integrations need it.
+  // ─── Phase 1.5 (converge) — MITM bring-up (run-CA + cert minter) ───
+  // The CA was minted once per run (kicked off above, concurrent with the
+  // adapter phase), regardless of how many integrations need it.
   // Per-integration listeners share the same minter (lazily creates leaf
   // certs per upstream SNI host). The CA cert PEM lands on local fs so
   // the adapter can ferry it into each runner's trust store.
-  const mitmIntegrationCount = specs.filter(
-    (s) => s.httpDeliveryAuths && Object.keys(s.httpDeliveryAuths).length > 0,
-  ).length;
   let runCa: RunCaMaterials | null = null;
-  if (mitmIntegrationCount > 0) {
-    const caStart = performance.now();
+  if (runCaPromise) {
     try {
-      runCa = await prepareRunCa(runId, "afps-ca-");
+      runCa = await runCaPromise;
       const caMs = Math.round(performance.now() - caStart);
       logger.info("integration MITM CA minted", {
         runId,

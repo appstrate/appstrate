@@ -61,6 +61,16 @@ export class DockerOrchestrator implements ContainerOrchestrator {
    * defensively cleared in {@link removeWorkload} / {@link shutdown}.
    */
   private expectedSidecarExits = new Set<string>();
+  /**
+   * Images verified present in this process's lifetime (pre-pulled at
+   * {@link initialize} or ensured by a prior run). {@link ensureImages}
+   * skips these — the per-run `imageExists` inspect round-trip was pure
+   * overhead on the run-boot critical path for images that are pulled
+   * once at boot and effectively never disappear mid-lifetime. If a host
+   * prune removes one anyway, the container create fails with a clear
+   * `No such image` and the next boot's `initialize()` re-pulls.
+   */
+  private verifiedImages = new Set<string>();
 
   async initialize(): Promise<void> {
     // Ensure runtime images are present (may have been pruned by host cleanup).
@@ -76,6 +86,8 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       docker.detectPlatformNetwork(),
       docker.createNetwork("appstrate-egress"),
     ]);
+    this.verifiedImages.add(env.PI_IMAGE);
+    this.verifiedImages.add(env.SIDECAR_IMAGE);
     this.egressNetworkId = egressId;
   }
 
@@ -91,7 +103,10 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async ensureImages(images: string[]): Promise<void> {
-    await Promise.all(images.map((image) => docker.ensureImage(image)));
+    const missing = images.filter((image) => !this.verifiedImages.has(image));
+    if (missing.length === 0) return;
+    await Promise.all(missing.map((image) => docker.ensureImage(image)));
+    for (const image of missing) this.verifiedImages.add(image);
   }
 
   async cleanupOrphans(): Promise<CleanupReport> {
@@ -103,6 +118,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     const env = getEnv();
     const name = `${docker.EXEC_NETWORK_PREFIX}${runId}`;
     const volumeName = `${docker.WORKSPACE_VOLUME_PREFIX}${runId}`;
+    const useTmpfs = env.WORKSPACE_TMPFS_SIZE_MB > 0;
 
     // Create the per-run network + workspace volume in parallel — both
     // are independent Docker resources and either may hit pool/quota
@@ -134,12 +150,18 @@ export class DockerOrchestrator implements ContainerOrchestrator {
         await docker.removeVolume(volumeName).catch(() => {});
         return docker.createVolume(volumeName, {
           labels: { "appstrate.run": runId },
-          ...(env.WORKSPACE_TMPFS_SIZE_MB > 0
+          ...(useTmpfs
             ? {
+                // `uid`/`gid` are kernel tmpfs mount options: ownership is
+                // set at mount time for the agent's `pi` user (UID 1001 —
+                // see runtime-pi/Dockerfile `adduser ... -u 1001 pi`), so
+                // the disk path's chown init container (below) is skipped
+                // entirely on this branch — a full ephemeral-container
+                // lifecycle (~150 ms) off the run-boot critical path.
                 driverOpts: {
                   type: "tmpfs",
                   device: "tmpfs",
-                  o: `size=${env.WORKSPACE_TMPFS_SIZE_MB}m`,
+                  o: `size=${env.WORKSPACE_TMPFS_SIZE_MB}m,uid=1001,gid=1001`,
                 },
               }
             : {}),
@@ -162,20 +184,23 @@ export class DockerOrchestrator implements ContainerOrchestrator {
 
     const networkId = networkResult.value;
 
-    // Chown the freshly created volume to the agent's `pi` user (UID
-    // 1001 — see runtime-pi/Dockerfile L144 `adduser ... -u 1001 pi`,
-    // contract-locked by the workspace volume tests in
-    // apps/api/test/integration/services/docker-api.test.ts). Docker
-    // named volumes default to root-owned on first mount, which
-    // would block the agent from writing to /workspace. A one-shot
-    // busybox container with the volume mounted is the canonical
-    // pattern: cheap (cached image, ~150ms warm), portable across
-    // drivers, and avoids baking workspace setup into the agent
-    // image's startup path.
+    // Disk-backed volumes (WORKSPACE_TMPFS_SIZE_MB=0) still need the chown
+    // init: Docker local named volumes default to root-owned on first
+    // mount, which would block the agent (`pi`, UID 1001 — see
+    // runtime-pi/Dockerfile `adduser ... -u 1001 pi`, contract-locked by
+    // the workspace volume tests in
+    // apps/api/test/integration/services/docker-api.test.ts) from writing
+    // to /workspace. A one-shot busybox container with the volume mounted
+    // is the canonical pattern: portable across drivers, avoids baking
+    // workspace setup into the agent image's startup path. The tmpfs
+    // branch (the default) skips this — ownership is set via the volume's
+    // `uid`/`gid` mount options at create time above, saving the
+    // ephemeral container's full create+start+wait+remove round-trip
+    // (~150 ms) on the run-boot critical path.
     //
-    // Subtle Docker quirk: `chown` against the mount-point root only
-    // sticks across remounts when the volume has at least one file
-    // inside (otherwise Docker resets the mount-point uid:gid from
+    // Subtle Docker quirk (disk path): `chown` against the mount-point
+    // root only sticks across remounts when the volume has at least one
+    // file inside (otherwise Docker resets the mount-point uid:gid from
     // the image's directory metadata on each subsequent mount). The
     // `touch /workspace/.appstrate-init` is the marker file that
     // pins the chown — small, predictable, hidden from agent
@@ -187,20 +212,25 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     // BEFORE rethrowing so the orchestrator doesn't leak a half-
     // initialised boundary. The caller never sees the partial
     // resources and the orphan reaper has nothing to do.
-    try {
-      await docker.runEphemeralCommand({
-        image: env.WORKSPACE_INIT_IMAGE,
-        cmd: [
-          "sh",
-          "-c",
-          "touch /workspace/.appstrate-init && chown 1001:1001 /workspace /workspace/.appstrate-init",
-        ],
-        binds: [`${volumeName}:/workspace`],
-        runId,
-      });
-    } catch (err) {
-      await Promise.allSettled([docker.removeNetwork(networkId), docker.removeVolume(volumeName)]);
-      throw err;
+    if (!useTmpfs) {
+      try {
+        await docker.runEphemeralCommand({
+          image: env.WORKSPACE_INIT_IMAGE,
+          cmd: [
+            "sh",
+            "-c",
+            "touch /workspace/.appstrate-init && chown 1001:1001 /workspace /workspace/.appstrate-init",
+          ],
+          binds: [`${volumeName}:/workspace`],
+          runId,
+        });
+      } catch (err) {
+        await Promise.allSettled([
+          docker.removeNetwork(networkId),
+          docker.removeVolume(volumeName),
+        ]);
+        throw err;
+      }
     }
 
     return {
