@@ -17,7 +17,7 @@ import { createNetworkWithPoolRetry } from "../docker-errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS } from "./constants.ts";
-import { applySpecToSidecarEnv } from "./sidecar-env.ts";
+import { buildBaseSidecarEnv } from "./sidecar-env.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
@@ -279,25 +279,17 @@ export class DockerOrchestrator implements RunOrchestrator {
       docker.detectPlatformNetwork(),
     ]);
 
-    const sidecarEnv: Record<string, string> = {
-      PORT: "8080",
-      ...pickOperatorSidecarEnv(),
-      RUN_TOKEN: spec.runToken,
-      // Phase 1.4 — exposed so the sidecar can stamp `appstrate.run=<runId>`
-      // on integration runner containers it spawns, letting the platform's
-      // orphan reaper match them back to the parent run.
-      RUN_ID: runId,
-      PLATFORM_API_URL: platformApiUrl,
-      // Workspace handle the sidecar passes to the integration runtime
-      // adapter so runner containers opting in via mcp-server
-      // `_meta["dev.appstrate/workspace"]` can mount the same surface as
-      // the agent. Shape is the WorkspaceHandle discriminated union —
-      // sidecar branches on `kind` (volume vs directory) so a future
-      // orchestrator can introduce a third shape without touching
-      // adapter dispatch.
-      WORKSPACE_HANDLE_JSON: JSON.stringify(boundary.workspace),
-    };
-    applySpecToSidecarEnv(spec, sidecarEnv);
+    const sidecarEnv = buildBaseSidecarEnv({
+      spec,
+      baseEnv: pickOperatorSidecarEnv(),
+      port: "8080",
+      // Phase 1.4 — RUN_ID lets the sidecar stamp `appstrate.run=<runId>`
+      // on the integration runner containers it spawns, letting the
+      // platform's orphan reaper match them back to the parent run.
+      runId,
+      platformApiUrl,
+      workspace: boundary.workspace,
+    });
     // The sidecar selects its integration runtime purely from this var (no
     // auto-detection). Pin it to mirror this orchestrator's RUN_ADAPTER so a
     // containerized run spawns its integrations as containers too. Respect an

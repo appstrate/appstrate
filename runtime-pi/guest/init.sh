@@ -31,14 +31,19 @@ log() { echo "[appstrate-init] $*"; }
 
 # --- Writable overlay over the read-only rootfs ----------------------------
 # /overlay, /rom are baked into the rootfs image (see Dockerfile.rootfs).
-mount -t tmpfs tmpfs /overlay \
+# size=50% makes the kernel's silent 50%-of-RAM tmpfs default explicit: it
+# caps the guest's writable space and is accounted in host capacity planning.
+# No noexec — this tmpfs backs the writable root (incl. /workspace), and
+# agents legitimately execute from it.
+mount -t tmpfs -o nosuid,nodev,size=50% tmpfs /overlay \
   && mkdir -p /overlay/upper /overlay/work \
   && mount -t overlay overlay \
        -o lowerdir=/,upperdir=/overlay/upper,workdir=/overlay/work /mnt \
   && pivot_root /mnt /mnt/rom
 if [ $? -ne 0 ]; then
-  log "FATAL: overlay/pivot_root failed"
-  echo "APPSTRATE_EXIT:127"
+  # No exit marker here: init cannot know the nonce (the config drive is
+  # not mounted yet) and the host ignores nonce-less markers by design.
+  log "FATAL: overlay/pivot_root failed (would-be exit 127)"
   vm_exit
 fi
 
@@ -50,7 +55,7 @@ mount -t sysfs    sysfs    /sys     2>/dev/null || true
 mount -t devtmpfs devtmpfs /dev     2>/dev/null || true
 mkdir -p /dev/pts /dev/shm
 mount -t devpts   devpts   /dev/pts 2>/dev/null || true
-mount -t tmpfs    tmpfs    /dev/shm 2>/dev/null || true
+mount -t tmpfs -o nosuid,nodev tmpfs /dev/shm 2>/dev/null || true
 
 # --- Base runtime environment ----------------------------------------------
 # eth0 is configured by the kernel `ip=` boot arg; only loopback is manual.
@@ -68,8 +73,9 @@ chmod 2775 /workspace
 # --- Config drive (second virtio-block device, read-only ext4) --------------
 mkdir -p /config
 if ! mount -t ext4 -o ro /dev/vdb /config; then
-  log "FATAL: could not mount config drive (/dev/vdb)"
-  echo "APPSTRATE_EXIT:127"
+  # No exit marker: the nonce lives ON this drive, so init cannot emit a
+  # marker the host would accept (nonce-less markers are ignored by design).
+  log "FATAL: could not mount config drive (/dev/vdb) (would-be exit 127)"
   vm_exit
 fi
 
@@ -77,8 +83,9 @@ log "handing off to supervisor"
 /usr/local/bin/bun run /runtime/guest/supervisor.js
 code=$?
 
-# The supervisor normally prints its own APPSTRATE_EXIT marker and powers
-# off. Reaching here means it crashed before doing so — report and halt.
-log "supervisor exited ($code) without powering off"
-echo "APPSTRATE_EXIT:$code"
+# The supervisor normally prints its own nonce-bearing APPSTRATE_EXIT
+# marker and powers off. Reaching here means it crashed before doing so —
+# log and halt. No marker: init never learns the nonce and the host ignores
+# nonce-less markers by design, so it reports a generic non-clean exit.
+log "FATAL: supervisor exited ($code) without powering off (would-be exit $code)"
 vm_exit

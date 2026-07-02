@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **BREAKING: `ContainerOrchestrator` removed from `@appstrate/core/platform-types`.**
+  Deprecated alias of `RunOrchestrator` (the pre-rename name, kept "for npm
+  consumers") with zero remaining consumers — import `RunOrchestrator` instead.
 - **BREAKING: `RealtimeEvent` removed from `@appstrate/core/platform-types`.**
   The loose `{ event: string; data: Record<string, unknown> }` envelope was
   dead — the platform's SSE pipeline uses the typed discriminated union in

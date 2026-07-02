@@ -36,7 +36,16 @@
  * point that directory at a tmpfs to keep secrets off persistent disk.
  */
 
-import { access, mkdir, rm, readdir, open as fsOpen, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  rm,
+  readdir,
+  open as fsOpen,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
@@ -54,7 +63,8 @@ import type {
   StopResult,
 } from "@appstrate/core/platform-types";
 import { logger } from "../../../lib/logger.ts";
-import { applySpecToSidecarEnv } from "../sidecar-env.ts";
+import { buildBaseSidecarEnv } from "../sidecar-env.ts";
+import { drainStream, spawnCollect, TAIL_POLL_MS, TAIL_BUFFER_SIZE } from "../subprocess-util.ts";
 import { SubnetAllocator, platformAliasIp, type RunSubnet } from "./subnet.ts";
 import {
   createHostExec,
@@ -73,12 +83,12 @@ import {
   vmSizing,
 } from "./vm-config.ts";
 
-/** Poll interval for tailing the serial console log (ms). */
-const TAIL_POLL_MS = 50;
-/** Read buffer size for tailing (bytes). */
-const TAIL_BUFFER_SIZE = 16_384;
 /** How much console tail to scan for the exit marker (bytes). */
 const EXIT_MARKER_SCAN_BYTES = 64 * 1024;
+/** streamLogs: flush a newline-less partial line once it grows past this. */
+const PARTIAL_FLUSH_BYTES = 64 * 1024;
+/** How often the per-VM watchdog stats the console log (ms). */
+const CONSOLE_WATCH_INTERVAL_MS = 10_000;
 
 type BunProcess = ReturnType<typeof Bun.spawn>;
 
@@ -91,6 +101,8 @@ interface VmRecord {
   proc: BunProcess | null;
   /** Set once stopWorkload initiated a teardown — suppresses crash logs. */
   stopping: boolean;
+  /** Console-size watchdog (FIRECRACKER_MAX_CONSOLE_BYTES enforcement). */
+  consoleWatch?: ReturnType<typeof setInterval>;
   /**
    * Per-run exit-marker nonce (set by startWorkload). Only console markers
    * carrying it are trusted by waitForExit — see GuestConfig.exit_marker_nonce.
@@ -128,6 +140,16 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   private readonly pendingAgentSpecs = new Map<string, WorkloadSpec>();
 
   private readonly agentArgvOverride: string[] | undefined;
+
+  /**
+   * Per-instance 0700 directory holding the VMM API sockets (see
+   * createIsolationBoundary). Created lazily; promise-cached so two
+   * concurrent boundary creations never mkdtemp twice.
+   */
+  private socketDirPromise: Promise<string> | null = null;
+
+  /** Host-lock pidfile path once acquired (see acquireHostLock). */
+  private hostLockPath: string | null = null;
 
   /**
    * Fail-closed gate: boot's parallel init swallows initialize() errors so
@@ -177,6 +199,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const version = (await this.execLocal([env.FIRECRACKER_BIN, "--version"])).split("\n")[0];
 
     await mkdir(resolve(env.FIRECRACKER_DATA_DIR), { recursive: true, mode: 0o700 });
+    await this.acquireHostLock(resolve(env.FIRECRACKER_DATA_DIR));
     await setupHostNetwork(this.hostExec, {
       subnetCidr: env.FIRECRACKER_SUBNET_CIDR,
       aliasIp: platformAliasIp(env.FIRECRACKER_SUBNET_CIDR),
@@ -201,6 +224,15 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     this.pendingSidecarEnv.clear();
     this.pendingAgentSpecs.clear();
     await teardownHostNetwork(this.hostExec);
+    if (this.socketDirPromise) {
+      const socketDir = await this.socketDirPromise.catch(() => null);
+      if (socketDir) await rm(socketDir, { recursive: true, force: true }).catch(() => {});
+      this.socketDirPromise = null;
+    }
+    if (this.hostLockPath) {
+      await rm(this.hostLockPath, { force: true }).catch(() => {});
+      this.hostLockPath = null;
+    }
   }
 
   async ensureImages(_images: string[]): Promise<void> {
@@ -216,7 +248,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
     let entries: string[];
     try {
-      entries = await readdir(dataDir);
+      // Only run directories: the data dir also holds the host-lock
+      // pidfile (orchestrator.pid), which must survive the sweep.
+      const dirents = await readdir(dataDir, { withFileTypes: true });
+      entries = dirents.filter((d) => d.isDirectory()).map((d) => d.name);
     } catch {
       entries = [];
     }
@@ -274,6 +309,16 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
     const env = getEnv();
+    // Admission control BEFORE any allocation: overcommitting host RAM
+    // with unbounded concurrent VMs is worse than failing the run fast.
+    const maxVms = env.FIRECRACKER_MAX_CONCURRENT_VMS;
+    if (maxVms > 0 && this.vms.size >= maxVms) {
+      throw new Error(
+        `Firecracker orchestrator at capacity: ${this.vms.size}/${maxVms} concurrent ` +
+          `microVMs (FIRECRACKER_MAX_CONCURRENT_VMS) — refusing to start run ${runId}`,
+      );
+    }
+    const socketDir = await this.ensureSocketDir();
     const runDir = join(resolve(env.FIRECRACKER_DATA_DIR), runId);
     await mkdir(runDir, { recursive: true, mode: 0o700 });
 
@@ -295,10 +340,12 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       consolePath: join(runDir, "console.log"),
       // NOT under runDir: AF_UNIX paths are capped at ~108 bytes (SUN_LEN)
       // and FIRECRACKER_DATA_DIR/<runId>/ routinely exceeds it — Firecracker
-      // then dies at startup with FailedToBindAndRunHttpServer. tmpdir plus
-      // the pid-scoped subnet index stays short and collision-free (the
-      // index is unique among this orchestrator's live runs).
-      apiSocketPath: join(tmpdir(), `afc-${process.pid}-${subnet.index}.sock`),
+      // then dies at startup with FailedToBindAndRunHttpServer. A short
+      // per-instance mkdtemp 0700 directory under tmpdir stays well under
+      // the cap AND keeps the sockets out of the world-writable flat /tmp
+      // (unix-socket connect permission is umask-dependent there). The
+      // subnet index is unique among this orchestrator's live runs.
+      apiSocketPath: join(socketDir, `afc-${subnet.index}.sock`),
       proc: null,
       stopping: false,
     });
@@ -334,6 +381,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
   /** Tear down one run's VM + network + on-disk state. Idempotent, best-effort. */
   private async destroyVm(vm: VmRecord, graceSeconds: number): Promise<void> {
+    if (vm.consoleWatch) clearInterval(vm.consoleWatch);
     await this.killVm(vm, graceSeconds).catch(() => {});
     try {
       await deleteTap(this.hostExec, vm.subnet.tapDevice);
@@ -363,18 +411,17 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     boundary: IsolationBoundary,
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
-    const sidecarEnv: Record<string, string> = {
-      PORT: "8080",
-      ...pickOperatorSidecarEnv(),
-      RUN_TOKEN: spec.runToken,
-      RUN_ID: runId,
-      PLATFORM_API_URL: await this.resolvePlatformApiUrl(),
-      WORKSPACE_HANDLE_JSON: JSON.stringify(boundary.workspace),
-      // The sidecar runs INSIDE the guest — its integration runners are
-      // guest subprocesses, exactly the process-adapter contract.
-      INTEGRATION_RUNTIME_ADAPTER: "process",
-    };
-    applySpecToSidecarEnv(spec, sidecarEnv);
+    const sidecarEnv = buildBaseSidecarEnv({
+      spec,
+      baseEnv: pickOperatorSidecarEnv(),
+      port: "8080",
+      runId,
+      platformApiUrl: await this.resolvePlatformApiUrl(),
+      workspace: boundary.workspace,
+    });
+    // The sidecar runs INSIDE the guest — its integration runners are
+    // guest subprocesses, exactly the process-adapter contract.
+    sidecarEnv.INTEGRATION_RUNTIME_ADAPTER = "process";
     this.pendingSidecarEnv.set(runId, sidecarEnv);
     // The sidecar process starts with the VM (startWorkload on the agent
     // boots the guest; the supervisor launches sidecar then agent). The
@@ -405,21 +452,27 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
     vm.exitNonce = randomBytes(16).toString("hex");
     const aliasIp = platformAliasIp(env.FIRECRACKER_SUBNET_CIDR);
+    // skipSidecar runs never called createSidecar — no pending env entry.
+    const sidecarEnv = this.pendingSidecarEnv.get(handle.runId);
     const guestConfig = buildGuestConfig({
       runId: handle.runId,
       exitMarkerNonce: vm.exitNonce,
       platformIp: aliasIp,
       platformPort: env.PORT,
-      sidecarEnv: this.pendingSidecarEnv.get(handle.runId),
+      sidecarEnv,
       agentEnv: agentSpec.env,
       agentUnrestrictedEgress: agentSpec.egress === true,
       ...(this.agentArgvOverride ? { agentArgv: this.agentArgvOverride } : {}),
     });
+    // The guest config now owns the credentials — drop them from the API
+    // heap immediately instead of letting them linger until removeWorkload.
+    this.pendingSidecarEnv.delete(handle.runId);
+    this.pendingAgentSpecs.delete(handle.runId);
 
     const configDrivePath = join(vm.runDir, "config.img");
     await this.buildConfigDrive(vm.runDir, configDrivePath, guestConfig);
 
-    const sizing = vmSizing(agentSpec.resources);
+    const sizing = vmSizing(agentSpec.resources, sidecarEnv !== undefined);
     const vmConfig = buildVmConfig({
       kernelPath: resolve(env.FIRECRACKER_KERNEL_PATH),
       rootfsPath: resolve(env.FIRECRACKER_ROOTFS_PATH),
@@ -446,15 +499,35 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       },
     );
     vm.proc = proc;
-    this.drainStderr(proc, `fc:${handle.runId}`);
-    await this.writeStateFile(vm.runDir, {
-      runId: handle.runId,
-      tapDevice: vm.subnet.tapDevice,
-      pid: proc.pid,
-      apiSocketPath: vm.apiSocketPath,
-    });
+    drainStream(proc, `fc:${handle.runId}`);
+    // Mandatory (unlike the pre-spawn pid-less write): without the pid on
+    // disk, a platform crash leaves a VMM the boot sweep cannot kill. A
+    // VMM we cannot account for must not run — kill it and fail the run.
+    try {
+      await this.writeStateFileStrict(vm.runDir, {
+        runId: handle.runId,
+        tapDevice: vm.subnet.tapDevice,
+        pid: proc.pid,
+        apiSocketPath: vm.apiSocketPath,
+      });
+    } catch (err) {
+      vm.stopping = true;
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // Already dead.
+      }
+      await proc.exited.catch(() => {});
+      vm.proc = null;
+      throw new Error(
+        `Firecracker orchestrator: failed to persist the VMM pid for run ${handle.runId} — ` +
+          `killed the VMM rather than leave it unsweepable: ${getErrorMessage(err)}`,
+      );
+    }
 
+    this.startConsoleWatch(vm, env.FIRECRACKER_MAX_CONSOLE_BYTES);
     proc.exited.then((code) => {
+      if (vm.consoleWatch) clearInterval(vm.consoleWatch);
       if (code !== 0 && !vm.stopping) {
         logger.error("Firecracker VMM exited non-zero", {
           runId: handle.runId,
@@ -540,6 +613,12 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           for (const line of lines) {
             if (line.length > 0) yield line;
           }
+          // A newline-less guest line must not buffer unbounded — flush
+          // it as a synthetic line once it grows past the cap.
+          if (partial.length > PARTIAL_FLUSH_BYTES) {
+            yield partial;
+            partial = "";
+          }
         } else if (exited) {
           if (partial.length > 0) yield partial;
           break;
@@ -587,9 +666,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           unix: vm.apiSocketPath,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action_type: "SendCtrlAltDel" }),
+          // A wedged VMM must never block cancel/shutdown — abort fast
+          // and fall through to the SIGKILL below.
+          signal: AbortSignal.timeout(1_000),
         });
       } catch {
-        // aarch64 / socket already gone — fall through to the kill.
+        // aarch64 / wedged VMM / socket already gone — fall through to
+        // the kill.
       }
       const exited = await Promise.race([
         proc.exited.then(() => true),
@@ -625,38 +708,46 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const stagingDir = join(runDir, "config-drive");
     await rm(stagingDir, { recursive: true, force: true });
     await mkdir(stagingDir, { recursive: true, mode: 0o700 });
-    const payload = JSON.stringify(guestConfig);
-    await writeFile(join(stagingDir, "config.json"), payload, { mode: 0o600 });
+    try {
+      const payload = JSON.stringify(guestConfig);
+      await writeFile(join(stagingDir, "config.json"), payload, { mode: 0o600 });
 
-    // Payload + ext4 metadata headroom, floored at 1 MiB (mkfs minimum).
-    const sizeBytes = Math.max(1024 * 1024, payload.length * 2 + 512 * 1024);
-    await rm(imagePath, { force: true });
-    await writeFile(imagePath, "", { mode: 0o600 });
-    await this.execLocal(["truncate", "-s", String(sizeBytes), imagePath]);
-    await this.execLocal(["mkfs.ext4", "-q", "-d", stagingDir, imagePath]);
-    for (const cmd of [
-      "sif / uid 0",
-      "sif / gid 0",
-      "sif / mode 040500",
-      "sif /config.json uid 0",
-      "sif /config.json gid 0",
-      "sif /config.json mode 0100400",
-    ]) {
-      await this.execLocal(["debugfs", "-w", "-R", cmd, imagePath]);
+      // Payload + ext4 metadata headroom, floored at 1 MiB (mkfs minimum).
+      const sizeBytes = Math.max(1024 * 1024, payload.length * 2 + 512 * 1024);
+      await rm(imagePath, { force: true });
+      // Sparse pre-allocation in-process — no `truncate` child spawn.
+      const image = await fsOpen(imagePath, "w", 0o600);
+      try {
+        await image.truncate(sizeBytes);
+      } finally {
+        await image.close();
+      }
+      await this.execLocal(["mkfs.ext4", "-q", "-d", stagingDir, imagePath]);
+      // One debugfs run for all six ownership/mode fixups (`-f -` reads
+      // the command list from stdin; a failing command still yields a
+      // non-zero exit) instead of six child spawns on the boot path.
+      const debugfsScript =
+        [
+          "sif / uid 0",
+          "sif / gid 0",
+          "sif / mode 040500",
+          "sif /config.json uid 0",
+          "sif /config.json gid 0",
+          "sif /config.json mode 0100400",
+        ].join("\n") + "\n";
+      await this.execLocal(["debugfs", "-w", "-f", "-", imagePath], debugfsScript);
+    } finally {
+      // The staging dir holds the plaintext launch spec (credentials) —
+      // it must not survive a mkfs/debugfs failure.
+      await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
     }
-    await rm(stagingDir, { recursive: true, force: true });
   }
 
-  /** Unprivileged local command (mkfs/truncate/firecracker --version). */
-  private async execLocal(cmd: string[]): Promise<string> {
-    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
-    const [code, stdout, stderr] = await Promise.all([
-      proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    if (code !== 0) {
-      throw new Error(`Command failed (${code}): ${cmd.join(" ")} — ${stderr.trim()}`);
+  /** Unprivileged local command (mkfs/debugfs/firecracker --version). */
+  private async execLocal(cmd: string[], stdin?: string): Promise<string> {
+    const { exitCode, stdout, stderr } = await spawnCollect(cmd, { stdin });
+    if (exitCode !== 0) {
+      throw new Error(`Command failed (${exitCode}): ${cmd.join(" ")} — ${stderr.trim()}`);
     }
     return stdout;
   }
@@ -689,15 +780,100 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
   }
 
+  /** Best-effort variant — for the pre-spawn (pid-less) write only. */
   private async writeStateFile(runDir: string, state: RunStateFile): Promise<void> {
     try {
-      await writeFile(join(runDir, "state.json"), JSON.stringify(state), { mode: 0o600 });
+      await this.writeStateFileStrict(runDir, state);
     } catch (err) {
       logger.warn("Failed to write firecracker run state file", {
         runId: state.runId,
         error: getErrorMessage(err),
       });
     }
+  }
+
+  /** Throwing variant — the post-spawn pid write must not be lost. */
+  private async writeStateFileStrict(runDir: string, state: RunStateFile): Promise<void> {
+    await writeFile(join(runDir, "state.json"), JSON.stringify(state), { mode: 0o600 });
+  }
+
+  /** Lazily create the per-instance 0700 API-socket directory. */
+  private ensureSocketDir(): Promise<string> {
+    // mkdtemp creates the directory 0700 — only this uid may traverse it.
+    this.socketDirPromise ??= mkdtemp(join(tmpdir(), "afc-"));
+    return this.socketDirPromise;
+  }
+
+  /**
+   * Single-orchestrator-per-host guard: two API processes on one host
+   * would mutually sweep each other's live TAP devices (cleanupOrphans
+   * reclaims every `afc*`) and collide on subnet indexes. Advisory
+   * pidfile (O_EXCL create, stale-pid takeover) — not flock, but good
+   * enough for the two-instance foot-gun it exists to catch.
+   */
+  private async acquireHostLock(dataDir: string): Promise<void> {
+    const lockPath = join(dataDir, "orchestrator.pid");
+    try {
+      await writeFile(lockPath, String(process.pid), { flag: "wx", mode: 0o600 });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const raw = await Bun.file(lockPath)
+        .text()
+        .catch(() => "");
+      const existingPid = Number.parseInt(raw.trim(), 10);
+      if (Number.isInteger(existingPid) && existingPid > 0 && existingPid !== process.pid) {
+        if (this.pidAlive(existingPid)) {
+          throw new Error(
+            `another Firecracker orchestrator (pid ${existingPid}) owns this host — ` +
+              `two instances would sweep each other's TAP devices and collide on subnets`,
+          );
+        }
+      }
+      // Stale lock from a crashed predecessor — take over.
+      await writeFile(lockPath, String(process.pid), { mode: 0o600 });
+    }
+    this.hostLockPath = lockPath;
+  }
+
+  private pidAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      // EPERM = alive but owned by another uid — still counts as alive.
+      return (err as NodeJS.ErrnoException).code === "EPERM";
+    }
+  }
+
+  /**
+   * Console-size watchdog: the serial console appends unbounded (kernel +
+   * supervisor + full workload stdout) — past the cap, the VM is killed
+   * and the run fails with the killed semantics.
+   */
+  private startConsoleWatch(vm: VmRecord, maxBytes: number): void {
+    const timer = setInterval(() => {
+      void (async () => {
+        let size: number;
+        try {
+          size = (await stat(vm.consolePath)).size;
+        } catch {
+          return; // Console not created yet / already reclaimed.
+        }
+        if (size <= maxBytes) return;
+        clearInterval(timer);
+        logger.error(
+          "Firecracker console log exceeded FIRECRACKER_MAX_CONSOLE_BYTES — killing VM",
+          {
+            runId: vm.runId,
+            size,
+            maxBytes,
+          },
+        );
+        vm.stopping = true;
+        await this.killVm(vm, 0).catch(() => {});
+      })();
+    }, CONSOLE_WATCH_INTERVAL_MS);
+    vm.consoleWatch = timer;
   }
 
   private async readStateFile(runDir: string): Promise<RunStateFile | null> {
@@ -715,33 +891,5 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     } catch {
       return null;
     }
-  }
-
-  private drainStderr(proc: BunProcess, label: string): void {
-    const stderr = proc.stderr;
-    if (!stderr || typeof stderr === "number") return;
-    const reader = (stderr as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    const drain = async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split("\n");
-          buf = lines.pop() ?? "";
-          for (const line of lines) {
-            if (line.trim()) logger.warn(`[${label}:stderr] ${line}`);
-          }
-        }
-        if (buf.trim()) logger.warn(`[${label}:stderr] ${buf}`);
-      } catch {
-        // Stream closed.
-      } finally {
-        reader.releaseLock();
-      }
-    };
-    drain().catch(() => {});
   }
 }

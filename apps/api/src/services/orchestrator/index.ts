@@ -12,7 +12,6 @@ export {
 
 export type {
   RunOrchestrator,
-  ContainerOrchestrator,
   WorkloadHandle,
   WorkloadResources,
   WorkloadSpec,

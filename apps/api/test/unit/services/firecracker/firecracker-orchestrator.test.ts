@@ -100,7 +100,8 @@ describe("createIsolationBoundary rollback", () => {
   it("releases the subnet index and removes the run dir when TAP creation fails", async () => {
     let failTap = true;
     const { exec } = fakeExec((cmd) => {
-      if (failTap && cmd.join(" ").startsWith("ip tuntap add")) return new Error("tap boom");
+      // TAP creation is a single `ip -batch -` run fed via stdin.
+      if (failTap && cmd.join(" ") === "ip -batch -") return new Error("tap boom");
       return defaultRespond(cmd);
     });
     const orch = readyOrchestrator(exec);
@@ -148,6 +149,25 @@ describe("TAP index accounting on teardown", () => {
   });
 });
 
+describe("admission control (FIRECRACKER_MAX_CONCURRENT_VMS)", () => {
+  it("refuses a new boundary once the cap is reached", async () => {
+    process.env.FIRECRACKER_MAX_CONCURRENT_VMS = "1";
+    _resetCacheForTesting();
+    try {
+      const { exec } = fakeExec();
+      const orch = readyOrchestrator(exec);
+      const b1 = await orch.createIsolationBoundary("run_1");
+      await expect(orch.createIsolationBoundary("run_2")).rejects.toThrow(/at capacity/);
+      // Freeing the slot admits the next run.
+      await orch.removeIsolationBoundary(b1);
+      await expect(orch.createIsolationBoundary("run_2")).resolves.toBeDefined();
+    } finally {
+      delete process.env.FIRECRACKER_MAX_CONCURRENT_VMS;
+      _resetCacheForTesting();
+    }
+  });
+});
+
 describe("cleanupOrphans PID-reuse guard", () => {
   it("does not kill a recorded pid that is not this run's firecracker VMM", async () => {
     // This test process's own pid is alive but is a bun process, not a
@@ -189,6 +209,40 @@ describe("cleanupOrphans PID-reuse guard", () => {
     const report = await orch.cleanupOrphans();
     expect(report.workloads).toBe(0);
     expect(report.isolationBoundaries).toBe(1);
+  });
+
+  it("leaves the host-lock pidfile alone (only run DIRECTORIES are swept)", async () => {
+    const lockPath = join(dataDir, "orchestrator.pid");
+    await writeFile(lockPath, String(process.pid));
+
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const report = await orch.cleanupOrphans();
+
+    expect(report.isolationBoundaries).toBe(0);
+    expect(await Bun.file(lockPath).exists()).toBe(true);
+  });
+});
+
+describe("streamLogs partial-line cap", () => {
+  it("flushes an overlong newline-less line instead of buffering it unbounded", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_1");
+    // proc stays null → the tail loop sees "exited" and drains to EOF.
+    const big = "x".repeat(100 * 1024);
+    await writeFile(join(dataDir, "run_1", "console.log"), big);
+
+    const chunks: string[] = [];
+    for await (const line of orch.streamLogs({ id: "x", runId: "run_1", role: "agent" })) {
+      chunks.push(line);
+    }
+
+    // Flushed mid-stream (not one giant buffered line), nothing lost.
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join("")).toBe(big);
+    // Bounded by the 64 KiB flush cap + one 16 KiB read.
+    expect(Math.max(...chunks.map((c) => c.length))).toBeLessThanOrEqual(80 * 1024);
   });
 });
 

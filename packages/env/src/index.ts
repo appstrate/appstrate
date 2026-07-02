@@ -468,6 +468,16 @@ const envSchema = z
         "must be comma-separated IPv4 CIDRs",
       )
       .default("169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
+    // Per-run serial console log cap (bytes). The console aggregates the
+    // guest kernel + supervisor + full workload stdout and appends
+    // unbounded — with FIRECRACKER_DATA_DIR on a tmpfs a chatty workload
+    // becomes a host OOM vector. A VM whose console exceeds the cap is
+    // killed (the run fails). Default 256 MiB.
+    FIRECRACKER_MAX_CONSOLE_BYTES: z.coerce.number().int().positive().default(268_435_456),
+    // Admission control: maximum concurrent microVMs on this host.
+    // 0 (default) = unlimited. When the cap is reached, new runs fail
+    // fast instead of overcommitting host RAM.
+    FIRECRACKER_MAX_CONCURRENT_VMS: z.coerce.number().int().nonnegative().default(0),
 
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),

@@ -21,6 +21,7 @@
 
 import type { RunSubnet } from "./subnet.ts";
 import { TAP_DEVICE_PREFIX } from "./subnet.ts";
+import { spawnCollect } from "../subprocess-util.ts";
 
 export interface HostExec {
   /** Run a host command; throws with stderr context on non-zero exit. */
@@ -32,18 +33,11 @@ export function createHostExec(): HostExec {
   return {
     async run(cmd: string[], opts?: { stdin?: string }): Promise<string> {
       const argv = process.getuid?.() === 0 ? cmd : ["sudo", "-n", ...cmd];
-      const proc = Bun.spawn(argv, {
-        stdin: opts?.stdin !== undefined ? new TextEncoder().encode(opts.stdin) : undefined,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [code, stdout, stderr] = await Promise.all([
-        proc.exited,
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
-      if (code !== 0) {
-        throw new Error(`Host command failed (${code}): ${cmd.join(" ")} — ${stderr.trim()}`);
+      // The error reports the unprefixed command — the sudo wrapper is an
+      // executor detail, not part of what the caller asked to run.
+      const { exitCode, stdout, stderr } = await spawnCollect(argv, { stdin: opts?.stdin });
+      if (exitCode !== 0) {
+        throw new Error(`Host command failed (${exitCode}): ${cmd.join(" ")} — ${stderr.trim()}`);
       }
       return stdout;
     },
@@ -168,14 +162,23 @@ export async function teardownHostNetwork(exec: HostExec): Promise<void> {
   }
 }
 
-/** Create + bring up one run's TAP device. */
+/**
+ * Create + bring up one run's TAP device. One privileged spawn instead of
+ * three: `ip -batch -` executes the add/addr/up sequence from stdin and
+ * aborts at the first failing line (no `-force`).
+ */
 export async function createTap(exec: HostExec, subnet: RunSubnet): Promise<void> {
-  await exec.run(["ip", "tuntap", "add", "dev", subnet.tapDevice, "mode", "tap"]);
+  const batch =
+    [
+      `tuntap add dev ${subnet.tapDevice} mode tap`,
+      `addr add ${subnet.hostIp}/30 dev ${subnet.tapDevice}`,
+      `link set dev ${subnet.tapDevice} up`,
+    ].join("\n") + "\n";
   try {
-    await exec.run(["ip", "addr", "add", `${subnet.hostIp}/30`, "dev", subnet.tapDevice]);
-    await exec.run(["ip", "link", "set", "dev", subnet.tapDevice, "up"]);
+    await exec.run(["ip", "-batch", "-"], { stdin: batch });
   } catch (err) {
-    // Half-created TAP would leak until the next boot sweep — reclaim now.
+    // Half-created TAP would leak until the next boot sweep — reclaim now
+    // (a no-op error when the batch failed on the very first line).
     await deleteTap(exec, subnet.tapDevice).catch(() => {});
     throw err;
   }

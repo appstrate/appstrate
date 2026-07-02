@@ -24,7 +24,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, readFileSync, writeFileSync } from "node:fs";
 // Wire contract shared with the host-side producer (vm-config.ts's
 // buildGuestConfig). Type-only: erased by `bun build`, so the supervisor
 // bundle stays self-contained.
@@ -186,6 +186,21 @@ async function main(): Promise<void> {
     printExitMarker(126);
     powerOff();
   });
+
+  // The umount removes the filesystem view, but the raw /dev/vdb block node
+  // survives in devtmpfs — the launch spec (credentials + exit nonce) would
+  // be recoverable via `dd if=/dev/vdb` if the node perms allowed it. Do not
+  // rely on devtmpfs defaults (root:disk): ENFORCE root:root 0000 so no
+  // workload uid can ever open the device. Same fail-closed contract as the
+  // umount above — refuse to spawn anything if the lockdown fails.
+  try {
+    chownSync("/dev/vdb", 0, 0);
+    chmodSync("/dev/vdb", 0o000);
+  } catch (err) {
+    log(`FATAL: could not lock down /dev/vdb: ${err instanceof Error ? err.message : String(err)}`);
+    printExitMarker(126);
+    powerOff();
+  }
 
   let sidecar: Child | undefined;
   if (cfg.sidecar.enabled) {

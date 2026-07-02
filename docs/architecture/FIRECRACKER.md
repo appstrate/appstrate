@@ -5,6 +5,34 @@ hardware virtualization boundary (KVM) around the whole run — stronger host
 protection than a container: a workload escape compromises a throwaway guest
 kernel, not the host.
 
+## Production status — EXPERIMENTAL
+
+Treat this backend as **experimental**. Two hardening gaps must close before
+it is production-grade:
+
+1. **No jailer.** Firecracker's own production guidance requires running the
+   VMM under the upstream `jailer` (or equivalent confinement: chroot,
+   cgroups, seccomp, dedicated uid). Today the VMM runs unjailed **on the
+   same uid that holds passwordless `sudo ip/nft/sysctl`** (the host-net
+   executor) — so a VMM escape lands on a uid that can rewrite the host
+   firewall and network, a compounding blast-radius issue. Until jailer
+   adoption, treat that sudoers entry as part of the platform's TCB.
+2. **In-guest credentials.** The run's raw credentials (the sidecar env:
+   LLM keys, OAuth tokens, RUN_TOKEN) live inside the guest, separated from
+   the untrusted agent only by uid + `/proc` hidepid. A guest-kernel LPE
+   reads them. The blast radius is that one run's credentials — the per-run
+   VM still protects the host and every other run — but a kernel LPE is a
+   realistic attacker step, not a theoretical one.
+
+To be explicit about what defends what: **the security boundary is the
+per-run VM (KVM)**. The in-guest uid + nftables separation is
+defense-in-depth against a non-kernel-capable agent, never the credential
+boundary itself.
+
+Planned mitigations: jailer + per-VM cgroup slices; a vsock credential
+broker (credentials stay host-side and are injected on request instead of
+riding the config drive); a seccomp profile for the agent process.
+
 ## Topology — VM-per-run
 
 ```
@@ -21,7 +49,9 @@ platform API (:PORT)                       /sbin/appstrate-init  (PID 1, overlay
 ```
 
 Design decision (vs one VM per workload): the sidecar, agent and integration
-runners share the guest, separated by uid + in-guest nftables. This keeps the
+runners share the guest, separated by uid + in-guest nftables — a
+defense-in-depth layer against a non-kernel-capable agent, not the security
+boundary (that is the VM; see _Production status_). This keeps the
 whole `docs/architecture/SIDECAR.md` contract byte-identical (the sidecar sees
 a "process mode" world: loopback URLs, directory workspace,
 `INTEGRATION_RUNTIME_ADAPTER=process`) and avoids the unsolvable parts of
@@ -118,16 +148,37 @@ bun run firecracker:build          # rootfs + kernel
   them out of persistent storage. In-guest, the drive is unmounted before
   any workload starts.
 
+## Operational constraints
+
+- **One orchestrator process per host.** `initialize()` takes an advisory
+  pidfile lock at `FIRECRACKER_DATA_DIR/orchestrator.pid` (stale-pid
+  takeover); a second instance refuses to boot. Two instances would sweep
+  each other's live `afc*` TAP devices and collide on subnet indexes.
+- **Admission cap.** `FIRECRACKER_MAX_CONCURRENT_VMS` (`0` = unlimited): at
+  the cap, `createIsolationBoundary` fails the run fast instead of
+  overcommitting host RAM with another VM.
+- **Console ceiling.** The serial console (guest kernel + supervisor + full
+  workload stdout) appends unbounded; a per-VM watchdog kills the VM — the
+  run fails — once `console.log` exceeds `FIRECRACKER_MAX_CONSOLE_BYTES`.
+- **Capacity planning.** Per-run guest RAM =
+  `agent MiB + 512 MiB` (256 MiB sidecar — dropped for skipSidecar runs —
+  plus 256 MiB kernel/init/overlay headroom), **plus workspace bytes**: the
+  rootfs overlay and `/workspace` are tmpfs-backed, so every byte the
+  workload writes is host RAM, capped at 50% of guest RAM by the init's
+  tmpfs mount.
+
 ## Env vars
 
-| Var                             | Default                          | Notes                                            |
-| ------------------------------- | -------------------------------- | ------------------------------------------------ |
-| `FIRECRACKER_BIN`               | `firecracker`                    | VMM binary                                       |
-| `FIRECRACKER_KERNEL_PATH`       | `./data/firecracker/vmlinux`     | guest kernel                                     |
-| `FIRECRACKER_ROOTFS_PATH`       | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                          |
-| `FIRECRACKER_DATA_DIR`          | `./data/firecracker/runs`        | per-run state (tmpfs recommended)                |
-| `FIRECRACKER_SUBNET_CIDR`       | `10.231.0.0/16`                  | /16 pool → per-run /30                           |
-| `FIRECRACKER_EGRESS_DENY_CIDRS` | metadata + RFC1918               | forward-path destinations guests may never reach |
+| Var                              | Default                          | Notes                                               |
+| -------------------------------- | -------------------------------- | --------------------------------------------------- |
+| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                          |
+| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                        |
+| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                             |
+| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended)                   |
+| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                              |
+| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach    |
+| `FIRECRACKER_MAX_CONCURRENT_VMS` | `0` (unlimited)                  | admission cap — see _Operational constraints_       |
+| `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails) |
 
 ## Development on macOS
 
@@ -157,10 +208,8 @@ with a trivial agent argv.
   sidecar-only workload (connect-run) cannot start. The connect executor
   fails fast (`ConnectNotSupportedError`) — use docker/process for connect
   flows.
-- **No jailer yet**: the VMM runs unjailed — a VMM escape lands on the API
-  uid, which holds passwordless `sudo ip/nft/sysctl`. chroot/cgroup/seccomp
-  hardening of the firecracker process itself (the upstream `jailer`) is a
-  planned follow-up tracked separately; until then treat the host's sudoers
-  entry as part of the platform's TCB.
+- **No jailer, credentials in-guest**: see _Production status_ at the top —
+  the backend is experimental until both close.
 - Workspace and rootfs overlay are tmpfs-backed → bounded by guest RAM
-  (`vmSizing` adds a fixed envelope over the agent budget).
+  (`vmSizing` adds a fixed envelope over the agent budget; see _Operational
+  constraints_ for the capacity formula).

@@ -16,12 +16,7 @@
 import type { RunSubnet } from "./subnet.ts";
 // The config-drive wire contract is shared with its in-guest consumer —
 // single definition next to the supervisor, imported type-only.
-import type {
-  GuestConfig,
-  GuestNetworkConfig,
-} from "../../../../../../runtime-pi/guest/guest-config.ts";
-
-export type { GuestConfig, GuestNetworkConfig };
+import type { GuestConfig } from "../../../../../../runtime-pi/guest/guest-config.ts";
 
 export interface BuildGuestConfigInput {
   runId: string;
@@ -123,23 +118,27 @@ export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown
 
 /**
  * VM sizing from the agent's workload resources. The microVM hosts the
- * agent AND the sidecar (+ kernel/init overhead), so the guest budget is
- * the agent budget plus a fixed envelope.
+ * agent AND (usually) the sidecar (+ kernel/init overhead), so the guest
+ * budget is the agent budget plus a fixed envelope. skipSidecar runs
+ * (`hasSidecar: false`) drop the sidecar's share of that envelope.
  */
-export function vmSizing(agent: { memoryBytes: number; nanoCpus: number }): {
+export function vmSizing(
+  agent: { memoryBytes: number; nanoCpus: number },
+  hasSidecar: boolean,
+): {
   vcpuCount: number;
   memSizeMib: number;
 } {
   const agentMib = Math.ceil(agent.memoryBytes / (1024 * 1024));
-  const sidecarMib = 256;
+  const sidecarMib = hasSidecar ? 256 : 0;
   const systemMib = 256; // kernel + init + tmpfs overlay headroom
   const vcpuFromSpec = Math.ceil(agent.nanoCpus / 1_000_000_000);
   return {
     // The sidecar and the agent cold-start concurrently — on a single
     // vCPU they starve each other and the agent's first sink event can
     // slip past the platform's heartbeat deadline. Budget one extra
-    // vCPU for the sidecar and never go below two.
-    vcpuCount: Math.min(8, Math.max(2, vcpuFromSpec + 1)),
+    // vCPU for the sidecar (when there is one) and never go below two.
+    vcpuCount: Math.min(8, Math.max(2, vcpuFromSpec + (hasSidecar ? 1 : 0))),
     memSizeMib: agentMib + sidecarMib + systemMib,
   };
 }

@@ -280,14 +280,6 @@ export interface RunOrchestrator {
   resolvePlatformApiUrl(): Promise<string>;
 }
 
-/**
- * @deprecated Renamed to {@link RunOrchestrator} — "container" stopped being
- * accurate once non-container backends (process, firecracker) shipped.
- * Alias kept for npm consumers of `@appstrate/core`; remove on the next
- * core major.
- */
-export type ContainerOrchestrator = RunOrchestrator;
-
 // ---------------------------------------------------------------------------
 // Inline run — request body
 // ---------------------------------------------------------------------------

@@ -161,20 +161,17 @@ describe("setupHostNetwork", () => {
 describe("createTap / deleteTap", () => {
   const subnet = subnetForIndex("10.231.0.0/16", 3);
 
-  it("creates, addresses and brings up the device", async () => {
+  it("creates, addresses and brings up the device in ONE batched ip run", async () => {
     const { exec, calls } = fakeExec();
     await createTap(exec, subnet);
-    expect(calls.map((c) => c.cmd.join(" "))).toEqual([
-      "ip tuntap add dev afc3 mode tap",
-      "ip addr add 10.231.0.13/30 dev afc3",
-      "ip link set dev afc3 up",
-    ]);
+    expect(calls.map((c) => c.cmd.join(" "))).toEqual(["ip -batch -"]);
+    expect(calls[0]?.stdin).toBe(
+      "tuntap add dev afc3 mode tap\naddr add 10.231.0.13/30 dev afc3\nlink set dev afc3 up\n",
+    );
   });
 
-  it("reclaims a half-created TAP when addressing fails", async () => {
-    const { exec, calls } = fakeExec((cmd) =>
-      cmd.join(" ").startsWith("ip addr add") ? new Error("boom") : "",
-    );
+  it("reclaims a half-created TAP when the batch fails", async () => {
+    const { exec, calls } = fakeExec((cmd) => (cmd[1] === "-batch" ? new Error("boom") : ""));
     await expect(createTap(exec, subnet)).rejects.toThrow("boom");
     expect(calls.at(-1)?.cmd.join(" ")).toBe("ip link del afc3");
   });

@@ -45,7 +45,12 @@ export interface RuntimePiEnvOptions {
   runId?: string;
   /** JSON-encoded user input passed to the agent (`AGENT_INPUT`). */
   agentInput?: unknown;
-  /** Sidecar URL reachable from the agent container (default `http://sidecar:8080`). */
+  /**
+   * Sidecar URL reachable from the agent container. Required unless
+   * {@link noSidecar}: the orchestrator owns the topology (Docker DNS
+   * alias, host loopback port, in-guest loopback for microVMs) — there
+   * is deliberately no default, a missing value throws at build time.
+   */
   sidecarUrl?: string;
   /**
    * If set, LLM traffic is routed through `${sidecarProxyUrl}` and
@@ -73,7 +78,12 @@ export interface RuntimePiEnvOptions {
    * stack with the SDK retry and cause amplification on 429.
    */
   disableModelRetry?: boolean;
-  /** Hosts excluded from the forward proxy. Defaults to `sidecar,localhost,127.0.0.1`. */
+  /**
+   * Hosts excluded from the forward proxy. Required when
+   * {@link forwardProxyUrl} is set on a sidecar-backed run — like
+   * {@link sidecarUrl}, the exclusion list is topology (which hostname
+   * the sidecar answers on), so the orchestrator must supply it.
+   */
   noProxy?: string;
   /**
    * Credentials for the container to post signed {@link RunEvent}s back to
@@ -132,7 +142,16 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (opts.engine && opts.engine !== "pi") env.RUN_ENGINE = opts.engine;
 
   if (!opts.noSidecar) {
-    env.SIDECAR_URL = opts.sidecarUrl ?? "http://sidecar:8080";
+    // No fallback: a Docker-shaped magic default here would silently
+    // misroute process/firecracker runs. The orchestrator's
+    // `IsolationBoundary.sidecarEndpoints` is the single topology owner.
+    if (!opts.sidecarUrl) {
+      throw new Error(
+        "buildRuntimePiEnv: sidecarUrl is required for sidecar-backed runs " +
+          "(pass the boundary's sidecarEndpoints.sidecarUrl, or set noSidecar: true)",
+      );
+    }
+    env.SIDECAR_URL = opts.sidecarUrl;
   }
 
   if (opts.runId) env.AGENT_RUN_ID = opts.runId;
@@ -179,7 +198,15 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   }
 
   if (opts.forwardProxyUrl && !opts.noSidecar) {
-    const noProxy = opts.noProxy ?? "sidecar,localhost,127.0.0.1";
+    // Same invariant as sidecarUrl above: the exclusion list names the
+    // sidecar's own host, which only the orchestrator knows.
+    const { noProxy } = opts;
+    if (!noProxy) {
+      throw new Error(
+        "buildRuntimePiEnv: noProxy is required when forwardProxyUrl is set " +
+          "(pass the boundary's sidecarEndpoints.noProxy)",
+      );
+    }
     env.HTTP_PROXY = opts.forwardProxyUrl;
     env.HTTPS_PROXY = opts.forwardProxyUrl;
     env.http_proxy = opts.forwardProxyUrl;

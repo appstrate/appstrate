@@ -70,13 +70,20 @@ describe("buildVmConfig", () => {
 
 describe("vmSizing", () => {
   it("adds the sidecar + system envelope to the agent budget", () => {
-    const sizing = vmSizing({ memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 });
+    const sizing = vmSizing({ memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 }, true);
     expect(sizing).toEqual({ vcpuCount: 3, memSizeMib: 1536 + 256 + 256 });
   });
 
+  it("drops the sidecar envelope (RAM + extra vCPU) for skipSidecar runs", () => {
+    const sizing = vmSizing({ memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 }, false);
+    expect(sizing).toEqual({ vcpuCount: 2, memSizeMib: 1536 + 256 });
+  });
+
   it("clamps vcpus to a sane range", () => {
-    expect(vmSizing({ memoryBytes: 1, nanoCpus: 100 }).vcpuCount).toBe(2);
-    expect(vmSizing({ memoryBytes: 1, nanoCpus: 64_000_000_000 }).vcpuCount).toBe(8);
+    expect(vmSizing({ memoryBytes: 1, nanoCpus: 100 }, true).vcpuCount).toBe(2);
+    expect(vmSizing({ memoryBytes: 1, nanoCpus: 100 }, false).vcpuCount).toBe(2);
+    expect(vmSizing({ memoryBytes: 1, nanoCpus: 64_000_000_000 }, true).vcpuCount).toBe(8);
+    expect(vmSizing({ memoryBytes: 1, nanoCpus: 64_000_000_000 }, false).vcpuCount).toBe(8);
   });
 });
 

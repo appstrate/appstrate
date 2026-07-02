@@ -34,7 +34,8 @@ import type {
   CleanupReport,
   StopResult,
 } from "@appstrate/core/platform-types";
-import { applySpecToSidecarEnv } from "./sidecar-env.ts";
+import { buildBaseSidecarEnv } from "./sidecar-env.ts";
+import { drainStream, TAIL_POLL_MS, TAIL_BUFFER_SIZE } from "./subprocess-util.ts";
 
 const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
@@ -93,11 +94,6 @@ async function reapOrphanWorkspaceDirs(): Promise<number> {
   }
   return count;
 }
-
-/** Poll interval for tailing the stdout file (ms). */
-const TAIL_POLL_MS = 50;
-/** Read buffer size for tailing (bytes). */
-const TAIL_BUFFER_SIZE = 16_384;
 
 type BunProcess = ReturnType<typeof Bun.spawn>;
 
@@ -312,16 +308,15 @@ export class ProcessOrchestrator implements RunOrchestrator {
     const platformApiUrl = await this.resolvePlatformApiUrl();
     const id = `sidecar-${runId}`;
 
-    const env: Record<string, string> = {
-      ...cleanProcessEnv(),
-      PORT: String(port),
-      PLATFORM_API_URL: platformApiUrl,
-      RUN_TOKEN: spec.runToken,
-      // Hand the workspace handle to the sidecar so its integration
-      // runtime adapter can wire the same shared surface into runner
-      // subprocesses that opt in via mcp-server _meta.workspace.
-      WORKSPACE_HANDLE_JSON: JSON.stringify(boundary.workspace),
-    };
+    // No `runId`: RUN_ID only serves container labeling and this
+    // topology spawns no containers.
+    const env = buildBaseSidecarEnv({
+      spec,
+      baseEnv: cleanProcessEnv(),
+      port: String(port),
+      platformApiUrl,
+      workspace: boundary.workspace,
+    });
     // This run is NOT containerized (process orchestrator), so its integrations
     // must spawn as host subprocesses too. The sidecar selects its integration
     // runtime purely from INTEGRATION_RUNTIME_ADAPTER (no auto-detection), so we
@@ -330,19 +325,18 @@ export class ProcessOrchestrator implements RunOrchestrator {
     if (!env.INTEGRATION_RUNTIME_ADAPTER) {
       env.INTEGRATION_RUNTIME_ADAPTER = "process";
     }
-    applySpecToSidecarEnv(spec, env);
 
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {
       env,
       stdout: "pipe",
       stderr: "pipe",
     });
-    this.drainStderr(proc, id);
+    drainStream(proc, `process:${id}`);
     // The sidecar's `info`-level lines go to stdout; drain them too so
     // the buffer never fills up (Bun pipes hang at ~64KB without a
     // reader, freezing whatever was about to be written next — e.g. the
     // integration-runtime's spawn progress logs).
-    this.drainStderr(proc, id, undefined, "stdout");
+    drainStream(proc, `process:${id}`, { stream: "stdout" });
     this.processes.set(id, { proc, role: "sidecar", runId });
     await this.writePidfile(runId, "sidecar", proc.pid);
 
@@ -398,7 +392,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     const stderrTail: string[] = [];
     ph.stderrTail = stderrTail;
-    this.drainStderr(proc, handle.id, stderrTail);
+    // The tail feeds the agent-exit error log — see ProcessHandle.stderrTail.
+    drainStream(proc, `process:${handle.id}`, { tail: stderrTail });
     ph.proc = proc;
     ph.stdoutPath = stdoutPath;
     this.pendingSpecs.delete(handle.id);
@@ -555,55 +550,5 @@ export class ProcessOrchestrator implements RunOrchestrator {
       }
     }
     throw new Error("Failed to find available port after retries");
-  }
-
-  /**
-   * Drain stderr from a subprocess. Each line is logged at warn level
-   * for live tailing; the same line is appended to {@link tail} (capped
-   * at the last 50 lines) so the platform can surface stderr in the
-   * agent-exit error log even when the process dies before the live
-   * warn lines reach the user's filtered view.
-   */
-  private drainStderr(
-    proc: BunProcess,
-    label: string,
-    tail?: string[],
-    stream: "stderr" | "stdout" = "stderr",
-  ): void {
-    const stderr = stream === "stderr" ? proc.stderr : proc.stdout;
-    if (!stderr || typeof stderr === "number") return;
-
-    const reader = (stderr as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-
-    const append = (line: string) => {
-      logger.warn(`[process:${label}:${stream}] ${line}`);
-      if (tail) {
-        tail.push(line);
-        if (tail.length > 50) tail.shift();
-      }
-    };
-
-    const drain = async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split("\n");
-          buf = lines.pop() ?? "";
-          for (const line of lines) {
-            if (line.trim()) append(line);
-          }
-        }
-        if (buf.trim()) append(buf);
-      } catch {
-        // Stream closed
-      } finally {
-        reader.releaseLock();
-      }
-    };
-    drain().catch(() => {});
   }
 }
