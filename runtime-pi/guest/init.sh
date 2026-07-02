@@ -62,8 +62,9 @@ mount -t tmpfs -o nosuid,nodev tmpfs /dev/shm 2>/dev/null || true
 ip link set lo up 2>/dev/null || true
 printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
 chmod 1777 /tmp
-mkdir -p /workspace /home/pi
-chown 1001:1001 /home/pi
+# /home/pi is baked into the rootfs (adduser in runtime-pi/Dockerfile) and
+# never the effective HOME (the supervisor sets HOME=cwd per workload).
+mkdir -p /workspace
 # Shared workspace: agent (1001) owns it; integration runners (1002) reach
 # it through the `workspace` group (1003, baked into the rootfs). setgid
 # keeps files created by either side group-shared.

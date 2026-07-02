@@ -13,8 +13,8 @@ it is production-grade:
 1. **No jailer.** Firecracker's own production guidance requires running the
    VMM under the upstream `jailer` (or equivalent confinement: chroot,
    cgroups, seccomp, dedicated uid). Today the VMM runs unjailed **on the
-   same uid that holds passwordless `sudo ip/nft/sysctl`** (the host-net
-   executor) — so a VMM escape lands on a uid that can rewrite the host
+   same uid that holds passwordless `sudo ip/nft/sysctl/iptables`** (the
+   host-net executor) — so a VMM escape lands on a uid that can rewrite the host
    firewall and network, a compounding blast-radius issue. Until jailer
    adoption, treat that sudoers entry as part of the platform's TCB.
 2. **In-guest credentials.** The run's raw credentials (the sidecar env:
@@ -138,10 +138,18 @@ bun run firecracker:build          # rootfs + kernel
 
 ## Requirements & privileges
 
-- Linux + `/dev/kvm` (+ `firecracker` ≥1.16, `mkfs.ext4` and `debugfs`
+- Linux + `/dev/kvm` (+ `firecracker` ≥1.16 — enforced at `initialize()`,
+  older releases are exposed to CVE-2026-5747 —, `mkfs.ext4` and `debugfs`
   — both from e2fsprogs — on PATH).
-- `ip`/`nft`/`sysctl` mutations run as root or via passwordless `sudo -n`
-  (host-net executor prefixes sudo automatically when non-root).
+- `ip`/`nft`/`sysctl`/`iptables` mutations run as root or via passwordless
+  `sudo -n` (host-net executor prefixes sudo automatically when non-root).
+  `iptables` matters on any host running dockerd: Docker sets the FORWARD
+  policy to DROP, and without the iptables accepts the guests' egress is
+  silently blocked (the insert failure is logged as a warning at boot).
+- **Host hygiene** (from Firecracker's production host setup guide): on
+  multi-tenant hosts disable SMT (`nosmt`) and KSM, disable swap entirely
+  (guest memory must never hit persistent storage), and keep the host
+  kernel + CPU microcode patched per your distro's advisories.
 - Secrets hygiene: the per-run config drive holds the run's credentials on
   disk (0600, in-image ownership forced to root:root 0400 via `debugfs`,
   deleted with the run) — point `FIRECRACKER_DATA_DIR` at a tmpfs to keep

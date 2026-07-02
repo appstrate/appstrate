@@ -56,6 +56,19 @@ export function buildGuestConfig(input: BuildGuestConfigInput): GuestConfig {
 export function buildKernelBootArgs(subnet: RunSubnet): string {
   return [
     "console=ttyS0",
+    // Boot-latency trim: every kernel printk over the emulated 16550 UART
+    // is a per-character VM exit. `quiet loglevel=1` silences boot chatter
+    // (userspace writes — init/supervisor logs, the exit marker — are
+    // unaffected); the i8042.* stubs skip PS/2 controller probing on
+    // hardware Firecracker doesn't emulate; random.trust_cpu seeds the
+    // CRNG from RDRAND so early boot never blocks on the entropy pool.
+    "quiet",
+    "loglevel=1",
+    "i8042.noaux",
+    "i8042.nomux",
+    "i8042.nopnp",
+    "i8042.dumbkbd",
+    "random.trust_cpu=on",
     "reboot=k",
     "panic=1",
     "pci=off",
@@ -78,6 +91,27 @@ export interface BuildVmConfigInput {
   memSizeMib: number;
 }
 
+/**
+ * Per-device token-bucket rate limiters (Firecracker's dual-bucket
+ * design: bytes + ops, each refilled per `refill_time` ms). These are
+ * DoS bounds against a hostile guest flooding host I/O — not workload
+ * QoS — so they are deliberately generous and not operator-tunable:
+ *
+ *   - drives: a large one-time burst lets the boot read the rootfs at
+ *     full speed; the sustained rate only throttles a guest that keeps
+ *     hammering the (read-only) block devices afterwards.
+ *   - network: ~25 MiB/s sustained per direction with a burst allowance
+ *     for legitimate downloads (package installs, artifact pulls).
+ */
+const DRIVE_RATE_LIMITER = {
+  bandwidth: { size: 50 * 1024 * 1024, refill_time: 1000, one_time_burst: 1024 * 1024 * 1024 },
+  ops: { size: 20_000, refill_time: 1000, one_time_burst: 100_000 },
+};
+const NET_RATE_LIMITER = {
+  bandwidth: { size: 25 * 1024 * 1024, refill_time: 1000, one_time_burst: 200 * 1024 * 1024 },
+  ops: { size: 50_000, refill_time: 1000, one_time_burst: 100_000 },
+};
+
 /** Firecracker `--config-file` payload (Firecracker API casing). */
 export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown> {
   return {
@@ -94,12 +128,14 @@ export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown
         // attached read-only; the guest init overlays a tmpfs on top for
         // per-run writes.
         is_read_only: true,
+        rate_limiter: DRIVE_RATE_LIMITER,
       },
       {
         drive_id: "config",
         path_on_host: input.configDrivePath,
         is_root_device: false,
         is_read_only: true,
+        rate_limiter: DRIVE_RATE_LIMITER,
       },
     ],
     "network-interfaces": [
@@ -107,6 +143,8 @@ export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown
         iface_id: "eth0",
         guest_mac: input.subnet.guestMac,
         host_dev_name: input.subnet.tapDevice,
+        rx_rate_limiter: NET_RATE_LIMITER,
+        tx_rate_limiter: NET_RATE_LIMITER,
       },
     ],
     "machine-config": {

@@ -45,8 +45,9 @@ const PARAMS = {
 describe("buildNftScript", () => {
   const script = buildNftScript(PARAMS);
 
-  it("is idempotent (destroys the table before recreating it)", () => {
-    expect(script.startsWith("destroy table ip appstrate_fc")).toBe(true);
+  it("is idempotent (add+delete pair — portable, unlike `destroy` which needs nft >= 1.0.8)", () => {
+    expect(script.startsWith("add table ip appstrate_fc\ndelete table ip appstrate_fc")).toBe(true);
+    expect(script).not.toContain("destroy table");
   });
 
   it("allows guests to reach ONLY the platform endpoint on the host", () => {
@@ -85,12 +86,12 @@ describe("buildNftScript", () => {
 });
 
 describe("teardownHostNetwork", () => {
-  it("destroys the nft table and removes the iptables FORWARD accepts", async () => {
+  it("deletes the nft table and removes the iptables FORWARD accepts", async () => {
     // -C probes succeed (rules present) → both deletes issued.
     const { exec, calls } = fakeExec();
     await teardownHostNetwork(exec);
     expect(calls.map((c) => c.cmd.join(" "))).toEqual([
-      "nft destroy table ip appstrate_fc",
+      "nft delete table ip appstrate_fc",
       "iptables -C FORWARD -i afc+ -j ACCEPT",
       "iptables -D FORWARD -i afc+ -j ACCEPT",
       "iptables -C FORWARD -o afc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
@@ -119,13 +120,18 @@ describe("setupHostNetwork", () => {
   it("binds the alias, enables forwarding, applies the firewall atomically", async () => {
     const { exec, calls } = fakeExec();
     await setupHostNetwork(exec, PARAMS);
-    expect(calls.slice(0, 4).map((c) => c.cmd.join(" "))).toEqual([
+    expect(calls.slice(0, 3).map((c) => c.cmd.join(" "))).toEqual([
       "ip addr replace 10.231.255.1/32 dev lo",
       "sysctl -qw net.ipv4.ip_forward=1",
-      "sysctl -qw net.ipv4.conf.all.rp_filter=2",
       "nft -f -",
     ]);
-    expect(calls[3]?.stdin).toBe(buildNftScript(PARAMS));
+    expect(calls[2]?.stdin).toBe(buildNftScript(PARAMS));
+  });
+
+  it("never loosens rp_filter host-wide (anti-spoofing is per-TAP, strict)", async () => {
+    const { exec, calls } = fakeExec();
+    await setupHostNetwork(exec, PARAMS);
+    expect(calls.some((c) => c.cmd.join(" ").includes("conf.all.rp_filter"))).toBe(false);
   });
 
   it("whitelists TAP forwarding in the iptables pipeline (Docker coexistence)", async () => {
@@ -161,10 +167,16 @@ describe("setupHostNetwork", () => {
 describe("createTap / deleteTap", () => {
   const subnet = subnetForIndex("10.231.0.0/16", 3);
 
-  it("creates, addresses and brings up the device in ONE batched ip run", async () => {
+  it("creates, addresses and brings up the device in ONE batched ip run, then pins strict rp_filter", async () => {
     const { exec, calls } = fakeExec();
     await createTap(exec, subnet);
-    expect(calls.map((c) => c.cmd.join(" "))).toEqual(["ip -batch -"]);
+    expect(calls.map((c) => c.cmd.join(" "))).toEqual([
+      "ip -batch -",
+      // L3 anti-spoofing: the kernel drops guest packets whose source
+      // doesn't route back through this TAP (another guest's IP, any
+      // foreign IP).
+      "sysctl -qw net.ipv4.conf.afc3.rp_filter=1",
+    ]);
     expect(calls[0]?.stdin).toBe(
       "tuntap add dev afc3 mode tap\naddr add 10.231.0.13/30 dev afc3\nlink set dev afc3 up\n",
     );
@@ -173,6 +185,12 @@ describe("createTap / deleteTap", () => {
   it("reclaims a half-created TAP when the batch fails", async () => {
     const { exec, calls } = fakeExec((cmd) => (cmd[1] === "-batch" ? new Error("boom") : ""));
     await expect(createTap(exec, subnet)).rejects.toThrow("boom");
+    expect(calls.at(-1)?.cmd.join(" ")).toBe("ip link del afc3");
+  });
+
+  it("reclaims the TAP when the rp_filter sysctl fails (anti-spoofing is mandatory)", async () => {
+    const { exec, calls } = fakeExec((cmd) => (cmd[0] === "sysctl" ? new Error("denied") : ""));
+    await expect(createTap(exec, subnet)).rejects.toThrow("denied");
     expect(calls.at(-1)?.cmd.join(" ")).toBe("ip link del afc3");
   });
 

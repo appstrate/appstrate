@@ -18,7 +18,7 @@
  * Re-test with `stdout: "pipe"` after upgrading Bun to check if the fix is still needed.
  */
 
-import { mkdir, rm, readdir, open as fsOpen, stat } from "node:fs/promises";
+import { mkdir, rm, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
@@ -35,7 +35,7 @@ import type {
   StopResult,
 } from "@appstrate/core/platform-types";
 import { buildBaseSidecarEnv } from "./sidecar-env.ts";
-import { drainStream, TAIL_POLL_MS, TAIL_BUFFER_SIZE } from "./subprocess-util.ts";
+import { drainStream, tailFileLines } from "./subprocess-util.ts";
 
 const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
@@ -326,18 +326,21 @@ export class ProcessOrchestrator implements RunOrchestrator {
       env.INTEGRATION_RUNTIME_ADAPTER = "process";
     }
 
+    // Sidecar stdout goes to a FILE, not a drained pipe, for two reasons:
+    //   - connect-runs capture the credential bundle by tailing it via
+    //     streamLogs (the APPSTRATE_CONNECT_RESULT sentinel) — a drained
+    //     pipe is invisible to streamLogs, so capture would always fail;
+    //   - that same sentinel line carries the captured credentials, and
+    //     drainStream logger.warn's every line — the bundle must never
+    //     reach the platform logs.
+    const stdoutPath = join(boundary.id, "sidecar-stdout.log");
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {
       env,
-      stdout: "pipe",
+      stdout: Bun.file(stdoutPath),
       stderr: "pipe",
     });
     drainStream(proc, `process:${id}`);
-    // The sidecar's `info`-level lines go to stdout; drain them too so
-    // the buffer never fills up (Bun pipes hang at ~64KB without a
-    // reader, freezing whatever was about to be written next — e.g. the
-    // integration-runtime's spawn progress logs).
-    drainStream(proc, `process:${id}`, { stream: "stdout" });
-    this.processes.set(id, { proc, role: "sidecar", runId });
+    this.processes.set(id, { proc, role: "sidecar", runId, stdoutPath });
     await this.writePidfile(runId, "sidecar", proc.pid);
 
     // No /health gate — the agent's MCP client retries its handshake against
@@ -459,33 +462,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     ph.proc.exited.then(() => {
       exited = true;
     });
-
-    const fh = await fsOpen(ph.stdoutPath, "r");
-    const buf = Buffer.alloc(TAIL_BUFFER_SIZE);
-    const decoder = new TextDecoder();
-    let partial = "";
-
-    try {
-      while (!signal?.aborted) {
-        const { bytesRead } = await fh.read(buf, 0, buf.length);
-
-        if (bytesRead > 0) {
-          partial += decoder.decode(buf.subarray(0, bytesRead), { stream: true });
-          const lines = partial.split("\n");
-          partial = lines.pop() ?? "";
-          for (const line of lines) {
-            if (line.length > 0) yield line;
-          }
-        } else if (exited) {
-          if (partial.length > 0) yield partial;
-          break;
-        } else {
-          await new Promise((r) => setTimeout(r, TAIL_POLL_MS));
-        }
-      }
-    } finally {
-      await fh.close();
-    }
+    yield* tailFileLines(ph.stdoutPath, () => exited, signal);
   }
 
   async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
@@ -535,12 +512,23 @@ export class ProcessOrchestrator implements RunOrchestrator {
     await rm(join(DATA_DIR, runId, `${role}.pid`), { force: true }).catch(() => {});
   }
 
-  private async findAvailablePort(retries = 3): Promise<number> {
+  private async findAvailablePort(retries = 5): Promise<number> {
+    // Ports already reserved by concurrent run starts (probed at boundary
+    // creation but only bound when their sidecar boots): the OS can hand
+    // the same ephemeral port out again in that window, so a candidate
+    // pair overlapping a reservation must be rejected here — the loser
+    // would otherwise die with EADDRINUSE at sidecar boot.
+    const reserved = new Set<number>();
+    for (const p of this.sidecarPorts.values()) {
+      reserved.add(p);
+      reserved.add(p + 1);
+    }
     for (let attempt = 0; attempt < retries; attempt++) {
       const s1 = Bun.serve({ port: 0, fetch: () => new Response() });
       const port = s1.port ?? 0;
       s1.stop(true);
       if (!port) continue;
+      if (reserved.has(port) || reserved.has(port + 1)) continue;
       try {
         const s2 = Bun.serve({ port: port + 1, fetch: () => new Response() });
         s2.stop(true);

@@ -19,6 +19,8 @@
  *   - guest→guest is dropped (per-run isolation)
  */
 
+import { getErrorMessage } from "@appstrate/core/errors";
+import { logger } from "../../../lib/logger.ts";
 import type { RunSubnet } from "./subnet.ts";
 import { TAP_DEVICE_PREFIX } from "./subnet.ts";
 import { spawnCollect } from "../subprocess-util.ts";
@@ -46,8 +48,12 @@ export function createHostExec(): HostExec {
 
 /**
  * Complete nftables policy, applied atomically via `nft -f -`. The
- * leading `destroy table` makes re-application idempotent (fresh boot,
- * crash recovery, config change) without touching other tables.
+ * leading `add table` + `delete table` pair makes re-application
+ * idempotent (fresh boot, crash recovery, config change) without
+ * touching other tables. NOT `destroy table`: that verb needs
+ * nftables >= 1.0.8 AND host kernel >= 6.3, which rules out Debian 12
+ * and Ubuntu 22.04 — `add` (no-op when present) followed by `delete`
+ * is the portable spelling of the same idempotency.
  */
 export function buildNftScript(params: {
   subnetCidr: string;
@@ -60,7 +66,8 @@ export function buildNftScript(params: {
   const tap = `"${TAP_DEVICE_PREFIX}*"`;
   const denySet = egressDenyCidrs.join(", ");
   return [
-    `destroy table ip appstrate_fc`,
+    `add table ip appstrate_fc`,
+    `delete table ip appstrate_fc`,
     `table ip appstrate_fc {`,
     `  chain input {`,
     `    type filter hook input priority filter; policy accept;`,
@@ -99,10 +106,6 @@ export async function setupHostNetwork(
   // `replace` (not `add`) → idempotent across restarts.
   await exec.run(["ip", "addr", "replace", `${params.aliasIp}/32`, "dev", "lo"]);
   await exec.run(["sysctl", "-qw", "net.ipv4.ip_forward=1"]);
-  // Loose reverse-path filtering: replies to the loopback alias leave
-  // through TAP devices whose subnet differs from the alias — strict rp
-  // filtering would drop the guests' platform traffic.
-  await exec.run(["sysctl", "-qw", "net.ipv4.conf.all.rp_filter=2"]);
   await exec.run(["nft", "-f", "-"], { stdin: buildNftScript(params) });
   await allowForwardInIptables(exec);
 }
@@ -139,7 +142,19 @@ async function allowForwardInIptables(exec: HostExec): Promise<void> {
     try {
       await exec.run(["iptables", "-C", "FORWARD", ...rule]);
     } catch {
-      await exec.run(["iptables", "-I", "FORWARD", ...rule]).catch(() => {});
+      // Still best-effort, but never silent: on a dockerd host (FORWARD
+      // policy DROP — the exact pipeline this function coexists with) a
+      // failed insert means guest egress is fully broken, and the only
+      // symptom would be opaque in-run network timeouts. The likeliest
+      // cause is a sudoers grant that covers ip/nft/sysctl but not
+      // iptables (see FIRECRACKER.md "Requirements & privileges").
+      await exec.run(["iptables", "-I", "FORWARD", ...rule]).catch((err) => {
+        logger.warn(
+          "Could not insert the iptables FORWARD accept for TAP traffic — " +
+            "guest egress will be blocked on hosts where iptables owns FORWARD (e.g. dockerd)",
+          { rule: rule.join(" "), error: getErrorMessage(err) },
+        );
+      });
     }
   }
 }
@@ -151,7 +166,9 @@ async function allowForwardInIptables(exec: HostExec): Promise<void> {
  * paths where the rules may already be gone.
  */
 export async function teardownHostNetwork(exec: HostExec): Promise<void> {
-  await exec.run(["nft", "destroy", "table", "ip", "appstrate_fc"]).catch(() => {});
+  // `delete` (not `destroy`, nftables >= 1.0.8 only) — absent-table
+  // errors are swallowed like every other teardown step here.
+  await exec.run(["nft", "delete", "table", "ip", "appstrate_fc"]).catch(() => {});
   for (const rule of IPTABLES_FORWARD_RULES) {
     try {
       await exec.run(["iptables", "-C", "FORWARD", ...rule]);
@@ -166,6 +183,15 @@ export async function teardownHostNetwork(exec: HostExec): Promise<void> {
  * Create + bring up one run's TAP device. One privileged spawn instead of
  * three: `ip -batch -` executes the add/addr/up sequence from stdin and
  * aborts at the first failing line (no `-force`).
+ *
+ * Strict reverse-path filtering on the TAP is the L3 anti-spoofing layer:
+ * the kernel drops any guest packet whose source address does not route
+ * back through this TAP, so a guest cannot emit traffic with another
+ * guest's (or any foreign) source IP. Legitimate traffic always passes —
+ * the guest's only valid source is its /30 address, which is directly
+ * connected on this interface (this includes replies to the platform's
+ * loopback alias). Effective rp_filter is max(conf.all, conf.<iface>), so
+ * the per-interface strict setting holds regardless of the host default.
  */
 export async function createTap(exec: HostExec, subnet: RunSubnet): Promise<void> {
   const batch =
@@ -176,6 +202,7 @@ export async function createTap(exec: HostExec, subnet: RunSubnet): Promise<void
     ].join("\n") + "\n";
   try {
     await exec.run(["ip", "-batch", "-"], { stdin: batch });
+    await exec.run(["sysctl", "-qw", `net.ipv4.conf.${subnet.tapDevice}.rp_filter=1`]);
   } catch (err) {
     // Half-created TAP would leak until the next boot sweep — reclaim now
     // (a no-op error when the batch failed on the very first line).

@@ -24,6 +24,15 @@ describe("buildKernelBootArgs", () => {
     // Host + guest firewalls are IPv4-only — the guest gets no v6 stack.
     expect(args).toContain("ipv6.disable=1");
   });
+
+  it("trims boot latency (quiet console, no PS/2 probing, RDRAND-seeded CRNG)", () => {
+    const args = buildKernelBootArgs(SUBNET);
+    expect(args).toContain("quiet");
+    expect(args).toContain("loglevel=1");
+    expect(args).toContain("i8042.noaux");
+    expect(args).toContain("i8042.dumbkbd");
+    expect(args).toContain("random.trust_cpu=on");
+  });
 });
 
 describe("buildVmConfig", () => {
@@ -58,9 +67,27 @@ describe("buildVmConfig", () => {
 
   it("binds eth0 to the run's TAP with the derived MAC", () => {
     const ifaces = config["network-interfaces"] as Array<Record<string, unknown>>;
-    expect(ifaces).toEqual([
-      { iface_id: "eth0", guest_mac: SUBNET.guestMac, host_dev_name: SUBNET.tapDevice },
-    ]);
+    expect(ifaces).toHaveLength(1);
+    expect(ifaces[0]).toMatchObject({
+      iface_id: "eth0",
+      guest_mac: SUBNET.guestMac,
+      host_dev_name: SUBNET.tapDevice,
+    });
+  });
+
+  it("rate-limits every device (dual token buckets — flood/DoS bound, not QoS)", () => {
+    const drives = config.drives as Array<Record<string, unknown>>;
+    const ifaces = config["network-interfaces"] as Array<Record<string, unknown>>;
+    for (const drive of drives) {
+      const limiter = drive.rate_limiter as Record<string, unknown>;
+      expect(limiter.bandwidth).toMatchObject({ refill_time: 1000 });
+      expect(limiter.ops).toMatchObject({ refill_time: 1000 });
+    }
+    for (const dir of ["rx_rate_limiter", "tx_rate_limiter"] as const) {
+      const limiter = ifaces[0]?.[dir] as Record<string, unknown>;
+      expect(limiter.bandwidth).toMatchObject({ refill_time: 1000 });
+      expect(limiter.ops).toMatchObject({ refill_time: 1000 });
+    }
   });
 
   it("carries the machine sizing", () => {

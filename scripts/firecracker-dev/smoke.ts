@@ -43,6 +43,22 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
+/**
+ * Print the guest console tail. MUST run before removeIsolationBoundary
+ * on every failure path: teardown rm -rf's the run dir (console.log
+ * included), so a timeout/exception would otherwise leave zero
+ * diagnostics — in CI the failure-artifact upload step would silently
+ * find nothing (`if-no-files-found: ignore`).
+ */
+async function dumpConsole(runDir: string, label: string): Promise<void> {
+  const text = await Bun.file(`${runDir}/console.log`)
+    .text()
+    .catch(() => "(console.log unreadable)");
+  console.log(`---- guest console (${label}, tail) ----`);
+  console.log(text.split("\n").slice(-60).join("\n"));
+  console.log("------------------------------");
+}
+
 // Read the raw env (with the schema defaults) rather than @appstrate/env:
 // scripts/ is not a workspace package, so the alias does not resolve here.
 const aliasIp = platformAliasIp(process.env.FIRECRACKER_SUBNET_CIDR ?? "10.231.0.0/16");
@@ -134,10 +150,7 @@ try {
   const consoleLog = await Bun.file(`${boundary.id}/console.log`)
     .text()
     .catch(() => "");
-  const tail = consoleLog.split("\n").slice(-40).join("\n");
-  console.log("---- guest console (tail) ----");
-  console.log(tail);
-  console.log("------------------------------");
+  await dumpConsole(boundary.id, "vm1");
 
   if (exitCode !== 0) fail(`expected exit marker 0, got ${exitCode}`);
   if (!consoleLog.includes("smoke-agent uid=1001")) {
@@ -199,13 +212,20 @@ try {
       ),
     ]);
     console.log(`==> second guest exit marker: ${exitCode2}`);
+    await dumpConsole(boundary2.id, "vm2");
     if (exitCode2 !== 42) {
       fail(`expected exit marker 42 from the second VM, got ${exitCode2}`);
     }
     await orch.removeWorkload(agent2);
+  } catch (err) {
+    await dumpConsole(boundary2.id, "vm2 exception");
+    throw err;
   } finally {
     await orch.removeIsolationBoundary(boundary2).catch(() => {});
   }
+} catch (err) {
+  await dumpConsole(boundary.id, "vm1 exception");
+  throw err;
 } finally {
   platformStub.stop(true);
   await orch.removeIsolationBoundary(boundary).catch(() => {});

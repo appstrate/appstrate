@@ -64,7 +64,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import { logger } from "../../../lib/logger.ts";
 import { buildBaseSidecarEnv } from "../sidecar-env.ts";
-import { drainStream, spawnCollect, TAIL_POLL_MS, TAIL_BUFFER_SIZE } from "../subprocess-util.ts";
+import { drainStream, spawnCollect, tailFileLines } from "../subprocess-util.ts";
 import { SubnetAllocator, platformAliasIp, type RunSubnet } from "./subnet.ts";
 import {
   createHostExec,
@@ -85,10 +85,15 @@ import {
 
 /** How much console tail to scan for the exit marker (bytes). */
 const EXIT_MARKER_SCAN_BYTES = 64 * 1024;
-/** streamLogs: flush a newline-less partial line once it grows past this. */
-const PARTIAL_FLUSH_BYTES = 64 * 1024;
 /** How often the per-VM watchdog stats the console log (ms). */
 const CONSOLE_WATCH_INTERVAL_MS = 10_000;
+/**
+ * Minimum firecracker binary version. 1.16 is what the docs require, and
+ * anything below 1.15.1 is exposed to CVE-2026-5747 (virtio-pci OOB
+ * write, guest-root → potential host code execution) — enforce the floor
+ * instead of merely documenting it.
+ */
+const MIN_FIRECRACKER = { major: 1, minor: 16 };
 
 type BunProcess = ReturnType<typeof Bun.spawn>;
 
@@ -196,7 +201,20 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
     // Fails loudly here (not at first run) when the binary is absent.
-    const version = (await this.execLocal([env.FIRECRACKER_BIN, "--version"])).split("\n")[0];
+    const version = (await this.execLocal([env.FIRECRACKER_BIN, "--version"])).split("\n")[0] ?? "";
+    const versionMatch = /v?(\d+)\.(\d+)/.exec(version);
+    const major = versionMatch ? Number(versionMatch[1]) : 0;
+    const minor = versionMatch ? Number(versionMatch[2]) : 0;
+    if (
+      major < MIN_FIRECRACKER.major ||
+      (major === MIN_FIRECRACKER.major && minor < MIN_FIRECRACKER.minor)
+    ) {
+      throw new Error(
+        `Firecracker >= ${MIN_FIRECRACKER.major}.${MIN_FIRECRACKER.minor} required ` +
+          `(older releases are exposed to CVE-2026-5747) — "${env.FIRECRACKER_BIN} --version" ` +
+          `reported: ${version || "(empty)"}`,
+      );
+    }
 
     await mkdir(resolve(env.FIRECRACKER_DATA_DIR), { recursive: true, mode: 0o700 });
     await this.acquireHostLock(resolve(env.FIRECRACKER_DATA_DIR));
@@ -593,42 +611,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     vm.proc?.exited.then(() => {
       exited = true;
     });
-
-    let fh: Awaited<ReturnType<typeof fsOpen>>;
-    try {
-      fh = await fsOpen(vm.consolePath, "r");
-    } catch {
-      return; // VM never started.
-    }
-    const buf = Buffer.alloc(TAIL_BUFFER_SIZE);
-    const decoder = new TextDecoder();
-    let partial = "";
-    try {
-      while (!signal?.aborted) {
-        const { bytesRead } = await fh.read(buf, 0, buf.length);
-        if (bytesRead > 0) {
-          partial += decoder.decode(buf.subarray(0, bytesRead), { stream: true });
-          const lines = partial.split("\n");
-          partial = lines.pop() ?? "";
-          for (const line of lines) {
-            if (line.length > 0) yield line;
-          }
-          // A newline-less guest line must not buffer unbounded — flush
-          // it as a synthetic line once it grows past the cap.
-          if (partial.length > PARTIAL_FLUSH_BYTES) {
-            yield partial;
-            partial = "";
-          }
-        } else if (exited) {
-          if (partial.length > 0) yield partial;
-          break;
-        } else {
-          await new Promise((r) => setTimeout(r, TAIL_POLL_MS));
-        }
-      }
-    } finally {
-      await fh.close();
-    }
+    yield* tailFileLines(vm.consolePath, () => exited, signal);
   }
 
   async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
@@ -713,7 +696,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       await writeFile(join(stagingDir, "config.json"), payload, { mode: 0o600 });
 
       // Payload + ext4 metadata headroom, floored at 1 MiB (mkfs minimum).
-      const sizeBytes = Math.max(1024 * 1024, payload.length * 2 + 512 * 1024);
+      // Byte length, not .length: the payload is written as UTF-8 and
+      // JSON.stringify leaves non-ASCII unescaped — a mostly-multibyte
+      // agent prompt would overflow a code-unit-sized image and fail mkfs.
+      const sizeBytes = Math.max(1024 * 1024, Buffer.byteLength(payload) * 2 + 512 * 1024);
       await rm(imagePath, { force: true });
       // Sparse pre-allocation in-process — no `truncate` child spawn.
       const image = await fsOpen(imagePath, "w", 0o600);
@@ -800,7 +786,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   /** Lazily create the per-instance 0700 API-socket directory. */
   private ensureSocketDir(): Promise<string> {
     // mkdtemp creates the directory 0700 — only this uid may traverse it.
-    this.socketDirPromise ??= mkdtemp(join(tmpdir(), "afc-"));
+    // A rejection must not stay cached (it would permanently fail every
+    // future run over one transient tmpdir hiccup) — clear and rethrow so
+    // the next boundary retries.
+    this.socketDirPromise ??= mkdtemp(join(tmpdir(), "afc-")).catch((err: unknown) => {
+      this.socketDirPromise = null;
+      throw err;
+    });
     return this.socketDirPromise;
   }
 

@@ -256,9 +256,9 @@ describe("shutdown", () => {
 
     const joined = calls.map((c) => c.cmd.join(" "));
     const tapDelete = joined.indexOf("ip link del afc1");
-    const nftDestroy = joined.indexOf("nft destroy table ip appstrate_fc");
+    const nftDelete = joined.indexOf("nft delete table ip appstrate_fc");
     expect(tapDelete).toBeGreaterThan(-1);
-    expect(nftDestroy).toBeGreaterThan(tapDelete);
+    expect(nftDelete).toBeGreaterThan(tapDelete);
     // The iptables FORWARD accepts are removed too (probe then delete).
     expect(joined).toContain("iptables -C FORWARD -i afc+ -j ACCEPT");
     // The run dir is gone.

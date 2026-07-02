@@ -44,6 +44,41 @@ function log(msg: string): void {
   process.stdout.write(`[supervisor] ${msg}\n`);
 }
 
+/**
+ * Fail-closed pre-launch abort: 126 is the supervisor's "refused to run
+ * the workloads" code (vs 125 for a supervisor crash). Typed `never` so
+ * callers get compile-time proof that control does not continue.
+ */
+function fatal(msg: string): never {
+  log(`FATAL: ${msg}`);
+  printExitMarker(126);
+  powerOff();
+}
+
+/**
+ * POSIX 128+n signal exit codes, mirroring what the docker adapter
+ * reports for the same death (Docker's ExitCode follows this
+ * convention). Flattening every signal to 137 would misdiagnose a
+ * SIGSEGV crash as an OOM kill in the run's user-facing error.
+ */
+const SIGNAL_EXIT_CODES: Record<string, number> = {
+  SIGHUP: 129,
+  SIGINT: 130,
+  SIGQUIT: 131,
+  SIGILL: 132,
+  SIGTRAP: 133,
+  SIGABRT: 134,
+  SIGBUS: 135,
+  SIGFPE: 136,
+  SIGKILL: 137,
+  SIGUSR1: 138,
+  SIGSEGV: 139,
+  SIGUSR2: 140,
+  SIGPIPE: 141,
+  SIGALRM: 142,
+  SIGTERM: 143,
+};
+
 function readConfig(): GuestConfig {
   const raw: unknown = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
   if (typeof raw !== "object" || raw === null) {
@@ -155,11 +190,13 @@ function spawnAs(
   });
   const exited = new Promise<number>((resolve) => {
     proc.on("exit", (code: number | null, signal: string | null) =>
-      resolve(code ?? (signal ? 137 : 1)),
+      resolve(code ?? (signal ? (SIGNAL_EXIT_CODES[signal] ?? 137) : 1)),
     );
     proc.on("error", (err: Error) => {
       log(`spawn error for ${argv[0]}: ${err.message}`);
-      resolve(1);
+      // 126 (the supervisor's fail-to-launch code), not 1 — a spawn
+      // failure must not be confusable with the workload's own exit 1.
+      resolve(126);
     });
   });
   return { pid: proc.pid ?? -1, exited, kill: () => proc.kill("SIGKILL") };
@@ -170,21 +207,17 @@ async function main(): Promise<void> {
   exitNonce = cfg.exit_marker_nonce;
   log(`run ${cfg.run_id} starting (sidecar=${cfg.sidecar.enabled})`);
 
-  await applyFirewall(runHostCmd, cfg).catch((err) => {
+  await applyFirewall(runHostCmd, cfg).catch((err: Error) => {
     // Fail closed: without the firewall the agent could bypass the sidecar
     // proxy. Refuse to launch rather than run unisolated.
-    log(`FATAL: firewall setup failed: ${err.message}`);
-    printExitMarker(126);
-    powerOff();
+    fatal(`firewall setup failed: ${err.message}`);
   });
 
   // The config drive carries the whole launch spec — sidecar credentials
   // included. Nothing rereads it after this point: unmount BEFORE any
   // workload exists so no in-guest uid can ever read it back.
   await runHostCmd(["umount", "/config"]).catch((err: Error) => {
-    log(`FATAL: could not unmount config drive: ${err.message}`);
-    printExitMarker(126);
-    powerOff();
+    fatal(`could not unmount config drive: ${err.message}`);
   });
 
   // The umount removes the filesystem view, but the raw /dev/vdb block node
@@ -197,9 +230,7 @@ async function main(): Promise<void> {
     chownSync("/dev/vdb", 0, 0);
     chmodSync("/dev/vdb", 0o000);
   } catch (err) {
-    log(`FATAL: could not lock down /dev/vdb: ${err instanceof Error ? err.message : String(err)}`);
-    printExitMarker(126);
-    powerOff();
+    fatal(`could not lock down /dev/vdb: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   let sidecar: Child | undefined;

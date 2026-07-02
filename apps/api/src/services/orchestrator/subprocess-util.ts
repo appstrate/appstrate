@@ -7,6 +7,7 @@
  * no options bags beyond that.
  */
 
+import { open as fsOpen } from "node:fs/promises";
 import { logger } from "../../lib/logger.ts";
 
 type BunProcess = ReturnType<typeof Bun.spawn>;
@@ -15,9 +16,59 @@ type BunProcess = ReturnType<typeof Bun.spawn>;
 export const TAIL_POLL_MS = 50;
 /** Read buffer size for tailing (bytes). */
 export const TAIL_BUFFER_SIZE = 16_384;
+/** tailFileLines: flush a newline-less partial line once it grows past this. */
+const PARTIAL_FLUSH_BYTES = 64 * 1024;
 
 /** Lines of drained output kept when a {@link drainStream} tail is requested. */
 const DRAIN_TAIL_LINES = 50;
+
+/**
+ * Tail an append-only output file, yielding complete lines until
+ * `isExited()` reports the producer is gone (then the remaining partial
+ * line, if any). Returns silently when the file cannot be opened — the
+ * producer never started. A newline-less line is flushed as a synthetic
+ * line once it exceeds {@link PARTIAL_FLUSH_BYTES} so a pathological
+ * producer cannot grow the partial buffer unbounded in the API heap.
+ */
+export async function* tailFileLines(
+  path: string,
+  isExited: () => boolean,
+  signal?: AbortSignal,
+): AsyncGenerator<string> {
+  let fh: Awaited<ReturnType<typeof fsOpen>>;
+  try {
+    fh = await fsOpen(path, "r");
+  } catch {
+    return;
+  }
+  const buf = Buffer.alloc(TAIL_BUFFER_SIZE);
+  const decoder = new TextDecoder();
+  let partial = "";
+  try {
+    while (!signal?.aborted) {
+      const { bytesRead } = await fh.read(buf, 0, buf.length);
+      if (bytesRead > 0) {
+        partial += decoder.decode(buf.subarray(0, bytesRead), { stream: true });
+        const lines = partial.split("\n");
+        partial = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.length > 0) yield line;
+        }
+        if (partial.length > PARTIAL_FLUSH_BYTES) {
+          yield partial;
+          partial = "";
+        }
+      } else if (isExited()) {
+        if (partial.length > 0) yield partial;
+        break;
+      } else {
+        await new Promise((r) => setTimeout(r, TAIL_POLL_MS));
+      }
+    }
+  } finally {
+    await fh.close();
+  }
+}
 
 export interface CollectedProcess {
   exitCode: number;

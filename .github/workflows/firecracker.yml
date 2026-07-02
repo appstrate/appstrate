@@ -49,7 +49,10 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Cold cache pays the full ~20 min kernel build + the rootfs docker
+    # builds before the smoke even starts — 30 min would loop forever
+    # without ever saving the kernel cache.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -85,8 +88,26 @@ jobs:
 
       # The kernel is BUILT (CI kernels lack nftables — see build-kernel.sh).
       # First build ~20 min; afterwards this cache short-circuits it.
-      - name: Cache guest kernel
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
+      # Explicit restore/build/save split (NOT the monolithic actions/cache):
+      # the monolithic post-step only saves on job SUCCESS, so a failing or
+      # cancelled smoke — exactly what an iterating branch produces — would
+      # discard the 20-min build and re-pay it on every push.
+      - name: Restore guest kernel cache
+        id: kernel-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
+        with:
+          path: data/firecracker/vmlinux
+          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('scripts/firecracker/build-kernel.sh') }}
+
+      - name: Build guest kernel
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: bash scripts/firecracker/build-kernel.sh data/firecracker/vmlinux
+
+      - name: Save guest kernel cache
+        if: >-
+          always() && steps.kernel-cache.outputs.cache-hit != 'true' &&
+          hashFiles('data/firecracker/vmlinux') != ''
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
         with:
           path: data/firecracker/vmlinux
           key: fc-kernel-${{ runner.arch }}-${{ hashFiles('scripts/firecracker/build-kernel.sh') }}
