@@ -145,7 +145,9 @@ function spawnAs(
     : ["--reuid", uidOrUser, "--regid", uidOrUser, "--init-groups"];
   const proc: ChildProcess = spawn("setpriv", [...privArgs, "--", ...argv], {
     cwd,
-    env: { ...env, HOME: cwd },
+    // The platform-built env maps don't carry PATH; inherit the guest's
+    // (set by init) so workload children can resolve bun/python/etc.
+    env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", ...env, HOME: cwd },
     stdio: ["ignore", "inherit", "inherit"],
   });
   const exited = new Promise<number>((resolve) => {

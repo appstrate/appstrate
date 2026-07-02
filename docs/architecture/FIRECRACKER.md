@@ -80,9 +80,13 @@ bun run firecracker:build          # rootfs + kernel
   the `appstrate-pi` image + the compiled sidecar binary + guest init/
   supervisor + nftables/setpriv, exported and converted with `mkfs.ext4 -d`.
   Rebuild whenever the pi/sidecar images change (arch-specific).
-- **kernel** (`FIRECRACKER_KERNEL_PATH`) — Firecracker CI `vmlinux` (pinned
-  6.1 series; virtio, ext4, overlayfs, nftables built in), fetched by
-  `scripts/firecracker/fetch-kernel.sh`.
+- **kernel** (`FIRECRACKER_KERNEL_PATH`) — built by
+  `scripts/firecracker/build-kernel.sh` (Docker, no host toolchain): pinned
+  6.1 kernel with the Firecracker project's own CI config as base, plus
+  `NF_TABLES`/`NF_TABLES_INET`/`NETFILTER_XT_MATCH_OWNER`. The stock
+  Firecracker CI kernels canNOT be used as-is — runtime-verified to lack
+  nftables AND the iptables owner match entirely (everything `=y`, nothing
+  loadable), which would break the in-guest uid firewall.
 
 ## Requirements & privileges
 

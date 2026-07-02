@@ -19,8 +19,8 @@ KERNEL="./data/firecracker/vmlinux"
 ROOTFS="./data/firecracker/rootfs.ext4"
 
 if [ ! -f "$KERNEL" ]; then
-  echo "==> Fetching guest kernel"
-  bash scripts/firecracker/fetch-kernel.sh "$KERNEL"
+  echo "==> Building guest kernel (Docker, ~15-25 min — cached afterwards)"
+  bash scripts/firecracker/build-kernel.sh "$KERNEL"
 fi
 
 if [ ! -f "$ROOTFS" ] || [ "${FORCE_ROOTFS:-0}" = "1" ]; then

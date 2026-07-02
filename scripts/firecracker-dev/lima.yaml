@@ -41,7 +41,7 @@ provision:
       set -eux
       export DEBIAN_FRONTEND=noninteractive
       command -v docker >/dev/null || curl -fsSL https://get.docker.com | sh
-      apt-get install -y --no-install-recommends e2fsprogs nftables iproute2 rsync
+      apt-get install -y --no-install-recommends e2fsprogs nftables iproute2 rsync unzip
       usermod -aG docker,kvm "{{.User}}"
       # udev rule so /dev/kvm stays group-accessible across reboots.
       echo 'KERNEL=="kvm", GROUP="kvm", MODE="0660"' > /etc/udev/rules.d/99-kvm.rules

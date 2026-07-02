@@ -15,6 +15,10 @@
 # host observes as run completion). stdout is the serial console.
 set -u
 
+# PID 1 inherits the kernel's bare env — without sbin on PATH the
+# supervisor can't find nft/setpriv, and the workloads expect bun.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 log() { echo "[appstrate-init] $*"; }
 
 # --- Writable overlay over the read-only rootfs ----------------------------

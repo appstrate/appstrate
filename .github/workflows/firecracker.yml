@@ -66,11 +66,13 @@ jobs:
           sudo install -m 0755 "/tmp/release-${latest}-${ARCH}/firecracker-${latest}-${ARCH}" /usr/local/bin/firecracker
           firecracker --version
 
+      # The kernel is BUILT (CI kernels lack nftables — see build-kernel.sh).
+      # First build ~20 min; afterwards this cache short-circuits it.
       - name: Cache guest kernel
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
         with:
           path: data/firecracker/vmlinux
-          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('scripts/firecracker/fetch-kernel.sh') }}
+          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('scripts/firecracker/build-kernel.sh') }}
 
       - name: Run smoke suite
         run: bash scripts/firecracker-dev/vm-smoke.sh

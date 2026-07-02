@@ -32,11 +32,15 @@ echo "==> Syncing repo to VM disk"
 limactl shell "$VM" -- bash -c "
   set -euo pipefail
   mkdir -p ~/appstrate-fc
+  # /data anchored to the repo root: package-relative data/ dirs (e.g.
+  # core-providers/data/featured-models.json) must sync, while the root
+  # data/ (VM-built kernel/rootfs artifacts, PGlite state) must survive
+  # --delete between runs.
   rsync -a --delete \
-    --exclude node_modules --exclude .git --exclude data --exclude dist \
+    --exclude node_modules --exclude .git --exclude /data --exclude dist \
     --exclude '.turbo' --exclude 'e2e/test-results' \
     '$REPO/' ~/appstrate-fc/
 "
 
 echo "==> Running Firecracker smoke suite inside VM"
-limactl shell "$VM" -- bash -lc "cd ~/appstrate-fc && bash scripts/firecracker-dev/vm-smoke.sh"
+limactl shell "$VM" -- bash -lc "cd ~/appstrate-fc && FORCE_ROOTFS='${FORCE_ROOTFS:-0}' bash scripts/firecracker-dev/vm-smoke.sh"

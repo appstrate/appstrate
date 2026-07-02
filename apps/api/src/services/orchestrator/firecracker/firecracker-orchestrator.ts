@@ -36,7 +36,8 @@
  * point that directory at a tmpfs to keep secrets off persistent disk.
  */
 
-import { mkdir, rm, readdir, open as fsOpen, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, readdir, open as fsOpen, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -138,7 +139,12 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
     const missing: string[] = [];
-    if (!(await Bun.file("/dev/kvm").exists())) missing.push("/dev/kvm (KVM not available)");
+    // access(), not Bun.file().exists(): /dev/kvm is a character device
+    // (exists() is false for non-regular files) and R|W also validates
+    // that this uid may actually open it (kvm group membership).
+    await access("/dev/kvm", fsConstants.R_OK | fsConstants.W_OK).catch(() => {
+      missing.push("/dev/kvm (KVM not available or not accessible)");
+    });
     if (!(await Bun.file(env.FIRECRACKER_KERNEL_PATH).exists())) {
       missing.push(`kernel at ${env.FIRECRACKER_KERNEL_PATH}`);
     }
