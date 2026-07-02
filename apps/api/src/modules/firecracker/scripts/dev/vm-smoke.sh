@@ -29,7 +29,7 @@ if [ ! -f "$ROOTFS" ] || [ "${FORCE_ROOTFS:-0}" = "1" ]; then
 fi
 
 echo "==> Unit tests (firecracker helpers)"
-TEST_TIER=0 bun test apps/api/test/unit/services/firecracker
+TEST_TIER=0 bun test apps/api/src/modules/firecracker/test/unit
 
 echo "==> End-to-end smoke (real microVM)"
 bun run apps/api/src/modules/firecracker/scripts/dev/smoke.ts
