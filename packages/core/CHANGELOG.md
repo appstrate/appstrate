@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@appstrate/core/run-and-wait-client`** — `kind:"inline"` now rejects a
+  missing top-level `prompt` before dispatching, with an actionable message.
+  When the prompt is found nested inside `manifest` (the common LLM mistake —
+  AFPS agents ship a `prompt.md`, so models naturally put it there), the error
+  says to move it to the top level instead of forwarding a promptless body to
+  `POST /api/runs/inline` and surfacing the route's bare
+  `prompt: must be a string`.
+
 ### Added
 
 - **`@appstrate/core/subscription-engines`** — the provider→execution-engine

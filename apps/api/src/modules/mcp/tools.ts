@@ -744,14 +744,16 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           description:
             'Inline agent manifest to run (kind:inline). Include `"runtime_tools": ["log"]` so the ' +
             "run can emit progress lines the chat shows live (the panel surfaces only `log`-tool " +
-            "output).",
+            "output). Do NOT put the prompt inside the manifest — it goes in the separate " +
+            "top-level `prompt` argument.",
           additionalProperties: true,
         },
         prompt: {
           type: "string",
           description:
-            "Prompt for the inline run (kind:inline). Tell the run to call the `log` tool to report " +
-            "each meaningful step — those lines are what the chat shows live.",
+            "REQUIRED for kind:inline. The inline run's system prompt, as a top-level argument " +
+            "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
+            "to report each meaningful step — those lines are what the chat shows live.",
         },
         config: {
           type: "object",
@@ -820,9 +822,31 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         });
         return textResult({ error: "`manifest` is required for kind:'inline'." }, true);
       }
-      const body: Record<string, unknown> = { manifest };
+      // Reject a missing top-level prompt here instead of forwarding a
+      // promptless body to the route: the route's field error alone doesn't
+      // tell the model WHERE the prompt goes, and the observed failure mode
+      // is nesting it inside the manifest (AFPS agents ship a prompt.md, so
+      // models naturally put it there) then retrying blind.
       const prompt = asString(args.prompt);
-      if (prompt) body.prompt = prompt;
+      if (!prompt) {
+        emit(ctx, {
+          tool: "run_and_wait",
+          durationMs: performance.now() - start,
+          outcome: "rejected",
+        });
+        const nested = typeof manifest.prompt === "string";
+        return textResult(
+          {
+            error: nested
+              ? "`prompt` was found inside `manifest`. It must be a TOP-LEVEL argument of " +
+                "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
+              : "`prompt` is required for kind:'inline'. Pass it as a top-level argument " +
+                "alongside `manifest` (not inside it).",
+          },
+          true,
+        );
+      }
+      const body: Record<string, unknown> = { manifest, prompt };
       if (asRecord(args.config)) body.config = args.config;
       launchResponse = await dispatchCatalogOperation(ctx, "runInline", { body, signal });
     }

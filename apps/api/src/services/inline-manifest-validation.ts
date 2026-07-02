@@ -41,8 +41,25 @@ export function validateInlineManifest(
   const errors: string[] = [];
 
   // --- 1. Prompt type + size (UTF-8 bytes, matches manifest_bytes) ---
+  // Distinguish "missing" from "wrong type", and detect the common LLM
+  // mistake of nesting the prompt inside the manifest (AFPS agents ship a
+  // prompt.md, so models naturally put it there) — a bare "must be a string"
+  // sends callers chasing phantom causes instead of moving the field.
   if (typeof input.prompt !== "string") {
-    errors.push("prompt: must be a string");
+    const nested =
+      input.manifest &&
+      typeof input.manifest === "object" &&
+      !Array.isArray(input.manifest) &&
+      typeof (input.manifest as Record<string, unknown>).prompt === "string";
+    if (nested) {
+      errors.push(
+        "prompt: found inside `manifest` — move it to the top-level `prompt` field, alongside `manifest`",
+      );
+    } else if (input.prompt === undefined) {
+      errors.push("prompt: missing (required top-level field, alongside `manifest`)");
+    } else {
+      errors.push("prompt: must be a string");
+    }
   } else {
     const promptByteLength = Buffer.byteLength(input.prompt, "utf8");
     if (promptByteLength > limits.prompt_bytes) {

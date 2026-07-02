@@ -95,6 +95,26 @@ describe("validateInlineManifest — size caps", () => {
     expect(result.errors.join(" ")).toContain("prompt: must be a string");
   });
 
+  it("reports a missing prompt as missing, not as a type error", () => {
+    const result = validateInlineManifest({
+      manifest: baseManifest(),
+      prompt: undefined,
+      limits: defaults,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(" ")).toContain("prompt: missing");
+  });
+
+  it("points at a prompt nested inside the manifest", () => {
+    const result = validateInlineManifest({
+      manifest: { ...baseManifest(), prompt: "do it" },
+      prompt: undefined,
+      limits: defaults,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(" ")).toContain("prompt: found inside `manifest`");
+  });
+
   it("rejects manifests larger than manifest_bytes", () => {
     const tight = { ...defaults, manifest_bytes: 100 };
     // Valid structure but padded description blows the byte cap
