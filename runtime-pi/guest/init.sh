@@ -11,9 +11,17 @@
 # supervisor, which parses the launch spec and runs the workloads.
 #
 # This script never returns control to the kernel: every path ends in
-# poweroff (reboot=k on the cmdline turns that into VMM exit, which the
+# vm_exit (reboot=k on the cmdline turns that into VMM exit, which the
 # host observes as run completion). stdout is the serial console.
 set -u
+
+# Firecracker exit is arch-specific: aarch64 PSCI powers off the VMM on
+# `poweroff`, but x86 has no ACPI S5 emulation — `poweroff` merely halts
+# the vCPU and the VMM lingers. A guest reboot (unimplemented by
+# Firecracker) terminates the VMM on x86 instead.
+vm_exit() {
+  if [ "$(uname -m)" = "x86_64" ]; then reboot -f; else poweroff -f; fi
+}
 
 # PID 1 inherits the kernel's bare env — without sbin on PATH the
 # supervisor can't find nft/setpriv, and the workloads expect bun.
@@ -31,7 +39,7 @@ mount -t tmpfs tmpfs /overlay \
 if [ $? -ne 0 ]; then
   log "FATAL: overlay/pivot_root failed"
   echo "APPSTRATE_EXIT:127"
-  poweroff -f
+  vm_exit
 fi
 
 # --- Pseudo-filesystems (new root) -----------------------------------------
@@ -55,7 +63,7 @@ mkdir -p /config
 if ! mount -t ext4 -o ro /dev/vdb /config; then
   log "FATAL: could not mount config drive (/dev/vdb)"
   echo "APPSTRATE_EXIT:127"
-  poweroff -f
+  vm_exit
 fi
 
 log "handing off to supervisor"
@@ -66,4 +74,4 @@ code=$?
 # off. Reaching here means it crashed before doing so — report and halt.
 log "supervisor exited ($code) without powering off"
 echo "APPSTRATE_EXIT:$code"
-poweroff -f
+vm_exit

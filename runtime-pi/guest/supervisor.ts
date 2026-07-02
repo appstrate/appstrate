@@ -208,16 +208,22 @@ function delay(ms: number): Promise<void> {
 }
 
 function powerOff(): never {
-  // Flush the console, then trigger an immediate power-off via the magic
-  // SysRq. `reboot=k panic=1` on the kernel cmdline makes this terminate
-  // the VMM process, which the host observes as `waitForExit`.
+  // Terminate the VMM via the magic SysRq. Arch-specific on purpose:
+  //   - aarch64: SysRq "o" (power off) → PSCI SYSTEM_OFF → the VMM exits.
+  //   - x86_64: Firecracker emulates no ACPI S5 poweroff, so "o" HALTS
+  //     the vCPU without ending the VMM (the host's waitForExit would
+  //     hang forever). A guest reboot ("b"), which Firecracker
+  //     deliberately does not implement, terminates the VMM instead —
+  //     the canonical x86 Firecracker exit path (with `reboot=k` on the
+  //     kernel cmdline).
+  const sysrq = process.arch === "x64" ? "b" : "o";
   try {
-    writeFileSync("/proc/sysrq-trigger", "o");
+    writeFileSync("/proc/sysrq-trigger", sysrq);
   } catch {
-    // Fall through to poweroff(8) if sysrq is unavailable.
+    // Fall through to reboot(8)/poweroff(8) if sysrq is unavailable.
   }
   try {
-    spawn("poweroff", ["-f"], { stdio: "ignore" });
+    spawn(process.arch === "x64" ? "reboot" : "poweroff", ["-f"], { stdio: "ignore" });
   } catch {
     // Nothing left to try.
   }
