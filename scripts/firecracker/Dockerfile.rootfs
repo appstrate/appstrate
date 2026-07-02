@@ -19,14 +19,28 @@ ARG SIDECAR_IMAGE=appstrate-sidecar:latest
 
 FROM ${SIDECAR_IMAGE} AS sidecar
 
+# Astral's official uv build — same source as the docker uv runner image
+# (runtime-pi/runners/uv/Dockerfile), so `server.type: "uv"` behaves the
+# same in both isolation modes.
+FROM ghcr.io/astral-sh/uv:0.7 AS uv
+
+# The setuid runner-exec wrapper, compiled static so it has zero runtime
+# deps inside the guest.
+FROM alpine:3.21 AS wrapper
+RUN apk add --no-cache gcc musl-dev
+COPY runtime-pi/guest/runner-exec.c /tmp/runner-exec.c
+RUN gcc -static -O2 -Wall -Werror -o /tmp/appstrate-runner-exec /tmp/runner-exec.c
+
 FROM ${PI_IMAGE}
 USER root
 
 # Guest-side tooling:
 #   nftables  the supervisor's uid-scoped egress firewall
 #   setpriv   drop root → sidecar (1000) / pi (1001) without a login shell
+#   nodejs    `server.type: "node"` integration runners (parity with the
+#             docker node runner image — bun is NOT a drop-in for them)
 # busybox (base) already provides ip / mount / pivot_root / poweroff.
-RUN apk add --no-cache nftables setpriv \
+RUN apk add --no-cache nftables setpriv nodejs \
  # Mount points the init script depends on (the rootfs is read-only at
  # boot, so they must pre-exist): /overlay (tmpfs upper), /rom (old root
  # after pivot), /config (config drive).
@@ -34,7 +48,20 @@ RUN apk add --no-cache nftables setpriv \
  # uid 1000 runs the sidecar. oven/bun's base image already ships a "bun"
  # user at uid 1000 on some variants — reuse it if present, create the
  # dedicated user otherwise. setpriv addresses it numerically either way.
- && (getent passwd 1000 > /dev/null || adduser -D -u 1000 -s /sbin/nologin sidecar)
+ && (getent group 1000 > /dev/null || addgroup -g 1000 sidecar) \
+ && (getent passwd 1000 > /dev/null || adduser -D -u 1000 -G "$(getent group 1000 | cut -d: -f1)" -s /sbin/nologin sidecar) \
+ # uid/gid 1002 runs the integration MCP runners — a dedicated user so
+ # the sidecar's /proc/<pid>/environ (credentials) is unreadable to them.
+ # Group created explicitly: the runner-exec wrapper hardcodes gid 1002.
+ && addgroup -g 1002 runner \
+ && adduser -D -u 1002 -G runner -s /sbin/nologin runner \
+ # Shared `workspace` group (1003): agent + runner both write /workspace.
+ && addgroup -g 1003 workspace \
+ && addgroup pi workspace \
+ && addgroup runner workspace
+
+# `server.type: "uv"` runners (uvx alongside, same as the docker runner).
+COPY --from=uv /uv /uvx /usr/local/bin/
 
 # The sidecar ships as one compiled binary — no sources, no node_modules.
 COPY --from=sidecar /usr/local/bin/sidecar /usr/local/bin/sidecar
@@ -48,6 +75,19 @@ RUN bun build /tmp/guest/supervisor.ts --target=bun --outfile=/runtime/guest/sup
 
 # PID 1.
 COPY --chmod=0755 runtime-pi/guest/init.sh /sbin/appstrate-init
+
+# Strip every setuid/setgid bit inherited from the merged base images —
+# a setuid binary is a uid-firewall bypass (the in-guest isolation is
+# uid-based). MUST run before the wrapper install below, which is the
+# single intentional setuid in the guest.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
+
+# The runner-exec privilege-drop wrapper: setuid root, exec restricted to
+# the sidecar's group (1000) — the agent (uid 1001, other groups) cannot
+# even exec it. See runtime-pi/guest/runner-exec.c.
+COPY --from=wrapper /tmp/appstrate-runner-exec /usr/local/bin/appstrate-runner-exec
+RUN chown root:1000 /usr/local/bin/appstrate-runner-exec \
+ && chmod 4750 /usr/local/bin/appstrate-runner-exec
 
 # The microVM ignores ENTRYPOINT/CMD (the kernel boots init directly);
 # keep root as the image user so the exported filesystem preserves

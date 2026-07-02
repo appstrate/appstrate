@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeAll } from "bun:test";
+import { _resetCacheForTesting } from "@appstrate/env";
 import type {
   RunOrchestrator,
   IsolationBoundary,
@@ -302,5 +303,26 @@ describe("createConnectRunExecutor.run", () => {
     await expect(executor.run(execution())).rejects.toThrow(/timed out after 30ms/);
     expect(calls.removedWorkloads).toBe(1);
     expect(calls.removedBoundaries).toBe(1);
+  });
+
+  it("fails fast when the global backend cannot run sidecar-only workloads (firecracker)", async () => {
+    // No injected orchestrator → the executor gates on the GLOBAL backend
+    // capability. Firecracker boots its VM through the agent workload, so
+    // a connect-run (sidecar-only) would silently never start — the
+    // executor must refuse up front instead of reporting "sidecar exited
+    // without emitting a result".
+    const prevAdapter = process.env.RUN_ADAPTER;
+    process.env.RUN_ADAPTER = "firecracker";
+    _resetCacheForTesting();
+    try {
+      const executor = createConnectRunExecutor({ resolveMcpServer: fakeMcpResolver });
+      await expect(executor.run(execution())).rejects.toThrow(
+        /connect-runs are not supported with RUN_ADAPTER="firecracker"/,
+      );
+    } finally {
+      if (prevAdapter === undefined) delete process.env.RUN_ADAPTER;
+      else process.env.RUN_ADAPTER = prevAdapter;
+      _resetCacheForTesting();
+    }
   });
 });

@@ -1,50 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * The registry is a closed compile-time table (`RUN_ADAPTER` is a closed
+ * Zod enum) — these tests pin the SECURITY capabilities each backend
+ * declares, so a capability flip shows up as an explicit test change.
+ */
+
 import { describe, it, expect } from "bun:test";
 import {
-  registerOrchestrator,
-  selectOrchestrator,
-  listOrchestratorIds,
   orchestratorIsolatesWorkloads,
+  orchestratorSupportsSidecarOnly,
   isolatingOrchestratorIds,
 } from "../../../../src/services/orchestrator/registry.ts";
-import type { RunOrchestrator } from "@appstrate/core/platform-types";
 
-// The registry is process-global (built-ins may already be registered by
-// other suites importing orchestrator/index.ts) — use test-unique ids.
-const fake = { marker: "fake" } as unknown as RunOrchestrator;
-
-describe("orchestrator registry", () => {
-  it("resolves a registered backend by id", () => {
-    registerOrchestrator({ id: "test-backend-a", isolatesWorkloads: false, create: () => fake });
-    expect(selectOrchestrator("test-backend-a")).toBe(fake);
-    expect(listOrchestratorIds()).toContain("test-backend-a");
+describe("orchestrator registry capabilities", () => {
+  it("docker and firecracker isolate workloads; process does not", () => {
+    expect(orchestratorIsolatesWorkloads("docker")).toBe(true);
+    expect(orchestratorIsolatesWorkloads("firecracker")).toBe(true);
+    expect(orchestratorIsolatesWorkloads("process")).toBe(false);
+    expect(isolatingOrchestratorIds()).toEqual(["docker", "firecracker"]);
   });
 
-  it("rejects duplicate registrations", () => {
-    registerOrchestrator({ id: "test-backend-dup", isolatesWorkloads: false, create: () => fake });
-    expect(() =>
-      registerOrchestrator({
-        id: "test-backend-dup",
-        isolatesWorkloads: false,
-        create: () => fake,
-      }),
-    ).toThrow(/already registered/);
-  });
-
-  it("names the known backends when the id is unknown", () => {
-    expect(() => selectOrchestrator("no-such-backend")).toThrow(/registered orchestrators:/);
-  });
-
-  it("exposes the isolation flag as declared", () => {
-    registerOrchestrator({ id: "test-backend-iso", isolatesWorkloads: true, create: () => fake });
-    expect(orchestratorIsolatesWorkloads("test-backend-iso")).toBe(true);
-    expect(orchestratorIsolatesWorkloads("test-backend-a")).toBe(false);
-    expect(isolatingOrchestratorIds()).toContain("test-backend-iso");
-    expect(isolatingOrchestratorIds()).not.toContain("test-backend-a");
-  });
-
-  it("fails closed: an unknown backend does not isolate", () => {
-    expect(orchestratorIsolatesWorkloads("never-registered")).toBe(false);
+  it("firecracker cannot run sidecar-only workloads (connect-runs fail fast)", () => {
+    expect(orchestratorSupportsSidecarOnly("docker")).toBe(true);
+    expect(orchestratorSupportsSidecarOnly("process")).toBe(true);
+    expect(orchestratorSupportsSidecarOnly("firecracker")).toBe(false);
   });
 });

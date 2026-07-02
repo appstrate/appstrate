@@ -38,6 +38,7 @@
 
 import { access, mkdir, rm, readdir, open as fsOpen, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { getEnv } from "@appstrate/env";
@@ -90,6 +91,11 @@ interface VmRecord {
   proc: BunProcess | null;
   /** Set once stopWorkload initiated a teardown — suppresses crash logs. */
   stopping: boolean;
+  /**
+   * Per-run exit-marker nonce (set by startWorkload). Only console markers
+   * carrying it are trusted by waitForExit — see GuestConfig.exit_marker_nonce.
+   */
+  exitNonce?: string;
 }
 
 /** Per-run state persisted for the boot-time orphan sweep. */
@@ -97,6 +103,8 @@ interface RunStateFile {
   runId: string;
   tapDevice: string;
   pid?: number;
+  /** VMM API socket path — pid-identity anchor for the orphan sweep. */
+  apiSocketPath?: string;
 }
 
 export interface FirecrackerOrchestratorDeps {
@@ -120,6 +128,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   private readonly pendingAgentSpecs = new Map<string, WorkloadSpec>();
 
   private readonly agentArgvOverride: string[] | undefined;
+
+  /**
+   * Fail-closed gate: boot's parallel init swallows initialize() errors so
+   * one broken backend can't block the API, but a run must NEVER start
+   * without the host firewall — createIsolationBoundary refuses instead.
+   */
+  private initialized = false;
 
   constructor(deps: FirecrackerOrchestratorDeps = {}) {
     this.hostExec = deps.hostExec ?? createHostExec();
@@ -166,7 +181,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       subnetCidr: env.FIRECRACKER_SUBNET_CIDR,
       aliasIp: platformAliasIp(env.FIRECRACKER_SUBNET_CIDR),
       platformPort: env.PORT,
+      egressDenyCidrs: env.FIRECRACKER_EGRESS_DENY_CIDRS.split(",").filter(Boolean),
     });
+    this.initialized = true;
     logger.info("Firecracker orchestrator initialized", {
       version,
       kernel: env.FIRECRACKER_KERNEL_PATH,
@@ -176,8 +193,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   }
 
   async shutdown(): Promise<void> {
+    // Full per-run teardown (VM, TAP, sockets, run dirs) BEFORE removing
+    // the host firewall — a VM must never outlive the policy table.
     const records = [...this.vms.values()];
-    await Promise.all(records.map((vm) => this.killVm(vm, 5)));
+    await Promise.all(records.map((vm) => this.destroyVm(vm, 5)));
     this.vms.clear();
     this.pendingSidecarEnv.clear();
     this.pendingAgentSpecs.clear();
@@ -205,11 +224,21 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       const dir = join(dataDir, name);
       const state = await this.readStateFile(dir);
       if (state?.pid && state.pid > 0) {
-        try {
-          process.kill(state.pid, "SIGKILL");
-          workloads++;
-        } catch {
-          // Already dead.
+        // A recorded pid may have been recycled by an unrelated process
+        // since the crash — only kill it if /proc still shows a
+        // firecracker VMM bound to THIS run's API socket.
+        if (await this.pidIsOurVmm(state.pid, state.apiSocketPath)) {
+          try {
+            process.kill(state.pid, "SIGKILL");
+            workloads++;
+          } catch {
+            // Already dead.
+          }
+        } else {
+          logger.warn("Orphan sweep: pid is not this run's firecracker VMM — skipping kill", {
+            runId: state.runId,
+            pid: state.pid,
+          });
         }
       }
       if (state?.tapDevice) {
@@ -237,6 +266,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   // -------------------------------------------------------------------------
 
   async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+    if (!this.initialized) {
+      throw new Error(
+        "Firecracker orchestrator is not initialized (host firewall setup failed or " +
+          "never ran) — refusing to start a run without host↔guest isolation. " +
+          "Check the boot logs for the initialize() failure.",
+      );
+    }
     const env = getEnv();
     const runDir = join(resolve(env.FIRECRACKER_DATA_DIR), runId);
     await mkdir(runDir, { recursive: true, mode: 0o700 });
@@ -289,15 +325,33 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const runId = boundary.name.replace(/^firecracker-/, "");
     const vm = this.vms.get(runId);
     if (vm) {
-      await this.killVm(vm, 0).catch(() => {});
-      await deleteTap(this.hostExec, vm.subnet.tapDevice).catch(() => {});
-      await rm(vm.apiSocketPath, { force: true }).catch(() => {});
-      this.allocator.release(vm.subnet.index);
-      this.vms.delete(runId);
+      await this.destroyVm(vm, 0);
     }
     this.pendingSidecarEnv.delete(runId);
     this.pendingAgentSpecs.delete(runId);
     await rm(boundary.id, { recursive: true, force: true }).catch(() => {});
+  }
+
+  /** Tear down one run's VM + network + on-disk state. Idempotent, best-effort. */
+  private async destroyVm(vm: VmRecord, graceSeconds: number): Promise<void> {
+    await this.killVm(vm, graceSeconds).catch(() => {});
+    try {
+      await deleteTap(this.hostExec, vm.subnet.tapDevice);
+      // Only a confirmed delete frees the index — releasing it while the
+      // device lingers would poison the next run that draws the same index
+      // (its `ip tuntap add` fails on the existing device). A stuck index
+      // is reclaimed by the boot-time orphan sweep.
+      this.allocator.release(vm.subnet.index);
+    } catch (err) {
+      logger.warn("Failed to delete TAP device — keeping its subnet index reserved", {
+        runId: vm.runId,
+        tap: vm.subnet.tapDevice,
+        error: getErrorMessage(err),
+      });
+    }
+    await rm(vm.apiSocketPath, { force: true }).catch(() => {});
+    await rm(vm.runDir, { recursive: true, force: true }).catch(() => {});
+    this.vms.delete(vm.runId);
   }
 
   // -------------------------------------------------------------------------
@@ -349,9 +403,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
 
+    vm.exitNonce = randomBytes(16).toString("hex");
     const aliasIp = platformAliasIp(env.FIRECRACKER_SUBNET_CIDR);
     const guestConfig = buildGuestConfig({
       runId: handle.runId,
+      exitMarkerNonce: vm.exitNonce,
       platformIp: aliasIp,
       platformPort: env.PORT,
       sidecarEnv: this.pendingSidecarEnv.get(handle.runId),
@@ -395,6 +451,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       runId: handle.runId,
       tapDevice: vm.subnet.tapDevice,
       pid: proc.pid,
+      apiSocketPath: vm.apiSocketPath,
     });
 
     proc.exited.then((code) => {
@@ -441,9 +498,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     if (!vm?.proc) return 1;
     await vm.proc.exited;
     // The VMM exiting 0 only means the guest powered off — the workload
-    // outcome is the supervisor's exit marker on the serial console.
+    // outcome is the supervisor's nonce-authenticated exit marker on the
+    // serial console (the console is shared with workload stdout, so an
+    // un-nonced marker is ignored as a potential forgery).
     const tail = await this.readConsoleTail(vm.consolePath);
-    const marker = parseExitMarker(tail);
+    const marker = vm.exitNonce ? parseExitMarker(tail, vm.exitNonce) : null;
     if (marker === null) {
       // Killed (stop/cancel) or crashed before the supervisor could
       // report — non-zero so pi.ts treats it as a non-clean exit unless
@@ -550,6 +609,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    * Materialise the guest config as a small read-only ext4 image
    * (`mkfs.ext4 -d`): no privileges needed, no size negotiation with
    * MMDS, and the secrets never touch the kernel command line.
+   *
+   * In-image ownership is forced to root:root with owner-only modes via
+   * `debugfs` (unprivileged — it edits the image file, not a mount).
+   * `mkfs -d` would otherwise preserve the staging files' owner = this
+   * API process's uid, and if that uid collides with an in-guest workload
+   * uid (1000/1001/1002) the workload could read the whole launch spec.
+   * Belt-and-suspenders with the supervisor's unmount-before-workloads.
    */
   private async buildConfigDrive(
     runDir: string,
@@ -568,6 +634,16 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     await writeFile(imagePath, "", { mode: 0o600 });
     await this.execLocal(["truncate", "-s", String(sizeBytes), imagePath]);
     await this.execLocal(["mkfs.ext4", "-q", "-d", stagingDir, imagePath]);
+    for (const cmd of [
+      "sif / uid 0",
+      "sif / gid 0",
+      "sif / mode 040500",
+      "sif /config.json uid 0",
+      "sif /config.json gid 0",
+      "sif /config.json mode 0100400",
+    ]) {
+      await this.execLocal(["debugfs", "-w", "-R", cmd, imagePath]);
+    }
     await rm(stagingDir, { recursive: true, force: true });
   }
 
@@ -583,6 +659,23 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       throw new Error(`Command failed (${code}): ${cmd.join(" ")} — ${stderr.trim()}`);
     }
     return stdout;
+  }
+
+  /**
+   * PID-reuse guard for the orphan sweep: `true` only when /proc shows a
+   * live process whose argv looks like a firecracker VMM AND (when the
+   * state file recorded one) references this run's API socket.
+   */
+  private async pidIsOurVmm(pid: number, apiSocketPath?: string): Promise<boolean> {
+    let cmdline: string;
+    try {
+      cmdline = await Bun.file(`/proc/${pid}/cmdline`).text();
+    } catch {
+      return false; // Process already gone.
+    }
+    const argv = cmdline.split("\0");
+    if (!argv.some((arg) => arg.includes("firecracker"))) return false;
+    return apiSocketPath === undefined || argv.includes(apiSocketPath);
   }
 
   private async readConsoleTail(consolePath: string): Promise<string> {
@@ -617,6 +710,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         runId: obj.runId,
         tapDevice: obj.tapDevice,
         ...(typeof obj.pid === "number" ? { pid: obj.pid } : {}),
+        ...(typeof obj.apiSocketPath === "string" ? { apiSocketPath: obj.apiSocketPath } : {}),
       };
     } catch {
       return null;

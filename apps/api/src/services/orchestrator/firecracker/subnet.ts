@@ -28,8 +28,6 @@ export interface RunSubnet {
   readonly guestIp: string;
   /** Netmask of the /30. */
   readonly netmask: "255.255.255.252";
-  /** CIDR of the whole block, e.g. `10.231.0.4/30`. */
-  readonly cidr: string;
   /** Deterministic guest MAC derived from the index. */
   readonly guestMac: string;
 }
@@ -77,7 +75,6 @@ export function subnetForIndex(cidr: string, index: number): RunSubnet {
     hostIp: `${a}.${b}.${oct3}.${oct4 + 1}`,
     guestIp: `${a}.${b}.${oct3}.${oct4 + 2}`,
     netmask: "255.255.255.252",
-    cidr: `${a}.${b}.${oct3}.${oct4}/30`,
     // Locally-administered, unicast prefix 06 (mirrors the Firecracker
     // getting-started convention) + the index spread over the low bytes.
     guestMac: `06:00:ac:00:${hex(index >> 8)}:${hex(index & 0xff)}`,

@@ -23,16 +23,10 @@ import type {
 
 export type { GuestConfig, GuestNetworkConfig };
 
-/** Fixed uid/gid the guest supervisor uses for the sidecar process. */
-export const GUEST_SIDECAR_UID = 1000;
-/** Fixed uid/gid of the agent (`pi` user baked into the rootfs at 1001). */
-export const GUEST_AGENT_UID = 1001;
-
-/** Serial-console marker the guest supervisor prints right before shutdown. */
-const EXIT_MARKER = /APPSTRATE_EXIT:(\d+)/;
-
 export interface BuildGuestConfigInput {
   runId: string;
+  /** Per-run random nonce authenticating the exit marker (see GuestConfig). */
+  exitMarkerNonce: string;
   platformIp: string;
   platformPort: number;
   /** Absent for skipSidecar runs. */
@@ -46,6 +40,7 @@ export interface BuildGuestConfigInput {
 export function buildGuestConfig(input: BuildGuestConfigInput): GuestConfig {
   return {
     run_id: input.runId,
+    exit_marker_nonce: input.exitMarkerNonce,
     network: { platform_ip: input.platformIp, platform_port: input.platformPort },
     sidecar: { enabled: !!input.sidecarEnv, env: input.sidecarEnv ?? {} },
     agent: {
@@ -69,6 +64,10 @@ export function buildKernelBootArgs(subnet: RunSubnet): string {
     "reboot=k",
     "panic=1",
     "pci=off",
+    // The host firewall (table `ip appstrate_fc`) and the in-guest uid
+    // rules are IPv4-only — no IPv6 in the guest means no unfiltered v6
+    // path to link-local host services.
+    "ipv6.disable=1",
     `ip=${subnet.guestIp}::${subnet.hostIp}:${subnet.netmask}::eth0:off`,
     "init=/sbin/appstrate-init",
   ].join(" ");
@@ -147,15 +146,23 @@ export function vmSizing(agent: { memoryBytes: number; nanoCpus: number }): {
 
 /**
  * Extract the guest's exit code from the tail of the serial console log.
- * The supervisor prints `APPSTRATE_EXIT:<code>` as its last line before
- * powering the VM off; a missing marker means the guest crashed or was
- * killed → treated as exit 1 by the caller.
+ * The supervisor prints `APPSTRATE_EXIT:<nonce>:<code>` as its last line
+ * before powering the VM off. Only markers carrying THIS run's nonce
+ * count: the serial console is shared with workload stdout, so an
+ * un-nonced (or wrong-nonce) marker is a potential forgery and is
+ * ignored — the caller then falls back to its killed/crashed handling.
  */
-export function parseExitMarker(consoleTail: string): number | null {
+export function parseExitMarker(consoleTail: string, nonce: string): number | null {
+  if (nonce.length === 0) return null;
+  const marker = new RegExp(`APPSTRATE_EXIT:${escapeRegExp(nonce)}:(\\d+)`);
   let last: number | null = null;
   for (const line of consoleTail.split("\n")) {
-    const match = EXIT_MARKER.exec(line);
+    const match = marker.exec(line);
     if (match) last = Number(match[1]);
   }
   return last;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

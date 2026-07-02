@@ -32,8 +32,11 @@ import type { GuestConfig } from "./guest-config.ts";
 
 const GUEST_SIDECAR_UID = "1000";
 const GUEST_AGENT_UID = "1001";
+const GUEST_RUNNER_UID = "1002";
 const GUEST_AGENT_USER = "pi"; // uid 1001, baked into the rootfs
 const SIDECAR_BIN = "/usr/local/bin/sidecar";
+/** setuid(1002) wrapper the sidecar uses to spawn integration runners. */
+const RUNNER_EXEC_WRAPPER = "/usr/local/bin/appstrate-runner-exec";
 const AGENT_ENTRY = "/runtime/dist/entrypoint.js";
 const CONFIG_PATH = "/config/config.json";
 
@@ -50,35 +53,41 @@ function readConfig(): GuestConfig {
 }
 
 /**
- * Guest egress firewall (nftables `inet` family).
+ * Guest egress firewall (nftables `inet` family), default-deny.
+ *
+ * The chain policy is DROP with an explicit allowlist — a denylist keyed
+ * on the agent uid alone would let any OTHER uid (root helpers, a future
+ * user, a compromised process that changed uid) egress freely:
  *
  *   - loopback: always allowed (agent ↔ sidecar traffic rides 127.0.0.1).
+ *   - root (supervisor): allowed — it is the trust anchor of the guest.
  *   - sidecar uid: full egress (it fronts the LLM proxy + forward proxy).
- *   - agent uid: allowed to loopback + the platform sink only, UNLESS the
- *     run is skipSidecar (then the agent needs direct upstream egress).
- *   - everything else from the agent uid is dropped, so the agent cannot
- *     bypass the sidecar's forward proxy to reach the internet directly.
+ *   - runner uid: full egress (integration MCP servers call external APIs).
+ *   - agent uid: loopback + the platform sink only, UNLESS the run is
+ *     skipSidecar (then the agent needs direct upstream egress).
+ *   - everything else — any uid, any socketless packet — is dropped.
  *
  * DNS to the configured resolvers is allowed for whoever has egress
- * (sidecar always, agent only when unrestricted) via the general accept
- * rules below — no special-casing needed.
+ * (sidecar/runner always, agent only when unrestricted) via the general
+ * accept rules — no special-casing needed.
  */
 function applyFirewall(exec: RunHostCmd, cfg: GuestConfig): Promise<void> {
   const agentEgress = cfg.agent.unrestricted_egress
-    ? `      meta skuid ${GUEST_AGENT_UID} accept`
+    ? [`      meta skuid ${GUEST_AGENT_UID} accept`]
     : [
         `      meta skuid ${GUEST_AGENT_UID} ip daddr 127.0.0.1 accept`,
         `      meta skuid ${GUEST_AGENT_UID} ip daddr ${cfg.network.platform_ip} tcp dport ${cfg.network.platform_port} accept`,
-        `      meta skuid ${GUEST_AGENT_UID} drop`,
-      ].join("\n");
+      ];
 
   const script = [
     `table inet appstrate_guest {`,
     `  chain output {`,
-    `    type filter hook output priority filter; policy accept;`,
+    `    type filter hook output priority filter; policy drop;`,
     `    oifname "lo" accept`,
+    `    meta skuid 0 accept`,
     `    meta skuid ${GUEST_SIDECAR_UID} accept`,
-    agentEgress,
+    `    meta skuid ${GUEST_RUNNER_UID} accept`,
+    ...agentEgress,
     `  }`,
     `}`,
     ``,
@@ -119,17 +128,24 @@ interface Child {
  * given env. `setpriv --reuid --regid --clear-groups` drops privileges
  * without a login shell (no PAM, no env scrubbing), so the caller's env
  * reaches the workload verbatim.
+ *
+ * `harden` additionally sets no_new_privs and empties the capability
+ * bounding set — the agent must never regain privileges through a setuid
+ * exec. The sidecar is NOT hardened: it legitimately execs the setuid
+ * runner wrapper to drop its integration runners to uid 1002.
  */
 function spawnAs(
   uidOrUser: string,
   argv: string[],
   env: Record<string, string>,
   cwd: string,
+  opts: { harden: boolean } = { harden: true },
 ): Child {
   const isNumeric = /^\d+$/.test(uidOrUser);
   const privArgs = isNumeric
     ? ["--reuid", uidOrUser, "--regid", uidOrUser, "--clear-groups"]
     : ["--reuid", uidOrUser, "--regid", uidOrUser, "--init-groups"];
+  if (opts.harden) privArgs.push("--no-new-privs", "--bounding-set", "-all");
   const proc: ChildProcess = spawn("setpriv", [...privArgs, "--", ...argv], {
     cwd,
     // The platform-built env maps don't carry PATH; inherit the guest's
@@ -151,19 +167,38 @@ function spawnAs(
 
 async function main(): Promise<void> {
   const cfg = readConfig();
+  exitNonce = cfg.exit_marker_nonce;
   log(`run ${cfg.run_id} starting (sidecar=${cfg.sidecar.enabled})`);
 
   await applyFirewall(runHostCmd, cfg).catch((err) => {
     // Fail closed: without the firewall the agent could bypass the sidecar
     // proxy. Refuse to launch rather than run unisolated.
     log(`FATAL: firewall setup failed: ${err.message}`);
-    process.stdout.write("APPSTRATE_EXIT:126\n");
+    printExitMarker(126);
+    powerOff();
+  });
+
+  // The config drive carries the whole launch spec — sidecar credentials
+  // included. Nothing rereads it after this point: unmount BEFORE any
+  // workload exists so no in-guest uid can ever read it back.
+  await runHostCmd(["umount", "/config"]).catch((err: Error) => {
+    log(`FATAL: could not unmount config drive: ${err.message}`);
+    printExitMarker(126);
     powerOff();
   });
 
   let sidecar: Child | undefined;
   if (cfg.sidecar.enabled) {
-    sidecar = spawnAs(GUEST_SIDECAR_UID, [SIDECAR_BIN], cfg.sidecar.env, "/tmp");
+    sidecar = spawnAs(
+      GUEST_SIDECAR_UID,
+      [SIDECAR_BIN],
+      // The wrapper path rides the env (not the adapter's own config): the
+      // process adapter is shared with host process-mode, where runners
+      // stay plain children of the sidecar.
+      { ...cfg.sidecar.env, APPSTRATE_RUNNER_EXEC: RUNNER_EXEC_WRAPPER },
+      "/tmp",
+      { harden: false },
+    );
     log(`sidecar pid ${sidecar.pid}`);
   }
 
@@ -186,12 +221,24 @@ async function main(): Promise<void> {
     await Promise.race([sidecar.exited, delay(2000)]);
   }
 
-  process.stdout.write(`APPSTRATE_EXIT:${code}\n`);
+  printExitMarker(code);
   powerOff();
 }
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Host-side nonce proving the marker came from THIS supervisor, not from a
+ * workload pre-printing `APPSTRATE_EXIT:0` on the shared serial console to
+ * forge a success after being killed. Set from the config drive; a marker
+ * without the nonce is ignored by the host's parseExitMarker.
+ */
+let exitNonce = "";
+
+function printExitMarker(code: number): void {
+  process.stdout.write(`APPSTRATE_EXIT:${exitNonce}:${code}\n`);
 }
 
 function powerOff(): never {
@@ -222,6 +269,9 @@ function powerOff(): never {
 
 main().catch((err) => {
   log(`FATAL: ${err instanceof Error ? err.stack : String(err)}`);
-  process.stdout.write("APPSTRATE_EXIT:125\n");
+  // Before the config is read the nonce is empty — the host then ignores
+  // the marker and reports a non-clean exit, which is the right outcome
+  // for a supervisor crash anyway.
+  printExitMarker(125);
   powerOff();
 });

@@ -188,6 +188,17 @@ export interface CleanupReport {
 
 export type StopResult = "stopped" | "not_found" | "already_stopped";
 
+/** Optional hints for {@link RunOrchestrator.createIsolationBoundary}. */
+export interface IsolationBoundaryOptions {
+  /**
+   * The run will never launch a sidecar (no integrations, static API key,
+   * no proxy, no alias). Lets port-allocating backends skip reserving a
+   * sidecar port the run will never bind — the boundary's
+   * `sidecarEndpoints` are then placeholders that must not be dialled.
+   */
+  skipSidecar?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // RunOrchestrator — structural contract
 // ---------------------------------------------------------------------------
@@ -213,7 +224,10 @@ export interface RunOrchestrator {
   ensureImages(images: string[]): Promise<void>;
 
   /** Create an isolated environment for a run. Docker: bridge network. K8s: namespace. */
-  createIsolationBoundary(runId: string): Promise<IsolationBoundary>;
+  createIsolationBoundary(
+    runId: string,
+    opts?: IsolationBoundaryOptions,
+  ): Promise<IsolationBoundary>;
 
   /** Remove an isolated environment. Idempotent. */
   removeIsolationBoundary(boundary: IsolationBoundary): Promise<void>;

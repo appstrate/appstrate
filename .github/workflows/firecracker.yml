@@ -13,6 +13,9 @@ on:
     branches: [main]
     paths:
       - "apps/api/src/services/orchestrator/**"
+      - "apps/api/src/services/run-launcher/**"
+      - "apps/api/src/services/connect/**"
+      - "packages/env/**"
       - "runtime-pi/guest/**"
       - "runtime-pi/Dockerfile"
       - "runtime-pi/sidecar/Dockerfile"
@@ -23,6 +26,9 @@ on:
     branches: [main]
     paths:
       - "apps/api/src/services/orchestrator/**"
+      - "apps/api/src/services/run-launcher/**"
+      - "apps/api/src/services/connect/**"
+      - "packages/env/**"
       - "runtime-pi/guest/**"
       - "runtime-pi/Dockerfile"
       - "runtime-pi/sidecar/Dockerfile"
@@ -59,11 +65,20 @@ jobs:
           test -r /dev/kvm && test -w /dev/kvm
 
       - name: Install Firecracker
+        # Pinned release + published checksum — never `latest` (supply chain).
+        # Keep FC_VERSION/FC_SHA256 in sync with scripts/firecracker-dev/lima.yaml.
         run: |
+          FC_VERSION="v1.16.0"
           ARCH="$(uname -m)"
-          latest="$(basename "$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/firecracker-microvm/firecracker/releases/latest)")"
-          curl -fsSL "https://github.com/firecracker-microvm/firecracker/releases/download/${latest}/firecracker-${latest}-${ARCH}.tgz" | tar -xz -C /tmp
-          sudo install -m 0755 "/tmp/release-${latest}-${ARCH}/firecracker-${latest}-${ARCH}" /usr/local/bin/firecracker
+          case "$ARCH" in
+            x86_64)  FC_SHA256="bd04e26952d4e158085778c6230a0b383d2619c319182e27eaa9d61a212e92d6" ;;
+            aarch64) FC_SHA256="531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7" ;;
+            *) echo "unsupported arch $ARCH" >&2; exit 1 ;;
+          esac
+          curl -fsSL -o /tmp/firecracker.tgz "https://github.com/firecracker-microvm/firecracker/releases/download/${FC_VERSION}/firecracker-${FC_VERSION}-${ARCH}.tgz"
+          echo "${FC_SHA256}  /tmp/firecracker.tgz" | sha256sum -c -
+          tar -xzf /tmp/firecracker.tgz -C /tmp
+          sudo install -m 0755 "/tmp/release-${FC_VERSION}-${ARCH}/firecracker-${FC_VERSION}-${ARCH}" /usr/local/bin/firecracker
           firecracker --version
 
       # The kernel is BUILT (CI kernels lack nftables — see build-kernel.sh).

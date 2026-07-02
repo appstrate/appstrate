@@ -11,6 +11,9 @@
  *   - guests may reach the platform API at exactly `<alias>:<port>`
  *   - any other guest→host-local traffic is dropped (a guest must never
  *     see host-local services like Redis or the Docker socket proxy)
+ *   - guest egress to the deny CIDRs (cloud metadata, RFC1918) is dropped
+ *     before the general forward accept — egress means INTERNET, never the
+ *     host's private neighbourhood (FIRECRACKER_EGRESS_DENY_CIDRS)
  *   - guest→internet is forwarded + masqueraded (the in-guest uid rules
  *     restrict WHICH process gets to use that egress)
  *   - guest→guest is dropped (per-run isolation)
@@ -56,9 +59,12 @@ export function buildNftScript(params: {
   subnetCidr: string;
   aliasIp: string;
   platformPort: number;
+  /** Forward-path destinations guests may never reach (metadata, RFC1918). */
+  egressDenyCidrs: string[];
 }): string {
-  const { subnetCidr, aliasIp, platformPort } = params;
+  const { subnetCidr, aliasIp, platformPort, egressDenyCidrs } = params;
   const tap = `"${TAP_DEVICE_PREFIX}*"`;
+  const denySet = egressDenyCidrs.join(", ");
   return [
     `destroy table ip appstrate_fc`,
     `table ip appstrate_fc {`,
@@ -70,6 +76,9 @@ export function buildNftScript(params: {
     `  chain forward {`,
     `    type filter hook forward priority filter; policy accept;`,
     `    iifname ${tap} oifname ${tap} drop`,
+    // The platform alias rides the input hook (it lives on lo), so this
+    // deny never blocks sink/API traffic — only routed egress.
+    ...(denySet.length > 0 ? [`    iifname ${tap} ip daddr { ${denySet} } drop`] : []),
     `    iifname ${tap} accept`,
     `    oifname ${tap} ct state established,related accept`,
     `    oifname ${tap} drop`,
@@ -86,7 +95,12 @@ export function buildNftScript(params: {
 /** One-shot host prerequisites: alias IP, IPv4 forwarding, firewall table. */
 export async function setupHostNetwork(
   exec: HostExec,
-  params: { subnetCidr: string; aliasIp: string; platformPort: number },
+  params: {
+    subnetCidr: string;
+    aliasIp: string;
+    platformPort: number;
+    egressDenyCidrs: string[];
+  },
 ): Promise<void> {
   // `replace` (not `add`) → idempotent across restarts.
   await exec.run(["ip", "addr", "replace", `${params.aliasIp}/32`, "dev", "lo"]);
@@ -112,13 +126,22 @@ export async function setupHostNetwork(
  * conflicting pipeline to coexist with, and `-C` probing keeps the
  * inserts idempotent across restarts.
  */
+const IPTABLES_FORWARD_RULES: string[][] = [
+  ["-i", `${TAP_DEVICE_PREFIX}+`, "-j", "ACCEPT"],
+  [
+    "-o",
+    `${TAP_DEVICE_PREFIX}+`,
+    "-m",
+    "conntrack",
+    "--ctstate",
+    "ESTABLISHED,RELATED",
+    "-j",
+    "ACCEPT",
+  ],
+];
+
 async function allowForwardInIptables(exec: HostExec): Promise<void> {
-  const tapMatch = `${TAP_DEVICE_PREFIX}+`;
-  const rules: string[][] = [
-    ["-i", tapMatch, "-j", "ACCEPT"],
-    ["-o", tapMatch, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"],
-  ];
-  for (const rule of rules) {
+  for (const rule of IPTABLES_FORWARD_RULES) {
     try {
       await exec.run(["iptables", "-C", "FORWARD", ...rule]);
     } catch {
@@ -127,9 +150,22 @@ async function allowForwardInIptables(exec: HostExec): Promise<void> {
   }
 }
 
-/** Remove the policy table (leaves the harmless lo alias in place). */
+/**
+ * Remove the policy table and the iptables FORWARD accepts. The lo alias
+ * and the sysctls are left in place — both are idempotent (`replace`/set)
+ * and harmless without TAP devices. Best-effort: teardown runs on shutdown
+ * paths where the rules may already be gone.
+ */
 export async function teardownHostNetwork(exec: HostExec): Promise<void> {
   await exec.run(["nft", "destroy", "table", "ip", "appstrate_fc"]).catch(() => {});
+  for (const rule of IPTABLES_FORWARD_RULES) {
+    try {
+      await exec.run(["iptables", "-C", "FORWARD", ...rule]);
+    } catch {
+      continue; // Rule absent — nothing to remove.
+    }
+    await exec.run(["iptables", "-D", "FORWARD", ...rule]).catch(() => {});
+  }
 }
 
 /** Create + bring up one run's TAP device. */

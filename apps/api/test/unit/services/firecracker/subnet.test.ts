@@ -33,7 +33,6 @@ describe("platformAliasIp", () => {
 describe("subnetForIndex", () => {
   it("computes the /30 block layout", () => {
     const s = subnetForIndex(CIDR, 1);
-    expect(s.cidr).toBe("10.231.0.4/30");
     expect(s.hostIp).toBe("10.231.0.5");
     expect(s.guestIp).toBe("10.231.0.6");
     expect(s.tapDevice).toBe("afc1");
@@ -42,7 +41,6 @@ describe("subnetForIndex", () => {
 
   it("rolls the third octet every 64 blocks", () => {
     const s = subnetForIndex(CIDR, 64); // offset 256
-    expect(s.cidr).toBe("10.231.1.0/30");
     expect(s.hostIp).toBe("10.231.1.1");
     expect(s.guestIp).toBe("10.231.1.2");
   });
@@ -56,7 +54,7 @@ describe("subnetForIndex", () => {
   it("never collides with the reserved alias /24", () => {
     // Highest allowed index stays below the x.y.255.0/24 range.
     const top = subnetForIndex(CIDR, 16319);
-    expect(top.cidr).toBe("10.231.254.252/30");
+    expect(top.hostIp).toBe("10.231.254.253");
   });
 
   it("rejects out-of-range indexes", () => {

@@ -29,6 +29,7 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
+  IsolationBoundaryOptions,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
@@ -232,7 +233,10 @@ export class ProcessOrchestrator implements RunOrchestrator {
     return { workloads, isolationBoundaries, workspaces };
   }
 
-  async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+  async createIsolationBoundary(
+    runId: string,
+    opts?: IsolationBoundaryOptions,
+  ): Promise<IsolationBoundary> {
     const dir = join(DATA_DIR, runId);
     // Create both the pidfile boundary dir and the shared workspace
     // dir in parallel — independent fs operations, no ordering
@@ -246,16 +250,21 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // createWorkload ordering hazard: both are launched in a Promise.all
     // by pi.ts, and the old lazy allocation meant the agent env could be
     // built before the port was known.
+    //
+    // skipSidecar runs never bind the port — don't probe one at all. The
+    // probe would only widen the probe→bind TOCTOU window for nothing;
+    // port 0 in the placeholder endpoints fails loudly if anything dials
+    // them by mistake.
     const workspacePath = workspaceDirFor(runId);
     const [port] = await Promise.all([
-      this.findAvailablePort(),
+      opts?.skipSidecar ? Promise.resolve(0) : this.findAvailablePort(),
       mkdir(dir, { recursive: true }),
       // 0o700: the workspace sits under the shared `os.tmpdir()` and
       // holds the agent's run inputs/outputs — keep it readable only by
       // the platform uid, not world-readable to other local users.
       mkdir(workspacePath, { recursive: true, mode: 0o700 }),
     ]);
-    this.sidecarPorts.set(runId, port);
+    if (!opts?.skipSidecar) this.sidecarPorts.set(runId, port);
     return {
       id: dir,
       name: `process-${runId}`,

@@ -182,22 +182,12 @@ async function runPlatformContainerImpl(
       orchestratorMode: getExecutionMode(),
     });
 
-    boundary = await orch.createIsolationBoundary(runId);
-
     const llmApiKey = llmConfig.apiKey;
 
     // OAuth credentials must take the sidecar's OAuth branch — the API-key
     // path can't refresh tokens or inject the provider's identity routing
     // headers at request time.
     const isOauthCredential = delivery.isOauthCredential;
-
-    // The placeholder is what actually lands in MODEL_API_KEY inside the
-    // agent container. Provider-specific shape (e.g. a structured JWT) is
-    // built by the module's `buildApiKeyPlaceholder` hook — see
-    // `deriveOauthPlaceholder` below.
-    const llmPlaceholder = isOauthCredential
-      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
-      : deriveKeyPlaceholder(llmApiKey);
 
     // Skip the sidecar entirely when the run declares no integrations AND
     // uses a static API key AND has no egress proxy. The sidecar's purposes
@@ -217,6 +207,18 @@ async function runPlatformContainerImpl(
       !isOauthCredential &&
       !plan.proxyUrl &&
       !llmConfig.aliased;
+
+    // Resolved BEFORE the boundary so port-allocating backends don't
+    // reserve a sidecar port this run will never bind.
+    boundary = await orch.createIsolationBoundary(runId, { skipSidecar });
+
+    // The placeholder is what actually lands in MODEL_API_KEY inside the
+    // agent container. Provider-specific shape (e.g. a structured JWT) is
+    // built by the module's `buildApiKeyPlaceholder` hook — see
+    // `deriveOauthPlaceholder` below.
+    const llmPlaceholder = isOauthCredential
+      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
+      : deriveKeyPlaceholder(llmApiKey);
 
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the

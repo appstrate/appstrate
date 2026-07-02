@@ -21,6 +21,8 @@ describe("buildKernelBootArgs", () => {
     // reboot=k panic=1: guest poweroff/panic must terminate the VMM.
     expect(args).toContain("reboot=k");
     expect(args).toContain("panic=1");
+    // Host + guest firewalls are IPv4-only — the guest gets no v6 stack.
+    expect(args).toContain("ipv6.disable=1");
   });
 });
 
@@ -82,6 +84,7 @@ describe("buildGuestConfig", () => {
   it("marks the sidecar disabled when no env is provided (skipSidecar)", () => {
     const cfg = buildGuestConfig({
       runId: "run_1",
+      exitMarkerNonce: "abc123",
       platformIp: "10.231.255.1",
       platformPort: 3000,
       agentEnv: { A: "1" },
@@ -90,11 +93,13 @@ describe("buildGuestConfig", () => {
     expect(cfg.sidecar).toEqual({ enabled: false, env: {} });
     expect(cfg.agent.unrestricted_egress).toBe(true);
     expect(cfg.agent.argv).toBeUndefined();
+    expect(cfg.exit_marker_nonce).toBe("abc123");
   });
 
   it("carries sidecar env + restricted agent egress for sidecar-backed runs", () => {
     const cfg = buildGuestConfig({
       runId: "run_1",
+      exitMarkerNonce: "abc123",
       platformIp: "10.231.255.1",
       platformPort: 3000,
       sidecarEnv: { RUN_TOKEN: "t" },
@@ -108,21 +113,36 @@ describe("buildGuestConfig", () => {
 });
 
 describe("parseExitMarker", () => {
+  const NONCE = "d00dfeedd00dfeed";
+
   it("returns null when no marker is present", () => {
-    expect(parseExitMarker("kernel panic\nsomething\n")).toBeNull();
-    expect(parseExitMarker("")).toBeNull();
+    expect(parseExitMarker("kernel panic\nsomething\n", NONCE)).toBeNull();
+    expect(parseExitMarker("", NONCE)).toBeNull();
   });
 
-  it("extracts the code", () => {
-    expect(parseExitMarker("boot ok\nAPPSTRATE_EXIT:0\n")).toBe(0);
-    expect(parseExitMarker("x\nAPPSTRATE_EXIT:137\n")).toBe(137);
+  it("extracts the code from a nonce-authenticated marker", () => {
+    expect(parseExitMarker(`boot ok\nAPPSTRATE_EXIT:${NONCE}:0\n`, NONCE)).toBe(0);
+    expect(parseExitMarker(`x\nAPPSTRATE_EXIT:${NONCE}:137\n`, NONCE)).toBe(137);
   });
 
   it("takes the LAST marker when several are printed", () => {
-    expect(parseExitMarker("APPSTRATE_EXIT:1\nnoise\nAPPSTRATE_EXIT:0\n")).toBe(0);
+    expect(
+      parseExitMarker(`APPSTRATE_EXIT:${NONCE}:1\nnoise\nAPPSTRATE_EXIT:${NONCE}:0\n`, NONCE),
+    ).toBe(0);
   });
 
   it("tolerates the marker embedded in a prefixed console line", () => {
-    expect(parseExitMarker("[  12.3] APPSTRATE_EXIT:42 trailing")).toBe(42);
+    expect(parseExitMarker(`[  12.3] APPSTRATE_EXIT:${NONCE}:42 trailing`, NONCE)).toBe(42);
+  });
+
+  it("ignores forged markers without the nonce (killed run must not report success)", () => {
+    // A workload pre-printing the legacy marker shape on the shared
+    // console must not be able to fake a clean exit.
+    expect(parseExitMarker("APPSTRATE_EXIT:0\n", NONCE)).toBeNull();
+    expect(parseExitMarker("APPSTRATE_EXIT:wrongnonce:0\n", NONCE)).toBeNull();
+  });
+
+  it("ignores everything when the nonce is empty (never trust an unauthenticated marker)", () => {
+    expect(parseExitMarker("APPSTRATE_EXIT::0\n", "")).toBeNull();
   });
 });

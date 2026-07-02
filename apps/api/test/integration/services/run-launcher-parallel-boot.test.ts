@@ -77,10 +77,10 @@ function createTimingFake(config: TimingFakeConfig): {
         name: `appstrate-exec-${runId}`,
         workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
         sidecarEndpoints: {
-          sidecarUrl: "http://sidecar:8080",
-          llmProxyUrl: "http://sidecar:8080/llm",
-          forwardProxyUrl: "http://sidecar:8081",
-          noProxy: "sidecar,localhost,127.0.0.1",
+          sidecarUrl: "http://fake-sidecar.test:19080",
+          llmProxyUrl: "http://fake-sidecar.test:19080/llm",
+          forwardProxyUrl: "http://fake-sidecar.test:19081",
+          noProxy: "fake-sidecar.test,localhost,127.0.0.1",
         },
       };
     },

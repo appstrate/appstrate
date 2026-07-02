@@ -7,6 +7,7 @@ import {
   deleteTap,
   listTapDevices,
   setupHostNetwork,
+  teardownHostNetwork,
   type HostExec,
 } from "../../../../src/services/orchestrator/firecracker/host-net.ts";
 import { subnetForIndex } from "../../../../src/services/orchestrator/firecracker/subnet.ts";
@@ -34,7 +35,12 @@ function fakeExec(respond: (cmd: string[]) => string | Error = () => ""): {
   };
 }
 
-const PARAMS = { subnetCidr: "10.231.0.0/16", aliasIp: "10.231.255.1", platformPort: 3000 };
+const PARAMS = {
+  subnetCidr: "10.231.0.0/16",
+  aliasIp: "10.231.255.1",
+  platformPort: 3000,
+  egressDenyCidrs: ["169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+};
 
 describe("buildNftScript", () => {
   const script = buildNftScript(PARAMS);
@@ -61,6 +67,51 @@ describe("buildNftScript", () => {
 
   it("masquerades the run subnets on the way out", () => {
     expect(script).toContain(`ip saddr 10.231.0.0/16 oifname != "afc*" masquerade`);
+  });
+
+  it("drops guest egress to metadata + private ranges BEFORE the forward accept", () => {
+    const deny = script.indexOf(
+      `iifname "afc*" ip daddr { 169.254.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } drop`,
+    );
+    const egress = script.indexOf(`iifname "afc*" accept`);
+    expect(deny).toBeGreaterThan(-1);
+    expect(deny).toBeLessThan(egress);
+  });
+
+  it("omits the deny rule when the list is empty (operator opt-out)", () => {
+    const open = buildNftScript({ ...PARAMS, egressDenyCidrs: [] });
+    expect(open).not.toContain("ip daddr {");
+  });
+});
+
+describe("teardownHostNetwork", () => {
+  it("destroys the nft table and removes the iptables FORWARD accepts", async () => {
+    // -C probes succeed (rules present) → both deletes issued.
+    const { exec, calls } = fakeExec();
+    await teardownHostNetwork(exec);
+    expect(calls.map((c) => c.cmd.join(" "))).toEqual([
+      "nft destroy table ip appstrate_fc",
+      "iptables -C FORWARD -i afc+ -j ACCEPT",
+      "iptables -D FORWARD -i afc+ -j ACCEPT",
+      "iptables -C FORWARD -o afc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
+      "iptables -D FORWARD -o afc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
+    ]);
+  });
+
+  it("skips deletes for rules that are already gone", async () => {
+    const { exec, calls } = fakeExec((cmd) =>
+      cmd[0] === "iptables" && cmd[1] === "-C" ? new Error("no match") : "",
+    );
+    await teardownHostNetwork(exec);
+    const deletes = calls.filter((c) => c.cmd[0] === "iptables" && c.cmd[1] === "-D");
+    expect(deletes).toEqual([]);
+  });
+
+  it("tolerates a host without iptables entirely", async () => {
+    const { exec } = fakeExec((cmd) =>
+      cmd[0] === "iptables" ? new Error("iptables: command not found") : "",
+    );
+    await expect(teardownHostNetwork(exec)).resolves.toBeUndefined();
   });
 });
 

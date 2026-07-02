@@ -20,13 +20,26 @@
 #
 # Env overrides:
 #   KERNEL_VERSION   full kernel version to build   (default pinned below)
+#   KERNEL_COMMIT    expected commit sha of the kernel tag (supply-chain pin;
+#                    MUST be updated together with KERNEL_VERSION)
 #   FIRECRACKER_REF  firecracker git ref for the base CI config
+#   CONFIG_SHA256    expected sha256 of the base CI config for this arch
+#                    (MUST be updated together with FIRECRACKER_REF)
 set -euo pipefail
 
 OUT="${1:-./data/firecracker/vmlinux}"
 ARCH="$(uname -m)"
 KERNEL_VERSION="${KERNEL_VERSION:-6.1.102}"
+# `git ls-remote <stable> 'v6.1.102^{}'` — the dereferenced tag commit.
+KERNEL_COMMIT="${KERNEL_COMMIT:-c1cec4dad96b5e49c2b7680f7246acf58d4c87da}"
 FIRECRACKER_REF="${FIRECRACKER_REF:-v1.16.0}"
+if [ -z "${CONFIG_SHA256:-}" ]; then
+  case "$ARCH" in
+    x86_64)  CONFIG_SHA256="adbc70ab5e89213ba00594b12d25e09bdf8bb1ed3c252d7449326bb14c22963b" ;;
+    aarch64) CONFIG_SHA256="1df6e14391ef65eceac0f65cac4e431fefd8e04e4584d261184059320ad492b7" ;;
+    *) echo "unsupported arch $ARCH (set CONFIG_SHA256 explicitly)" >&2; exit 1 ;;
+  esac
+fi
 
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 1; }
 
@@ -44,7 +57,9 @@ CONFIG_URL="https://raw.githubusercontent.com/firecracker-microvm/firecracker/${
 echo "==> Building vmlinux ${KERNEL_VERSION} (${ARCH}) in Docker"
 docker run --rm \
   -e KERNEL_VERSION="$KERNEL_VERSION" \
+  -e KERNEL_COMMIT="$KERNEL_COMMIT" \
   -e CONFIG_URL="$CONFIG_URL" \
+  -e CONFIG_SHA256="$CONFIG_SHA256" \
   -e TARGET_ARCH="$ARCH" \
   -v "$OUT_DIR:/out" \
   ubuntu:24.04 bash -euo pipefail -c '
@@ -52,17 +67,27 @@ docker run --rm \
     apt-get update -qq
     apt-get install -y -qq --no-install-recommends \
       build-essential bc bison flex libssl-dev libelf-dev \
-      curl ca-certificates xz-utils python3 kmod cpio >/dev/null
+      curl ca-certificates xz-utils python3 kmod cpio git >/dev/null
 
     cd /tmp
-    echo "==> Downloading linux-${KERNEL_VERSION}"
-    # git.kernel.org snapshot rather than cdn.kernel.org tarballs — the CDN
-    # is unreachable from some networks while the cgit snapshots stay up.
-    curl -fsSL "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-${KERNEL_VERSION}.tar.gz" | tar -xz
+    echo "==> Cloning linux ${KERNEL_VERSION}"
+    # Shallow tag clone + commit-sha verification instead of a snapshot
+    # tarball: cgit snapshots are generated per-request (no stable hash to
+    # pin), while the tag commit sha IS the content pin — a moved tag or a
+    # tampered mirror fails loudly here.
+    git clone --depth 1 --branch "v${KERNEL_VERSION}" \
+      https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git "linux-${KERNEL_VERSION}"
     cd "linux-${KERNEL_VERSION}"
+    actual="$(git rev-parse HEAD)"
+    if [ "$actual" != "$KERNEL_COMMIT" ]; then
+      echo "FATAL: kernel tag v${KERNEL_VERSION} resolves to ${actual}, expected ${KERNEL_COMMIT}" >&2
+      exit 1
+    fi
 
     echo "==> Base config: ${CONFIG_URL}"
     curl -fsSL -o .config "$CONFIG_URL"
+    echo "${CONFIG_SHA256}  .config" | sha256sum -c - >/dev/null \
+      || { echo "FATAL: base kernel config checksum mismatch" >&2; exit 1; }
 
     # Netfilter delta over the CI config:
     #  - NF_TABLES/NF_TABLES_INET: the guest supervisor uid firewall

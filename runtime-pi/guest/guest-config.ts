@@ -22,6 +22,14 @@ export interface GuestNetworkConfig {
 /** `config.json` consumed by the guest supervisor (snake_case wire). */
 export interface GuestConfig {
   run_id: string;
+  /**
+   * Per-run random nonce the supervisor embeds in its serial-console exit
+   * marker (`APPSTRATE_EXIT:<nonce>:<code>`). Workloads share the console
+   * but never see the config drive (unmounted before they start), so a
+   * marker carrying the nonce provably came from the supervisor — a
+   * pre-printed forgery cannot turn a killed run into a success.
+   */
+  exit_marker_nonce: string;
   network: GuestNetworkConfig;
   sidecar: {
     enabled: boolean;

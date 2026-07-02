@@ -456,6 +456,18 @@ const envSchema = z
       .string()
       .regex(/^\d+\.\d+\.0\.0\/16$/, "must be a /16 CIDR ending in .0.0/16")
       .default("10.231.0.0/16"),
+    // Destinations guests must never reach through the host's forward path,
+    // even when a workload has egress: cloud metadata endpoints (instance
+    // credentials) and RFC1918 ranges (Docker bridges, LAN, VPC neighbours).
+    // Comma-separated CIDRs. Narrow this list only for deployments that
+    // intentionally expose private-range services to guest workloads.
+    FIRECRACKER_EGRESS_DENY_CIDRS: z
+      .string()
+      .regex(
+        /^\d+\.\d+\.\d+\.\d+\/\d+(,\d+\.\d+\.\d+\.\d+\/\d+)*$/,
+        "must be comma-separated IPv4 CIDRs",
+      )
+      .default("169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
 
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),

@@ -267,9 +267,16 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
         createdPaths.push(...paths);
         Object.assign(procEnv, envOverrides);
       }
+      // Privilege-drop wrapper (Firecracker guest): when the supervisor
+      // provides APPSTRATE_RUNNER_EXEC, every runner execs through the
+      // setuid wrapper and lands on the dedicated runner uid instead of
+      // inheriting the sidecar's — the sidecar's environ (credentials)
+      // stays unreadable. Unset in host process mode: runners remain
+      // plain children.
+      const runnerExec = process.env.APPSTRATE_RUNNER_EXEC;
       const transport = new SubprocessTransport({
-        command: plan.command,
-        args: plan.args,
+        command: runnerExec ?? plan.command,
+        args: runnerExec ? [plan.command, ...plan.args] : plan.args,
         cwd: plan.cwd,
         env: procEnv,
         envPassthrough: ["PATH", "HOME", "NODE_OPTIONS"],

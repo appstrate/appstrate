@@ -6,7 +6,10 @@
 #   scripts/firecracker/build-rootfs.sh [output.ext4]
 #
 # Pipeline: docker build (Dockerfile.rootfs, merged pi+sidecar+guest image)
-# → docker create + export → ext4 image via mkfs.ext4 -d (no root needed).
+# → docker create + export → ext4 image via mkfs.ext4 -d. The extraction
+# and mkfs run under `sudo -n` when not already root: the in-guest uid
+# separation depends on baked ownership and on the setuid runner wrapper,
+# both of which unprivileged tar/mkfs would silently strip.
 #
 # Requirements: docker, mkfs.ext4 (e2fsprogs). Linux-oriented — on macOS run
 # inside the Lima dev VM (bun run firecracker:dev / scripts/firecracker-dev/).
@@ -42,19 +45,23 @@ docker build \
   -t "$ROOTFS_IMAGE_TAG" -f scripts/firecracker/Dockerfile.rootfs .
 
 echo "==> Exporting filesystem"
+SUDO=""
+[ "$(id -u)" = "0" ] || SUDO="sudo -n"
 STAGING="$(mktemp -d)"
-trap 'rm -rf "$STAGING"; docker rm -f appstrate-fc-rootfs-export >/dev/null 2>&1 || true' EXIT
+trap '$SUDO rm -rf "$STAGING"; docker rm -f appstrate-fc-rootfs-export >/dev/null 2>&1 || true' EXIT
 docker rm -f appstrate-fc-rootfs-export >/dev/null 2>&1 || true
 docker create --name appstrate-fc-rootfs-export "$ROOTFS_IMAGE_TAG" /bin/true >/dev/null
-docker export appstrate-fc-rootfs-export | tar -x -C "$STAGING"
+# -p + --numeric-owner + root: preserve ownership and the setuid bit on
+# /usr/local/bin/appstrate-runner-exec — the uid-separation contract.
+docker export appstrate-fc-rootfs-export | $SUDO tar -xp --numeric-owner -C "$STAGING"
 docker rm -f appstrate-fc-rootfs-export >/dev/null
 
 # Docker export artifacts that must not leak into the guest.
-rm -rf "$STAGING/.dockerenv" "$STAGING/etc/hostname" "$STAGING/etc/resolv.conf" 2>/dev/null || true
-touch "$STAGING/etc/resolv.conf"
+$SUDO rm -rf "$STAGING/.dockerenv" "$STAGING/etc/hostname" "$STAGING/etc/resolv.conf" 2>/dev/null || true
+$SUDO touch "$STAGING/etc/resolv.conf"
 
 if [ -z "${ROOTFS_SIZE_MB:-}" ]; then
-  CONTENT_MB="$(du -sm "$STAGING" | cut -f1)"
+  CONTENT_MB="$($SUDO du -sm "$STAGING" | cut -f1)"
   ROOTFS_SIZE_MB=$(( CONTENT_MB * 14 / 10 + 64 ))
 fi
 
@@ -62,6 +69,9 @@ echo "==> Creating ext4 image (${ROOTFS_SIZE_MB} MB) at $OUT"
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
 truncate -s "${ROOTFS_SIZE_MB}M" "$OUT"
-mkfs.ext4 -q -d "$STAGING" "$OUT"
+$SUDO mkfs.ext4 -q -d "$STAGING" "$OUT"
+# The image file itself must stay owned by the invoking user (the
+# orchestrator reads it unprivileged).
+$SUDO chown "$(id -u):$(id -g)" "$OUT"
 
 echo "==> Done: $OUT ($(du -h "$OUT" | cut -f1), arch $ARCH)"

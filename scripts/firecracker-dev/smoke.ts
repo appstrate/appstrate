@@ -29,6 +29,8 @@ process.env.FIRECRACKER_DATA_DIR ??= "./data/firecracker/runs";
 
 const { FirecrackerOrchestrator } =
   await import("../../apps/api/src/services/orchestrator/firecracker/firecracker-orchestrator.ts");
+const { platformAliasIp } =
+  await import("../../apps/api/src/services/orchestrator/firecracker/subnet.ts");
 
 const RUN_ID = `smoke_${process.pid}`;
 
@@ -37,15 +39,43 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
+// Read the raw env (with the schema defaults) rather than @appstrate/env:
+// scripts/ is not a workspace package, so the alias does not resolve here.
+const aliasIp = platformAliasIp(process.env.FIRECRACKER_SUBNET_CIDR ?? "10.231.0.0/16");
+const platformPort = Number(process.env.PORT ?? "3000");
+
+// The probe script runs as the RESTRICTED agent (uid 1001, no
+// unrestricted_egress): direct internet egress must be firewall-dropped,
+// the platform alias must stay reachable, and the config drive must be
+// gone (unmounted before workloads start). Each probe prints a marker the
+// assertions below grep out of the serial console.
+const PROBE_SCRIPT = [
+  'echo "smoke-agent uid=$(id -u)"',
+  `if wget -q -T 3 -O /dev/null http://1.1.1.1/ 2>/dev/null; then echo "smoke-egress=open"; else echo "smoke-egress=blocked"; fi`,
+  `if wget -q -T 5 -O /dev/null "http://${aliasIp}:${platformPort}/" 2>/dev/null; then echo "smoke-platform=reachable"; else echo "smoke-platform=unreachable"; fi`,
+  'if cat /config/config.json >/dev/null 2>&1; then echo "smoke-config=readable"; else echo "smoke-config=hidden"; fi',
+  "exit 0",
+].join(" && ");
+
 const orch = new FirecrackerOrchestrator({
-  // Validates: overlay boot, config drive parse, guest firewall, setpriv
-  // uid drop (id -u must print the agent uid), clean exit marker.
-  agentArgvOverride: ["/bin/sh", "-c", 'echo "smoke-agent uid=$(id -u)" && exit 0'],
+  // Validates: overlay boot, config drive parse + unmount, guest firewall
+  // (egress blocked / platform allowed), setpriv uid drop (id -u must
+  // print the agent uid), nonce-authenticated exit marker.
+  agentArgvOverride: ["/bin/sh", "-c", PROBE_SCRIPT],
 });
 
 console.log("==> initialize");
 await orch.initialize();
 await orch.cleanupOrphans();
+
+// Stand-in for the platform API on the loopback alias — gives the guest's
+// "platform reachable" probe something to answer it. Bound AFTER
+// initialize() (which creates the alias).
+const platformStub = Bun.serve({
+  hostname: aliasIp,
+  port: platformPort,
+  fetch: () => new Response("ok"),
+});
 
 console.log("==> boundary");
 const boundary = await orch.createIsolationBoundary(RUN_ID);
@@ -93,11 +123,21 @@ try {
   if (!consoleLog.includes("[supervisor] sidecar pid")) {
     fail("supervisor did not report a sidecar pid");
   }
+  if (!consoleLog.includes("smoke-egress=blocked")) {
+    fail("restricted agent reached the internet directly — guest egress firewall not effective");
+  }
+  if (!consoleLog.includes("smoke-platform=reachable")) {
+    fail("agent could not reach the platform alias — host input allow or guest allow broken");
+  }
+  if (!consoleLog.includes("smoke-config=hidden")) {
+    fail("agent could read /config/config.json — config drive not unmounted before workloads");
+  }
 
   console.log("==> teardown");
   await orch.removeWorkload(sidecar);
   await orch.removeWorkload(agent);
 } finally {
+  platformStub.stop(true);
   await orch.removeIsolationBoundary(boundary).catch(() => {});
   await orch.shutdown().catch(() => {});
 }

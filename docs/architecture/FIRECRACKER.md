@@ -10,12 +10,14 @@ kernel, not the host.
 ```
 host (Linux + /dev/kvm)                    guest (one Firecracker microVM per run)
 ──────────────────────────                 ─────────────────────────────────────────
-platform API (:PORT)                       /sbin/appstrate-init  (PID 1, overlay + mounts)
-├─ lo alias 10.231.255.1/32   ◄── sink ──  └─ guest supervisor    (root, bun)
-├─ TAP afc<n> 10.231.x.y/30   ◄── eth0 ──     ├─ sidecar   uid 1000 — full egress
-├─ nft table appstrate_fc                     │   └─ integration runners (process adapter)
-│  (guest↔host/internet policy)               └─ agent     uid 1001 — lo + sink only
-└─ firecracker process (VMM)                      cwd /workspace, MCP → 127.0.0.1:8080
+platform API (:PORT)                       /sbin/appstrate-init  (PID 1, overlay + mounts,
+├─ lo alias 10.231.255.1/32   ◄── sink ──  │                      /proc hidepid=2)
+├─ TAP afc<n> 10.231.x.y/30   ◄── eth0 ──  └─ guest supervisor    (root, bun)
+├─ nft table appstrate_fc                     ├─ sidecar   uid 1000 — full egress
+│  (guest↔host/internet policy)               │   └─ integration runners uid 1002
+└─ firecracker process (VMM)                  │       (setuid wrapper, own uid, egress)
+                                              └─ agent     uid 1001 — lo + sink only
+                                                  cwd /workspace, MCP → 127.0.0.1:8080
 ```
 
 Design decision (vs one VM per workload): the sidecar, agent and integration
@@ -42,8 +44,16 @@ The platform is reachable from every guest at the **loopback alias**
 `x.y.255.1:PORT` (reserved last /24 of the pool) — `resolvePlatformApiUrl()`
 returns it, the host nft `input` chain only accepts that destination from
 `afc*`, everything else guest→host is dropped (guests must never reach Redis,
-the Docker socket, etc.). Guest→guest is dropped; guest→internet is
-masqueraded and reserved, inside the guest, to the sidecar uid.
+the Docker socket, etc.). Guest→guest is dropped; guest egress to cloud
+metadata (169.254.0.0/16) and RFC1918 ranges is dropped in the host `forward`
+chain (`FIRECRACKER_EGRESS_DENY_CIDRS`) — "egress" means the internet, never
+the host's private neighbourhood. Everything else guest→internet is
+masqueraded and reserved, inside the guest, to the sidecar/runner uids
+(default-deny `output` chain; IPv6 is disabled in the guest entirely).
+
+Fail-closed: `initialize()` sets up the host firewall; if it failed at boot,
+`createIsolationBoundary` refuses to start runs rather than running without
+host↔guest isolation.
 
 ## Launch sequence
 
@@ -58,11 +68,19 @@ masqueraded and reserved, inside the guest, to the sidecar uid.
    MMDS size limits), writes the Firecracker `vmconfig.json` (shared rootfs
    attached **read-only**), spawns the VMM. Serial console → `console.log`.
 4. Guest boots: kernel `ip=` statics eth0 → init overlays tmpfs on `/`
-   (pivot_root) → mounts the config drive → supervisor applies the uid
-   firewall → `setpriv` spawns sidecar (1000) then agent (1001).
-5. Agent exits → supervisor kills sidecar, prints `APPSTRATE_EXIT:<code>` on
-   the console, powers off (`reboot=k` → VMM exit). `waitForExit` returns the
-   marker code; a missing marker = crash (1) or kill (137).
+   (pivot_root, `/proc` mounted `hidepid=2`) → mounts the config drive →
+   supervisor applies the default-deny uid firewall → **unmounts the config
+   drive** (no workload can ever read the launch spec) → `setpriv` spawns
+   sidecar (1000; not hardened — it execs the setuid runner wrapper) then
+   agent (1001, `--no-new-privs --bounding-set -all`). Integration runners
+   exec through `appstrate-runner-exec` (setuid root, group-1000-only) and
+   land on uid 1002.
+5. Agent exits → supervisor kills sidecar, prints
+   `APPSTRATE_EXIT:<nonce>:<code>` on the console, powers off (`reboot=k` →
+   VMM exit). The nonce is a per-run random value from the config drive —
+   the console is shared with workload stdout, so an un-nonced marker is a
+   potential forgery and is ignored. `waitForExit` returns the authenticated
+   marker code; a missing/forged marker = crash (1) or kill (137).
 
 Timeout/cancel flow through `stopWorkload`/`stopByRunId` (graceful
 `SendCtrlAltDel` attempt, then SIGKILL). Orphans (crash recovery): run-dir
@@ -90,22 +108,26 @@ bun run firecracker:build          # rootfs + kernel
 
 ## Requirements & privileges
 
-- Linux + `/dev/kvm` (+ `firecracker` ≥1.16 and `mkfs.ext4` on PATH).
+- Linux + `/dev/kvm` (+ `firecracker` ≥1.16, `mkfs.ext4` and `debugfs`
+  — both from e2fsprogs — on PATH).
 - `ip`/`nft`/`sysctl` mutations run as root or via passwordless `sudo -n`
   (host-net executor prefixes sudo automatically when non-root).
 - Secrets hygiene: the per-run config drive holds the run's credentials on
-  disk (0600, deleted with the run) — point `FIRECRACKER_DATA_DIR` at a tmpfs
-  to keep them out of persistent storage.
+  disk (0600, in-image ownership forced to root:root 0400 via `debugfs`,
+  deleted with the run) — point `FIRECRACKER_DATA_DIR` at a tmpfs to keep
+  them out of persistent storage. In-guest, the drive is unmounted before
+  any workload starts.
 
 ## Env vars
 
-| Var                       | Default                          | Notes                             |
-| ------------------------- | -------------------------------- | --------------------------------- |
-| `FIRECRACKER_BIN`         | `firecracker`                    | VMM binary                        |
-| `FIRECRACKER_KERNEL_PATH` | `./data/firecracker/vmlinux`     | guest kernel                      |
-| `FIRECRACKER_ROOTFS_PATH` | `./data/firecracker/rootfs.ext4` | shared read-only rootfs           |
-| `FIRECRACKER_DATA_DIR`    | `./data/firecracker/runs`        | per-run state (tmpfs recommended) |
-| `FIRECRACKER_SUBNET_CIDR` | `10.231.0.0/16`                  | /16 pool → per-run /30            |
+| Var                             | Default                          | Notes                                            |
+| ------------------------------- | -------------------------------- | ------------------------------------------------ |
+| `FIRECRACKER_BIN`               | `firecracker`                    | VMM binary                                       |
+| `FIRECRACKER_KERNEL_PATH`       | `./data/firecracker/vmlinux`     | guest kernel                                     |
+| `FIRECRACKER_ROOTFS_PATH`       | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                          |
+| `FIRECRACKER_DATA_DIR`          | `./data/firecracker/runs`        | per-run state (tmpfs recommended)                |
+| `FIRECRACKER_SUBNET_CIDR`       | `10.231.0.0/16`                  | /16 pool → per-run /30                           |
+| `FIRECRACKER_EGRESS_DENY_CIDRS` | metadata + RFC1918               | forward-path destinations guests may never reach |
 
 ## Development on macOS
 
@@ -131,10 +153,14 @@ with a trivial agent argv.
 
 - **Boot latency**: VM boot + in-guest bun cold start on every run; no
   snapshot support yet (Firecracker snapshots are the planned optimization).
-- **Integration runners** share the sidecar uid inside the guest (process
-  adapter semantics) — same trust model as `RUN_ADAPTER=process` for
-  runner-vs-sidecar, but hardware-isolated from the host.
-- **No jailer yet**: the VMM runs unjailed (chroot/cgroup hardening of the
-  firecracker process itself is a planned follow-up).
+- **No connect-runs**: the VM boots once, driven by the agent workload; a
+  sidecar-only workload (connect-run) cannot start. The connect executor
+  fails fast (`ConnectNotSupportedError`) — use docker/process for connect
+  flows.
+- **No jailer yet**: the VMM runs unjailed — a VMM escape lands on the API
+  uid, which holds passwordless `sudo ip/nft/sysctl`. chroot/cgroup/seccomp
+  hardening of the firecracker process itself (the upstream `jailer`) is a
+  planned follow-up tracked separately; until then treat the host's sudoers
+  entry as part of the platform's TCB.
 - Workspace and rootfs overlay are tmpfs-backed → bounded by guest RAM
   (`vmSizing` adds a fixed envelope over the agent budget).

@@ -43,7 +43,9 @@ if [ $? -ne 0 ]; then
 fi
 
 # --- Pseudo-filesystems (new root) -----------------------------------------
-mount -t proc     proc     /proc
+# hidepid=2: a workload uid must not enumerate (or read the environ of)
+# another uid's processes — the sidecar env holds the run's credentials.
+mount -t proc     -o hidepid=2 proc /proc
 mount -t sysfs    sysfs    /sys     2>/dev/null || true
 mount -t devtmpfs devtmpfs /dev     2>/dev/null || true
 mkdir -p /dev/pts /dev/shm
@@ -56,7 +58,12 @@ ip link set lo up 2>/dev/null || true
 printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
 chmod 1777 /tmp
 mkdir -p /workspace /home/pi
-chown 1001:1001 /workspace /home/pi
+chown 1001:1001 /home/pi
+# Shared workspace: agent (1001) owns it; integration runners (1002) reach
+# it through the `workspace` group (1003, baked into the rootfs). setgid
+# keeps files created by either side group-shared.
+chown 1001:1003 /workspace
+chmod 2775 /workspace
 
 # --- Config drive (second virtio-block device, read-only ext4) --------------
 mkdir -p /config
