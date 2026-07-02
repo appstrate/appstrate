@@ -280,6 +280,36 @@ export interface RunOrchestrator {
   resolvePlatformApiUrl(): Promise<string>;
 }
 
+/**
+ * Registration entry for an execution backend, keyed by `RUN_ADAPTER` value
+ * in the orchestrator registry. Core registers its own backends (docker,
+ * process); modules contribute additional ones via
+ * `AppstrateModule.orchestrators()`. A backend's security capabilities are
+ * declared here — the platform trusts the declaration (a module listed in
+ * `MODULES` is operator-installed code), but unknown ids always degrade to
+ * "no capability" (fail-closed).
+ */
+export interface OrchestratorRegistration {
+  /**
+   * Whether this backend places each run inside a real isolation boundary
+   * (container, microVM) that keeps run credentials out of the host API
+   * process. Security-sensitive: the subscription-run policy refuses
+   * OAuth-subscription agent runs on any backend that does not declare
+   * this — a new backend is untrusted until it opts in explicitly.
+   */
+  readonly isolatesWorkloads: boolean;
+  /**
+   * Whether this backend can run a sidecar-only workload (no agent) —
+   * the shape connect-runs use. Backends whose workload lifecycle is
+   * driven by the agent (e.g. a one-shot microVM boot) cannot: a
+   * sidecar-only launch would silently never start. Connect fails fast
+   * instead.
+   */
+  readonly supportsSidecarOnly: boolean;
+  /** Build a fresh orchestrator instance. Called once per process (singleton held by the registry consumer). */
+  readonly create: () => RunOrchestrator;
+}
+
 // ---------------------------------------------------------------------------
 // Inline run — request body
 // ---------------------------------------------------------------------------

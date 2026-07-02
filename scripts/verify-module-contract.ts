@@ -78,6 +78,7 @@ const MODULE_TENANT: Record<string, Tenant> = {
   oidc: "oss",
   webhooks: "oss",
   "core-providers": "oss",
+  firecracker: "oss",
   "module-codex": "oss",
   "module-claude-code": "oss",
   "module-chat": "oss",
@@ -95,6 +96,7 @@ const DECLARER_ROOTS: Record<string, string> = {
   oidc: "appstrate/apps/api/src/modules/oidc",
   webhooks: "appstrate/apps/api/src/modules/webhooks",
   "core-providers": "appstrate/apps/api/src/modules/core-providers",
+  firecracker: "appstrate/apps/api/src/modules/firecracker",
   "module-codex": "appstrate/packages/module-codex/src",
   "module-claude-code": "appstrate/packages/module-claude-code/src",
   "module-chat": "appstrate/packages/module-chat/src",
@@ -158,6 +160,13 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
     owners: ["oidc"],
     justification:
       "Structured (non-boolean) injection into core buildAppConfig(); features holds booleans only.",
+  },
+  orchestrators: {
+    kind: "seam",
+    owners: ["firecracker"],
+    justification:
+      "Execution backends beyond core docker/process plug into the orchestrator registry — " +
+      "firecracker is the reference (and only) contributor; core stays free of KVM/Linux code.",
   },
   emailOverrides: {
     kind: "seam",

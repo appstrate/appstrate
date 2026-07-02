@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@appstrate/core/module`** — new optional extension point
+  `AppstrateModule.orchestrators?(): Record<string, OrchestratorRegistration>`.
+  Modules can contribute execution backends (run orchestrators) keyed by
+  `RUN_ADAPTER` value; a duplicate id across modules/core is a fatal boot
+  error. The registration type (`isolatesWorkloads`, `supportsSidecarOnly`,
+  `create`) lives in `@appstrate/core/platform-types` next to
+  `RunOrchestrator`.
 - **`@appstrate/core/subscription-engines`** — the provider→execution-engine
   binding registry contract: the `"claude"|"codex"` engine vocabulary, the
   binding shape (credential-delivery mode, egress allowlist, native-output
