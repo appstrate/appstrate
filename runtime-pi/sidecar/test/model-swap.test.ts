@@ -16,6 +16,8 @@ import {
   createSseModelSwapStream,
   scrubModelText,
   isAliasableApiShape,
+  hostnameOf,
+  SCRUBBED_HOST_MARKER,
 } from "../model-swap.ts";
 
 const swap = { alias: "appstrate-medium", real: "deepseek-chat" };
@@ -237,6 +239,61 @@ describe("scrubModelText (error-body blind scrub)", () => {
   it("no-ops cleanly when alias === real", () => {
     const noop = { alias: "deepseek-chat", real: "deepseek-chat" };
     expect(scrubModelText("model deepseek-chat down", noop)).toBe("model deepseek-chat down");
+  });
+
+  it("masks the real hostname when realHost is set", () => {
+    const hostSwap = { ...swap, realHost: "api.deepseek.com" };
+    const out = scrubModelText(
+      "ConnectionRefused (api.deepseek.com): model deepseek-chat unreachable",
+      hostSwap,
+    );
+    expect(out).not.toContain("api.deepseek.com");
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).toContain(`(${SCRUBBED_HOST_MARKER})`);
+    expect(out).toContain("appstrate-medium");
+  });
+
+  it("leaves hostnames untouched when realHost is absent", () => {
+    const body = "ConnectionRefused (api.deepseek.com)";
+    // No realHost — only the model id is scrubbed, and it isn't mentioned.
+    expect(scrubModelText(body, swap)).toBe(body);
+  });
+});
+
+describe("hostnameOf", () => {
+  it("extracts the hostname from a base URL", () => {
+    expect(hostnameOf("https://api.deepseek.com/v1")).toBe("api.deepseek.com");
+  });
+
+  it("returns undefined on an unparsable URL", () => {
+    expect(hostnameOf("not a url")).toBeUndefined();
+    expect(hostnameOf("")).toBeUndefined();
+  });
+});
+
+describe("createSseModelSwapStream — mid-stream error frames", () => {
+  it("scrubs free-form prose in an Anthropic error frame", async () => {
+    const input =
+      `event: error\n` +
+      `data: {"type":"error","error":{"type":"overloaded_error","message":"model deepseek-chat is overloaded"}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).toContain("appstrate-medium");
+  });
+
+  it("scrubs an OpenAI-family top-level error frame", async () => {
+    const input = `data: {"error":{"message":"deepseek-chat quota exceeded","code":429}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).toContain("appstrate-medium");
+  });
+
+  it("still never clobbers the real id inside a content delta (non-error frame)", async () => {
+    const input = `data: {"model":"deepseek-chat","choices":[{"delta":{"content":"I am deepseek-chat"}}]}\n\n`;
+    const out = await pipeSse(input);
+    // Exact-field rewritten, prose content preserved.
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).toContain("I am deepseek-chat");
   });
 });
 

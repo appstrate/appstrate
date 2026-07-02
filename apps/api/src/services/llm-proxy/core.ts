@@ -30,6 +30,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
+import { hostnameOf } from "@appstrate/core/model-swap";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
@@ -79,9 +80,12 @@ export class LlmProxyModelApiMismatchError extends Error {
  * here — this gateway never forges).
  */
 export class LlmProxyUnsupportedSubscriptionError extends Error {
+  // `providerId` stays a property for server-side logging only — the message
+  // is caller-facing and must not name the backing provider (an aliased
+  // model's whole point is that the caller never learns it).
   constructor(public readonly providerId: string) {
     super(
-      `Provider "${providerId}" is an OAuth subscription and cannot be served through ` +
+      `This model is backed by an OAuth subscription and cannot be served through ` +
         `this gateway (no fingerprint forging). Subscription chat is only available when ` +
         `the provider's subscription engine has a dedicated official-binary SDK gateway; ` +
         `this credential's engine has none. Use an API-key model instead.`,
@@ -121,8 +125,12 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // dashboard `jwt_user`) never sees the backing. The request `model` was
   // already rewritten alias→real by `request.rewriteModel` above. This mirrors
   // the in-container sidecar path; both share `@appstrate/core/model-swap`.
+  // `realHost` extends the scrub to the backing hostname in error prose
+  // (provider error bodies, gateway messages) — the host identifies the
+  // backing as surely as the model id.
+  const realHost = resolved.aliased ? hostnameOf(resolved.baseUrl) : undefined;
   const swap: ModelSwap | null = resolved.aliased
-    ? { alias: presetId, real: resolved.modelId }
+    ? { alias: presetId, real: resolved.modelId, ...(realHost ? { realHost } : {}) }
     : null;
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
@@ -160,7 +168,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // documented fail-closed consumer of `@appstrate/core/ssrf`.
   if (isBlockedUrl(upstreamUrl)) {
     logger.error("llm-proxy: refused blocked upstream (SSRF)", { presetId, upstreamUrl });
-    throw invalidRequest(`Refusing to proxy to a blocked address: ${resolved.baseUrl}`);
+    // Generic message: the resolved base URL is the real backing (hidden for
+    // aliased models) — it belongs in the server log above, never in the
+    // caller-facing error body.
+    throw invalidRequest(`Model "${presetId}" resolves to a blocked address — refusing to proxy.`);
   }
 
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(

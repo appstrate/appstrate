@@ -26,6 +26,7 @@ import {
   swapResponseModelJson,
   createSseModelSwapStream,
   scrubModelText,
+  SCRUBBED_HOST_MARKER,
 } from "./model-swap.ts";
 import { applyClaudeOauthGatewayHeaders } from "@appstrate/core/claude-oauth-gateway";
 import {
@@ -329,12 +330,23 @@ async function logOauthLlmResponse(
   return upstream;
 }
 
-function llmFetchErrorResponse(c: Context, targetUrl: string, err: unknown): Response {
+function llmFetchErrorResponse(
+  c: Context,
+  targetUrl: string,
+  err: unknown,
+  swap?: ModelSwap,
+): Response {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   let domain: string | undefined;
   try {
     domain = new URL(targetUrl).hostname;
   } catch {}
+  // Model alias: the hostname IS the backing provider ("api.deepseek.com"
+  // identifies it as surely as the model id) — the agent must never see it.
+  // Replace with a neutral marker unconditionally when a swap is configured,
+  // not via scrubModelText, so the guarantee doesn't depend on `realHost`
+  // having been populated by the platform.
+  if (swap) domain = SCRUBBED_HOST_MARKER;
   const suffix = code ? `: ${code}` : "";
   const domainHint = domain ? ` (${domain})` : "";
   return c.json({ error: `LLM request failed${suffix}${domainHint}` }, 502);
@@ -631,7 +643,7 @@ export function createApp(deps: AppDeps): Hono {
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
       });
     } catch (err) {
-      return llmFetchErrorResponse(c, targetUrl, err);
+      return llmFetchErrorResponse(c, targetUrl, err, apiKeyConfig.modelSwap);
     }
 
     return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
@@ -716,7 +728,7 @@ export function createApp(deps: AppDeps): Hono {
         targetUrl,
         error: err instanceof Error ? err.message : String(err),
       });
-      return llmFetchErrorResponse(c, targetUrl, err);
+      return llmFetchErrorResponse(c, targetUrl, err, llmConfig.modelSwap);
     }
 
     upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);

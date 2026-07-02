@@ -52,6 +52,7 @@ import {
 import { getEnv } from "@appstrate/env";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
+import { hostnameOf } from "@appstrate/core/model-swap";
 
 /**
  * Grace added to the platform's container watchdog on top of the agent's
@@ -220,8 +221,16 @@ async function runPlatformContainerImpl(
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
     // real upstream id on every call. The real id never enters the container.
+    // `realHost` lets the sidecar scrub the backing hostname out of error
+    // prose (fetch failures, provider error bodies) — it identifies the
+    // backing as surely as the model id.
+    const realHost = llmConfig.aliased ? hostnameOf(llmConfig.baseUrl) : undefined;
     const modelSwap = llmConfig.aliased
-      ? { alias: llmConfig.aliasId, real: llmConfig.modelId }
+      ? {
+          alias: llmConfig.aliasId,
+          real: llmConfig.modelId,
+          ...(realHost ? { realHost } : {}),
+        }
       : undefined;
 
     // Engine selection (Pi vs the official Claude Agent SDK). Resolved from the

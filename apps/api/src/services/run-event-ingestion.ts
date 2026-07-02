@@ -48,6 +48,8 @@ import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
+import { listAliasSwapsForOrg } from "./org-models.ts";
+import { scrubModelText } from "@appstrate/core/model-swap";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
@@ -353,6 +355,18 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     if (runHadZeroTokens(validatedUsage)) {
       status = "failed";
       errorMessage = llmUnreachableMessage(run);
+    }
+  }
+
+  // 3b. Model-alias scrub on the terminal error — defense-in-depth at the last
+  //     platform boundary before the message fans out (runs.error → run DTO,
+  //     `run_update` SSE, terminal run_log, webhook payload). The sidecar
+  //     already scrubs its own responses, but the runner-supplied message can
+  //     carry upstream prose the sidecar never saw. The run's own swap isn't
+  //     persisted, so scrub against every alias visible to the org.
+  if (errorMessage) {
+    for (const aliasSwap of await listAliasSwapsForOrg(run.orgId)) {
+      errorMessage = scrubModelText(errorMessage, aliasSwap);
     }
   }
 

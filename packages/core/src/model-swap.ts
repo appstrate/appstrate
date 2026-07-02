@@ -141,10 +141,47 @@ export function swapResponseModelJson(bodyText: string, swap: ModelSwap): string
  * field swap misses it. An error body carries no generated content, so a blind
  * replace cannot clobber anything meaningful. No-op when the body doesn't
  * mention the real id (the common case).
+ *
+ * When `swap.realHost` is set, the backing hostname is masked the same way
+ * ("ConnectionRefused (api.deepseek.com)" identifies the provider as surely as
+ * the model id) — replaced with a neutral `upstream` marker, since there is no
+ * alias hostname to substitute.
  */
+export const SCRUBBED_HOST_MARKER = "upstream";
+
+/**
+ * Hostname of a base URL, for {@link ModelSwap.realHost}. Returns `undefined`
+ * on an unparsable URL — the swap then simply skips host scrubbing.
+ */
+export function hostnameOf(url: string): string | undefined {
+  try {
+    return new URL(url).hostname || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function scrubModelText(text: string, swap: ModelSwap): string {
-  if (!text.includes(swap.real)) return text;
-  return text.split(swap.real).join(swap.alias);
+  let out = text;
+  if (out.includes(swap.real)) out = out.split(swap.real).join(swap.alias);
+  if (swap.realHost && out.includes(swap.realHost)) {
+    out = out.split(swap.realHost).join(SCRUBBED_HOST_MARKER);
+  }
+  return out;
+}
+
+/**
+ * True when a parsed SSE frame is an error event — Anthropic emits
+ * `{"type":"error","error":{...}}`, OpenAI-family streams emit a top-level
+ * `error` object. Error frames carry no generated content, so the blind
+ * {@link scrubModelText} prose scrub is safe on them (and required: the real
+ * id / hostname sits in free-form `error.message` prose the exact-field
+ * rewrite can't reach).
+ */
+function isSseErrorFrame(obj: unknown): boolean {
+  if (!obj || typeof obj !== "object") return false;
+  const o = obj as Record<string, unknown>;
+  return o["type"] === "error" || (typeof o["error"] === "object" && o["error"] !== null);
 }
 
 /** Rewrite a single SSE line's `model` real→alias (data lines only). */
@@ -152,12 +189,18 @@ function rewriteSseLine(line: string, swap: ModelSwap): string {
   if (!line.startsWith("data:")) return line;
   const payload = line.slice("data:".length).trimStart();
   // Fast skip: the [DONE] sentinel and any chunk that doesn't mention the real
-  // id (the vast majority — content deltas) need no parse.
-  if (payload === "[DONE]" || !payload.includes(swap.real)) return line;
+  // id or host (the vast majority — content deltas) need no parse.
+  const mentionsBacking =
+    payload.includes(swap.real) || (swap.realHost !== undefined && payload.includes(swap.realHost));
+  if (payload === "[DONE]" || !mentionsBacking) return line;
   try {
     const obj = JSON.parse(payload);
     rewriteModelRealToAlias(obj, swap);
-    return `data: ${JSON.stringify(obj)}`;
+    const rewritten = JSON.stringify(obj);
+    // Mid-stream error frames name the backing in free-form prose — scrub the
+    // whole frame. Never blind-replace a non-error frame: generated content
+    // mentioning the real id must not be clobbered.
+    return `data: ${isSseErrorFrame(obj) ? scrubModelText(rewritten, swap) : rewritten}`;
   } catch {
     return line;
   }
