@@ -25,6 +25,10 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+// Wire contract shared with the host-side producer (vm-config.ts's
+// buildGuestConfig). Type-only: erased by `bun build`, so the supervisor
+// bundle stays self-contained.
+import type { GuestConfig } from "./guest-config.ts";
 
 const GUEST_SIDECAR_UID = "1000";
 const GUEST_AGENT_UID = "1001";
@@ -32,23 +36,6 @@ const GUEST_AGENT_USER = "pi"; // uid 1001, baked into the rootfs
 const SIDECAR_BIN = "/usr/local/bin/sidecar";
 const AGENT_ENTRY = "/runtime/dist/entrypoint.js";
 const CONFIG_PATH = "/config/config.json";
-
-interface GuestConfig {
-  run_id: string;
-  network: { platform_ip: string; platform_port: number };
-  sidecar: { enabled: boolean; env: Record<string, string> };
-  agent: {
-    env: Record<string, string>;
-    unrestricted_egress: boolean;
-    /**
-     * Agent command override. Absent in production (the orchestrator
-     * always launches the baked runtime entrypoint); the dev smoke
-     * harness (scripts/firecracker-dev/) sets it to validate the boot
-     * machinery without a live platform.
-     */
-    argv?: string[];
-  };
-}
 
 function log(msg: string): void {
   process.stdout.write(`[supervisor] ${msg}\n`);

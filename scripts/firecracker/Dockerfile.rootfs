@@ -40,10 +40,11 @@ RUN apk add --no-cache nftables setpriv \
 COPY --from=sidecar /usr/local/bin/sidecar /usr/local/bin/sidecar
 
 # Guest supervisor, pre-bundled to a single file for cold-start speed.
-# It only imports node builtins, so the bundle is self-contained.
-COPY runtime-pi/guest/supervisor.ts /tmp/supervisor.ts
-RUN bun build /tmp/supervisor.ts --target=bun --outfile=/runtime/guest/supervisor.js \
- && rm /tmp/supervisor.ts
+# It only imports node builtins plus the type-only wire contract
+# (guest-config.ts, erased at bundle), so the bundle is self-contained.
+COPY runtime-pi/guest/supervisor.ts runtime-pi/guest/guest-config.ts /tmp/guest/
+RUN bun build /tmp/guest/supervisor.ts --target=bun --outfile=/runtime/guest/supervisor.js \
+ && rm -r /tmp/guest
 
 # PID 1.
 COPY --chmod=0755 runtime-pi/guest/init.sh /sbin/appstrate-init

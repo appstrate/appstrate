@@ -14,6 +14,14 @@
  */
 
 import type { RunSubnet } from "./subnet.ts";
+// The config-drive wire contract is shared with its in-guest consumer —
+// single definition next to the supervisor, imported type-only.
+import type {
+  GuestConfig,
+  GuestNetworkConfig,
+} from "../../../../../../runtime-pi/guest/guest-config.ts";
+
+export type { GuestConfig, GuestNetworkConfig };
 
 /** Fixed uid/gid the guest supervisor uses for the sidecar process. */
 export const GUEST_SIDECAR_UID = 1000;
@@ -22,39 +30,6 @@ export const GUEST_AGENT_UID = 1001;
 
 /** Serial-console marker the guest supervisor prints right before shutdown. */
 const EXIT_MARKER = /APPSTRATE_EXIT:(\d+)/;
-
-export interface GuestNetworkConfig {
-  /** Loopback-alias IP of the platform API, reachable via the guest's gateway. */
-  platform_ip: string;
-  platform_port: number;
-}
-
-/** `config.json` consumed by the guest supervisor (snake_case wire). */
-export interface GuestConfig {
-  run_id: string;
-  network: GuestNetworkConfig;
-  sidecar: {
-    enabled: boolean;
-    env: Record<string, string>;
-  };
-  agent: {
-    env: Record<string, string>;
-    /**
-     * skipSidecar runs have no in-guest egress proxy — the agent itself
-     * must reach the upstream LLM, so the supervisor skips the uid-based
-     * egress restriction for it. Sidecar-backed runs keep it: the agent
-     * may only talk to loopback (sidecar) and the platform sink.
-     */
-    unrestricted_egress: boolean;
-    /**
-     * Agent command override — NEVER set on production runs (the guest
-     * supervisor defaults to the baked runtime entrypoint). Exists for
-     * the dev smoke harness, which validates the boot machinery with a
-     * trivial command instead of a live platform run.
-     */
-    argv?: string[];
-  };
-}
 
 export interface BuildGuestConfigInput {
   runId: string;

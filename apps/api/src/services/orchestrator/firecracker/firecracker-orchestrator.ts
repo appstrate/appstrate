@@ -197,7 +197,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
     let entries: string[];
     try {
-      entries = (await readdir(dataDir)) as unknown as string[];
+      entries = await readdir(dataDir);
     } catch {
       entries = [];
     }

@@ -100,9 +100,10 @@ describe("buildOauthSidecarLlm", () => {
 });
 
 describe("assertSubscriptionEngineIsolation", () => {
-  // The guard now consumes the engine resolved by resolveCredentialDelivery
-  // (claude → subscription engine, pi → API-key) rather than re-reading the
-  // registry; the isolation contract refuses exactly the in-host mode.
+  // The guard consumes the engine resolved by resolveCredentialDelivery
+  // (claude → subscription engine, pi → API-key) and allowlists against the
+  // orchestrator registry's `isolatesWorkloads` flag — any backend that
+  // never declared isolation is refused, not just the known in-host mode.
   it("rejects a claude-code subscription run under the process orchestrator", () => {
     expect(() =>
       assertSubscriptionEngineIsolation({
@@ -131,6 +132,19 @@ describe("assertSubscriptionEngineIsolation", () => {
         orchestratorMode: "firecracker",
       }),
     ).not.toThrow();
+  });
+
+  it("fails closed: a backend that never declared isolation is refused", () => {
+    // A future RUN_ADAPTER value that passed env validation but whose
+    // registration forgot `isolatesWorkloads: true` must be refused by
+    // default — the guard is an allowlist, not a denylist of known-bad modes.
+    expect(() =>
+      assertSubscriptionEngineIsolation({
+        engine: "claude",
+        providerId: "claude-code",
+        orchestratorMode: "some-future-backend" as never,
+      }),
+    ).toThrow(SubscriptionRequiresIsolationError);
   });
 
   it("allows an API-key provider under either orchestrator mode", () => {

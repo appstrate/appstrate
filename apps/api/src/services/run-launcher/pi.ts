@@ -171,8 +171,9 @@ async function runPlatformContainerImpl(
     });
 
     // Fail-closed BEFORE provisioning any isolation boundary: a subscription
-    // AGENT run (claude-code → Claude Agent SDK) must execute under the docker
-    // orchestrator. The process orchestrator runs in-host and would expose the
+    // AGENT run (claude-code → Claude Agent SDK) must execute under an
+    // orchestrator that declares `isolatesWorkloads` (docker, firecracker).
+    // The process orchestrator runs in-host and would expose the
     // subscription credential to the API process. API-key providers are
     // unaffected. Consumes the engine already resolved above.
     assertSubscriptionEngineIsolation({

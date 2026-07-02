@@ -5,6 +5,8 @@ import {
   registerOrchestrator,
   selectOrchestrator,
   listOrchestratorIds,
+  orchestratorIsolatesWorkloads,
+  isolatingOrchestratorIds,
 } from "../../../../src/services/orchestrator/registry.ts";
 import type { RunOrchestrator } from "@appstrate/core/platform-types";
 
@@ -14,19 +16,35 @@ const fake = { marker: "fake" } as unknown as RunOrchestrator;
 
 describe("orchestrator registry", () => {
   it("resolves a registered backend by id", () => {
-    registerOrchestrator({ id: "test-backend-a", create: () => fake });
+    registerOrchestrator({ id: "test-backend-a", isolatesWorkloads: false, create: () => fake });
     expect(selectOrchestrator("test-backend-a")).toBe(fake);
     expect(listOrchestratorIds()).toContain("test-backend-a");
   });
 
   it("rejects duplicate registrations", () => {
-    registerOrchestrator({ id: "test-backend-dup", create: () => fake });
-    expect(() => registerOrchestrator({ id: "test-backend-dup", create: () => fake })).toThrow(
-      /already registered/,
-    );
+    registerOrchestrator({ id: "test-backend-dup", isolatesWorkloads: false, create: () => fake });
+    expect(() =>
+      registerOrchestrator({
+        id: "test-backend-dup",
+        isolatesWorkloads: false,
+        create: () => fake,
+      }),
+    ).toThrow(/already registered/);
   });
 
   it("names the known backends when the id is unknown", () => {
     expect(() => selectOrchestrator("no-such-backend")).toThrow(/registered orchestrators:/);
+  });
+
+  it("exposes the isolation flag as declared", () => {
+    registerOrchestrator({ id: "test-backend-iso", isolatesWorkloads: true, create: () => fake });
+    expect(orchestratorIsolatesWorkloads("test-backend-iso")).toBe(true);
+    expect(orchestratorIsolatesWorkloads("test-backend-a")).toBe(false);
+    expect(isolatingOrchestratorIds()).toContain("test-backend-iso");
+    expect(isolatingOrchestratorIds()).not.toContain("test-backend-a");
+  });
+
+  it("fails closed: an unknown backend does not isolate", () => {
+    expect(orchestratorIsolatesWorkloads("never-registered")).toBe(false);
   });
 });
