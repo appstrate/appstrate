@@ -234,6 +234,12 @@ async function handleProxy(
       throw invalidRequest(err.message);
     }
     if (err instanceof LlmProxyUnsupportedSubscriptionError) {
+      // The backing provider id is server-log-only — the caller-facing
+      // message deliberately doesn't name it (model-alias masking).
+      logger.warn("llm-proxy: rejected OAuth-subscription model", {
+        providerId: err.providerId,
+        orgId,
+      });
       throw invalidRequest(err.message, "model");
     }
     if (err instanceof LlmProxyModelApiMismatchError) {

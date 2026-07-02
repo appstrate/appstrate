@@ -622,9 +622,15 @@ export async function listOrgModelProviderCredentials(
     mapSystem: (id, def): ModelProviderCredentialInfo => {
       const provider = getModelProvider(def.providerId);
       const aliasOnly = aliasOnlySystemCredentials.has(id);
+      // Alias-only: the displayName/providerId label fallbacks NAME the hidden
+      // backing ("DeepSeek") — as revealing as the nulled apiShape/baseUrl.
+      // Without an explicit env label, fall back to a neutral one.
+      const label = aliasOnly
+        ? (def.label ?? "System models")
+        : (def.label ?? provider?.displayName ?? def.providerId);
       return {
         id,
-        label: def.label ?? provider?.displayName ?? def.providerId,
+        label,
         apiShape: aliasOnly ? null : def.apiShape,
         baseUrl: aliasOnly ? null : def.baseUrl,
         source: "built-in",

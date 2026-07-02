@@ -523,6 +523,13 @@ export interface ModelSwap {
   alias: string;
   /** Real upstream model id forwarded to the provider. */
   real: string;
+  /**
+   * Hostname of the real upstream base URL (e.g. `api.deepseek.com`). Used by
+   * {@link scrubModelText} to mask the backing host in error prose — provider
+   * error bodies and locally-synthesized fetch-failure messages can name the
+   * host, which identifies the backing as surely as the model id does.
+   */
+  realHost?: string;
 }
 
 export interface LlmProxyApiKeyConfig {

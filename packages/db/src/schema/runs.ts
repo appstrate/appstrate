@@ -457,6 +457,10 @@ export const llmUsage = pgTable(
     model: text("model"),
     // Upstream model id the proxy actually forwarded — resolved from the
     // preset via `loadModel()`. Optional on runner rows.
+    // SERVER-SIDE ONLY: for an aliased model this is the hidden backing id.
+    // Never serialize it on any caller-facing surface (route, DTO, SSE,
+    // webhook) — `listLlmUsageForRun` deliberately selects only
+    // id/costUsd/source. Same for `api` below (backing protocol family).
     realModel: text("real_model"),
     // Protocol family: "openai-completions", "anthropic-messages", …
     // Optional on runner rows.

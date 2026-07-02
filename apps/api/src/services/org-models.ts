@@ -17,7 +17,8 @@ import {
   loadCredentialRow,
   loadCredentialMetadata,
 } from "./model-providers/credentials.ts";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelApiShape, ModelSwap } from "@appstrate/core/sidecar-types";
+import { hostnameOf } from "@appstrate/core/model-swap";
 import {
   getResolvedModel,
   setResolvedModel,
@@ -229,6 +230,31 @@ export async function listOrgModels(
       };
     },
   }).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Every model-alias swap visible to an org, for scrubbing free-form text
+ * (run terminal errors) that may name a real backing id or hostname. Uses the
+ * metadata-only credential resolution — no secret is decrypted. Failures
+ * degrade to an empty list (scrubbing is defense-in-depth, never a reason to
+ * fail a finalize).
+ */
+export async function listAliasSwapsForOrg(orgId: string): Promise<ModelSwap[]> {
+  try {
+    const models = await listOrgModels(orgId, { metadataOnly: true });
+    return models
+      .filter((m) => m.aliased && m.modelId)
+      .map((m) => {
+        const realHost = m.baseUrl ? hostnameOf(m.baseUrl) : undefined;
+        return { alias: m.id, real: m.modelId as string, ...(realHost ? { realHost } : {}) };
+      });
+  } catch (err) {
+    logger.warn("org-models: alias-swap listing failed — skipping scrub", {
+      orgId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
 }
 
 /**

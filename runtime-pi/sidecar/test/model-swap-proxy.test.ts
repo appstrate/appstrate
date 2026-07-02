@@ -114,6 +114,74 @@ describe("/llm/* model-alias swap (api_key)", () => {
     expect(text).toContain("appstrate-medium");
   });
 
+  it("masks the upstream hostname in a fetch-level 502 (alias)", async () => {
+    // ConnectionRefused/DNS/TLS never produce a Response — the sidecar
+    // synthesizes the 502 body itself. With an alias, the real hostname
+    // ("api.deepseek.com") identifies the backing and must be masked.
+    const err = Object.assign(new Error("connect ECONNREFUSED"), { code: "ConnectionRefused" });
+    const fetchFn = mock(async () => {
+      throw err;
+    }) as unknown as typeof fetch;
+
+    const app = createApp(makeDeps(fetchFn));
+    const res = await app.request("/llm/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
+    });
+    expect(res.status).toBe(502);
+    const text = await res.text();
+    expect(text).not.toContain("deepseek");
+    expect(text).toContain("ConnectionRefused");
+    expect(text).toContain("(upstream)");
+  });
+
+  it("keeps the upstream hostname in a fetch-level 502 when NOT aliased", async () => {
+    const err = Object.assign(new Error("connect ECONNREFUSED"), { code: "ConnectionRefused" });
+    const fetchFn = mock(async () => {
+      throw err;
+    }) as unknown as typeof fetch;
+
+    const deps = makeDeps(fetchFn);
+    delete (deps.config.llm as { modelSwap?: unknown }).modelSwap;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "deepseek-chat", messages: [] }),
+    });
+    expect(res.status).toBe(502);
+    expect(await res.text()).toContain("api.deepseek.com");
+  });
+
+  it("scrubs the real hostname from an upstream error body when realHost is set", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: { message: "Upstream api.deepseek.com rejected the request" },
+          }),
+          { status: 503, headers: { "Content-Type": "application/json" } },
+        ),
+    ) as unknown as typeof fetch;
+
+    const deps = makeDeps(fetchFn);
+    (deps.config.llm as { modelSwap: unknown }).modelSwap = {
+      ...SWAP,
+      realHost: "api.deepseek.com",
+    };
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
+    });
+    expect(res.status).toBe(503);
+    const text = await res.text();
+    expect(text).not.toContain("api.deepseek.com");
+    expect(text).toContain("upstream");
+  });
+
   it("rewrites the streaming (SSE) response model real→alias in every chunk", async () => {
     const sse =
       `data: {"object":"chat.completion.chunk","model":"deepseek-chat","choices":[]}\n\n` +

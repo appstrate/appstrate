@@ -200,6 +200,89 @@ describe("guardSseTeardown", () => {
     expect(out).not.toContain("real-model");
   });
 
+  it("alias: strips provider-fingerprinting response headers, keeps the operational set", async () => {
+    const upstream = new Response('{"error":{"message":"overloaded"}}', {
+      status: 529,
+      headers: {
+        "content-type": "application/json",
+        server: "cloudflare",
+        "cf-ray": "8d2-CDG",
+        "anthropic-organization-id": "org_123",
+        "openai-organization": "org-abc",
+        "retry-after": "7",
+        "x-request-id": "req_1",
+      },
+    });
+    const ctx: MeteredForwardContext = {
+      principal: { kind: "jwt_user", userId: "u", orgId: "o" },
+      runId: null,
+      presetId: "preset",
+      resolved: {
+        modelId: "real-model",
+        apiShape: "anthropic-messages",
+      } as unknown as ResolvedModel,
+      started: 0,
+    };
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, ctx, {
+      swap: { alias: "alias-model", real: "real-model" },
+      logLabel: "test",
+    });
+    expect(res.headers.get("server")).toBeNull();
+    expect(res.headers.get("cf-ray")).toBeNull();
+    expect(res.headers.get("anthropic-organization-id")).toBeNull();
+    expect(res.headers.get("openai-organization")).toBeNull();
+    expect(res.headers.get("retry-after")).toBe("7");
+    expect(res.headers.get("x-request-id")).toBe("req_1");
+    expect(res.headers.get("content-type")).toBe("application/json");
+  });
+
+  it("no alias: response headers pass through as before", async () => {
+    const upstream = new Response('{"error":{"message":"overloaded"}}', {
+      status: 529,
+      headers: { "content-type": "application/json", server: "cloudflare" },
+    });
+    const ctx: MeteredForwardContext = {
+      principal: { kind: "jwt_user", userId: "u", orgId: "o" },
+      runId: null,
+      presetId: "preset",
+      resolved: {
+        modelId: "real-model",
+        apiShape: "anthropic-messages",
+      } as unknown as ResolvedModel,
+      started: 0,
+    };
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, ctx, {
+      swap: null,
+      logLabel: "test",
+    });
+    expect(res.headers.get("server")).toBe("cloudflare");
+  });
+
+  it("alias: scrubs the real hostname from an upstream error body via realHost", async () => {
+    const upstream = new Response(
+      '{"error":{"message":"api.deepseek.com refused the connection for real-model"}}',
+      { status: 502, headers: { "content-type": "application/json" } },
+    );
+    const ctx: MeteredForwardContext = {
+      principal: { kind: "jwt_user", userId: "u", orgId: "o" },
+      runId: null,
+      presetId: "preset",
+      resolved: {
+        modelId: "real-model",
+        apiShape: "anthropic-messages",
+      } as unknown as ResolvedModel,
+      started: 0,
+    };
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, ctx, {
+      swap: { alias: "alias-model", real: "real-model", realHost: "api.deepseek.com" },
+      logLabel: "test",
+    });
+    const out = await res.text();
+    expect(out).not.toContain("api.deepseek.com");
+    expect(out).not.toContain("real-model");
+    expect(out).toContain("alias-model");
+  });
+
   it("propagates client cancel to the source without a spurious teardown error", async () => {
     let cancelledWith: unknown = undefined;
     const source = new ReadableStream<Uint8Array>({

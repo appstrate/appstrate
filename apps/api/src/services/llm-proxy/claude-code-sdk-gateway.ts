@@ -137,9 +137,13 @@ async function resolveClaudeSubscriptionToken(
     throw invalidRequest(`Model preset "${presetId}" is not enabled for this org`);
   }
   if (resolved.providerId !== CLAUDE_CODE_PROVIDER_ID) {
-    throw invalidRequest(
-      `Model preset "${presetId}" is not a Claude Code subscription model (provider: ${resolved.providerId})`,
-    );
+    // Backing provider id is server-log-only — never in the caller-facing body
+    // (model-alias masking).
+    logger.warn(`${logLabel}: preset is not a Claude Code subscription model`, {
+      presetId,
+      providerId: resolved.providerId,
+    });
+    throw invalidRequest(`Model preset "${presetId}" is not a Claude Code subscription model`);
   }
   if (!resolved.credentialId) {
     throw invalidRequest(`Model preset "${presetId}" has no OAuth credential to resolve`);
@@ -194,7 +198,13 @@ export async function handleClaudeCodeSdkGateway(
   // gateway becoming an SSRF hole if that flag is ever flipped, instead of the
   // protection silently depending on a provider def in another repo.
   if (isBlockedUrl(resolved.baseUrl)) {
-    throw invalidRequest(`Model base URL targets a blocked network: ${resolved.baseUrl}`);
+    logger.error("claude-code-sdk gateway: refused blocked upstream (SSRF)", {
+      presetId,
+      baseUrl: resolved.baseUrl,
+    });
+    throw invalidRequest(
+      `Model preset "${presetId}" resolves to a blocked address — refusing to proxy.`,
+    );
   }
 
   const buf = await c.req.arrayBuffer();

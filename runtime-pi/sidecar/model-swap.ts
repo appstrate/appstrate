@@ -14,4 +14,6 @@ export {
   scrubModelText,
   isAliasableApiShape,
   ALIASABLE_API_SHAPES,
+  SCRUBBED_HOST_MARKER,
+  hostnameOf,
 } from "@appstrate/core/model-swap";
