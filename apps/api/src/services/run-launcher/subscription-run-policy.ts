@@ -105,34 +105,36 @@ export function assertRunnableOnEngine(params: {
 }
 
 /**
- * Thrown when a subscription AGENT run is launched outside a Docker container.
- * A subscription engine drives the vendor's official binary against a personal
- * login/subscription; that credential must never execute in the host process,
- * only inside the per-run isolation boundary. Fail-closed: refuse rather than
- * leak the credential into the API process.
+ * Thrown when a subscription AGENT run is launched without an isolation
+ * boundary (RUN_ADAPTER=process). A subscription engine drives the vendor's
+ * official binary against a personal login/subscription; that credential must
+ * never execute in the host process, only inside the per-run isolation
+ * boundary (Docker container or Firecracker microVM). Fail-closed: refuse
+ * rather than leak the credential into the API process.
  */
-export class SubscriptionRequiresDockerError extends Error {
+export class SubscriptionRequiresIsolationError extends Error {
   constructor(public readonly providerId: string) {
     super(
-      `Provider "${providerId}" is an OAuth subscription and can only run as a ` +
-        `Docker-isolated agent (RUN_ADAPTER=docker). The current execution mode is ` +
-        `"process", which runs the agent in the host API process — unsafe for a ` +
-        `subscription credential. Switch RUN_ADAPTER to docker, or run this agent ` +
-        `with an API-key model provider.`,
+      `Provider "${providerId}" is an OAuth subscription and can only run inside ` +
+        `an isolated agent boundary (RUN_ADAPTER=docker or RUN_ADAPTER=firecracker). ` +
+        `The current execution mode is "process", which runs the agent in the host ` +
+        `API process — unsafe for a subscription credential. Switch RUN_ADAPTER, or ` +
+        `run this agent with an API-key model provider.`,
     );
-    this.name = "SubscriptionRequiresDockerError";
+    this.name = "SubscriptionRequiresIsolationError";
   }
 }
 
 /**
  * Fail-closed isolation guard for subscription AGENT runs. If the provider maps
  * to a subscription engine (claude-code → Claude Agent SDK) the run MUST execute
- * under the docker orchestrator — the only mode that puts
- * the official binary + its credential inside the per-run boundary. The process
- * orchestrator runs in-host and would expose the subscription token to the API
- * process, so it is refused. API-key providers (no subscription engine def) are
- * unaffected. Claude *chat* never reaches this path (host-side, token swapped
- * gateway-side). Throws {@link SubscriptionRequiresDockerError}.
+ * under an isolating orchestrator — docker (container boundary) or firecracker
+ * (microVM boundary) — the modes that put the official binary + its credential
+ * inside the per-run boundary. The process orchestrator runs in-host and would
+ * expose the subscription token to the API process, so it is refused. API-key
+ * providers (no subscription engine def) are unaffected. Claude *chat* never
+ * reaches this path (host-side, token swapped gateway-side). Throws
+ * {@link SubscriptionRequiresIsolationError}.
  *
  * Consumes the engine already resolved by {@link resolveCredentialDelivery} so
  * the launcher reads the provider→engine registry once rather than re-deriving
@@ -143,11 +145,11 @@ export class SubscriptionRequiresDockerError extends Error {
 export function assertSubscriptionEngineIsolation(params: {
   engine: RunEngine;
   providerId: string;
-  orchestratorMode: "docker" | "process";
+  orchestratorMode: "docker" | "process" | "firecracker";
 }): void {
   const { engine, providerId, orchestratorMode } = params;
-  if (isSubscriptionEngine(engine) && orchestratorMode !== "docker") {
-    throw new SubscriptionRequiresDockerError(providerId);
+  if (isSubscriptionEngine(engine) && orchestratorMode === "process") {
+    throw new SubscriptionRequiresIsolationError(providerId);
   }
 }
 

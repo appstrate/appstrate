@@ -427,15 +427,35 @@ const envSchema = z
     // `traceparent` for external callers.
     OTEL_TRUST_INCOMING_TRACE: boolEnv("false"),
 
-    // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
-    RUN_ADAPTER: z.enum(["docker", "process"]).default("process"),
+    // Run — execution backend: "docker" (isolated containers), "process"
+    // (default, Bun subprocesses, no isolation) or "firecracker" (one
+    // microVM per run — Linux host with /dev/kvm + built kernel/rootfs
+    // artifacts required; see docs/architecture/FIRECRACKER.md)
+    RUN_ADAPTER: z.enum(["docker", "process", "firecracker"]).default("process"),
 
     // Integration runtime backend the Docker orchestrator pins onto the
     // sidecar (operator override; same value set as RUN_ADAPTER). The
     // process orchestrator deliberately reads the raw environment instead —
     // it must distinguish "unset" (pin to "process") from an explicit
-    // operator override, which a schema default would erase.
+    // operator override, which a schema default would erase. The
+    // firecracker orchestrator always pins "process": the sidecar runs
+    // INSIDE the guest, so its integration runners are guest subprocesses.
     INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),
+
+    // Firecracker backend (RUN_ADAPTER=firecracker). Linux + /dev/kvm only.
+    // Artifacts are built by `bun run firecracker:build` (see
+    // scripts/firecracker/) — the orchestrator fails fast at boot when the
+    // kernel/rootfs are missing.
+    FIRECRACKER_BIN: z.string().default("firecracker"),
+    FIRECRACKER_KERNEL_PATH: z.string().default("./data/firecracker/vmlinux"),
+    FIRECRACKER_ROOTFS_PATH: z.string().default("./data/firecracker/rootfs.ext4"),
+    FIRECRACKER_DATA_DIR: z.string().default("./data/firecracker/runs"),
+    // IPv4 /16 pool carved into per-run /30 subnets (host TAP peer + guest).
+    // Override when the default collides with an existing route.
+    FIRECRACKER_SUBNET_CIDR: z
+      .string()
+      .regex(/^\d+\.\d+\.0\.0\/16$/, "must be a /16 CIDR ending in .0.0/16")
+      .default("10.231.0.0/16"),
 
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),

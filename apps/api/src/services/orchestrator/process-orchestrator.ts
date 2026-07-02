@@ -25,7 +25,7 @@ import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
 import type {
-  ContainerOrchestrator,
+  RunOrchestrator,
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
@@ -129,7 +129,7 @@ function cleanProcessEnv(): Record<string, string> {
   return env;
 }
 
-export class ProcessOrchestrator implements ContainerOrchestrator {
+export class ProcessOrchestrator implements RunOrchestrator {
   private processes = new Map<string, ProcessHandle>();
   private sidecarPorts = new Map<string, number>();
   private pendingSpecs = new Map<string, PendingSpec>();
@@ -239,22 +239,42 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     // constraint. Workspace lives under os.tmpdir() rather than
     // DATA_DIR so a host-side `rm -rf data/` doesn't accidentally
     // wipe the workspace for an active run.
+    //
+    // The sidecar port pair is allocated HERE (not in createSidecar) so
+    // the boundary can expose agent-visible sidecar endpoints before the
+    // sidecar exists. This also removes the former createSidecar ↔
+    // createWorkload ordering hazard: both are launched in a Promise.all
+    // by pi.ts, and the old lazy allocation meant the agent env could be
+    // built before the port was known.
     const workspacePath = workspaceDirFor(runId);
-    await Promise.all([
+    const [port] = await Promise.all([
+      this.findAvailablePort(),
       mkdir(dir, { recursive: true }),
       // 0o700: the workspace sits under the shared `os.tmpdir()` and
       // holds the agent's run inputs/outputs — keep it readable only by
       // the platform uid, not world-readable to other local users.
       mkdir(workspacePath, { recursive: true, mode: 0o700 }),
     ]);
+    this.sidecarPorts.set(runId, port);
     return {
       id: dir,
       name: `process-${runId}`,
       workspace: { kind: "directory", path: workspacePath },
+      sidecarEndpoints: {
+        sidecarUrl: `http://localhost:${port}`,
+        llmProxyUrl: `http://localhost:${port}/llm`,
+        forwardProxyUrl: `http://localhost:${port + 1}`,
+        noProxy: "localhost,127.0.0.1",
+      },
     };
   }
 
   async removeIsolationBoundary(boundary: IsolationBoundary): Promise<void> {
+    // Port allocation is boundary-scoped (see createIsolationBoundary) —
+    // release it here so a run that never spawned a sidecar (skipSidecar)
+    // doesn't leak one map entry per run.
+    const runId = boundary.name.replace(/^process-/, "");
+    this.sidecarPorts.delete(runId);
     // Race boundary teardown and workspace teardown — independent
     // paths, errors swallowed individually so a stuck workspace can't
     // block the pidfile dir cleanup.
@@ -271,10 +291,16 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     boundary: IsolationBoundary,
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
-    const [port, platformApiUrl] = await Promise.all([
-      this.findAvailablePort(),
-      this.resolvePlatformApiUrl(),
-    ]);
+    // Allocated by createIsolationBoundary — the boundary's
+    // sidecarEndpoints already advertise this port to the agent env.
+    const port = this.sidecarPorts.get(runId);
+    if (!port) {
+      throw new Error(
+        `Process orchestrator: no sidecar port allocated for run ${runId} — ` +
+          `createIsolationBoundary must run before createSidecar`,
+      );
+    }
+    const platformApiUrl = await this.resolvePlatformApiUrl();
     const id = `sidecar-${runId}`;
 
     const env: Record<string, string> = {
@@ -309,7 +335,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     // integration-runtime's spawn progress logs).
     this.drainStderr(proc, id, undefined, "stdout");
     this.processes.set(id, { proc, role: "sidecar", runId });
-    this.sidecarPorts.set(runId, port);
     await this.writePidfile(runId, "sidecar", proc.pid);
 
     // No /health gate — the agent's MCP client retries its handshake against
@@ -335,21 +360,12 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     await mkdir(workDir, { recursive: true });
 
     const id = `workload-${spec.runId}-${spec.role}`;
-    const sidecarPort = this.sidecarPorts.get(spec.runId);
-    const sidecarUrl = sidecarPort ? `http://localhost:${sidecarPort}` : "http://localhost:8080";
 
+    // Sidecar-relative URLs (SIDECAR_URL, MODEL_BASE_URL, HTTP(S)_PROXY,
+    // NO_PROXY) arrive in spec.env — pi.ts builds them from the boundary's
+    // sidecarEndpoints, so this orchestrator no longer patches them in.
     const env: Record<string, string> = { ...cleanProcessEnv(), ...spec.env };
     env.WORKSPACE_DIR = resolve(workDir);
-    if (sidecarPort) {
-      env.SIDECAR_URL = sidecarUrl;
-      env.MODEL_BASE_URL = `${sidecarUrl}/llm`;
-      env.HTTP_PROXY = `http://localhost:${sidecarPort + 1}`;
-      env.HTTPS_PROXY = `http://localhost:${sidecarPort + 1}`;
-      env.http_proxy = `http://localhost:${sidecarPort + 1}`;
-      env.https_proxy = `http://localhost:${sidecarPort + 1}`;
-      env.NO_PROXY = "localhost,127.0.0.1";
-      env.no_proxy = "localhost,127.0.0.1";
-    }
 
     this.pendingSpecs.set(id, { entrypoint: AGENT_ENTRY, workDir, env });
     this.processes.set(id, { proc: null, role: spec.role, runId: spec.runId, workDir });

@@ -35,7 +35,7 @@ import {
 import { getExecutionMode } from "../../infra/mode.ts";
 import {
   getOrchestrator,
-  type ContainerOrchestrator,
+  type RunOrchestrator,
   type WorkloadHandle,
   type IsolationBoundary,
 } from "../orchestrator/index.ts";
@@ -85,7 +85,7 @@ export interface RunPlatformContainerInput {
   /** Cancellation token — aborted = the run was cancelled by user. */
   signal?: AbortSignal;
   /** Injectable orchestrator — production defaults to the global singleton. */
-  orchestrator?: ContainerOrchestrator;
+  orchestrator?: RunOrchestrator;
   /**
    * Injectable workspace provisioning — production defaults to the
    * run-workspace storage helpers. The agent fetches the bundle itself at
@@ -350,6 +350,10 @@ async function runPlatformContainerImpl(
       // The platform setTimeout in `waitForWorkload` is the longer safety net.
       timeoutSeconds: plan.timeout,
       noSidecar: skipSidecar,
+      // All sidecar-relative URLs come from the boundary — the orchestrator
+      // owns the topology (Docker DNS alias, host loopback port, in-guest
+      // loopback for microVMs) and pi.ts stays backend-agnostic.
+      sidecarUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.sidecarUrl,
       // Sidecar-backed runs route LLM traffic through the sidecar proxy
       // (sidecarProxyLlmUrl below). No-sidecar runs talk to the upstream
       // directly, so buildRuntimePiEnv derives MODEL_BASE_URL from the
@@ -359,10 +363,11 @@ async function runPlatformContainerImpl(
       sidecarProxyLlmUrl: skipSidecar
         ? undefined
         : llmApiKey
-          ? "http://sidecar:8080/llm"
+          ? boundary.sidecarEndpoints.llmProxyUrl
           : undefined,
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
-      forwardProxyUrl: skipSidecar ? undefined : "http://sidecar:8081",
+      forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
+      noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
       sink: {
         url: sinkCredentials.url,
         finalizeUrl: sinkCredentials.finalize_url,
@@ -486,7 +491,7 @@ async function runPlatformContainerImpl(
  * lingers after the run has ended.
  */
 async function waitForWorkload(
-  orch: ContainerOrchestrator,
+  orch: RunOrchestrator,
   agent: WorkloadHandle,
   sidecar: WorkloadHandle | undefined,
   timeoutSeconds: number,

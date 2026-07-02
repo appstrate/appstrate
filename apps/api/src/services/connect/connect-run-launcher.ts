@@ -12,7 +12,7 @@
  *   2. builds a single {@link IntegrationSpawnSpec} carrying a `connectLogin`
  *      block derived from the execution's manifest auth,
  *   3. launches a STRIPPED sidecar (isolation boundary + sidecar, NO agent
- *      container) in connect mode via {@link ContainerOrchestrator.createSidecar}
+ *      container) in connect mode via {@link RunOrchestrator.createSidecar}
  *      with `connectLoginSpec` set,
  *   4. captures the sidecar's stdout, parses the `APPSTRATE_CONNECT_RESULT:` /
  *      `APPSTRATE_CONNECT_ERROR:` sentinel into a {@link CredentialBundle} (or a
@@ -47,7 +47,7 @@ import {
 } from "../integration-manifest-helpers.ts";
 import {
   getOrchestrator,
-  type ContainerOrchestrator,
+  type RunOrchestrator,
   type IsolationBoundary,
   type WorkloadHandle,
 } from "../orchestrator/index.ts";
@@ -79,7 +79,7 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 60_000;
 
 export interface ConnectRunExecutorOptions {
   /** Injectable orchestrator — production defaults to the global singleton. */
-  orchestrator?: ContainerOrchestrator;
+  orchestrator?: RunOrchestrator;
   /** Override the connect-run timeout (ms). Defaults to 60s. */
   timeoutMs?: number;
   /**
@@ -241,7 +241,7 @@ export function parseConnectResult(lines: readonly string[]): CredentialBundle {
 }
 
 class ConnectRunExecutor implements ConnectToolExecutor {
-  private readonly orchestrator: ContainerOrchestrator | undefined;
+  private readonly orchestrator: RunOrchestrator | undefined;
   private readonly timeoutMs: number;
   private readonly resolveMcpServer: McpServerResolver;
 
@@ -307,7 +307,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
    * throw surfaces. On exit, the sentinel is parsed from the captured lines.
    */
   private async captureBundle(
-    orch: ContainerOrchestrator,
+    orch: RunOrchestrator,
     sidecar: WorkloadHandle,
   ): Promise<CredentialBundle> {
     await orch.startWorkload(sidecar);

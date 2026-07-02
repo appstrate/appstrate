@@ -3,7 +3,7 @@
 /**
  * P4 — connect-run launcher (the production ConnectToolExecutor) unit tests.
  *
- * Drives `createConnectRunExecutor` against a MOCK ContainerOrchestrator (no
+ * Drives `createConnectRunExecutor` against a MOCK RunOrchestrator (no
  * Docker, no real sidecar). Asserts:
  *   - the spec it hands `createSidecar` carries CONNECT_LOGIN_JSON-worthy data
  *     (connectLoginSpec + integrations) with the right connectLogin block;
@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeAll } from "bun:test";
 import type {
-  ContainerOrchestrator,
+  RunOrchestrator,
   IsolationBoundary,
   WorkloadHandle,
   SidecarLaunchSpec,
@@ -93,7 +93,7 @@ interface MockCalls {
  * timeout path) until `stopWorkload` is called.
  */
 function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang?: boolean }): {
-  orch: ContainerOrchestrator;
+  orch: RunOrchestrator;
   calls: MockCalls;
 } {
   const calls: MockCalls = {
@@ -105,13 +105,19 @@ function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang
   };
   let stopped = false;
 
-  const orch: Partial<ContainerOrchestrator> = {
+  const orch: Partial<RunOrchestrator> = {
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
       calls.createdBoundaries.push(runId);
       return {
         id: `net-${runId}`,
         name: `net-${runId}`,
         workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+        sidecarEndpoints: {
+          sidecarUrl: "http://sidecar:8080",
+          llmProxyUrl: "http://sidecar:8080/llm",
+          forwardProxyUrl: "http://sidecar:8081",
+          noProxy: "sidecar,localhost,127.0.0.1",
+        },
       };
     },
     async createSidecar(
@@ -154,7 +160,7 @@ function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang
     },
   };
 
-  return { orch: orch as ContainerOrchestrator, calls };
+  return { orch: orch as RunOrchestrator, calls };
 }
 
 describe("buildConnectLoginSpec", () => {

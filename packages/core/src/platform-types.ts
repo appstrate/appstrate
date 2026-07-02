@@ -111,6 +111,28 @@ export interface WorkloadSpec {
   egress?: boolean;
 }
 
+/**
+ * How the AGENT workload reaches its run's sidecar. Resolved by the
+ * orchestrator at boundary creation — the shape of "where is the sidecar"
+ * is a pure topology decision (Docker DNS alias, host loopback port,
+ * in-guest loopback for microVMs) and must never leak into
+ * orchestrator-agnostic launch code as magic strings.
+ *
+ * Always present on a boundary: the endpoints describe where a sidecar
+ * WOULD live for this run. Runs that skip the sidecar simply never read
+ * them.
+ */
+export interface SidecarEndpoints {
+  /** Base URL of the sidecar's HTTP surface (`/mcp`, `/health`) as seen from the agent. */
+  readonly sidecarUrl: string;
+  /** Placeholder-substituting LLM reverse proxy (`/llm`) as seen from the agent. */
+  readonly llmProxyUrl: string;
+  /** Egress forward proxy (HTTP CONNECT) as seen from the agent. */
+  readonly forwardProxyUrl: string;
+  /** Comma-separated hosts the agent must exclude from the forward proxy. */
+  readonly noProxy: string;
+}
+
 export interface IsolationBoundary {
   readonly id: string;
   readonly name: string;
@@ -123,6 +145,10 @@ export interface IsolationBoundary {
    *     volume created alongside the per-run network.
    *   - Process: `{ kind: "directory", path: string }` — a host
    *     directory under `os.tmpdir()/appstrate-ws-<runId>/`.
+   *   - Firecracker: `{ kind: "directory", path: "/workspace" }` — a
+   *     GUEST-side path. The sidecar and integration runners execute
+   *     inside the same microVM as the agent, so from every consumer's
+   *     perspective the workspace is a plain directory.
    *
    * Non-optional: every built-in orchestrator provides a handle. The
    * `WorkspaceHandle` union (not an optional field) is what keeps the
@@ -130,6 +156,10 @@ export interface IsolationBoundary {
    * touching call sites that already branch on `kind`.
    */
   readonly workspace: WorkspaceHandle;
+  /**
+   * Agent-visible sidecar endpoints for this run. See {@link SidecarEndpoints}.
+   */
+  readonly sidecarEndpoints: SidecarEndpoints;
 }
 
 /**
@@ -159,10 +189,17 @@ export interface CleanupReport {
 export type StopResult = "stopped" | "not_found" | "already_stopped";
 
 // ---------------------------------------------------------------------------
-// ContainerOrchestrator — structural contract
+// RunOrchestrator — structural contract
 // ---------------------------------------------------------------------------
 
-export interface ContainerOrchestrator {
+/**
+ * Execution backend for agent runs. Implementations decide what a
+ * "workload" physically is — a Docker container, a host subprocess, or a
+ * process inside a per-run Firecracker microVM — behind one uniform
+ * lifecycle contract. Selected by `RUN_ADAPTER` through the orchestrator
+ * registry (`apps/api/src/services/orchestrator/registry.ts`).
+ */
+export interface RunOrchestrator {
   /** Init one-shot: pool init, platform detection, etc. */
   initialize(): Promise<void>;
 
@@ -228,6 +265,14 @@ export interface ContainerOrchestrator {
    */
   resolvePlatformApiUrl(): Promise<string>;
 }
+
+/**
+ * @deprecated Renamed to {@link RunOrchestrator} — "container" stopped being
+ * accurate once non-container backends (process, firecracker) shipped.
+ * Alias kept for npm consumers of `@appstrate/core`; remove on the next
+ * core major.
+ */
+export type ContainerOrchestrator = RunOrchestrator;
 
 // ---------------------------------------------------------------------------
 // Inline run — request body

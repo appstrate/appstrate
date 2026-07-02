@@ -3,33 +3,37 @@
 import { getExecutionMode } from "../../infra/mode.ts";
 import { DockerOrchestrator } from "./docker-orchestrator.ts";
 import { ProcessOrchestrator } from "./process-orchestrator.ts";
-import type { ContainerOrchestrator } from "@appstrate/core/platform-types";
+import { FirecrackerOrchestrator } from "./firecracker/firecracker-orchestrator.ts";
+import { registerOrchestrator, selectOrchestrator } from "./registry.ts";
+import type { RunOrchestrator } from "@appstrate/core/platform-types";
 
 export type {
+  RunOrchestrator,
   ContainerOrchestrator,
   WorkloadHandle,
   WorkloadResources,
   WorkloadSpec,
   IsolationBoundary,
+  SidecarEndpoints,
   CleanupReport,
   StopResult,
   SidecarConfig,
   LlmProxyConfig,
 } from "@appstrate/core/platform-types";
 
-let instance: ContainerOrchestrator | undefined;
+// Built-in execution backends. External backends would register the same
+// way — the registry is keyed by RUN_ADAPTER value, no if/else per type.
+registerOrchestrator({ id: "docker", create: () => new DockerOrchestrator() });
+registerOrchestrator({ id: "process", create: () => new ProcessOrchestrator() });
+registerOrchestrator({ id: "firecracker", create: () => new FirecrackerOrchestrator() });
 
-export function getOrchestrator(): ContainerOrchestrator {
+let instance: RunOrchestrator | undefined;
+
+export function getOrchestrator(): RunOrchestrator {
   if (!instance) {
-    instance = createOrchestrator();
+    instance = selectOrchestrator(getExecutionMode());
   }
   return instance;
-}
-
-function createOrchestrator(): ContainerOrchestrator {
-  const mode = getExecutionMode();
-  if (mode === "process") return new ProcessOrchestrator();
-  return new DockerOrchestrator();
 }
 
 /**
@@ -39,6 +43,6 @@ function createOrchestrator(): ContainerOrchestrator {
  * `null` to reset; the next `getOrchestrator()` re-creates the real one.
  * Never call in production code.
  */
-export function _setOrchestratorForTesting(orchestrator: ContainerOrchestrator | null): void {
+export function _setOrchestratorForTesting(orchestrator: RunOrchestrator | null): void {
   instance = orchestrator ?? undefined;
 }

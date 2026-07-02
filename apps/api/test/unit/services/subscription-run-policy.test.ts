@@ -5,7 +5,7 @@ import {
   assertRunnableOnEngine,
   assertSubscriptionEngineIsolation,
   resolveCredentialDelivery,
-  SubscriptionRequiresDockerError,
+  SubscriptionRequiresIsolationError,
   buildOauthSidecarLlm,
   UnrunnableOauthProviderError,
 } from "../../../src/services/run-launcher/subscription-run-policy.ts";
@@ -102,7 +102,7 @@ describe("buildOauthSidecarLlm", () => {
 describe("assertSubscriptionEngineIsolation", () => {
   // The guard now consumes the engine resolved by resolveCredentialDelivery
   // (claude → subscription engine, pi → API-key) rather than re-reading the
-  // registry; the docker-isolation contract is unchanged.
+  // registry; the isolation contract refuses exactly the in-host mode.
   it("rejects a claude-code subscription run under the process orchestrator", () => {
     expect(() =>
       assertSubscriptionEngineIsolation({
@@ -110,7 +110,7 @@ describe("assertSubscriptionEngineIsolation", () => {
         providerId: "claude-code",
         orchestratorMode: "process",
       }),
-    ).toThrow(SubscriptionRequiresDockerError);
+    ).toThrow(SubscriptionRequiresIsolationError);
   });
 
   it("allows a claude-code subscription run under docker", () => {
@@ -119,6 +119,16 @@ describe("assertSubscriptionEngineIsolation", () => {
         engine: "claude",
         providerId: "claude-code",
         orchestratorMode: "docker",
+      }),
+    ).not.toThrow();
+  });
+
+  it("allows a claude-code subscription run under firecracker (microVM boundary)", () => {
+    expect(() =>
+      assertSubscriptionEngineIsolation({
+        engine: "claude",
+        providerId: "claude-code",
+        orchestratorMode: "firecracker",
       }),
     ).not.toThrow();
   });

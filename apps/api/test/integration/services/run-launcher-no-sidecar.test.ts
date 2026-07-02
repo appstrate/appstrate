@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import type {
-  ContainerOrchestrator,
+  RunOrchestrator,
   IsolationBoundary,
   SidecarLaunchSpec,
   WorkloadHandle,
@@ -36,7 +36,7 @@ interface CallCounts {
 }
 
 function createCountingFake(): {
-  orchestrator: ContainerOrchestrator;
+  orchestrator: RunOrchestrator;
   counts: CallCounts;
 } {
   const counts: CallCounts = {
@@ -46,7 +46,7 @@ function createCountingFake(): {
     capturedSidecarSpec: null,
   };
 
-  const orchestrator: ContainerOrchestrator = {
+  const orchestrator: RunOrchestrator = {
     async initialize() {},
     async shutdown() {},
     async cleanupOrphans(): Promise<CleanupReport> {
@@ -58,6 +58,12 @@ function createCountingFake(): {
         id: `net_${runId}`,
         name: `appstrate-exec-${runId}`,
         workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+        sidecarEndpoints: {
+          sidecarUrl: "http://sidecar:8080",
+          llmProxyUrl: "http://sidecar:8080/llm",
+          forwardProxyUrl: "http://sidecar:8081",
+          noProxy: "sidecar,localhost,127.0.0.1",
+        },
       };
     },
     async removeIsolationBoundary() {},

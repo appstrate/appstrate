@@ -1,0 +1,88 @@
+name: Firecracker
+
+# End-to-end smoke of the Firecracker orchestrator (RUN_ADAPTER=firecracker):
+# builds the guest kernel/rootfs artifacts, runs the focused unit tests, then
+# boots a REAL microVM through the orchestrator (scripts/firecracker-dev/).
+# GitHub's Linux runners expose KVM, so this runs on ubuntu-latest.
+#
+# Scoped to the paths that can break the guest boot machinery — the generic
+# check/test workflows already cover the platform-side TypeScript.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/src/services/orchestrator/**"
+      - "runtime-pi/guest/**"
+      - "runtime-pi/Dockerfile"
+      - "runtime-pi/sidecar/Dockerfile"
+      - "scripts/firecracker/**"
+      - "scripts/firecracker-dev/**"
+      - ".github/workflows/firecracker.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/api/src/services/orchestrator/**"
+      - "runtime-pi/guest/**"
+      - "runtime-pi/Dockerfile"
+      - "runtime-pi/sidecar/Dockerfile"
+      - "scripts/firecracker/**"
+      - "scripts/firecracker-dev/**"
+      - ".github/workflows/firecracker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firecracker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm && test -w /dev/kvm
+
+      - name: Install Firecracker
+        run: |
+          ARCH="$(uname -m)"
+          latest="$(basename "$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/firecracker-microvm/firecracker/releases/latest)")"
+          curl -fsSL "https://github.com/firecracker-microvm/firecracker/releases/download/${latest}/firecracker-${latest}-${ARCH}.tgz" | tar -xz -C /tmp
+          sudo install -m 0755 "/tmp/release-${latest}-${ARCH}/firecracker-${latest}-${ARCH}" /usr/local/bin/firecracker
+          firecracker --version
+
+      - name: Cache guest kernel
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
+        with:
+          path: data/firecracker/vmlinux
+          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('scripts/firecracker/fetch-kernel.sh') }}
+
+      - name: Run smoke suite
+        run: bash scripts/firecracker-dev/vm-smoke.sh
+        env:
+          BETTER_AUTH_SECRET: ci-dummy-secret
+          CONNECTION_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          UPLOAD_SIGNING_SECRET: ci-dummy-upload-signing-secret
+
+      - name: Upload guest console on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: firecracker-run-dirs
+          path: data/firecracker/runs/**/console.log
+          if-no-files-found: ignore

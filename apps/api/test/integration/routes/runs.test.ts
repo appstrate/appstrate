@@ -22,7 +22,7 @@ import { createOrgModel, setDefaultModel } from "../../../src/services/org-model
 import { waitForInFlight } from "../../../src/services/run-tracker.ts";
 import {
   _setOrchestratorForTesting,
-  type ContainerOrchestrator,
+  type RunOrchestrator,
   type WorkloadHandle,
   type WorkloadSpec,
   type IsolationBoundary,
@@ -373,7 +373,7 @@ describe("Runs API", () => {
   // instead of a slow real image pull racing the next test's truncateAll.
   describe("POST /api/agents/:scope/:name/run — resolved model echo", () => {
     /** Minimal no-op orchestrator: workloads "run" instantly and exit 0. */
-    function createFakeOrchestrator(): ContainerOrchestrator {
+    function createFakeOrchestrator(): RunOrchestrator {
       const handle = (runId: string, role: string): WorkloadHandle => ({
         id: `${role}_${runId}`,
         runId,
@@ -391,6 +391,12 @@ describe("Runs API", () => {
             id: `net_${runId}`,
             name: `appstrate-exec-${runId}`,
             workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+            sidecarEndpoints: {
+              sidecarUrl: "http://sidecar:8080",
+              llmProxyUrl: "http://sidecar:8080/llm",
+              forwardProxyUrl: "http://sidecar:8081",
+              noProxy: "sidecar,localhost,127.0.0.1",
+            },
           };
         },
         async removeIsolationBoundary() {},

@@ -3,10 +3,11 @@
 import { getEnv } from "@appstrate/env";
 import { pickOperatorSidecarEnv } from "@appstrate/runner-pi";
 import type {
-  ContainerOrchestrator,
+  RunOrchestrator,
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
+  SidecarEndpoints,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
@@ -51,7 +52,19 @@ export function sidecarSocketOverrides(
     : {};
 }
 
-export class DockerOrchestrator implements ContainerOrchestrator {
+/**
+ * Agent-visible sidecar endpoints on the Docker topology: the sidecar is
+ * reachable through its DNS alias on the per-run bridge network. Static —
+ * the alias and ports are identical for every run.
+ */
+const DOCKER_SIDECAR_ENDPOINTS: SidecarEndpoints = {
+  sidecarUrl: "http://sidecar:8080",
+  llmProxyUrl: "http://sidecar:8080/llm",
+  forwardProxyUrl: "http://sidecar:8081",
+  noProxy: "sidecar,localhost,127.0.0.1",
+};
+
+export class DockerOrchestrator implements RunOrchestrator {
   private egressNetworkId: string | null = null;
   /**
    * Set of sidecar container IDs whose exit is expected (run is being
@@ -237,6 +250,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       id: networkId,
       name,
       workspace: { kind: "volume", name: volumeName },
+      sidecarEndpoints: DOCKER_SIDECAR_ENDPOINTS,
     };
   }
 

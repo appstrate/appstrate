@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.20
+# SPDX-License-Identifier: Apache-2.0
+#
+# Appstrate Firecracker guest rootfs — the merged filesystem a per-run
+# microVM boots (RUN_ADAPTER=firecracker, one VM per run).
+#
+# Composition:
+#   appstrate-pi (base)   agent runtime — bun, /runtime entrypoint, pi user
+#   appstrate-sidecar     the compiled sidecar binary (single file)
+#   guest bits            /sbin/appstrate-init (PID 1) + the bun supervisor
+#   nftables + setpriv    in-guest uid firewall + privilege dropping
+#
+# Build via `bun run firecracker:build` (scripts/firecracker/build-rootfs.sh),
+# which docker-builds this image, exports its filesystem, and converts it to
+# the ext4 file the orchestrator attaches read-only to every run.
+
+ARG PI_IMAGE=appstrate-pi:latest
+ARG SIDECAR_IMAGE=appstrate-sidecar:latest
+
+FROM ${SIDECAR_IMAGE} AS sidecar
+
+FROM ${PI_IMAGE}
+USER root
+
+# Guest-side tooling:
+#   nftables  the supervisor's uid-scoped egress firewall
+#   setpriv   drop root → sidecar (1000) / pi (1001) without a login shell
+# busybox (base) already provides ip / mount / pivot_root / poweroff.
+RUN apk add --no-cache nftables setpriv \
+ # Mount points the init script depends on (the rootfs is read-only at
+ # boot, so they must pre-exist): /overlay (tmpfs upper), /rom (old root
+ # after pivot), /config (config drive).
+ && mkdir -p /overlay /rom /config \
+ # uid 1000 runs the sidecar. oven/bun's base image already ships a "bun"
+ # user at uid 1000 on some variants — reuse it if present, create the
+ # dedicated user otherwise. setpriv addresses it numerically either way.
+ && (getent passwd 1000 > /dev/null || adduser -D -u 1000 -s /sbin/nologin sidecar)
+
+# The sidecar ships as one compiled binary — no sources, no node_modules.
+COPY --from=sidecar /usr/local/bin/sidecar /usr/local/bin/sidecar
+
+# Guest supervisor, pre-bundled to a single file for cold-start speed.
+# It only imports node builtins, so the bundle is self-contained.
+COPY runtime-pi/guest/supervisor.ts /tmp/supervisor.ts
+RUN bun build /tmp/supervisor.ts --target=bun --outfile=/runtime/guest/supervisor.js \
+ && rm /tmp/supervisor.ts
+
+# PID 1.
+COPY --chmod=0755 runtime-pi/guest/init.sh /sbin/appstrate-init
+
+# The microVM ignores ENTRYPOINT/CMD (the kernel boots init directly);
+# keep root as the image user so the exported filesystem preserves
+# root-owned system paths.

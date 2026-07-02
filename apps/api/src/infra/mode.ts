@@ -17,7 +17,10 @@ export function hasS3(): boolean {
   return !!getEnv().S3_BUCKET;
 }
 
+/** Execution backend for agent runs — the validated `RUN_ADAPTER` value. */
+export type ExecutionMode = "docker" | "process" | "firecracker";
+
 /** Returns the execution backend for agent runs. */
-export function getExecutionMode(): "docker" | "process" {
-  return getEnv().RUN_ADAPTER === "process" ? "process" : "docker";
+export function getExecutionMode(): ExecutionMode {
+  return getEnv().RUN_ADAPTER;
 }
