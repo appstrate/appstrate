@@ -96,6 +96,35 @@ export async function setupHostNetwork(
   // filtering would drop the guests' platform traffic.
   await exec.run(["sysctl", "-qw", "net.ipv4.conf.all.rp_filter=2"]);
   await exec.run(["nft", "-f", "-"], { stdin: buildNftScript(params) });
+  await allowForwardInIptables(exec);
+}
+
+/**
+ * Coexist with an iptables-managed FORWARD pipeline (Docker sets the
+ * policy to DROP on any host running dockerd). nftables verdicts are
+ * per-table: the `accept` in `appstrate_fc` does NOT exempt guest
+ * egress from a drop in the iptables-owned `ip filter` table, so the
+ * TAP traffic must be whitelisted there too. Guest↔guest isolation is
+ * unaffected — `appstrate_fc` still drops it regardless of these
+ * accepts (a drop in ANY hooked table is final).
+ *
+ * Best-effort by design: a host without the iptables binary has no
+ * conflicting pipeline to coexist with, and `-C` probing keeps the
+ * inserts idempotent across restarts.
+ */
+async function allowForwardInIptables(exec: HostExec): Promise<void> {
+  const tapMatch = `${TAP_DEVICE_PREFIX}+`;
+  const rules: string[][] = [
+    ["-i", tapMatch, "-j", "ACCEPT"],
+    ["-o", tapMatch, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"],
+  ];
+  for (const rule of rules) {
+    try {
+      await exec.run(["iptables", "-C", "FORWARD", ...rule]);
+    } catch {
+      await exec.run(["iptables", "-I", "FORWARD", ...rule]).catch(() => {});
+    }
+  }
 }
 
 /** Remove the policy table (leaves the harmless lo alias in place). */

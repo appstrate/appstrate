@@ -161,7 +161,11 @@ export function vmSizing(agent: { memoryBytes: number; nanoCpus: number }): {
   const systemMib = 256; // kernel + init + tmpfs overlay headroom
   const vcpuFromSpec = Math.ceil(agent.nanoCpus / 1_000_000_000);
   return {
-    vcpuCount: Math.min(8, Math.max(1, vcpuFromSpec)),
+    // The sidecar and the agent cold-start concurrently — on a single
+    // vCPU they starve each other and the agent's first sink event can
+    // slip past the platform's heartbeat deadline. Budget one extra
+    // vCPU for the sidecar and never go below two.
+    vcpuCount: Math.min(8, Math.max(2, vcpuFromSpec + 1)),
     memSizeMib: agentMib + sidecarMib + systemMib,
   };
 }

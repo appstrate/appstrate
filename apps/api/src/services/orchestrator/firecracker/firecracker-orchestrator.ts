@@ -39,6 +39,7 @@
 import { access, mkdir, rm, readdir, open as fsOpen, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { pickOperatorSidecarEnv } from "@appstrate/runner-pi";
@@ -256,7 +257,12 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       subnet,
       runDir,
       consolePath: join(runDir, "console.log"),
-      apiSocketPath: join(runDir, "firecracker.sock"),
+      // NOT under runDir: AF_UNIX paths are capped at ~108 bytes (SUN_LEN)
+      // and FIRECRACKER_DATA_DIR/<runId>/ routinely exceeds it — Firecracker
+      // then dies at startup with FailedToBindAndRunHttpServer. tmpdir plus
+      // the pid-scoped subnet index stays short and collision-free (the
+      // index is unique among this orchestrator's live runs).
+      apiSocketPath: join(tmpdir(), `afc-${process.pid}-${subnet.index}.sock`),
       proc: null,
       stopping: false,
     });
@@ -285,6 +291,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     if (vm) {
       await this.killVm(vm, 0).catch(() => {});
       await deleteTap(this.hostExec, vm.subnet.tapDevice).catch(() => {});
+      await rm(vm.apiSocketPath, { force: true }).catch(() => {});
       this.allocator.release(vm.subnet.index);
       this.vms.delete(runId);
     }
@@ -369,6 +376,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const vmConfigPath = join(vm.runDir, "vmconfig.json");
     await writeFile(vmConfigPath, JSON.stringify(vmConfig, null, 2), { mode: 0o600 });
 
+    // Firecracker refuses to bind over an existing socket file (stale from
+    // a crashed predecessor that shared the pid+index pair).
+    await rm(vm.apiSocketPath, { force: true }).catch(() => {});
     const proc = Bun.spawn(
       [env.FIRECRACKER_BIN, "--api-sock", vm.apiSocketPath, "--config-file", vmConfigPath],
       {

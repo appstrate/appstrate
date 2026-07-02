@@ -68,13 +68,42 @@ describe("setupHostNetwork", () => {
   it("binds the alias, enables forwarding, applies the firewall atomically", async () => {
     const { exec, calls } = fakeExec();
     await setupHostNetwork(exec, PARAMS);
-    expect(calls.map((c) => c.cmd.join(" "))).toEqual([
+    expect(calls.slice(0, 4).map((c) => c.cmd.join(" "))).toEqual([
       "ip addr replace 10.231.255.1/32 dev lo",
       "sysctl -qw net.ipv4.ip_forward=1",
       "sysctl -qw net.ipv4.conf.all.rp_filter=2",
       "nft -f -",
     ]);
     expect(calls[3]?.stdin).toBe(buildNftScript(PARAMS));
+  });
+
+  it("whitelists TAP forwarding in the iptables pipeline (Docker coexistence)", async () => {
+    // -C probes fail (rules absent) → both inserts issued.
+    const { exec, calls } = fakeExec((cmd) =>
+      cmd[0] === "iptables" && cmd[1] === "-C" ? new Error("no match") : "",
+    );
+    await setupHostNetwork(exec, PARAMS);
+    const iptables = calls.filter((c) => c.cmd[0] === "iptables").map((c) => c.cmd.join(" "));
+    expect(iptables).toEqual([
+      "iptables -C FORWARD -i afc+ -j ACCEPT",
+      "iptables -I FORWARD -i afc+ -j ACCEPT",
+      "iptables -C FORWARD -o afc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
+      "iptables -I FORWARD -o afc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
+    ]);
+  });
+
+  it("skips inserts when the rules already exist", async () => {
+    const { exec, calls } = fakeExec();
+    await setupHostNetwork(exec, PARAMS);
+    const inserts = calls.filter((c) => c.cmd[0] === "iptables" && c.cmd[1] === "-I");
+    expect(inserts).toEqual([]);
+  });
+
+  it("tolerates a host without iptables entirely", async () => {
+    const { exec } = fakeExec((cmd) =>
+      cmd[0] === "iptables" ? new Error("iptables: command not found") : "",
+    );
+    await expect(setupHostNetwork(exec, PARAMS)).resolves.toBeUndefined();
   });
 });
 
