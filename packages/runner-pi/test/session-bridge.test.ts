@@ -852,3 +852,135 @@ describe("installSessionBridge — fire-and-forget rejection handling", () => {
     expect(bridge.getCost()).toBe(0);
   });
 });
+
+describe("installSessionBridge — terminal tools (early stop on output)", () => {
+  it("invokes onTerminalTool once on the first successful terminal tool execution", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    let calls = 0;
+    installSessionBridge(session, sink, RUN_ID, {
+      terminalTools: ["output"],
+      onTerminalTool: () => {
+        calls += 1;
+      },
+    });
+
+    session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
+    session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
+
+    expect(calls).toBe(1);
+  });
+
+  it("does NOT invoke onTerminalTool on a failed terminal tool call (validation retry)", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    let calls = 0;
+    installSessionBridge(session, sink, RUN_ID, {
+      terminalTools: ["output"],
+      onTerminalTool: () => {
+        calls += 1;
+      },
+    });
+
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "output",
+      result: "Output validation failed",
+      isError: true,
+    });
+    expect(calls).toBe(0);
+
+    // The retry that succeeds still triggers the early stop.
+    session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
+    expect(calls).toBe(1);
+  });
+
+  it("does NOT invoke onTerminalTool for non-terminal tools", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    let calls = 0;
+    installSessionBridge(session, sink, RUN_ID, {
+      terminalTools: ["output"],
+      onTerminalTool: () => {
+        calls += 1;
+      },
+    });
+
+    session.emit({ type: "tool_execution_end", toolName: "log", result: "ok" });
+    session.emit({ type: "tool_execution_end", toolName: "gmail__api_call", result: "ok" });
+
+    expect(calls).toBe(0);
+  });
+
+  it("treats a trailing aborted turn after a successful terminal tool as clean (no error event, no terminal error)", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, {
+      terminalTools: ["output"],
+      onTerminalTool: () => {},
+    });
+
+    session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
+
+    // The runner's own early-stop abort can surface as a partial assistant
+    // turn with stopReason "aborted" — semantically a clean finish.
+    session.pushMessage({
+      role: "assistant",
+      stopReason: "aborted",
+      errorMessage: "Request was aborted",
+      content: [],
+    });
+    session.emit({ type: "message_end" });
+
+    expect(sink.events.find((e) => e.type === "appstrate.error")).toBeUndefined();
+    expect(bridge.getTerminalError()).toBeUndefined();
+  });
+
+  it("still reports a genuine error turn after a successful terminal tool", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, {
+      terminalTools: ["output"],
+      onTerminalTool: () => {},
+    });
+
+    session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
+
+    session.pushMessage({
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "provider exploded",
+      content: [],
+    });
+    session.emit({ type: "message_end" });
+
+    expect(sink.events.find((e) => e.type === "appstrate.error")).toBeDefined();
+    expect(bridge.getTerminalError()).toEqual({
+      code: "adapter_error",
+      message: "provider exploded",
+    });
+  });
+
+  it("keeps aborted-as-failure semantics when no terminal tool completed", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, {
+      terminalTools: ["output"],
+      onTerminalTool: () => {},
+    });
+
+    session.pushMessage({
+      role: "assistant",
+      stopReason: "aborted",
+      errorMessage: "Request was aborted",
+      content: [],
+    });
+    session.emit({ type: "message_end" });
+
+    expect(sink.events.find((e) => e.type === "appstrate.error")).toBeDefined();
+    expect(bridge.getTerminalError()).toEqual({
+      code: "adapter_error",
+      message: "Request was aborted",
+    });
+  });
+});

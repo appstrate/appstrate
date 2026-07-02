@@ -375,11 +375,13 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   if (opts.outputSchema && Object.keys(opts.outputSchema).length > 0) {
     sections.push("## Output Format\n");
     sections.push(
-      "You MUST call the `output` tool **exactly once** before finishing, " +
+      "You MUST call the `output` tool **exactly once**, as your FINAL action, " +
         "with a `data` parameter that satisfies the JSON Schema below. " +
         "Provide ALL required fields in that single call — do not probe " +
         "with `output({})` first, and do not split the payload across " +
-        "multiple calls (each call REPLACES the previous one).\n",
+        "multiple calls. A successful `output` call ends the run immediately: " +
+        "finish all other work before calling it, and do not plan any message " +
+        "or step after it.\n",
     );
 
     const required = Array.isArray(opts.outputSchema.required)

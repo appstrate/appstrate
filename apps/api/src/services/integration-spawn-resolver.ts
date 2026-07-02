@@ -117,35 +117,41 @@ export async function resolveIntegrationSpawns(
 
   const entries = parseManifestIntegrations(agentManifest);
   if (entries.length === 0) return [];
-  const out: IntegrationSpawnSpec[] = [];
-  for (const entry of entries) {
-    try {
-      const spec = await resolveOne(
-        entry.id,
-        applicationId,
-        actor,
-        entry.tools,
-        resolvedConnections?.[entry.id] ?? null,
-        entry.auth_key,
-        input.manifestCache,
-      );
-      if (spec) out.push(spec);
-    } catch (err) {
-      // An unsatisfiable referenced-mcp-server pin is a hard failure: the run
-      // must NOT silently spawn without the integration's tools. resolveOne
-      // raises a DEPENDENCY_UNRESOLVED BundleError for it; let it propagate so
-      // the pipeline maps it to a structured 422 (#686), matching the skill
-      // closure (#666). Every other failure (not installed / not connected /
-      // missing referenced package) stays a per-integration warn-and-skip.
-      if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
-      logger.warn("integration resolve failed; skipping", {
-        integrationId: entry.id,
-        applicationId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-  return out;
+  // Resolve every declared integration concurrently — each resolution is an
+  // independent chain of DB reads + storage fetch + credential decrypt, and
+  // the sequential version paid their latencies back-to-back on the run
+  // kickoff critical path. Declaration order is preserved by mapping then
+  // compacting.
+  const specs = await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        return await resolveOne(
+          entry.id,
+          applicationId,
+          actor,
+          entry.tools,
+          resolvedConnections?.[entry.id] ?? null,
+          entry.auth_key,
+          input.manifestCache,
+        );
+      } catch (err) {
+        // An unsatisfiable referenced-mcp-server pin is a hard failure: the run
+        // must NOT silently spawn without the integration's tools. resolveOne
+        // raises a DEPENDENCY_UNRESOLVED BundleError for it; let it propagate so
+        // the pipeline maps it to a structured 422 (#686), matching the skill
+        // closure (#666). Every other failure (not installed / not connected /
+        // missing referenced package) stays a per-integration warn-and-skip.
+        if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
+        logger.warn("integration resolve failed; skipping", {
+          integrationId: entry.id,
+          applicationId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    }),
+  );
+  return specs.filter((s): s is IntegrationSpawnSpec => s !== null);
 }
 
 async function resolveOne(

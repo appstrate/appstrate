@@ -733,6 +733,16 @@ const heartbeat = startSinkHeartbeat({
 
 /** Construct the default Pi runner (every non-`claude-code` run). */
 function buildPiRunner(): PiRunner {
+  // When the agent selected the `output` runtime tool, a successful call is
+  // the run's semantic end — stop the SDK loop there instead of paying one
+  // more LLM round-trip for a trailing text-only turn whose content the
+  // communication contract discards anyway. Gated on the manifest selection
+  // so a bundle-defined tool that happens to be named `output` (no
+  // `runtime_tools` opt-in) keeps the SDK's natural stop.
+  const declaredRuntimeTools = bundle
+    ? ((bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
+        ?.runtime_tools ?? [])
+    : [];
   return new PiRunner({
     model,
     apiKey: env.modelApiKey,
@@ -741,6 +751,7 @@ function buildPiRunner(): PiRunner {
     agentDir: "/tmp/pi-agent",
     extensionFactories,
     authStoragePath: "/tmp/pi-auth/auth.json",
+    ...(declaredRuntimeTools.includes("output") ? { terminalTools: ["output"] } : {}),
   });
 }
 
