@@ -111,7 +111,7 @@ The daemon owns two schemas — its own listen/link config (`FIRECRACKER_RUNNER_
 | `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool carved into per-run /30 subnets                                                                    |
 | `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918 ranges        | Destinations guests must never reach                                                                        |
 | `FIRECRACKER_MAX_CONSOLE_BYTES`  | 268435456 (256 MiB)              | Console-size kill switch (host OOM guard)                                                                   |
-| `FIRECRACKER_MAX_CONCURRENT_VMS` | 0 (unlimited)                    | Admission control                                                                                           |
+| `FIRECRACKER_MAX_CONCURRENT_VMS` | 16 (`0` = unlimited)             | Admission control — race-free slot reservation; size by host RAM ÷ per-guest memory. `0` opts out entirely  |
 | `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | Guest-artifact download base — point at a mirror for air-gapped hosts                                       |
 | `FIRECRACKER_ARTIFACTS_VERSION`  | latest / on-disk                 | Pin a release (`1.2.3`); unset = skip download when artifacts present                                       |
 | `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver — dev iterating on locally built artifacts                                          |

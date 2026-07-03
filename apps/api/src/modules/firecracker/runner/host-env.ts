@@ -68,10 +68,13 @@ const firecrackerEnvSchema = z.object({
   // becomes a host OOM vector. A VM whose console exceeds the cap is
   // killed (the run fails). Default 256 MiB.
   FIRECRACKER_MAX_CONSOLE_BYTES: z.coerce.number().int().positive().default(268_435_456),
-  // Admission control: maximum concurrent microVMs on this host.
-  // 0 (default) = unlimited. When the cap is reached, new runs fail
-  // fast instead of overcommitting host RAM.
-  FIRECRACKER_MAX_CONCURRENT_VMS: z.coerce.number().int().nonnegative().default(0),
+  // Admission control: maximum concurrent microVMs on this host. When the
+  // cap is reached, new runs fail fast instead of overcommitting host RAM.
+  // Default 16 — a conservative fixed ceiling (E2B/Fly/Firecracker sizing
+  // guidance is host RAM ÷ per-guest memory; at the default ~1 GiB guest
+  // that fits a 16-32 GiB host beside the platform + daemon). Raise it on
+  // larger hosts. 0 = explicit, opt-in unlimited (no admission control).
+  FIRECRACKER_MAX_CONCURRENT_VMS: z.coerce.number().int().nonnegative().default(16),
   // Guest→platform network self-verification at daemon boot (see
   // runner/net-probe.ts). `warn` (default) logs a loud diagnostic and
   // keeps booting when the guest path is proven broken; `strict` makes

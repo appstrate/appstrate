@@ -212,6 +212,34 @@ describe("admission control (FIRECRACKER_MAX_CONCURRENT_VMS)", () => {
       _resetCacheForTesting();
     }
   });
+
+  it("admits at most `maxVms` under concurrent creation (slot reserved before the awaits)", async () => {
+    process.env.FIRECRACKER_MAX_CONCURRENT_VMS = "1";
+    _resetCacheForTesting();
+    try {
+      const { exec } = fakeExec();
+      const orch = readyOrchestrator(exec);
+      // Both fire before either lands in `vms`. A plain `vms.size` gate
+      // would let both through (TOCTOU); the synchronous reservation caps
+      // it at one admission, one rejection.
+      const results = await Promise.allSettled([
+        orch.createIsolationBoundary("run_a"),
+        orch.createIsolationBoundary("run_b"),
+      ]);
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+        message: expect.stringMatching(/at capacity/),
+      });
+      // Exactly one live VM, one reserved index — no overcommit leaked.
+      expect(reservedIndexes(orch).size).toBe(1);
+    } finally {
+      delete process.env.FIRECRACKER_MAX_CONCURRENT_VMS;
+      _resetCacheForTesting();
+    }
+  });
 });
 
 describe("cleanupOrphans PID-reuse guard", () => {

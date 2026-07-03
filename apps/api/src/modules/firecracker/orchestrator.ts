@@ -260,6 +260,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    */
   private socketDirPromise: Promise<string> | null = null;
 
+  /**
+   * In-flight createIsolationBoundary calls that passed the admission gate
+   * but have not yet landed in {@link vms}. Counted alongside `vms.size` so
+   * the concurrency cap is race-free across the awaits between the two.
+   */
+  private reservedSlots = 0;
+
   /** Host-lock pidfile path once acquired (see acquireHostLock). */
   private hostLockPath: string | null = null;
 
@@ -453,6 +460,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   // Boundary
   // -------------------------------------------------------------------------
 
+  /** Booted microVMs plus in-flight creations holding a reserved slot. */
+  private activeSlots(): number {
+    return this.vms.size + this.reservedSlots;
+  }
+
   async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
     if (!this.initialized) {
       throw new Error(
@@ -474,64 +486,78 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const fcEnv = getFirecrackerEnv();
     // Admission control BEFORE any allocation: overcommitting host RAM
     // with unbounded concurrent VMs is worse than failing the run fast.
+    // The gate counts booted VMs PLUS in-flight creations: `this.vms.set`
+    // only lands after several awaits, so a plain `this.vms.size` check
+    // would be TOCTOU — two concurrent creations would each see room and
+    // both proceed past the cap. The reserved counter is bumped
+    // synchronously here (before the first await) and released in the
+    // finally once the run is either in `vms` or rolled back.
     const maxVms = fcEnv.FIRECRACKER_MAX_CONCURRENT_VMS;
-    if (maxVms > 0 && this.vms.size >= maxVms) {
+    if (maxVms > 0 && this.activeSlots() >= maxVms) {
       throw new Error(
-        `Firecracker orchestrator at capacity: ${this.vms.size}/${maxVms} concurrent ` +
+        `Firecracker orchestrator at capacity: ${this.activeSlots()}/${maxVms} concurrent ` +
           `microVMs (FIRECRACKER_MAX_CONCURRENT_VMS) — refusing to start run ${runId}`,
       );
     }
-    const socketDir = await this.ensureSocketDir();
-    const runDir = join(resolve(fcEnv.FIRECRACKER_DATA_DIR), runId);
-    await mkdir(runDir, { recursive: true, mode: 0o700 });
-
-    const subnet = this.allocator.allocate();
+    this.reservedSlots++;
     try {
-      await createTap(this.hostExec, subnet);
-    } catch (err) {
-      this.allocator.release(subnet.index);
-      await rm(runDir, { recursive: true, force: true }).catch(() => {});
-      throw err;
+      const socketDir = await this.ensureSocketDir();
+      const runDir = join(resolve(fcEnv.FIRECRACKER_DATA_DIR), runId);
+      await mkdir(runDir, { recursive: true, mode: 0o700 });
+
+      const subnet = this.allocator.allocate();
+      try {
+        await createTap(this.hostExec, subnet);
+      } catch (err) {
+        this.allocator.release(subnet.index);
+        await rm(runDir, { recursive: true, force: true }).catch(() => {});
+        throw err;
+      }
+      await this.writeStateFile(runDir, { runId, tapDevice: subnet.tapDevice });
+
+      // Remote-platform mode: the guest talks to the override ip, not the
+      // host lo alias — the noProxy exemption must track whichever one the
+      // sink POSTs actually target.
+      const platformIp = this.platformForward?.ip ?? platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
+      this.vms.set(runId, {
+        runId,
+        subnet,
+        runDir,
+        consolePath: join(runDir, "console.log"),
+        // NOT under runDir: AF_UNIX paths are capped at ~108 bytes (SUN_LEN)
+        // and FIRECRACKER_DATA_DIR/<runId>/ routinely exceeds it — Firecracker
+        // then dies at startup with FailedToBindAndRunHttpServer. A short
+        // per-instance mkdtemp 0700 directory under tmpdir stays well under
+        // the cap AND keeps the sockets out of the world-writable flat /tmp
+        // (unix-socket connect permission is umask-dependent there). The
+        // subnet index is unique among this orchestrator's live runs.
+        apiSocketPath: join(socketDir, `afc-${subnet.index}.sock`),
+        proc: null,
+        stopping: false,
+      });
+
+      return {
+        id: runDir,
+        name: `firecracker-${runId}`,
+        // In-guest path: the sidecar and integration runners live in the
+        // same VM as the agent, so from every consumer's perspective the
+        // workspace is a plain directory.
+        workspace: { kind: "directory", path: "/workspace" },
+        sidecarEndpoints: {
+          sidecarUrl: "http://127.0.0.1:8080",
+          llmProxyUrl: "http://127.0.0.1:8080/llm",
+          forwardProxyUrl: "http://127.0.0.1:8081",
+          // The platform endpoint must bypass the forward proxy — sink POSTs
+          // go straight out eth0 (uid-scoped allow in the guest firewall).
+          noProxy: `localhost,127.0.0.1,${platformIp}`,
+        },
+      };
+    } finally {
+      // A run that reached `vms.set` is now counted by `this.vms.size`; one
+      // that threw released its subnet/dir above. Either way the reservation
+      // is done — drop it so the two counters never double-count.
+      this.reservedSlots--;
     }
-    await this.writeStateFile(runDir, { runId, tapDevice: subnet.tapDevice });
-
-    // Remote-platform mode: the guest talks to the override ip, not the
-    // host lo alias — the noProxy exemption must track whichever one the
-    // sink POSTs actually target.
-    const platformIp = this.platformForward?.ip ?? platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
-    this.vms.set(runId, {
-      runId,
-      subnet,
-      runDir,
-      consolePath: join(runDir, "console.log"),
-      // NOT under runDir: AF_UNIX paths are capped at ~108 bytes (SUN_LEN)
-      // and FIRECRACKER_DATA_DIR/<runId>/ routinely exceeds it — Firecracker
-      // then dies at startup with FailedToBindAndRunHttpServer. A short
-      // per-instance mkdtemp 0700 directory under tmpdir stays well under
-      // the cap AND keeps the sockets out of the world-writable flat /tmp
-      // (unix-socket connect permission is umask-dependent there). The
-      // subnet index is unique among this orchestrator's live runs.
-      apiSocketPath: join(socketDir, `afc-${subnet.index}.sock`),
-      proc: null,
-      stopping: false,
-    });
-
-    return {
-      id: runDir,
-      name: `firecracker-${runId}`,
-      // In-guest path: the sidecar and integration runners live in the
-      // same VM as the agent, so from every consumer's perspective the
-      // workspace is a plain directory.
-      workspace: { kind: "directory", path: "/workspace" },
-      sidecarEndpoints: {
-        sidecarUrl: "http://127.0.0.1:8080",
-        llmProxyUrl: "http://127.0.0.1:8080/llm",
-        forwardProxyUrl: "http://127.0.0.1:8081",
-        // The platform endpoint must bypass the forward proxy — sink POSTs
-        // go straight out eth0 (uid-scoped allow in the guest firewall).
-        noProxy: `localhost,127.0.0.1,${platformIp}`,
-      },
-    };
   }
 
   async removeIsolationBoundary(boundary: IsolationBoundary): Promise<void> {
