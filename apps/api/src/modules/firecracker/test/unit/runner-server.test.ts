@@ -211,6 +211,14 @@ describe("runner server routes", () => {
     expect(calls).toEqual([]);
   });
 
+  it("rejects a runId with unsafe filesystem characters (400, before the orchestrator)", async () => {
+    const { app, calls } = makeApp();
+    const res = await post(app, RUNNER_ROUTES.createBoundary, { runId: "../../etc/passwd" });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("runId");
+    expect(calls).toEqual([]);
+  });
+
   it("maps an orchestrator error to 500 with the message only", async () => {
     const { app } = makeApp({
       createIsolationBoundary: () => Promise.reject(new Error("tap allocation failed")),

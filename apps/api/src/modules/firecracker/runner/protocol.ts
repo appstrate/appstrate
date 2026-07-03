@@ -90,8 +90,19 @@ export const sidecarLaunchSpecSchema = z.looseObject({
 // Request bodies
 // ---------------------------------------------------------------------------
 
+/**
+ * Safe run-identifier charset. A runId reaches the daemon filesystem
+ * verbatim — `join(FIRECRACKER_DATA_DIR, runId)` at boundary creation and
+ * `<console-archive>/<runId>.log` at teardown — so a crafted value
+ * (`../foo`, `/etc`, an embedded NUL) could escape the run tree. Restrict
+ * it to the characters a real platform run id uses. Single source: reused
+ * by the boundary-creation ingress AND the console `:id` guard
+ * ({@link CONSOLE_ID_RE}).
+ */
+export const RUN_ID_RE = /^[A-Za-z0-9_.-]+$/;
+
 export const createBoundaryBodySchema = z.object({
-  runId: z.string().min(1),
+  runId: z.string().min(1).regex(RUN_ID_RE, "runId contains unsafe characters"),
   opts: z.object({ skipSidecar: z.boolean().optional() }).optional(),
 });
 
@@ -200,9 +211,10 @@ export const CONSOLE_MAX_TAIL_BYTES = 256 * 1024;
 /**
  * A console `:id` is used verbatim to build the archive path
  * (`<archive-dir>/<id>.log`) — restrict it to run-identifier characters so
- * a crafted id can never traverse out of the archive directory.
+ * a crafted id can never traverse out of the archive directory. Same
+ * charset as {@link RUN_ID_RE} (a console id IS a runId).
  */
-export const CONSOLE_ID_RE = /^[A-Za-z0-9_.-]+$/;
+export const CONSOLE_ID_RE = RUN_ID_RE;
 
 /** Static Hono pattern for the console route (server side). */
 export const CONSOLE_ROUTE_PATTERN = "/v1/workloads/:id/console";

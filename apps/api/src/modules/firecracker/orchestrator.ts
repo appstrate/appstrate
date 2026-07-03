@@ -48,7 +48,7 @@ import {
 } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { getFirecrackerEnv } from "./runner/host-env.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -86,6 +86,7 @@ import {
   parseExitMarker,
   vmSizing,
 } from "./vm-config.ts";
+import { RUN_ID_RE } from "./runner/protocol.ts";
 
 /** How much console tail to scan for the exit marker (bytes). */
 const EXIT_MARKER_SCAN_BYTES = 64 * 1024;
@@ -460,6 +461,16 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           "Check the boot logs for the initialize() failure.",
       );
     }
+    // Defense in depth: the daemon route already rejects an unsafe runId
+    // (protocol.ts createBoundaryBodySchema), but the smoke harness drives
+    // this engine directly and `runId` reaches the filesystem verbatim
+    // (join(dataDir, runId) below, <archive>/<runId>.log at teardown).
+    if (!RUN_ID_RE.test(runId)) {
+      throw new Error(
+        `Firecracker orchestrator: runId "${runId}" has characters outside the ` +
+          `safe set [A-Za-z0-9_.-] — refusing (it reaches the filesystem verbatim)`,
+      );
+    }
     const fcEnv = getFirecrackerEnv();
     // Admission control BEFORE any allocation: overcommitting host RAM
     // with unbounded concurrent VMs is worse than failing the run fast.
@@ -524,6 +535,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   }
 
   async removeIsolationBoundary(boundary: IsolationBoundary): Promise<void> {
+    // `boundary.id` crosses the daemon wire as an opaque z.string().min(1)
+    // (protocol.ts isolationBoundarySchema) yet reaches a recursive rm here
+    // — a crafted id like "/" or "../.." would delete host state outside
+    // the run tree. Contain it before any destructive fs op.
+    const target = this.assertUnderDataDir(boundary.id, "boundary id");
     const runId = boundary.name.replace(/^firecracker-/, "");
     const vm = this.vms.get(runId);
     if (vm) {
@@ -531,7 +547,26 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
     this.pendingSidecarEnv.delete(runId);
     this.pendingAgentSpecs.delete(runId);
-    await rm(boundary.id, { recursive: true, force: true }).catch(() => {});
+    await rm(target, { recursive: true, force: true }).catch(() => {});
+  }
+
+  /**
+   * Resolve a wire-supplied path and require it to live strictly under
+   * FIRECRACKER_DATA_DIR. Guards the destructive fs ops whose target
+   * arrives from the daemon wire (see removeIsolationBoundary). Throws a
+   * clear error — never silently no-ops — so a crafted path is a loud
+   * rejection, not a silent skip.
+   */
+  private assertUnderDataDir(candidate: string, what: string): string {
+    const dataDir = resolve(getFirecrackerEnv().FIRECRACKER_DATA_DIR);
+    const resolved = resolve(candidate);
+    if (!resolved.startsWith(dataDir + sep)) {
+      throw new Error(
+        `Firecracker orchestrator: ${what} "${candidate}" resolves outside ` +
+          `FIRECRACKER_DATA_DIR (${dataDir}) — refusing filesystem operation`,
+      );
+    }
+    return resolved;
   }
 
   /** Tear down one run's VM + network + on-disk state. Idempotent, best-effort. */

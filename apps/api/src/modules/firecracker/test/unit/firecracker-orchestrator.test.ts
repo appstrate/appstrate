@@ -152,6 +152,49 @@ describe("TAP index accounting on teardown", () => {
   });
 });
 
+describe("runId charset guard", () => {
+  it("rejects a runId that reaches outside the safe filesystem charset", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    for (const bad of ["../escape", "a/b", "run 1", "run\0x"]) {
+      await expect(orch.createIsolationBoundary(bad)).rejects.toThrow(/safe set/);
+    }
+    // Nothing was allocated for the rejected runs.
+    expect(reservedIndexes(orch).size).toBe(0);
+  });
+});
+
+describe("boundary-id path containment", () => {
+  it("refuses to remove a boundary whose id resolves outside FIRECRACKER_DATA_DIR", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    // A crafted wire boundary — name matches no live VM, id points at host
+    // state outside the run tree. The containment guard must throw before rm.
+    await expect(
+      orch.removeIsolationBoundary({
+        id: "/etc",
+        name: "firecracker-run_x",
+        workspace: { kind: "directory", path: "/workspace" },
+        sidecarEndpoints: {
+          sidecarUrl: "http://127.0.0.1:8080",
+          llmProxyUrl: "http://127.0.0.1:8080/llm",
+          forwardProxyUrl: "http://127.0.0.1:8081",
+          noProxy: "127.0.0.1",
+        },
+      }),
+    ).rejects.toThrow(/outside\s+FIRECRACKER_DATA_DIR/);
+  });
+
+  it("removes a legitimately-contained boundary id", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const boundary = await orch.createIsolationBoundary("run_ok");
+    // boundary.id is the run dir under dataDir — the guard admits it.
+    await orch.removeIsolationBoundary(boundary);
+    expect(await Bun.file(join(dataDir, "run_ok", "state.json")).exists()).toBe(false);
+  });
+});
+
 describe("admission control (FIRECRACKER_MAX_CONCURRENT_VMS)", () => {
   it("refuses a new boundary once the cap is reached", async () => {
     process.env.FIRECRACKER_MAX_CONCURRENT_VMS = "1";
