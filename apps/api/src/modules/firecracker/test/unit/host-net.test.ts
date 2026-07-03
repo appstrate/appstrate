@@ -85,6 +85,68 @@ describe("buildNftScript", () => {
   });
 });
 
+describe("buildNftScript with a remote platform (platformForward)", () => {
+  const FORWARD = { ip: "172.17.0.1", port: 3000 };
+  const script = buildNftScript({ ...PARAMS, platformForward: FORWARD });
+  const rule = `iifname "afc*" ip daddr 172.17.0.1 tcp dport 3000 accept`;
+
+  it("accepts guest→platform in BOTH input and forward chains (topology-agnostic)", () => {
+    const inputCopy = script.indexOf(rule);
+    const forwardCopy = script.indexOf(rule, inputCopy + 1);
+    expect(inputCopy).toBeGreaterThan(-1);
+    expect(forwardCopy).toBeGreaterThan(inputCopy);
+    expect(inputCopy).toBeGreaterThan(script.indexOf("chain input"));
+    expect(forwardCopy).toBeGreaterThan(script.indexOf("chain forward"));
+  });
+
+  it("beats the guest→host catch-all drop (input) and the deny-CIDR drop (forward)", () => {
+    const inputCopy = script.indexOf(rule);
+    const forwardCopy = script.indexOf(rule, inputCopy + 1);
+    // Input copy before the guest→host catch-all drop — platform
+    // reachability is unconditional, like the lo-alias accept.
+    expect(inputCopy).toBeLessThan(script.indexOf(`iifname "afc*" drop`));
+    // Forward copy before the egress deny-CIDR drop: 172.17.0.1 is inside
+    // 172.16.0.0/12, which would otherwise drop it (a drop in ANY hooked
+    // table is final — the accept must win by order inside this one).
+    expect(forwardCopy).toBeLessThan(script.indexOf("ip daddr {"));
+  });
+
+  it("stays byte-identical to the in-process script when platformForward is absent", () => {
+    expect(buildNftScript(PARAMS)).toBe(
+      [
+        "add table ip appstrate_fc",
+        "delete table ip appstrate_fc",
+        "table ip appstrate_fc {",
+        "  chain input {",
+        "    type filter hook input priority filter; policy accept;",
+        '    iifname "afc*" ip daddr 10.231.255.1 tcp dport 3000 accept',
+        '    iifname "afc*" drop',
+        "  }",
+        "  chain forward {",
+        "    type filter hook forward priority filter; policy accept;",
+        '    iifname "afc*" oifname "afc*" drop',
+        '    iifname "afc*" ip daddr { 169.254.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } drop',
+        '    iifname "afc*" accept',
+        '    oifname "afc*" ct state established,related accept',
+        '    oifname "afc*" drop',
+        "  }",
+        "  chain postrouting {",
+        "    type nat hook postrouting priority srcnat; policy accept;",
+        '    ip saddr 10.231.0.0/16 oifname != "afc*" masquerade',
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("is applied by setupHostNetwork (pass-through to the atomic nft -f)", async () => {
+    const { exec, calls } = fakeExec();
+    await setupHostNetwork(exec, { ...PARAMS, platformForward: FORWARD });
+    expect(calls[2]?.stdin).toBe(script);
+  });
+});
+
 describe("teardownHostNetwork", () => {
   it("deletes the nft table and removes the iptables FORWARD accepts", async () => {
     // -C probes succeed (rules present) → both deletes issued.

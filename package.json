@@ -92,6 +92,7 @@
     "firecracker:build": "bash apps/api/src/modules/firecracker/scripts/build-rootfs.sh && bash apps/api/src/modules/firecracker/scripts/build-kernel.sh",
     "firecracker:build:rootfs": "bash apps/api/src/modules/firecracker/scripts/build-rootfs.sh",
     "firecracker:build:kernel": "bash apps/api/src/modules/firecracker/scripts/build-kernel.sh",
+    "firecracker:runner": "bun apps/api/src/modules/firecracker/runner/daemon.ts",
     "test:firecracker": "bash apps/api/src/modules/firecracker/scripts/dev/run-in-vm.sh",
     "db:generate": "cd packages/db && bunx drizzle-kit generate",
     "db:migrate": "cd packages/db && bunx drizzle-kit migrate",

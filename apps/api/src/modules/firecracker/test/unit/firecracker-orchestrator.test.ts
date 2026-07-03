@@ -14,7 +14,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../env.ts";
-import { FirecrackerOrchestrator } from "../../orchestrator.ts";
+import { FirecrackerOrchestrator, type FirecrackerOrchestratorDeps } from "../../orchestrator.ts";
 import type { HostExec } from "../../host-net.ts";
 
 interface RecordedCall {
@@ -69,8 +69,11 @@ afterAll(() => {
  * real initialize() needs Linux + KVM + built artifacts. Everything past
  * the gate is host-command driven and fully faked.
  */
-function readyOrchestrator(exec: HostExec): FirecrackerOrchestrator {
-  const orch = new FirecrackerOrchestrator({ hostExec: exec });
+function readyOrchestrator(
+  exec: HostExec,
+  deps: Omit<FirecrackerOrchestratorDeps, "hostExec"> = {},
+): FirecrackerOrchestrator {
+  const orch = new FirecrackerOrchestrator({ hostExec: exec, ...deps });
   Reflect.set(orch, "initialized", true);
   return orch;
 }
@@ -263,6 +266,75 @@ describe("shutdown", () => {
     expect(joined).toContain("iptables -C FORWARD -i afc+ -j ACCEPT");
     // The run dir is gone.
     expect(await Bun.file(join(dataDir, "run_1", "state.json")).exists()).toBe(false);
+  });
+});
+
+describe("remote platform URL override (deps.platformApiUrl)", () => {
+  const REMOTE_URL = "http://172.17.0.1:3000";
+
+  it("resolvePlatformApiUrl returns the override verbatim (no alias/PORT computation)", async () => {
+    const { exec } = fakeExec();
+    const orch = new FirecrackerOrchestrator({ hostExec: exec, platformApiUrl: REMOTE_URL });
+    expect(await orch.resolvePlatformApiUrl()).toBe(REMOTE_URL);
+  });
+
+  it("keeps the in-process lo-alias URL when no override is set", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    // Default FIRECRACKER_SUBNET_CIDR (10.231.0.0/16) → alias 10.231.255.1;
+    // port comes from the platform env, not from any override machinery.
+    await expect(orch.resolvePlatformApiUrl()).resolves.toMatch(/^http:\/\/10\.231\.255\.1:\d+$/);
+  });
+
+  it("defaults the port from the scheme (80 http / 443 https)", () => {
+    const { exec } = fakeExec();
+    const http = new FirecrackerOrchestrator({ hostExec: exec, platformApiUrl: "http://10.0.0.9" });
+    expect(Reflect.get(http, "platformForward")).toEqual({ ip: "10.0.0.9", port: 80 });
+    const https = new FirecrackerOrchestrator({
+      hostExec: exec,
+      platformApiUrl: "https://10.0.0.9",
+    });
+    expect(Reflect.get(https, "platformForward")).toEqual({ ip: "10.0.0.9", port: 443 });
+  });
+
+  it("rejects hostname URLs at construction — guests have no DNS resolver", () => {
+    const { exec } = fakeExec();
+    expect(
+      () => new FirecrackerOrchestrator({ hostExec: exec, platformApiUrl: "http://myhost:3000" }),
+    ).toThrow(/IPv4 literal.*no DNS resolver/s);
+  });
+
+  it("rejects out-of-range octets and unparseable URLs", () => {
+    const { exec } = fakeExec();
+    // The WHATWG parser rejects malformed numeric hosts outright — they
+    // land in the "not a valid URL" bucket, same actionable hint.
+    expect(
+      () => new FirecrackerOrchestrator({ hostExec: exec, platformApiUrl: "http://999.0.0.1" }),
+    ).toThrow(/not a valid URL.*http\(s\):\/\/<IPv4>\[:port\]/s);
+    expect(
+      () => new FirecrackerOrchestrator({ hostExec: exec, platformApiUrl: "not a url" }),
+    ).toThrow(/not a valid URL.*http\(s\):\/\/<IPv4>\[:port\]/s);
+  });
+
+  it("rejects non-http(s) schemes with an actionable message", () => {
+    const { exec } = fakeExec();
+    expect(
+      () => new FirecrackerOrchestrator({ hostExec: exec, platformApiUrl: "ftp://10.0.0.1:21" }),
+    ).toThrow(/must use http or https/);
+  });
+
+  it("exempts the remote platform ip (not the lo alias) from the forward proxy", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec, { platformApiUrl: REMOTE_URL });
+    const boundary = await orch.createIsolationBoundary("run_1");
+    expect(boundary.sidecarEndpoints.noProxy).toBe("localhost,127.0.0.1,172.17.0.1");
+  });
+
+  it("keeps the lo alias in noProxy when no override is set (in-process mode unchanged)", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const boundary = await orch.createIsolationBoundary("run_1");
+    expect(boundary.sidecarEndpoints.noProxy).toBe("localhost,127.0.0.1,10.231.255.1");
   });
 });
 

@@ -1,0 +1,204 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Wire protocol between the platform's `firecracker-remote` backend and
+ * the `appstrate-runner` daemon (issue #819, phase 1).
+ *
+ * Single source of truth for both sides: the daemon (`./server.ts`)
+ * validates every request body against these schemas, the client
+ * (`../remote-orchestrator.ts`) types its calls from them. All payloads
+ * are plain JSON mirrors of the `RunOrchestrator` value types — handles
+ * and boundaries cross the wire verbatim and are treated as opaque by
+ * the client.
+ *
+ * Wire casing note: this is an INTERNAL platform↔daemon protocol, not a
+ * public HTTP API — payloads carry `@appstrate/core/platform-types`
+ * shapes as-is (camelCase), the same way they cross the in-process
+ * orchestrator boundary. Converting to snake_case here would force a
+ * lossy rename layer around types the two sides already share.
+ *
+ * SECURITY: `POST /v1/sidecars` carries the run token and credential
+ * bundle env. The transport MUST be a trusted link — same host, private
+ * network, or TLS via a reverse proxy — and every request carries the
+ * shared bearer token. See README.md ("Remote run-plane").
+ */
+
+import { z } from "zod";
+
+/**
+ * Bumped on any wire-incompatible change. The client refuses to start
+ * against a daemon speaking a different major protocol.
+ */
+export const RUNNER_PROTOCOL_VERSION = 1;
+
+// ---------------------------------------------------------------------------
+// Platform-type mirrors
+// ---------------------------------------------------------------------------
+
+export const workloadHandleSchema = z.object({
+  id: z.string().min(1),
+  runId: z.string().min(1),
+  role: z.string().min(1),
+});
+
+export const workloadResourcesSchema = z.object({
+  memoryBytes: z.number().int().positive(),
+  nanoCpus: z.number().int().positive(),
+  pidsLimit: z.number().int().positive().optional(),
+});
+
+export const workloadSpecSchema = z.object({
+  runId: z.string().min(1),
+  role: z.string().min(1),
+  image: z.string(),
+  env: z.record(z.string(), z.string()),
+  resources: workloadResourcesSchema,
+  egress: z.boolean().optional(),
+});
+
+export const workspaceHandleSchema = z.union([
+  z.object({ kind: z.literal("volume"), name: z.string().min(1) }),
+  z.object({ kind: z.literal("directory"), path: z.string().min(1) }),
+]);
+
+export const sidecarEndpointsSchema = z.object({
+  sidecarUrl: z.string(),
+  llmProxyUrl: z.string(),
+  forwardProxyUrl: z.string(),
+  noProxy: z.string(),
+});
+
+export const isolationBoundarySchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  workspace: workspaceHandleSchema,
+  sidecarEndpoints: sidecarEndpointsSchema,
+});
+
+/**
+ * `SidecarLaunchSpec` mirror. Loose on purpose: the spec is produced and
+ * consumed by the same platform codebase on both ends — the daemon only
+ * needs to pin the fields it inspects (`runToken`) and forwards the rest
+ * untouched. A strict mirror would turn every additive core field into a
+ * lockstep daemon redeploy.
+ */
+export const sidecarLaunchSpecSchema = z.looseObject({
+  runToken: z.string().min(1),
+});
+
+// ---------------------------------------------------------------------------
+// Request bodies
+// ---------------------------------------------------------------------------
+
+export const createBoundaryBodySchema = z.object({
+  runId: z.string().min(1),
+  opts: z.object({ skipSidecar: z.boolean().optional() }).optional(),
+});
+
+export const removeBoundaryBodySchema = z.object({
+  boundary: isolationBoundarySchema,
+});
+
+export const createSidecarBodySchema = z.object({
+  runId: z.string().min(1),
+  boundary: isolationBoundarySchema,
+  spec: sidecarLaunchSpecSchema,
+});
+
+export const createWorkloadBodySchema = z.object({
+  spec: workloadSpecSchema,
+  boundary: isolationBoundarySchema,
+});
+
+export const handleBodySchema = z.object({
+  handle: workloadHandleSchema,
+});
+
+export const stopWorkloadBodySchema = z.object({
+  handle: workloadHandleSchema,
+  timeoutSeconds: z.number().int().nonnegative().optional(),
+});
+
+export const logsBodySchema = z.object({
+  handle: workloadHandleSchema,
+  /**
+   * Lines already received — the daemon skips that many lines so a
+   * reconnecting client resumes without duplicating run logs.
+   */
+  skip: z.number().int().nonnegative().default(0),
+});
+
+export const stopRunBodySchema = z.object({
+  runId: z.string().min(1),
+  timeoutSeconds: z.number().int().nonnegative().optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Responses
+// ---------------------------------------------------------------------------
+
+export const healthResponseSchema = z.object({
+  ok: z.literal(true),
+  adapter: z.literal("firecracker"),
+  protocol: z.number().int(),
+  initialized: z.boolean(),
+});
+
+export const cleanupReportSchema = z.object({
+  workloads: z.number().int().nonnegative(),
+  isolationBoundaries: z.number().int().nonnegative(),
+  workspaces: z.number().int().nonnegative(),
+});
+
+/** Long-poll answer: `done: false` means "still running, poll again". */
+export const exitResponseSchema = z.union([
+  z.object({ done: z.literal(false) }),
+  z.object({ done: z.literal(true), code: z.number().int() }),
+]);
+
+export const stopResultResponseSchema = z.object({
+  result: z.enum(["stopped", "not_found", "already_stopped"]),
+});
+
+export const platformUrlResponseSchema = z.object({
+  url: z.string(),
+});
+
+/** Every non-2xx response body. */
+export const errorResponseSchema = z.object({
+  error: z.string(),
+});
+
+/** One NDJSON line on the `logs` stream. */
+export const logLineSchema = z.object({
+  line: z.string(),
+});
+
+// ---------------------------------------------------------------------------
+// Endpoint map
+// ---------------------------------------------------------------------------
+
+/**
+ * Route paths, shared so client and server can never drift. All bodies
+ * are JSON; `logs` responds as an NDJSON stream (`application/x-ndjson`,
+ * one `logLineSchema` object per line); `exit` long-polls up to
+ * {@link EXIT_LONG_POLL_MS} before answering `{ done: false }`.
+ */
+export const RUNNER_ROUTES = {
+  health: "/v1/health",
+  cleanupOrphans: "/v1/cleanup-orphans",
+  createBoundary: "/v1/boundaries",
+  removeBoundary: "/v1/boundaries/remove",
+  createSidecar: "/v1/sidecars",
+  createWorkload: "/v1/workloads",
+  startWorkload: "/v1/workloads/start",
+  stopWorkload: "/v1/workloads/stop",
+  removeWorkload: "/v1/workloads/remove",
+  waitForExit: "/v1/workloads/exit",
+  streamLogs: "/v1/workloads/logs",
+  stopRun: "/v1/runs/stop",
+  platformUrl: "/v1/platform-url",
+} as const;
+
+/** How long the daemon holds an `exit` long-poll before `{ done: false }`. */
+export const EXIT_LONG_POLL_MS = 45_000;

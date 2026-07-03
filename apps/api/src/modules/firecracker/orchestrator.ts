@@ -138,6 +138,58 @@ export interface FirecrackerOrchestratorDeps {
    * the boot machinery without a live platform. Never set in production.
    */
   agentArgvOverride?: string[];
+  /**
+   * Remote platform API URL override for split-process deployments
+   * (issue #819): the orchestrator runs inside the appstrate-runner
+   * daemon on a KVM host while the platform API lives elsewhere (e.g. a
+   * Docker container on the same machine). Must be
+   * `http(s)://<IPv4>[:port]` — guests have no DNS resolver, so a
+   * hostname would never resolve in-guest (validated fail-fast in the
+   * constructor). When set: resolvePlatformApiUrl advertises it verbatim
+   * (no lo-alias/PORT computation), the guest config targets its ip:port,
+   * and the host firewall unconditionally accepts guest→ip:port (see
+   * host-net.ts `platformForward`). Absent = in-process mode, unchanged.
+   */
+  platformApiUrl?: string;
+}
+
+/**
+ * Validate + parse the remote platform URL into the ip:port the host
+ * firewall must open for guests. Fail-fast at construction: an invalid
+ * URL discovered at first run would surface as an opaque in-guest network
+ * timeout instead of a boot-time configuration error.
+ */
+function parsePlatformApiUrl(raw: string): { ip: string; port: number } {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(
+      `FirecrackerOrchestrator platformApiUrl is not a valid URL: "${raw}" — ` +
+        `expected http(s)://<IPv4>[:port]`,
+    );
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(
+      `FirecrackerOrchestrator platformApiUrl must use http or https ` +
+        `(got "${url.protocol}//" in "${raw}") — expected http(s)://<IPv4>[:port]`,
+    );
+  }
+  // The WHATWG parser has already normalized/validated numeric hosts
+  // (e.g. "999.0.0.1" or "0x7f.1" never reach here as-is) — anything
+  // still dotted-quad shaped is a well-formed IPv4 literal.
+  const ip = url.hostname;
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+    throw new Error(
+      `FirecrackerOrchestrator platformApiUrl host must be an IPv4 literal ` +
+        `(got "${ip}" in "${raw}") — guests have no DNS resolver, so a hostname ` +
+        `would never resolve in-guest`,
+    );
+  }
+  // URL normalizes an explicit default port away (":80"/":443" → "") —
+  // re-derive it from the scheme.
+  const port = url.port !== "" ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+  return { ip, port };
 }
 
 export class FirecrackerOrchestrator implements RunOrchestrator {
@@ -150,6 +202,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   private readonly pendingAgentSpecs = new Map<string, WorkloadSpec>();
 
   private readonly agentArgvOverride: string[] | undefined;
+
+  /** Verbatim deps.platformApiUrl — advertised to the sidecar as-is. */
+  private readonly platformApiUrlOverride: string | undefined;
+  /** Parsed override — the ip:port guests must always be allowed to reach. */
+  private readonly platformForward: { ip: string; port: number } | undefined;
 
   /**
    * Per-instance 0700 directory holding the VMM API sockets (see
@@ -171,6 +228,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   constructor(deps: FirecrackerOrchestratorDeps = {}) {
     this.hostExec = deps.hostExec ?? createHostExec();
     this.agentArgvOverride = deps.agentArgvOverride;
+    this.platformApiUrlOverride = deps.platformApiUrl;
+    this.platformForward =
+      deps.platformApiUrl === undefined ? undefined : parsePlatformApiUrl(deps.platformApiUrl);
     this.allocator = new SubnetAllocator(getFirecrackerEnv().FIRECRACKER_SUBNET_CIDR);
   }
 
@@ -230,6 +290,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       aliasIp: platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR),
       platformPort: env.PORT,
       egressDenyCidrs: fcEnv.FIRECRACKER_EGRESS_DENY_CIDRS.split(",").filter(Boolean),
+      // Remote-platform mode: guests must reach the override's ip:port
+      // unconditionally (it typically sits inside the deny CIDRs above).
+      ...(this.platformForward ? { platformForward: this.platformForward } : {}),
     });
     this.initialized = true;
     logger.info("Firecracker orchestrator initialized", {
@@ -357,7 +420,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
     await this.writeStateFile(runDir, { runId, tapDevice: subnet.tapDevice });
 
-    const aliasIp = platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
+    // Remote-platform mode: the guest talks to the override ip, not the
+    // host lo alias — the noProxy exemption must track whichever one the
+    // sink POSTs actually target.
+    const platformIp = this.platformForward?.ip ?? platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
     this.vms.set(runId, {
       runId,
       subnet,
@@ -386,9 +452,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         sidecarUrl: "http://127.0.0.1:8080",
         llmProxyUrl: "http://127.0.0.1:8080/llm",
         forwardProxyUrl: "http://127.0.0.1:8081",
-        // The platform alias must bypass the forward proxy — sink POSTs
+        // The platform endpoint must bypass the forward proxy — sink POSTs
         // go straight out eth0 (uid-scoped allow in the guest firewall).
-        noProxy: `localhost,127.0.0.1,${aliasIp}`,
+        noProxy: `localhost,127.0.0.1,${platformIp}`,
       },
     };
   }
@@ -477,14 +543,17 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
 
     vm.exitNonce = randomBytes(16).toString("hex");
+    // Remote-platform mode: the guest firewall's sink-POST allow and the
+    // supervisor's platform endpoint must target the override, not the
+    // host lo alias (which nothing listens on in that topology).
     const aliasIp = platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
     // skipSidecar runs never called createSidecar — no pending env entry.
     const sidecarEnv = this.pendingSidecarEnv.get(handle.runId);
     const guestConfig = buildGuestConfig({
       runId: handle.runId,
       exitMarkerNonce: vm.exitNonce,
-      platformIp: aliasIp,
-      platformPort: env.PORT,
+      platformIp: this.platformForward?.ip ?? aliasIp,
+      platformPort: this.platformForward?.port ?? env.PORT,
       sidecarEnv,
       agentEnv: agentSpec.env,
       agentUnrestrictedEgress: agentSpec.egress === true,
@@ -632,6 +701,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   }
 
   async resolvePlatformApiUrl(): Promise<string> {
+    // Remote-platform mode (appstrate-runner): the platform is NOT this
+    // process — advertise the operator-provided URL verbatim, no
+    // lo-alias/PORT computation.
+    if (this.platformApiUrlOverride !== undefined) return this.platformApiUrlOverride;
     const env = getEnv();
     const fcEnv = getFirecrackerEnv();
     return `http://${platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR)}:${env.PORT}`;

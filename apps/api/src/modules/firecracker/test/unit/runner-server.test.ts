@@ -1,0 +1,233 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Unit tests for the `appstrate-runner` HTTP surface (runner/server.ts)
+ * — pure wire-level coverage with a fake orchestrator: bearer auth,
+ * body validation, error mapping, the exit long-poll, and NDJSON log
+ * streaming. No network, no KVM, no Linux: the app is driven entirely
+ * through `app.request()`.
+ */
+
+import { describe, it, expect } from "bun:test";
+import type {
+  CleanupReport,
+  IsolationBoundary,
+  RunOrchestrator,
+  StopResult,
+  WorkloadHandle,
+} from "@appstrate/core/platform-types";
+import { createRunnerApp } from "../../runner/server.ts";
+import { RUNNER_PROTOCOL_VERSION, RUNNER_ROUTES } from "../../runner/protocol.ts";
+
+const TOKEN = "unit-test-token-0123456789";
+
+interface RecordedCall {
+  method: string;
+  args: unknown[];
+}
+
+const BOUNDARY: IsolationBoundary = {
+  id: "b-1",
+  name: "appstrate-run-1",
+  workspace: { kind: "directory", path: "/workspace" },
+  sidecarEndpoints: {
+    sidecarUrl: "http://127.0.0.1:8080",
+    llmProxyUrl: "http://127.0.0.1:8080/llm",
+    forwardProxyUrl: "http://127.0.0.1:8081",
+    noProxy: "127.0.0.1",
+  },
+};
+
+const AGENT_HANDLE: WorkloadHandle = { id: "wl-1", runId: "run-1", role: "agent" };
+
+const CLEANUP: CleanupReport = { workloads: 1, isolationBoundaries: 2, workspaces: 3 };
+
+/**
+ * Plain-object RunOrchestrator: every method records its arguments and
+ * returns a canned value. Individual tests override the method under
+ * test (throwing, never resolving, custom generator).
+ */
+function fakeOrchestrator(overrides: Partial<RunOrchestrator> = {}): {
+  orchestrator: RunOrchestrator;
+  calls: RecordedCall[];
+} {
+  const calls: RecordedCall[] = [];
+  const record =
+    <T>(method: string, value: T) =>
+    (...args: unknown[]): Promise<T> => {
+      calls.push({ method, args });
+      return Promise.resolve(value);
+    };
+  const orchestrator: RunOrchestrator = {
+    initialize: record("initialize", undefined),
+    shutdown: record("shutdown", undefined),
+    cleanupOrphans: record("cleanupOrphans", CLEANUP),
+    ensureImages: record("ensureImages", undefined),
+    createIsolationBoundary: record("createIsolationBoundary", BOUNDARY),
+    removeIsolationBoundary: record("removeIsolationBoundary", undefined),
+    createSidecar: record("createSidecar", { ...AGENT_HANDLE, role: "sidecar" }),
+    createWorkload: record("createWorkload", AGENT_HANDLE),
+    startWorkload: record("startWorkload", undefined),
+    stopWorkload: record("stopWorkload", undefined),
+    removeWorkload: record("removeWorkload", undefined),
+    waitForExit: record("waitForExit", 0),
+    streamLogs: async function* (): AsyncGenerator<string> {
+      calls.push({ method: "streamLogs", args: [] });
+      yield* [] as string[];
+    },
+    stopByRunId: record<StopResult>("stopByRunId", "stopped"),
+    resolvePlatformApiUrl: record("resolvePlatformApiUrl", "http://10.0.0.1:3000"),
+    ...overrides,
+  };
+  return { orchestrator, calls };
+}
+
+function makeApp(overrides: Partial<RunOrchestrator> = {}, exitLongPollMs?: number) {
+  const { orchestrator, calls } = fakeOrchestrator(overrides);
+  const app = createRunnerApp({
+    orchestrator,
+    token: TOKEN,
+    ...(exitLongPollMs !== undefined ? { exitLongPollMs } : {}),
+  });
+  return { app, calls };
+}
+
+function post(app: ReturnType<typeof makeApp>["app"], path: string, body: unknown) {
+  return app.request(path, {
+    method: "POST",
+    headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("runner server auth", () => {
+  it("rejects requests without a token", async () => {
+    const { app } = makeApp();
+    const res = await app.request(RUNNER_ROUTES.health);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("rejects requests with a wrong token (same length included)", async () => {
+    const { app } = makeApp();
+    for (const bad of ["nope", "x".repeat(TOKEN.length)]) {
+      const res = await app.request(RUNNER_ROUTES.health, {
+        headers: { authorization: `Bearer ${bad}` },
+      });
+      expect(res.status).toBe(401);
+    }
+  });
+
+  it("accepts the shared token", async () => {
+    const { app } = makeApp();
+    const res = await app.request(RUNNER_ROUTES.health, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("runner server routes", () => {
+  it("answers health with the protocol version", async () => {
+    const { app } = makeApp();
+    const res = await app.request(RUNNER_ROUTES.health, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(await res.json()).toEqual({
+      ok: true,
+      adapter: "firecracker",
+      protocol: RUNNER_PROTOCOL_VERSION,
+      initialized: true,
+    });
+  });
+
+  it("creates a boundary and forwards runId + opts", async () => {
+    const { app, calls } = makeApp();
+    const res = await post(app, RUNNER_ROUTES.createBoundary, {
+      runId: "run-1",
+      opts: { skipSidecar: true },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(BOUNDARY as unknown as Record<string, unknown>);
+    expect(calls).toEqual([
+      { method: "createIsolationBoundary", args: ["run-1", { skipSidecar: true }] },
+    ]);
+  });
+
+  it("returns 400 with a message summary on an invalid body", async () => {
+    const { app, calls } = makeApp();
+    const res = await post(app, RUNNER_ROUTES.createBoundary, { runId: 42 });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("runId");
+    // The orchestrator must never see an unvalidated payload.
+    expect(calls).toEqual([]);
+  });
+
+  it("maps an orchestrator error to 500 with the message only", async () => {
+    const { app } = makeApp({
+      createIsolationBoundary: () => Promise.reject(new Error("tap allocation failed")),
+    });
+    const res = await post(app, RUNNER_ROUTES.createBoundary, { runId: "run-1" });
+    expect(res.status).toBe(500);
+    // Exactly the message — no stack, no error class name.
+    expect(await res.json()).toEqual({ error: "tap allocation failed" });
+  });
+
+  it("forwards the sidecar spec verbatim, extra fields included", async () => {
+    const { app, calls } = makeApp();
+    const spec = {
+      runToken: "tok-1",
+      llmProxy: { baseUrl: "https://api.anthropic.com" },
+      futureField: { nested: [1, 2, 3] },
+    };
+    const res = await post(app, RUNNER_ROUTES.createSidecar, {
+      runId: "run-1",
+      boundary: BOUNDARY,
+      spec,
+    });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([{ method: "createSidecar", args: ["run-1", BOUNDARY, spec] }]);
+  });
+
+  it("long-polls exit: immediate exit answers { done: true, code }", async () => {
+    const { app } = makeApp({ waitForExit: () => Promise.resolve(7) });
+    const res = await post(app, RUNNER_ROUTES.waitForExit, { handle: AGENT_HANDLE });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ done: true, code: 7 });
+  });
+
+  it("long-polls exit: a still-running workload answers { done: false }", async () => {
+    // Never-resolving waitForExit + a 50ms injected window keeps the
+    // test fast without touching the production 45s constant.
+    const { app } = makeApp({ waitForExit: () => new Promise<number>(() => {}) }, 50);
+    const res = await post(app, RUNNER_ROUTES.waitForExit, { handle: AGENT_HANDLE });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ done: false });
+  });
+
+  it("streams logs as NDJSON and honors skip", async () => {
+    const lines = ["l1", "l2", "l3", "l4", "l5"];
+    const { app } = makeApp({
+      streamLogs: async function* (): AsyncGenerator<string> {
+        yield* lines;
+      },
+    });
+    const res = await post(app, RUNNER_ROUTES.streamLogs, { handle: AGENT_HANDLE, skip: 3 });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/x-ndjson");
+    const received = (await res.text())
+      .split("\n")
+      .filter((l) => l.length > 0)
+      .map((l) => (JSON.parse(l) as { line: string }).line);
+    expect(received).toEqual(["l4", "l5"]);
+  });
+
+  it("passes the stop-run result through and forwards the timeout", async () => {
+    const { app, calls } = makeApp();
+    const res = await post(app, RUNNER_ROUTES.stopRun, { runId: "run-1", timeoutSeconds: 9 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ result: "stopped" });
+    expect(calls).toEqual([{ method: "stopByRunId", args: ["run-1", 9] }]);
+  });
+});

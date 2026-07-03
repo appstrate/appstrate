@@ -21,6 +21,27 @@ listing the registered backends. The module owns its `FIRECRACKER_*`
 environment variables (validated at module init — see the module `README.md`);
 they are not part of the `@appstrate/env` schema.
 
+## Remote run-plane — `appstrate-runner` (phase 1 of #819)
+
+The in-process backend requires the platform API itself to run on the KVM
+host with network privileges. For containerized platforms (Coolify /
+docker-compose), the module contributes a second backend,
+`RUN_ADAPTER=firecracker-remote`: a `RunOrchestrator` HTTP client that
+drives a small daemon (`bun run firecracker:runner`, systemd on the KVM
+host) which wraps the same `FirecrackerOrchestrator` behind a
+token-authenticated JSON/NDJSON protocol (`runner/protocol.ts`,
+versioned). This is the standard production split (AWS MicroManager,
+Fly.io flyd, E2B orchestrator): the control plane never touches KVM; the
+privileged surface lives in a rarely-released host daemon.
+
+Guests reach the platform at `FIRECRACKER_RUNNER_PLATFORM_URL` (IPv4
+literal — guests have no DNS); the daemon opens an explicit nft accept
+for exactly that ip:port ahead of the egress-deny CIDRs, mirroring the
+in-process platform-alias rule. Capabilities are identical
+(`isolatesWorkloads: true` — the VM lives on the runner host, credentials
+never enter the platform process; `supportsSidecarOnly: false`). Setup,
+env vars, and security posture: module `README.md` § "Remote run-plane".
+
 ## Production status — EXPERIMENTAL
 
 Treat this backend as **experimental**. Two hardening gaps must close before

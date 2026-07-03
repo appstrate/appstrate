@@ -61,10 +61,31 @@ export function buildNftScript(params: {
   platformPort: number;
   /** Forward-path destinations guests may never reach (metadata, RFC1918). */
   egressDenyCidrs: string[];
+  /**
+   * REMOTE platform API endpoint (split-process deployments: the platform
+   * is not this process, e.g. a Docker container next to the
+   * appstrate-runner daemon). Guests must reach exactly this ip:port
+   * unconditionally — it typically sits inside the deny CIDRs (RFC1918 /
+   * docker bridge) and the run's TAP may not even have egress, so the
+   * accept must beat every drop, exactly like the lo-alias accept does
+   * for in-process mode. Absent = in-process mode, script unchanged.
+   */
+  platformForward?: { ip: string; port: number };
 }): string {
-  const { subnetCidr, aliasIp, platformPort, egressDenyCidrs } = params;
+  const { subnetCidr, aliasIp, platformPort, egressDenyCidrs, platformForward } = params;
   const tap = `"${TAP_DEVICE_PREFIX}*"`;
   const denySet = egressDenyCidrs.join(", ");
+  // Whether guest→platform traffic is delivered locally (INPUT hook — the
+  // host owns the platform IP, e.g. a docker bridge address) or routed
+  // (FORWARD hook) depends on host topology we don't control. Emit the
+  // accept in BOTH chains of this table — two one-line rules remove the
+  // topology guesswork, and the unmatched copy is a harmless no-op. Both
+  // copies precede the drops in their chain (a drop in ANY hooked table
+  // is final, so the accept must win INSIDE this table). No teardown
+  // mirror needed: both rules die with the table delete.
+  const platformAccept = platformForward
+    ? [`    iifname ${tap} ip daddr ${platformForward.ip} tcp dport ${platformForward.port} accept`]
+    : [];
   return [
     `add table ip appstrate_fc`,
     `delete table ip appstrate_fc`,
@@ -72,13 +93,16 @@ export function buildNftScript(params: {
     `  chain input {`,
     `    type filter hook input priority filter; policy accept;`,
     `    iifname ${tap} ip daddr ${aliasIp} tcp dport ${platformPort} accept`,
+    ...platformAccept,
     `    iifname ${tap} drop`,
     `  }`,
     `  chain forward {`,
     `    type filter hook forward priority filter; policy accept;`,
     `    iifname ${tap} oifname ${tap} drop`,
+    ...platformAccept,
     // The platform alias rides the input hook (it lives on lo), so this
-    // deny never blocks sink/API traffic — only routed egress.
+    // deny never blocks sink/API traffic — only routed egress. The remote
+    // platform accept above beats it by rule order.
     ...(denySet.length > 0 ? [`    iifname ${tap} ip daddr { ${denySet} } drop`] : []),
     `    iifname ${tap} accept`,
     `    oifname ${tap} ct state established,related accept`,
@@ -101,6 +125,8 @@ export async function setupHostNetwork(
     aliasIp: string;
     platformPort: number;
     egressDenyCidrs: string[];
+    /** Remote platform endpoint guests must always reach — see buildNftScript. */
+    platformForward?: { ip: string; port: number };
   },
 ): Promise<void> {
   // `replace` (not `add`) → idempotent across restarts.
