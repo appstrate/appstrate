@@ -20,7 +20,7 @@
  * SECURITY: `POST /v1/sidecars` carries the run token and credential
  * bundle env. The transport MUST be a trusted link — same host, private
  * network, or TLS via a reverse proxy — and every request carries the
- * shared bearer token. See README.md ("Remote run-plane").
+ * shared bearer token. See ../README.md ("Security posture").
  */
 
 import { z } from "zod";

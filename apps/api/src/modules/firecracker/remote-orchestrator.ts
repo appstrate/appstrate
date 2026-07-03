@@ -166,7 +166,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
         `firecracker backend is not configured: set FIRECRACKER_RUNNER_URL ` +
           `(http(s) address of the appstrate-runner daemon) and FIRECRACKER_RUNNER_TOKEN ` +
           `(shared bearer secret, at least 16 chars). See ` +
-          `apps/api/src/modules/firecracker/runner/README.md. (${getErrorMessage(err)})`,
+          `apps/api/src/modules/firecracker/README.md. (${getErrorMessage(err)})`,
       );
     }
   }
