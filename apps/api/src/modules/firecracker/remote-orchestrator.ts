@@ -42,7 +42,6 @@ import {
   workloadHandleSchema,
   exitResponseSchema,
   stopResultResponseSchema,
-  platformUrlResponseSchema,
   errorResponseSchema,
   logLineSchema,
   workloadStatusResponseSchema,
@@ -245,6 +244,9 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
           `orchestrator failed to initialize — check the daemon's logs (KVM, artifacts)`,
       );
     }
+    // Cache the daemon's guest-visible platform URL from the same health
+    // payload — resolvePlatformApiUrl() serves it without a second round-trip.
+    this.platformUrlPromise = Promise.resolve(health.platformUrl);
     // Surface the daemon's boot-time guest-path self-verification
     // (net-probe.ts) on the platform side too, so an operator reading the
     // platform boot log sees whether guest→platform networking is proven
@@ -253,8 +255,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     logger.info("firecracker orchestrator connected", {
       url: env.FIRECRACKER_RUNNER_URL,
       protocol: health.protocol,
-      platformReachable: health.platformReachable ?? null,
-      guestPathVerified: health.guestPathVerified ?? null,
+      platformReachable: health.platformReachable,
+      guestPathVerified: health.guestPathVerified,
     });
   }
 
@@ -550,15 +552,16 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
 
   /**
    * The DAEMON answers this: the agent runs on the runner host, so "how
-   * does the agent reach the platform" is a runner-side topology fact
-   * (its configured platform URL), not something this process can guess.
-   * Cached — the answer is static for the daemon's lifetime; the cache is
-   * dropped on failure so a transient error does not poison every
-   * subsequent run.
+   * does the agent reach the platform" is a runner-side topology fact (its
+   * configured platform URL), not something this process can guess. Served
+   * from the /v1/health payload — primed by initialize(), or fetched on
+   * demand here if resolve races ahead of it. Cached (the answer is static
+   * for the daemon's lifetime); the cache is dropped on failure so a
+   * transient error does not poison every subsequent run.
    */
   resolvePlatformApiUrl(): Promise<string> {
-    this.platformUrlPromise ??= this.call(RUNNER_ROUTES.platformUrl, { method: "GET" })
-      .then(async (res) => platformUrlResponseSchema.parse(await res.json()).url)
+    this.platformUrlPromise ??= this.call(RUNNER_ROUTES.health, { method: "GET" })
+      .then(async (res) => healthResponseSchema.parse(await res.json()).platformUrl)
       .catch((err: unknown) => {
         this.platformUrlPromise = undefined;
         throw err;

@@ -153,12 +153,16 @@ export const healthResponseSchema = z.object({
   adapter: z.literal("firecracker"),
   protocol: z.number().int(),
   initialized: z.boolean(),
+  // Guest-visible platform API URL the daemon advertises to its guests (its
+  // FIRECRACKER_RUNNER_PLATFORM_URL). The client caches this from the
+  // initialize() handshake so resolvePlatformApiUrl() needs no second call.
+  platformUrl: z.string(),
   // Guest→platform self-verification result computed once at daemon boot
-  // (see runner/net-probe.ts). Optional so a daemon that skipped the probe
-  // (or an older same-major build) still validates. `guestPathVerified`
-  // null = probe degraded/skipped (tooling absent or platform down).
-  platformReachable: z.boolean().optional(),
-  guestPathVerified: z.boolean().nullable().optional(),
+  // (see runner/net-probe.ts). Always sent — the handler defaults them when
+  // the probe was skipped. `guestPathVerified` null = probe degraded/skipped
+  // (tooling absent or platform down).
+  platformReachable: z.boolean(),
+  guestPathVerified: z.boolean().nullable(),
 });
 
 /** Long-poll answer: `done: false` means "still running, poll again". */
@@ -169,10 +173,6 @@ export const exitResponseSchema = z.union([
 
 export const stopResultResponseSchema = z.object({
   result: z.enum(["stopped", "not_found", "already_stopped"]),
-});
-
-export const platformUrlResponseSchema = z.object({
-  url: z.string(),
 });
 
 /** Every non-2xx response body. */
@@ -257,7 +257,6 @@ export const RUNNER_ROUTES = {
   // this route and the platform's heartbeat pump degrades to inert.
   workloadStatus: "/v1/workloads/status",
   stopRun: "/v1/runs/stop",
-  platformUrl: "/v1/platform-url",
 } as const;
 // NOTE: the console route (`CONSOLE_ROUTE_PATTERN` / `workloadConsolePath`)
 // is NOT in this map — it carries a path parameter and a query string, so

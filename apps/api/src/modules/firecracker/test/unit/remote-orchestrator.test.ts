@@ -42,6 +42,9 @@ const HEALTH_OK = {
   adapter: "firecracker",
   protocol: RUNNER_PROTOCOL_VERSION,
   initialized: true,
+  platformUrl: "http://10.0.0.9:3000",
+  platformReachable: true,
+  guestPathVerified: true,
 };
 
 interface RecordedCall {
@@ -510,8 +513,10 @@ describe("RemoteFirecrackerOrchestrator misc calls", () => {
     });
   });
 
-  it("resolvePlatformApiUrl caches the answer (single fetch)", async () => {
-    const { fn, calls } = fetchStub(() => json({ url: "http://platform.internal:3000" }));
+  it("resolvePlatformApiUrl reads platformUrl from health and caches it (single fetch)", async () => {
+    const { fn, calls } = fetchStub(() =>
+      json({ ...HEALTH_OK, platformUrl: "http://platform.internal:3000" }),
+    );
     const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
 
     const first = await orchestrator.resolvePlatformApiUrl();
@@ -520,7 +525,20 @@ describe("RemoteFirecrackerOrchestrator misc calls", () => {
     expect(first).toBe("http://platform.internal:3000");
     expect(second).toBe(first);
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe(`${BASE_URL}${RUNNER_ROUTES.platformUrl}`);
+    expect(calls[0]?.url).toBe(`${BASE_URL}${RUNNER_ROUTES.health}`);
     expect(calls[0]?.init?.method).toBe("GET");
+  });
+
+  it("initialize() primes the platform-url cache — resolve makes no extra call", async () => {
+    const { fn, calls } = fetchStub(() =>
+      json({ ...HEALTH_OK, platformUrl: "http://platform.internal:3000" }),
+    );
+    const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
+
+    await orchestrator.initialize();
+    expect(calls).toHaveLength(1); // just the health handshake
+
+    expect(await orchestrator.resolvePlatformApiUrl()).toBe("http://platform.internal:3000");
+    expect(calls).toHaveLength(1); // served from the cached handshake, no second call
   });
 });

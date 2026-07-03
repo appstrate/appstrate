@@ -170,7 +170,7 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
     }),
   );
 
-  app.get(RUNNER_ROUTES.health, (c) =>
+  app.get(RUNNER_ROUTES.health, async (c) =>
     c.json({
       ok: true,
       adapter: "firecracker",
@@ -179,9 +179,13 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
       // succeeded (see daemon.ts) — a reachable daemon is an initialized
       // one by construction.
       initialized: true,
-      // Spread the boot-time net-probe result when present; omitted
-      // entirely on a daemon that never ran the probe.
-      ...(deps.health ?? {}),
+      // The guest-visible platform URL is a daemon-side topology fact; the
+      // client caches it from this handshake (no separate round-trip).
+      platformUrl: await orchestrator.resolvePlatformApiUrl(),
+      // Boot-time net-probe result. Defaulted when the daemon skipped the
+      // probe so both fields are always present on the wire.
+      platformReachable: deps.health?.platformReachable ?? false,
+      guestPathVerified: deps.health?.guestPathVerified ?? null,
     }),
   );
 
@@ -302,11 +306,6 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
     if (!body.ok) return body.res;
     const result = await orchestrator.stopByRunId(body.data.runId, body.data.timeoutSeconds);
     return c.json({ result });
-  });
-
-  app.get(RUNNER_ROUTES.platformUrl, async (c) => {
-    const url = await orchestrator.resolvePlatformApiUrl();
-    return c.json({ url });
   });
 
   // Boot-phase liveness probe (phase 4): the platform's heartbeat pump

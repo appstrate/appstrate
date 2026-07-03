@@ -145,11 +145,16 @@ describe("runner server routes", () => {
     const res = await app.request(RUNNER_ROUTES.health, {
       headers: { authorization: `Bearer ${TOKEN}` },
     });
+    // The probe fields are always present — defaulted when no health snapshot
+    // is passed. platformUrl comes from the orchestrator's resolvePlatformApiUrl.
     expect(await res.json()).toEqual({
       ok: true,
       adapter: "firecracker",
       protocol: RUNNER_PROTOCOL_VERSION,
       initialized: true,
+      platformUrl: "http://10.0.0.1:3000",
+      platformReachable: false,
+      guestPathVerified: null,
     });
   });
 
@@ -168,6 +173,7 @@ describe("runner server routes", () => {
       adapter: "firecracker",
       protocol: RUNNER_PROTOCOL_VERSION,
       initialized: true,
+      platformUrl: "http://10.0.0.1:3000",
       platformReachable: true,
       guestPathVerified: false,
     });
