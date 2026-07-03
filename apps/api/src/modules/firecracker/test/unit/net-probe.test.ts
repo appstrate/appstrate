@@ -125,6 +125,21 @@ describe("verifyGuestPath — success", () => {
     expect(cmds.some((c) => is(c, "ip", "netns", "del", "appstrate-fc-probe"))).toBe(true);
     expect(cmds.some((c) => is(c, "ip", "link", "del", "afcprobe0"))).toBe(true);
   });
+
+  it("deletes a leftover netns before adding it, so a crashed probe cannot false-FATAL", async () => {
+    const { exec, calls } = fakeExec();
+    const { logger } = fakeLogger();
+    const result = await verifyGuestPath(baseDeps({ exec, logger }));
+    expect(result.guestPathVerified).toBe(true);
+
+    const cmds = calls.map((c) => c.cmd);
+    // The setup-phase `netns del` (idempotent pre-clean) must come BEFORE
+    // the `netns add`, not just at teardown.
+    const firstDel = cmds.findIndex((c) => is(c, "ip", "netns", "del", "appstrate-fc-probe"));
+    const add = cmds.findIndex((c) => is(c, "ip", "netns", "add", "appstrate-fc-probe"));
+    expect(firstDel).toBeGreaterThanOrEqual(0);
+    expect(add).toBeGreaterThan(firstDel);
+  });
 });
 
 describe("verifyGuestPath — nft drop (the DNAT regression)", () => {

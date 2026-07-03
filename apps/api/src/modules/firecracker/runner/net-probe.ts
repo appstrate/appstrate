@@ -135,6 +135,11 @@ async function toolingAvailable(exec: HostExec): Promise<{ ok: boolean; missing?
 
 /** Bring up the netns + veth pair addressed inside the guest /30. */
 async function setupProbeNetns(exec: HostExec, hostIp: string, guestIp: string): Promise<void> {
+  // A crashed probe can leave the namespace (or host veth) behind; the
+  // matching `add` below then fails with EEXIST, which strict mode would
+  // surface as a false FATAL. Clear both first (ignore "not found").
+  await exec.run(["ip", "netns", "del", PROBE_NETNS]).catch(() => {});
+  await exec.run(["ip", "link", "del", PROBE_HOST_IF]).catch(() => {});
   await exec.run(["ip", "netns", "add", PROBE_NETNS]);
   await exec.run([
     "ip",
