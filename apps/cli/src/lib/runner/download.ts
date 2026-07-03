@@ -34,8 +34,9 @@ export function sha256Hex(bytes: Uint8Array): string {
 
 /**
  * Extract the leading 64-hex token from a `sha256sum`-style manifest line
- * (`<hash>  <filename>` or `<hash> *<filename>`). Both the daemon sidecar
- * and firecracker's `.sha256.txt` use this shape.
+ * (`<hash>  <filename>` or `<hash> *<filename>`). Used to verify upstream
+ * firecracker's own `.tgz.sha256.txt` sidecar (the daemon binary is verified
+ * against the minisign-signed `checksums.txt` instead).
  */
 export function parseSha256(text: string): string {
   const first = text.trim().split(/\s+/)[0] ?? "";
@@ -48,13 +49,12 @@ export function parseSha256(text: string): string {
 /**
  * Build the daemon asset URLs for a version tag (`1.2.3` or `latest`). The
  * daemon's digest is a line in the release-wide `checksums.txt` (minisign
- * signed), so those two URLs anchor the trust; `sha256` is the legacy
- * same-origin sidecar, kept for other consumers but no longer trusted here.
+ * signed), so those two URLs anchor the trust.
  */
 export function daemonUrls(
   version: string,
   arch: RunnerArch,
-): { binary: string; sha256: string; checksums: string; checksumsSig: string } {
+): { binary: string; checksums: string; checksumsSig: string } {
   const asset = daemonAssetName(arch);
   const base =
     version === "latest"
@@ -62,7 +62,6 @@ export function daemonUrls(
       : `${APPSTRATE_RELEASE_BASE}/download/v${version.replace(/^v/, "")}`;
   return {
     binary: `${base}/${asset}`,
-    sha256: `${base}/${asset}.sha256`,
     checksums: `${base}/checksums.txt`,
     checksumsSig: `${base}/checksums.txt.minisig`,
   };

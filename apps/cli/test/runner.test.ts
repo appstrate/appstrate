@@ -31,6 +31,7 @@ import {
   resolveRunnerArch,
   runnerDataPaths,
   daemonAssetName,
+  APPSTRATE_RELEASE_BASE,
 } from "../src/lib/runner/constants.ts";
 import {
   resolveDaemonVersion,
@@ -266,7 +267,8 @@ describe("url builders", () => {
     );
     const pinned = daemonUrls("1.2.3", "aarch64");
     expect(pinned.binary).toContain("/download/v1.2.3/appstrate-runner-aarch64");
-    expect(pinned.sha256).toBe(`${pinned.binary}.sha256`);
+    expect(pinned.checksums).toBe(`${APPSTRATE_RELEASE_BASE}/download/v1.2.3/checksums.txt`);
+    expect(pinned.checksumsSig).toBe(`${pinned.checksums}.minisig`);
   });
   it("firecrackerUrls: tarball + sha + inner path", () => {
     const u = firecrackerUrls("1.16.0", "x86_64");
