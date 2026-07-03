@@ -83,8 +83,20 @@ export function buildNftScript(params: {
   // copies precede the drops in their chain (a drop in ANY hooked table
   // is final, so the accept must win INSIDE this table). No teardown
   // mirror needed: both rules die with the table delete.
-  const platformAccept = platformForward
+  // The forward copy matches the conntrack ORIGINAL tuple, not the packet
+  // header: when the platform endpoint is a docker-published port on this
+  // host, docker's DNAT (prerouting, dstnat priority) rewrites the
+  // destination to the container ip:port BEFORE the forward hook runs, so a
+  // plain `ip daddr` match never fires and the RFC1918 deny below kills the
+  // sink traffic. `ct original` sees the pre-DNAT destination in both the
+  // DNAT and the plain-routed case.
+  const platformInputAccept = platformForward
     ? [`    iifname ${tap} ip daddr ${platformForward.ip} tcp dport ${platformForward.port} accept`]
+    : [];
+  const platformForwardAccept = platformForward
+    ? [
+        `    iifname ${tap} ct original ip daddr ${platformForward.ip} ct original proto-dst ${platformForward.port} accept`,
+      ]
     : [];
   return [
     `add table ip appstrate_fc`,
@@ -93,13 +105,13 @@ export function buildNftScript(params: {
     `  chain input {`,
     `    type filter hook input priority filter; policy accept;`,
     `    iifname ${tap} ip daddr ${aliasIp} tcp dport ${platformPort} accept`,
-    ...platformAccept,
+    ...platformInputAccept,
     `    iifname ${tap} drop`,
     `  }`,
     `  chain forward {`,
     `    type filter hook forward priority filter; policy accept;`,
     `    iifname ${tap} oifname ${tap} drop`,
-    ...platformAccept,
+    ...platformForwardAccept,
     // The platform alias rides the input hook (it lives on lo), so this
     // deny never blocks sink/API traffic — only routed egress. The remote
     // platform accept above beats it by rule order.

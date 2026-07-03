@@ -88,11 +88,16 @@ describe("buildNftScript", () => {
 describe("buildNftScript with a remote platform (platformForward)", () => {
   const FORWARD = { ip: "172.17.0.1", port: 3000 };
   const script = buildNftScript({ ...PARAMS, platformForward: FORWARD });
-  const rule = `iifname "afc*" ip daddr 172.17.0.1 tcp dport 3000 accept`;
+  const inputRule = `iifname "afc*" ip daddr 172.17.0.1 tcp dport 3000 accept`;
+  // The forward copy matches the conntrack ORIGINAL tuple: when the platform
+  // endpoint is a docker-published port on this host, docker's DNAT rewrites
+  // the destination before the forward hook, so a plain `ip daddr` match
+  // would never fire there.
+  const forwardRule = `iifname "afc*" ct original ip daddr 172.17.0.1 ct original proto-dst 3000 accept`;
 
   it("accepts guest→platform in BOTH input and forward chains (topology-agnostic)", () => {
-    const inputCopy = script.indexOf(rule);
-    const forwardCopy = script.indexOf(rule, inputCopy + 1);
+    const inputCopy = script.indexOf(inputRule);
+    const forwardCopy = script.indexOf(forwardRule);
     expect(inputCopy).toBeGreaterThan(-1);
     expect(forwardCopy).toBeGreaterThan(inputCopy);
     expect(inputCopy).toBeGreaterThan(script.indexOf("chain input"));
@@ -100,8 +105,8 @@ describe("buildNftScript with a remote platform (platformForward)", () => {
   });
 
   it("beats the guest→host catch-all drop (input) and the deny-CIDR drop (forward)", () => {
-    const inputCopy = script.indexOf(rule);
-    const forwardCopy = script.indexOf(rule, inputCopy + 1);
+    const inputCopy = script.indexOf(inputRule);
+    const forwardCopy = script.indexOf(forwardRule);
     // Input copy before the guest→host catch-all drop — platform
     // reachability is unconditional, like the lo-alias accept.
     expect(inputCopy).toBeLessThan(script.indexOf(`iifname "afc*" drop`));
