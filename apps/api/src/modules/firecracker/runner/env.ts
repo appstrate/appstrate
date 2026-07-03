@@ -10,14 +10,8 @@
  */
 
 import { z } from "zod";
-
-/**
- * `http(s)://<IPv4>[:port]` with an optional trailing slash (stripped).
- * The host MUST be an IPv4 literal: this URL is handed to guest
- * workloads as the platform sink base, and Firecracker guests have no
- * DNS resolver — a hostname would fail inside every microVM.
- */
-const IPV4_URL_RE = /^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\/?$/;
+import { getErrorMessage } from "@appstrate/core/errors";
+import { parsePlatformApiUrl } from "./platform-url.ts";
 
 const runnerEnvSchema = z.object({
   // Shared bearer secret between the platform's firecracker backend (its
@@ -34,13 +28,19 @@ const runnerEnvSchema = z.object({
   // port: the bearer token is the only lock on this door.
   FIRECRACKER_RUNNER_HOST: z.string().default("0.0.0.0"),
   // Base URL guest workloads use to reach the platform API, e.g.
-  // "http://10.0.0.5:3000". REQUIRED and IPv4-literal-only (see
-  // IPV4_URL_RE) — the daemon cannot guess where the platform lives when
-  // the platform runs in a container on another host.
-  FIRECRACKER_RUNNER_PLATFORM_URL: z
-    .string()
-    .regex(IPV4_URL_RE, "must be http(s)://<IPv4>[:port] — guests have no DNS")
-    .transform((url) => url.replace(/\/+$/, "")),
+  // "http://10.0.0.5:3000". REQUIRED and IPv4-literal-only — the daemon
+  // cannot guess where the platform lives when it runs in a container on
+  // another host, and guests have no DNS. Validated + normalized by the
+  // shared parsePlatformApiUrl — the same parser the orchestrator uses to
+  // open the host firewall, so the two can never disagree on what is valid.
+  FIRECRACKER_RUNNER_PLATFORM_URL: z.string().transform((raw, ctx) => {
+    try {
+      return parsePlatformApiUrl(raw).url;
+    } catch (err) {
+      ctx.addIssue({ code: "custom", message: getErrorMessage(err) });
+      return z.NEVER;
+    }
+  }),
 });
 
 export type RunnerEnv = z.infer<typeof runnerEnvSchema>;

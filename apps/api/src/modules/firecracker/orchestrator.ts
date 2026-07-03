@@ -42,6 +42,7 @@ import { randomBytes } from "node:crypto";
 import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { getFirecrackerEnv } from "./runner/host-env.ts";
+import { parsePlatformApiUrl } from "./runner/platform-url.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { pickOperatorSidecarEnv } from "@appstrate/runner-pi";
 import type {
@@ -189,45 +190,6 @@ export interface FirecrackerOrchestratorDeps {
   platformApiUrl?: string;
 }
 
-/**
- * Validate + parse the remote platform URL into the ip:port the host
- * firewall must open for guests. Fail-fast at construction: an invalid
- * URL discovered at first run would surface as an opaque in-guest network
- * timeout instead of a boot-time configuration error.
- */
-function parsePlatformApiUrl(raw: string): { ip: string; port: number } {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error(
-      `FirecrackerOrchestrator platformApiUrl is not a valid URL: "${raw}" — ` +
-        `expected http(s)://<IPv4>[:port]`,
-    );
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(
-      `FirecrackerOrchestrator platformApiUrl must use http or https ` +
-        `(got "${url.protocol}//" in "${raw}") — expected http(s)://<IPv4>[:port]`,
-    );
-  }
-  // The WHATWG parser has already normalized/validated numeric hosts
-  // (e.g. "999.0.0.1" or "0x7f.1" never reach here as-is) — anything
-  // still dotted-quad shaped is a well-formed IPv4 literal.
-  const ip = url.hostname;
-  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
-    throw new Error(
-      `FirecrackerOrchestrator platformApiUrl host must be an IPv4 literal ` +
-        `(got "${ip}" in "${raw}") — guests have no DNS resolver, so a hostname ` +
-        `would never resolve in-guest`,
-    );
-  }
-  // URL normalizes an explicit default port away (":80"/":443" → "") —
-  // re-derive it from the scheme.
-  const port = url.port !== "" ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
-  return { ip, port };
-}
-
 export class FirecrackerOrchestrator implements RunOrchestrator {
   private readonly hostExec: HostExec;
   private readonly allocator: SubnetAllocator;
@@ -272,8 +234,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     this.hostExec = deps.hostExec ?? createHostExec();
     this.agentArgvOverride = deps.agentArgvOverride;
     this.platformApiUrlOverride = deps.platformApiUrl;
-    this.platformForward =
+    const parsedForward =
       deps.platformApiUrl === undefined ? undefined : parsePlatformApiUrl(deps.platformApiUrl);
+    this.platformForward = parsedForward && { ip: parsedForward.ip, port: parsedForward.port };
     this.allocator = new SubnetAllocator(getFirecrackerEnv().FIRECRACKER_SUBNET_CIDR);
   }
 
