@@ -1,0 +1,179 @@
+name: Preview Images
+
+# Official preview channel (issue #819, phase 6). Builds the full 8-image
+# stack from a PR (or an arbitrary ref) and publishes it to GHCR under a
+# `pr-<n>` / `preview-<ref-slug>` tag so a reviewer can deploy the change on
+# Coolify BEFORE merge — no CLI binaries, no GH Release, no `latest`.
+#
+# Opt-in per PR: add the `preview` label. A labeled PR re-publishes on every
+# push. `workflow_dispatch` builds any ref on demand. amd64 only (the staging
+# server is x86_64). See docs/deployment/PREVIEW_DEPLOY.md.
+#
+# NOTE: this REPLACES the temporary preview-images.yml (branch-pinned, dies at
+# merge) — do not delete that file here; it is still in use on the branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (branch, tag, or SHA) to build a preview from"
+        required: true
+        type: string
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  # One in-flight build per PR / dispatch ref — a new push cancels the stale one.
+  group: preview-${{ github.event.pull_request.number || github.event.inputs.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # Gate on the `preview` label (pull_request) and resolve the tag + the ref
+  # to check out. Skipping here keeps every unlabeled push a zero-cost no-op.
+  resolve:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'preview'))
+    outputs:
+      tag: ${{ steps.compute.outputs.tag }}
+      checkout_ref: ${{ steps.compute.outputs.checkout_ref }}
+      is_pr: ${{ steps.compute.outputs.is_pr }}
+    steps:
+      - name: Compute preview tag + checkout ref
+        id: compute
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "tag=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            # Build the PR's HEAD, not the synthetic merge commit.
+            echo "checkout_ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+            echo "is_pr=true" >> "$GITHUB_OUTPUT"
+          else
+            REF="${{ github.event.inputs.ref }}"
+            # Slugify for a valid, readable Docker tag.
+            SLUG="$(echo "$REF" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9._-]#-#g' | cut -c1-100)"
+            echo "tag=preview-${SLUG}" >> "$GITHUB_OUTPUT"
+            echo "checkout_ref=${REF}" >> "$GITHUB_OUTPUT"
+            echo "is_pr=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-push:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - name: appstrate
+            context: .
+            dockerfile: Dockerfile
+          - name: appstrate-pi
+            context: .
+            dockerfile: ./runtime-pi/Dockerfile
+          - name: appstrate-sidecar
+            context: .
+            dockerfile: ./runtime-pi/sidecar/Dockerfile
+          - name: appstrate-mcp-runner-node
+            context: ./runtime-pi/runners/node
+            dockerfile: ./runtime-pi/runners/node/Dockerfile
+          - name: appstrate-mcp-runner-python
+            context: ./runtime-pi/runners/python
+            dockerfile: ./runtime-pi/runners/python/Dockerfile
+          - name: appstrate-mcp-runner-bun
+            context: ./runtime-pi/runners/bun
+            dockerfile: ./runtime-pi/runners/bun/Dockerfile
+          - name: appstrate-mcp-runner-uv
+            context: ./runtime-pi/runners/uv
+            dockerfile: ./runtime-pi/runners/uv/Dockerfile
+          - name: appstrate-mcp-runner-binary
+            context: ./runtime-pi/runners/binary
+            dockerfile: ./runtime-pi/runners/binary/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.resolve.outputs.checkout_ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          # amd64 only: preview images exist solely to deploy on the (x86_64)
+          # staging/prod server — skipping arm64 roughly halves build time.
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Sticky PR comment with the tag + the one-liner to deploy on Coolify. Runs
+  # only for PR events (a dispatch has no PR to comment on) and only after the
+  # images are actually pushed.
+  comment:
+    needs: [resolve, build-and-push]
+    if: needs.resolve.outputs.is_pr == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upsert preview comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const tag = ${{ toJSON(needs.resolve.outputs.tag) }};
+            const marker = "<!-- appstrate-preview -->";
+            const body = [
+              marker,
+              `### 🚀 Preview images published`,
+              ``,
+              `Tag: \`${tag}\` — 8 images on \`ghcr.io/${context.repo.owner}/appstrate*\` (amd64).`,
+              ``,
+              `**Deploy on Coolify:** set \`APPSTRATE_VERSION=${tag}\` and redeploy.`,
+              ``,
+              `> On a slow link, pre-pull the images on the host first ` +
+              `(\`docker compose pull\`) — Coolify's deploy task times out at ` +
+              `10 min and a cold GHCR pull of all 8 images can exceed that.`,
+              ``,
+              `See [docs/deployment/PREVIEW_DEPLOY.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/docs/deployment/PREVIEW_DEPLOY.md).`,
+            ].join("\n");
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
