@@ -219,6 +219,18 @@ describe("runner server routes", () => {
     expect(calls).toEqual([]);
   });
 
+  it("rejects a request body over the size cap with 413 (after auth, before the orchestrator)", async () => {
+    const { app, calls } = makeApp();
+    // A valid-shaped createBoundary body padded past the 4 MiB cap.
+    const res = await post(app, RUNNER_ROUTES.createBoundary, {
+      runId: "run-1",
+      pad: "x".repeat(5 * 1024 * 1024),
+    });
+    expect(res.status).toBe(413);
+    expect(((await res.json()) as { error: string }).error).toContain("too large");
+    expect(calls).toEqual([]);
+  });
+
   it("maps an orchestrator error to 500 with the message only", async () => {
     const { app } = makeApp({
       createIsolationBoundary: () => Promise.reject(new Error("tap allocation failed")),

@@ -14,6 +14,7 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { stream } from "hono/streaming";
 import type { z } from "zod";
 import type {
@@ -42,6 +43,15 @@ import {
   stopRunBodySchema,
   stopWorkloadBodySchema,
 } from "./protocol.ts";
+
+/**
+ * Request body cap. The largest legitimate body is a sidecar/workload
+ * launch spec (env + credential bundle) — kilobytes in practice. Without
+ * an explicit cap Bun.serve would accept up to its 128 MiB default, so a
+ * single hostile POST could pin daemon memory. 4 MiB leaves generous
+ * headroom over any real spec.
+ */
+const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
 
 /** Liveness snapshot returned by {@link RunnerOrchestrator.workloadStatus}. */
 export interface WorkloadStatus {
@@ -148,6 +158,17 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
     }
     await next();
   });
+
+  // Cap the request body AFTER auth — an unauthenticated flood is rejected
+  // by the 401 above without buffering. 413 mirrors the daemon's {error}
+  // JSON convention instead of Hono's default plaintext body.
+  app.use(
+    "*",
+    bodyLimit({
+      maxSize: MAX_REQUEST_BODY_BYTES,
+      onError: (c) => c.json({ error: "request body too large" }, 413),
+    }),
+  );
 
   app.get(RUNNER_ROUTES.health, (c) =>
     c.json({
