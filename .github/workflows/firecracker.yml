@@ -76,7 +76,8 @@ jobs:
           # and (being RFC1918, e.g. 10.x on GH runners) it sits INSIDE the
           # egress-deny CIDRs. That is precisely what makes a reverted
           # `ip daddr` rule fatal: after Docker's DNAT the deny eats the packet.
-          export HOST_IP="$(ip route get 1.1.1.1 | awk '{print $7; exit}')"
+          HOST_IP="$(ip route get 1.1.1.1 | awk '{print $7; exit}')"
+          export HOST_IP
           echo "host IP under test: ${HOST_IP}"
 
           # Dummy HTTP target behind a PUBLISHED port → Docker installs the
@@ -84,7 +85,7 @@ jobs:
           # match on its conntrack-original tuple.
           docker run -d --name fc-dnat-target -p 18080:5678 \
             hashicorp/http-echo -listen=:5678 -text=ok >/dev/null
-          for i in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             curl -fsS --max-time 2 "http://127.0.0.1:18080" >/dev/null 2>&1 && break
             sleep 0.5
           done
@@ -156,12 +157,27 @@ jobs:
         uses: ./.github/actions/bun-setup
 
       - name: Enable KVM access
+        # GitHub's Linux runners expose nested virt on most pools, but the kvm
+        # module is not always pre-loaded and the /dev/kvm node can appear a
+        # beat after the udev trigger. Load the module explicitly, then poll
+        # for the node so a transient race doesn't red the whole 20-min build.
         run: |
+          set -euo pipefail
+          sudo modprobe kvm 2>/dev/null || true
+          sudo modprobe kvm_intel 2>/dev/null || sudo modprobe kvm_amd 2>/dev/null || true
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          test -r /dev/kvm && test -w /dev/kvm
+          for _ in $(seq 1 20); do
+            [ -e /dev/kvm ] && break
+            sleep 0.5
+          done
+          if ! { test -r /dev/kvm && test -w /dev/kvm; }; then
+            echo "::error::/dev/kvm unavailable on this runner — nested virt not exposed by the host pool" >&2
+            ls -l /dev/kvm 2>&1 || true
+            exit 1
+          fi
 
       - name: Install Firecracker
         # Pinned release + published checksum — never `latest` (supply chain).
