@@ -8,7 +8,7 @@
  * ./protocol.ts, so a CONTAINERIZED platform (which cannot touch
  * /dev/kvm, TAP devices, or nftables) can still drive microVM runs:
  *
- *   platform container ── firecracker-remote client ──HTTP──▶ this daemon ──▶ microVMs
+ *   platform container ── firecracker backend (HTTP client) ──HTTP──▶ this daemon ──▶ microVMs
  *
  * Start on the host:
  *
@@ -22,11 +22,11 @@
  */
 
 import { FirecrackerOrchestrator } from "../orchestrator.ts";
-import { getFirecrackerEnv } from "../env.ts";
+import { getFirecrackerEnv } from "./host-env.ts";
 import { getRunnerEnv } from "./env.ts";
 import { createRunnerApp } from "./server.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { logger } from "../../../lib/logger.ts";
+import { logger } from "./logger.ts";
 
 function fatal(step: string, err: unknown): never {
   logger.error(`appstrate-runner failed to start: ${step}`, { error: getErrorMessage(err) });

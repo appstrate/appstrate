@@ -20,8 +20,9 @@ import { z } from "zod";
 const IPV4_URL_RE = /^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\/?$/;
 
 const runnerEnvSchema = z.object({
-  // Shared bearer secret between the platform's firecracker-remote client
-  // and this daemon. REQUIRED — there is deliberately no default and no
+  // Shared bearer secret between the platform's firecracker backend (its
+  // HTTP client) and this daemon. REQUIRED — there is deliberately no
+  // default and no
   // "auth off" mode: /v1/sidecars carries run tokens and credential
   // bundles, so an unauthenticated daemon is a credential oracle.
   FIRECRACKER_RUNNER_TOKEN: z.string().min(16, "must be at least 16 characters"),

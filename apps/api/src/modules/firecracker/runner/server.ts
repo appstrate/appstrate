@@ -23,7 +23,7 @@ import type {
   WorkloadSpec,
 } from "@appstrate/core/platform-types";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { logger } from "../../../lib/logger.ts";
+import { logger } from "./logger.ts";
 import {
   EXIT_LONG_POLL_MS,
   RUNNER_PROTOCOL_VERSION,

@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Environment for the `firecracker-remote` backend — the platform-side
- * HTTP client of the `appstrate-runner` daemon.
+ * Environment for the `firecracker` backend — the platform-side HTTP
+ * client of the `appstrate-runner` daemon.
  *
  * Parsed LAZILY, on the first `RemoteFirecrackerOrchestrator.initialize()`
- * — NEVER at module import or module `init()`. The firecracker module
- * also serves the in-process backend (`RUN_ADAPTER=firecracker`), and a
- * deployment using that backend must load this module without any
- * `FIRECRACKER_RUNNER_*` variables set. Only selecting
- * `RUN_ADAPTER=firecracker-remote` (which instantiates and initializes
- * the remote orchestrator) makes these variables required.
+ * — NEVER at module import or module `init()`. Loading the firecracker
+ * module (adding it to `MODULES`) registers this backend unconditionally,
+ * but a deployment that loads the module without selecting it as its
+ * `RUN_ADAPTER` must not be forced to set `FIRECRACKER_RUNNER_*`. Only
+ * selecting `RUN_ADAPTER=firecracker` (which instantiates and initializes
+ * the orchestrator) makes these variables required.
  */
 
 import { z } from "zod";

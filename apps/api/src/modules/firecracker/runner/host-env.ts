@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Firecracker module environment — validated here, NOT in @appstrate/env.
- * The module owns its configuration surface (same posture as the cloud
- * module): when the module is absent from MODULES, these variables are
- * never read and never appear in the platform env schema. Parsed once at
- * module init (fail-fast with Zod messages) and cached for the process
+ * Firecracker HOST environment (the microVM engine's config surface) —
+ * validated here, NOT in @appstrate/env. These variables are DAEMON-ONLY:
+ * the containerized platform never runs VMs and never reads them; they
+ * configure the `appstrate-runner` daemon (and the dev smoke harness),
+ * which drive {@link FirecrackerOrchestrator} on the KVM host. Kept next
+ * to runner/env.ts (the daemon's FIRECRACKER_RUNNER_* surface) — the two
+ * schemas validate distinct surfaces and stay separate. Parsed once at
+ * daemon boot (fail-fast with Zod messages) and cached for the process
  * lifetime.
  */
 

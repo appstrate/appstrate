@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test"
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../env.ts";
+import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../runner/host-env.ts";
 import { FirecrackerOrchestrator, type FirecrackerOrchestratorDeps } from "../../orchestrator.ts";
 import type { HostExec } from "../../host-net.ts";
 
@@ -278,7 +278,7 @@ describe("remote platform URL override (deps.platformApiUrl)", () => {
     expect(await orch.resolvePlatformApiUrl()).toBe(REMOTE_URL);
   });
 
-  it("keeps the in-process lo-alias URL when no override is set", async () => {
+  it("keeps the lo-alias URL when no platformApiUrl is set (dev smoke-harness topology)", async () => {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec);
     // Default FIRECRACKER_SUBNET_CIDR (10.231.0.0/16) → alias 10.231.255.1;
@@ -330,7 +330,7 @@ describe("remote platform URL override (deps.platformApiUrl)", () => {
     expect(boundary.sidecarEndpoints.noProxy).toBe("localhost,127.0.0.1,172.17.0.1");
   });
 
-  it("keeps the lo alias in noProxy when no override is set (in-process mode unchanged)", async () => {
+  it("keeps the lo alias in noProxy when no platformApiUrl is set (dev smoke-harness topology: lo-alias delivery)", async () => {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec);
     const boundary = await orch.createIsolationBoundary("run_1");

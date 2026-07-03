@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the `firecracker-remote` orchestrator — NO network:
+ * Unit tests for the `firecracker` backend's remote orchestrator (the
+ * HTTP client of the appstrate-runner daemon) — NO network:
  * every test injects a `fetchFn` returning canned Response objects and
  * asserts the wire shapes against the frozen protocol schemas, so a
  * client-side drift from `runner/protocol.ts` fails here, not against a

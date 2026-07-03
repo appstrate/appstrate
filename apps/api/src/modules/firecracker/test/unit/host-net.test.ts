@@ -116,7 +116,7 @@ describe("buildNftScript with a remote platform (platformForward)", () => {
     expect(forwardCopy).toBeLessThan(script.indexOf("ip daddr {"));
   });
 
-  it("stays byte-identical to the in-process script when platformForward is absent", () => {
+  it("stays byte-identical to the lo-alias-only script when platformForward is absent (dev smoke-harness topology)", () => {
     expect(buildNftScript(PARAMS)).toBe(
       [
         "add table ip appstrate_fc",

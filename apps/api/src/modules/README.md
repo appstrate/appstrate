@@ -177,7 +177,7 @@ Reference module: `core-providers` (openai/anthropic/openai-compatible — API k
 
 ## Orchestrators (execution backends)
 
-Modules contribute execution backends via `orchestrators(): Record<string, OrchestratorRegistration>` — keys are `RUN_ADAPTER` values, registered by the loader at load time (before any orchestrator is instantiated). Core ships `docker` and `process`; the built-in `firecracker` module (opt-in, not in the default `MODULES`) is the reference contribution. One module may contribute several backends — `firecracker` registers both `firecracker` (in-process, API on the KVM host) and `firecracker-remote` (HTTP client to the `appstrate-runner` host daemon, see `modules/firecracker/README.md`).
+Modules contribute execution backends via `orchestrators(): Record<string, OrchestratorRegistration>` — keys are `RUN_ADAPTER` values, registered by the loader at load time (before any orchestrator is instantiated). Core ships `docker` and `process`; the built-in `firecracker` module (opt-in, not in the default `MODULES`) is the reference contribution — it registers a single backend, `firecracker`, an HTTP client (`RemoteFirecrackerOrchestrator`) that proxies to an `appstrate-runner` host daemon (the daemon embeds the in-process `FirecrackerOrchestrator` as its engine; see `modules/firecracker/README.md`).
 
 Each `OrchestratorRegistration` (`@appstrate/core/platform-types`) declares:
 

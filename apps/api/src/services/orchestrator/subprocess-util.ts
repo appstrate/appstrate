@@ -8,7 +8,16 @@
  */
 
 import { open as fsOpen } from "node:fs/promises";
-import { logger } from "../../lib/logger.ts";
+import { createLogger } from "@appstrate/core/logger";
+
+// Core pino logger read straight from LOG_LEVEL (default `info`), NOT the
+// platform logger (apps/api/src/lib/logger.ts). This file is pulled into
+// the firecracker `appstrate-runner` daemon's dependency closure (via the
+// orchestrator + host-net executor), which must boot on a bare KVM host
+// with only FIRECRACKER_RUNNER_* set — it cannot depend on @appstrate/env's
+// required-secrets schema. Output is identical for the platform-side
+// callers (process orchestrator).
+const logger = createLogger(process.env.LOG_LEVEL ?? "info");
 
 type BunProcess = ReturnType<typeof Bun.spawn>;
 

@@ -5,6 +5,19 @@ hardware virtualization boundary (KVM) around the whole run — stronger host
 protection than a container: a workload escape compromises a throwaway guest
 kernel, not the host.
 
+## One topology — platform → `appstrate-runner` daemon
+
+The platform is always containerized (Coolify / docker-compose) — it cannot
+own KVM, TAP devices, or nftables. So there is a **single** supported topology:
+the `firecracker` backend is a `RunOrchestrator` HTTP client
+(`RemoteFirecrackerOrchestrator`) that proxies every call to a small daemon
+(`bun run firecracker:runner`, systemd on a KVM host). The daemon embeds the
+in-process `FirecrackerOrchestrator` — that class is the daemon's **engine**,
+not a platform adapter — behind a token-authenticated JSON/NDJSON protocol
+(`runner/protocol.ts`, versioned). This is the standard production split (AWS
+MicroManager, Fly.io flyd, E2B orchestrator): the control plane never touches
+KVM; the privileged surface lives in a rarely-released host daemon.
+
 ## Activation — built-in module
 
 The backend ships as the built-in `firecracker` module
@@ -12,35 +25,37 @@ The backend ships as the built-in `firecracker` module
 Zero footprint when absent: no env vars read, no backend registered.
 
 ```sh
+# Platform (container)
 MODULES=oidc,webhooks,mcp,core-providers,firecracker
 RUN_ADAPTER=firecracker
+FIRECRACKER_RUNNER_URL=http://<runner-host>:3100
+FIRECRACKER_RUNNER_TOKEN=<shared secret, >=16 chars>
 ```
 
 Setting `RUN_ADAPTER=firecracker` without the module is a fatal boot error
-listing the registered backends. The module owns its `FIRECRACKER_*`
-environment variables (validated at module init — see the module `README.md`);
-they are not part of the `@appstrate/env` schema.
+listing the registered backends; a stale `RUN_ADAPTER=firecracker-remote`
+(the id before the in-process backend was removed) gets a targeted "renamed to
+`firecracker`" error. Platform-side only `FIRECRACKER_RUNNER_URL`/`_TOKEN` are
+read (validated lazily, on the first `initialize()`). The host-side
+`FIRECRACKER_*` variables (kernel/rootfs, subnet CIDR, …) are **daemon-only** —
+never parsed platform-side. None of these are part of the `@appstrate/env`
+schema.
 
-## Remote run-plane — `appstrate-runner` (phase 1 of #819)
+## Daemon (`appstrate-runner`)
 
-The in-process backend requires the platform API itself to run on the KVM
-host with network privileges. For containerized platforms (Coolify /
-docker-compose), the module contributes a second backend,
-`RUN_ADAPTER=firecracker-remote`: a `RunOrchestrator` HTTP client that
-drives a small daemon (`bun run firecracker:runner`, systemd on the KVM
-host) which wraps the same `FirecrackerOrchestrator` behind a
-token-authenticated JSON/NDJSON protocol (`runner/protocol.ts`,
-versioned). This is the standard production split (AWS MicroManager,
-Fly.io flyd, E2B orchestrator): the control plane never touches KVM; the
-privileged surface lives in a rarely-released host daemon.
+Runs on the KVM host. Owns two env schemas — its listen/link config
+(`FIRECRACKER_RUNNER_*`, `runner/env.ts`) and the engine's host config
+(`FIRECRACKER_*`, `runner/host-env.ts`). It boots on a bare host with **only**
+those variables — nothing in its dependency closure imports `@appstrate/env`,
+so no `BETTER_AUTH_SECRET`/`CONNECTION_ENCRYPTION_KEY`/`UPLOAD_SIGNING_SECRET`
+are required (the closure uses an env-free pino logger, `runner/logger.ts`).
 
-Guests reach the platform at `FIRECRACKER_RUNNER_PLATFORM_URL` (IPv4
-literal — guests have no DNS); the daemon opens an explicit nft accept
-for exactly that ip:port ahead of the egress-deny CIDRs, mirroring the
-in-process platform-alias rule. Capabilities are identical
-(`isolatesWorkloads: true` — the VM lives on the runner host, credentials
-never enter the platform process; `supportsSidecarOnly: false`). Setup,
-env vars, and security posture: module `README.md` § "Remote run-plane".
+Guests reach the platform at `FIRECRACKER_RUNNER_PLATFORM_URL` (IPv4 literal —
+guests have no DNS); the daemon opens an explicit nft accept for exactly that
+ip:port ahead of the egress-deny CIDRs. Capabilities: `isolatesWorkloads: true`
+(the VM lives on the runner host, credentials never enter the platform
+process), `supportsSidecarOnly: false`. Setup, env vars, and security posture:
+module `README.md`.
 
 ## Production status — EXPERIMENTAL
 

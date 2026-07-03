@@ -20,7 +20,7 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
-import { logger } from "../../lib/logger.ts";
+import { logger } from "./runner/logger.ts";
 import type { RunSubnet } from "./subnet.ts";
 import { TAP_DEVICE_PREFIX } from "./subnet.ts";
 import { spawnCollect } from "../../services/orchestrator/subprocess-util.ts";
@@ -62,13 +62,15 @@ export function buildNftScript(params: {
   /** Forward-path destinations guests may never reach (metadata, RFC1918). */
   egressDenyCidrs: string[];
   /**
-   * REMOTE platform API endpoint (split-process deployments: the platform
-   * is not this process, e.g. a Docker container next to the
-   * appstrate-runner daemon). Guests must reach exactly this ip:port
-   * unconditionally — it typically sits inside the deny CIDRs (RFC1918 /
-   * docker bridge) and the run's TAP may not even have egress, so the
-   * accept must beat every drop, exactly like the lo-alias accept does
-   * for in-process mode. Absent = in-process mode, script unchanged.
+   * REMOTE platform API endpoint (daemon topology: the platform is not
+   * this process, e.g. a Docker container next to the appstrate-runner
+   * daemon). Guests must reach exactly this ip:port unconditionally — it
+   * typically sits inside the deny CIDRs (RFC1918 / docker bridge) and
+   * the run's TAP may not even have egress, so the accept must beat
+   * every drop, exactly like the lo-alias accept does when the platform
+   * endpoint is the host lo alias. Absent = dev smoke-harness topology
+   * (scripts/dev/smoke.ts serves its platform stub on the lo alias),
+   * script unchanged.
    */
   platformForward?: { ip: string; port: number };
 }): string {

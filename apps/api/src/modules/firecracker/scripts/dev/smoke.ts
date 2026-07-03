@@ -20,11 +20,11 @@
  * `bun run test:firecracker` (apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh).
  */
 
-// Minimal env so @appstrate/env validates without a real platform config.
-process.env.BETTER_AUTH_SECRET ??= "smoke-secret-not-a-real-deployment";
-process.env.CONNECTION_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
-process.env.UPLOAD_SIGNING_SECRET ??= "smoke-upload-signing-secret";
-process.env.RUN_ADAPTER = "firecracker";
+// Only the host-side FIRECRACKER_* vars the orchestrator reads via
+// getFirecrackerEnv() — no platform secrets: the orchestrator is now
+// decoupled from @appstrate/env (it is the daemon's engine, not a
+// platform adapter), so this dev harness drives it with FIRECRACKER_*
+// alone.
 process.env.FIRECRACKER_KERNEL_PATH ??= "./data/firecracker/vmlinux";
 process.env.FIRECRACKER_ROOTFS_PATH ??= "./data/firecracker/rootfs.ext4";
 process.env.FIRECRACKER_DATA_DIR ??= "./data/firecracker/runs";

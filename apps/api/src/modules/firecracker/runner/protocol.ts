@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Wire protocol between the platform's `firecracker-remote` backend and
- * the `appstrate-runner` daemon (issue #819, phase 1).
+ * Wire protocol between the platform's `firecracker` backend (its HTTP
+ * client) and the `appstrate-runner` daemon (issue #819, phase 1).
  *
  * Single source of truth for both sides: the daemon (`./server.ts`)
  * validates every request body against these schemas, the client

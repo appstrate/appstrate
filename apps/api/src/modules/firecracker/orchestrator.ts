@@ -50,8 +50,7 @@ import { constants as fsConstants } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { getEnv } from "@appstrate/env";
-import { getFirecrackerEnv } from "./env.ts";
+import { getFirecrackerEnv } from "./runner/host-env.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { pickOperatorSidecarEnv } from "@appstrate/runner-pi";
 import type {
@@ -63,7 +62,7 @@ import type {
   CleanupReport,
   StopResult,
 } from "@appstrate/core/platform-types";
-import { logger } from "../../lib/logger.ts";
+import { logger } from "./runner/logger.ts";
 import { buildBaseSidecarEnv } from "../../services/orchestrator/sidecar-env.ts";
 import {
   drainStream,
@@ -99,6 +98,19 @@ const CONSOLE_WATCH_INTERVAL_MS = 10_000;
  * instead of merely documenting it.
  */
 const MIN_FIRECRACKER = { major: 1, minor: 16 };
+
+/**
+ * Platform HTTP port paired with the host lo alias — the port guests
+ * reach the platform endpoint on when no `platformApiUrl` is supplied.
+ * The daemon always supplies one, so this path only serves the dev smoke
+ * harness (scripts/dev/smoke.ts binds its platform stub on the lo alias
+ * at this port). Read straight from the environment (default 3000) so
+ * this class — the daemon's engine and the smoke harness's driver —
+ * never pulls the full platform env schema (`@appstrate/env`).
+ */
+function loAliasPlatformPort(): number {
+  return Number(process.env.PORT ?? 3000);
+}
 
 type BunProcess = ReturnType<typeof Bun.spawn>;
 
@@ -139,16 +151,17 @@ export interface FirecrackerOrchestratorDeps {
    */
   agentArgvOverride?: string[];
   /**
-   * Remote platform API URL override for split-process deployments
-   * (issue #819): the orchestrator runs inside the appstrate-runner
-   * daemon on a KVM host while the platform API lives elsewhere (e.g. a
-   * Docker container on the same machine). Must be
-   * `http(s)://<IPv4>[:port]` — guests have no DNS resolver, so a
+   * Remote platform API URL (issue #819): the orchestrator runs inside
+   * the appstrate-runner daemon on a KVM host while the platform API
+   * lives elsewhere (e.g. a Docker container on the same machine). Must
+   * be `http(s)://<IPv4>[:port]` — guests have no DNS resolver, so a
    * hostname would never resolve in-guest (validated fail-fast in the
    * constructor). When set: resolvePlatformApiUrl advertises it verbatim
    * (no lo-alias/PORT computation), the guest config targets its ip:port,
    * and the host firewall unconditionally accepts guest→ip:port (see
-   * host-net.ts `platformForward`). Absent = in-process mode, unchanged.
+   * host-net.ts `platformForward`). The daemon always sets it; absent =
+   * dev smoke-harness topology (scripts/dev/smoke.ts serves a platform
+   * stub on the host lo alias), lo-alias delivery unchanged.
    */
   platformApiUrl?: string;
 }
@@ -239,7 +252,6 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   // -------------------------------------------------------------------------
 
   async initialize(): Promise<void> {
-    const env = getEnv();
     const fcEnv = getFirecrackerEnv();
     if (process.platform !== "linux") {
       throw new Error(
@@ -288,7 +300,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     await setupHostNetwork(this.hostExec, {
       subnetCidr: fcEnv.FIRECRACKER_SUBNET_CIDR,
       aliasIp: platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR),
-      platformPort: env.PORT,
+      platformPort: loAliasPlatformPort(),
       egressDenyCidrs: fcEnv.FIRECRACKER_EGRESS_DENY_CIDRS.split(",").filter(Boolean),
       // Remote-platform mode: guests must reach the override's ip:port
       // unconditionally (it typically sits inside the deny CIDRs above).
@@ -531,7 +543,6 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // the workload pi.ts drives the lifecycle through — is started.
     if (handle.role !== "agent") return;
 
-    const env = getEnv();
     const fcEnv = getFirecrackerEnv();
     const vm = this.vms.get(handle.runId);
     const agentSpec = this.pendingAgentSpecs.get(handle.runId);
@@ -553,7 +564,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       runId: handle.runId,
       exitMarkerNonce: vm.exitNonce,
       platformIp: this.platformForward?.ip ?? aliasIp,
-      platformPort: this.platformForward?.port ?? env.PORT,
+      platformPort: this.platformForward?.port ?? loAliasPlatformPort(),
       sidecarEnv,
       agentEnv: agentSpec.env,
       agentUnrestrictedEgress: agentSpec.egress === true,
@@ -705,9 +716,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // process — advertise the operator-provided URL verbatim, no
     // lo-alias/PORT computation.
     if (this.platformApiUrlOverride !== undefined) return this.platformApiUrlOverride;
-    const env = getEnv();
     const fcEnv = getFirecrackerEnv();
-    return `http://${platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR)}:${env.PORT}`;
+    return `http://${platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR)}:${loAliasPlatformPort()}`;
   }
 
   // -------------------------------------------------------------------------

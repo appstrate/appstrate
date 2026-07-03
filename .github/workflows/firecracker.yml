@@ -111,11 +111,10 @@ jobs:
           key: fc-kernel-${{ runner.arch }}-${{ hashFiles('apps/api/src/modules/firecracker/scripts/build-kernel.sh') }}
 
       - name: Run smoke suite
+        # No platform secrets: the FirecrackerOrchestrator is decoupled from
+        # @appstrate/env — the smoke harness drives it with FIRECRACKER_*
+        # alone (same posture as the appstrate-runner daemon).
         run: bash apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh
-        env:
-          BETTER_AUTH_SECRET: ci-dummy-secret
-          CONNECTION_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-          UPLOAD_SIGNING_SECRET: ci-dummy-upload-signing-secret
 
       - name: Upload guest console on failure
         if: failure()

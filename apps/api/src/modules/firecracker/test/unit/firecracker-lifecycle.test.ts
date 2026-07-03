@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test"
 import { mkdtemp, mkdir, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../env.ts";
+import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../runner/host-env.ts";
 import { FirecrackerOrchestrator } from "../../orchestrator.ts";
 import type { HostExec } from "../../host-net.ts";
 

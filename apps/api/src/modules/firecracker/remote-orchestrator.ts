@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `firecracker-remote` execution backend (issue #819, phase 1) — a
- * {@link RunOrchestrator} that owns no VMs itself: every call is proxied
- * over HTTP to a remote `appstrate-runner` daemon which runs the real
- * in-process Firecracker orchestrator on a KVM-capable host.
+ * `firecracker` execution backend — a {@link RunOrchestrator} that owns
+ * no VMs itself: every call is proxied over HTTP to a remote
+ * `appstrate-runner` daemon which runs the real in-process Firecracker
+ * orchestrator on a KVM-capable host. (The class name keeps the "Remote"
+ * qualifier because it describes the topology — an HTTP client to a
+ * daemon — not the adapter id, which is simply `firecracker`.)
  *
  * The wire protocol lives in `./runner/protocol.ts` (single source of
  * truth for both sides). Handles and boundaries cross the wire verbatim
@@ -100,15 +102,15 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
   /**
    * Lazy env access — this is deliberately NOT read at construction:
    * the module registers this backend unconditionally, but only a
-   * deployment that selects `RUN_ADAPTER=firecracker-remote` (and thus
-   * calls initialize()) must provide the variables.
+   * deployment that selects `RUN_ADAPTER=firecracker` (and thus calls
+   * initialize()) must provide the variables.
    */
   private requireEnv(): RemoteRunnerEnv {
     try {
       return getRemoteEnv();
     } catch (err) {
       throw new Error(
-        `firecracker-remote backend is not configured: set FIRECRACKER_RUNNER_URL ` +
+        `firecracker backend is not configured: set FIRECRACKER_RUNNER_URL ` +
           `(http(s) address of the appstrate-runner daemon) and FIRECRACKER_RUNNER_TOKEN ` +
           `(shared bearer secret, at least 16 chars). See ` +
           `apps/api/src/modules/firecracker/runner/README.md. (${getErrorMessage(err)})`,
@@ -189,7 +191,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
           `orchestrator failed to initialize — check the daemon's logs (KVM, artifacts)`,
       );
     }
-    logger.info("firecracker-remote orchestrator connected", {
+    logger.info("firecracker orchestrator connected", {
       url: env.FIRECRACKER_RUNNER_URL,
       protocol: health.protocol,
     });
@@ -274,7 +276,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
           timeoutMs: EXIT_LONG_POLL_MS + 15_000,
         });
       } catch (err) {
-        logger.warn("firecracker-remote: waitForExit request failed — retrying", {
+        logger.warn("firecracker: waitForExit request failed — retrying", {
           runId: handle.runId,
           workloadId: handle.id,
           backoffMs,
@@ -352,7 +354,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
               `${MAX_STREAM_RECONNECTS} reconnect attempts: ${getErrorMessage(err)}`,
           );
         }
-        logger.warn("firecracker-remote: log stream interrupted — reconnecting", {
+        logger.warn("firecracker: log stream interrupted — reconnecting", {
           runId: handle.runId,
           workloadId: handle.id,
           received,
