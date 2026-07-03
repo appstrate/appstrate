@@ -312,6 +312,52 @@ combined manifest to each `v*` GitHub Release.
   workload writes is host RAM, capped at 50% of guest RAM by the init's
   tmpfs mount.
 
+## Observability — debugging a failed run
+
+The daemon deletes the per-run workspace (with its `console.log`) at
+teardown, and a run's crash is exactly when you need that console. The
+teardown path itself is therefore the observability surface:
+
+- **Structured teardown log.** Every microVM destruction emits
+  `Firecracker workload destroyed` with `{ runId, reason, exitMarkerFound,
+uptimeMs }`. `reason` is derived from the call path: `finalize` (run
+  ended, `removeIsolationBoundary`), `watchdog-kill` (platform stopped the
+  run by id via `stopByRunId` — the stall watchdog and user cancel share
+  this route), `orphan-sweep` (boot-time reclamation of a crashed
+  predecessor), `shutdown` (daemon stopping), or `crash` (VMM exited
+  non-zero without an intentional stop, incl. the console-ceiling kill).
+  `exitMarkerFound` is the nonce-authenticated supervisor exit marker — the
+  same signal `waitForExit` trusts. There is no longer a silent gap between
+  "microVM booted" and cleanup.
+- **Console retention.** Before the workspace is deleted, the last 256 KiB
+  of `console.log` is copied to
+  `<FIRECRACKER_DATA_DIR>/../console-archive/<runId>.log`; the archive dir
+  is pruned to the 100 most recent files. Archiving is best-effort — a
+  failure only warns, it never fails a teardown. Orphan-swept runs are
+  archived too (their exit-marker nonce died with the previous daemon, so
+  `exitMarkerFound` is reported `false`).
+- **Console API.** `GET /v1/workloads/:id/console?tailBytes=N` (bearer-
+  authed like every other route; `N` clamped to ≤ 256 KiB, default 64 KiB;
+  `:id` = run id) serves the live console while the VM runs, else the
+  archive; `404` when neither exists. The `:id` is charset-restricted so it
+  can never traverse out of the archive directory.
+- **Abnormal-exit surfacing.** When `waitForExit` resolves non-zero, the
+  platform `RemoteFirecrackerOrchestrator` fetches a ~2 KiB console tail via
+  the API above and records it as a `system` / `firecracker_console` run-log
+  row (visible in the UI — the log detail the platform records for the run).
+  Fully guarded and time-boxed: a fetch failure never blocks the run's
+  finalize.
+- **Boot-phase liveness.** The platform stall watchdog finalises a run whose
+  `runs.last_heartbeat_at` slips past `RUN_STALL_THRESHOLD_SECONDS`
+  (default 60 s). A slow-booting guest has not yet emitted its first sink
+  event, so the platform records a **synthetic** heartbeat on the same
+  column every 15 s during the boot window — but only while the daemon
+  confirms the VMM is alive (`POST /v1/workloads/status`). It stops the
+  instant real events flow (`last_event_sequence > 0`), the sink closes, or
+  the daemon reports the VMM dead — so a genuinely hung or dead VM is never
+  masked. This removes the historical "watchdog kills a healthy,
+  slow-booting run" class (see the Lima `RUN_STALL_THRESHOLD=300` workaround).
+
 ## Env vars
 
 | Var                              | Default                          | Notes                                                |

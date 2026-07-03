@@ -19,7 +19,7 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
 } from "@appstrate/core/platform-types";
-import { createRunnerApp } from "../../runner/server.ts";
+import { createRunnerApp, type RunnerOrchestrator } from "../../runner/server.ts";
 import { RemoteFirecrackerOrchestrator } from "../../remote-orchestrator.ts";
 import { _resetRemoteEnvCacheForTesting } from "../../remote-env.ts";
 
@@ -39,7 +39,7 @@ const BOUNDARY: IsolationBoundary = {
 
 const HANDLE: WorkloadHandle = { id: "vm-run-1-agent", runId: "run-1", role: "agent" };
 
-function makeFakeOrchestrator(): RunOrchestrator & { calls: Array<[string, unknown[]]> } {
+function makeFakeOrchestrator(): RunnerOrchestrator & { calls: Array<[string, unknown[]]> } {
   const calls: Array<[string, unknown[]]> = [];
   const record =
     <T>(name: string, ret: T) =>
@@ -74,10 +74,18 @@ function makeFakeOrchestrator(): RunOrchestrator & { calls: Array<[string, unkno
     } as RunOrchestrator["streamLogs"],
     stopByRunId: record("stopByRunId", "stopped" satisfies StopResult),
     resolvePlatformApiUrl: record("resolvePlatformApiUrl", "http://192.168.1.10:3000"),
+    workloadStatus: (handle) => {
+      calls.push(["workloadStatus", [handle]]);
+      return { running: true, uptimeMs: 500 };
+    },
+    readConsole: (id, tailBytes) => {
+      calls.push(["readConsole", [id, tailBytes]]);
+      return Promise.resolve(`console:${id}`);
+    },
   };
 }
 
-function makeClient(fake: RunOrchestrator) {
+function makeClient(fake: RunnerOrchestrator) {
   const app = createRunnerApp({ orchestrator: fake, token: TOKEN, exitLongPollMs: 100 });
   // The client builds absolute URLs from FIRECRACKER_RUNNER_URL;
   // app.request accepts them and routes on the path.

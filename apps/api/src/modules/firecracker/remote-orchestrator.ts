@@ -45,6 +45,8 @@ import {
   platformUrlResponseSchema,
   errorResponseSchema,
   logLineSchema,
+  workloadStatusResponseSchema,
+  workloadConsolePath,
 } from "./runner/protocol.ts";
 
 /** Default per-request timeout. Control-plane calls must not hang a run. */
@@ -53,6 +55,29 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const RETRY_MAX_MS = 30_000;
 /** Consecutive reconnect attempts before giving up on a log stream. */
 const MAX_STREAM_RECONNECTS = 5;
+/**
+ * Boot-phase synthetic-heartbeat interval (phase 4). Comfortably under the
+ * platform stall threshold (`RUN_STALL_THRESHOLD_SECONDS`, default 60s) so
+ * a slow-booting guest never trips the watchdog before it emits its first
+ * real event.
+ */
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+/** Console tail attached to an abnormally-exited run (bytes). */
+const CONSOLE_EXCERPT_BYTES = 2 * 1024;
+/**
+ * Timeout for the best-effort abnormal-exit console fetch. Short and fully
+ * guarded — this fetch runs after waitForExit resolves, so it must never
+ * stall the platform's finalize path.
+ */
+const CONSOLE_FETCH_TIMEOUT_MS = 5_000;
+
+/**
+ * Boot-phase heartbeat outcome (phase 4). While the run's guest has not
+ * emitted its first event the pump keeps `bumped`ing `runs.last_heartbeat_at`
+ * — the exact column the stall watchdog reads. It stops the moment the
+ * guest starts reporting (`guest-active`) or the sink closes (`closed`).
+ */
+export type BootHeartbeatOutcome = "bumped" | "guest-active" | "closed";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -86,17 +111,45 @@ export interface RemoteOrchestratorDeps {
    * without real one-second sleeps. Production default: 1s.
    */
   retryBaseMs?: number;
+  /** Boot-phase synthetic-heartbeat interval (ms). Default 15s. */
+  heartbeatIntervalMs?: number;
+  /**
+   * Records a synthetic heartbeat for a run whose guest has not yet emitted
+   * its first event, returning whether the boot window is still open. This
+   * is the DB-backed `runs.last_heartbeat_at` bump the stall watchdog reads
+   * (see `recordBootHeartbeat` in services/state/runs.ts). When ABSENT, the
+   * boot-phase heartbeat pump is disabled entirely — so unit tests and the
+   * real-client round-trip stay inert. Production wires it in index.ts.
+   */
+  recordBootHeartbeat?: (runId: string) => Promise<BootHeartbeatOutcome>;
+  /**
+   * Surfaces a console excerpt for an abnormally-exited run into the run's
+   * platform-recorded error/log detail (a run_logs row, visible in the UI).
+   * When ABSENT, abnormal-exit console capture is disabled. Production wires
+   * it in index.ts.
+   */
+  recordConsoleExcerpt?: (runId: string, exitCode: number, excerpt: string) => Promise<void>;
 }
 
 export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
   private readonly fetchFn: (input: string | URL, init?: RequestInit) => Promise<Response>;
   private readonly retryBaseMs: number;
+  private readonly heartbeatIntervalMs: number;
+  private readonly recordBootHeartbeat:
+    | ((runId: string) => Promise<BootHeartbeatOutcome>)
+    | undefined;
+  private readonly recordConsoleExcerpt:
+    | ((runId: string, exitCode: number, excerpt: string) => Promise<void>)
+    | undefined;
   /** resolvePlatformApiUrl cache — the answer is static per daemon. */
   private platformUrlPromise: Promise<string> | undefined;
 
   constructor(deps: RemoteOrchestratorDeps = {}) {
     this.fetchFn = deps.fetchFn ?? ((input, init) => globalThis.fetch(input, init));
     this.retryBaseMs = deps.retryBaseMs ?? 1_000;
+    this.heartbeatIntervalMs = deps.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.recordBootHeartbeat = deps.recordBootHeartbeat;
+    this.recordConsoleExcerpt = deps.recordConsoleExcerpt;
   }
 
   /**
@@ -265,6 +318,29 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
    * still-running (or already-finished) run as failed.
    */
   async waitForExit(handle: WorkloadHandle): Promise<number> {
+    // Boot-phase liveness (phase 4): while the guest is still booting and
+    // has not yet posted its first sink event, keep the run alive against
+    // the platform stall watchdog with synthetic heartbeats — but only
+    // while the daemon confirms the VMM is alive, so a dead VM is never
+    // masked. The pump is inert when no recorder is wired (tests).
+    const stopHeartbeat = this.startBootHeartbeat(handle);
+    let code: number;
+    try {
+      code = await this.pollForExit(handle);
+    } finally {
+      stopHeartbeat();
+    }
+    // Abnormal exit (crash / kill / watchdog) — attach the console tail to
+    // the run's platform-recorded detail. Best-effort: fully guarded and
+    // time-boxed so a fetch failure never blocks or fails finalize.
+    if (code !== 0) {
+      await this.captureAbnormalConsole(handle, code).catch(() => {});
+    }
+    return code;
+  }
+
+  /** The exit long-poll loop, extracted so waitForExit can wrap it. */
+  private async pollForExit(handle: WorkloadHandle): Promise<number> {
     let backoffMs = this.retryBaseMs;
     for (;;) {
       let res: Response;
@@ -290,6 +366,97 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
       const exit = exitResponseSchema.parse(await res.json());
       if (exit.done) return exit.code;
     }
+  }
+
+  /**
+   * Start the boot-phase synthetic-heartbeat pump for a run. Returns a stop
+   * function (idempotent). Each tick: confirm the VMM is alive with the
+   * daemon, and only then record a heartbeat — until the guest starts
+   * reporting real events, the sink closes, or the VMM dies. A no-op when
+   * `recordBootHeartbeat` is not wired.
+   */
+  private startBootHeartbeat(handle: WorkloadHandle): () => void {
+    const record = this.recordBootHeartbeat;
+    if (!record) return () => {};
+
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = (): void => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+    const schedule = (): void => {
+      if (!stopped) timer = setTimeout(tick, this.heartbeatIntervalMs);
+    };
+    const tick = (): void => {
+      void (async () => {
+        if (stopped) return;
+        const alive = await this.workloadIsAlive(handle);
+        if (stopped) return;
+        // VMM confirmed dead — stop so the watchdog can catch a genuinely
+        // hung run instead of us masking it. (waitForExit will resolve too.)
+        if (alive === false) return stop();
+        // Liveness unknown (daemon blip / older daemon without the probe) —
+        // skip this beat rather than assume alive, and retry next tick.
+        if (alive === null) return schedule();
+        let outcome: BootHeartbeatOutcome;
+        try {
+          outcome = await record(handle.runId);
+        } catch (err) {
+          logger.warn("firecracker: boot heartbeat write failed — retrying", {
+            runId: handle.runId,
+            error: getErrorMessage(err),
+          });
+          return schedule();
+        }
+        if (stopped) return;
+        // Guest now reporting or run closed — real liveness takes over.
+        if (outcome !== "bumped") return stop();
+        schedule();
+      })();
+    };
+    schedule();
+    return stop;
+  }
+
+  /**
+   * Ask the daemon whether the workload's VMM is still alive. `null` means
+   * the answer is unknown (request failed, or an older daemon 404s the
+   * probe) — the caller degrades rather than guessing.
+   */
+  private async workloadIsAlive(handle: WorkloadHandle): Promise<boolean | null> {
+    let res: Response;
+    try {
+      res = await this.call(RUNNER_ROUTES.workloadStatus, { body: { handle } });
+    } catch {
+      return null;
+    }
+    const parsed = workloadStatusResponseSchema.safeParse(await res.json().catch(() => undefined));
+    return parsed.success ? parsed.data.running : null;
+  }
+
+  /** Fetch a small console tail and hand it to the injected recorder. */
+  private async captureAbnormalConsole(handle: WorkloadHandle, exitCode: number): Promise<void> {
+    const record = this.recordConsoleExcerpt;
+    if (!record) return;
+    const excerpt = await this.fetchConsoleExcerpt(handle);
+    if (!excerpt) return;
+    await record(handle.runId, exitCode, excerpt);
+  }
+
+  /** Best-effort console tail via the daemon's console route; undefined on any failure. */
+  private async fetchConsoleExcerpt(handle: WorkloadHandle): Promise<string | undefined> {
+    let res: Response;
+    try {
+      res = await this.call(
+        `${workloadConsolePath(handle.runId)}?tailBytes=${CONSOLE_EXCERPT_BYTES}`,
+        { method: "GET", timeoutMs: CONSOLE_FETCH_TIMEOUT_MS },
+      );
+    } catch {
+      return undefined;
+    }
+    const text = await res.text().catch(() => "");
+    return text.length > 0 ? text : undefined;
   }
 
   /**

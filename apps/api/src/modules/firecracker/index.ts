@@ -35,7 +35,45 @@
  */
 
 import type { AppstrateModule } from "@appstrate/core/module";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { RemoteFirecrackerOrchestrator } from "./remote-orchestrator.ts";
+import { appendRunLog, recordBootHeartbeat } from "../../services/state/runs.ts";
+import { getRunSinkContext } from "../../services/run-event-ingestion.ts";
+import { logger } from "../../lib/logger.ts";
+
+/**
+ * Phase-4 platform surfacing: attach a microVM console tail to an
+ * abnormally-exited run as a run_logs row (visible in the UI, the "log
+ * detail the platform records for the run"). Best-effort — a missing run
+ * or a failed write only warns; it must never affect finalize.
+ */
+async function recordFirecrackerConsoleExcerpt(
+  runId: string,
+  exitCode: number,
+  excerpt: string,
+): Promise<void> {
+  try {
+    const ctx = await getRunSinkContext(runId);
+    if (!ctx) return;
+    const message =
+      `[firecracker microVM serial console — agent exited ${exitCode}; ` +
+      `last ${excerpt.length} bytes]\n${excerpt}`;
+    await appendRunLog(
+      { orgId: ctx.orgId },
+      runId,
+      "system",
+      "firecracker_console",
+      message,
+      { exitCode },
+      "error",
+    );
+  } catch (err) {
+    logger.warn("firecracker: failed to record console excerpt for abnormal run", {
+      runId,
+      error: getErrorMessage(err),
+    });
+  }
+}
 
 const firecrackerModule: AppstrateModule = {
   manifest: { id: "firecracker", name: "Firecracker microVM backend", version: "1.0.0" },
@@ -56,7 +94,15 @@ const firecrackerModule: AppstrateModule = {
         // The VM boots exactly once, driven by the agent workload — a
         // sidecar-only launch (connect-runs) would silently never start.
         supportsSidecarOnly: false,
-        create: () => new RemoteFirecrackerOrchestrator(),
+        // Wire the phase-4 observability hooks: boot-phase liveness (the
+        // watchdog-safe synthetic heartbeat) and abnormal-exit console
+        // surfacing. Both are inert unless provided — this is the only
+        // production wiring site.
+        create: () =>
+          new RemoteFirecrackerOrchestrator({
+            recordBootHeartbeat,
+            recordConsoleExcerpt: recordFirecrackerConsoleExcerpt,
+          }),
       },
     };
   },

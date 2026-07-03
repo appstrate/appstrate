@@ -12,12 +12,16 @@ import { describe, it, expect } from "bun:test";
 import type {
   CleanupReport,
   IsolationBoundary,
-  RunOrchestrator,
   StopResult,
   WorkloadHandle,
 } from "@appstrate/core/platform-types";
-import { createRunnerApp } from "../../runner/server.ts";
-import { RUNNER_PROTOCOL_VERSION, RUNNER_ROUTES } from "../../runner/protocol.ts";
+import { createRunnerApp, type RunnerOrchestrator } from "../../runner/server.ts";
+import {
+  CONSOLE_MAX_TAIL_BYTES,
+  RUNNER_PROTOCOL_VERSION,
+  RUNNER_ROUTES,
+  workloadConsolePath,
+} from "../../runner/protocol.ts";
 
 const TOKEN = "unit-test-token-0123456789";
 
@@ -47,8 +51,8 @@ const CLEANUP: CleanupReport = { workloads: 1, isolationBoundaries: 2, workspace
  * returns a canned value. Individual tests override the method under
  * test (throwing, never resolving, custom generator).
  */
-function fakeOrchestrator(overrides: Partial<RunOrchestrator> = {}): {
-  orchestrator: RunOrchestrator;
+function fakeOrchestrator(overrides: Partial<RunnerOrchestrator> = {}): {
+  orchestrator: RunnerOrchestrator;
   calls: RecordedCall[];
 } {
   const calls: RecordedCall[] = [];
@@ -58,7 +62,7 @@ function fakeOrchestrator(overrides: Partial<RunOrchestrator> = {}): {
       calls.push({ method, args });
       return Promise.resolve(value);
     };
-  const orchestrator: RunOrchestrator = {
+  const orchestrator: RunnerOrchestrator = {
     initialize: record("initialize", undefined),
     shutdown: record("shutdown", undefined),
     cleanupOrphans: record("cleanupOrphans", CLEANUP),
@@ -77,12 +81,20 @@ function fakeOrchestrator(overrides: Partial<RunOrchestrator> = {}): {
     },
     stopByRunId: record<StopResult>("stopByRunId", "stopped"),
     resolvePlatformApiUrl: record("resolvePlatformApiUrl", "http://10.0.0.1:3000"),
+    workloadStatus: (handle) => {
+      calls.push({ method: "workloadStatus", args: [handle] });
+      return { running: true, uptimeMs: 1234 };
+    },
+    readConsole: (id, tailBytes) => {
+      calls.push({ method: "readConsole", args: [id, tailBytes] });
+      return Promise.resolve(null);
+    },
     ...overrides,
   };
   return { orchestrator, calls };
 }
 
-function makeApp(overrides: Partial<RunOrchestrator> = {}, exitLongPollMs?: number) {
+function makeApp(overrides: Partial<RunnerOrchestrator> = {}, exitLongPollMs?: number) {
   const { orchestrator, calls } = fakeOrchestrator(overrides);
   const app = createRunnerApp({
     orchestrator,
@@ -229,5 +241,74 @@ describe("runner server routes", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ result: "stopped" });
     expect(calls).toEqual([{ method: "stopByRunId", args: ["run-1", 9] }]);
+  });
+
+  it("reports workload liveness", async () => {
+    const { app, calls } = makeApp();
+    const res = await post(app, RUNNER_ROUTES.workloadStatus, { handle: AGENT_HANDLE });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ running: true, uptimeMs: 1234 });
+    expect(calls).toEqual([{ method: "workloadStatus", args: [AGENT_HANDLE] }]);
+  });
+});
+
+const authGet = (app: ReturnType<typeof makeApp>["app"], path: string) =>
+  app.request(path, { headers: { authorization: `Bearer ${TOKEN}` } });
+
+describe("runner server console route", () => {
+  it("serves the console tail with the requested (clamped) byte budget", async () => {
+    let seen: [string, number] | undefined;
+    const { app } = makeApp({
+      readConsole: (id, tailBytes) => {
+        seen = [id, tailBytes];
+        return Promise.resolve(`console for ${id}`);
+      },
+    });
+    const res = await authGet(app, `${workloadConsolePath("run-1")}?tailBytes=999999999`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    expect(await res.text()).toBe("console for run-1");
+    // Over-cap request is clamped down to the max, never rejected.
+    expect(seen).toEqual(["run-1", CONSOLE_MAX_TAIL_BYTES]);
+  });
+
+  it("defaults tailBytes when the query is absent", async () => {
+    let seen: [string, number] | undefined;
+    const { app } = makeApp({
+      readConsole: (id, tailBytes) => {
+        seen = [id, tailBytes];
+        return Promise.resolve("live");
+      },
+    });
+    const res = await authGet(app, workloadConsolePath("run-1"));
+    expect(res.status).toBe(200);
+    expect(seen?.[1]).toBe(64 * 1024);
+  });
+
+  it("404s when neither live nor archived console exists", async () => {
+    const { app } = makeApp({ readConsole: () => Promise.resolve(null) });
+    const res = await authGet(app, workloadConsolePath("run-1"));
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toContain("run-1");
+  });
+
+  it("rejects a path-traversing id before touching the orchestrator", async () => {
+    let called = false;
+    const { app } = makeApp({
+      readConsole: () => {
+        called = true;
+        return Promise.resolve("nope");
+      },
+    });
+    // `..%2f..` decodes to a traversal attempt — the charset guard rejects it.
+    const res = await authGet(app, "/v1/workloads/..%2f..%2fetc/console");
+    expect(res.status).toBe(400);
+    expect(called).toBe(false);
+  });
+
+  it("requires the bearer token like every other route", async () => {
+    const { app } = makeApp({ readConsole: () => Promise.resolve("secret") });
+    const res = await app.request(workloadConsolePath("run-1"));
+    expect(res.status).toBe(401);
   });
 });

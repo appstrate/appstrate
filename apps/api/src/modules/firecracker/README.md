@@ -129,6 +129,16 @@ The wire carries run tokens and credential bundles (`POST /v1/sidecars`) — kee
 
 **Protocol**: JSON over HTTP (`runner/protocol.ts`, versioned — client refuses a daemon speaking another major version). Logs stream as NDJSON with reconnect-and-skip; exit codes long-poll.
 
+## Debugging a failed run
+
+The daemon deletes the per-run workspace (with `console.log`) at teardown, so observability is built into the teardown path rather than the disk:
+
+- **Structured teardown log** — every microVM destruction emits `Firecracker workload destroyed` with `{ runId, reason, exitMarkerFound, uptimeMs }`. `reason` is one of `finalize` (run ended normally), `watchdog-kill` (platform stopped the run by id — stall watchdog or user cancel), `orphan-sweep` (boot-time reclamation of a crashed predecessor), `shutdown` (daemon stopping), or `crash` (VMM exited abnormally without an intentional stop). There is no longer a silent gap between "microVM booted" and cleanup.
+- **Console retention** — the last 256 KiB of the console is copied to `<FIRECRACKER_DATA_DIR>/../console-archive/<runId>.log` **before** the workspace is deleted (the archive dir is pruned to the 100 most recent files). Archiving never fails a teardown — a failure only warns. Orphan-swept runs are archived too, so a crash that predated the daemon restart stays debuggable.
+- **Console API** — `GET /v1/workloads/:id/console?tailBytes=N` (bearer-authed, `N` ≤ 256 KiB, default 64 KiB) serves the live console while the VM runs, else the archive; `404` when neither exists. `:id` is the run id.
+- **Abnormal-exit surfacing** — when a run exits non-zero (crash / kill / watchdog), the platform fetches a ~2 KiB console tail and attaches it to the run as a `system` / `firecracker_console` run-log row (visible in the UI). Best-effort: it never blocks or fails the run's finalize.
+- **Boot-phase liveness** — a slow-booting guest has not yet emitted its first sink event, so the platform stall watchdog would kill it. While the daemon confirms the VMM is alive (`POST /v1/workloads/status`) and the guest is still silent, the platform records a synthetic heartbeat (`runs.last_heartbeat_at`, the exact column the watchdog reads) every 15 s, stopping the moment real events flow or the VM exits. It never masks a dead VM — a `running: false` status stops the synthetic beat immediately.
+
 ## Layout
 
 | Path                                         | Contents                                                              |

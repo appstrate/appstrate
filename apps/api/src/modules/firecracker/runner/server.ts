@@ -20,14 +20,19 @@ import type {
   IsolationBoundary,
   RunOrchestrator,
   SidecarLaunchSpec,
+  WorkloadHandle,
   WorkloadSpec,
 } from "@appstrate/core/platform-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
 import {
+  CONSOLE_DEFAULT_TAIL_BYTES,
+  CONSOLE_ID_RE,
+  CONSOLE_ROUTE_PATTERN,
   EXIT_LONG_POLL_MS,
   RUNNER_PROTOCOL_VERSION,
   RUNNER_ROUTES,
+  consoleQuerySchema,
   createBoundaryBodySchema,
   createSidecarBodySchema,
   createWorkloadBodySchema,
@@ -38,8 +43,31 @@ import {
   stopWorkloadBodySchema,
 } from "./protocol.ts";
 
+/** Liveness snapshot returned by {@link RunnerOrchestrator.workloadStatus}. */
+export interface WorkloadStatus {
+  running: boolean;
+  uptimeMs?: number;
+}
+
+/**
+ * Observability capabilities the daemon's engine adds on top of the
+ * transport-neutral {@link RunOrchestrator} contract (phase 4). Kept OFF
+ * the shared interface so the docker/process orchestrators — which do not
+ * back this daemon — are not forced to implement them; the daemon always
+ * drives a {@link FirecrackerOrchestrator}, which does.
+ */
+export interface RunnerOrchestrator extends RunOrchestrator {
+  /** Whether the daemon still holds a live VMM process for the workload. */
+  workloadStatus(handle: WorkloadHandle): WorkloadStatus | Promise<WorkloadStatus>;
+  /**
+   * Console tail for a run, served from the live workspace while the VM
+   * runs, else from the post-teardown archive. `null` when neither exists.
+   */
+  readConsole(id: string, tailBytes: number): Promise<string | null>;
+}
+
 export interface RunnerAppDeps {
-  orchestrator: RunOrchestrator;
+  orchestrator: RunnerOrchestrator;
   /** Shared bearer secret — every request must present it. */
   token: string;
   /**
@@ -250,6 +278,37 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
   app.get(RUNNER_ROUTES.platformUrl, async (c) => {
     const url = await orchestrator.resolvePlatformApiUrl();
     return c.json({ url });
+  });
+
+  // Boot-phase liveness probe (phase 4): the platform's heartbeat pump
+  // reads this to decide whether to keep synthesising heartbeats for a
+  // still-booting guest — it never masks a dead VM because `running`
+  // reflects the actual VMM process.
+  app.post(RUNNER_ROUTES.workloadStatus, async (c) => {
+    const body = await readBody(c, handleBodySchema);
+    if (!body.ok) return body.res;
+    const status = await orchestrator.workloadStatus(body.data.handle);
+    return c.json(status);
+  });
+
+  // Console retention (phase 4): serves the run's serial console from the
+  // live workspace while the VM runs, else from the post-teardown archive.
+  // The platform fetches a small tail here to attach to an abnormally
+  // exited run — the console that used to vanish with the workspace.
+  app.get(CONSOLE_ROUTE_PATTERN, async (c) => {
+    const id = c.req.param("id");
+    if (!CONSOLE_ID_RE.test(id)) {
+      return c.json({ error: "invalid workload id" }, 400);
+    }
+    const query = consoleQuerySchema.safeParse({ tailBytes: c.req.query("tailBytes") });
+    // `.catch(...)` inside the schema makes a parse failure impossible, but
+    // guard defensively rather than assert.
+    const tailBytes = query.success ? query.data.tailBytes : CONSOLE_DEFAULT_TAIL_BYTES;
+    const text = await orchestrator.readConsole(id, tailBytes);
+    if (text === null) {
+      return c.json({ error: `no console for workload ${id}` }, 404);
+    }
+    return c.body(text, 200, { "content-type": "text/plain; charset=utf-8" });
   });
 
   return app;

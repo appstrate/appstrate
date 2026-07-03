@@ -92,6 +92,29 @@ const EXIT_MARKER_SCAN_BYTES = 64 * 1024;
 /** How often the per-VM watchdog stats the console log (ms). */
 const CONSOLE_WATCH_INTERVAL_MS = 10_000;
 /**
+ * Console tail retained at teardown (phase 4). The run workspace — and
+ * with it `console.log` — is deleted when the VM is torn down; the last
+ * slice is copied to the archive first so a failed run stays debuggable.
+ */
+const CONSOLE_ARCHIVE_BYTES = 256 * 1024;
+/** Console upper bound the {@link readConsole} endpoint will ever serve. */
+const CONSOLE_MAX_TAIL_BYTES = 256 * 1024;
+/** Most recent archived consoles kept — older ones are pruned at teardown. */
+const CONSOLE_ARCHIVE_MAX_FILES = 100;
+
+/**
+ * Why a workload's microVM + workspace were destroyed, logged on every
+ * teardown so there is never a silent path from "booted" to "gone".
+ * Derived from the actual call paths:
+ *   - `finalize`      — the run ended and pi.ts removed the boundary
+ *   - `watchdog-kill` — the platform asked the daemon to stop the run by
+ *                       id (stall watchdog / user cancel share this path)
+ *   - `orphan-sweep`  — boot-time reclamation of a crashed predecessor
+ *   - `shutdown`      — the daemon itself is stopping
+ *   - `crash`         — the VMM exited abnormally without an intentional stop
+ */
+export type TeardownReason = "finalize" | "watchdog-kill" | "orphan-sweep" | "shutdown" | "crash";
+/**
  * Minimum firecracker binary version. 1.16 is what the docs require, and
  * anything below 1.15.1 is exposed to CVE-2026-5747 (virtio-pci OOB
  * write, guest-root → potential host code execution) — enforce the floor
@@ -130,6 +153,14 @@ interface VmRecord {
    * carrying it are trusted by waitForExit — see GuestConfig.exit_marker_nonce.
    */
   exitNonce?: string;
+  /** `Date.now()` at VMM spawn — teardown uptime + liveness uptime. */
+  bootedAt?: number;
+  /**
+   * Overrides the teardown reason a caller passes to destroyVm — stamped
+   * by kill paths that know WHY the VM is going away (watchdog stop,
+   * console-cap kill) before the generic cleanup runs.
+   */
+  teardownReason?: TeardownReason;
 }
 
 /** Per-run state persisted for the boot-time orphan sweep. */
@@ -319,7 +350,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // Full per-run teardown (VM, TAP, sockets, run dirs) BEFORE removing
     // the host firewall — a VM must never outlive the policy table.
     const records = [...this.vms.values()];
-    await Promise.all(records.map((vm) => this.destroyVm(vm, 5)));
+    await Promise.all(records.map((vm) => this.destroyVm(vm, 5, "shutdown")));
     this.vms.clear();
     this.pendingSidecarEnv.clear();
     this.pendingAgentSpecs.clear();
@@ -379,6 +410,27 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       if (state?.tapDevice) {
         await deleteTap(this.hostExec, state.tapDevice).catch(() => {});
       }
+      // Preserve the crashed run's console before its workspace is reclaimed
+      // — a crash-swept run is exactly the kind that needs post-mortem
+      // forensics. The exit-marker nonce died with the previous daemon, so
+      // it can't be authenticated here (reported false, not scanned).
+      const orphanRunId = state?.runId ?? name;
+      const orphanTail = await this.readConsoleTail(
+        join(dir, "console.log"),
+        CONSOLE_ARCHIVE_BYTES,
+      );
+      await this.archiveConsole(orphanRunId, orphanTail).catch((err) => {
+        logger.warn("Firecracker orphan console archive failed — continuing sweep", {
+          runId: orphanRunId,
+          error: getErrorMessage(err),
+        });
+      });
+      logger.info("Firecracker workload destroyed", {
+        runId: orphanRunId,
+        reason: "orphan-sweep" satisfies TeardownReason,
+        exitMarkerFound: false,
+        uptimeMs: 0,
+      });
       await rm(dir, { recursive: true, force: true }).catch(() => {});
       isolationBoundaries++;
     }
@@ -475,7 +527,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const runId = boundary.name.replace(/^firecracker-/, "");
     const vm = this.vms.get(runId);
     if (vm) {
-      await this.destroyVm(vm, 0);
+      await this.destroyVm(vm, 0, "finalize");
     }
     this.pendingSidecarEnv.delete(runId);
     this.pendingAgentSpecs.delete(runId);
@@ -483,9 +535,31 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   }
 
   /** Tear down one run's VM + network + on-disk state. Idempotent, best-effort. */
-  private async destroyVm(vm: VmRecord, graceSeconds: number): Promise<void> {
+  private async destroyVm(
+    vm: VmRecord,
+    graceSeconds: number,
+    reason: TeardownReason,
+  ): Promise<void> {
     if (vm.consoleWatch) clearInterval(vm.consoleWatch);
     await this.killVm(vm, graceSeconds).catch(() => {});
+    // Teardown observability (phase 4): read the console tail ONCE, derive
+    // the exit-marker signal, archive it, and emit a structured line — all
+    // BEFORE the workspace (with console.log) is deleted below. No silent
+    // path from boot to gone.
+    const tail = await this.readConsoleTail(vm.consolePath, CONSOLE_ARCHIVE_BYTES);
+    const exitMarkerFound = vm.exitNonce ? parseExitMarker(tail, vm.exitNonce) !== null : false;
+    await this.archiveConsole(vm.runId, tail).catch((err) => {
+      logger.warn("Firecracker console archive failed — continuing teardown", {
+        runId: vm.runId,
+        error: getErrorMessage(err),
+      });
+    });
+    logger.info("Firecracker workload destroyed", {
+      runId: vm.runId,
+      reason: this.effectiveTeardownReason(vm, reason),
+      exitMarkerFound,
+      uptimeMs: vm.bootedAt !== undefined ? Date.now() - vm.bootedAt : 0,
+    });
     try {
       await deleteTap(this.hostExec, vm.subnet.tapDevice);
       // Only a confirmed delete frees the index — releasing it while the
@@ -605,6 +679,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       },
     );
     vm.proc = proc;
+    vm.bootedAt = Date.now();
     drainStream(proc, `fc:${handle.runId}`);
     // Mandatory (unlike the pre-spawn pid-less write): without the pid on
     // disk, a platform crash leaves a VMM the boot sweep cannot kill. A
@@ -707,6 +782,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     if (!vm) return "not_found";
     if (!vm.proc) return "already_stopped";
     vm.stopping = true;
+    // The platform stops a run by id from its stall watchdog (and shares
+    // this route with user cancel) — record it so the eventual teardown
+    // log attributes the kill instead of mislabelling it a clean finalize.
+    vm.teardownReason = "watchdog-kill";
     await this.killVm(vm, timeoutSeconds ?? 5);
     return "stopped";
   }
@@ -847,15 +926,124 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     return apiSocketPath === undefined || argv.includes(apiSocketPath);
   }
 
-  private async readConsoleTail(consolePath: string): Promise<string> {
+  private async readConsoleTail(
+    consolePath: string,
+    bytes: number = EXIT_MARKER_SCAN_BYTES,
+  ): Promise<string> {
     try {
       const file = Bun.file(consolePath);
       const size = file.size;
-      const from = Math.max(0, size - EXIT_MARKER_SCAN_BYTES);
+      const from = Math.max(0, size - bytes);
       return await file.slice(from, size).text();
     } catch {
       return "";
     }
+  }
+
+  /**
+   * The absolute path a console tail is archived at (phase 4). Sits beside
+   * the runs directory — `<FIRECRACKER_DATA_DIR>/../console-archive` — so it
+   * survives the per-run workspace deletion.
+   */
+  private consoleArchiveDir(): string {
+    const fcEnv = getFirecrackerEnv();
+    return join(resolve(fcEnv.FIRECRACKER_DATA_DIR), "..", "console-archive");
+  }
+
+  /**
+   * Persist a console tail to the archive, then prune to the most recent
+   * {@link CONSOLE_ARCHIVE_MAX_FILES}. Empty tails (a VM that never wrote a
+   * console) are skipped. Caller wraps this so a failure only warns —
+   * archiving must never fail a teardown.
+   */
+  private async archiveConsole(runId: string, tail: string): Promise<void> {
+    if (tail.length === 0) return;
+    const dir = this.consoleArchiveDir();
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await writeFile(join(dir, `${runId}.log`), tail, { mode: 0o600 });
+    await this.pruneConsoleArchive(dir);
+  }
+
+  /** Keep only the most recent {@link CONSOLE_ARCHIVE_MAX_FILES} `.log` files. */
+  private async pruneConsoleArchive(dir: string): Promise<void> {
+    let names: string[];
+    try {
+      const dirents = await readdir(dir, { withFileTypes: true });
+      names = dirents.filter((d) => d.isFile() && d.name.endsWith(".log")).map((d) => d.name);
+    } catch {
+      return;
+    }
+    if (names.length <= CONSOLE_ARCHIVE_MAX_FILES) return;
+    const withMtime = await Promise.all(
+      names.map(async (name) => {
+        try {
+          return { name, mtimeMs: (await stat(join(dir, name))).mtimeMs };
+        } catch {
+          return { name, mtimeMs: 0 };
+        }
+      }),
+    );
+    withMtime.sort((a, b) => b.mtimeMs - a.mtimeMs); // newest first
+    for (const { name } of withMtime.slice(CONSOLE_ARCHIVE_MAX_FILES)) {
+      await rm(join(dir, name), { force: true }).catch(() => {});
+    }
+  }
+
+  /**
+   * Tail of a file, or `null` when it does not exist (distinct from an
+   * existing-but-empty console, which returns `""`). Used by
+   * {@link readConsole} to distinguish "no console anywhere" (404) from a
+   * freshly booted VM whose console is still empty.
+   */
+  private async readFileTail(path: string, bytes: number): Promise<string | null> {
+    const file = Bun.file(path);
+    if (!(await file.exists())) return null;
+    const size = file.size;
+    const from = Math.max(0, size - bytes);
+    return await file.slice(from, size).text();
+  }
+
+  /**
+   * Boot-phase liveness probe (phase 4). `running` is true only while the
+   * daemon still holds a VMM process that has not exited — the platform's
+   * heartbeat pump reads this so it never masks a dead VM.
+   */
+  workloadStatus(handle: WorkloadHandle): { running: boolean; uptimeMs?: number } {
+    const vm = this.vms.get(handle.runId);
+    // `exitCode === null` while the process is alive; a number once reaped.
+    const running = vm?.proc != null && vm.proc.exitCode === null;
+    return vm?.bootedAt !== undefined
+      ? { running, uptimeMs: Date.now() - vm.bootedAt }
+      : { running };
+  }
+
+  /**
+   * Console tail for a run (phase 4). Served from the live workspace while
+   * the VM runs, else from the post-teardown archive. `null` when neither
+   * exists (→ 404). `id` is the runId; it has already been validated
+   * against a run-identifier charset by the route.
+   */
+  async readConsole(id: string, tailBytes: number): Promise<string | null> {
+    const bytes = Math.min(Math.max(tailBytes, 1), CONSOLE_MAX_TAIL_BYTES);
+    const vm = this.vms.get(id);
+    if (vm) {
+      const live = await this.readFileTail(vm.consolePath, bytes).catch(() => null);
+      if (live !== null) return live;
+    }
+    const archivePath = join(this.consoleArchiveDir(), `${id}.log`);
+    return this.readFileTail(archivePath, bytes).catch(() => null);
+  }
+
+  /**
+   * The reason to log for a teardown: an explicit stamp from a kill path
+   * wins; otherwise a VMM that exited non-zero without an intentional stop
+   * crashed, regardless of the caller's cleanup intent.
+   */
+  private effectiveTeardownReason(vm: VmRecord, reason: TeardownReason): TeardownReason {
+    if (vm.teardownReason) return vm.teardownReason;
+    const code = vm.proc?.exitCode;
+    if (!vm.stopping && code != null && code !== 0) return "crash";
+    return reason;
   }
 
   /** Best-effort variant — for the pre-spawn (pid-less) write only. */
@@ -954,6 +1142,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           },
         );
         vm.stopping = true;
+        // A runaway console is an abnormal, self-inflicted end — attribute
+        // the eventual teardown as a crash, not a clean finalize.
+        vm.teardownReason = "crash";
         await this.killVm(vm, 0).catch(() => {});
       })();
     }, CONSOLE_WATCH_INTERVAL_MS);

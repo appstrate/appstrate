@@ -174,6 +174,52 @@ export const logLineSchema = z.object({
   line: z.string(),
 });
 
+/**
+ * Liveness probe answer (issue #819, phase 4 — daemon observability).
+ * `running` reflects whether the daemon still holds a live VMM process for
+ * the workload. The platform's boot-phase heartbeat pump synthesises
+ * heartbeats ONLY while this is `true`, so a dead VM is never masked.
+ * `uptimeMs` is present once the microVM has booted.
+ */
+export const workloadStatusResponseSchema = z.object({
+  running: z.boolean(),
+  uptimeMs: z.number().int().nonnegative().optional(),
+});
+
+/** Default console tail served when `?tailBytes=` is absent or malformed. */
+export const CONSOLE_DEFAULT_TAIL_BYTES = 64 * 1024;
+/** Hard cap on the console tail — a request over this is clamped, not rejected. */
+export const CONSOLE_MAX_TAIL_BYTES = 256 * 1024;
+
+/**
+ * A console `:id` is used verbatim to build the archive path
+ * (`<archive-dir>/<id>.log`) — restrict it to run-identifier characters so
+ * a crafted id can never traverse out of the archive directory.
+ */
+export const CONSOLE_ID_RE = /^[A-Za-z0-9_.-]+$/;
+
+/** Static Hono pattern for the console route (server side). */
+export const CONSOLE_ROUTE_PATTERN = "/v1/workloads/:id/console";
+
+/** Build the console path for a given id (client side). */
+export function workloadConsolePath(id: string): string {
+  return `/v1/workloads/${encodeURIComponent(id)}/console`;
+}
+
+/**
+ * `?tailBytes=` query for the console route. Absent or malformed → the
+ * default; a value over the cap is clamped down (never rejected) so a
+ * caller can safely ask for "as much as allowed".
+ */
+export const consoleQuerySchema = z.object({
+  tailBytes: z.coerce
+    .number()
+    .int()
+    .positive()
+    .catch(CONSOLE_DEFAULT_TAIL_BYTES)
+    .transform((n) => Math.min(Math.max(n, 1), CONSOLE_MAX_TAIL_BYTES)),
+});
+
 // ---------------------------------------------------------------------------
 // Endpoint map
 // ---------------------------------------------------------------------------
@@ -196,9 +242,15 @@ export const RUNNER_ROUTES = {
   removeWorkload: "/v1/workloads/remove",
   waitForExit: "/v1/workloads/exit",
   streamLogs: "/v1/workloads/logs",
+  // Boot-phase liveness probe (phase 4). Additive: an older daemon 404s
+  // this route and the platform's heartbeat pump degrades to inert.
+  workloadStatus: "/v1/workloads/status",
   stopRun: "/v1/runs/stop",
   platformUrl: "/v1/platform-url",
 } as const;
+// NOTE: the console route (`CONSOLE_ROUTE_PATTERN` / `workloadConsolePath`)
+// is NOT in this map — it carries a path parameter and a query string, so
+// it cannot be a single static string like the routes above.
 
 /** How long the daemon holds an `exit` long-poll before `{ done: false }`. */
 export const EXIT_LONG_POLL_MS = 45_000;

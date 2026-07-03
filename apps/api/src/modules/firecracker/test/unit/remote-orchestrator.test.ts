@@ -343,6 +343,145 @@ describe("RemoteFirecrackerOrchestrator.streamLogs", () => {
   });
 });
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+describe("RemoteFirecrackerOrchestrator boot-phase heartbeat", () => {
+  it("synthesises heartbeats while the guest is silent, and stops once it becomes active", async () => {
+    let hbCalls = 0;
+    const recordBootHeartbeat = () => {
+      hbCalls += 1;
+      // First two ticks: still booting. Third: guest is now reporting.
+      return Promise.resolve(hbCalls < 3 ? ("bumped" as const) : ("guest-active" as const));
+    };
+    const fn = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes(RUNNER_ROUTES.workloadStatus)) return json({ running: true });
+      if (url.includes(RUNNER_ROUTES.waitForExit)) {
+        await sleep(80); // outlives the pump so the "stop on guest-active" is observed
+        return json({ done: true, code: 0 });
+      }
+      return json({});
+    }) as unknown as typeof fetch;
+
+    const orchestrator = new RemoteFirecrackerOrchestrator({
+      fetchFn: fn,
+      recordBootHeartbeat,
+      heartbeatIntervalMs: 5,
+    });
+
+    const code = await orchestrator.waitForExit(HANDLE);
+    expect(code).toBe(0);
+    // The pump stopped itself at the guest-active tick — never beats again.
+    expect(hbCalls).toBe(3);
+  });
+
+  it("does NOT heartbeat while the daemon reports the VMM dead (never masks a dead VM)", async () => {
+    let hbCalls = 0;
+    const recordBootHeartbeat = () => {
+      hbCalls += 1;
+      return Promise.resolve("bumped" as const);
+    };
+    const fn = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes(RUNNER_ROUTES.workloadStatus)) return json({ running: false });
+      if (url.includes(RUNNER_ROUTES.waitForExit)) {
+        await sleep(40);
+        return json({ done: true, code: 1 });
+      }
+      return json({});
+    }) as unknown as typeof fetch;
+
+    const orchestrator = new RemoteFirecrackerOrchestrator({
+      fetchFn: fn,
+      recordBootHeartbeat,
+      heartbeatIntervalMs: 5,
+    });
+
+    await orchestrator.waitForExit(HANDLE);
+    expect(hbCalls).toBe(0);
+  });
+
+  it("is inert when no heartbeat recorder is wired (no status probes at all)", async () => {
+    const { fn, calls } = fetchStub((url) =>
+      url.includes(RUNNER_ROUTES.waitForExit) ? json({ done: true, code: 0 }) : json({}),
+    );
+    const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn, heartbeatIntervalMs: 1 });
+
+    await orchestrator.waitForExit(HANDLE);
+    // Only the exit poll crossed the wire — no workloadStatus probe.
+    expect(calls.every((c) => !c.url.includes(RUNNER_ROUTES.workloadStatus))).toBe(true);
+  });
+});
+
+describe("RemoteFirecrackerOrchestrator abnormal-exit console capture", () => {
+  it("fetches and records the console tail on a non-zero exit", async () => {
+    const recorded: Array<[string, number, string]> = [];
+    const fn = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes(RUNNER_ROUTES.waitForExit)) return json({ done: true, code: 137 });
+      if (url.includes("/console")) return new Response("panic: guest died\n", { status: 200 });
+      return json({});
+    }) as unknown as typeof fetch;
+
+    const orchestrator = new RemoteFirecrackerOrchestrator({
+      fetchFn: fn,
+      recordConsoleExcerpt: (runId, exitCode, excerpt) => {
+        recorded.push([runId, exitCode, excerpt]);
+        return Promise.resolve();
+      },
+    });
+
+    const code = await orchestrator.waitForExit(HANDLE);
+    expect(code).toBe(137);
+    expect(recorded).toEqual([["r-1", 137, "panic: guest died\n"]]);
+  });
+
+  it("does not capture on a clean exit, and never fails finalize when the fetch errors", async () => {
+    let recorded = 0;
+    const fn = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes(RUNNER_ROUTES.waitForExit)) return json({ done: true, code: 0 });
+      if (url.includes("/console")) throw new TypeError("console fetch failed");
+      void init;
+      return json({});
+    }) as unknown as typeof fetch;
+
+    const orchestrator = new RemoteFirecrackerOrchestrator({
+      fetchFn: fn,
+      recordConsoleExcerpt: () => {
+        recorded += 1;
+        return Promise.resolve();
+      },
+    });
+
+    // Clean exit → no capture attempt.
+    expect(await orchestrator.waitForExit(HANDLE)).toBe(0);
+    expect(recorded).toBe(0);
+  });
+
+  it("swallows a console-fetch failure on an abnormal exit (finalize still gets the code)", async () => {
+    let recorded = 0;
+    const fn = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes(RUNNER_ROUTES.waitForExit)) return json({ done: true, code: 1 });
+      if (url.includes("/console")) throw new TypeError("console fetch failed");
+      return json({});
+    }) as unknown as typeof fetch;
+
+    const orchestrator = new RemoteFirecrackerOrchestrator({
+      fetchFn: fn,
+      recordConsoleExcerpt: () => {
+        recorded += 1;
+        return Promise.resolve();
+      },
+    });
+
+    // The excerpt fetch fails, but the exit code is still returned intact.
+    expect(await orchestrator.waitForExit(HANDLE)).toBe(1);
+    expect(recorded).toBe(0);
+  });
+});
+
 describe("RemoteFirecrackerOrchestrator misc calls", () => {
   it("stopByRunId passes the daemon's result through", async () => {
     const { fn, calls } = fetchStub(() => json({ result: "already_stopped" }));

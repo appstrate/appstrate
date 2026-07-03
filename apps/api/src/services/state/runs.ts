@@ -731,6 +731,49 @@ export async function appendRunLog(
   return row?.id ?? 0;
 }
 
+/**
+ * Outcome of a boot-phase synthetic heartbeat.
+ * - `bumped`       — the run is still booting (no guest events yet, sink
+ *                    open); `last_heartbeat_at` was advanced.
+ * - `guest-active` — the guest has emitted at least one event; real
+ *                    liveness has taken over, stop synthesising.
+ * - `closed`       — the sink is closed (run finalised) or the run is gone.
+ */
+export type BootHeartbeatOutcome = "bumped" | "guest-active" | "closed";
+
+/**
+ * Synthetic keep-alive for a run whose guest has not yet posted its first
+ * sink event — the boot-window liveness signal the Firecracker remote
+ * backend uses so the stall watchdog does not kill a slow-booting microVM
+ * before it reports.
+ *
+ * Reuses the EXACT mechanism the watchdog reads: it bumps
+ * `runs.last_heartbeat_at` on an OPEN-sink row (`sink_closed_at IS NULL`),
+ * the same column `POST /events/heartbeat`, `PATCH /sink/extend` and event
+ * ingestion touch. It is gated to `last_event_sequence = 0` so it only
+ * fires during the pre-first-event boot window — once the guest reports,
+ * real events keep the run alive and this returns `guest-active` to stop
+ * the pump.
+ */
+export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatOutcome> {
+  const bumped = await db
+    .update(runs)
+    .set({ lastHeartbeatAt: new Date() })
+    .where(and(eq(runs.id, runId), isNull(runs.sinkClosedAt), eq(runs.lastEventSequence, 0)))
+    .returning({ id: runs.id });
+  if (bumped.length > 0) return "bumped";
+
+  // Nothing bumped — distinguish "guest is now reporting" from "run closed
+  // / gone" so the caller knows whether to keep the pump alive.
+  const [row] = await db
+    .select({ closed: runs.sinkClosedAt, seq: runs.lastEventSequence })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+  if (!row || row.closed !== null) return "closed";
+  return "guest-active";
+}
+
 export async function getRunningRunsForPackage(
   scope: AppScope,
   packageId: string,
