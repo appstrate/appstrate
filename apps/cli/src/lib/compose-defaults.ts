@@ -98,17 +98,6 @@ export const CODE_DEFAULTS: Record<string, string> = {
   // doesn't usually reference them with a default.
   PGLITE_DATA_DIR: "./data/pglite",
   FS_STORAGE_PATH: "./data/storage",
-  // Firecracker backend (RUN_ADAPTER=firecracker) — host-only paths and
-  // knobs; compose doesn't usually reference them, mirrored per the
-  // schema's maintainer note.
-  FIRECRACKER_BIN: "firecracker",
-  FIRECRACKER_KERNEL_PATH: "./data/firecracker/vmlinux",
-  FIRECRACKER_ROOTFS_PATH: "./data/firecracker/rootfs.ext4",
-  FIRECRACKER_DATA_DIR: "./data/firecracker/runs",
-  FIRECRACKER_SUBNET_CIDR: "10.231.0.0/16",
-  FIRECRACKER_EGRESS_DENY_CIDRS: "169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
-  FIRECRACKER_MAX_CONSOLE_BYTES: "268435456",
-  FIRECRACKER_MAX_CONCURRENT_VMS: "0",
   // `NODE_ENV` defaults to `development`; compose-driven prod usually
   // sets it explicitly via `.env`, no default-mirroring expected.
   NODE_ENV: "development",
