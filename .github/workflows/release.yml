@@ -259,14 +259,20 @@ jobs:
   # anchor and the whole curl | bash path degrades to TLS-only trust.
   sign-cli:
     name: Sign CLI binaries
-    needs: build-cli
+    # Also `needs: build-runner-daemon` so the daemon binaries can be folded
+    # into the SAME signed checksums.txt (see "Stage runner daemon binaries").
+    # `if: always() && build-cli success` keeps the CLI signable even when the
+    # decoupled 90-min daemon build flaked — the daemon-staging step below is
+    # guarded so a CLI-only manifest is signed in that case.
+    needs: [build-cli, build-runner-daemon]
+    if: always() && needs.build-cli.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Download CLI binaries
+      - name: Download CLI + runner daemon binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           # `docker/build-push-action` auto-uploads
@@ -274,33 +280,58 @@ jobs:
           # same run; without a pattern filter, download-artifact pulls
           # them too — and they're large enough to flake the 5-retry
           # blob download budget. Restrict to the binary asset names.
+          # This pattern also matches the `appstrate-runner-*` daemon
+          # artifacts (staged into the signed manifest below when present).
           pattern: appstrate-*
           path: cli-binaries
           merge-multiple: false
 
-      - name: Stage binaries
+      - name: Stage CLI binaries
         id: stage
         run: |
-          # Each artifact extracts into its own subdir — flatten into a
-          # single directory so checksum + signing steps see one tree.
+          # Copy ONLY the four CLI binaries by exact name into out/ — an
+          # explicit list, not `find -name appstrate-*`, so the daemon
+          # artifacts (appstrate-runner-*, sharing the appstrate-* download
+          # pattern) and their .sha256 sidecars do NOT leak into the signed
+          # manifest here. The daemon binaries are folded in deterministically
+          # by the next step.
           mkdir -p out
-          find cli-binaries -type f -name 'appstrate-*' -exec cp {} out/ \;
-          ls -la out/
-          # Fail fast if any expected target is missing — the release
-          # should not ship with a partial binary set.
           for asset in appstrate-darwin-arm64 appstrate-darwin-x64 \
                        appstrate-linux-x64 appstrate-linux-arm64; do
-            if [ ! -f "out/$asset" ]; then
+            src="$(find cli-binaries -type f -name "$asset" | head -1)"
+            if [ -z "$src" ]; then
               echo "::error::Missing CLI binary: $asset"
               exit 1
             fi
+            cp "$src" "out/$asset"
           done
+          ls -la out/
+
+      - name: Stage runner daemon binaries into the signed manifest
+        # Fold the daemon binaries into the SAME checksums.txt the CLI is signed
+        # under, so `appstrate runner install` verifies the daemon against a
+        # minisign-signed digest instead of a bare same-origin .sha256 sidecar
+        # (a trust downgrade). Guarded on the daemon job: the release is
+        # decoupled from it, so when it failed we sign a CLI-only manifest and
+        # the daemon simply isn't part of this release.
+        if: needs.build-runner-daemon.result == 'success'
+        run: |
+          for asset in appstrate-runner-x86_64 appstrate-runner-aarch64; do
+            src="$(find cli-binaries -type f -name "$asset" | head -1)"
+            if [ -z "$src" ]; then
+              echo "::error::Missing runner daemon binary: $asset"
+              exit 1
+            fi
+            cp "$src" "out/$asset"
+          done
+          ls -la out/
 
       - name: Generate checksums
         run: |
           cd out
           # `shasum -a 256` output format matches what `sha256sum -c`
-          # expects, so `bootstrap.sh` can verify with either tool.
+          # expects, so `bootstrap.sh` can verify with either tool. out/
+          # holds only binaries (no .sha256 sidecars), so the glob is clean.
           sha256sum appstrate-* > checksums.txt
           cat checksums.txt
 
@@ -537,7 +568,21 @@ jobs:
           retention-days: 7
 
   release:
+    # The CORE release (GH Release + CLI binaries + signed checksums) must not
+    # be hard-blocked by the firecracker guest-artifact / runner-daemon builds:
+    # `firecracker-artifacts` is a ~90-min kernel+rootfs build (incl.
+    # ubuntu-24.04-arm) and a single flake would otherwise sink every release.
+    # So depend on them for ordering but gate only on the core jobs, and upload
+    # the firecracker/daemon assets conditionally (per-step `if` on their
+    # results). A release published without runner assets is handled on the
+    # consumer side: `appstrate runner install` gives an actionable 404 error
+    # (apps/cli/src/lib/runner/download.ts) pointing at a version that has them.
     needs: [build-and-push, build-cli, sign-cli, firecracker-artifacts, build-runner-daemon]
+    if: >-
+      always() &&
+      needs.build-and-push.result == 'success' &&
+      needs.build-cli.result == 'success' &&
+      needs.sign-cli.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -564,6 +609,9 @@ jobs:
           path: cli-signed
 
       - name: Download Firecracker guest artifacts
+        # Decoupled build (may have failed) — skip cleanly and the manifest +
+        # asset uploads below are guarded on the same condition.
+        if: needs.firecracker-artifacts.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           # One artifact per arch (firecracker-x86_64, firecracker-aarch64),
@@ -573,6 +621,9 @@ jobs:
           merge-multiple: false
 
       - name: Download runner daemon binaries
+        # Decoupled build (may have failed) — skip cleanly; the release simply
+        # ships without daemon assets for this tag.
+        if: needs.build-runner-daemon.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           # One artifact per arch (appstrate-runner-x86_64,
@@ -582,12 +633,20 @@ jobs:
           merge-multiple: false
 
       - name: Assemble Firecracker manifest
+        # Only when the guest artifacts were built + downloaded above.
+        if: needs.firecracker-artifacts.result == 'success'
         run: |
           set -euo pipefail
           # guest_protocol is the single source of truth in the daemon source
           # — read it here so the manifest can never drift from the resolver.
+          # `|| true` + explicit check so a moved/renamed constant fails with a
+          # clear message instead of a bare pipefail grep exit.
           GUEST_PROTOCOL=$(grep -oP 'GUEST_PROTOCOL_VERSION = \K[0-9]+' \
-            apps/api/src/modules/firecracker/runner/artifacts.ts)
+            apps/api/src/modules/firecracker/runner/artifacts.ts || true)
+          if [ -z "$GUEST_PROTOCOL" ]; then
+            echo "::error::Could not parse GUEST_PROTOCOL_VERSION from runner/artifacts.ts — the source constant was moved or its shape changed. The firecracker manifest cannot be assembled without it; update this grep."
+            exit 1
+          fi
           VERSION="${GITHUB_REF_NAME#v}"
           # Merge the per-arch fragments ({ "<arch>": {...} }) into the
           # combined manifest wrapped with version + guest_protocol.
@@ -634,6 +693,11 @@ jobs:
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           body: ${{ steps.notes.outputs.body }}
+          # `fail_on_unmatched_files: false` (the default, pinned explicit for
+          # intent): the firecracker/runner-daemon globs match nothing when
+          # those decoupled jobs failed and their downloads were skipped — the
+          # release must still publish the CLI + signed checksums for this tag.
+          fail_on_unmatched_files: false
           # Flatten the per-artifact subdirs into a single glob so every
           # CLI binary lands as a top-level asset on the release, then
           # append the signed checksum bundle so `bootstrap.sh` can

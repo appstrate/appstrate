@@ -51,6 +51,12 @@ jobs:
     steps:
       - name: Compute preview tag + checkout ref
         id: compute
+        env:
+          # Pass the user-controlled dispatch input through the environment
+          # rather than inlining `${{ github.event.inputs.ref }}` in the script:
+          # a crafted ref (e.g. containing `$(...)` / backticks) inlined into a
+          # run: block is a shell-injection vector. Referenced as "$REF" below.
+          REF: ${{ github.event.inputs.ref }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -59,7 +65,6 @@ jobs:
             echo "checkout_ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
             echo "is_pr=true" >> "$GITHUB_OUTPUT"
           else
-            REF="${{ github.event.inputs.ref }}"
             # Slugify for a valid, readable Docker tag.
             SLUG="$(echo "$REF" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9._-]#-#g' | cut -c1-100)"
             echo "tag=preview-${SLUG}" >> "$GITHUB_OUTPUT"
