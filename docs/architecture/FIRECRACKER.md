@@ -54,8 +54,15 @@ Guests reach the platform at `FIRECRACKER_RUNNER_PLATFORM_URL` (IPv4 literal —
 guests have no DNS); the daemon opens an explicit nft accept for exactly that
 ip:port ahead of the egress-deny CIDRs. Capabilities: `isolatesWorkloads: true`
 (the VM lives on the runner host, credentials never enter the platform
-process), `supportsSidecarOnly: false`. Setup, env vars, and security posture:
-module `README.md`.
+process), `supportsSidecarOnly: false`.
+
+**Transport & auth.** The wire carries run tokens and credential bundles
+(`POST /v1/sidecars`), so keep the link trusted: same machine, private network,
+or TLS via a reverse proxy in front of the daemon. Auth is a single shared
+token compared in constant time; run **one platform per daemon** (the orphan
+sweep is daemon-wide). The protocol is JSON over HTTP (`runner/protocol.ts`,
+versioned — the client refuses a daemon speaking another major version); logs
+stream as NDJSON with reconnect-and-skip and exit codes long-poll.
 
 ## Installing the daemon — `appstrate runner install` (issue #819, phase 3)
 
@@ -77,9 +84,11 @@ sudo appstrate runner install --platform-url http://<PLATFORM_IPV4>:3000
    Every failed check prints a one-line remedy; the install aborts rather than
    crash-looping the daemon later.
 2. **Download + verify** the compiled daemon binary
-   (`appstrate-runner-<arch>`, published by `release.yml`, SHA-256 verified
-   against its `.sha256` sidecar) → `/usr/local/bin/appstrate-runner`, and the
-   pinned upstream **firecracker** binary (v1.16.0, verified against its
+   (`appstrate-runner-<arch>`, published by `release.yml`, verified against the
+   release's **minisign-signed `checksums.txt`** — the same signed trust chain
+   the CLI itself ships under, so a tampered mirror cannot swap both the binary
+   and its digest) → `/usr/local/bin/appstrate-runner`, and the pinned upstream
+   **firecracker** binary (v1.16.0, verified against its own upstream
    `.tgz.sha256.txt`) → `<data-dir>/bin/firecracker`.
 3. **Token** — reuses an existing one from `/etc/appstrate-runner/env`, else
    generates 48 hex chars and prints it once. Set the same value as
@@ -299,9 +308,9 @@ combined manifest to each `v*` GitHub Release.
   pidfile lock at `FIRECRACKER_DATA_DIR/orchestrator.pid` (stale-pid
   takeover); a second instance refuses to boot. Two instances would sweep
   each other's live `afc*` TAP devices and collide on subnet indexes.
-- **Admission cap.** `FIRECRACKER_MAX_CONCURRENT_VMS` (`0` = unlimited): at
-  the cap, `createIsolationBoundary` fails the run fast instead of
-  overcommitting host RAM with another VM.
+- **Admission cap.** `FIRECRACKER_MAX_CONCURRENT_VMS` (default `16`; `0` =
+  unlimited): at the cap, `createIsolationBoundary` fails the run fast instead
+  of overcommitting host RAM with another VM.
 - **Console ceiling.** The serial console (guest kernel + supervisor + full
   workload stdout) appends unbounded; a per-VM watchdog kills the VM — the
   run fails — once `console.log` exceeds `FIRECRACKER_MAX_CONSOLE_BYTES`.
@@ -371,6 +380,20 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
 
 ## Env vars
 
+The daemon owns two schemas, neither part of `@appstrate/env` — the daemon
+boots on a bare KVM host with only these variables.
+
+### Daemon listen/link — `FIRECRACKER_RUNNER_*` (`runner/env.ts`)
+
+| Variable                          | Default   | Notes                                                                                                                                                                  |
+| --------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FIRECRACKER_RUNNER_TOKEN`        | —         | REQUIRED, ≥16 chars. Shared bearer secret; every request must present it. Must match the platform's `FIRECRACKER_RUNNER_TOKEN`                                         |
+| `FIRECRACKER_RUNNER_PORT`         | `3100`    | Daemon listen port                                                                                                                                                     |
+| `FIRECRACKER_RUNNER_HOST`         | `0.0.0.0` | Bind narrowly / firewall the port — the launch spec carries run credentials                                                                                            |
+| `FIRECRACKER_RUNNER_PLATFORM_URL` | —         | REQUIRED. `http(s)://<IPv4>[:port]` guests use to reach the platform (IP literal — no DNS in guests). The daemon opens an explicit nft accept for exactly this ip:port |
+
+### Engine host config — `FIRECRACKER_*` (`runner/host-env.ts`)
+
 | Var                              | Default                          | Notes                                                                   |
 | -------------------------------- | -------------------------------- | ----------------------------------------------------------------------- |
 | `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                              |
@@ -379,7 +402,7 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
 | `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended)                                       |
 | `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                                                  |
 | `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach                        |
-| `FIRECRACKER_MAX_CONCURRENT_VMS` | `0` (unlimited)                  | admission cap — see _Operational constraints_                           |
+| `FIRECRACKER_MAX_CONCURRENT_VMS` | `16` (`0` = unlimited)           | admission cap — see _Operational constraints_                           |
 | `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)                     |
 | `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | guest-artifact download base (mirror for air-gapped)                    |
 | `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present                        |
@@ -405,6 +428,29 @@ directly. The suite = artifact build (cached) + firecracker unit tests +
 `apps/api/src/modules/firecracker/scripts/dev/smoke.ts`, which drives the real orchestrator
 lifecycle (TAP → config drive → boot → uid drop → exit marker → teardown)
 with a trivial agent argv.
+
+## Module layout
+
+Files under `apps/api/src/modules/firecracker/`:
+
+| Path                                         | Contents                                                              |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| `index.ts`                                   | Module manifest + single `firecracker` `orchestrators()` contribution |
+| `remote-env.ts`                              | Platform-side client env (`FIRECRACKER_RUNNER_*`, lazy)               |
+| `remote-orchestrator.ts`                     | `RemoteFirecrackerOrchestrator` — the `RunOrchestrator` HTTP client   |
+| `orchestrator.ts`                            | `FirecrackerOrchestrator` — the daemon's in-process engine            |
+| `host-net.ts` / `subnet.ts` / `vm-config.ts` | Host TAP/nftables, /30 allocator, VM + guest config                   |
+| `guest/`                                     | In-guest supervisor, init, runner-exec wrapper, wire types            |
+| `runner/protocol.ts`                         | Frozen wire schemas + route map (shared both sides)                   |
+| `runner/env.ts`                              | Daemon-side `FIRECRACKER_RUNNER_*` schema                             |
+| `runner/host-env.ts`                         | Engine-side `FIRECRACKER_*` schema (daemon-only)                      |
+| `runner/artifacts.ts`                        | Boot-time guest-artifact resolver (download + verify + install)       |
+| `runner/net-probe.ts`                        | Boot-time guest→platform path probe (health `guestPathVerified`)      |
+| `runner/logger.ts`                           | Env-free pino logger for the daemon closure (no `@appstrate/env`)     |
+| `runner/server.ts`                           | Hono app factory (DI orchestrator — unit-testable)                    |
+| `runner/daemon.ts`                           | Entrypoint (`bun run firecracker:runner`)                             |
+| `scripts/`                                   | Kernel/rootfs build (`Dockerfile.rootfs`, `build-*.sh`)               |
+| `scripts/dev/`                               | Lima dev VM + smoke suite                                             |
 
 ## Known limitations (V1)
 
