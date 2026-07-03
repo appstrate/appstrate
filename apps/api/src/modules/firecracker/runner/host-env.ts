@@ -31,7 +31,20 @@ const firecrackerEnvSchema = z.object({
   // Base URL of the release assets. Optional — defaults to this repo's GH
   // Releases (see DEFAULT_ARTIFACTS_BASE_URL in runner/artifacts.ts). Point
   // it at a mirror for air-gapped or self-hosted deployments.
-  FIRECRACKER_ARTIFACTS_BASE_URL: z.url().optional(),
+  //
+  // MUST be https:// — the manifest is the sole trust anchor (the vmlinux +
+  // rootfs SHA256s come from it), so a plaintext fetch lets a network
+  // attacker swap the manifest AND the artifacts consistently and boot a
+  // tampered guest. http:// is permitted ONLY for localhost/127.0.0.1
+  // (a mirror on the same host, dev).
+  FIRECRACKER_ARTIFACTS_BASE_URL: z
+    .url()
+    .refine(
+      (u) => u.startsWith("https://") || /^http:\/\/(localhost|127\.0\.0\.1)([:/]|$)/.test(u),
+      "must use https:// (the manifest is the sole trust anchor for artifact checksums); " +
+        "http:// is allowed only for localhost/127.0.0.1",
+    )
+    .optional(),
   // Pin a specific release (e.g. "1.2.3" or "v1.2.3"). Optional — when the
   // artifacts already exist on disk and no version is pinned, the resolver
   // skips the download; when they are missing and no version is pinned it

@@ -102,20 +102,20 @@ The daemon owns two schemas — its own listen/link config (`FIRECRACKER_RUNNER_
 
 `FIRECRACKER_*` engine config (`runner/host-env.ts`):
 
-| Variable                         | Default                          | Notes                                                                                                       |
-| -------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                                                                  |
-| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | Auto-downloaded at boot (or built by `firecracker:build:kernel`)                                            |
-| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | Auto-downloaded at boot (or built by `firecracker:build:rootfs`)                                            |
-| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | Per-run state; point at a tmpfs to keep config-drive secrets off disk                                       |
-| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool carved into per-run /30 subnets                                                                    |
-| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918 ranges        | Destinations guests must never reach                                                                        |
-| `FIRECRACKER_MAX_CONSOLE_BYTES`  | 268435456 (256 MiB)              | Console-size kill switch (host OOM guard)                                                                   |
-| `FIRECRACKER_MAX_CONCURRENT_VMS` | 16 (`0` = unlimited)             | Admission control — race-free slot reservation; size by host RAM ÷ per-guest memory. `0` opts out entirely  |
-| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | Guest-artifact download base — point at a mirror for air-gapped hosts                                       |
-| `FIRECRACKER_ARTIFACTS_VERSION`  | latest / on-disk                 | Pin a release (`1.2.3`); unset = skip download when artifacts present                                       |
-| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver — dev iterating on locally built artifacts                                          |
-| `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot-time guest→platform path probe: `warn` logs a dropped path, `strict` refuses to start on a proven drop |
+| Variable                         | Default                          | Notes                                                                                                                                            |
+| -------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                                                                                                       |
+| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | Auto-downloaded at boot (or built by `firecracker:build:kernel`)                                                                                 |
+| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | Auto-downloaded at boot (or built by `firecracker:build:rootfs`)                                                                                 |
+| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | Per-run state; point at a tmpfs to keep config-drive secrets off disk                                                                            |
+| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool carved into per-run /30 subnets                                                                                                         |
+| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918 ranges        | Destinations guests must never reach                                                                                                             |
+| `FIRECRACKER_MAX_CONSOLE_BYTES`  | 268435456 (256 MiB)              | Console-size kill switch (host OOM guard)                                                                                                        |
+| `FIRECRACKER_MAX_CONCURRENT_VMS` | 16 (`0` = unlimited)             | Admission control — race-free slot reservation; size by host RAM ÷ per-guest memory. `0` opts out entirely                                       |
+| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | Guest-artifact download base — point at a mirror for air-gapped hosts. Must be `https://` (trust anchor); `http://` only for localhost/127.0.0.1 |
+| `FIRECRACKER_ARTIFACTS_VERSION`  | latest / on-disk                 | Pin a release (`1.2.3`); unset = skip download when artifacts present                                                                            |
+| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver — dev iterating on locally built artifacts                                                                               |
+| `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot-time guest→platform path probe: `warn` logs a dropped path, `strict` refuses to start on a proven drop                                      |
 
 Start: `bun run firecracker:runner` (systemd unit recommended: `Restart=always`, `After=network-online.target`). Boot order: env → **artifacts** (download/verify kernel + rootfs) → `initialize()` (KVM/artifact checks) → orphan sweep → **guest-path self-verification** (net probe) → listen. Running VMs are separate processes — a daemon restart re-adopts or reaps them via the orphan sweep, it does not kill them mid-flight.
 
