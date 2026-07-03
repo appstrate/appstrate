@@ -119,12 +119,27 @@ jobs:
           ( cd out && sha256sum install.sh > install.sh.sha256 )
           ( cd out/${{ steps.ver.outputs.version }} && sha256sum install.sh > install.sh.sha256 )
 
+          # Runner installer: `scripts/bootstrap-runner.sh` published at
+          # `get.appstrate.dev/runner`. Same trust chain — downloads +
+          # verifies the CLI binary, then execs `appstrate runner install`.
+          sed "s|__APPSTRATE_VERSION__|${{ steps.ver.outputs.version }}|g" \
+            scripts/bootstrap-runner.sh > out/runner
+          if grep -q "__APPSTRATE_VERSION__" out/runner; then
+            echo "::error::Placeholder __APPSTRATE_VERSION__ was not fully replaced in runner"
+            exit 1
+          fi
+          cp out/runner out/${{ steps.ver.outputs.version }}/runner
+          ( cd out && sha256sum runner > runner.sha256 )
+          ( cd out/${{ steps.ver.outputs.version }} && sha256sum runner > runner.sha256 )
+
       - name: Generate SLSA build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: |
             out/install.sh
             out/${{ steps.ver.outputs.version }}/install.sh
+            out/runner
+            out/${{ steps.ver.outputs.version }}/runner
 
       - name: Sign installer with minisign
         id: minisign
@@ -158,6 +173,12 @@ jobs:
             minisign -S -s /tmp/minisign.key \
               -t "appstrate $VERSION" \
               -m out/install.sh
+          # Sign the runner installer too (both rendered copies are byte-
+          # identical, so one signature covers latest + versioned).
+          printf '%s\n' "$MINISIGN_PASSWORD" | \
+            minisign -S -s /tmp/minisign.key \
+              -t "appstrate runner $VERSION" \
+              -m out/runner
           rm -f /tmp/minisign.key
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
@@ -212,6 +233,20 @@ jobs:
           if [ "$SIGNED" = "true" ]; then
             cp out/install.sh.minisig pages/install.sh.minisig
             cp out/install.sh.minisig "pages/${VERSION}/install.sh.minisig"
+          fi
+
+          # Runner installer (served at get.appstrate.dev/runner).
+          cp out/runner        pages/runner
+          cp out/runner.sha256 pages/runner.sha256
+          if [ -e "pages/${VERSION}/runner" ]; then
+            echo "::error::Version ${VERSION} runner already published — refusing to overwrite"
+            exit 1
+          fi
+          cp "out/${VERSION}/runner"        "pages/${VERSION}/runner"
+          cp "out/${VERSION}/runner.sha256" "pages/${VERSION}/runner.sha256"
+          if [ "$SIGNED" = "true" ]; then
+            cp out/runner.minisig pages/runner.minisig
+            cp out/runner.minisig "pages/${VERSION}/runner.minisig"
           fi
 
           # Publish verify.sh wrapper. If the public key is committed under

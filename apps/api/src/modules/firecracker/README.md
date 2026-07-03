@@ -32,6 +32,24 @@ The host-side `FIRECRACKER_*` variables (kernel/rootfs paths, subnet CIDR, …) 
 
 ## Daemon side (`appstrate-runner`)
 
+### Install (`appstrate runner install`)
+
+The supported install path is the CLI — no checkout, no bun, no on-host build:
+
+```sh
+curl -fsSL https://get.appstrate.dev/runner | sudo bash -s -- \
+  --platform-url http://<PLATFORM_IPV4>:3000
+# or, CLI already present:  sudo appstrate runner install --platform-url …
+```
+
+It preflights the host, downloads + SHA-256-verifies the compiled daemon binary
+(`appstrate-runner-<arch>`) and the pinned `firecracker` binary, writes
+`/etc/appstrate-runner/env` (0600) + a hardened systemd unit, and
+`enable --now`s it. Day-2: `appstrate runner {doctor,update,status,logs}`.
+Full flow + `bun build --compile` decoupling notes:
+`docs/architecture/FIRECRACKER.md` → "Installing the daemon". The manual
+`bun run firecracker:runner` path remains for development.
+
 ### Requirements (KVM host)
 
 - Linux host with `/dev/kvm` accessible to the daemon user

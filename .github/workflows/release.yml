@@ -433,8 +433,111 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # ─── Runner daemon binary (compiled appstrate-runner) ────────────────────
+  #
+  # `appstrate runner install` (issue #819, phase 3) downloads THIS compiled
+  # binary onto a bare KVM host — no checkout, no bun, no on-host build. It is
+  # deliberately SEPARATE from the CLI: zero firecracker code ships in the CLI,
+  # zero CLI code ships in the daemon.
+  #
+  # `bun build --compile` embeds a Bun runtime + the daemon's JS closure. The
+  # daemon has no N-API native modules (unlike the CLI's keyring), so a plain
+  # cross-compile would suffice — but we build each arch on its OWN native
+  # runner so the smoke step below can actually EXECUTE the binary and prove
+  # the compile + env-decoupling on the target arch. x86_64 on ubuntu-latest,
+  # aarch64 on ubuntu-24.04-arm (GitHub's free ARM tier), mirroring the
+  # firecracker-artifacts matrix.
+  #
+  # Asset names (`appstrate-runner-<arch>`) match `daemonAssetName()` in
+  # apps/cli/src/lib/runner/constants.ts — do NOT rename without updating it.
+  build-runner-daemon:
+    name: Runner daemon (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            target: bun-linux-x64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            target: bun-linux-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Compile runner daemon binary
+        run: |
+          bun build --compile \
+            --target=${{ matrix.target }} \
+            apps/api/src/modules/firecracker/runner/daemon.ts \
+            --outfile=appstrate-runner-${{ matrix.arch }}
+
+      # Boot the compiled binary with ONLY the FIRECRACKER_RUNNER_* variables
+      # (+ FIRECRACKER_ARTIFACTS_LOCAL=1 to skip the network download) and
+      # assert it reaches the HOST PREFLIGHT error inside orchestrator
+      # initialize() — /dev/kvm and the kernel/rootfs are absent on a GitHub
+      # runner, so initialize() must fail. This proves two things at once:
+      #   1. `bun build --compile` produced a runnable binary (it started).
+      #   2. The daemon booted WITHOUT the platform env schema — no
+      #      BETTER_AUTH_SECRET / CONNECTION_ENCRYPTION_KEY / @appstrate/env.
+      #      A regression that re-coupled the closure to @appstrate/env would
+      #      crash at env-parse BEFORE preflight, which this step catches.
+      - name: Smoke-test compiled binary (env-decoupled preflight)
+        run: |
+          set +e
+          OUT=$(env -i \
+            PATH="$PATH" \
+            FIRECRACKER_RUNNER_TOKEN=0123456789abcdef0123456789abcdef \
+            FIRECRACKER_RUNNER_PLATFORM_URL=http://10.0.0.1:3000 \
+            FIRECRACKER_ARTIFACTS_LOCAL=1 \
+            ./appstrate-runner-${{ matrix.arch }} 2>&1)
+          CODE=$?
+          echo "--- daemon output ---"
+          echo "$OUT"
+          echo "--- exit code: $CODE ---"
+          if [ "$CODE" -eq 0 ]; then
+            echo "::error::Daemon exited 0 — expected a host-preflight failure on a non-KVM runner."
+            exit 1
+          fi
+          # Must reach the orchestrator's host preflight (KVM / kernel / rootfs).
+          if ! echo "$OUT" | grep -qiE "orchestrator initialize|prerequisites missing|/dev/kvm|requires a Linux host with KVM"; then
+            echo "::error::Daemon did not reach the KVM/Linux host preflight — compile or boot-order regression."
+            exit 1
+          fi
+          # Must NOT fail on the platform env schema — that would mean the
+          # daemon closure re-coupled to @appstrate/env (env-decoupling broke).
+          if echo "$OUT" | grep -qE "BETTER_AUTH_SECRET|CONNECTION_ENCRYPTION_KEY|UPLOAD_SIGNING_SECRET"; then
+            echo "::error::Daemon required a platform env var — env decoupling regressed."
+            exit 1
+          fi
+          echo "Runner daemon smoke passed: compiled, env-decoupled, reached host preflight."
+
+      - name: Generate checksum
+        run: |
+          sha256sum "appstrate-runner-${{ matrix.arch }}" > "appstrate-runner-${{ matrix.arch }}.sha256"
+          cat "appstrate-runner-${{ matrix.arch }}.sha256"
+
+      - name: Upload runner daemon binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appstrate-runner-${{ matrix.arch }}
+          path: |
+            appstrate-runner-${{ matrix.arch }}
+            appstrate-runner-${{ matrix.arch }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   release:
-    needs: [build-and-push, build-cli, sign-cli, firecracker-artifacts]
+    needs: [build-and-push, build-cli, sign-cli, firecracker-artifacts, build-runner-daemon]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -467,6 +570,15 @@ jobs:
           # each extracted into its own subdir under `path`.
           pattern: firecracker-*
           path: firecracker-assets
+          merge-multiple: false
+
+      - name: Download runner daemon binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          # One artifact per arch (appstrate-runner-x86_64,
+          # appstrate-runner-aarch64), each with the binary + its .sha256.
+          pattern: appstrate-runner-*
+          path: runner-daemon
           merge-multiple: false
 
       - name: Assemble Firecracker manifest
@@ -534,3 +646,4 @@ jobs:
             firecracker-assets/*/vmlinux-*
             firecracker-assets/*/rootfs-*.ext4.zst
             firecracker-artifacts-manifest.json
+            runner-daemon/*/appstrate-runner-*

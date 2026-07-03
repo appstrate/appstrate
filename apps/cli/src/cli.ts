@@ -62,6 +62,13 @@ import {
   uninstallCommand,
 } from "./commands/lifecycle.ts";
 import { doctorCommand } from "./commands/doctor.ts";
+import {
+  runnerInstallCommand,
+  runnerDoctorCommand,
+  runnerUpdateCommand,
+  runnerStatusCommand,
+  runnerLogsCommand,
+} from "./commands/runner.ts";
 import { internalInfoCommand } from "./commands/internal.ts";
 import {
   ackDualInstall,
@@ -727,6 +734,77 @@ program
   .option("--json", "Emit machine-readable JSON instead of the framed report.")
   .action(async (opts) => {
     await doctorCommand({ json: opts.json === true });
+  });
+
+// ─── `appstrate runner …` — manage the Firecracker runner daemon (#819) ───
+//
+// The daemon is a SEPARATELY-compiled binary (`appstrate-runner-<arch>`,
+// published as a GH Release asset) — the CLI downloads + verifies + installs
+// it and wires a hardened systemd unit. Install/update/logs mutate /etc,
+// /usr, and systemd, so they require root (each fails early with a sudo hint).
+
+const runnerGroup = program
+  .command("runner")
+  .description("Install and manage the Firecracker runner daemon on a KVM host");
+
+runnerGroup
+  .command("install")
+  .description("Preflight a KVM host, install + start the appstrate-runner daemon via systemd")
+  .option(
+    "--platform-url <url>",
+    "IPv4 URL the guests reach the platform on (e.g. http://10.0.0.5:3000)",
+  )
+  .option("--token <token>", "Shared bearer token (default: preserve existing, else generate one)")
+  .option("--port <port>", "Daemon listen port (default: 3100)")
+  .option(
+    "--data-dir <path>",
+    "State root for kernel/rootfs/runs/firecracker (default: /var/lib/appstrate-runner)",
+  )
+  .option("--host <addr>", "Daemon bind address (default: 0.0.0.0)")
+  .option("-y, --yes", "Skip prompts (requires --platform-url).")
+  .action(async (opts) => {
+    await runnerInstallCommand({
+      platformUrl: typeof opts.platformUrl === "string" ? opts.platformUrl : undefined,
+      token: typeof opts.token === "string" ? opts.token : undefined,
+      port: typeof opts.port === "string" ? opts.port : undefined,
+      dataDir: typeof opts.dataDir === "string" ? opts.dataDir : undefined,
+      host: typeof opts.host === "string" ? opts.host : undefined,
+      yes: opts.yes === true,
+    });
+  });
+
+runnerGroup
+  .command("doctor")
+  .description(
+    "Diagnose the runner host: preflight + systemd state + daemon health + artifacts version",
+  )
+  .option("--json", "Emit machine-readable JSON instead of the framed report.")
+  .action(async (opts) => {
+    await runnerDoctorCommand({ json: opts.json === true });
+  });
+
+runnerGroup
+  .command("update")
+  .description(
+    "Re-download the daemon binary for this CLI's version, verify, swap, and restart the unit",
+  )
+  .action(async () => {
+    await runnerUpdateCommand();
+  });
+
+runnerGroup
+  .command("status")
+  .description("Show the runner daemon's systemd status (`systemctl status`).")
+  .action(async () => {
+    await runnerStatusCommand();
+  });
+
+runnerGroup
+  .command("logs")
+  .description("Stream the runner daemon's journal (`journalctl -u appstrate-runner`).")
+  .option("-f, --follow", "Stream new lines as they arrive.")
+  .action(async (opts) => {
+    await runnerLogsCommand({ follow: opts.follow === true });
   });
 
 // Hidden command: machine-readable introspection for `doctor` to call across binaries.

@@ -57,6 +57,61 @@ ip:port ahead of the egress-deny CIDRs. Capabilities: `isolatesWorkloads: true`
 process), `supportsSidecarOnly: false`. Setup, env vars, and security posture:
 module `README.md`.
 
+## Installing the daemon — `appstrate runner install` (issue #819, phase 3)
+
+The supported install path is the **CLI**, not a manual checkout. On a fresh
+KVM host:
+
+```sh
+# One-liner (downloads the CLI, verifies it, then execs `runner install`):
+curl -fsSL https://get.appstrate.dev/runner | sudo bash -s -- \
+  --platform-url http://<PLATFORM_IPV4>:3000
+
+# Or, if the CLI is already installed:
+sudo appstrate runner install --platform-url http://<PLATFORM_IPV4>:3000
+```
+
+`appstrate runner install` (`apps/cli/src/commands/runner.ts`):
+
+1. **Preflight** — Linux, `/dev/kvm` (read+write), `nft`, `ip`, supported arch.
+   Every failed check prints a one-line remedy; the install aborts rather than
+   crash-looping the daemon later.
+2. **Download + verify** the compiled daemon binary
+   (`appstrate-runner-<arch>`, published by `release.yml`, SHA-256 verified
+   against its `.sha256` sidecar) → `/usr/local/bin/appstrate-runner`, and the
+   pinned upstream **firecracker** binary (v1.16.0, verified against its
+   `.tgz.sha256.txt`) → `<data-dir>/bin/firecracker`.
+3. **Token** — reuses an existing one from `/etc/appstrate-runner/env`, else
+   generates 48 hex chars and prints it once. Set the same value as
+   `FIRECRACKER_RUNNER_TOKEN` on the platform.
+4. **Config + unit** — writes `/etc/appstrate-runner/env` (0600) and a hardened
+   systemd unit (`ProtectSystem=strict`, `ReadWritePaths=<data-dir>`,
+   `Restart=always`; PATH corrected to include `/usr/sbin`+`/sbin` because the
+   daemon spawns `ip`/`nft`/`sysctl`/`mkfs.ext4`/`debugfs` by bare name), then
+   `systemctl daemon-reload && enable --now`.
+5. **Verify + firewall** — polls `/v1/health`, then prints the exact
+   `ufw`/`firewalld` command to open the daemon port for the platform.
+
+Guest artifacts (kernel + rootfs) are NOT downloaded by the CLI — the daemon
+resolves them itself at first boot (see below), so `runner install` returns as
+soon as the unit is up and the artifact download proceeds in the background
+(`runner doctor` / `runner logs -f` show progress).
+
+**`bun build --compile` note.** The daemon binary embeds a Bun runtime + its JS
+closure; it has no N-API native modules, and nothing in the closure reads a
+source-relative path (`import.meta.dir`/`__dirname`) or dynamic-imports at
+runtime — the in-guest supervisor is baked into the rootfs by CI, not bundled.
+The one host-relative surface is the engine's `FIRECRACKER_*` path defaults
+(`./data/firecracker/*`, cwd-relative). Under systemd the working directory is
+`/`, so `runner install` pins them to ABSOLUTE paths under the data dir in the
+generated env file (and the unit sets `WorkingDirectory`), decoupling the
+compiled daemon from its launch cwd.
+
+Day-2 verbs: `appstrate runner doctor` (preflight, systemd state, `/v1/health`,
+and installed-artifacts version/protocol — `--json` for scripts); `runner
+update` (re-download the daemon binary for this CLI's version, verify,
+atomic-swap, restart); `runner status`; `runner logs [-f]`.
+
 ## Production status — EXPERIMENTAL
 
 Treat this backend as **experimental**. Two hardening gaps must close before
