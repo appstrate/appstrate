@@ -74,6 +74,15 @@ COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
 COPY --from=deps /app/packages/mcp-transport/node_modules ./packages/mcp-transport/node_modules
 COPY --from=deps /app/packages/runner-pi/node_modules ./packages/runner-pi/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
+# Opt-in runtime modules (loaded when listed in MODULES) + their runner
+# packages. Bun isolated installs keep their deps out of the root hoist
+# (e.g. @anthropic-ai/claude-agent-sdk under module-claude-code), so each
+# needs its own node_modules copied or the module crash-loops at load.
+COPY --from=deps /app/packages/module-chat/node_modules ./packages/module-chat/node_modules
+COPY --from=deps /app/packages/module-claude-code/node_modules ./packages/module-claude-code/node_modules
+COPY --from=deps /app/packages/module-codex/node_modules ./packages/module-codex/node_modules
+COPY --from=deps /app/packages/runner-claude/node_modules ./packages/runner-claude/node_modules
+COPY --from=deps /app/packages/runner-codex/node_modules ./packages/runner-codex/node_modules
 
 # ── Workspace package sources (Bun runs TypeScript directly — no build step) ──
 # Graph-derived via `COPY --parents`: apps/api source + every packages/*/src
