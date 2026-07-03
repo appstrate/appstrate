@@ -79,16 +79,6 @@ registerCoreOrchestrators();
 export function selectOrchestrator(id: ExecutionMode): RunOrchestrator {
   const registration = ORCHESTRATORS.get(id);
   if (!registration) {
-    // The firecracker module's HTTP-client backend used to register as
-    // `firecracker-remote` (alongside a now-removed in-process backend).
-    // It is now simply `firecracker` — point stale configs at the new id.
-    if (id === "firecracker-remote") {
-      throw new Error(
-        `Unknown RUN_ADAPTER "firecracker-remote" — it was renamed to "firecracker". ` +
-          `Set RUN_ADAPTER=firecracker (the firecracker module now contributes a single ` +
-          `backend that proxies to the appstrate-runner daemon).`,
-      );
-    }
     const known = [...ORCHESTRATORS.keys()].sort().join(", ");
     throw new Error(
       `Unknown RUN_ADAPTER ${JSON.stringify(id)} — registered orchestrators: ${known}. ` +
