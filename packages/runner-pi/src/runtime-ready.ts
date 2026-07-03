@@ -42,6 +42,13 @@ export interface RuntimeReadyPayload {
    * envelope).
    */
   runtimeProtocolVersion?: string;
+  /**
+   * Per-phase cold-start durations (ms), merged into the event `data` so the
+   * dashboard can see *where* the boot time went (provisioning, bundle
+   * prepare, SDK import, MCP connect). Optional — only the container
+   * entrypoint measures these; external runners (CLI, GitHub Action) omit it.
+   */
+  phaseTimings?: Record<string, number>;
 }
 
 /**
@@ -72,6 +79,8 @@ export async function emitRuntimeReady(
       bundleLoaded: payload.bundleLoaded,
       extensions: payload.extensions,
       runtimeProtocolVersion: protocolVersion,
+      totalToReadyMs: Math.round(payload.bootDurationMs),
+      ...(payload.phaseTimings ?? {}),
     },
     level: "info",
   });

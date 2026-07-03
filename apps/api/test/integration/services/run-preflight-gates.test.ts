@@ -52,6 +52,23 @@ describe("runPreflightGates", () => {
     if (res.ok) expect(res.agent.manifest.timeout).toBe(60);
   });
 
+  it("returns per-sub-gate timings on the ok result (rate-limit + concurrency run in parallel)", async () => {
+    const agent = loadedPackage("@gates/agent", 60);
+    const res = await runPreflightGates({
+      orgId: ctx.orgId,
+      agent,
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // No `beforeRun` hook is registered in core tests → hook timing is 0.
+      expect(res.timings.beforeRunHookMs).toBe(0);
+      expect(typeof res.timings.rateLimitMs).toBe("number");
+      expect(typeof res.timings.concurrencyMs).toBe("number");
+      expect(res.timings.rateLimitMs).toBeGreaterThanOrEqual(0);
+      expect(res.timings.concurrencyMs).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   it("caps the agent timeout to the platform ceiling without mutating the input", async () => {
     const limits = getPlatformRunLimits();
     const agent = loadedPackage("@gates/agent", limits.timeout_ceiling_seconds + 60);

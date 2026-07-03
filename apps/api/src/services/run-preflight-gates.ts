@@ -30,12 +30,21 @@ export interface PreflightGatesInput {
   agent: LoadedPackage;
 }
 
+/** Per-sub-gate wall-clock timings (ms), surfaced for the pipeline timing log. */
+export interface PreflightGateTimings {
+  rateLimitMs: number;
+  concurrencyMs: number;
+  beforeRunHookMs: number;
+}
+
 export interface PreflightGatesOk {
   ok: true;
   /** Agent potentially cloned with a capped `timeout` — pass this to downstream code. */
   agent: LoadedPackage;
   /** Running run count observed during the concurrency check. Forwarded to `beforeRun`. */
   runningCount: number;
+  /** Sub-gate durations (ms) for the pipeline's per-stage timing log. */
+  timings: PreflightGateTimings;
 }
 
 export type PreflightGatesResult = PreflightGatesOk | { ok: false; error: PreflightGateError };
@@ -51,8 +60,31 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
 
   const platformLimits = getPlatformRunLimits();
 
-  // 1. Per-org rate limit.
-  const rateCheck = await checkOrgRunRateLimit(orgId, platformLimits.per_org_global_rate_per_min);
+  // 1 + 2. Per-org rate limit (Redis) and concurrency count (SQL) are
+  //         independent — fire both concurrently. Rate-limit precedence is
+  //         preserved for GRACEFUL rejections by checking its result first
+  //         below: when both would reject with `{ ok: false }`, the caller
+  //         still sees the rate error. A THROWN infra error is different —
+  //         under Promise.all whichever call rejects first wins (the previous
+  //         sequential order always surfaced Redis first), but both map to a
+  //         500 upstream, so the ordering is not observable. The rate limiter
+  //         consumes a token on evaluation regardless of the concurrency
+  //         outcome, exactly as the previous sequential order did.
+  let rateLimitMs = 0;
+  let concurrencyMs = 0;
+  const rateStart = Date.now();
+  const concurrencyStart = Date.now();
+  const [rateCheck, runningCount] = await Promise.all([
+    checkOrgRunRateLimit(orgId, platformLimits.per_org_global_rate_per_min).then((r) => {
+      rateLimitMs = Date.now() - rateStart;
+      return r;
+    }),
+    getRunningRunCountForOrg({ orgId }).then((c) => {
+      concurrencyMs = Date.now() - concurrencyStart;
+      return c;
+    }),
+  ]);
+
   if (!rateCheck.ok) {
     return {
       ok: false,
@@ -64,8 +96,6 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
     };
   }
 
-  // 2. Per-org concurrency.
-  const runningCount = await getRunningRunCountForOrg({ orgId });
   if (runningCount >= platformLimits.max_concurrent_per_org) {
     return {
       ok: false,
@@ -88,12 +118,15 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
   }
 
   // 4. `beforeRun` module hook.
+  let beforeRunHookMs = 0;
   if (hasHook("beforeRun")) {
+    const hookStart = Date.now();
     const rejection = await callHook("beforeRun", {
       orgId,
       packageId: agent.id,
       runningCount,
     });
+    beforeRunHookMs = Date.now() - hookStart;
     if (rejection) {
       return {
         ok: false,
@@ -102,5 +135,10 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
     }
   }
 
-  return { ok: true, agent, runningCount };
+  return {
+    ok: true,
+    agent,
+    runningCount,
+    timings: { rateLimitMs, concurrencyMs, beforeRunHookMs },
+  };
 }

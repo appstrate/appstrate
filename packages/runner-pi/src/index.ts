@@ -3,13 +3,18 @@
 export {
   PiRunner,
   installSessionBridge,
-  deriveProviderFromApi,
-  PROVIDER_BY_API,
   type PiRunnerOptions,
   type PiModelConfig,
   type BridgeableSession,
   type InternalSink,
 } from "./pi-runner.ts";
+
+export { deriveProviderFromApi, PROVIDER_BY_API } from "./provider-map.ts";
+
+// Warms `@mariozechner/pi-coding-agent` (dynamic import) so the container
+// entrypoint can overlap its ~200ms eval with network-bound provisioning
+// instead of paying it on the pre-session boot path.
+export { loadPiCodingAgentSdk, type PiCodingAgentSdk } from "./pi-sdk.ts";
 
 export { prepareBundleForPi, type PrepareBundleOptions } from "./bundle-extensions.ts";
 

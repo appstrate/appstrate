@@ -43,6 +43,7 @@ import {
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
+  loadPiCodingAgentSdk,
   type AppstrateToolCtx,
   type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
@@ -345,6 +346,31 @@ await progress(`runtime starting (${Math.round(performance.now())}ms cold start)
   coldStartMs: Math.round(performance.now()),
 });
 
+// Per-phase cold-start durations, folded into the "runtime ready" breadcrumb
+// so a slow boot is attributable (provisioning vs bundle prepare vs SDK import
+// vs MCP connect) instead of a single opaque total.
+const phaseTimings: Record<string, number> = {};
+
+// Warm the heavy Pi SDK now (non-awaited) so its ~200ms module eval overlaps
+// the network-bound provisioning below instead of landing on the pre-session
+// boot path. `@mariozechner/pi-coding-agent` is dynamically imported by
+// `PiRunner` at session-build time; ESM caches the module, so this kick-off
+// turns that later `await` into a no-op. A `claude-code` run never builds a
+// PiRunner (it drives the Agent SDK), so it skips the load entirely — this
+// mirrors the `RUN_ENGINE` selection resolved further down.
+const sdkImportStart = performance.now();
+// The `.catch(() => null)` is attached at creation so the handle is never
+// momentarily unguarded: if the dynamic import rejects before we await it (~400
+// lines below) it would otherwise surface as an unhandled rejection. Swallowing
+// here is safe — the authoritative load happens inside `PiRunner.executeSession`
+// (ESM caches the errored module, so its `await loadPiCodingAgentSdk()` re-throws
+// and the run fails through the normal error path). A failed warm-up resolves to
+// `null`, which the timing block below uses to skip recording a bogus duration.
+const piSdkWarmup =
+  process.env.RUN_ENGINE === "claude" ? null : loadPiCodingAgentSdk().catch(() => null);
+
+const provisionStart = performance.now();
+
 // Self-provision the workspace before anything reads it: the AFPS bundle
 // (fatal on any miss — see provisionWorkspace) and the input documents
 // (streamed per-file to `documents/<name>`; absent is fine). Run in parallel —
@@ -369,9 +395,15 @@ const [, bundle] = await Promise.all([
   hasPackage ? readBundleFromFile(packagePath) : Promise.resolve(null),
 ]);
 
-await progress(hasPackage ? "workspace initialized · agent package read" : "workspace initialized");
+phaseTimings.provisioningMs = Math.round(performance.now() - provisionStart);
+await progress(
+  hasPackage ? "workspace initialized · agent package read" : "workspace initialized",
+  { provisioningMs: phaseTimings.provisioningMs },
+);
 
 // --- 2b. Phase B: materialise .pi/ layout + dynamic-import tools ---
+
+const bundlePrepareStart = performance.now();
 
 if (bundle) {
   try {
@@ -411,9 +443,14 @@ if (bundle) {
 
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
+phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart);
 await progress(
   `bundle loaded (${extensionFactories.length} extension${extensionFactories.length === 1 ? "" : "s"})`,
-  { bundleLoaded: bundle !== null, extensions: extensionFactories.length },
+  {
+    bundleLoaded: bundle !== null,
+    extensions: extensionFactories.length,
+    bundlePrepareMs: phaseTimings.bundlePrepareMs,
+  },
 );
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
@@ -472,6 +509,7 @@ if (sidecarUrl) {
   // construction), so it skips this whole block — only the boot gate below runs.
   if (runEngine === "pi") {
     await progress("connecting to sidecar");
+    const mcpConnectStart = performance.now();
     try {
       // Retry the initial MCP handshake — the platform now starts the agent
       // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
@@ -515,7 +553,8 @@ if (sidecarUrl) {
       process.exit(1);
     }
 
-    await progress("MCP connected");
+    phaseTimings.mcpConnectMs = Math.round(performance.now() - mcpConnectStart);
+    await progress("MCP connected", { mcpConnectMs: phaseTimings.mcpConnectMs });
 
     try {
       // `buildMcpDirectFactories` registers `run_history` and
@@ -698,10 +737,25 @@ const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 // evaluate every `import` before any top-level statement runs, so the
 // timer started only after the slow part was already done and reported
 // an artificially low duration vs. the user-perceived gap.
+// The Pi SDK warm-up was kicked off during provisioning; awaiting it here keeps
+// "runtime ready" honest — the module that talks to the LLM is actually loaded —
+// while folding its cost into the overlap window rather than the post-ready
+// path. The rejection was already swallowed at creation (resolves to `null`), so
+// a warm-up failure just surfaces later through `PiRunner.executeSession`. Only a
+// successful load records `sdkImportMs`; a rejected load resolves early and would
+// otherwise report a bogus import duration.
+if (piSdkWarmup) {
+  const loadedSdk = await piSdkWarmup;
+  if (loadedSdk) {
+    phaseTimings.sdkImportMs = Math.round(performance.now() - sdkImportStart);
+  }
+}
+
 await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
   bundleLoaded: bundle !== null,
   extensions: extensionFactories.length,
   bootDurationMs: performance.now(),
+  phaseTimings,
 });
 
 // --- 6a. Liveness keep-alive ---
