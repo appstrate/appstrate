@@ -3,13 +3,16 @@
 /**
  * Binary acquisition for `runner install` / `runner update`: the appstrate
  * daemon binary (published by this repo's release CI) and the pinned
- * upstream firecracker VMM. Both are SHA-256 verified against a sidecar
- * checksum published next to the asset before they touch disk.
+ * upstream firecracker VMM.
  *
  * The daemon binary is the compiled `appstrate-runner-<arch>` from
- * `.github/workflows/release.yml`; its checksum sidecar is
- * `<asset>.sha256`. Firecracker ships `<asset>.tgz` + `<asset>.tgz.sha256.txt`
- * on its own GitHub Releases.
+ * `.github/workflows/release.yml`. It is verified against the release's
+ * minisign-signed `checksums.txt` — the SAME signed trust chain the CLI
+ * itself ships under (`scripts/bootstrap-runner.sh` / `self-update`) — rather
+ * than a bare same-origin `.sha256` sidecar, so a tampered mirror cannot swap
+ * both the binary and its checksum. Firecracker ships `<asset>.tgz` +
+ * `<asset>.tgz.sha256.txt` on its own GitHub Releases (upstream, verified
+ * against its published sidecar).
  */
 
 import { mkdtemp, rm } from "node:fs/promises";
@@ -22,6 +25,7 @@ import {
   type RunnerArch,
 } from "./constants.ts";
 import type { RunnerExec, RunnerFs, RunnerHttp } from "./exec.ts";
+import { APPSTRATE_MINISIGN_PUBKEY, parseChecksumLine } from "../self-update.ts";
 
 /** Hex SHA-256 of a byte buffer via Bun's baked-in hasher. */
 export function sha256Hex(bytes: Uint8Array): string {
@@ -41,40 +45,168 @@ export function parseSha256(text: string): string {
   return first.toLowerCase();
 }
 
-/** Build the daemon asset URLs for a version tag (`1.2.3` or `latest`). */
-export function daemonUrls(version: string, arch: RunnerArch): { binary: string; sha256: string } {
+/**
+ * Build the daemon asset URLs for a version tag (`1.2.3` or `latest`). The
+ * daemon's digest is a line in the release-wide `checksums.txt` (minisign
+ * signed), so those two URLs anchor the trust; `sha256` is the legacy
+ * same-origin sidecar, kept for other consumers but no longer trusted here.
+ */
+export function daemonUrls(
+  version: string,
+  arch: RunnerArch,
+): { binary: string; sha256: string; checksums: string; checksumsSig: string } {
   const asset = daemonAssetName(arch);
   const base =
     version === "latest"
       ? `${APPSTRATE_RELEASE_BASE}/latest/download`
       : `${APPSTRATE_RELEASE_BASE}/download/v${version.replace(/^v/, "")}`;
-  return { binary: `${base}/${asset}`, sha256: `${base}/${asset}.sha256` };
+  return {
+    binary: `${base}/${asset}`,
+    sha256: `${base}/${asset}.sha256`,
+    checksums: `${base}/checksums.txt`,
+    checksumsSig: `${base}/checksums.txt.minisig`,
+  };
 }
 
 /**
- * Download the daemon binary + its sha256 sidecar, verify, and return the
- * bytes. Never writes to disk — the caller installs atomically at the
- * destination it controls (so `update` can swap over the live binary).
+ * Download the daemon binary and verify it against the release's
+ * minisign-signed `checksums.txt`, then return the bytes. Never writes the
+ * binary to disk — the caller installs atomically at the destination it
+ * controls (so `update` can swap over the live binary).
+ *
+ * minisign is REQUIRED (fail-closed, matching `self-update` and
+ * `scripts/bootstrap-runner.sh`): a signed-checksum check the host cannot
+ * perform is no check at all. On a runner host provisioned via
+ * `get.appstrate.dev/runner`, minisign is already present (the bootstrap
+ * verified the CLI with it).
  */
 export async function downloadDaemon(opts: {
   http: RunnerHttp;
+  exec: RunnerExec;
+  fs: RunnerFs;
   version: string;
   arch: RunnerArch;
 }): Promise<Uint8Array> {
   const urls = daemonUrls(opts.version, opts.arch);
-  const [bytes, sumText] = await Promise.all([
-    opts.http.fetchBinary(urls.binary),
-    opts.http.fetchText(urls.sha256),
-  ]);
-  const expected = parseSha256(sumText);
+  const asset = daemonAssetName(opts.arch);
+
+  // 1. The daemon binary. A 404 here almost always means this release shipped
+  //    WITHOUT runner assets — the firecracker/daemon build jobs are decoupled
+  //    from the core release (release.yml) and may have failed for this tag.
+  //    Turn the opaque "HTTP 404" into an actionable fix.
+  let bytes: Uint8Array;
+  try {
+    bytes = await opts.http.fetchBinary(urls.binary);
+  } catch (err) {
+    throw asRunnerAssetError(err, opts.version, asset);
+  }
+
+  // 2. The signed checksums manifest + its minisign signature.
+  let checksumsTxt: string;
+  let checksumsSig: Uint8Array;
+  try {
+    [checksumsTxt, checksumsSig] = await Promise.all([
+      opts.http.fetchText(urls.checksums),
+      opts.http.fetchBinary(urls.checksumsSig),
+    ]);
+  } catch (err) {
+    throw asRunnerAssetError(err, opts.version, asset);
+  }
+
+  // 3. Verify the manifest signature, then the binary's digest against the
+  //    (now trusted) manifest line for this asset.
+  await verifyDaemonSignature({
+    exec: opts.exec,
+    fs: opts.fs,
+    checksumsTxt,
+    checksumsSig,
+  });
+  const expected = parseChecksumLine(checksumsTxt, asset);
   const actual = sha256Hex(bytes);
   if (actual !== expected) {
     throw new Error(
       `daemon binary SHA-256 mismatch: expected ${expected}, got ${actual} — ` +
-        `refusing to install (broken release or tampering).`,
+        `the download does NOT match the signed checksums manifest. ` +
+        `Refusing to install (broken release or tampering).`,
     );
   }
   return bytes;
+}
+
+/**
+ * Map a raw fetch failure to an actionable error. `fetchBinary` / `fetchText`
+ * throw `GET <url> → HTTP <status>`; a 404 on a runner asset means the release
+ * omitted them (the decoupled firecracker/daemon build jobs failed for this
+ * tag). The daemon version is locked to the CLI, so the fix is to pin a CLI
+ * release that shipped runner assets.
+ */
+function asRunnerAssetError(err: unknown, version: string, asset: string): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/HTTP 404/.test(msg)) {
+    const vlabel = version === "latest" ? "the latest release" : `release v${version}`;
+    return new Error(
+      `Runner asset "${asset}" is missing from ${vlabel} (HTTP 404). This release was ` +
+        `published WITHOUT runner assets — the firecracker/daemon build jobs are decoupled ` +
+        `from the core release (release.yml) and likely failed for this tag. The daemon ` +
+        `version is locked to the CLI version, so pin a CLI release that shipped runner ` +
+        `assets and retry: \`appstrate self-update --release <previous-version>\` (or ` +
+        `re-bootstrap with APPSTRATE_VERSION=<previous-version>), then re-run ` +
+        `\`appstrate runner install\`. Releases: https://github.com/appstrate/appstrate/releases`,
+    );
+  }
+  return err instanceof Error ? err : new Error(msg);
+}
+
+/**
+ * Verify `checksums.txt` against `checksums.txt.minisig` with the pinned
+ * Appstrate release key via the system `minisign` binary. Mirrors the CLI
+ * self-update verify path (`lib/self-update.ts`) and
+ * `scripts/bootstrap-runner.sh` — fail closed when minisign is absent or the
+ * signature does not verify. `minisign -Vm` resolves the `.minisig`
+ * automatically from the sibling file, so both are written to one work dir.
+ */
+async function verifyDaemonSignature(opts: {
+  exec: RunnerExec;
+  fs: RunnerFs;
+  checksumsTxt: string;
+  checksumsSig: Uint8Array;
+}): Promise<void> {
+  const probe = await opts.exec.run("minisign", ["-v"]);
+  if (!probe.ok && probe.exitCode === -1) {
+    // exitCode -1 = ENOENT (minisign not on PATH).
+    throw new Error(
+      [
+        "minisign is required to verify the runner daemon download (signed checksums).",
+        "  → Debian:  sudo apt install minisign",
+        "  → Alpine:  apk add minisign",
+        "  → RHEL:    dnf install minisign",
+        "  → Other:   https://jedisct1.github.io/minisign/",
+      ].join("\n"),
+    );
+  }
+
+  const work = await mkdtemp(join(tmpdir(), "appstrate-runner-verify-"));
+  try {
+    const sumsPath = join(work, "checksums.txt");
+    const sigPath = join(work, "checksums.txt.minisig");
+    await opts.fs.writeFile(sumsPath, opts.checksumsTxt);
+    await opts.fs.writeFile(sigPath, opts.checksumsSig);
+    const check = await opts.exec.run("minisign", [
+      "-Vm",
+      sumsPath,
+      "-P",
+      APPSTRATE_MINISIGN_PUBKEY,
+    ]);
+    if (!check.ok) {
+      throw new Error(
+        `Signature verification FAILED — the runner checksums manifest was NOT signed by the ` +
+          `Appstrate release key. Refusing to install (broken release or tampering). ` +
+          `Report at https://github.com/appstrate/appstrate/issues`,
+      );
+    }
+  } finally {
+    await rm(work, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** Build the firecracker tarball URLs for the pinned version. */

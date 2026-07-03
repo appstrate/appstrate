@@ -10,7 +10,6 @@
 import { randomBytes } from "node:crypto";
 import {
   RUNNER_BIN_PATH,
-  RUNNER_DATA_DIR,
   RUNNER_ENV_PATH,
   RUNNER_SERVICE_NAME,
   runnerDataPaths,
@@ -128,6 +127,13 @@ export function renderRunnerUnit(config: RunnerConfig): string {
     "Documentation=https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md",
     "After=network-online.target",
     "Wants=network-online.target",
+    // Bound the Restart=always loop (RestartSec=2): up to 30 starts / 300s, then
+    // systemd parks the unit in `failed` — long enough to ride out a transient
+    // first-boot network blip (~10 min of 2s-spaced retries) but not an endless
+    // spin on a FatalArtifactsError (bad/missing guest artifacts, exit 1).
+    // StartLimit* live in [Unit] on modern systemd (moved out of [Service] in v230).
+    "StartLimitIntervalSec=300",
+    "StartLimitBurst=30",
     "",
     "[Service]",
     "Type=simple",
@@ -156,7 +162,7 @@ export function renderRunnerUnit(config: RunnerConfig): string {
 }
 
 /** A firewall's toolset was detected; render the exact allow commands. */
-export interface FirewallCommands {
+interface FirewallCommands {
   tool: "ufw" | "firewalld" | "none";
   commands: string[];
 }
@@ -187,17 +193,6 @@ export function firewallCommands(
     commands: [
       `# No ufw/firewalld detected. If a firewall is active, open TCP ${port} to the platform host.`,
     ],
-  };
-}
-
-/** Default install config skeleton (token filled in by the caller). */
-export function defaultRunnerConfig(overrides: Partial<RunnerConfig>): RunnerConfig {
-  return {
-    token: overrides.token ?? "",
-    platformUrl: overrides.platformUrl ?? "",
-    port: overrides.port ?? 3100,
-    host: overrides.host ?? "0.0.0.0",
-    dataDir: overrides.dataDir ?? RUNNER_DATA_DIR,
   };
 }
 

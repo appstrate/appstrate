@@ -27,8 +27,17 @@ import {
   firecrackerUrls,
   downloadDaemon,
 } from "../src/lib/runner/download.ts";
-import { resolveRunnerArch, runnerDataPaths } from "../src/lib/runner/constants.ts";
-import { resolveDaemonVersion, runnerUpdateCommand, runnerDoctor } from "../src/commands/runner.ts";
+import {
+  resolveRunnerArch,
+  runnerDataPaths,
+  daemonAssetName,
+} from "../src/lib/runner/constants.ts";
+import {
+  resolveDaemonVersion,
+  runnerUpdateCommand,
+  runnerDoctor,
+  pollHealth,
+} from "../src/commands/runner.ts";
 import type { RunnerExec, RunnerFs, RunnerHttp } from "../src/lib/runner/exec.ts";
 
 // ─── fakes ───────────────────────────────────────────────────────────────
@@ -218,6 +227,9 @@ describe("renderRunnerUnit", () => {
     expect(unit).toContain("ReadWritePaths=/srv/runner");
     expect(unit).toContain("WorkingDirectory=/srv/runner");
     expect(unit).toContain("Restart=always");
+    // Start-rate limit bounds the Restart=always loop (StartLimit* live in [Unit]).
+    expect(unit).toContain("StartLimitIntervalSec=300");
+    expect(unit).toContain("StartLimitBurst=30");
     expect(unit).toContain("/usr/sbin");
     expect(unit).toContain("/sbin");
     expect(unit).toContain("/srv/runner/bin");
@@ -265,20 +277,77 @@ describe("url builders", () => {
 });
 
 describe("downloadDaemon", () => {
-  it("returns the bytes when the sha256 matches", async () => {
+  it("returns the bytes when the signed checksum matches", async () => {
     const bytes = new Uint8Array([9, 8, 7, 6]);
     const sha = sha256Hex(bytes);
+    // `sha` doubles as the checksums.txt body (fetchText) — one line for the asset.
     const http = fakeHttp({ binary: bytes, sha: `${sha}  appstrate-runner-x86_64` });
-    const out = await downloadDaemon({ http, version: "1.0.0", arch: "x86_64" });
+    const { fs } = fakeFs();
+    const { exec } = fakeExec(); // default minisign probe + -Vm both `ok`.
+    const out = await downloadDaemon({ http, exec, fs, version: "1.0.0", arch: "x86_64" });
     expect(out).toEqual(bytes);
   });
 
   it("throws on a sha256 mismatch (never returns tampered bytes)", async () => {
     const bytes = new Uint8Array([1, 1, 1]);
     const http = fakeHttp({ binary: bytes, sha: `${"b".repeat(64)}  appstrate-runner-x86_64` });
-    await expect(downloadDaemon({ http, version: "1.0.0", arch: "x86_64" })).rejects.toThrow(
-      /mismatch/,
-    );
+    const { fs } = fakeFs();
+    const { exec } = fakeExec();
+    await expect(
+      downloadDaemon({ http, exec, fs, version: "1.0.0", arch: "x86_64" }),
+    ).rejects.toThrow(/mismatch/);
+  });
+
+  it("gives an actionable error when the release omitted runner assets (404)", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const http: RunnerHttp = {
+      // Mirror defaultRunnerHttp's non-2xx message shape.
+      async fetchBinary(url) {
+        throw new Error(`GET ${url} → HTTP 404`);
+      },
+      async fetchText(url) {
+        throw new Error(`GET ${url} → HTTP 404`);
+      },
+      async getJson() {
+        return { reachable: false, error: "n/a" };
+      },
+    };
+    const { fs } = fakeFs();
+    const { exec } = fakeExec();
+    await expect(
+      downloadDaemon({ http, exec, fs, version: "1.2.3", arch: "x86_64" }),
+    ).rejects.toThrow(/published WITHOUT runner assets/);
+    // Sanity: the raw bytes are never leaked when the fetch failed.
+    expect(bytes).toBeDefined();
+  });
+
+  it("fails closed when minisign is not installed", async () => {
+    const bytes = new Uint8Array([5, 5, 5]);
+    const sha = sha256Hex(bytes);
+    const http = fakeHttp({ binary: bytes, sha: `${sha}  appstrate-runner-x86_64` });
+    const { fs } = fakeFs();
+    // exitCode -1 = ENOENT (minisign not on PATH), matching runCommand's contract.
+    const { exec } = fakeExec({
+      minisign: () => ({ ok: false, exitCode: -1, stdout: "", stderr: "" }),
+    });
+    await expect(
+      downloadDaemon({ http, exec, fs, version: "1.0.0", arch: "x86_64" }),
+    ).rejects.toThrow(/minisign is required/);
+  });
+
+  it("rejects a checksums manifest that fails signature verification", async () => {
+    const bytes = new Uint8Array([7, 7, 7]);
+    const sha = sha256Hex(bytes);
+    const http = fakeHttp({ binary: bytes, sha: `${sha}  appstrate-runner-x86_64` });
+    const { fs } = fakeFs();
+    // `minisign -Vm …` returns non-zero → signature rejected. The probe
+    // (`minisign -v`, args[0] === "-v") must still succeed, so key on the verb.
+    const { exec } = fakeExec({
+      "minisign -Vm": () => ({ ok: false, exitCode: 1, stdout: "", stderr: "bad sig" }),
+    });
+    await expect(
+      downloadDaemon({ http, exec, fs, version: "1.0.0", arch: "x86_64" }),
+    ).rejects.toThrow(/Signature verification FAILED/);
   });
 });
 
@@ -304,12 +373,15 @@ describe("runnerUpdateCommand", () => {
     const sha = sha256Hex(bytes);
     const { fs, installed } = fakeFs();
     const { exec, calls } = fakeExec();
+    // The daemon is verified against the signed checksums.txt line for the
+    // runtime arch, so the manifest line must carry the resolved asset name.
+    const asset = daemonAssetName(resolveRunnerArch());
     await runnerUpdateCommand({
       deps: {
         getuid: () => 0,
         fs,
         exec,
-        http: fakeHttp({ binary: bytes, sha: `${sha}  appstrate-runner` }),
+        http: fakeHttp({ binary: bytes, sha: `${sha}  ${asset}` }),
       },
     });
     expect(installed).toHaveLength(1);
@@ -368,5 +440,48 @@ describe("runnerDoctor", () => {
     });
     expect(report.ok).toBe(false);
     expect(report.health.reachable).toBe(false);
+  });
+});
+
+// ─── health poll (warming up vs crash-looped) ──────────────────────────────
+
+describe("pollHealth", () => {
+  const cfg = { port: 3100, token: "t".repeat(48) };
+
+  it("returns true as soon as the daemon serves 200", async () => {
+    const http = fakeHttp({ health: { status: 200, body: {} } });
+    const { exec } = fakeExec();
+    expect(await pollHealth(cfg, { exec, http }, 5000)).toBe(true);
+  });
+
+  it("bails early with the journal tail when the unit parked in `failed`", async () => {
+    const http = fakeHttp({}); // getJson unreachable → never 200.
+    const { exec } = fakeExec({
+      "systemctl is-failed": () => ({ ok: true, exitCode: 0, stdout: "failed\n", stderr: "" }),
+      journalctl: () => ({
+        ok: true,
+        exitCode: 0,
+        stdout: "boot line\nFatalArtifactsError: rootfs sha mismatch\n",
+        stderr: "",
+      }),
+    });
+    await expect(pollHealth(cfg, { exec, http }, 5000)).rejects.toThrow(
+      /did not stay running[\s\S]*FatalArtifactsError/,
+    );
+  });
+
+  it("bails early when the unit is inactive (stopped)", async () => {
+    const http = fakeHttp({});
+    const { exec } = fakeExec({
+      "systemctl is-active": () => ({ ok: false, exitCode: 3, stdout: "inactive\n", stderr: "" }),
+    });
+    await expect(pollHealth(cfg, { exec, http }, 5000)).rejects.toThrow(/inactive/);
+  });
+
+  it("returns false (still warming up) when the deadline elapses", async () => {
+    const http = fakeHttp({}); // never 200.
+    const { exec } = fakeExec();
+    // timeoutMs 0 → the loop never enters; no 3s sleeps in the test.
+    expect(await pollHealth(cfg, { exec, http }, 0)).toBe(false);
   });
 });

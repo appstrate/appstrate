@@ -17,7 +17,7 @@
 import { resolveRunnerArch, type RunnerArch } from "./constants.ts";
 import { defaultRunnerExec, defaultRunnerFs } from "./exec.ts";
 
-export interface PreflightCheck {
+interface PreflightCheck {
   id: string;
   label: string;
   ok: boolean;
@@ -33,7 +33,7 @@ export interface PreflightResult {
   checks: PreflightCheck[];
 }
 
-export interface PreflightDeps {
+interface PreflightDeps {
   platform?: NodeJS.Platform;
   arch?: string;
   /** `/dev/kvm` open-for-read+write probe. */

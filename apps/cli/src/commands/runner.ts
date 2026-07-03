@@ -232,7 +232,13 @@ async function downloadAndInstallBinaries(
 
   const daemonSpin = clack.spinner();
   daemonSpin.start(`Downloading runner daemon ${version} (${arch})`);
-  const daemonBytes = await downloadDaemon({ http: d.http, version, arch });
+  const daemonBytes = await downloadDaemon({
+    http: d.http,
+    exec: d.exec,
+    fs: d.fs,
+    version,
+    arch,
+  });
   await d.fs.installAtomic(RUNNER_BIN_PATH, daemonBytes, 0o755);
   daemonSpin.stop(`Installed daemon → ${RUNNER_BIN_PATH}`);
 
@@ -280,10 +286,23 @@ async function enableService(d: ResolvedDeps): Promise<void> {
   spin.stop("systemd unit enabled + started");
 }
 
-/** Poll the daemon health endpoint until healthy or the deadline elapses. */
-async function pollHealth(
-  config: RunnerConfig,
-  d: ResolvedDeps,
+/**
+ * Poll the daemon health endpoint until healthy or the deadline elapses.
+ *
+ * The daemon may legitimately be warming up on first boot (it downloads the
+ * guest kernel/rootfs before it serves 200) — but it may instead have
+ * crash-looped past its systemd start limit and parked in `failed` (e.g. a
+ * `FatalArtifactsError` on bad/undownloadable artifacts, exit 1). Reporting
+ * "warming up" for the full timeout in that case hides the real failure, so
+ * each iteration also checks the unit state and bails early with the last
+ * journal lines when the unit is parked (`failed`/`inactive`).
+ *
+ * Exported for unit testing (the poll loop is the interesting bit). Takes the
+ * exec + http seams only.
+ */
+export async function pollHealth(
+  config: { port: number; token: string },
+  d: { exec: RunnerExec; http: RunnerHttp },
   timeoutMs: number,
 ): Promise<boolean> {
   const url = `http://127.0.0.1:${config.port}/v1/health`;
@@ -291,9 +310,50 @@ async function pollHealth(
   while (Date.now() < deadline) {
     const res = await d.http.getJson(url, config.token);
     if (res.reachable && res.status === 200) return true;
+
+    const parked = await unitParkedState(d.exec);
+    if (parked) {
+      const tail = await journalTail(d.exec, 20);
+      throw new Error(
+        `The ${RUNNER_SERVICE_NAME} unit is ${parked} — the daemon did not stay running. ` +
+          `It likely failed at boot; common causes are undownloadable/unbuildable guest ` +
+          `artifacts, a missing or unreadable /dev/kvm, or an unreachable platform URL.` +
+          (tail ? `\n\nLast journal lines:\n${tail}` : "") +
+          `\n\nDiagnose with \`appstrate runner doctor\` / \`appstrate runner logs\`, fix the ` +
+          `cause, then \`systemctl restart ${RUNNER_SERVICE_NAME}\` (or re-run install).`,
+      );
+    }
     await new Promise((r) => setTimeout(r, 3000));
   }
   return false;
+}
+
+/**
+ * Is the unit parked (not coming back on its own)? Returns the terminal state
+ * string (`failed` / `inactive`) or null while it is still up/activating.
+ * `systemctl is-failed` exits 0 and prints `failed` for a failed unit;
+ * `is-active` prints `inactive` for a stopped one. A warming-up daemon is
+ * `active` (or `activating`), so both probes return non-terminal — the poll
+ * keeps waiting.
+ */
+async function unitParkedState(exec: RunnerExec): Promise<"failed" | "inactive" | null> {
+  const failed = await exec.run("systemctl", ["is-failed", RUNNER_SERVICE_NAME]);
+  if (failed.stdout.trim() === "failed") return "failed";
+  const active = await exec.run("systemctl", ["is-active", RUNNER_SERVICE_NAME]);
+  if (active.stdout.trim() === "inactive") return "inactive";
+  return null;
+}
+
+/** Best-effort last N journal lines for the unit (empty string on failure). */
+async function journalTail(exec: RunnerExec, lines: number): Promise<string> {
+  const res = await exec.run("journalctl", [
+    "-u",
+    RUNNER_SERVICE_NAME,
+    "-n",
+    String(lines),
+    "--no-pager",
+  ]);
+  return res.ok ? res.stdout.trim() : "";
 }
 
 function printPreflight(pf: PreflightResult): void {
@@ -470,7 +530,7 @@ export async function runnerUpdateCommand(opts: RunnerUpdateOptions = {}): Promi
 
     const spin = clack.spinner();
     spin.start(`Downloading runner daemon ${version} (${arch})`);
-    const bytes = await downloadDaemon({ http: d.http, version, arch });
+    const bytes = await downloadDaemon({ http: d.http, exec: d.exec, fs: d.fs, version, arch });
     // Atomic swap over the live binary — rename(2) keeps the running
     // process's fd valid; the restart below picks up the new inode.
     await d.fs.installAtomic(RUNNER_BIN_PATH, bytes, 0o755);
