@@ -95,8 +95,11 @@ sudo appstrate runner install --platform-url http://<PLATFORM_IPV4>:3000
    `FIRECRACKER_RUNNER_TOKEN` on the platform.
 4. **Config + unit** — writes `/etc/appstrate-runner/env` (0600) and a hardened
    systemd unit (`ProtectSystem=strict`, `ReadWritePaths=<data-dir>`,
-   `Restart=always`; PATH corrected to include `/usr/sbin`+`/sbin` because the
-   daemon spawns `ip`/`nft`/`sysctl`/`mkfs.ext4`/`debugfs` by bare name), then
+   `Restart=always`; `PrivateTmp=true` so the VMM socket root under `tmpdir()`
+   is writable; `ReadWritePaths=/run/netns` + `ExecStartPre=+/bin/mkdir -p
+/run/netns` so the boot net-probe's `ip netns add` works under the read-only
+   `/run`; PATH corrected to include `/usr/sbin`+`/sbin` because the daemon
+   spawns `ip`/`nft`/`sysctl`/`mkfs.ext4`/`debugfs` by bare name), then
    `systemctl daemon-reload && enable --now`.
 5. **Verify + firewall** — polls `/v1/health`, then prints the exact
    `ufw`/`firewalld` command to open the daemon port for the platform.

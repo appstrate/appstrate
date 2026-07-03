@@ -138,6 +138,10 @@ export function renderRunnerUnit(config: RunnerConfig): string {
     "[Service]",
     "Type=simple",
     "User=root",
+    // `+` runs OUTSIDE the sandbox (privileged, ignores ProtectSystem): pre-create
+    // /run/netns so the boot net-probe's `ip netns add` has a writable parent on a
+    // host where `ip netns` has never run (ReadWritePaths on a missing dir is a no-op).
+    "ExecStartPre=+/bin/mkdir -p /run/netns",
     `ExecStart=${RUNNER_BIN_PATH}`,
     `EnvironmentFile=${RUNNER_ENV_PATH}`,
     // sbin dirs + the data-dir bin (pinned firecracker) so bare-name spawns resolve.
@@ -151,7 +155,15 @@ export function renderRunnerUnit(config: RunnerConfig): string {
     "# --- Hardening (see renderRunnerUnit doc-comment for why the aggressive",
     "#     device/network knobs are intentionally omitted) ---",
     "ProtectSystem=strict",
+    // ProtectSystem=strict leaves /tmp read-only, but the daemon's deterministic
+    // VMM API-socket root lives under tmpdir() — a private writable /tmp is what
+    // keeps boundary creation from failing EROFS on socket-root mkdir.
+    "PrivateTmp=true",
     `ReadWritePaths=${config.dataDir}`,
+    // ProtectSystem=strict also makes /run read-only, but the boot net-probe's
+    // `ip netns add` writes under /run/netns — carve just that path writable
+    // (paired with the ExecStartPre above that guarantees the dir exists).
+    "ReadWritePaths=/run/netns",
     "ProtectHome=true",
     "ProtectClock=true",
     "",
