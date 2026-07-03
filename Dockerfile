@@ -78,11 +78,11 @@ COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types
 # packages. Bun isolated installs keep their deps out of the root hoist
 # (e.g. @anthropic-ai/claude-agent-sdk under module-claude-code), so each
 # needs its own node_modules copied or the module crash-loops at load.
-COPY --from=deps /app/packages/module-chat/node_modules ./packages/module-chat/node_modules
+# module-chat and runner-codex have no isolated node_modules today (fully
+# hoisted) — a COPY on a missing dir fails the build, so they are omitted.
 COPY --from=deps /app/packages/module-claude-code/node_modules ./packages/module-claude-code/node_modules
 COPY --from=deps /app/packages/module-codex/node_modules ./packages/module-codex/node_modules
 COPY --from=deps /app/packages/runner-claude/node_modules ./packages/runner-claude/node_modules
-COPY --from=deps /app/packages/runner-codex/node_modules ./packages/runner-codex/node_modules
 
 # ── Workspace package sources (Bun runs TypeScript directly — no build step) ──
 # Graph-derived via `COPY --parents`: apps/api source + every packages/*/src
