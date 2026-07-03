@@ -284,7 +284,12 @@ function delay(ms: number): Promise<void> {
 let exitNonce = "";
 
 function printExitMarker(code: number): void {
-  process.stdout.write(`APPSTRATE_EXIT:${exitNonce}:${code}\n`);
+  // Blocking write(2) straight to fd 1 — process.stdout.write() queues in
+  // the runtime and the bytes can still be in flight when powerOff() fires
+  // the SysRq. Observed live: marker truncated mid-nonce, interleaved with
+  // the kernel's "sysrq: Resetting" printk, so the host read no valid
+  // marker and reported a clean agent exit as a crash.
+  writeFileSync(1, `APPSTRATE_EXIT:${exitNonce}:${code}\n`);
 }
 
 function powerOff(): never {
@@ -297,6 +302,11 @@ function powerOff(): never {
   //     the canonical x86 Firecracker exit path (with `reboot=k` on the
   //     kernel cmdline).
   const sysrq = process.arch === "x64" ? "b" : "o";
+  // Let the serial line discipline drain the exit marker to the UART —
+  // even a blocking write(2) returns once the bytes sit in the tty output
+  // buffer, not when the VMM has consumed them. 200ms is orders of
+  // magnitude above one line's drain time and invisible next to boot cost.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
   try {
     writeFileSync("/proc/sysrq-trigger", sysrq);
   } catch {
