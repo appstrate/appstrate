@@ -365,9 +365,19 @@ const sdkImportStart = performance.now();
 // here is safe — the authoritative load happens inside `PiRunner.executeSession`
 // (ESM caches the errored module, so its `await loadPiCodingAgentSdk()` re-throws
 // and the run fails through the normal error path). A failed warm-up resolves to
-// `null`, which the timing block below uses to skip recording a bogus duration.
+// `null` and records nothing; `sdkImportMs` is captured inside the resolve step
+// below, at actual import completion — not at the late await (~400 lines down),
+// which in the nominal case fires after provisioning already overlapped the load
+// and would misattribute the whole boot window to the import.
 const piSdkWarmup =
-  process.env.RUN_ENGINE === "claude" ? null : loadPiCodingAgentSdk().catch(() => null);
+  process.env.RUN_ENGINE === "claude"
+    ? null
+    : loadPiCodingAgentSdk()
+        .then((sdk) => {
+          phaseTimings.sdkImportMs = Math.round(performance.now() - sdkImportStart);
+          return sdk;
+        })
+        .catch(() => null);
 
 const provisionStart = performance.now();
 
@@ -741,15 +751,11 @@ const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 // "runtime ready" honest — the module that talks to the LLM is actually loaded —
 // while folding its cost into the overlap window rather than the post-ready
 // path. The rejection was already swallowed at creation (resolves to `null`), so
-// a warm-up failure just surfaces later through `PiRunner.executeSession`. Only a
-// successful load records `sdkImportMs`; a rejected load resolves early and would
-// otherwise report a bogus import duration.
-if (piSdkWarmup) {
-  const loadedSdk = await piSdkWarmup;
-  if (loadedSdk) {
-    phaseTimings.sdkImportMs = Math.round(performance.now() - sdkImportStart);
-  }
-}
+// a warm-up failure just surfaces later through `PiRunner.executeSession`. The
+// timing is now recorded at import completion inside the loader chain (a rejected
+// load records nothing), so this await only gates "runtime ready" on the module
+// being settled.
+if (piSdkWarmup) await piSdkWarmup;
 
 await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
   bundleLoaded: bundle !== null,
