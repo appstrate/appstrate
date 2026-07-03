@@ -36,16 +36,7 @@
  * point that directory at a tmpfs to keep secrets off persistent disk.
  */
 
-import {
-  access,
-  mkdir,
-  mkdtemp,
-  rm,
-  readdir,
-  open as fsOpen,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { access, mkdir, rm, readdir, open as fsOpen, stat, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, resolve, sep } from "node:path";
@@ -254,9 +245,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   private readonly platformForward: { ip: string; port: number } | undefined;
 
   /**
-   * Per-instance 0700 directory holding the VMM API sockets (see
-   * createIsolationBoundary). Created lazily; promise-cached so two
-   * concurrent boundary creations never mkdtemp twice.
+   * Deterministic per-data-dir 0700 directory holding the VMM API sockets
+   * (see ensureSocketDir / socketRoot). Created lazily; promise-cached so
+   * two concurrent boundary creations never race to mkdir it.
    */
   private socketDirPromise: Promise<string> | null = null;
 
@@ -414,6 +405,22 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
             pid: state.pid,
           });
         }
+      } else if (state?.apiSocketPath) {
+        // Pre-spawn crash window: createIsolationBoundary persists the api
+        // socket path BEFORE startWorkload records the pid. A daemon crash
+        // in between leaves a running VMM with no pid on disk — find it by
+        // the exact `--api-sock` it was launched with. Conservative: only
+        // a /proc entry that IS a firecracker VMM referencing this socket
+        // is a positive match; anything else is left untouched.
+        const pid = await this.findVmmByApiSocket(state.apiSocketPath);
+        if (pid !== null) {
+          try {
+            process.kill(pid, "SIGKILL");
+            workloads++;
+          } catch {
+            // Already dead.
+          }
+        }
       }
       if (state?.tapDevice) {
         await deleteTap(this.hostExec, state.tapDevice).catch(() => {});
@@ -452,6 +459,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     } catch (err) {
       logger.warn("Firecracker orphan TAP sweep failed", { error: getErrorMessage(err) });
     }
+
+    // Reclaim the socket root a crashed predecessor left behind. The root
+    // is deterministic per data dir, so this successor finds it; any VMM
+    // that held a socket in it was already killed above. Safe to remove
+    // wholesale here: the sweep runs at boot before ensureSocketDir creates
+    // this daemon's own socket (it is lazy, first-run only).
+    await rm(this.socketRoot(), { recursive: true, force: true }).catch(() => {});
 
     return { workloads, isolationBoundaries, workspaces: 0 };
   }
@@ -513,7 +527,20 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         await rm(runDir, { recursive: true, force: true }).catch(() => {});
         throw err;
       }
-      await this.writeStateFile(runDir, { runId, tapDevice: subnet.tapDevice });
+      // NOT under runDir: AF_UNIX paths are capped at ~108 bytes (SUN_LEN)
+      // and FIRECRACKER_DATA_DIR/<runId>/ routinely exceeds it — Firecracker
+      // then dies at startup with FailedToBindAndRunHttpServer. The socket
+      // dir is a short, deterministic per-data-dir 0700 directory under
+      // tmpdir (see ensureSocketDir): under the cap, out of the
+      // world-writable flat /tmp, AND recoverable by a successor daemon.
+      // The subnet index is unique among this orchestrator's live runs.
+      const apiSocketPath = join(socketDir, `afc-${subnet.index}.sock`);
+      // Persist the socket path BEFORE the VMM spawns (the pid is added by
+      // writeStateFileStrict in startWorkload). A daemon crash in the window
+      // between spawn and the pid write would otherwise leave a VMM the
+      // pid-based orphan sweep cannot see — the boot sweep falls back to
+      // matching this socket path against /proc (see cleanupOrphans).
+      await this.writeStateFile(runDir, { runId, tapDevice: subnet.tapDevice, apiSocketPath });
 
       // Remote-platform mode: the guest talks to the override ip, not the
       // host lo alias — the noProxy exemption must track whichever one the
@@ -524,14 +551,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         subnet,
         runDir,
         consolePath: join(runDir, "console.log"),
-        // NOT under runDir: AF_UNIX paths are capped at ~108 bytes (SUN_LEN)
-        // and FIRECRACKER_DATA_DIR/<runId>/ routinely exceeds it — Firecracker
-        // then dies at startup with FailedToBindAndRunHttpServer. A short
-        // per-instance mkdtemp 0700 directory under tmpdir stays well under
-        // the cap AND keeps the sockets out of the world-writable flat /tmp
-        // (unix-socket connect permission is umask-dependent there). The
-        // subnet index is unique among this orchestrator's live runs.
-        apiSocketPath: join(socketDir, `afc-${subnet.index}.sock`),
+        apiSocketPath,
         proc: null,
         stopping: false,
       });
@@ -987,6 +1007,30 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     return apiSocketPath === undefined || argv.includes(apiSocketPath);
   }
 
+  /**
+   * Scan /proc for the firecracker VMM launched with a given `--api-sock`
+   * path — the pre-spawn orphan case where the crashed run's state.json
+   * recorded the socket but never the pid. Returns the pid only on POSITIVE
+   * identification (argv is a firecracker VMM AND references this exact
+   * socket, via {@link pidIsOurVmm}); `null` otherwise, so a run is never
+   * killed without it. Fail-closed on a host with no readable /proc.
+   */
+  private async findVmmByApiSocket(apiSocketPath: string): Promise<number | null> {
+    let pids: number[];
+    try {
+      const dirents = await readdir("/proc", { withFileTypes: true });
+      pids = dirents
+        .filter((d) => d.isDirectory() && /^\d+$/.test(d.name))
+        .map((d) => Number(d.name));
+    } catch {
+      return null; // No /proc (non-Linux / restricted) — fail closed.
+    }
+    for (const pid of pids) {
+      if (await this.pidIsOurVmm(pid, apiSocketPath)) return pid;
+    }
+    return null;
+  }
+
   private async readConsoleTail(
     consolePath: string,
     bytes: number = EXIT_MARKER_SCAN_BYTES,
@@ -1124,13 +1168,31 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     await writeFile(join(runDir, "state.json"), JSON.stringify(state), { mode: 0o600 });
   }
 
-  /** Lazily create the per-instance 0700 API-socket directory. */
+  /**
+   * Deterministic root for this daemon's VMM API sockets: a short
+   * per-data-dir path under tmpdir. Deterministic (not mkdtemp-random) so a
+   * successor daemon can find and reclaim sockets a crashed predecessor
+   * left behind (cleanupOrphans). Keyed by a hash of the resolved data dir
+   * so two daemons with distinct data dirs never share a socket root; the
+   * host lock already forbids two daemons on one data dir. Kept SHORT
+   * (tmpdir + 12 hex) to stay under the AF_UNIX SUN_LEN cap.
+   */
+  private socketRoot(): string {
+    const dataDir = resolve(getFirecrackerEnv().FIRECRACKER_DATA_DIR);
+    const tag = new Bun.CryptoHasher("sha256").update(dataDir).digest("hex").slice(0, 12);
+    return join(tmpdir(), `appstrate-fc-${tag}`);
+  }
+
+  /** Lazily create the deterministic 0700 API-socket directory. */
   private ensureSocketDir(): Promise<string> {
-    // mkdtemp creates the directory 0700 — only this uid may traverse it.
-    // A rejection must not stay cached (it would permanently fail every
-    // future run over one transient tmpdir hiccup) — clear and rethrow so
-    // the next boundary retries.
-    this.socketDirPromise ??= mkdtemp(join(tmpdir(), "afc-")).catch((err: unknown) => {
+    // 0700 — only this uid may traverse it. A rejection must not stay
+    // cached (it would permanently fail every future run over one transient
+    // tmpdir hiccup) — clear and rethrow so the next boundary retries.
+    this.socketDirPromise ??= (async () => {
+      const dir = this.socketRoot();
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      return dir;
+    })().catch((err: unknown) => {
       this.socketDirPromise = null;
       throw err;
     });

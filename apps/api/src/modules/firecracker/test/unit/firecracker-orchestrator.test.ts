@@ -242,6 +242,22 @@ describe("admission control (FIRECRACKER_MAX_CONCURRENT_VMS)", () => {
   });
 });
 
+describe("pre-spawn state persistence", () => {
+  it("records the api socket path before the VMM spawns (orphan-sweep anchor)", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_pre");
+    const state = JSON.parse(
+      await Bun.file(join(dataDir, "run_pre", "state.json")).text(),
+    ) as Record<string, unknown>;
+    // The socket path is on disk pre-spawn; the pid is not (added later by
+    // startWorkload) — this is exactly the window the /proc fallback covers.
+    expect(typeof state.apiSocketPath).toBe("string");
+    expect(String(state.apiSocketPath)).toContain("afc-");
+    expect(state.pid).toBeUndefined();
+  });
+});
+
 describe("cleanupOrphans PID-reuse guard", () => {
   it("does not kill a recorded pid that is not this run's firecracker VMM", async () => {
     // This test process's own pid is alive but is a bun process, not a

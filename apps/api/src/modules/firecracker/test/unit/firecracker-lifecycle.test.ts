@@ -289,4 +289,51 @@ describe("cleanupOrphans positive kill path", () => {
       expect(await Bun.file(join(runDir, "state.json")).exists()).toBe(false);
     },
   );
+
+  it.skipIf(process.platform !== "linux")(
+    "kills a PRE-SPAWN orphan found by its api socket when state.json has no pid",
+    async () => {
+      // Same decoy as above, but the state file records ONLY the api socket
+      // (no pid) — the daemon-crash-before-pid-write window. The /proc scan
+      // must locate and kill it by the socket path alone.
+      const binDir = await mkdtemp(join(tmpdir(), "fc-decoy-prespawn-"));
+      extraDirs.push(binDir);
+      const decoyBin = join(binDir, "firecracker");
+      await Bun.write(decoyBin, Bun.file("/bin/sh"));
+      await chmod(decoyBin, 0o755);
+      const socketPath = join(binDir, "decoy-api.sock");
+      const decoy = Bun.spawn([decoyBin, "-c", "sleep 30", "decoy", socketPath]);
+      spawned.push(decoy);
+
+      const cmdlineReady = async (): Promise<boolean> => {
+        try {
+          const cmdline = await Bun.file(`/proc/${decoy.pid}/cmdline`).text();
+          const argv = cmdline.split("\0");
+          return argv.some((a) => a.includes("firecracker")) && argv.includes(socketPath);
+        } catch {
+          return false;
+        }
+      };
+      for (let i = 0; i < 40 && !(await cmdlineReady()); i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(await cmdlineReady()).toBe(true);
+
+      const runDir = join(dataDir, "run_prespawn");
+      await mkdir(runDir, { recursive: true });
+      await writeFile(
+        join(runDir, "state.json"),
+        JSON.stringify({ runId: "run_prespawn", tapDevice: "afc11", apiSocketPath: socketPath }),
+      );
+
+      const { exec } = fakeExec();
+      const orch = readyOrchestrator(exec);
+      const report = await orch.cleanupOrphans();
+
+      expect(report.workloads).toBe(1); // found + killed via the socket path
+      await decoy.exited;
+      expect(decoy.signalCode).toBe("SIGKILL");
+      expect(await Bun.file(join(runDir, "state.json")).exists()).toBe(false);
+    },
+  );
 });
