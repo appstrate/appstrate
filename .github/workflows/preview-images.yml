@@ -1,0 +1,86 @@
+name: Preview Docker Images
+
+# Publishes the Docker images from a feature branch under a `preview-*` tag
+# so the branch can be deployed on Coolify (APPSTRATE_VERSION=preview-pr818)
+# BEFORE merging. Deliberately skips everything else release.yml does:
+# no CLI binaries, no GH Release, no installer update, no `latest` tag.
+#
+# TEMPORARY — delete this file before merging the branch into main.
+
+on:
+  push:
+    branches:
+      - feat/firecracker-orchestrator
+
+concurrency:
+  group: preview-images
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  PREVIEW_TAG: preview-pr818
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - name: appstrate
+            context: .
+            dockerfile: Dockerfile
+          - name: appstrate-pi
+            context: .
+            dockerfile: ./runtime-pi/Dockerfile
+          - name: appstrate-sidecar
+            context: .
+            dockerfile: ./runtime-pi/sidecar/Dockerfile
+          - name: appstrate-mcp-runner-node
+            context: ./runtime-pi/runners/node
+            dockerfile: ./runtime-pi/runners/node/Dockerfile
+          - name: appstrate-mcp-runner-python
+            context: ./runtime-pi/runners/python
+            dockerfile: ./runtime-pi/runners/python/Dockerfile
+          - name: appstrate-mcp-runner-bun
+            context: ./runtime-pi/runners/bun
+            dockerfile: ./runtime-pi/runners/bun/Dockerfile
+          - name: appstrate-mcp-runner-uv
+            context: ./runtime-pi/runners/uv
+            dockerfile: ./runtime-pi/runners/uv/Dockerfile
+          - name: appstrate-mcp-runner-binary
+            context: ./runtime-pi/runners/binary
+            dockerfile: ./runtime-pi/runners/binary/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          # amd64 only: preview images exist solely to deploy on the (x86_64)
+          # staging/prod server — skipping arm64 roughly halves build time.
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ env.PREVIEW_TAG }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:preview-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
