@@ -31,6 +31,8 @@ import {
   resolveBootstrapEmail,
   printBootstrapFollowup,
   resolveRunBackend,
+  readRawRunAdapter,
+  assertRunAdapterCompatibleWithTier,
   buildRunnerInstallArgs,
   firecrackerFollowupNote,
   resolveCliInvocation,
@@ -1296,6 +1298,53 @@ describe("resolveRunBackend — adapter selection", () => {
         { generateToken: () => "generated-token-abcdef1234" },
       );
       expect(cfg.adapter).toBe("firecracker");
+    } finally {
+      if (prev === undefined) delete process.env.APPSTRATE_RUN_ADAPTER;
+      else process.env.APPSTRATE_RUN_ADAPTER = prev;
+    }
+  });
+});
+
+describe("assertRunAdapterCompatibleWithTier (tier 0 × firecracker conflict)", () => {
+  it("rejects an explicit firecracker request on tier 0", () => {
+    expect(() => assertRunAdapterCompatibleWithTier(0, "firecracker")).toThrow(
+      /--run-adapter firecracker requires a Docker tier \(1-3\); tier 0 runs agents in-process\./,
+    );
+  });
+
+  it("stays silent on tier 0 when no adapter was requested (default behavior)", () => {
+    expect(() => assertRunAdapterCompatibleWithTier(0, undefined)).not.toThrow();
+  });
+
+  it("allows docker on tier 0 and firecracker on Docker tiers", () => {
+    expect(() => assertRunAdapterCompatibleWithTier(0, "docker")).not.toThrow();
+    expect(() => assertRunAdapterCompatibleWithTier(1, "firecracker")).not.toThrow();
+    expect(() => assertRunAdapterCompatibleWithTier(2, "firecracker")).not.toThrow();
+    expect(() => assertRunAdapterCompatibleWithTier(3, "firecracker")).not.toThrow();
+  });
+
+  it("fires on an env-only APPSTRATE_RUN_ADAPTER=firecracker request via readRawRunAdapter", () => {
+    const prev = process.env.APPSTRATE_RUN_ADAPTER;
+    process.env.APPSTRATE_RUN_ADAPTER = "firecracker";
+    try {
+      expect(() => assertRunAdapterCompatibleWithTier(0, readRawRunAdapter(undefined))).toThrow(
+        /requires a Docker tier/,
+      );
+    } finally {
+      if (prev === undefined) delete process.env.APPSTRATE_RUN_ADAPTER;
+      else process.env.APPSTRATE_RUN_ADAPTER = prev;
+    }
+  });
+
+  it("readRawRunAdapter: flag wins over env, blank/whitespace normalizes to undefined", () => {
+    const prev = process.env.APPSTRATE_RUN_ADAPTER;
+    process.env.APPSTRATE_RUN_ADAPTER = "firecracker";
+    try {
+      expect(readRawRunAdapter("docker")).toBe("docker");
+      expect(readRawRunAdapter(undefined)).toBe("firecracker");
+      process.env.APPSTRATE_RUN_ADAPTER = "  ";
+      expect(readRawRunAdapter(undefined)).toBeUndefined();
+      expect(readRawRunAdapter("")).toBeUndefined();
     } finally {
       if (prev === undefined) delete process.env.APPSTRATE_RUN_ADAPTER;
       else process.env.APPSTRATE_RUN_ADAPTER = prev;

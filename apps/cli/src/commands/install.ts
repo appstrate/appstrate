@@ -114,7 +114,8 @@ export interface InstallOptions {
   /**
    * Agent execution backend: `docker` (default) or `firecracker`. Also
    * honored via `APPSTRATE_RUN_ADAPTER`. Only meaningful on Docker tiers
-   * (1/2/3); ignored on tier 0. See `resolveRunBackend`.
+   * (1/2/3); an explicit `firecracker` request on tier 0 is a hard error
+   * (see `assertRunAdapterCompatibleWithTier`). See `resolveRunBackend`.
    */
   runAdapter?: string;
   /** Firecracker/remote: URL of an existing appstrate-runner daemon (http://<ipv4>:3100). */
@@ -220,6 +221,10 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
   try {
     const autoConfirm = opts.autoConfirm === true;
     const tier = await resolveTier(opts.tier, { autoConfirm });
+    // Fail fast on an EXPLICIT firecracker request on tier 0 — before any
+    // install work starts. Absence of the flag stays silent (tier 0 simply
+    // never offers the backend choice).
+    assertRunAdapterCompatibleWithTier(tier, readRawRunAdapter(opts.runAdapter));
     const dir = await resolveDir(opts.dir, { autoConfirm });
     // "Non-interactive" means the caller has opted out of every prompt —
     // either via `--tier` (scripted installs) or `--yes` (curl|bash, CI,
@@ -900,6 +905,35 @@ const IPV4_HINT =
   "Firecracker guests have no DNS resolver, so it must be an IPv4 literal — a hostname would fail inside every microVM.";
 
 /**
+ * Normalize the explicitly-requested run adapter: `--run-adapter` flag >
+ * `APPSTRATE_RUN_ADAPTER` env, trimmed; `undefined` when the operator
+ * expressed no choice. Single source shared by the tier-0 conflict guard
+ * in `installCommand` and `resolveRunBackend` — both must see the exact
+ * same input.
+ */
+export function readRawRunAdapter(flagValue?: string): string | undefined {
+  const raw = (flagValue ?? process.env.APPSTRATE_RUN_ADAPTER)?.trim();
+  return raw === undefined || raw === "" ? undefined : raw;
+}
+
+/**
+ * Tier-0 conflict guard (pure, exported for tests): `firecracker` is a
+ * Docker-tier (1/2/3) option, so an EXPLICIT firecracker request on tier 0
+ * must fail loudly instead of being silently ignored. No explicit request
+ * (`undefined`) stays silent — tier 0 simply never offers the choice.
+ */
+export function assertRunAdapterCompatibleWithTier(
+  tier: Tier,
+  rawAdapter: string | undefined,
+): void {
+  if (tier === 0 && rawAdapter === "firecracker") {
+    throw new Error(
+      "--run-adapter firecracker requires a Docker tier (1-3); tier 0 runs agents in-process.",
+    );
+  }
+}
+
+/**
  * Resolve the agent execution backend for a Docker-tier install.
  *
  * Precedence for the adapter: `--run-adapter` flag > `APPSTRATE_RUN_ADAPTER`
@@ -922,9 +956,9 @@ export async function resolveRunBackend(
   const { appPort, nonInteractive } = inputs;
 
   // 1. Which adapter? Flag > env > prompt (interactive) > docker.
-  const rawAdapter = (inputs.runAdapter ?? process.env.APPSTRATE_RUN_ADAPTER)?.trim();
+  const rawAdapter = readRawRunAdapter(inputs.runAdapter);
   let adapter: "docker" | "firecracker";
-  if (rawAdapter !== undefined && rawAdapter !== "") {
+  if (rawAdapter !== undefined) {
     if (rawAdapter !== "docker" && rawAdapter !== "firecracker") {
       throw new Error(
         `Invalid --run-adapter value "${rawAdapter}". Expected "docker" or "firecracker".`,
@@ -1042,8 +1076,10 @@ export async function resolveRunBackend(
     }
     // The regex only shapes the host as four dotted numbers — it happily
     // accepts out-of-range octets like `300.0.0.1`. Range-check the host
-    // with `isIpv4` so a bogus literal fails here, not inside a guest.
-    const runnerHost = new URL(runnerUrl).hostname;
+    // with `isIpv4` so a bogus literal fails here with the DNS hint, not
+    // inside a guest. Extract via regex (not `new URL`, which throws its own
+    // opaque "cannot be parsed" on out-of-range octets before we can).
+    const runnerHost = runnerUrl.replace(/^https?:\/\//, "").replace(/:\d+$/, "");
     if (!isIpv4(runnerHost)) {
       throw new Error(
         `Invalid --runner-url "${runnerUrl}" — the host must be an IPv4 literal (e.g. 10.0.0.9). ${IPV4_HINT}`,
