@@ -31,6 +31,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
+import type { BootHeartbeatOutcome } from "../../services/state/runs.ts";
 import { getRemoteEnv, type RemoteRunnerEnv } from "./remote-env.ts";
 import {
   RUNNER_ROUTES,
@@ -72,12 +73,13 @@ const CONSOLE_EXCERPT_BYTES = 2 * 1024;
 const CONSOLE_FETCH_TIMEOUT_MS = 5_000;
 
 /**
- * Boot-phase heartbeat outcome (phase 4). While the run's guest has not
- * emitted its first event the pump keeps `bumped`ing `runs.last_heartbeat_at`
- * — the exact column the stall watchdog reads. It stops the moment the
- * guest starts reporting (`guest-active`) or the sink closes (`closed`).
+ * Boot-phase heartbeat outcome (phase 4) — single source of truth in
+ * services/state/runs.ts (the pump bumps `runs.last_heartbeat_at`, the
+ * exact column the stall watchdog reads; it stops when the guest starts
+ * reporting or the sink closes). Re-exported so this module's public type
+ * surface (RemoteOrchestratorDeps) is unchanged.
  */
-export type BootHeartbeatOutcome = "bumped" | "guest-active" | "closed";
+export type { BootHeartbeatOutcome };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
