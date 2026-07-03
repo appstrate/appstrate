@@ -36,9 +36,38 @@ The host-side `FIRECRACKER_*` variables (kernel/rootfs paths, subnet CIDR, …) 
 
 - Linux host with `/dev/kvm` accessible to the daemon user
 - `firecracker` binary >= 1.16 (older releases are exposed to CVE-2026-5747)
-- Kernel + rootfs artifacts: `bun run firecracker:build` (see `scripts/` here)
+- Kernel + rootfs artifacts — **downloaded automatically at boot** (see below);
+  no on-host build required for a released daemon
 
 On macOS, develop inside the Lima VM: `bun run test:firecracker` (see `scripts/dev/`).
+
+### Guest artifacts (auto-downloaded)
+
+At boot — **before** `initialize()` — the daemon resolves the guest kernel
+(`vmlinux`) and rootfs (`rootfs.ext4`) via `runner/artifacts.ts`:
+
+- If the files are already installed (and, when `FIRECRACKER_ARTIFACTS_VERSION`
+  is pinned, the version marker matches), the resolver skips — no download.
+- Otherwise it downloads `firecracker-artifacts-manifest.json` +
+  `vmlinux-<arch>` + `rootfs-<arch>.ext4.zst` from
+  `FIRECRACKER_ARTIFACTS_BASE_URL` (default: this repo's GitHub Releases),
+  verifies SHA256 **while streaming**, decompresses the rootfs (Bun's native
+  zstd — no external `zstd` binary), and installs both atomically
+  (tmp write + rename), writing a version marker.
+
+Failure policy: a **network failure with artifacts already present** is a
+warning (boot continues on the existing files). **Missing artifacts + a failed
+download** is fatal with an actionable message. A **guest-protocol mismatch**
+(the manifest's `guest_protocol` ≠ the daemon's `GUEST_PROTOCOL_VERSION`) or a
+**checksum mismatch** is ALWAYS fatal — a daemon never boots artifacts it
+cannot drive, nor a corrupt/tampered asset.
+
+Dev iteration on `guest/` (supervisor, init.sh): build locally with
+`bun run firecracker:build` and set `FIRECRACKER_ARTIFACTS_LOCAL=1` to skip the
+resolver entirely.
+
+Artifacts are published per release by the `firecracker-artifacts` job in
+`.github/workflows/release.yml` (matrix `{x86_64, aarch64}`).
 
 ### Daemon environment
 
@@ -58,15 +87,18 @@ The daemon owns two schemas — its own listen/link config (`FIRECRACKER_RUNNER_
 | Variable                         | Default                          | Notes                                                                 |
 | -------------------------------- | -------------------------------- | --------------------------------------------------------------------- |
 | `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                            |
-| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | Built by `firecracker:build:kernel`                                   |
-| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | Built by `firecracker:build:rootfs`                                   |
+| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | Auto-downloaded at boot (or built by `firecracker:build:kernel`)      |
+| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | Auto-downloaded at boot (or built by `firecracker:build:rootfs`)      |
 | `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | Per-run state; point at a tmpfs to keep config-drive secrets off disk |
 | `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool carved into per-run /30 subnets                              |
 | `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918 ranges        | Destinations guests must never reach                                  |
 | `FIRECRACKER_MAX_CONSOLE_BYTES`  | 268435456 (256 MiB)              | Console-size kill switch (host OOM guard)                             |
 | `FIRECRACKER_MAX_CONCURRENT_VMS` | 0 (unlimited)                    | Admission control                                                     |
+| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | Guest-artifact download base — point at a mirror for air-gapped hosts |
+| `FIRECRACKER_ARTIFACTS_VERSION`  | latest / on-disk                 | Pin a release (`1.2.3`); unset = skip download when artifacts present |
+| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver — dev iterating on locally built artifacts    |
 
-Start: `bun run firecracker:runner` (systemd unit recommended: `Restart=always`, `After=network-online.target`). Boot order: env → `initialize()` (KVM/artifact checks) → orphan sweep → listen. Running VMs are separate processes — a daemon restart re-adopts or reaps them via the orphan sweep, it does not kill them mid-flight.
+Start: `bun run firecracker:runner` (systemd unit recommended: `Restart=always`, `After=network-online.target`). Boot order: env → **artifacts** (download/verify kernel + rootfs) → `initialize()` (KVM/artifact checks) → orphan sweep → listen. Running VMs are separate processes — a daemon restart re-adopts or reaps them via the orphan sweep, it does not kill them mid-flight.
 
 ## Capabilities declared
 
@@ -92,6 +124,7 @@ The wire carries run tokens and credential bundles (`POST /v1/sidecars`) — kee
 | `runner/protocol.ts`                         | Frozen wire schemas + route map (shared both sides)                   |
 | `runner/env.ts`                              | Daemon-side `FIRECRACKER_RUNNER_*` schema                             |
 | `runner/host-env.ts`                         | Engine-side `FIRECRACKER_*` schema (daemon-only)                      |
+| `runner/artifacts.ts`                        | Boot-time guest-artifact resolver (download + verify + install)       |
 | `runner/logger.ts`                           | Env-free pino logger for the daemon closure (no `@appstrate/env`)     |
 | `runner/server.ts`                           | Hono app factory (DI orchestrator — unit-testable)                    |
 | `runner/daemon.ts`                           | Entrypoint (`bun run firecracker:runner`)                             |

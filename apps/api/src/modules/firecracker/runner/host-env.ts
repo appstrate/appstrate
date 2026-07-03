@@ -15,13 +15,35 @@
 import { z } from "zod";
 
 const firecrackerEnvSchema = z.object({
-  // Linux + /dev/kvm only. Artifacts are built by `bun run firecracker:build`
-  // (see apps/api/src/modules/firecracker/scripts/) — the orchestrator fails
-  // fast at initialize() when the kernel/rootfs are missing.
+  // Linux + /dev/kvm only. Artifacts are resolved at daemon boot by
+  // runner/artifacts.ts (download + SHA256 verify + zstd decompress from
+  // GitHub Release assets) OR built locally by `bun run firecracker:build`
+  // (see apps/api/src/modules/firecracker/scripts/) — the orchestrator
+  // fails fast at initialize() when the kernel/rootfs are still missing.
   FIRECRACKER_BIN: z.string().default("firecracker"),
   FIRECRACKER_KERNEL_PATH: z.string().default("./data/firecracker/vmlinux"),
   FIRECRACKER_ROOTFS_PATH: z.string().default("./data/firecracker/rootfs.ext4"),
   FIRECRACKER_DATA_DIR: z.string().default("./data/firecracker/runs"),
+  // Prebuilt guest-artifact resolution (issue #819, phase 2). At boot the
+  // daemon downloads versioned, checksum-verified vmlinux + rootfs from
+  // GitHub Release assets instead of requiring an on-host docker build.
+  //
+  // Base URL of the release assets. Optional — defaults to this repo's GH
+  // Releases (see DEFAULT_ARTIFACTS_BASE_URL in runner/artifacts.ts). Point
+  // it at a mirror for air-gapped or self-hosted deployments.
+  FIRECRACKER_ARTIFACTS_BASE_URL: z.url().optional(),
+  // Pin a specific release (e.g. "1.2.3" or "v1.2.3"). Optional — when the
+  // artifacts already exist on disk and no version is pinned, the resolver
+  // skips the download; when they are missing and no version is pinned it
+  // fetches the `latest` release.
+  FIRECRACKER_ARTIFACTS_VERSION: z.string().optional(),
+  // Dev opt-out: `=1` (or `true`) skips the resolver entirely — the
+  // developer builds artifacts locally with `bun run firecracker:build`
+  // and iterates on guest/ without any download.
+  FIRECRACKER_ARTIFACTS_LOCAL: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v?.toLowerCase() === "true"),
   // IPv4 /16 pool carved into per-run /30 subnets (host TAP peer + guest).
   // Override when the default collides with an existing route.
   FIRECRACKER_SUBNET_CIDR: z

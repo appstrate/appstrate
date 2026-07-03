@@ -170,16 +170,12 @@ Timeout/cancel flow through `stopWorkload`/`stopByRunId` (graceful
 
 ## Artifacts
 
-Built once, shared by all runs, validated at `initialize()`:
-
-```sh
-bun run firecracker:build          # rootfs + kernel
-```
+Two artifacts, shared by all runs, validated at `initialize()`:
 
 - **rootfs** (`FIRECRACKER_ROOTFS_PATH`) — `apps/api/src/modules/firecracker/scripts/Dockerfile.rootfs`:
   the `appstrate-pi` image + the compiled sidecar binary + guest init/
   supervisor + nftables/setpriv, exported and converted with `mkfs.ext4 -d`.
-  Rebuild whenever the pi/sidecar images change (arch-specific).
+  Arch-specific.
 - **kernel** (`FIRECRACKER_KERNEL_PATH`) — built by
   `apps/api/src/modules/firecracker/scripts/build-kernel.sh` (Docker, no host toolchain): pinned
   6.1 kernel with the Firecracker project's own CI config as base, plus
@@ -187,6 +183,40 @@ bun run firecracker:build          # rootfs + kernel
   Firecracker CI kernels canNOT be used as-is — runtime-verified to lack
   nftables AND the iptables owner match entirely (everything `=y`, nothing
   loadable), which would break the in-guest uid firewall.
+
+### Daemon install — download, don't build (issue #819, phase 2)
+
+A released daemon does **not** build artifacts on the host. At boot, BEFORE
+`initialize()`, `runner/artifacts.ts` resolves the kernel + rootfs:
+
+1. **Skip** when the files already exist and — if `FIRECRACKER_ARTIFACTS_VERSION`
+   is pinned — the on-disk version marker matches. Otherwise:
+2. **Download** `firecracker-artifacts-manifest.json`, `vmlinux-<arch>`, and
+   `rootfs-<arch>.ext4.zst` from `FIRECRACKER_ARTIFACTS_BASE_URL` (default: this
+   repo's GitHub Releases — `latest`, or `download/v<version>` when pinned).
+3. **Verify** SHA256 while streaming; **decompress** the rootfs with Bun's
+   native zstd (`Bun.zstdDecompressSync` — no external `zstd` binary, no extra
+   dependency) and verify the DECOMPRESSED digest against the manifest.
+4. **Install atomically** (tmp write + rename) into the engine's paths and
+   write a version marker.
+
+Failure policy: a network failure with artifacts already present → **warning**,
+boot continues on the existing files; missing artifacts + failed download →
+**fatal** (actionable message). A **guest-protocol mismatch** (manifest
+`guest_protocol` ≠ daemon `GUEST_PROTOCOL_VERSION`, exported from
+`runner/artifacts.ts`) or a **checksum mismatch** is ALWAYS fatal — the daemon
+never boots artifacts it cannot drive, nor a corrupt/tampered asset. The
+`guest_protocol` couples the daemon engine (config drive, exit-marker protocol,
+rootfs layout) to the artifacts; its bump rules are documented beside the
+constant.
+
+Publication: the `firecracker-artifacts` job in `.github/workflows/release.yml`
+(matrix `{x86_64, aarch64}`, native runners) reuses `build-kernel.sh` /
+`build-rootfs.sh`, zstd-compresses the rootfs, and attaches the assets + the
+combined manifest to each `v*` GitHub Release.
+
+**Dev**: iterate on `guest/` with `bun run firecracker:build`, then set
+`FIRECRACKER_ARTIFACTS_LOCAL=1` to skip the resolver entirely.
 
 ## Requirements & privileges
 
@@ -229,16 +259,19 @@ bun run firecracker:build          # rootfs + kernel
 
 ## Env vars
 
-| Var                              | Default                          | Notes                                               |
-| -------------------------------- | -------------------------------- | --------------------------------------------------- |
-| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                          |
-| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                        |
-| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                             |
-| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended)                   |
-| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                              |
-| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach    |
-| `FIRECRACKER_MAX_CONCURRENT_VMS` | `0` (unlimited)                  | admission cap — see _Operational constraints_       |
-| `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails) |
+| Var                              | Default                          | Notes                                                |
+| -------------------------------- | -------------------------------- | ---------------------------------------------------- |
+| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                           |
+| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                         |
+| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                              |
+| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended)                    |
+| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                               |
+| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach     |
+| `FIRECRACKER_MAX_CONCURRENT_VMS` | `0` (unlimited)                  | admission cap — see _Operational constraints_        |
+| `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)  |
+| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | guest-artifact download base (mirror for air-gapped) |
+| `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present     |
+| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)          |
 
 ## Development on macOS
 
