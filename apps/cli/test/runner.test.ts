@@ -38,6 +38,7 @@ import {
   runnerUpdateCommand,
   runnerDoctor,
   pollHealth,
+  enableService,
 } from "../src/commands/runner.ts";
 import type { RunnerExec, RunnerFs, RunnerHttp } from "../src/lib/runner/exec.ts";
 
@@ -226,6 +227,12 @@ describe("renderRunnerUnit", () => {
     expect(unit).toContain("EnvironmentFile=/etc/appstrate-runner/env");
     expect(unit).toContain("ProtectSystem=strict");
     expect(unit).toContain("ReadWritePaths=/srv/runner");
+    // PrivateTmp: the daemon's VMM socket root lives under tmpdir(), so a private
+    // writable /tmp is required or boundary creation fails EROFS under ProtectSystem.
+    expect(unit).toContain("PrivateTmp=true");
+    // /run/netns writable + pre-created for the boot net-probe's `ip netns add`.
+    expect(unit).toContain("ReadWritePaths=/run/netns");
+    expect(unit).toContain("ExecStartPre=+/bin/mkdir -p /run/netns");
     expect(unit).toContain("WorkingDirectory=/srv/runner");
     expect(unit).toContain("Restart=always");
     // Start-rate limit bounds the Restart=always loop (StartLimit* live in [Unit]).
@@ -390,6 +397,38 @@ describe("runnerUpdateCommand", () => {
     expect(installed[0]!.dest).toBe("/usr/local/bin/appstrate-runner");
     expect(installed[0]!.mode).toBe(0o755);
     expect(calls).toContainEqual(["systemctl", "restart", "appstrate-runner"]);
+  });
+});
+
+// ─── enable + start ─────────────────────────────────────────────────────────
+
+describe("enableService", () => {
+  const deps = (exec: RunnerExec) => ({
+    exec,
+    fs: fakeFs().fs,
+    http: fakeHttp({}),
+    getuid: () => 0,
+    preflight: async () => ({ ok: true, arch: "x86_64" as const, checks: [] }),
+  });
+
+  it("reloads, enables for persistence, then restarts (never `enable --now`)", async () => {
+    const { exec, calls } = fakeExec();
+    await enableService(deps(exec));
+    expect(calls).toContainEqual(["systemctl", "daemon-reload"]);
+    expect(calls).toContainEqual(["systemctl", "enable", "appstrate-runner"]);
+    // `restart` is idempotent — it starts the NEW binary even when a stale
+    // daemon is already active (the re-install bug `enable --now` masked).
+    expect(calls).toContainEqual(["systemctl", "restart", "appstrate-runner"]);
+    expect(calls).not.toContainEqual(["systemctl", "enable", "--now", "appstrate-runner"]);
+  });
+
+  it("throws with stderr when restart fails", async () => {
+    const { exec } = fakeExec({
+      "systemctl restart": () => ({ ok: false, exitCode: 1, stdout: "", stderr: "boom" }),
+    });
+    await expect(enableService(deps(exec))).rejects.toThrow(
+      /restart appstrate-runner failed: boom/,
+    );
   });
 });
 

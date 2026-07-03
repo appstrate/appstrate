@@ -270,16 +270,27 @@ async function writeHostFiles(config: RunnerConfig, d: ResolvedDeps): Promise<vo
   await d.fs.writeFile(RUNNER_UNIT_PATH, renderRunnerUnit(config), 0o644);
 }
 
-async function enableService(d: ResolvedDeps): Promise<void> {
+export async function enableService(d: ResolvedDeps): Promise<void> {
   const spin = clack.spinner();
   spin.start("Enabling systemd unit");
   const reload = await d.exec.run("systemctl", ["daemon-reload"]);
   if (!reload.ok)
     throw new Error(`systemctl daemon-reload failed: ${reload.stderr || reload.exitCode}`);
-  const enable = await d.exec.run("systemctl", ["enable", "--now", RUNNER_SERVICE_NAME]);
+  // `enable` (persistence) then `restart` — NOT `enable --now`: on a re-install
+  // over an already-active unit `enable --now` is a no-op that leaves the OLD
+  // binary running, so the health poll would validate the stale daemon. `restart`
+  // is idempotent (starts if stopped, restarts if running) → always the new binary.
+  const enable = await d.exec.run("systemctl", ["enable", RUNNER_SERVICE_NAME]);
   if (!enable.ok) {
     throw new Error(
-      `systemctl enable --now ${RUNNER_SERVICE_NAME} failed: ${enable.stderr || enable.exitCode}. ` +
+      `systemctl enable ${RUNNER_SERVICE_NAME} failed: ${enable.stderr || enable.exitCode}. ` +
+        `Inspect with \`journalctl -u ${RUNNER_SERVICE_NAME} -n 50\`.`,
+    );
+  }
+  const restart = await d.exec.run("systemctl", ["restart", RUNNER_SERVICE_NAME]);
+  if (!restart.ok) {
+    throw new Error(
+      `systemctl restart ${RUNNER_SERVICE_NAME} failed: ${restart.stderr || restart.exitCode}. ` +
         `Inspect with \`journalctl -u ${RUNNER_SERVICE_NAME} -n 50\`.`,
     );
   }
