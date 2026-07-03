@@ -204,6 +204,22 @@ program
     "Bypass the 'another Compose project is already running under this name' preflight. Only use if you have already backed up the other install's data.",
   )
   .option(
+    "--run-adapter <docker|firecracker>",
+    "Agent execution backend (default: docker). `firecracker` runs agents in microVMs on a KVM host running the appstrate-runner daemon. Docker tiers only. Also honored via APPSTRATE_RUN_ADAPTER.",
+  )
+  .option(
+    "--runner-url <url>",
+    "Firecracker (remote): URL of an existing appstrate-runner daemon on a KVM host, e.g. http://10.0.0.9:3100. Implies the remote topology.",
+  )
+  .option(
+    "--runner-token <token>",
+    "Firecracker: shared bearer token for the runner daemon (default: generate one).",
+  )
+  .option(
+    "--host-ip <ipv4>",
+    "Firecracker (same-host): this host's LAN IPv4 the daemon + guests reach the platform on (default: auto-detect).",
+  )
+  .option(
     "-y, --yes",
     "Skip all prompts and accept smart defaults (Docker-aware tier from #180, default directory, auto-start dev server). Required for curl|bash, CI, Dockerfile RUN, cloud-init. Equivalent to APPSTRATE_YES=1. Per-field flags (--tier, --dir, --port) still override the defaults.",
   )
@@ -232,6 +248,10 @@ program
         typeof opts.minioConsolePort === "string" ? opts.minioConsolePort : undefined,
       force: opts.force === true,
       autoConfirm,
+      runAdapter: typeof opts.runAdapter === "string" ? opts.runAdapter : undefined,
+      runnerUrl: typeof opts.runnerUrl === "string" ? opts.runnerUrl : undefined,
+      runnerToken: typeof opts.runnerToken === "string" ? opts.runnerToken : undefined,
+      hostIp: typeof opts.hostIp === "string" ? opts.hostIp : undefined,
     });
   });
 

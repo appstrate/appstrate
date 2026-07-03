@@ -27,6 +27,14 @@
 # Usage:
 #   curl -fsSL https://get.appstrate.dev | bash
 #   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3
+#   # Firecracker execution backend (microVMs) on this KVM host:
+#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 \
+#     --run-adapter firecracker --host-ip 10.0.0.5
+#   # ...or paired with a remote runner daemon:
+#   #   --run-adapter firecracker --runner-url http://10.0.0.9:3100 --runner-token <token>
+#
+# All `appstrate install` flags (including --run-adapter / --runner-url /
+# --runner-token / --host-ip) pass straight through this wrapper.
 #
 # Env overrides:
 #   APPSTRATE_VERSION             Pin a release tag (default: pinned or "latest").

@@ -25,12 +25,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { createServer, type Server } from "node:net";
 import { platform } from "node:os";
+import type { NetworkInterfaceInfo } from "node:os";
 import {
   runCommand,
   waitForHttp,
   commandExists,
   isPortAvailable,
   describeProcessOnPort,
+  detectLanIpv4,
+  isIpv4,
 } from "../../src/lib/install/os.ts";
 
 const originalFetch = globalThis.fetch;
@@ -229,6 +232,71 @@ describe("describeProcessOnPort", () => {
     const port = await pickEphemeralPort();
     const hint = await describeProcessOnPort(port);
     expect(hint).toBeNull();
+  });
+});
+
+describe("isIpv4", () => {
+  it("accepts well-formed IPv4 literals", () => {
+    expect(isIpv4("10.0.0.5")).toBe(true);
+    expect(isIpv4("192.168.1.20")).toBe(true);
+    expect(isIpv4("255.255.255.255")).toBe(true);
+    expect(isIpv4("0.0.0.0")).toBe(true);
+  });
+
+  it("rejects hostnames, out-of-range octets, and malformed input", () => {
+    expect(isIpv4("runner.local")).toBe(false);
+    expect(isIpv4("10.0.0")).toBe(false);
+    expect(isIpv4("256.0.0.1")).toBe(false);
+    expect(isIpv4("10.0.0.5.6")).toBe(false);
+    expect(isIpv4("")).toBe(false);
+  });
+});
+
+describe("detectLanIpv4", () => {
+  // Minimal helper — only the fields detectLanIpv4 reads.
+  const iface = (
+    address: string,
+    opts: { internal?: boolean; family?: "IPv4" | "IPv6" } = {},
+  ): NetworkInterfaceInfo =>
+    ({
+      address,
+      family: opts.family ?? "IPv4",
+      internal: opts.internal ?? false,
+      netmask: "255.255.255.0",
+      mac: "00:00:00:00:00:00",
+      cidr: null,
+    }) as NetworkInterfaceInfo;
+
+  it("prefers an RFC 1918 private address over a public one", () => {
+    const ip = detectLanIpv4(() => ({
+      en0: [iface("8.8.8.8"), iface("192.168.1.42")],
+    }));
+    expect(ip).toBe("192.168.1.42");
+  });
+
+  it("skips loopback / internal interfaces", () => {
+    const ip = detectLanIpv4(() => ({
+      lo0: [iface("127.0.0.1", { internal: true })],
+      en0: [iface("10.1.2.3")],
+    }));
+    expect(ip).toBe("10.1.2.3");
+  });
+
+  it("ignores IPv6 addresses", () => {
+    const ip = detectLanIpv4(() => ({
+      en0: [iface("fe80::1", { family: "IPv6" }), iface("172.16.5.5")],
+    }));
+    expect(ip).toBe("172.16.5.5");
+  });
+
+  it("falls back to a non-private IPv4 when no RFC 1918 address exists", () => {
+    const ip = detectLanIpv4(() => ({ en0: [iface("203.0.113.7")] }));
+    expect(ip).toBe("203.0.113.7");
+  });
+
+  it("returns null on a loopback-only host", () => {
+    const ip = detectLanIpv4(() => ({ lo0: [iface("127.0.0.1", { internal: true })] }));
+    expect(ip).toBeNull();
   });
 });
 

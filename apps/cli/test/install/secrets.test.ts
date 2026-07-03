@@ -283,6 +283,52 @@ describe("generateEnvForTier — bootstrap (issue #228)", () => {
   });
 });
 
+describe("generateEnvForTier — Firecracker backend (#819)", () => {
+  it("writes nothing extra for the docker backend (default)", () => {
+    const env = generateEnvForTier(3, "http://localhost:3000", {}, {}, { adapter: "docker" });
+    expect(env.RUN_ADAPTER).toBeUndefined();
+    expect(env.MODULES).toBeUndefined();
+    expect(env.FIRECRACKER_RUNNER_URL).toBeUndefined();
+    expect(env.FIRECRACKER_RUNNER_TOKEN).toBeUndefined();
+  });
+
+  it("emits RUN_ADAPTER + MODULES + FIRECRACKER_RUNNER_* for the firecracker backend", () => {
+    const env = generateEnvForTier(
+      3,
+      "http://localhost:3000",
+      {},
+      {},
+      {
+        adapter: "firecracker",
+        runnerUrl: "http://10.0.0.5:3100",
+        runnerToken: "tok-abcdef1234567890",
+      },
+    );
+    expect(env.RUN_ADAPTER).toBe("firecracker");
+    // Base module default + firecracker (mirror of the Zod schema default).
+    expect(env.MODULES).toBe("oidc,webhooks,mcp,core-providers,firecracker");
+    expect(env.FIRECRACKER_RUNNER_URL).toBe("http://10.0.0.5:3100");
+    expect(env.FIRECRACKER_RUNNER_TOKEN).toBe("tok-abcdef1234567890");
+  });
+
+  it("never emits firecracker keys on Tier 0 (option is Docker-tier only)", () => {
+    const env = generateEnvForTier(
+      0,
+      "http://localhost:3000",
+      {},
+      {},
+      {
+        adapter: "firecracker",
+        runnerUrl: "http://10.0.0.5:3100",
+        runnerToken: "tok-abcdef1234567890",
+      },
+    );
+    expect(env.RUN_ADAPTER).toBeUndefined();
+    expect(env.MODULES).toBeUndefined();
+    expect(env.FIRECRACKER_RUNNER_URL).toBeUndefined();
+  });
+});
+
 describe("isValidBootstrapEmail", () => {
   it("accepts well-formed emails", () => {
     expect(isValidBootstrapEmail("admin@acme.com")).toBe(true);

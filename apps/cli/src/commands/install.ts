@@ -21,6 +21,7 @@ import {
   isValidBootstrapEmail,
   renderEnvFile,
   type BootstrapOverrides,
+  type RunBackendEnv,
   type Tier,
 } from "../lib/install/secrets.ts";
 import {
@@ -43,7 +44,16 @@ import {
   spawnDevServer,
   writeEnvFile as writeTier0Env,
 } from "../lib/install/tier0.ts";
-import { openBrowser, isPortAvailable, describeProcessOnPort } from "../lib/install/os.ts";
+import {
+  openBrowser,
+  isPortAvailable,
+  describeProcessOnPort,
+  detectLanIpv4,
+  isIpv4,
+  runCommand,
+} from "../lib/install/os.ts";
+import { generateRunnerToken } from "../lib/runner/config-files.ts";
+import { RUNNER_DEFAULT_PORT } from "../lib/runner/constants.ts";
 import {
   detectInstallMode,
   mergeEnv,
@@ -101,6 +111,18 @@ export interface InstallOptions {
    * the installer usable from CI, Dockerfile `RUN`, cloud-init, Ansible.
    */
   autoConfirm?: boolean;
+  /**
+   * Agent execution backend: `docker` (default) or `firecracker`. Also
+   * honored via `APPSTRATE_RUN_ADAPTER`. Only meaningful on Docker tiers
+   * (1/2/3); ignored on tier 0. See `resolveRunBackend`.
+   */
+  runAdapter?: string;
+  /** Firecracker/remote: URL of an existing appstrate-runner daemon (http://<ipv4>:3100). */
+  runnerUrl?: string;
+  /** Firecracker: shared bearer token for the runner daemon. */
+  runnerToken?: string;
+  /** Firecracker/same-host: this host's LAN IPv4 (overrides auto-detection). */
+  hostIp?: string;
 }
 
 const DEFAULT_PORT = 3000;
@@ -260,13 +282,27 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     if (tier === 0) {
       await installTier0(dir, port, { autoConfirm, bootstrap });
     } else {
+      // Agent execution backend (docker | firecracker) — offered only on
+      // Docker tiers. Docker stays the default; firecracker mints a runner
+      // token, writes the runner env, and (same-host) drives the daemon
+      // install after the stack is up.
+      const runBackend = await resolveRunBackend({
+        runAdapter: opts.runAdapter,
+        runnerUrl: opts.runnerUrl,
+        runnerToken: opts.runnerToken,
+        hostIp: opts.hostIp,
+        appPort: port,
+        nonInteractive,
+      });
       await installDockerTier(dir, tier, port, minioConsolePort, {
         force: opts.force ?? false,
         mode: installState.mode,
         existing: installState.existing,
         project: project!,
         autoConfirm,
+        nonInteractive,
         bootstrap,
+        runBackend,
       });
     }
   } catch (err) {
@@ -783,6 +819,401 @@ export async function resolveDir(
   return resolve(chosen);
 }
 
+// ─── Agent execution backend (docker | firecracker) ──────────────────
+//
+// An execution-backend *option*, NOT a tier. Offered only on Docker tiers
+// (1/2/3). `docker` (the default) runs agents in local containers;
+// `firecracker` runs them in microVMs on a KVM host running the
+// `appstrate-runner` daemon. Two firecracker topologies: the daemon lives
+// on THIS host (same-host — we drive `appstrate runner install` via sudo
+// after the stack is up) or on a REMOTE KVM host (we print the one-liner
+// the operator runs there). Main install stays rootless in both cases.
+
+/** Resolved backend decision threaded into `.env` writing + post-install steps. */
+export type RunBackendConfig =
+  | { adapter: "docker" }
+  | {
+      adapter: "firecracker";
+      /** FIRECRACKER_RUNNER_URL written to the platform `.env` (http://<runner-ip>:3100). */
+      runnerUrl: string;
+      /** Shared bearer token between platform and daemon. */
+      token: string;
+      /** Where the token came from — a flag the operator passed, or freshly minted. */
+      tokenSource: "flag" | "generated";
+      /** Daemon lives on this host, or a separate KVM host. */
+      topology: "same-host" | "remote";
+      /** This host's LAN IPv4 — the address the daemon/guests reach the platform on. */
+      hostIp: string;
+      /** Full platform URL for `runner install --platform-url` (http://<hostIp>:<appPort>). */
+      platformUrl: string;
+    };
+
+export interface RunBackendInputs {
+  /** `--run-adapter` flag (env `APPSTRATE_RUN_ADAPTER` applied as fallback here). */
+  runAdapter?: string;
+  /** `--runner-url` — an existing remote daemon URL (implies the remote topology). */
+  runnerUrl?: string;
+  /** `--runner-token` — shared bearer token. */
+  runnerToken?: string;
+  /** `--host-ip` — override this host's LAN IPv4 detection. */
+  hostIp?: string;
+  /** The resolved platform host port, used to build the platform URL. */
+  appPort: number;
+  /** No interactive prompts allowed (`--tier`/`--yes`/non-TTY). */
+  nonInteractive: boolean;
+}
+
+/**
+ * DI seam for `resolveRunBackend()` — production wires clack + the real
+ * network-interface probe + token minting; tests inject deterministic
+ * stubs so no prompt, no `os.networkInterfaces()`, no randomness leaks in.
+ */
+export interface RunBackendResolverDeps {
+  select?: typeof clack.select;
+  isCancel?: typeof clack.isCancel;
+  askText?: typeof askText;
+  detectLanIpv4?: () => string | null;
+  generateToken?: () => string;
+}
+
+/** IPv4-literal URL — guests have no DNS (mirrors `IPV4_URL_RE` in commands/runner.ts). */
+const IPV4_URL_RE = /^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\/?$/;
+
+/** Resolve + validate the runner token (flag > freshly minted). */
+function resolveRunnerToken(
+  flagToken: string | undefined,
+  mint: () => string,
+): { value: string; source: "flag" | "generated" } {
+  const t = flagToken?.trim();
+  if (t) {
+    if (t.length < 16) {
+      throw new Error(
+        "--runner-token must be at least 16 characters (it guards the credential-bearing runner daemon API).",
+      );
+    }
+    return { value: t, source: "flag" };
+  }
+  return { value: mint(), source: "generated" };
+}
+
+const IPV4_HINT =
+  "Firecracker guests have no DNS resolver, so it must be an IPv4 literal — a hostname would fail inside every microVM.";
+
+/**
+ * Resolve the agent execution backend for a Docker-tier install.
+ *
+ * Precedence for the adapter: `--run-adapter` flag > `APPSTRATE_RUN_ADAPTER`
+ * env > interactive select (docker default) > docker (non-interactive).
+ * Docker returns immediately. Firecracker then resolves a topology and the
+ * runner URL / token / host IP it needs.
+ *
+ * NOT called for tier 0 (the caller skips it) — firecracker is a Docker-tier
+ * option only.
+ */
+export async function resolveRunBackend(
+  inputs: RunBackendInputs,
+  deps: RunBackendResolverDeps = {},
+): Promise<RunBackendConfig> {
+  const select = deps.select ?? clack.select;
+  const isCancel = deps.isCancel ?? clack.isCancel;
+  const promptText = deps.askText ?? askText;
+  const detectIp = deps.detectLanIpv4 ?? detectLanIpv4;
+  const mintToken = deps.generateToken ?? generateRunnerToken;
+  const { appPort, nonInteractive } = inputs;
+
+  // 1. Which adapter? Flag > env > prompt (interactive) > docker.
+  const rawAdapter = (inputs.runAdapter ?? process.env.APPSTRATE_RUN_ADAPTER)?.trim();
+  let adapter: "docker" | "firecracker";
+  if (rawAdapter !== undefined && rawAdapter !== "") {
+    if (rawAdapter !== "docker" && rawAdapter !== "firecracker") {
+      throw new Error(
+        `Invalid --run-adapter value "${rawAdapter}". Expected "docker" or "firecracker".`,
+      );
+    }
+    adapter = rawAdapter;
+  } else if (nonInteractive) {
+    adapter = "docker";
+  } else {
+    const chosen = await select<"docker" | "firecracker">({
+      message: "Agent execution backend?",
+      initialValue: "docker",
+      options: [
+        { value: "docker", label: "Docker — run agents in local containers (default)" },
+        {
+          value: "firecracker",
+          label: "Firecracker — microVMs (requires a KVM host running the appstrate-runner daemon)",
+        },
+      ],
+    });
+    if (isCancel(chosen)) {
+      clack.cancel("Cancelled.");
+      process.exit(130);
+    }
+    adapter = chosen;
+  }
+
+  if (adapter === "docker") return { adapter: "docker" };
+
+  // 2. Firecracker — determine the topology.
+  const hasRunnerUrl = (inputs.runnerUrl ?? "").trim() !== "";
+  const hasHostIp = (inputs.hostIp ?? "").trim() !== "";
+  let topology: "same-host" | "remote";
+  if (hasRunnerUrl) topology = "remote";
+  else if (hasHostIp) topology = "same-host";
+  else if (nonInteractive) {
+    throw new Error(
+      "--run-adapter firecracker in non-interactive mode requires either " +
+        "(--runner-url <url> --runner-token <token>) for a remote KVM host, " +
+        "or --host-ip <ipv4> to install the runner daemon on this host.",
+    );
+  } else {
+    const chosen = await select<"same-host" | "remote">({
+      message: "Where does the Firecracker runner daemon run?",
+      initialValue: "same-host",
+      options: [
+        {
+          value: "same-host",
+          label: "This host — install the appstrate-runner daemon here (needs KVM + sudo)",
+        },
+        { value: "remote", label: "A remote KVM host — I'll run the daemon installer there" },
+      ],
+    });
+    if (isCancel(chosen)) {
+      clack.cancel("Cancelled.");
+      process.exit(130);
+    }
+    topology = chosen;
+  }
+
+  // Non-interactive remote must carry an explicit token (there is no daemon
+  // yet to preserve one from, and we can't prompt).
+  if (nonInteractive && topology === "remote" && !(inputs.runnerToken ?? "").trim()) {
+    throw new Error(
+      "--run-adapter firecracker --runner-url also requires --runner-token in non-interactive mode.",
+    );
+  }
+
+  if (topology === "same-host") {
+    // This host's LAN IP: flag > detection (interactive confirm/override).
+    let ip = inputs.hostIp?.trim();
+    if (!ip) {
+      const detected = detectIp();
+      if (nonInteractive) {
+        // Guarded above (hasHostIp) — defensive only.
+        if (!detected) {
+          throw new Error("Could not detect a LAN IPv4 for this host — pass --host-ip <ipv4>.");
+        }
+        ip = detected;
+      } else {
+        ip = (
+          await promptText(
+            "Host LAN IPv4 the runner + guests reach the platform on",
+            detected ?? "",
+          )
+        ).trim();
+      }
+    }
+    if (!isIpv4(ip)) {
+      throw new Error(
+        `Invalid host IP "${ip}" — must be an IPv4 literal (e.g. 10.0.0.5). ${IPV4_HINT}`,
+      );
+    }
+    const token = resolveRunnerToken(inputs.runnerToken, mintToken);
+    return {
+      adapter: "firecracker",
+      runnerUrl: `http://${ip}:${RUNNER_DEFAULT_PORT}`,
+      token: token.value,
+      tokenSource: token.source,
+      topology: "same-host",
+      hostIp: ip,
+      platformUrl: `http://${ip}:${appPort}`,
+    };
+  }
+
+  // topology === "remote"
+  // Runner daemon URL: flag (full URL) > interactive prompt for the KVM host IP.
+  let runnerUrl = inputs.runnerUrl?.trim();
+  if (runnerUrl) {
+    runnerUrl = runnerUrl.replace(/\/+$/, "");
+    if (!IPV4_URL_RE.test(runnerUrl)) {
+      throw new Error(
+        `Invalid --runner-url "${runnerUrl}" — must be http(s)://<IPv4>[:port]. ${IPV4_HINT}`,
+      );
+    }
+    // The regex only shapes the host as four dotted numbers — it happily
+    // accepts out-of-range octets like `300.0.0.1`. Range-check the host
+    // with `isIpv4` so a bogus literal fails here, not inside a guest.
+    const runnerHost = new URL(runnerUrl).hostname;
+    if (!isIpv4(runnerHost)) {
+      throw new Error(
+        `Invalid --runner-url "${runnerUrl}" — the host must be an IPv4 literal (e.g. 10.0.0.9). ${IPV4_HINT}`,
+      );
+    }
+  } else {
+    const runnerIp = (await promptText("Runner (KVM host) LAN IPv4", "")).trim();
+    if (!isIpv4(runnerIp)) {
+      throw new Error(
+        `Invalid runner IP "${runnerIp}" — must be an IPv4 literal (e.g. 10.0.0.9). ${IPV4_HINT}`,
+      );
+    }
+    runnerUrl = `http://${runnerIp}:${RUNNER_DEFAULT_PORT}`;
+  }
+
+  const token = resolveRunnerToken(inputs.runnerToken, mintToken);
+
+  // This host's LAN IP for the printed one-liner's --platform-url.
+  let hostIp = inputs.hostIp?.trim();
+  if (!hostIp) {
+    const detected = detectIp();
+    hostIp = nonInteractive
+      ? (detected ?? "")
+      : (
+          await promptText(
+            "This host's LAN IPv4 (the daemon reaches the platform here)",
+            detected ?? "",
+          )
+        ).trim();
+  }
+  if (hostIp && !isIpv4(hostIp)) {
+    throw new Error(
+      `Invalid host IP "${hostIp}" — must be an IPv4 literal (e.g. 10.0.0.5). ${IPV4_HINT}`,
+    );
+  }
+  // A missing this-host IP (non-interactive, undetectable) degrades only the
+  // printed hint — the platform `.env` needs just the runner URL + token.
+  const platformHost = hostIp || "<this-host-ip>";
+
+  return {
+    adapter: "firecracker",
+    runnerUrl,
+    token: token.value,
+    tokenSource: token.source,
+    topology: "remote",
+    hostIp,
+    platformUrl: `http://${platformHost}:${appPort}`,
+  };
+}
+
+/**
+ * Resolve the argv used to re-invoke THIS CLI. For the shipped single-file
+ * binary `process.execPath` IS the appstrate binary; when running from
+ * source under bun/node it's the runtime and `argv[1]` is the entry script.
+ * Callers prefix `sudo` (and append the subcommand).
+ */
+export function resolveCliInvocation(
+  execPath: string = process.execPath,
+  argv: string[] = process.argv,
+): string[] {
+  const base = (execPath.split("/").pop() ?? execPath).toLowerCase();
+  if (base === "bun" || base === "node" || base === "bun.exe" || base === "node.exe") {
+    const script = argv[1];
+    return script ? [execPath, script] : [execPath];
+  }
+  return [execPath];
+}
+
+/**
+ * Build the argv (excluding the leading `sudo`) for the same-host runner
+ * install: `<cli> runner install --platform-url <url> --token <token> --yes`.
+ * The token is a secret but must appear here — it is how the daemon pairs
+ * with the platform.
+ */
+export function buildRunnerInstallArgs(
+  cliInvocation: string[],
+  platformUrl: string,
+  token: string,
+): string[] {
+  return [
+    ...cliInvocation,
+    "runner",
+    "install",
+    "--platform-url",
+    platformUrl,
+    "--token",
+    token,
+    "--yes",
+  ];
+}
+
+/**
+ * Render the Firecracker post-install follow-up note. For the remote
+ * topology this includes the exact one-liner to run on the KVM host (which
+ * carries the pairing token — intended). Both topologies print the daemon
+ * lifecycle hints.
+ */
+export function firecrackerFollowupNote(
+  rb: Extract<RunBackendConfig, { adapter: "firecracker" }>,
+): string {
+  const lines: string[] = [];
+  if (rb.topology === "remote") {
+    lines.push(
+      "Run this on your KVM host to install + pair the runner daemon:",
+      "",
+      `  curl -fsSL https://get.appstrate.dev/runner | bash -s -- --platform-url ${rb.platformUrl} --token ${rb.token}`,
+      "",
+    );
+  }
+  lines.push(
+    "Manage the runner daemon on the KVM host:",
+    "  appstrate runner status",
+    "  appstrate runner logs -f",
+    "  appstrate runner doctor",
+  );
+  return lines.join("\n");
+}
+
+/**
+ * Same-host firecracker: after the platform stack is healthy, install the
+ * runner daemon on THIS host. Interactive → spawn `sudo appstrate runner
+ * install …` (sudo prompts on the same TTY). Non-interactive → print the
+ * command instead (we can't sudo-prompt). A non-zero exit is a WARNING, not
+ * a failure: the platform itself is already installed and running.
+ *
+ * The spawn goes through an injectable seam so tests never actually sudo.
+ */
+export async function runSameHostRunnerInstall(
+  rb: Extract<RunBackendConfig, { adapter: "firecracker" }>,
+  opts: {
+    nonInteractive: boolean;
+    run?: (cmd: string, args: string[]) => Promise<{ ok: boolean; exitCode: number }>;
+    cliInvocation?: string[];
+    note?: (message: string, title?: string) => void;
+    logInfo?: (message: string) => void;
+    logWarn?: (message: string) => void;
+  },
+): Promise<void> {
+  const run = opts.run ?? ((cmd, args) => runCommand(cmd, args, { stdio: "inherit" }));
+  // Wrap the clack helpers in arrows — extracting `clack.log.info` as a bare
+  // value would drop its `this` binding.
+  const note = opts.note ?? ((message: string, title?: string) => clack.note(message, title));
+  const logInfo = opts.logInfo ?? ((message: string) => clack.log.info(message));
+  const logWarn = opts.logWarn ?? ((message: string) => clack.log.warn(message));
+  const cliInvocation = opts.cliInvocation ?? resolveCliInvocation();
+  const args = buildRunnerInstallArgs(cliInvocation, rb.platformUrl, rb.token);
+  const manualCommand = `sudo ${args.join(" ")}`;
+
+  if (opts.nonInteractive) {
+    note(
+      "The platform is configured for Firecracker. Install the runner daemon on this host " +
+        `(needs root + KVM) with:\n\n  ${manualCommand}`,
+      "Next: install the runner daemon",
+    );
+    return;
+  }
+
+  logInfo(
+    "Installing the Firecracker runner daemon on this host — sudo is required, " +
+      "you may be prompted for your password.",
+  );
+  const res = await run("sudo", args);
+  if (!res.ok) {
+    logWarn(
+      `The runner daemon install did not complete (exit ${res.exitCode}). The platform is ` +
+        `installed and running; finish the runner setup manually:\n\n  ${manualCommand}`,
+    );
+  }
+}
+
 async function installTier0(
   dir: string,
   port: number,
@@ -934,10 +1365,20 @@ async function installDockerTier(
     existing: ExistingInstall;
     project: { name: string; origin: "sidecar" | "derived" };
     autoConfirm: boolean;
+    nonInteractive: boolean;
     bootstrap: BootstrapOverrides;
+    runBackend: RunBackendConfig;
   },
 ): Promise<void> {
   const appUrl = appUrlForPort(port);
+  const runBackend = opts.runBackend;
+  // Firecracker `.env` keys (RUN_ADAPTER/MODULES/FIRECRACKER_RUNNER_*). On
+  // upgrade these flow through `mergeEnv` like every other secret (existing
+  // wins), so re-running install never rotates the runner token.
+  const runBackendEnv: RunBackendEnv =
+    runBackend.adapter === "firecracker"
+      ? { adapter: "firecracker", runnerUrl: runBackend.runnerUrl, runnerToken: runBackend.token }
+      : { adapter: "docker" };
   // Docker.
   const dockerSpinner = spinner();
   dockerSpinner.start("Checking Docker");
@@ -1022,7 +1463,13 @@ async function installDockerTier(
         mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
       );
       await writeComposeFile(dir, tier);
-      const fresh = generateEnvForTier(tier, appUrl, { port, minioConsolePort }, opts.bootstrap);
+      const fresh = generateEnvForTier(
+        tier,
+        appUrl,
+        { port, minioConsolePort },
+        opts.bootstrap,
+        runBackendEnv,
+      );
       const envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
       await writeComposeEnv(dir, renderEnvFile(envVars));
       writeSpinner.stop(
@@ -1062,6 +1509,23 @@ async function installDockerTier(
       if (backedUp.length > 0) await cleanupBackups(dir, backedUp);
     },
   );
+
+  // Firecracker post-install (runs AFTER the platform is committed — a
+  // runner-install hiccup must never roll back the healthy stack). Same-host
+  // drives `sudo appstrate runner install` (or prints it in non-interactive
+  // mode); both topologies then print the daemon lifecycle hints + (remote)
+  // the pairing one-liner.
+  if (runBackend.adapter === "firecracker") {
+    if (runBackend.topology === "same-host") {
+      await runSameHostRunnerInstall(runBackend, { nonInteractive: opts.nonInteractive });
+    }
+    clack.note(
+      firecrackerFollowupNote(runBackend),
+      runBackend.topology === "remote"
+        ? "Firecracker — install the runner on your KVM host"
+        : "Firecracker runner",
+    );
+  }
 
   await openBrowser(appUrl);
   printBootstrapFollowup(appUrl, opts.bootstrap);

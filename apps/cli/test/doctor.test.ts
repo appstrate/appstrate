@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { formatDoctorReport, runDoctor, type ProbeBinary } from "../src/lib/doctor.ts";
+import {
+  formatDoctorReport,
+  runDoctor,
+  type FirecrackerHealth,
+  type ProbeBinary,
+} from "../src/lib/doctor.ts";
 import { type PathScanFs } from "../src/lib/path-scan.ts";
 import { buildInternalInfoPayload, type InternalInfoPayload } from "../src/commands/internal.ts";
 import { CODE_DEFAULTS } from "../src/lib/compose-defaults.ts";
@@ -503,6 +508,86 @@ describe("compose-drift check (#515)", () => {
       "/usr/local/bin/appstrate",
     );
     expect(text).not.toContain("Compose drift");
+  });
+});
+
+describe("runDoctor — Firecracker runner reachability (#819)", () => {
+  const localInstall = { dir: "/srv/appstrate", projectName: "appstrate-prod-cafebabe" };
+  const firecrackerEnv =
+    "RUN_ADAPTER=firecracker\nFIRECRACKER_RUNNER_URL=http://10.0.0.9:3100\nFIRECRACKER_RUNNER_TOKEN=tok-abcdef1234567890\n";
+
+  async function run(
+    readEnv: string | null,
+    probeFirecracker?: (url: string, token: string) => Promise<FirecrackerHealth>,
+  ) {
+    return runDoctor({
+      pathEnv: "/usr/local/bin",
+      pathScanFs: fs({ "/usr/local/bin/appstrate": { exec: true } }),
+      probeBinary: probe({ "/usr/local/bin/appstrate": { version: "1.2.3", source: "curl" } }),
+      execPath: "/usr/local/bin/appstrate",
+      probeLocalInstall: async () => localInstall,
+      readComposeFile: async () => null,
+      readEnvFile: async () => readEnv,
+      probeFirecracker,
+    });
+  }
+
+  it("reports ok when the daemon health probe returns 200", async () => {
+    let probedUrl = "";
+    let probedToken = "";
+    const report = await run(firecrackerEnv, async (url, token) => {
+      probedUrl = url;
+      probedToken = token;
+      return { status: "ok", url };
+    });
+    expect(report.firecracker).toEqual({ status: "ok", url: "http://10.0.0.9:3100" });
+    expect(probedUrl).toBe("http://10.0.0.9:3100");
+    expect(probedToken).toBe("tok-abcdef1234567890");
+    expect(formatDoctorReport(report, "/usr/local/bin/appstrate")).toContain(
+      "reachable and authorized",
+    );
+  });
+
+  it("reports unauthorized (401) with a runner-doctor hint", async () => {
+    const report = await run(firecrackerEnv, async (url) => ({
+      status: "unauthorized",
+      url,
+      detail: "HTTP 401",
+    }));
+    expect(report.firecracker?.status).toBe("unauthorized");
+    const text = formatDoctorReport(report, "/usr/local/bin/appstrate");
+    expect(text).toContain("unauthorized");
+    expect(text).toContain("appstrate runner doctor");
+  });
+
+  it("reports unreachable on a connection error / timeout", async () => {
+    const report = await run(firecrackerEnv, async (url) => ({
+      status: "unreachable",
+      url,
+      detail: "The operation was aborted",
+    }));
+    expect(report.firecracker?.status).toBe("unreachable");
+    expect(formatDoctorReport(report, "/usr/local/bin/appstrate")).toContain("unreachable");
+  });
+
+  it("skips the probe entirely for a docker-backend install", async () => {
+    let probed = false;
+    const report = await run("RUN_ADAPTER=docker\n", async (url) => {
+      probed = true;
+      return { status: "ok", url };
+    });
+    expect(report.firecracker).toBeUndefined();
+    expect(probed).toBe(false);
+  });
+
+  it("skips the probe when there is no .env", async () => {
+    let probed = false;
+    const report = await run(null, async (url) => {
+      probed = true;
+      return { status: "ok", url };
+    });
+    expect(report.firecracker).toBeUndefined();
+    expect(probed).toBe(false);
   });
 });
 

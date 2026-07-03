@@ -30,6 +30,12 @@ import {
   resolveMinioConsolePort,
   resolveBootstrapEmail,
   printBootstrapFollowup,
+  resolveRunBackend,
+  buildRunnerInstallArgs,
+  firecrackerFollowupNote,
+  resolveCliInvocation,
+  runSameHostRunnerInstall,
+  type RunBackendConfig,
 } from "../src/commands/install.ts";
 import type { RunningComposeProject } from "../src/lib/install/tier123.ts";
 
@@ -1248,5 +1254,352 @@ describe("printBootstrapFollowup (issue #228) — post-install action", () => {
     );
     expect(cap.calls[0]!.message).toContain("http://appstrate.acme.com/register");
     expect(cap.calls[0]!.message).not.toContain("localhost");
+  });
+});
+
+// ─── resolveRunBackend (Firecracker execution-backend option) ─────────
+
+type ClackSelect = typeof import("@clack/prompts").select;
+type ClackIsCancel = typeof import("@clack/prompts").isCancel;
+type AskText = typeof import("../src/lib/ui.ts").askText;
+
+const asSelect = (fn: (opts: { message: string }) => Promise<unknown>): ClackSelect =>
+  fn as unknown as ClackSelect;
+const noCancel = (() => false) as unknown as ClackIsCancel;
+
+describe("resolveRunBackend — adapter selection", () => {
+  it("defaults to docker in non-interactive mode with no flags", async () => {
+    const cfg = await resolveRunBackend({ appPort: 3000, nonInteractive: true }, {});
+    expect(cfg).toEqual({ adapter: "docker" });
+  });
+
+  it("honors --run-adapter docker explicitly (zero firecracker config)", async () => {
+    const cfg = await resolveRunBackend(
+      { runAdapter: "docker", appPort: 3000, nonInteractive: true },
+      {},
+    );
+    expect(cfg).toEqual({ adapter: "docker" });
+  });
+
+  it("rejects an invalid --run-adapter value", async () => {
+    await expect(
+      resolveRunBackend({ runAdapter: "podman", appPort: 3000, nonInteractive: true }, {}),
+    ).rejects.toThrow(/Invalid --run-adapter/);
+  });
+
+  it("reads APPSTRATE_RUN_ADAPTER as a fallback", async () => {
+    const prev = process.env.APPSTRATE_RUN_ADAPTER;
+    process.env.APPSTRATE_RUN_ADAPTER = "firecracker";
+    try {
+      const cfg = await resolveRunBackend(
+        { hostIp: "10.0.0.5", appPort: 3000, nonInteractive: true },
+        { generateToken: () => "generated-token-abcdef1234" },
+      );
+      expect(cfg.adapter).toBe("firecracker");
+    } finally {
+      if (prev === undefined) delete process.env.APPSTRATE_RUN_ADAPTER;
+      else process.env.APPSTRATE_RUN_ADAPTER = prev;
+    }
+  });
+});
+
+describe("resolveRunBackend — non-interactive firecracker validation matrix", () => {
+  it("throws when neither --runner-url nor --host-ip is provided", async () => {
+    await expect(
+      resolveRunBackend({ runAdapter: "firecracker", appPort: 3000, nonInteractive: true }, {}),
+    ).rejects.toThrow(/requires either/);
+  });
+
+  it("throws when --runner-url is given without --runner-token", async () => {
+    await expect(
+      resolveRunBackend(
+        {
+          runAdapter: "firecracker",
+          runnerUrl: "http://10.0.0.9:3100",
+          appPort: 3000,
+          nonInteractive: true,
+        },
+        {},
+      ),
+    ).rejects.toThrow(/--runner-token/);
+  });
+
+  it("rejects a too-short --runner-token", async () => {
+    await expect(
+      resolveRunBackend(
+        {
+          runAdapter: "firecracker",
+          hostIp: "10.0.0.5",
+          runnerToken: "short",
+          appPort: 3000,
+          nonInteractive: true,
+        },
+        {},
+      ),
+    ).rejects.toThrow(/at least 16 characters/);
+  });
+
+  it("rejects a non-IPv4 --host-ip", async () => {
+    await expect(
+      resolveRunBackend(
+        {
+          runAdapter: "firecracker",
+          hostIp: "my-host.local",
+          appPort: 3000,
+          nonInteractive: true,
+        },
+        { generateToken: () => "x".repeat(16) },
+      ),
+    ).rejects.toThrow(/IPv4 literal/);
+  });
+
+  it("rejects a non-IPv4 --runner-url", async () => {
+    await expect(
+      resolveRunBackend(
+        {
+          runAdapter: "firecracker",
+          runnerUrl: "http://runner.local:3100",
+          runnerToken: "x".repeat(16),
+          appPort: 3000,
+          nonInteractive: true,
+        },
+        {},
+      ),
+    ).rejects.toThrow(/must be http\(s\):\/\/<IPv4>/);
+  });
+});
+
+describe("resolveRunBackend — firecracker same-host", () => {
+  it("builds runner + platform URLs and mints a token from --host-ip", async () => {
+    const cfg = await resolveRunBackend(
+      { runAdapter: "firecracker", hostIp: "10.0.0.5", appPort: 8080, nonInteractive: true },
+      { generateToken: () => "generated-token-abcdef1234" },
+    );
+    expect(cfg).toEqual({
+      adapter: "firecracker",
+      runnerUrl: "http://10.0.0.5:3100",
+      token: "generated-token-abcdef1234",
+      tokenSource: "generated",
+      topology: "same-host",
+      hostIp: "10.0.0.5",
+      platformUrl: "http://10.0.0.5:8080",
+    } satisfies RunBackendConfig);
+  });
+
+  it("honors an explicit --runner-token (>=16 chars)", async () => {
+    const cfg = await resolveRunBackend(
+      {
+        runAdapter: "firecracker",
+        hostIp: "10.0.0.5",
+        runnerToken: "y".repeat(20),
+        appPort: 3000,
+        nonInteractive: true,
+      },
+      {},
+    );
+    if (cfg.adapter !== "firecracker") throw new Error("expected firecracker");
+    expect(cfg.token).toBe("y".repeat(20));
+    expect(cfg.tokenSource).toBe("flag");
+  });
+});
+
+describe("resolveRunBackend — firecracker remote", () => {
+  it("uses --runner-url (trailing slash stripped) + this-host detected IP for platform-url", async () => {
+    const cfg = await resolveRunBackend(
+      {
+        runAdapter: "firecracker",
+        runnerUrl: "http://10.0.0.9:3100/",
+        runnerToken: "remote-token-abcdef1234",
+        appPort: 3000,
+        nonInteractive: true,
+      },
+      { detectLanIpv4: () => "192.168.1.20" },
+    );
+    if (cfg.adapter !== "firecracker") throw new Error("expected firecracker");
+    expect(cfg.topology).toBe("remote");
+    expect(cfg.runnerUrl).toBe("http://10.0.0.9:3100");
+    expect(cfg.token).toBe("remote-token-abcdef1234");
+    expect(cfg.tokenSource).toBe("flag");
+    expect(cfg.platformUrl).toBe("http://192.168.1.20:3000");
+  });
+
+  it("falls back to a <this-host-ip> placeholder when LAN detection fails", async () => {
+    const cfg = await resolveRunBackend(
+      {
+        runAdapter: "firecracker",
+        runnerUrl: "http://10.0.0.9:3100",
+        runnerToken: "remote-token-abcdef1234",
+        appPort: 3000,
+        nonInteractive: true,
+      },
+      { detectLanIpv4: () => null },
+    );
+    if (cfg.adapter !== "firecracker") throw new Error("expected firecracker");
+    expect(cfg.hostIp).toBe("");
+    expect(cfg.platformUrl).toBe("http://<this-host-ip>:3000");
+  });
+});
+
+describe("resolveRunBackend — interactive prompts", () => {
+  it("prompts for adapter + same-host IP, prefilling the detected LAN IP", async () => {
+    const prompts: string[] = [];
+    const askText = (async (msg: string, initial?: string) => {
+      prompts.push(`${msg}::${initial ?? ""}`);
+      return initial ?? "";
+    }) as unknown as AskText;
+    const cfg = await resolveRunBackend(
+      { appPort: 3000, nonInteractive: false },
+      {
+        select: asSelect(async (opts) =>
+          opts.message.toLowerCase().includes("backend") ? "firecracker" : "same-host",
+        ),
+        isCancel: noCancel,
+        askText,
+        detectLanIpv4: () => "10.1.2.3",
+        generateToken: () => "gen-token-abcdef123456",
+      },
+    );
+    if (cfg.adapter !== "firecracker") throw new Error("expected firecracker");
+    expect(cfg.topology).toBe("same-host");
+    expect(cfg.hostIp).toBe("10.1.2.3");
+    expect(prompts.some((p) => p.endsWith("::10.1.2.3"))).toBe(true);
+  });
+});
+
+describe("runner-install command builder + follow-up", () => {
+  it("resolveCliInvocation returns the binary path for a compiled build", () => {
+    expect(
+      resolveCliInvocation("/usr/local/bin/appstrate", ["/usr/local/bin/appstrate", "install"]),
+    ).toEqual(["/usr/local/bin/appstrate"]);
+  });
+
+  it("resolveCliInvocation prepends the runtime + entry script under bun/node", () => {
+    expect(
+      resolveCliInvocation("/opt/homebrew/bin/bun", [
+        "/opt/homebrew/bin/bun",
+        "/repo/apps/cli/src/cli.ts",
+        "install",
+      ]),
+    ).toEqual(["/opt/homebrew/bin/bun", "/repo/apps/cli/src/cli.ts"]);
+  });
+
+  it("buildRunnerInstallArgs carries --platform-url and --token", () => {
+    const args = buildRunnerInstallArgs(
+      ["/usr/local/bin/appstrate"],
+      "http://10.0.0.5:3000",
+      "the-token",
+    );
+    expect(args).toEqual([
+      "/usr/local/bin/appstrate",
+      "runner",
+      "install",
+      "--platform-url",
+      "http://10.0.0.5:3000",
+      "--token",
+      "the-token",
+      "--yes",
+    ]);
+  });
+
+  it("firecrackerFollowupNote (remote) prints the one-liner with platform-url + token", () => {
+    const note = firecrackerFollowupNote({
+      adapter: "firecracker",
+      runnerUrl: "http://10.0.0.9:3100",
+      token: "pairing-token-123456",
+      tokenSource: "generated",
+      topology: "remote",
+      hostIp: "192.168.1.20",
+      platformUrl: "http://192.168.1.20:3000",
+    });
+    expect(note).toContain("curl -fsSL https://get.appstrate.dev/runner");
+    expect(note).toContain("--platform-url http://192.168.1.20:3000");
+    expect(note).toContain("--token pairing-token-123456");
+    expect(note).toContain("appstrate runner status");
+  });
+
+  it("firecrackerFollowupNote (same-host) prints lifecycle hints, no curl one-liner", () => {
+    const note = firecrackerFollowupNote({
+      adapter: "firecracker",
+      runnerUrl: "http://10.0.0.5:3100",
+      token: "tok-123456",
+      tokenSource: "generated",
+      topology: "same-host",
+      hostIp: "10.0.0.5",
+      platformUrl: "http://10.0.0.5:3000",
+    });
+    expect(note).not.toContain("curl -fsSL");
+    expect(note).toContain("appstrate runner logs -f");
+  });
+});
+
+describe("runSameHostRunnerInstall", () => {
+  const rb = {
+    adapter: "firecracker",
+    runnerUrl: "http://10.0.0.5:3100",
+    token: "pairing-token-123456",
+    tokenSource: "generated",
+    topology: "same-host",
+    hostIp: "10.0.0.5",
+    platformUrl: "http://10.0.0.5:3000",
+  } satisfies RunBackendConfig;
+
+  it("interactive + exit 0: spawns sudo, no warning, no manual-command note", async () => {
+    const runCalls: Array<{ cmd: string; args: string[] }> = [];
+    const notes: string[] = [];
+    const warns: string[] = [];
+    await runSameHostRunnerInstall(rb, {
+      nonInteractive: false,
+      cliInvocation: ["/usr/local/bin/appstrate"],
+      run: async (cmd, args) => {
+        runCalls.push({ cmd, args });
+        return { ok: true, exitCode: 0 };
+      },
+      note: (message) => notes.push(message),
+      logInfo: () => {},
+      logWarn: (message) => warns.push(message),
+    });
+    expect(runCalls).toHaveLength(1);
+    expect(runCalls[0]?.cmd).toBe("sudo");
+    expect(warns).toHaveLength(0);
+    expect(notes).toHaveLength(0);
+  });
+
+  it("interactive + non-zero exit: warns and prints the manual sudo command with platform-url + token", async () => {
+    const warns: string[] = [];
+    await runSameHostRunnerInstall(rb, {
+      nonInteractive: false,
+      cliInvocation: ["/usr/local/bin/appstrate"],
+      run: async () => ({ ok: false, exitCode: 3 }),
+      note: () => {},
+      logInfo: () => {},
+      logWarn: (message) => warns.push(message),
+    });
+    expect(warns).toHaveLength(1);
+    const warning = warns[0] ?? "";
+    expect(warning).toContain("sudo /usr/local/bin/appstrate runner install");
+    expect(warning).toContain("--platform-url http://10.0.0.5:3000");
+    expect(warning).toContain("--token pairing-token-123456");
+  });
+
+  it("non-interactive: never spawns, prints the manual sudo command instead", async () => {
+    const runCalls: string[] = [];
+    const notes: string[] = [];
+    await runSameHostRunnerInstall(rb, {
+      nonInteractive: true,
+      cliInvocation: ["/usr/local/bin/appstrate"],
+      run: async (cmd) => {
+        runCalls.push(cmd);
+        return { ok: true, exitCode: 0 };
+      },
+      note: (message) => notes.push(message),
+      logInfo: () => {},
+      logWarn: () => {},
+    });
+    expect(runCalls).toHaveLength(0);
+    expect(notes).toHaveLength(1);
+    const note = notes[0] ?? "";
+    expect(note).toContain("sudo /usr/local/bin/appstrate runner install");
+    expect(note).toContain("--platform-url http://10.0.0.5:3000");
+    expect(note).toContain("--token pairing-token-123456");
   });
 });

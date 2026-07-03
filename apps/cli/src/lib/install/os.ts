@@ -12,6 +12,7 @@
 
 import { spawn, spawnSync, type SpawnOptions } from "node:child_process";
 import { createServer } from "node:net";
+import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 
 export interface CommandResult {
@@ -236,6 +237,56 @@ function parseSsOutput(raw: string): string | null {
   const match = raw.match(/users:\(\("([^"]+)",pid=(\d+)/);
   if (!match) return null;
   return `${match[1]} (pid ${match[2]})`;
+}
+
+/**
+ * Strict IPv4-literal check (each octet 0..255). Firecracker guests have
+ * no DNS resolver, so the platform URL the runner + guests reach must be
+ * an IPv4 literal — a hostname would fail inside every microVM. Mirrors
+ * the intent of `IPV4_URL_RE` in `commands/runner.ts` (that one matches a
+ * full URL; this one matches a bare address).
+ */
+const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+
+export function isIpv4(value: string): boolean {
+  if (!IPV4_RE.test(value)) return false;
+  return value.split(".").every((octet) => {
+    const n = Number(octet);
+    return Number.isInteger(n) && n >= 0 && n <= 255;
+  });
+}
+
+/** Private (RFC 1918) IPv4 ranges — preferred over public/other addresses. */
+function isRfc1918(ip: string): boolean {
+  return /^10\./.test(ip) || /^192\.168\./.test(ip) || /^172\.(?:1[6-9]|2\d|3[01])\./.test(ip);
+}
+
+/**
+ * Best-effort detection of this host's LAN IPv4 address — the address a
+ * same-host Firecracker runner daemon (and its guests) reach the platform
+ * on. Walks `os.networkInterfaces()`, keeps every non-internal IPv4, and
+ * prefers an RFC 1918 private address (the common LAN case) over a public
+ * or link-local one. Returns `null` when no non-internal IPv4 exists
+ * (loopback-only host) — the caller then prompts / requires `--host-ip`.
+ *
+ * `ifaces` is injectable so tests can feed a deterministic interface map
+ * without depending on the runner's real network configuration.
+ */
+export function detectLanIpv4(
+  ifaces: () => NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces,
+): string | null {
+  const candidates: string[] = [];
+  for (const list of Object.values(ifaces())) {
+    if (!list) continue;
+    for (const info of list) {
+      // node >= 18 reports `family` as the string "IPv4"; older/native
+      // callers may hand back the numeric 4 — accept both.
+      const isV4 = info.family === "IPv4" || (info.family as unknown) === 4;
+      if (!isV4 || info.internal) continue;
+      candidates.push(info.address);
+    }
+  }
+  return candidates.find(isRfc1918) ?? candidates[0] ?? null;
 }
 
 /**

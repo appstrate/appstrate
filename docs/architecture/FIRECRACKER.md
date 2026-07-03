@@ -124,6 +124,49 @@ and installed-artifacts version/protocol — `--json` for scripts); `runner
 update` (re-download the daemon binary for this CLI's version, verify,
 atomic-swap, restart); `runner status`; `runner logs [-f]`.
 
+## Installer integration — `appstrate install`
+
+The main installer offers Firecracker as an **execution-backend option**, not a
+tier. After the tier + port prompts, a Docker-tier install (1/2/3 — never tier 0) asks for the agent execution backend: `docker` (default) or `firecracker`.
+Choosing `firecracker` writes four keys into the generated `.env` (preserved
+across upgrades by `mergeEnv` like every other secret):
+
+```sh
+RUN_ADAPTER=firecracker
+MODULES=oidc,webhooks,mcp,core-providers,firecracker
+FIRECRACKER_RUNNER_URL=http://<runner-ip>:3100
+FIRECRACKER_RUNNER_TOKEN=<minted or --runner-token>
+```
+
+> **Re-installing over a hand-edited `.env`:** `mergeEnv` keeps the existing
+> value on conflict, so if you previously hand-set `MODULES`, re-running the
+> installer with `--run-adapter firecracker` will **not** append `firecracker`
+> to it. Add `firecracker` to your `MODULES` line yourself in that case.
+
+The main install itself stays **rootless** — it never sudo's. Two topologies:
+
+- **Same host** — the runner daemon runs on the install host. The installer
+  detects the host LAN IPv4 (confirm/override interactively, or `--host-ip`),
+  mints a runner token, brings up the platform, and _then_ runs
+  `sudo appstrate runner install --platform-url http://<host-ip>:<port> --token <token> --yes`
+  as a subprocess (sudo prompts on the same TTY). If that step fails — or the
+  install is non-interactive (`--host-ip` + `--yes`, which can't sudo-prompt) —
+  it prints the exact command to run by hand. A runner-install hiccup is a
+  warning, never a rollback: the platform is already healthy.
+- **Remote KVM host** — the runner daemon runs elsewhere. Provide
+  `--runner-url http://<kvm-ip>:3100 --runner-token <token>` (or answer the
+  prompts). The installer writes the platform `.env`, then prints the one-liner
+  to run on the KVM host:
+  `curl -fsSL https://get.appstrate.dev/runner | bash -s -- --platform-url http://<this-host-ip>:<port> --token <token>`.
+
+Flags (Docker tiers only): `--run-adapter <docker|firecracker>` (env
+`APPSTRATE_RUN_ADAPTER`), `--runner-url`, `--runner-token`, `--host-ip`.
+Non-interactive `--run-adapter firecracker` requires either
+(`--runner-url` + `--runner-token`) or `--host-ip`. `appstrate doctor` adds a
+Firecracker line when a local install selects the backend — a light
+`GET /v1/health` reachability probe that points at `appstrate runner doctor`
+(on the KVM host) for the deep diagnosis.
+
 ## Production status — EXPERIMENTAL
 
 Treat this backend as **experimental**. Two hardening gaps must close before
