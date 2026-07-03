@@ -494,6 +494,22 @@ describe("RemoteFirecrackerOrchestrator misc calls", () => {
     expect(bodyOf(calls[0] as RecordedCall)).toEqual({ runId: "r-1", timeoutSeconds: 5 });
   });
 
+  it("cleanupOrphans is a no-op that resolves to zeros WITHOUT any HTTP call", async () => {
+    // The daemon owns host reconciliation (it sweeps at its own boot); a
+    // platform boot must never reap live microVMs on the runner host. So the
+    // client answers zeros locally — a fetch here would be a bug.
+    const fn = (async () => {
+      throw new Error("cleanupOrphans must not touch the daemon");
+    }) as unknown as typeof fetch;
+    const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
+
+    expect(await orchestrator.cleanupOrphans()).toEqual({
+      workloads: 0,
+      isolationBoundaries: 0,
+      workspaces: 0,
+    });
+  });
+
   it("resolvePlatformApiUrl caches the answer (single fetch)", async () => {
     const { fn, calls } = fetchStub(() => json({ url: "http://platform.internal:3000" }));
     const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });

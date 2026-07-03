@@ -38,7 +38,6 @@ import {
   RUNNER_PROTOCOL_VERSION,
   EXIT_LONG_POLL_MS,
   healthResponseSchema,
-  cleanupReportSchema,
   isolationBoundarySchema,
   workloadHandleSchema,
   exitResponseSchema,
@@ -268,14 +267,16 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
   async shutdown(): Promise<void> {}
 
   /**
-   * Proxied to the daemon, which sweeps ITS host. This assumes a single
-   * platform per daemon (documented in runner/README.md) — with two
-   * platforms sharing one daemon, one platform's boot would reap the
-   * other's live runs.
+   * No-op ON PURPOSE, mirroring shutdown(): the daemon owns the host's VM
+   * lifecycle. It already sweeps its own orphans at ITS boot (daemon.ts) —
+   * the correct and sufficient crash-recovery point. A PLATFORM boot must
+   * never reap VMs on the runner host: an in-flight run survives a platform
+   * redeploy (see shutdown()), so a host-wide sweep triggered from here
+   * would SIGKILL every live microVM mid-run. The platform reports zero and
+   * leaves host reconciliation to the daemon.
    */
   async cleanupOrphans(): Promise<CleanupReport> {
-    const res = await this.call(RUNNER_ROUTES.cleanupOrphans);
-    return cleanupReportSchema.parse(await res.json());
+    return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };
   }
 
   /** No-op: guest images are baked into the daemon's rootfs at build time. */

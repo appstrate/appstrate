@@ -161,12 +161,6 @@ export const healthResponseSchema = z.object({
   guestPathVerified: z.boolean().nullable().optional(),
 });
 
-export const cleanupReportSchema = z.object({
-  workloads: z.number().int().nonnegative(),
-  isolationBoundaries: z.number().int().nonnegative(),
-  workspaces: z.number().int().nonnegative(),
-});
-
 /** Long-poll answer: `done: false` means "still running, poll again". */
 export const exitResponseSchema = z.union([
   z.object({ done: z.literal(false) }),
@@ -250,7 +244,6 @@ export const consoleQuerySchema = z.object({
  */
 export const RUNNER_ROUTES = {
   health: "/v1/health",
-  cleanupOrphans: "/v1/cleanup-orphans",
   createBoundary: "/v1/boundaries",
   removeBoundary: "/v1/boundaries/remove",
   createSidecar: "/v1/sidecars",

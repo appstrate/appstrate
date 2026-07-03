@@ -185,11 +185,6 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
     }),
   );
 
-  app.post(RUNNER_ROUTES.cleanupOrphans, async (c) => {
-    const report = await orchestrator.cleanupOrphans();
-    return c.json(report);
-  });
-
   app.post(RUNNER_ROUTES.createBoundary, async (c) => {
     const body = await readBody(c, createBoundaryBodySchema);
     if (!body.ok) return body.res;

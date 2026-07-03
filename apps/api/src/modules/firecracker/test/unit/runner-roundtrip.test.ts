@@ -164,11 +164,6 @@ describe("runner protocol round-trip (real client ↔ real server)", () => {
     const removeCall = fake.calls.find(([name]) => name === "removeIsolationBoundary");
     expect(removeCall?.[1][0]).toEqual(BOUNDARY);
 
-    expect(await client.cleanupOrphans()).toEqual({
-      workloads: 2,
-      isolationBoundaries: 1,
-      workspaces: 1,
-    });
     expect(await client.resolvePlatformApiUrl()).toBe("http://192.168.1.10:3000");
   });
 
