@@ -153,6 +153,41 @@ describe("runner server routes", () => {
     });
   });
 
+  it("includes the boot-time guest-path probe snapshot on health when provided", async () => {
+    const { orchestrator } = fakeOrchestrator();
+    const app = createRunnerApp({
+      orchestrator,
+      token: TOKEN,
+      health: { platformReachable: true, guestPathVerified: false },
+    });
+    const res = await app.request(RUNNER_ROUTES.health, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(await res.json()).toEqual({
+      ok: true,
+      adapter: "firecracker",
+      protocol: RUNNER_PROTOCOL_VERSION,
+      initialized: true,
+      platformReachable: true,
+      guestPathVerified: false,
+    });
+  });
+
+  it("carries a null guestPathVerified (degraded probe) through the payload", async () => {
+    const { orchestrator } = fakeOrchestrator();
+    const app = createRunnerApp({
+      orchestrator,
+      token: TOKEN,
+      health: { platformReachable: true, guestPathVerified: null },
+    });
+    const res = await app.request(RUNNER_ROUTES.health, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.guestPathVerified).toBeNull();
+    expect(body.platformReachable).toBe(true);
+  });
+
   it("creates a boundary and forwards runId + opts", async () => {
     const { app, calls } = makeApp();
     const res = await post(app, RUNNER_ROUTES.createBoundary, {

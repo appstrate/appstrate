@@ -102,21 +102,22 @@ The daemon owns two schemas — its own listen/link config (`FIRECRACKER_RUNNER_
 
 `FIRECRACKER_*` engine config (`runner/host-env.ts`):
 
-| Variable                         | Default                          | Notes                                                                 |
-| -------------------------------- | -------------------------------- | --------------------------------------------------------------------- |
-| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                            |
-| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | Auto-downloaded at boot (or built by `firecracker:build:kernel`)      |
-| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | Auto-downloaded at boot (or built by `firecracker:build:rootfs`)      |
-| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | Per-run state; point at a tmpfs to keep config-drive secrets off disk |
-| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool carved into per-run /30 subnets                              |
-| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918 ranges        | Destinations guests must never reach                                  |
-| `FIRECRACKER_MAX_CONSOLE_BYTES`  | 268435456 (256 MiB)              | Console-size kill switch (host OOM guard)                             |
-| `FIRECRACKER_MAX_CONCURRENT_VMS` | 0 (unlimited)                    | Admission control                                                     |
-| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | Guest-artifact download base — point at a mirror for air-gapped hosts |
-| `FIRECRACKER_ARTIFACTS_VERSION`  | latest / on-disk                 | Pin a release (`1.2.3`); unset = skip download when artifacts present |
-| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver — dev iterating on locally built artifacts    |
+| Variable                         | Default                          | Notes                                                                                                       |
+| -------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                                                                  |
+| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | Auto-downloaded at boot (or built by `firecracker:build:kernel`)                                            |
+| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | Auto-downloaded at boot (or built by `firecracker:build:rootfs`)                                            |
+| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | Per-run state; point at a tmpfs to keep config-drive secrets off disk                                       |
+| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool carved into per-run /30 subnets                                                                    |
+| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918 ranges        | Destinations guests must never reach                                                                        |
+| `FIRECRACKER_MAX_CONSOLE_BYTES`  | 268435456 (256 MiB)              | Console-size kill switch (host OOM guard)                                                                   |
+| `FIRECRACKER_MAX_CONCURRENT_VMS` | 0 (unlimited)                    | Admission control                                                                                           |
+| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | Guest-artifact download base — point at a mirror for air-gapped hosts                                       |
+| `FIRECRACKER_ARTIFACTS_VERSION`  | latest / on-disk                 | Pin a release (`1.2.3`); unset = skip download when artifacts present                                       |
+| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver — dev iterating on locally built artifacts                                          |
+| `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot-time guest→platform path probe: `warn` logs a dropped path, `strict` refuses to start on a proven drop |
 
-Start: `bun run firecracker:runner` (systemd unit recommended: `Restart=always`, `After=network-online.target`). Boot order: env → **artifacts** (download/verify kernel + rootfs) → `initialize()` (KVM/artifact checks) → orphan sweep → listen. Running VMs are separate processes — a daemon restart re-adopts or reaps them via the orphan sweep, it does not kill them mid-flight.
+Start: `bun run firecracker:runner` (systemd unit recommended: `Restart=always`, `After=network-online.target`). Boot order: env → **artifacts** (download/verify kernel + rootfs) → `initialize()` (KVM/artifact checks) → orphan sweep → **guest-path self-verification** (net probe) → listen. Running VMs are separate processes — a daemon restart re-adopts or reaps them via the orphan sweep, it does not kill them mid-flight.
 
 ## Capabilities declared
 
@@ -138,6 +139,7 @@ The daemon deletes the per-run workspace (with `console.log`) at teardown, so ob
 - **Console API** — `GET /v1/workloads/:id/console?tailBytes=N` (bearer-authed, `N` ≤ 256 KiB, default 64 KiB) serves the live console while the VM runs, else the archive; `404` when neither exists. `:id` is the run id.
 - **Abnormal-exit surfacing** — when a run exits non-zero (crash / kill / watchdog), the platform fetches a ~2 KiB console tail and attaches it to the run as a `system` / `firecracker_console` run-log row (visible in the UI). Best-effort: it never blocks or fails the run's finalize.
 - **Boot-phase liveness** — a slow-booting guest has not yet emitted its first sink event, so the platform stall watchdog would kill it. While the daemon confirms the VMM is alive (`POST /v1/workloads/status`) and the guest is still silent, the platform records a synthetic heartbeat (`runs.last_heartbeat_at`, the exact column the watchdog reads) every 15 s, stopping the moment real events flow or the VM exits. It never masks a dead VM — a `running: false` status stops the synthetic beat immediately.
+- **Boot-time guest-path self-verification** — before the port opens, the daemon probes whether a guest could actually reach the platform through the freshly-applied nft policy (`runner/net-probe.ts`), turning the DNAT drop that once cost hours of `tcpdump` into a one-line boot diagnostic. The result is reported verbatim on `GET /v1/health` (`platformReachable`, `guestPathVerified`). `FIRECRACKER_NET_VERIFY=warn` (default) only logs a proven drop; `strict` refuses to start on one. An unverifiable path (probe couldn't decide) is always non-fatal.
 
 ## Layout
 

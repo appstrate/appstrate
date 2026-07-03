@@ -72,6 +72,15 @@ const firecrackerEnvSchema = z.object({
   // 0 (default) = unlimited. When the cap is reached, new runs fail
   // fast instead of overcommitting host RAM.
   FIRECRACKER_MAX_CONCURRENT_VMS: z.coerce.number().int().nonnegative().default(0),
+  // Guest→platform network self-verification at daemon boot (see
+  // runner/net-probe.ts). `warn` (default) logs a loud diagnostic and
+  // keeps booting when the guest path is proven broken; `strict` makes
+  // that failure fatal (the daemon refuses to serve a host where runs
+  // could not reach the platform). A path that merely could NOT be
+  // verified (netns/curl tooling absent, or the platform itself down) is
+  // never fatal in either mode — an unproven path is not a proven
+  // failure.
+  FIRECRACKER_NET_VERIFY: z.enum(["warn", "strict"]).default("warn"),
 });
 
 export type FirecrackerEnv = z.infer<typeof firecrackerEnvSchema>;

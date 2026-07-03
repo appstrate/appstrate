@@ -244,9 +244,16 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
           `orchestrator failed to initialize — check the daemon's logs (KVM, artifacts)`,
       );
     }
+    // Surface the daemon's boot-time guest-path self-verification
+    // (net-probe.ts) on the platform side too, so an operator reading the
+    // platform boot log sees whether guest→platform networking is proven
+    // healthy without SSHing to the runner host. `guestPathVerified` null
+    // = the daemon could not verify (tooling absent or platform down).
     logger.info("firecracker orchestrator connected", {
       url: env.FIRECRACKER_RUNNER_URL,
       protocol: health.protocol,
+      platformReachable: health.platformReachable ?? null,
+      guestPathVerified: health.guestPathVerified ?? null,
     });
   }
 

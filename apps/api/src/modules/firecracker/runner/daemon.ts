@@ -17,18 +17,22 @@
  *   bun run firecracker:runner
  *
  * Boot order is deliberate: env → artifacts → initialize() → orphan
- * sweep → listen. Guest artifacts (kernel + rootfs) are resolved BEFORE
- * initialize() so its existence check passes on a freshly provisioned
- * host that never ran `bun run firecracker:build`. The port only opens
- * after the host firewall and artifacts are proven good, which is what
- * lets /v1/health hardcode `initialized: true`.
+ * sweep → guest-path self-verification → listen. Guest artifacts
+ * (kernel + rootfs) are resolved BEFORE initialize() so its existence
+ * check passes on a freshly provisioned host that never ran `bun run
+ * firecracker:build`. The port only opens after the host firewall and
+ * artifacts are proven good, which is what lets /v1/health hardcode
+ * `initialized: true`; the net probe (phase 5) then annotates that
+ * health with the guest→platform reachability facts.
  */
 
 import { FirecrackerOrchestrator } from "../orchestrator.ts";
+import { createHostExec } from "../host-net.ts";
 import { getFirecrackerEnv } from "./host-env.ts";
 import { getRunnerEnv } from "./env.ts";
 import { createRunnerApp } from "./server.ts";
 import { ensureGuestArtifacts } from "./artifacts.ts";
+import { verifyGuestPath, type GuestPathResult } from "./net-probe.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
 
@@ -89,7 +93,39 @@ try {
 const report = await orchestrator.cleanupOrphans();
 logger.info("appstrate-runner orphan sweep complete", { ...report });
 
-const app = createRunnerApp({ orchestrator, token: runnerEnv.FIRECRACKER_RUNNER_TOKEN });
+// Self-verify the guest→platform path through the freshly-applied nft
+// policy BEFORE the port opens — the DNAT drop that once cost 3h of
+// tcpdump becomes a one-line boot diagnostic here. Own HostExec (the
+// orchestrator's is private): both are stateless. FIRECRACKER_NET_VERIFY
+// decides whether a PROVEN failure is fatal; a merely unverifiable path
+// is always non-fatal.
+let health: GuestPathResult = { platformReachable: false, guestPathVerified: null };
+try {
+  health = await verifyGuestPath({
+    exec: createHostExec(),
+    platformUrl: runnerEnv.FIRECRACKER_RUNNER_PLATFORM_URL,
+    subnetCidr: fcEnv.FIRECRACKER_SUBNET_CIDR,
+    mode: fcEnv.FIRECRACKER_NET_VERIFY,
+  });
+} catch (err) {
+  // The probe is best-effort instrumentation — a bug inside it must never
+  // sink a daemon that is otherwise ready to serve.
+  logger.warn("appstrate-runner guest-path probe errored — treating as unverified", {
+    error: getErrorMessage(err),
+  });
+}
+if (fcEnv.FIRECRACKER_NET_VERIFY === "strict" && health.guestPathVerified === false) {
+  fatal(
+    "guest-path verification (FIRECRACKER_NET_VERIFY=strict)",
+    new Error("guest→platform path is dropped by the host firewall — see the diagnostic above"),
+  );
+}
+
+const app = createRunnerApp({
+  orchestrator,
+  token: runnerEnv.FIRECRACKER_RUNNER_TOKEN,
+  health,
+});
 
 const server = Bun.serve({
   hostname: runnerEnv.FIRECRACKER_RUNNER_HOST,

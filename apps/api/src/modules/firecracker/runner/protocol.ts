@@ -142,6 +142,12 @@ export const healthResponseSchema = z.object({
   adapter: z.literal("firecracker"),
   protocol: z.number().int(),
   initialized: z.boolean(),
+  // Guest→platform self-verification result computed once at daemon boot
+  // (see runner/net-probe.ts). Optional so a daemon that skipped the probe
+  // (or an older same-major build) still validates. `guestPathVerified`
+  // null = probe degraded/skipped (tooling absent or platform down).
+  platformReachable: z.boolean().optional(),
+  guestPathVerified: z.boolean().nullable().optional(),
 });
 
 export const cleanupReportSchema = z.object({

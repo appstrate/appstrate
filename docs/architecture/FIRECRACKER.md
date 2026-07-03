@@ -357,22 +357,34 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
   the daemon reports the VMM dead — so a genuinely hung or dead VM is never
   masked. This removes the historical "watchdog kills a healthy,
   slow-booting run" class (see the Lima `RUN_STALL_THRESHOLD=300` workaround).
+- **Boot-time guest-path self-verification.** Immediately after the orphan
+  sweep and _before_ the port opens, the daemon probes whether a guest could
+  actually reach `FIRECRACKER_RUNNER_PLATFORM_URL` through the freshly-applied
+  nft policy (`runner/net-probe.ts`) — a namespaced guest-path probe plus a
+  forward-path reachability check. The silent DNAT drop that once cost hours
+  of `tcpdump` becomes a one-line boot diagnostic. The verdict is reported
+  verbatim on `GET /v1/health` as `platformReachable` / `guestPathVerified`
+  (the platform surfaces it in the module health check). `FIRECRACKER_NET_VERIFY`
+  decides severity: `warn` (default) logs a proven drop and boots anyway;
+  `strict` refuses to start. An _unverifiable_ path (the probe couldn't reach
+  a verdict) is always non-fatal — only a proven drop trips `strict`.
 
 ## Env vars
 
-| Var                              | Default                          | Notes                                                |
-| -------------------------------- | -------------------------------- | ---------------------------------------------------- |
-| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                           |
-| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                         |
-| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                              |
-| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended)                    |
-| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                               |
-| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach     |
-| `FIRECRACKER_MAX_CONCURRENT_VMS` | `0` (unlimited)                  | admission cap — see _Operational constraints_        |
-| `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)  |
-| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | guest-artifact download base (mirror for air-gapped) |
-| `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present     |
-| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)          |
+| Var                              | Default                          | Notes                                                                   |
+| -------------------------------- | -------------------------------- | ----------------------------------------------------------------------- |
+| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                              |
+| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                                            |
+| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                                                 |
+| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended)                                       |
+| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                                                  |
+| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach                        |
+| `FIRECRACKER_MAX_CONCURRENT_VMS` | `0` (unlimited)                  | admission cap — see _Operational constraints_                           |
+| `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)                     |
+| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | guest-artifact download base (mirror for air-gapped)                    |
+| `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present                        |
+| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)                             |
+| `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot guest→platform path probe: `warn` logs a drop, `strict` fails boot |
 
 ## Development on macOS
 

@@ -76,6 +76,16 @@ export interface RunnerAppDeps {
    * of waiting the production 45s.
    */
   exitLongPollMs?: number;
+  /**
+   * Guest→platform self-verification snapshot, computed once at boot
+   * (see runner/net-probe.ts) and reported verbatim on /v1/health so the
+   * platform's initialize() handshake surfaces it to the operator. Absent
+   * = probe not run (the field is simply omitted from the payload).
+   */
+  health?: {
+    platformReachable: boolean;
+    guestPathVerified: boolean | null;
+  };
 }
 
 /**
@@ -148,6 +158,9 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
       // succeeded (see daemon.ts) — a reachable daemon is an initialized
       // one by construction.
       initialized: true,
+      // Spread the boot-time net-probe result when present; omitted
+      // entirely on a daemon that never ran the probe.
+      ...(deps.health ?? {}),
     }),
   );
 

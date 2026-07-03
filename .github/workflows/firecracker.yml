@@ -45,6 +45,102 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Regression guard for the guest→platform DNAT drop (issue #819, phase 5):
+  # the 3h-of-tcpdump incident where Docker's DNAT rewrote the destination
+  # before the daemon's nft forward hook, so a plain `ip daddr` match missed
+  # and the RFC1918 deny silently killed the platform sink traffic. This job
+  # reproduces a real guest's L3 path with a netns — no microVM, no kernel
+  # build — through the DAEMON'S REAL nft script (buildNftScript output). If
+  # someone reverts the `ct original` forward rule to a plain `ip daddr`, the
+  # generated script changes, the DNAT'd packet hits the deny, and the curl
+  # below fails the job. Fast (<1 min) and self-cleaning.
+  dnat-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      # buildNftScript pulls @appstrate/core (logger/errors) into its import
+      # closure — deps must be installed to render the real script.
+      - name: Install dependencies
+        run: bun install
+
+      - name: Reproduce the guest→platform path through the real nft script
+        run: |
+          set -euo pipefail
+          # The host's own routable IP — a docker-published port lands on it,
+          # and (being RFC1918, e.g. 10.x on GH runners) it sits INSIDE the
+          # egress-deny CIDRs. That is precisely what makes a reverted
+          # `ip daddr` rule fatal: after Docker's DNAT the deny eats the packet.
+          export HOST_IP="$(ip route get 1.1.1.1 | awk '{print $7; exit}')"
+          echo "host IP under test: ${HOST_IP}"
+
+          # Dummy HTTP target behind a PUBLISHED port → Docker installs the
+          # nat/PREROUTING DNAT rule that the daemon's forward accept must
+          # match on its conntrack-original tuple.
+          docker run -d --name fc-dnat-target -p 18080:5678 \
+            hashicorp/http-echo -listen=:5678 -text=ok >/dev/null
+          for i in $(seq 1 20); do
+            curl -fsS --max-time 2 "http://127.0.0.1:18080" >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+
+          sudo sysctl -qw net.ipv4.ip_forward=1
+
+          # Render the DAEMON'S nft policy with the published port as the
+          # remote platform endpoint, then apply it verbatim.
+          bun -e 'import { buildNftScript } from "./apps/api/src/modules/firecracker/host-net.ts";
+            process.stdout.write(buildNftScript({
+              subnetCidr: "10.231.0.0/16",
+              aliasIp: "10.231.255.1",
+              platformPort: 3000,
+              egressDenyCidrs: ["169.254.0.0/16","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"],
+              platformForward: { ip: process.env.HOST_IP, port: 18080 },
+            }));' > /tmp/appstrate_fc.nft
+          echo "----- rendered nft ruleset -----"; cat /tmp/appstrate_fc.nft
+          # HOST_IP is already baked into the rendered file — nft -f is static.
+          sudo nft -f /tmp/appstrate_fc.nft
+
+          # Docker sets the iptables FORWARD policy to DROP; mirror what the
+          # daemon does (allowForwardInIptables) so the ONLY differentiator
+          # between pass and fail is the appstrate_fc nft table under test.
+          sudo iptables -I FORWARD -i afc+ -j ACCEPT
+          sudo iptables -I FORWARD -o afc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+          # A "guest": a netns whose HOST-side veth carries the afc* prefix
+          # (so the iifname rules fire) addressed in a run /30 (index 1).
+          sudo ip netns add guest
+          sudo ip link add afcprobe0 type veth peer name afcprobe0p
+          sudo ip link set afcprobe0p netns guest
+          sudo ip addr add 10.231.0.5/30 dev afcprobe0
+          sudo ip link set afcprobe0 up
+          sudo sysctl -qw net.ipv4.conf.afcprobe0.rp_filter=1
+          sudo ip -n guest addr add 10.231.0.6/30 dev afcprobe0p
+          sudo ip -n guest link set afcprobe0p up
+          sudo ip -n guest link set lo up
+          sudo ip -n guest route add default via 10.231.0.5
+
+          echo "curling http://${HOST_IP}:18080 from the guest netns..."
+          # MUST succeed. A reverted `ct original` rule → DNAT'd packet hits
+          # the RFC1918 deny → timeout → this fails the job (the regression).
+          sudo ip netns exec guest curl -fsS --max-time 5 "http://${HOST_IP}:18080"
+          echo "" # http-echo omits a trailing newline
+          echo "guest→platform path OK through the nft policy"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo ip netns del guest 2>/dev/null || true
+          sudo ip link del afcprobe0 2>/dev/null || true
+          sudo nft delete table ip appstrate_fc 2>/dev/null || true
+          sudo iptables -D FORWARD -i afc+ -j ACCEPT 2>/dev/null || true
+          sudo iptables -D FORWARD -o afc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+          docker rm -f fc-dnat-target 2>/dev/null || true
+
   smoke:
     runs-on: ubuntu-latest
     # Cold cache pays the full ~20 min kernel build + the rootfs docker
