@@ -22,9 +22,9 @@ const logger = createLogger(process.env.LOG_LEVEL ?? "info");
 type BunProcess = ReturnType<typeof Bun.spawn>;
 
 /** Poll interval for tailing an append-only output file (ms). */
-export const TAIL_POLL_MS = 50;
+const TAIL_POLL_MS = 50;
 /** Read buffer size for tailing (bytes). */
-export const TAIL_BUFFER_SIZE = 16_384;
+const TAIL_BUFFER_SIZE = 16_384;
 /** tailFileLines: flush a newline-less partial line once it grows past this. */
 const PARTIAL_FLUSH_BYTES = 64 * 1024;
 

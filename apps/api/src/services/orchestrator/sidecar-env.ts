@@ -23,7 +23,7 @@
 import type { SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 import type { WorkspaceHandle } from "@appstrate/core/platform-types";
 
-export interface BaseSidecarEnvParams {
+interface BaseSidecarEnvParams {
   spec: SidecarLaunchSpec;
   /**
    * Env the sidecar starts from — topology-owned. Docker/firecracker pass
