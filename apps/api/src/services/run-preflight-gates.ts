@@ -62,27 +62,33 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
 
   // 1 + 2. Per-org rate limit (Redis) and concurrency count (SQL) are
   //         independent — fire both concurrently. Rate-limit precedence is
-  //         preserved for GRACEFUL rejections by checking its result first
-  //         below: when both would reject with `{ ok: false }`, the caller
-  //         still sees the rate error. A THROWN infra error is different —
-  //         under Promise.all whichever call rejects first wins (the previous
-  //         sequential order always surfaced Redis first), but both map to a
-  //         500 upstream, so the ordering is not observable. The rate limiter
-  //         consumes a token on evaluation regardless of the concurrency
-  //         outcome, exactly as the previous sequential order did.
+  //         preserved for EVERY outcome, not just graceful ones: the SQL
+  //         call's rejection is captured (never thrown inside Promise.all)
+  //         and only re-thrown after the rate result has been inspected.
+  //         `checkOrgRunRateLimit` itself never throws (its catch degrades
+  //         to a graceful rejection), so without the capture a DB blip
+  //         during an over-rate burst would win the Promise.all rejection
+  //         and turn the caller's 429+Retry-After into a 500 — the exact
+  //         load-shedding failure the rate gate exists to absorb. The rate
+  //         limiter consumes a token on evaluation regardless of the
+  //         concurrency outcome, exactly as the previous sequential order
+  //         did.
   let rateLimitMs = 0;
   let concurrencyMs = 0;
   const rateStart = Date.now();
   const concurrencyStart = Date.now();
-  const [rateCheck, runningCount] = await Promise.all([
+  const [rateCheck, countOutcome] = await Promise.all([
     checkOrgRunRateLimit(orgId, platformLimits.per_org_global_rate_per_min).then((r) => {
       rateLimitMs = Date.now() - rateStart;
       return r;
     }),
-    getRunningRunCountForOrg({ orgId }).then((c) => {
-      concurrencyMs = Date.now() - concurrencyStart;
-      return c;
-    }),
+    getRunningRunCountForOrg({ orgId }).then(
+      (count) => {
+        concurrencyMs = Date.now() - concurrencyStart;
+        return { ok: true as const, count };
+      },
+      (error: unknown) => ({ ok: false as const, error }),
+    ),
   ]);
 
   if (!rateCheck.ok) {
@@ -95,6 +101,9 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
       },
     };
   }
+
+  if (!countOutcome.ok) throw countOutcome.error;
+  const runningCount = countOutcome.count;
 
   if (runningCount >= platformLimits.max_concurrent_per_org) {
     return {

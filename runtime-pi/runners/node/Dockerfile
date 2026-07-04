@@ -13,9 +13,11 @@
 # (then ruby, deno, …). Per-runtime images keep the sidecar minimal and
 # let operators pull only the runtimes they actually use.
 #
-# Build (linux/amd64 required to match the sidecar's `docker run` target):
+# Build for the HOST architecture (the sidecar's `docker run` pins no
+# platform; an emulated runner pays a ~4x cold-start penalty on the
+# per-integration 30s connect deadline). CI builds multi-arch via buildx.
 #
-#   docker build --platform linux/amd64 \
+#   docker build \
 #     -t appstrate-mcp-runner-node:latest \
 #     -f runtime-pi/runners/node/Dockerfile \
 #     runtime-pi/runners/node

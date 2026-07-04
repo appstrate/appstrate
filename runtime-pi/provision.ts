@@ -28,7 +28,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
  * early retries poll tightly (120 ms base — a 500 ms base overshot the proxy
  * by up to a full doubled sleep on every boot); 9 attempts span ~9.7 s
  * (0.12+0.24+0.48+0.96+1.92+2+2+2 s), a slightly larger total budget than the
- * previous 6×500ms (~7.4 s), still well inside the boot gate.
+ * previous 6×500ms (7.5 s), still well inside the boot gate.
  */
 export const PROVISION_MAX_ATTEMPTS = 9;
 

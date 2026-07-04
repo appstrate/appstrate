@@ -152,12 +152,17 @@ const sink = new HttpSink({
   // the very first POST (sequence 1, fired non-blocking below) can land
   // before the proxy binds. A tight initial retry (vs the 500 ms default)
   // shrinks the window during which later events sit in the platform's
-  // out-of-order buffer waiting for sequence 1. More attempts compensate for
-  // the smaller start: 8 attempts span ~15 s of sleeps (vs ~3.5 s at the
-  // 4×500ms default), so a boot-window POST still outlives a slow proxy bind
-  // and mid-run platform blips get MORE absorption, not less.
+  // out-of-order buffer waiting for sequence 1. More attempts + a 2 s cap
+  // keep the total window bounded: sleeps are 0.12+0.24+0.48+0.96+1.92+2+2
+  // ≈ 7.7 s (vs ~3.5 s at the 4×500ms default) — enough to outlive a slow
+  // proxy bind, without inflating the fatal path: `die()` (one error POST +
+  // one finalize POST, each exhausting retries when the platform is
+  // unreachable) holds the container ~15 s before exit; the uncapped 30 s
+  // default would hold it ~30 s, delaying the platform's exit-synthesized
+  // failure the user is waiting on.
   initialBackoffMs: 120,
   maxAttempts: 8,
+  maxBackoffMs: 2000,
 });
 
 // --- 0a. Stdout-JSONL bridge ---
@@ -771,12 +776,21 @@ const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 // The Pi SDK warm-up was kicked off during provisioning; awaiting it here keeps
 // "runtime ready" honest — the module that talks to the LLM is actually loaded —
 // while folding its cost into the overlap window rather than the post-ready
-// path. The rejection was already swallowed at creation (resolves to `null`), so
-// a warm-up failure just surfaces later through `PiRunner.executeSession`. The
-// timing is now recorded at import completion inside the loader chain (a rejected
-// load records nothing), so this await only gates "runtime ready" on the module
-// being settled.
-if (piSdkWarmup) await piSdkWarmup;
+// path. The warm-up handle swallowed its rejection at creation (resolves to
+// `null`) purely to avoid an unhandled-rejection window; a `null` therefore
+// means the SDK CANNOT load, and emitting "runtime ready" anyway would
+// reclassify a deterministic image defect as a mid-run session failure (the
+// pre-lazy static import failed the container at eval time — before any
+// event). Re-awaiting the loader surfaces the ESM-cached rejection with its
+// real message, and `die()` restores the fail-fast contract: one
+// `appstrate.error` + a failed finalize instead of a lying ready signal.
+if (piSdkWarmup && (await piSdkWarmup) === null) {
+  try {
+    await loadPiCodingAgentSdk();
+  } catch (err) {
+    await die(`Pi SDK failed to load — runtime image is unusable: ${getErrorMessage(err)}`);
+  }
+}
 
 await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
   bundleLoaded: bundle !== null,
