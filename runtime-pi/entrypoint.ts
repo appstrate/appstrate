@@ -43,6 +43,7 @@ import {
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
+  loadPiCodingAgentSdk,
   type AppstrateToolCtx,
   type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
@@ -147,6 +148,21 @@ const sink = new HttpSink({
   finalizeUrl: env.sink.finalizeUrl,
   runSecret: env.sink.secret,
   traceparent: env.traceparent,
+  // Sink traffic rides the sidecar forward proxy, which boots in parallel —
+  // the very first POST (sequence 1, fired non-blocking below) can land
+  // before the proxy binds. A tight initial retry (vs the 500 ms default)
+  // shrinks the window during which later events sit in the platform's
+  // out-of-order buffer waiting for sequence 1. More attempts + a 2 s cap
+  // keep the total window bounded: sleeps are 0.12+0.24+0.48+0.96+1.92+2+2
+  // ≈ 7.7 s (vs ~3.5 s at the 4×500ms default) — enough to outlive a slow
+  // proxy bind, without inflating the fatal path: `die()` (one error POST +
+  // one finalize POST, each exhausting retries when the platform is
+  // unreachable) holds the container ~15 s before exit; the uncapped 30 s
+  // default would hold it ~30 s, delaying the platform's exit-synthesized
+  // failure the user is waiting on.
+  initialBackoffMs: 120,
+  maxAttempts: 8,
+  maxBackoffMs: 2000,
 });
 
 // --- 0a. Stdout-JSONL bridge ---
@@ -341,9 +357,55 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 // cold start are behind us. `performance.now()` is measured from process entry
 // (timeOrigin), so it quantifies the cold-start gap the dashboard otherwise
 // shows as dead air before the run goes `running`.
-await progress(`runtime starting (${Math.round(performance.now())}ms cold start)`, {
+//
+// Fire-and-forget: this POST rides the sidecar's forward proxy (the agent's
+// only route out), which boots in parallel (#406) — awaiting it serializes
+// the whole boot behind the proxy coming up (~2s of HttpSink backoff on a
+// cold host). Provisioning below retries through the same proxy, so nothing
+// downstream depends on this event having landed. Ordering is safe: the sink
+// stamped this event sequence 1 at emit time, and the ingestion endpoint
+// buffers any later-sequence arrivals until it lands, then drains in order
+// (run-event-ingestion.ts) — worst case the dashboard shows the boot trail
+// as one burst instead of a trickle, exactly what the old awaited POST
+// produced anyway (nothing was emitted at all until it succeeded).
+void progress(`runtime starting (${Math.round(performance.now())}ms cold start)`, {
   coldStartMs: Math.round(performance.now()),
 });
+
+// Per-phase cold-start durations, folded into the "runtime ready" breadcrumb
+// so a slow boot is attributable (provisioning vs bundle prepare vs SDK import
+// vs MCP connect) instead of a single opaque total.
+const phaseTimings: Record<string, number> = {};
+
+// Warm the heavy Pi SDK now (non-awaited) so its ~200ms module eval overlaps
+// the network-bound provisioning below instead of landing on the pre-session
+// boot path. `@mariozechner/pi-coding-agent` is dynamically imported by
+// `PiRunner` at session-build time; ESM caches the module, so this kick-off
+// turns that later `await` into a no-op. A `claude-code` run never builds a
+// PiRunner (it drives the Agent SDK), so it skips the load entirely — this
+// mirrors the `RUN_ENGINE` selection resolved further down.
+const sdkImportStart = performance.now();
+// The `.catch(() => null)` is attached at creation so the handle is never
+// momentarily unguarded: if the dynamic import rejects before we await it (~400
+// lines below) it would otherwise surface as an unhandled rejection. Swallowing
+// here is safe — the authoritative load happens inside `PiRunner.executeSession`
+// (ESM caches the errored module, so its `await loadPiCodingAgentSdk()` re-throws
+// and the run fails through the normal error path). A failed warm-up resolves to
+// `null` and records nothing; `sdkImportMs` is captured inside the resolve step
+// below, at actual import completion — not at the late await (~400 lines down),
+// which in the nominal case fires after provisioning already overlapped the load
+// and would misattribute the whole boot window to the import.
+const piSdkWarmup =
+  process.env.RUN_ENGINE === "claude"
+    ? null
+    : loadPiCodingAgentSdk()
+        .then((sdk) => {
+          phaseTimings.sdkImportMs = Math.round(performance.now() - sdkImportStart);
+          return sdk;
+        })
+        .catch(() => null);
+
+const provisionStart = performance.now();
 
 // Self-provision the workspace before anything reads it: the AFPS bundle
 // (fatal on any miss — see provisionWorkspace) and the input documents
@@ -369,9 +431,15 @@ const [, bundle] = await Promise.all([
   hasPackage ? readBundleFromFile(packagePath) : Promise.resolve(null),
 ]);
 
-await progress(hasPackage ? "workspace initialized · agent package read" : "workspace initialized");
+phaseTimings.provisioningMs = Math.round(performance.now() - provisionStart);
+await progress(
+  hasPackage ? "workspace initialized · agent package read" : "workspace initialized",
+  { provisioningMs: phaseTimings.provisioningMs },
+);
 
 // --- 2b. Phase B: materialise .pi/ layout + dynamic-import tools ---
+
+const bundlePrepareStart = performance.now();
 
 if (bundle) {
   try {
@@ -411,9 +479,14 @@ if (bundle) {
 
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
+phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart);
 await progress(
   `bundle loaded (${extensionFactories.length} extension${extensionFactories.length === 1 ? "" : "s"})`,
-  { bundleLoaded: bundle !== null, extensions: extensionFactories.length },
+  {
+    bundleLoaded: bundle !== null,
+    extensions: extensionFactories.length,
+    bundlePrepareMs: phaseTimings.bundlePrepareMs,
+  },
 );
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
@@ -472,6 +545,7 @@ if (sidecarUrl) {
   // construction), so it skips this whole block — only the boot gate below runs.
   if (runEngine === "pi") {
     await progress("connecting to sidecar");
+    const mcpConnectStart = performance.now();
     try {
       // Retry the initial MCP handshake — the platform now starts the agent
       // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
@@ -515,7 +589,8 @@ if (sidecarUrl) {
       process.exit(1);
     }
 
-    await progress("MCP connected");
+    phaseTimings.mcpConnectMs = Math.round(performance.now() - mcpConnectStart);
+    await progress("MCP connected", { mcpConnectMs: phaseTimings.mcpConnectMs });
 
     try {
       // `buildMcpDirectFactories` registers `run_history` and
@@ -698,10 +773,30 @@ const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 // evaluate every `import` before any top-level statement runs, so the
 // timer started only after the slow part was already done and reported
 // an artificially low duration vs. the user-perceived gap.
+// The Pi SDK warm-up was kicked off during provisioning; awaiting it here keeps
+// "runtime ready" honest — the module that talks to the LLM is actually loaded —
+// while folding its cost into the overlap window rather than the post-ready
+// path. The warm-up handle swallowed its rejection at creation (resolves to
+// `null`) purely to avoid an unhandled-rejection window; a `null` therefore
+// means the SDK CANNOT load, and emitting "runtime ready" anyway would
+// reclassify a deterministic image defect as a mid-run session failure (the
+// pre-lazy static import failed the container at eval time — before any
+// event). Re-awaiting the loader surfaces the ESM-cached rejection with its
+// real message, and `die()` restores the fail-fast contract: one
+// `appstrate.error` + a failed finalize instead of a lying ready signal.
+if (piSdkWarmup && (await piSdkWarmup) === null) {
+  try {
+    await loadPiCodingAgentSdk();
+  } catch (err) {
+    await die(`Pi SDK failed to load — runtime image is unusable: ${getErrorMessage(err)}`);
+  }
+}
+
 await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
   bundleLoaded: bundle !== null,
   extensions: extensionFactories.length,
   bootDurationMs: performance.now(),
+  phaseTimings,
 });
 
 // --- 6a. Liveness keep-alive ---

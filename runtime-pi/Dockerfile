@@ -6,10 +6,16 @@
 # Build from the repo root so the workspace graph (`@appstrate/*`
 # workspace:* specs) resolves identically to local installs:
 #
-#   docker build --platform linux/amd64 \
+#   docker build \
 #     -t appstrate-pi \
 #     -f runtime-pi/Dockerfile \
 #     .
+#
+# No `--platform` flag: build the HOST architecture. Running an amd64 image
+# on an arm64 dev host (Apple Silicon) goes through Rosetta/QEMU emulation
+# and multiplies container cold start ~4x (measured: runtime ready 3.8s
+# emulated vs 1.2s native). CI's release pipeline builds its own multi-arch
+# (amd64+arm64) images via buildx — it does not use this default.
 #
 # All paths below are relative to the repo root.
 

@@ -15,9 +15,11 @@
 # `docker start -ai`s the container — stdio is piped verbatim to the
 # spawning MCP client.
 #
-# Build (linux/amd64 required to match the sidecar's `docker run` target):
+# Build for the HOST architecture (the sidecar's `docker run` pins no
+# platform; an emulated runner pays a ~4x cold-start penalty on the
+# per-integration 30s connect deadline). CI builds multi-arch via buildx.
 #
-#   docker build --platform linux/amd64 \
+#   docker build \
 #     -t appstrate-mcp-runner-bun:latest \
 #     -f runtime-pi/runners/bun/Dockerfile \
 #     runtime-pi/runners/bun

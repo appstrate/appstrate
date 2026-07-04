@@ -9,11 +9,21 @@
  * only as a runtime `undefined` (for values) or a tsc error (for types).
  *
  * This test closes the runtime half: it imports each barrel and asserts the
- * VALUE symbols consumers use are actually defined at runtime. Type-only
- * re-exports cannot be checked at runtime (they erase to nothing); they are
- * covered by `tsc` on each barrel's real consumers — e.g. the `apps/cli` barrel
- * is pure type-only (`Api`, `Model`), and `apps/cli/src/commands/run/model.ts`
- * would fail to typecheck if those re-exports went missing.
+ * VALUE symbols consumers use are actually reachable at runtime. The
+ * `@appstrate/runner-pi` barrel splits that surface: `Type` stays a static
+ * value export (used synchronously at tool-registration time), while the six
+ * heavy `pi-coding-agent` values (`AuthStorage`, `createAgentSession`,
+ * `DefaultResourceLoader`, `ModelRegistry`, `SessionManager`, `SettingsManager`)
+ * are reachable only through the `loadPiCodingAgentSdk()` dynamic loader that
+ * keeps them out of the eager bundle graph. So the test asserts the static
+ * `Type` + `loadPiCodingAgentSdk` handle exist on the barrel, then drives the
+ * loader and asserts every heavy value is defined on the resolved module.
+ *
+ * Type-only re-exports cannot be checked at runtime (they erase to nothing);
+ * they are covered by `tsc` on each barrel's real consumers — e.g. the
+ * `apps/cli` barrel is pure type-only (`Api`, `Model`), and
+ * `apps/cli/src/commands/run/model.ts` would fail to typecheck if those
+ * re-exports went missing.
  *
  * Imported via relative paths (not package names) because the barrels are
  * package-internal files, not part of any package's `exports` map. This file
@@ -28,7 +38,17 @@ import * as runnerPiBarrel from "../packages/runner-pi/src/pi-sdk.ts";
 import * as runtimePiBarrel from "../runtime-pi/pi-sdk.ts";
 
 describe("supply-chain: pi-sdk barrel completeness", () => {
-  it("@appstrate/runner-pi barrel re-exports every value symbol its consumers import", () => {
+  it("@appstrate/runner-pi barrel exposes the static Type value and the SDK loader handle", () => {
+    const barrel = runnerPiBarrel as Record<string, unknown>;
+
+    expect(barrel.Type, 'runner-pi pi-sdk barrel is missing value export "Type"').toBeDefined();
+    expect(
+      barrel.loadPiCodingAgentSdk,
+      'runner-pi pi-sdk barrel is missing value export "loadPiCodingAgentSdk"',
+    ).toBeDefined();
+  });
+
+  it("@appstrate/runner-pi loadPiCodingAgentSdk() resolves every heavy value its consumers import", async () => {
     const expectedValues = [
       "AuthStorage",
       "createAgentSession",
@@ -36,14 +56,12 @@ describe("supply-chain: pi-sdk barrel completeness", () => {
       "ModelRegistry",
       "SessionManager",
       "SettingsManager",
-      "Type",
     ] as const;
 
+    const sdk = (await runnerPiBarrel.loadPiCodingAgentSdk()) as Record<string, unknown>;
+
     for (const name of expectedValues) {
-      expect(
-        (runnerPiBarrel as Record<string, unknown>)[name],
-        `runner-pi pi-sdk barrel is missing value export "${name}"`,
-      ).toBeDefined();
+      expect(sdk[name], `runner-pi pi-sdk loader is missing value export "${name}"`).toBeDefined();
     }
   });
 
