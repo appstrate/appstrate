@@ -148,6 +148,16 @@ const sink = new HttpSink({
   finalizeUrl: env.sink.finalizeUrl,
   runSecret: env.sink.secret,
   traceparent: env.traceparent,
+  // Sink traffic rides the sidecar forward proxy, which boots in parallel —
+  // the very first POST (sequence 1, fired non-blocking below) can land
+  // before the proxy binds. A tight initial retry (vs the 500 ms default)
+  // shrinks the window during which later events sit in the platform's
+  // out-of-order buffer waiting for sequence 1. More attempts compensate for
+  // the smaller start: 8 attempts span ~15 s of sleeps (vs ~3.5 s at the
+  // 4×500ms default), so a boot-window POST still outlives a slow proxy bind
+  // and mid-run platform blips get MORE absorption, not less.
+  initialBackoffMs: 120,
+  maxAttempts: 8,
 });
 
 // --- 0a. Stdout-JSONL bridge ---
@@ -342,7 +352,18 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 // cold start are behind us. `performance.now()` is measured from process entry
 // (timeOrigin), so it quantifies the cold-start gap the dashboard otherwise
 // shows as dead air before the run goes `running`.
-await progress(`runtime starting (${Math.round(performance.now())}ms cold start)`, {
+//
+// Fire-and-forget: this POST rides the sidecar's forward proxy (the agent's
+// only route out), which boots in parallel (#406) — awaiting it serializes
+// the whole boot behind the proxy coming up (~2s of HttpSink backoff on a
+// cold host). Provisioning below retries through the same proxy, so nothing
+// downstream depends on this event having landed. Ordering is safe: the sink
+// stamped this event sequence 1 at emit time, and the ingestion endpoint
+// buffers any later-sequence arrivals until it lands, then drains in order
+// (run-event-ingestion.ts) — worst case the dashboard shows the boot trail
+// as one burst instead of a trickle, exactly what the old awaited POST
+// produced anyway (nothing was emitted at all until it succeeded).
+void progress(`runtime starting (${Math.round(performance.now())}ms cold start)`, {
   coldStartMs: Math.round(performance.now()),
 });
 
