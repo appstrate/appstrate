@@ -55,7 +55,9 @@ type PackageDetailMap = {
 function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDetail {
   return {
     ...d,
-    display_name: d.display_name ?? "",
+    // display_name is optional (agent editor no longer forces it, issue #825);
+    // fall back to the package id so labels never render blank.
+    display_name: d.display_name || d.id,
     description: d.description ?? "",
     scope: d.scope ?? null,
     version: d.version ?? null,
@@ -248,7 +250,8 @@ export function useAgents() {
       // list shape. `forked_from` is not returned by the list endpoint.
       return data!.data.map((a) => ({
         ...a,
-        display_name: a.display_name ?? "",
+        // Fall back to the package id when display_name is empty (issue #825).
+        display_name: a.display_name || a.id,
         description: a.description ?? "",
         schema_version: a.schema_version ?? "",
         author: a.author ?? "",
