@@ -116,9 +116,12 @@ export function createUploadContentRouter() {
 
     // Stream the body straight to the storage backend (disk, or S3 via
     // multipart upload) — never buffered in memory (this route is exempt from
-    // the global bodyLimit; the token's signed max replaces it).
+    // the global bodyLimit; the token's signed max replaces it). The token
+    // expiry is passed through so it keeps being enforced WHILE the body
+    // streams — verified only up front, a slow-trickled body could hold the
+    // socket (and an open S3 multipart upload) long past the token window.
     const body = c.req.raw.body ?? new Blob([]).stream();
-    await writeProxyUploadContent(payload.k, body, payload.s);
+    await writeProxyUploadContent(payload.k, body, payload.s, payload.e);
     return c.body(null, 204);
   });
 

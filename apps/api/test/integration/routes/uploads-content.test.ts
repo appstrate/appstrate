@@ -92,8 +92,11 @@ describe("PUT /api/uploads/_content", () => {
 
   it("accepts a valid PUT (204), stores the bytes, and 409s a replay", async () => {
     const path = uniquePath("happy");
-    const token = makeToken({ k: `${BUCKET}/${path}`, s: 1024 });
     const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    // `s` binds the EXACT declared size (createUpload signs min(size, max)
+    // === size) — the sink enforces it as a ceiling mid-stream and an exact
+    // match on completion.
+    const token = makeToken({ k: `${BUCKET}/${path}`, s: bytes.byteLength });
 
     const res = await putContent(token, bytes);
     expect(res.status).toBe(204);
@@ -124,11 +127,30 @@ describe("PUT /api/uploads/_content", () => {
     const problem = (await res.json()) as { detail?: string };
     expect(problem.detail).toContain("exceeds signed max");
 
-    // No partial object retained — the token stays usable for a clean retry.
+    // No partial object retained — the token stays usable for a clean retry
+    // at the exact signed size.
     expect(await storageExists(BUCKET, path)).toBe(false);
-    const retry = await putContent(token, new Uint8Array([1, 2, 3]));
+    const retryBytes = new Uint8Array(4 * 1024).fill(9);
+    const retry = await putContent(token, retryBytes);
     expect(retry.status).toBe(204);
-    expect(await storageGet(BUCKET, path)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(await storageGet(BUCKET, path)).toEqual(retryBytes);
+  });
+
+  it("rejects a completed body shorter than the signed size (400) and keeps the token usable", async () => {
+    const path = uniquePath("short");
+    const token = makeToken({ k: `${BUCKET}/${path}`, s: 64 });
+
+    const res = await putContent(token, new Uint8Array(48).fill(5));
+    expect(res.status).toBe(400);
+    const problem = (await res.json()) as { detail?: string };
+    expect(problem.detail).toContain("signed size");
+
+    // The short object was rolled back — same token retries at the exact size.
+    expect(await storageExists(BUCKET, path)).toBe(false);
+    const exact = new Uint8Array(64).fill(6);
+    const retry = await putContent(token, exact);
+    expect(retry.status).toBe(204);
+    expect(await storageGet(BUCKET, path)).toEqual(exact);
   });
 
   it("rejects an oversized declared Content-Length before reading the body", async () => {

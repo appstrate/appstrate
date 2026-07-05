@@ -4066,7 +4066,7 @@ export interface paths {
         get?: never;
         /**
          * Write upload bytes (proxy sink)
-         * @description Public endpoint receiving upload bytes on the app domain — used by filesystem storage, and by S3 storage in proxy mode (`S3_PUBLIC_ENDPOINT` unset; the platform streams the body to the private bucket server-side). Authenticated via HMAC-signed `token` query parameter returned in the upload descriptor. The token binds storage key, declared MIME, max size and expiry; the max size is enforced while the body streams to the backend, so chunked uploads cannot exceed it. In direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) the signed URL points directly at the bucket and this endpoint is not used. Rate-limited per IP (60/min).
+         * @description Public endpoint receiving upload bytes on the app domain — used by filesystem storage, and by S3 storage in proxy mode (`S3_PUBLIC_ENDPOINT` unset; the platform streams the body to the private bucket server-side). Authenticated via HMAC-signed `token` query parameter returned in the upload descriptor. The token binds storage key, declared MIME, declared size and expiry; the size is enforced while the body streams to the backend (chunked uploads cannot exceed it) and re-checked exactly on completion — a body shorter than the declared size is rejected and rolled back so the token stays usable for a retry. The expiry is also enforced during streaming, not just when the PUT starts. In direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) the signed URL points directly at the bucket and this endpoint is not used. Rate-limited per IP (60/min).
          */
         put: operations["writeUploadContent"];
         post?: never;
