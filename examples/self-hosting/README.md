@@ -5,6 +5,16 @@ Docker Compose. This directory holds the production `docker-compose.yml`
 (the Tier 3 full stack: PostgreSQL + Redis + MinIO) plus progressive
 `docker-compose.tier{1,2,3}.yml` templates used by `appstrate install`.
 
+On a single node the recommended stack is **Tier 2**: PostgreSQL +
+Redis with filesystem storage on a persisted volume. All file traffic
+(uploads included) is served through the platform on `APP_URL`, so a
+separate object store adds a container without adding capability.
+Bundled MinIO remains available as the Tier 3 advanced option — it
+stays fully private inside the compose network (uploads proxy through
+the platform; no published S3 port, no second public domain). To
+offload upload bytes directly to a publicly reachable S3 endpoint
+instead (multi-node deployments), set `S3_PUBLIC_ENDPOINT`.
+
 ## One-Liner Install (Recommended)
 
 ```bash
@@ -26,10 +36,10 @@ email) and sidesteps a Bun macOS regression (#199, oven-sh/bun #6862,
 `curl|bash`. The two-step pattern is the same one Supabase, Vercel,
 Railway, gh CLI, and fly.io use.
 
-Press Enter at the tier prompt to land on the recommended Tier 3 stack:
+Press Enter at the tier prompt to land on the recommended Tier 2 stack:
 
-- **Tier 3** — Postgres + Redis + MinIO (full production, **default**)
-- **Tier 2** — Postgres + Redis (no object storage)
+- **Tier 3** — Postgres + Redis + bundled MinIO object storage (advanced)
+- **Tier 2** — Postgres + Redis, filesystem storage (production, **default**)
 - **Tier 1** — Postgres only (dev / testing)
 - **Tier 0** — Bun + PGlite + filesystem (no Docker, hobby / evaluation)
 

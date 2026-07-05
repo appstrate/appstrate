@@ -4,7 +4,9 @@
  * Uploads service — direct-upload lifecycle.
  *
  *   POST /api/uploads       → createUpload()  (row + signed URL)
- *   PUT  <signed url>       → (S3 direct, or /api/uploads/_content for FS)
+ *   PUT  <signed url>       → /api/uploads/_content proxy sink (FS storage,
+ *                             and S3 in proxy mode), or direct-to-bucket
+ *                             presigned PUT (S3 with S3_PUBLIC_ENDPOINT set)
  *   POST /api/agents/:id/run { input: { file: "upload://upl_xxx" } }
  *                            → consumeUploadStream() streams the bytes to the
  *                              caller's sink + stamps consumedAt (no buffering)
@@ -197,9 +199,10 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
   const storagePath = `${params.applicationId}/${uploadId}/${safeName}`;
 
   // `maxSize` carries the DECLARED size (`params.size <= maxSize` is enforced
-  // above, so the min is exactly `params.size`): S3 signs it as the presigned
-  // PUT's exact Content-Length; the FS sink enforces it as the streaming
-  // upper bound. Either way the client cannot upload more than it declared.
+  // above, so the min is exactly `params.size`): direct-presign S3 signs it
+  // as the presigned PUT's exact Content-Length; the proxy sink (FS storage,
+  // or S3 in proxy mode) enforces it as the streaming upper bound. Either
+  // way the client cannot upload more than it declared.
   const descriptor = await createUploadUrl(UPLOAD_BUCKET, storagePath, {
     mime: normalizedMime,
     maxSize: Math.min(params.size, maxSize),
@@ -481,11 +484,12 @@ export async function consumeUploadStream(
     // sniffed from the head — both are only known once the stream drains.
     const { bytes, sniffedMime } = await sink(source);
 
-    // Reject mismatched size outright. Both adapters now enforce the declared
-    // size at upload time (S3 signs ContentLength into the presigned PUT; the
-    // FS sink aborts mid-stream past the signed max) — this re-check is
-    // defence in depth, and the only place a SHORTER-than-declared FS upload
-    // is caught (the sink enforces an upper bound, not an exact count).
+    // Reject mismatched size outright. Both upload paths enforce the declared
+    // size at upload time (direct-presign S3 signs ContentLength into the
+    // presigned PUT; the proxy sink aborts mid-stream past the signed max) —
+    // this re-check is defence in depth, and the only place a SHORTER-than-
+    // declared proxy upload is caught (the sink enforces an upper bound, not
+    // an exact count).
     if (bytes !== row.size) {
       logger.warn("upload size mismatch on consume", {
         uploadId,
@@ -578,7 +582,7 @@ export async function consumeUploadStream(
 }
 
 // ---------------------------------------------------------------------------
-// Filesystem content sink (PUT /api/uploads/_content?token=...)
+// Proxy-upload content sink (PUT /api/uploads/_content?token=...)
 // ---------------------------------------------------------------------------
 
 export interface FsContentWriteResult {
@@ -587,22 +591,26 @@ export interface FsContentWriteResult {
 }
 
 /**
- * Stream the body of a PUT to storage (FS adapter path). Token verification +
- * header checks happen in the route handler — this pipes the request body to
- * disk through a counting transform, never buffering the payload in memory.
+ * Stream the body of a PUT to storage (proxy-upload path — filesystem
+ * storage, and S3 storage in proxy mode). Token verification + header checks
+ * happen in the route handler — this pipes the request body to the backend
+ * through a counting transform, never buffering the payload in memory (FS
+ * writes chunk-by-chunk to disk; S3 runs a bounded-memory multipart upload).
  *
  * Size cap: `maxSize` (the token's signed limit; 0 = unlimited) is enforced
  * WHILE streaming — the transform errors the pipe as soon as the byte count
- * exceeds it, which aborts the write and removes the partial file (the
- * storage adapter unlinks its own O_EXCL-created destination). A Content-
- * Length pre-check alone would be bypassable via chunked transfer encoding.
+ * exceeds it, which aborts the write and rolls back the partial object (FS
+ * unlinks its own O_EXCL-created destination; S3 aborts the multipart
+ * upload). A Content-Length pre-check alone would be bypassable via chunked
+ * transfer encoding.
  *
  * Atomic create-or-fail: refuses to overwrite an existing object at the same
- * storage key via O_EXCL. The signed token is valid for 15 min and could
- * otherwise be replayed within its window to swap the bytes of an already-
- * populated upload between client PUT and server-side consume.
+ * storage key (O_EXCL on FS, `If-None-Match: *` on S3). The signed token is
+ * valid for 15 min and could otherwise be replayed within its window to swap
+ * the bytes of an already-populated upload between client PUT and
+ * server-side consume.
  */
-export async function writeFsUploadContent(
+export async function writeProxyUploadContent(
   storageKey: string,
   body: ReadableStream<Uint8Array>,
   maxSize: number,

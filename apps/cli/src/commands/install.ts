@@ -770,13 +770,17 @@ export interface TierResolverDeps {
  * the "what did I type?" typo recovery. Exported so unit tests can
  * lock down the validation contract without invoking the prompt.
  *
- * Interactive default: Tier 3 (full production stack) when Docker is
- * reachable — the happy path for the one-liner installer is
- * `press Enter → working production-grade Appstrate`. When Docker is
- * missing we silently downgrade the default to Tier 0 and surface a
- * friendly note so the user is not pushed into a tier they cannot
- * actually run; the fatal `DockerMissingError` in `installDockerTier`
- * remains the safety net for the explicit-pick case.
+ * Interactive default: Tier 2 (PostgreSQL + Redis, filesystem storage)
+ * when Docker is reachable — the happy path for the one-liner installer
+ * is `press Enter → working production-grade Appstrate`. Filesystem
+ * storage is the single-node default (issue #829): serving is app-domain
+ * either way, so bundled MinIO adds a container without adding
+ * capability — it stays available as the Tier 3 advanced option (or
+ * bring your own S3 via env on any tier). When Docker is missing we
+ * silently downgrade the default to Tier 0 and surface a friendly note
+ * so the user is not pushed into a tier they cannot actually run; the
+ * fatal `DockerMissingError` in `installDockerTier` remains the safety
+ * net for the explicit-pick case.
  */
 export async function resolveTier(
   raw: string | undefined,
@@ -799,11 +803,11 @@ export async function resolveTier(
   // tier was chosen and how to override it on the next run.
   if (deps.autoConfirm === true) {
     const dockerOk = await probe();
-    const autoTier: Tier = dockerOk ? 3 : 0;
+    const autoTier: Tier = dockerOk ? 2 : 0;
     note(
       dockerOk
-        ? "--yes: Tier 3 selected automatically (Docker detected). Re-run with `--tier N` to override."
-        : "--yes: Tier 0 selected automatically (Docker not detected). Install Docker and re-run with `--tier 3` for the production stack.",
+        ? "--yes: Tier 2 selected automatically (Docker detected). Re-run with `--tier N` to override."
+        : "--yes: Tier 0 selected automatically (Docker not detected). Install Docker and re-run with `--tier 2` for the production stack.",
     );
     return autoTier;
   }
@@ -819,22 +823,25 @@ export async function resolveTier(
       "Cannot prompt for tier: stdin is not a TTY. " +
         "Re-run with `--tier N` (0, 1, 2, or 3), or pass `--yes` to accept the Docker-aware default, " +
         "e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --yes` " +
-        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3`.",
+        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 2`.",
     );
   }
   const dockerOk = await probe();
-  const defaultTier: Tier = dockerOk ? 3 : 0;
+  const defaultTier: Tier = dockerOk ? 2 : 0;
   if (!dockerOk) {
     note(
-      "Docker not detected — Tier 0 selected by default. Install Docker Desktop and re-run for the production stack (Tier 3).",
+      "Docker not detected — Tier 0 selected by default. Install Docker Desktop and re-run for the production stack (Tier 2).",
     );
   }
   const chosen = await select<Tier>({
     message: "Which tier do you want to install?",
     initialValue: defaultTier,
     options: [
-      { value: 3, label: "Tier 3 — Production (PostgreSQL + Redis + MinIO) — recommended" },
-      { value: 2, label: "Tier 2 — Standard (PostgreSQL + Redis, no object storage)" },
+      { value: 3, label: "Tier 3 — Advanced (PostgreSQL + Redis + bundled MinIO object storage)" },
+      {
+        value: 2,
+        label: "Tier 2 — Production (PostgreSQL + Redis, filesystem storage) — recommended",
+      },
       { value: 1, label: "Tier 1 — Minimal (PostgreSQL only, dev/testing)" },
       { value: 0, label: "Tier 0 — Hobby (no Docker, evaluation only)" },
     ],
@@ -872,7 +879,7 @@ export async function resolveDir(
       "Cannot prompt for install directory: stdin is not a TTY. " +
         "Re-run with `--dir <path>` or `--yes` to accept ~/appstrate, " +
         "e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --yes` " +
-        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 --dir ~/appstrate`.",
+        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 2 --dir ~/appstrate`.",
     );
   }
   const chosen = raw ?? (await askText("Install directory", defaultInstallDir()));

@@ -88,8 +88,10 @@ export const uploadsPaths = {
                     type: "string",
                     format: "uri",
                     description:
-                      "Pre-signed PUT URL. Points at S3/MinIO directly, or at the platform FS sink. " +
-                      "PUT the raw binary body to it before the upload expires.",
+                      "Signed PUT URL. Points at the platform's proxy sink on the app domain " +
+                      "(filesystem storage, or S3 in proxy mode), or directly at S3/MinIO when " +
+                      "`S3_PUBLIC_ENDPOINT` is configured. PUT the raw binary body to it before " +
+                      "the upload expires.",
                   },
                   method: { type: "string", enum: ["PUT"] },
                   headers: {
@@ -98,7 +100,8 @@ export const uploadsPaths = {
                     description:
                       "The complete set of headers the client MUST send verbatim on the PUT " +
                       "request (`Content-Type`, plus `Content-Length` bound to the declared " +
-                      "`size` in S3 mode). Nothing else is required — no checksum headers.",
+                      "`size` in direct-presign S3 mode). Nothing else is required — no " +
+                      "checksum headers.",
                   },
                   expiresAt: { type: "string", format: "date-time" },
                 },
@@ -126,14 +129,16 @@ export const uploadsPaths = {
     put: {
       operationId: "writeUploadContent",
       tags: ["Uploads"],
-      summary: "Write upload bytes (filesystem sink)",
+      summary: "Write upload bytes (proxy sink)",
       description:
-        "Public endpoint used when the platform runs in filesystem storage mode. " +
-        "Authenticated via HMAC-signed `token` query parameter returned in the upload " +
-        "descriptor. The token binds storage key, declared MIME, max size and expiry; the max " +
-        "size is enforced while the body streams to disk, so chunked uploads cannot exceed it. " +
-        "In S3 mode the signed URL points directly at the bucket and this endpoint is not used. " +
-        "Rate-limited per IP (60/min).",
+        "Public endpoint receiving upload bytes on the app domain — used by filesystem " +
+        "storage, and by S3 storage in proxy mode (`S3_PUBLIC_ENDPOINT` unset; the platform " +
+        "streams the body to the private bucket server-side). Authenticated via HMAC-signed " +
+        "`token` query parameter returned in the upload descriptor. The token binds storage " +
+        "key, declared MIME, max size and expiry; the max size is enforced while the body " +
+        "streams to the backend, so chunked uploads cannot exceed it. In direct-presign S3 " +
+        "mode (`S3_PUBLIC_ENDPOINT` set) the signed URL points directly at the bucket and " +
+        "this endpoint is not used. Rate-limited per IP (60/min).",
       security: [],
       parameters: [
         {

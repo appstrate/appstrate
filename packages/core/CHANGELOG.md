@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`@appstrate/core/storage-s3`** — proxy-upload mode (issue #829).
+  `S3StorageConfig` gains optional `uploadBaseUrl` + `uploadSecret`: when set
+  and no `publicEndpoint` is configured, `createUploadUrl()` returns an
+  HMAC-signed app-domain URL (`PUT /api/uploads/_content`) instead of a
+  presigned direct-to-bucket URL, so the blob store (e.g. a compose-internal
+  MinIO) never needs to be publicly reachable. Setting `publicEndpoint`
+  opts back into direct presign. Existing configs are unaffected.
+- **`@appstrate/core/storage-fs`** — exports `createProxyUploadDescriptor` +
+  `ProxyUploadUrlConfig`, the shared app-domain signed-URL builder now used
+  by both the filesystem backend and the S3 backend's proxy mode.
+
 ### Fixed
 
 - **`@appstrate/core/run-and-wait-client`** — `kind:"inline"` now rejects a

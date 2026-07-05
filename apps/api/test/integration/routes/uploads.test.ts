@@ -60,6 +60,22 @@ describe("POST /api/uploads", () => {
     });
   });
 
+  it("returns an app-domain proxy upload URL when no public storage endpoint is configured", async () => {
+    // Both storage backends must sign the platform sink URL here: filesystem
+    // always does, and S3 does whenever S3_PUBLIC_ENDPOINT is unset (proxy
+    // mode, issue #829) — the test env never sets a public endpoint, so a
+    // presigned direct-to-bucket URL leaking through would regress the
+    // "blob store stays private" contract.
+    const res = await app.request("/api/uploads", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "clip.bin", size: 64, mime: "application/octet-stream" }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { url?: string };
+    expect(body.url).toContain("/api/uploads/_content?token=");
+  });
+
   it("rejects an invalid body with 400 and records no audit event", async () => {
     const res = await app.request("/api/uploads", {
       method: "POST",

@@ -53,6 +53,15 @@ services:
       retries: 5
 
   # ── MinIO (S3-compatible storage) ───────────────────────────
+  # Deliberately PRIVATE: the S3 API port (:9000) is never published.
+  # Browser uploads proxy through the platform on APP_URL (issue #829 —
+  # the platform signs app-domain upload URLs and streams the bytes to
+  # MinIO server-side), so MinIO needs no public FQDN and no exposed
+  # port. Only the admin console (:9001) is published, on localhost use.
+  # To presign direct-to-bucket URLs instead (multi-node offload), expose
+  # the S3 API publicly at a domain ROOT (SigV4 signs the full path —
+  # subpath proxying is unsupported, minio/minio#7857) and set
+  # S3_PUBLIC_ENDPOINT on the appstrate service.
   minio:
     image: minio/minio:latest
     networks:

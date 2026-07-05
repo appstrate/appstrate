@@ -105,6 +105,47 @@ export function verifyFsUploadToken(
   return payload;
 }
 
+/** Config for building app-domain signed proxy-upload URLs. */
+export interface ProxyUploadUrlConfig {
+  /** Absolute public base URL of the API (e.g. `APP_URL`). */
+  uploadBaseUrl: string;
+  /** HMAC keyring for upload tokens (e.g. `UPLOAD_SIGNING_SECRET`). */
+  uploadSecret: string | readonly string[];
+}
+
+/**
+ * Build a signed app-domain upload descriptor pointing at the platform's
+ * `PUT /api/uploads/_content` sink. Shared by the filesystem backend (its
+ * only upload path) and the S3 backend's proxy mode (no public S3 endpoint
+ * configured): the client PUTs to the platform on the app domain, and the
+ * sink streams the body to whichever storage backend is configured — the
+ * blob store itself never needs to be publicly reachable.
+ */
+export function createProxyUploadDescriptor(
+  config: ProxyUploadUrlConfig,
+  key: string,
+  opts?: CreateUploadUrlOptions,
+): UploadUrlDescriptor {
+  const expiresIn = opts?.expiresIn ?? 900;
+  const token = signFsUploadToken(
+    {
+      k: key,
+      s: opts?.maxSize ?? 0,
+      m: opts?.mime ?? "",
+      e: Math.floor(Date.now() / 1000) + expiresIn,
+    },
+    config.uploadSecret,
+  );
+  // Trim trailing slashes with a loop rather than /\/+$/ — the regex is
+  // polynomial on inputs like "http://x/////" and CodeQL flags it as ReDoS.
+  let baseUrl = config.uploadBaseUrl;
+  while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+  const url = `${baseUrl}/api/uploads/_content?token=${encodeURIComponent(token)}`;
+  const headers: Record<string, string> = {};
+  if (opts?.mime) headers["Content-Type"] = opts.mime;
+  return { url, method: "PUT", headers, expiresIn };
+}
+
 /**
  * Create a filesystem-backed Storage implementation.
  * Drop-in replacement for S3 storage — stores files on the local disk.
@@ -312,25 +353,11 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
           "FileSystemStorage.createUploadUrl() requires config.uploadBaseUrl to build URLs",
         );
       }
-      const expiresIn = opts?.expiresIn ?? 900;
-      const key = makeKey(bucket, path);
-      const token = signFsUploadToken(
-        {
-          k: key,
-          s: opts?.maxSize ?? 0,
-          m: opts?.mime ?? "",
-          e: Math.floor(Date.now() / 1000) + expiresIn,
-        },
-        config.uploadSecret,
+      return createProxyUploadDescriptor(
+        { uploadBaseUrl: config.uploadBaseUrl, uploadSecret: config.uploadSecret },
+        makeKey(bucket, path),
+        opts,
       );
-      // Trim trailing slashes with a loop rather than /\/+$/ — the regex is
-      // polynomial on inputs like "http://x/////" and CodeQL flags it as ReDoS.
-      let baseUrl = config.uploadBaseUrl;
-      while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
-      const url = `${baseUrl}/api/uploads/_content?token=${encodeURIComponent(token)}`;
-      const headers: Record<string, string> = {};
-      if (opts?.mime) headers["Content-Type"] = opts.mime;
-      return { url, method: "PUT", headers, expiresIn };
     },
   };
 }

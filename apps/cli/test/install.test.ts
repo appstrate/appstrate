@@ -101,7 +101,7 @@ describe("resolveTier (--yes / autoConfirm)", () => {
   // The tests lock that contract down: any future refactor that
   // accidentally reintroduces `select()` on the --yes path fails here.
 
-  it("returns Tier 3 when Docker is available, without calling select", async () => {
+  it("returns Tier 2 when Docker is available, without calling select", async () => {
     let selectCalls = 0;
     const select = (async () => {
       selectCalls += 1;
@@ -117,9 +117,9 @@ describe("resolveTier (--yes / autoConfirm)", () => {
       isDockerAvailable: async () => true,
       autoConfirm: true,
     });
-    expect(tier).toBe(3);
+    expect(tier).toBe(2);
     expect(selectCalls).toBe(0);
-    expect(noteMsg).toMatch(/Tier 3 selected automatically/i);
+    expect(noteMsg).toMatch(/Tier 2 selected automatically/i);
     expect(noteMsg).toMatch(/Docker detected/i);
   });
 
@@ -155,7 +155,7 @@ describe("resolveTier (--yes / autoConfirm)", () => {
       note: () => {},
       autoConfirm: true,
     });
-    expect(tier).toBe(3);
+    expect(tier).toBe(2);
   });
 
   it("still honors an explicit --tier argument under --yes (granular override wins)", async () => {
@@ -215,7 +215,7 @@ describe("resolveTier (interactive)", () => {
     options?: Array<{ value: number; label: string }>;
   };
 
-  it("defaults to Tier 3 when Docker is available", async () => {
+  it("defaults to Tier 2 when Docker is available", async () => {
     let captured: SelectOpts | undefined;
     const select = (async (opts: SelectOpts) => {
       captured = opts;
@@ -227,10 +227,10 @@ describe("resolveTier (interactive)", () => {
       note: () => {},
       isDockerAvailable: async () => true,
     });
-    expect(tier).toBe(3);
-    expect(captured?.initialValue).toBe(3);
-    expect(captured?.options?.[0]?.value).toBe(3);
-    expect(captured?.options?.[0]?.label).toMatch(/recommended/i);
+    expect(tier).toBe(2);
+    expect(captured?.initialValue).toBe(2);
+    expect(captured?.options?.[1]?.value).toBe(2);
+    expect(captured?.options?.[1]?.label).toMatch(/recommended/i);
   });
 
   it("falls back to Tier 0 default when Docker is missing and surfaces a note", async () => {
@@ -255,14 +255,14 @@ describe("resolveTier (interactive)", () => {
   });
 
   it("returns whatever the user explicitly selects, regardless of default", async () => {
-    const select = (async () => 2) as unknown as typeof import("@clack/prompts").select;
+    const select = (async () => 3) as unknown as typeof import("@clack/prompts").select;
     const tier = await resolveTier(undefined, {
       select,
       isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
       note: () => {},
       isDockerAvailable: async () => true,
     });
-    expect(tier).toBe(2);
+    expect(tier).toBe(3);
   });
 
   it("orders options Tier 3 → 2 → 1 → 0", async () => {

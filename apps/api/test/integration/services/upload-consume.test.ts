@@ -21,7 +21,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import {
   consumeUploadStream,
-  writeFsUploadContent,
+  writeProxyUploadContent,
   cleanupExpiredUploads,
   type UploadStreamSink,
 } from "../../../src/services/uploads.ts";
@@ -535,7 +535,7 @@ describe("cleanupExpiredUploads", () => {
   });
 });
 
-describe("writeFsUploadContent (FS sink)", () => {
+describe("writeProxyUploadContent (FS sink)", () => {
   beforeEach(async () => {
     await truncateAll();
   });
@@ -552,10 +552,10 @@ describe("writeFsUploadContent (FS sink)", () => {
 
   it("refuses to overwrite an existing object at the same storage key", async () => {
     const { key, storagePath } = uniqueKey("replay");
-    await writeFsUploadContent(key, bodyStream(new Uint8Array([1, 2, 3])), 0);
+    await writeProxyUploadContent(key, bodyStream(new Uint8Array([1, 2, 3])), 0);
     // Second PUT with the same (still-valid) token must be rejected.
     try {
-      await writeFsUploadContent(key, bodyStream(new Uint8Array([4, 5, 6])), 0);
+      await writeProxyUploadContent(key, bodyStream(new Uint8Array([4, 5, 6])), 0);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -569,7 +569,7 @@ describe("writeFsUploadContent (FS sink)", () => {
   it("accepts a body at exactly the signed max and reports its size", async () => {
     const { key, storagePath } = uniqueKey("exact");
     const bytes = new Uint8Array(64).fill(7);
-    const result = await writeFsUploadContent(key, bodyStream(bytes), 64);
+    const result = await writeProxyUploadContent(key, bodyStream(bytes), 64);
     expect(result.size).toBe(64);
     expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(bytes);
   });
@@ -586,7 +586,7 @@ describe("writeFsUploadContent (FS sink)", () => {
       },
     });
     try {
-      await writeFsUploadContent(key, source, 4 * 1024);
+      await writeProxyUploadContent(key, source, 4 * 1024);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -596,14 +596,14 @@ describe("writeFsUploadContent (FS sink)", () => {
     // No partial object left behind — the token stays usable for a clean retry.
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
     const retry = new Uint8Array([9, 9, 9]);
-    await writeFsUploadContent(key, bodyStream(retry), 4 * 1024);
+    await writeProxyUploadContent(key, bodyStream(retry), 4 * 1024);
     expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(retry);
   });
 
   it("treats a signed max of 0 as unlimited (legacy tokens)", async () => {
     const { key, storagePath } = uniqueKey("nolimit");
     const bytes = new Uint8Array(2048).fill(3);
-    await writeFsUploadContent(key, bodyStream(bytes), 0);
+    await writeProxyUploadContent(key, bodyStream(bytes), 0);
     expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(bytes);
   });
 });
