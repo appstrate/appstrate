@@ -404,6 +404,59 @@ appstrate.example.com {
 }
 ```
 
+### Reverse proxy body size & timeouts (uploads)
+
+All file uploads flow through the platform on `APP_URL`
+(`PUT /api/uploads/_content`) — for filesystem storage and for S3/MinIO in
+the default proxy mode alike. That means every upload byte transits your
+reverse proxy, and most proxies cap request bodies well below Appstrate's
+own 100 MB upload ceiling. Raise the proxy limit or uploads larger than the
+proxy default fail with an opaque proxy-side `413` that never reaches
+Appstrate:
+
+- **nginx** (default is only 1 MB):
+
+  ```nginx
+  client_max_body_size 100m;
+  # slow links + large files: give the streamed body time to arrive
+  proxy_read_timeout 300s;
+  proxy_send_timeout 300s;
+  # stream the body through instead of buffering it to disk first
+  proxy_request_buffering off;
+  ```
+
+- **Caddy**: no body limit by default — nothing to do (use
+  `request_body { max_size 100MB }` if you had set one).
+- **Traefik**: no body limit by default; if you use the `buffering`
+  middleware, set `maxRequestBodyBytes` ≥ `104857600`.
+
+Only direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) bypasses the proxy —
+browsers then PUT straight at the public S3 endpoint.
+
+### Bring-your-own S3 (AWS, R2): abort incomplete multipart uploads
+
+In proxy mode the platform streams large uploads to S3 as multipart uploads.
+Failed/interrupted uploads are aborted server-side, but as a belt-and-braces
+measure AWS itself recommends a lifecycle rule that expires any incomplete
+multipart upload — parts otherwise accumulate invisibly and are billed:
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "abort-incomplete-mpu",
+      "Status": "Enabled",
+      "Filter": {},
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}
+```
+
+Apply with `aws s3api put-bucket-lifecycle-configuration` (R2: same API).
+The bundled MinIO needs nothing — it expires stale multipart uploads after
+24 h on its own.
+
 Other production notes:
 
 - Use strong, unique secrets for all `*_SECRET` and `*_PASSWORD` variables
