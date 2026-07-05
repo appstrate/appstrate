@@ -103,7 +103,7 @@ function AgentEditorInner({
     toWireBody: (s) => ({ manifest: s.manifest, content: s.prompt }),
     validate: (s) => {
       const { id } = getManifestName(s.manifest);
-      if (!id || !s.manifest.display_name) {
+      if (!id) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
       if (!s.prompt.trim()) {
@@ -323,7 +323,7 @@ function PackageEditorInner({
     }),
     validate: (s) => {
       const { id } = getManifestName(s.manifest);
-      if (!id || !s.manifest.display_name) {
+      if (!id) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
       if (!s.content.trim()) {
@@ -436,7 +436,7 @@ function IntegrationEditorInner({
     }),
     validate: (s) => {
       const { id } = getManifestName(s.manifest);
-      if (!id || !s.manifest.display_name) {
+      if (!id) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
       return null;
