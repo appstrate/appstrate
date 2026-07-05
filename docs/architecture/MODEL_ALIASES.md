@@ -19,9 +19,9 @@ the second.
 - **Threat B — the agent runtime (adversarial code inside the container).** The
   agent needs _some_ protocol/endpoint info to format requests, so the backing
   cannot be perfectly hidden from determined in-container code. **Reduced, not
-  eliminated** — the real `model` id, real upstream id in responses, and error
-  prose are swapped/scrubbed, but `MODEL_API` (protocol family) remains
-  observable.
+  eliminated** — the real `model` id is rewritten on success responses and
+  every error surface is synthesized (see below), but `MODEL_API` (protocol
+  family) remains observable.
 
 ## How resolution works
 
@@ -42,6 +42,50 @@ the alias never reaches upstream. Two layers hide the backing from users:
 The usage ledger (`llm_usage`) keeps the real id privately in `real_model` for
 billing/audit; the only service accessor (`listLlmUsageForRun`) projects just
 `id`/`costUsd`/`source`.
+
+## Error surfaces: synthesize, never scrub
+
+Success responses are rewritten by **exact field** (`model`, `message.model`,
+`response.model`) — generated content is never touched. Error surfaces are
+different: provider error bodies are free-form prose that can name the backing
+anywhere (model id, hostname, provider vocabulary). For an aliased model they
+are therefore **never forwarded at all** — each boundary REPLACES them with a
+neutral synthesized envelope (`syntheticAliasErrorBody`):
+
+```json
+{
+  "type": "error",
+  "error": {
+    "type": "upstream_error",
+    "message": "Upstream model error (model \"<alias>\", status 529)"
+  }
+}
+```
+
+This is a whitelist by construction — a scrub would be a blacklist where every
+forgotten surface is a new leak. Concretely:
+
+- **Non-2xx upstream bodies** (sidecar + gateway) → envelope at the upstream
+  status; the original body goes to server logs (truncated).
+- **Mid-stream SSE error frames** (Anthropic `type:"error"`, OpenAI-family
+  standalone top-level `error`, OpenAI Responses `response.failed`/
+  `response.incomplete` with a nested `response.error`) → replaced in-stream.
+  Frames carrying `choices` are content and stay on the exact-field path.
+- **Fetch-level failures** (ConnectionRefused / DNS / TLS, sidecar-synthesized 502) → the error `code` survives, the `(hostname)` hint is dropped.
+- **Response headers** → reduced to the shared allowlist
+  (`LLM_PASSTHROUGH_RESPONSE_HEADERS`: content-type, retry/RateLimit family,
+  x-request-id); `server`, `cf-ray`, `anthropic-*`, `openai-organization`, …
+  fingerprint the backing and are dropped.
+- **Locally-synthesized gateway messages** (protocol mismatch, SSRF refusal,
+  OAuth-subscription rejection, credential label fallback) name the alias only;
+  the backing detail is server-log-only.
+
+Status codes and the retry/backoff headers still flow, so client retry
+behavior is preserved. Non-aliased models keep full verbatim passthrough
+(bodies, headers, hostnames) — the opacity cost applies only to aliases, whose
+contract is precisely that opacity. The trade-off: aliased callers lose
+upstream error detail (e.g. a provider's "max_tokens too large" prose); the
+detail remains in server logs.
 
 ## Constraints
 

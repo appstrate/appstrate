@@ -11,7 +11,8 @@ export {
   swapRequestModel,
   swapResponseModelJson,
   createSseModelSwapStream,
-  scrubModelText,
+  syntheticAliasErrorBody,
   isAliasableApiShape,
   ALIASABLE_API_SHAPES,
+  LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "@appstrate/core/model-swap";

@@ -225,6 +225,28 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       }),
     });
     expect(res.status).toBe(400);
+    // Non-aliased presets keep the actionable detail — the message names the
+    // preset's actual protocol family so the caller can pick the right route.
+    expect(await res.text()).toContain("anthropic-messages");
+  });
+
+  it("masks the backing protocol family on an apiShape mismatch for an aliased preset", async () => {
+    // For an alias the public DTO nulls apiShape (`projectAliasedModel`), so
+    // the mismatch message must not name the backing family either.
+    const h = await buildHarness({ apiShape: "anthropic-messages", aliased: true });
+    mockUpstream(async () => new Response("should not be called", { status: 599 }));
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const text = await res.text();
+    expect(text).not.toContain("anthropic");
+    expect(text).toContain("is not served by this endpoint");
   });
 
   it("forwards upstream errors verbatim without recording usage", async () => {
@@ -780,7 +802,10 @@ describe("POST /api/llm-proxy/* — model-alias swap", () => {
     expect(echoed).toContain(`"model":"${h.presetId}"`);
   });
 
-  it("scrubs the real id out of an upstream error body", async () => {
+  it("replaces an upstream error body with the synthetic envelope (never forwarded)", async () => {
+    // Error bodies are free-form prose that can name the backing anywhere, so
+    // for an alias they are synthesized (whitelist by construction), never
+    // forwarded-and-scrubbed: nothing of the upstream prose may survive.
     const h = await buildHarness({ aliased: true, modelId: "deepseek-chat-SECRET" });
     mockUpstream(
       async () =>
@@ -796,9 +821,12 @@ describe("POST /api/llm-proxy/* — model-alias swap", () => {
       body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
     });
 
+    // Status preserved for caller retry/backoff; body is the neutral envelope.
     expect(res.status).toBe(429);
     const text = await res.text();
-    expect(text).not.toContain("deepseek-chat-SECRET");
     expect(text).toContain(h.presetId);
+    expect(text).toContain("Upstream model error");
+    expect(text).not.toContain("deepseek-chat-SECRET");
+    expect(text).not.toContain("overloaded");
   });
 });
