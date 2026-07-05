@@ -13,7 +13,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   generateEnvForTier,
+  isRemoteAppUrl,
   isValidBootstrapEmail,
+  parseAppUrl,
   renderEnvFile,
   type EnvVars,
 } from "../../src/lib/install/secrets.ts";
@@ -296,5 +298,87 @@ describe("isValidBootstrapEmail", () => {
     expect(isValidBootstrapEmail("trailing@")).toBe(false);
     expect(isValidBootstrapEmail("no-tld@example")).toBe(false);
     expect(isValidBootstrapEmail("white space@example.com")).toBe(false);
+  });
+});
+
+describe("parseAppUrl (issue #822)", () => {
+  it("accepts a bare https origin and returns it unchanged", () => {
+    expect(parseAppUrl("https://appstrate.example.com")).toBe("https://appstrate.example.com");
+  });
+
+  it("accepts http with an explicit port", () => {
+    expect(parseAppUrl("http://192.168.1.10:8080")).toBe("http://192.168.1.10:8080");
+  });
+
+  it("normalizes: strips a trailing slash and lowercases the host", () => {
+    expect(parseAppUrl("https://Appstrate.Example.COM/")).toBe("https://appstrate.example.com");
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(parseAppUrl("  https://example.com  ")).toBe("https://example.com");
+  });
+
+  it("drops a default port (URL origin semantics)", () => {
+    expect(parseAppUrl("https://example.com:443")).toBe("https://example.com");
+    expect(parseAppUrl("http://example.com:80")).toBe("http://example.com");
+  });
+
+  it("rejects a relative or garbage value", () => {
+    expect(() => parseAppUrl("example.com")).toThrow(/Expected an absolute URL/);
+    expect(() => parseAppUrl("not a url")).toThrow(/Expected an absolute URL/);
+    expect(() => parseAppUrl("")).toThrow(/Expected an absolute URL/);
+  });
+
+  it("rejects non-http(s) schemes", () => {
+    expect(() => parseAppUrl("ftp://example.com")).toThrow(/Only http/);
+    expect(() => parseAppUrl("ws://example.com")).toThrow(/Only http/);
+  });
+
+  it("rejects a path, query, or fragment (origin only — no subpath deploys)", () => {
+    expect(() => parseAppUrl("https://example.com/appstrate")).toThrow(/origin only/);
+    expect(() => parseAppUrl("https://example.com/?x=1")).toThrow(/origin only/);
+    expect(() => parseAppUrl("https://example.com/#frag")).toThrow(/origin only/);
+  });
+
+  it("rejects embedded credentials", () => {
+    expect(() => parseAppUrl("https://user:pass@example.com")).toThrow(/Credentials/);
+  });
+});
+
+describe("isRemoteAppUrl (issue #822)", () => {
+  it("localhost / 127.0.0.1 / [::1] over http are local", () => {
+    expect(isRemoteAppUrl("http://localhost:3000")).toBe(false);
+    expect(isRemoteAppUrl("http://localhost")).toBe(false);
+    expect(isRemoteAppUrl("http://127.0.0.1:3000")).toBe(false);
+    expect(isRemoteAppUrl("http://[::1]:3000")).toBe(false);
+  });
+
+  it("any non-loopback hostname is remote, even over plain http", () => {
+    expect(isRemoteAppUrl("http://appstrate.example.com")).toBe(true);
+    expect(isRemoteAppUrl("http://192.168.1.10:8080")).toBe(true);
+  });
+
+  it("https always implies a TLS-terminating proxy → remote", () => {
+    expect(isRemoteAppUrl("https://localhost")).toBe(true);
+    expect(isRemoteAppUrl("https://appstrate.example.com")).toBe(true);
+  });
+});
+
+describe("generateEnvForTier — TRUST_PROXY wiring (issue #822)", () => {
+  it("local default: no TRUST_PROXY key (defaults are elided)", () => {
+    const env = generateEnvForTier(3, "http://localhost:3000");
+    expect(env.TRUST_PROXY).toBeUndefined();
+  });
+
+  it("remote APP_URL sets TRUST_PROXY=true and mirrors the URL into TRUSTED_ORIGINS", () => {
+    const env = generateEnvForTier(3, "https://appstrate.example.com");
+    expect(env.APP_URL).toBe("https://appstrate.example.com");
+    expect(env.TRUSTED_ORIGINS).toBe("https://appstrate.example.com");
+    expect(env.TRUST_PROXY).toBe("true");
+  });
+
+  it("applies on Tier 0 too (flag-driven, no prompt there)", () => {
+    const env = generateEnvForTier(0, "https://appstrate.example.com");
+    expect(env.TRUST_PROXY).toBe("true");
   });
 });

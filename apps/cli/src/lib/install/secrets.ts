@@ -122,6 +122,63 @@ export function isValidBootstrapEmail(value: string): boolean {
 }
 
 /**
+ * Parse + normalize the public app URL (issue #822). Accepts an origin
+ * only — scheme http/https, optional port, no path/query/fragment —
+ * because APP_URL is consumed as an origin everywhere downstream
+ * (TRUSTED_ORIGINS/CORS, OAuth redirect URIs, email links). A subpath
+ * deployment is not supported by the platform, so rejecting it here
+ * surfaces the misconfiguration at install time instead of as a broken
+ * OAuth callback later.
+ *
+ * Returns the URL origin (trailing slash stripped, hostname lowercased
+ * by the URL parser). Throws with an actionable message on anything
+ * else.
+ */
+export function parseAppUrl(raw: string): string {
+  const trimmed = raw.trim();
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(
+      `Invalid app URL "${raw}". Expected an absolute URL like https://appstrate.example.com or http://localhost:3000.`,
+    );
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`Invalid app URL "${raw}". Only http:// and https:// schemes are supported.`);
+  }
+  if (url.username || url.password) {
+    throw new Error(`Invalid app URL "${raw}". Credentials in the URL are not supported.`);
+  }
+  if ((url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) {
+    throw new Error(
+      `Invalid app URL "${raw}". Use the origin only (no path, query, or fragment) — Appstrate must be served at the domain root.`,
+    );
+  }
+  return url.origin;
+}
+
+/**
+ * True when the public URL points beyond the local machine — i.e. the
+ * install is a remote deployment sitting behind a reverse proxy. Two
+ * signals, either one suffices:
+ *   - non-loopback hostname (`example.com`, a LAN IP, …)
+ *   - https scheme — TLS is always terminated by a proxy in front of
+ *     the platform (the container itself only speaks plain HTTP), so
+ *     even `https://localhost` implies a proxy hop.
+ *
+ * Drives the automatic `TRUST_PROXY=true` in `generateEnvForTier` so
+ * client IPs and forwarded-proto are honored behind the proxy without
+ * a separate knob.
+ */
+export function isRemoteAppUrl(appUrl: string): boolean {
+  const url = new URL(appUrl);
+  if (url.protocol === "https:") return true;
+  const host = url.hostname;
+  return host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]";
+}
+
+/**
  * Build the `.env` variable set for the given tier. All tiers share
  * the core Better Auth / connection-encryption secrets; Docker tiers
  * (1/2/3) add infra passwords.
@@ -140,6 +197,15 @@ export function generateEnvForTier(
     RUN_TOKEN_SECRET: hex32(),
     UPLOAD_SIGNING_SECRET: hex32(),
   };
+
+  // Remote deployment (issue #822): a non-localhost / https APP_URL
+  // means a reverse proxy terminates TLS in front of the platform, so
+  // client-IP and forwarded-proto must be read from X-Forwarded-*.
+  // Elided on local installs — same "defaults are not written" policy
+  // as PORT below.
+  if (isRemoteAppUrl(appUrl)) {
+    env.TRUST_PROXY = "true";
+  }
 
   if (ports.port !== undefined && ports.port !== 3000) {
     env.PORT = String(ports.port);

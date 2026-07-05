@@ -18,7 +18,9 @@ import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/u
 import {
   generateBootstrapToken,
   generateEnvForTier,
+  isRemoteAppUrl,
   isValidBootstrapEmail,
+  parseAppUrl,
   renderEnvFile,
   type BootstrapOverrides,
   type Tier,
@@ -77,6 +79,14 @@ export interface InstallOptions {
   port?: string;
   /** Override the host port the MinIO console binds to (Tier 3 only). */
   minioConsolePort?: string;
+  /**
+   * Public URL of the platform (issue #822) — what browsers, OAuth
+   * redirects, and email links use. Independent of `--port` (the host
+   * bind port / reverse-proxy upstream). Origin only, e.g.
+   * `https://appstrate.example.com`. Also honored via
+   * `APPSTRATE_APP_URL`. Defaults to `http://localhost:<port>`.
+   */
+  appUrl?: string;
   /**
    * Bypass the "another stack is already running under this project
    * name" preflight. Escape hatch for edge cases where the operator
@@ -257,10 +267,20 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
       nonInteractive,
     });
 
+    // Public URL (issue #822) — flag/env/prompt, defaults to
+    // http://localhost:<port>. Resolved AFTER the port so the local
+    // default reflects the (possibly auto-picked) final port.
+    const appUrl = await resolveAppUrl(opts.appUrl, port, {
+      tier,
+      mode: installState.mode,
+      existing: installState.existing,
+      nonInteractive,
+    });
+
     if (tier === 0) {
-      await installTier0(dir, port, { autoConfirm, bootstrap });
+      await installTier0(dir, port, appUrl, { autoConfirm, bootstrap });
     } else {
-      await installDockerTier(dir, tier, port, minioConsolePort, {
+      await installDockerTier(dir, tier, port, minioConsolePort, appUrl, {
         force: opts.force ?? false,
         mode: installState.mode,
         existing: installState.existing,
@@ -381,6 +401,92 @@ export async function resolveBootstrapEmail(opts: {
 
 /** Default-shaped `ExistingInstall` used when the resolver is called without upgrade context. */
 const NO_EXISTING_INSTALL: ExistingInstall = { hasEnv: false, hasCompose: false, existingEnv: {} };
+
+/**
+ * Resolve the public app URL for the install (issue #822).
+ *
+ * Order of precedence:
+ *   1. Upgrade with an existing `APP_URL` in `.env` → inherit it.
+ *      `mergeEnv` preserves the existing value anyway (existing wins),
+ *      so honoring a divergent `--app-url` here would print banners
+ *      pointing at a URL the generated `.env` doesn't contain. Same
+ *      warn-and-inherit contract as `resolveAppstratePort`; the
+ *      documented way to change the URL is editing `<dir>/.env`.
+ *   2. `--app-url` flag / `APPSTRATE_APP_URL` env — the scripted and
+ *      `curl | APPSTRATE_APP_URL=… bash` path. Validated strictly
+ *      (throws) so a typo surfaces at install time, not as a broken
+ *      OAuth callback later.
+ *   3. Interactive prompt — Docker tiers only, fresh install. Tier 0
+ *      is local dev where a public URL is meaningless noise. Enter
+ *      keeps the local default (current behavior preserved).
+ *   4. `http://localhost:<port>` — the historical default.
+ */
+export async function resolveAppUrl(
+  raw: string | undefined,
+  port: number,
+  opts: { tier: Tier; mode: InstallMode; existing: ExistingInstall; nonInteractive: boolean },
+): Promise<string> {
+  const envValue = process.env.APPSTRATE_APP_URL?.trim();
+  const expressed = raw ?? (envValue === "" ? undefined : envValue);
+  const requested = expressed === undefined ? undefined : parseAppUrl(expressed);
+
+  if (opts.mode === "upgrade" && opts.existing.hasEnv) {
+    const inherited = opts.existing.existingEnv.APP_URL;
+    if (inherited) {
+      if (requested !== undefined && requested !== inherited) {
+        clack.log.warn(
+          `app URL ${requested} ignored on upgrade — existing .env pins APP_URL=${inherited}, and config is preserved across upgrades (see mergeEnv). Edit <dir>/.env manually (APP_URL + TRUSTED_ORIGINS + TRUST_PROXY) to change the public URL.`,
+        );
+      }
+      return inherited;
+    }
+  }
+
+  if (requested !== undefined) {
+    assertLoopbackPortMatches(requested, port);
+    return requested;
+  }
+
+  const fallback = appUrlForPort(port);
+  // Tier 0 is local dev; non-interactive keeps the zero-prompt contract
+  // of `--yes` / `--tier N` (remote deploys pass --app-url explicitly).
+  if (opts.tier === 0 || opts.nonInteractive) return fallback;
+
+  clack.note(
+    `Remote deployment (behind a reverse proxy)? Enter the public URL users will\nhit, e.g. https://appstrate.example.com — it drives OAuth redirects, CORS\n(TRUSTED_ORIGINS), and email links. The reverse proxy itself (TLS, forwarding\nto localhost:${port}) is not provisioned by the installer.\nPress Enter to keep the local default.`,
+    "Public URL (optional)",
+  );
+  const answer = (await askText("Public URL", fallback)).trim();
+  if (!answer || answer === fallback) return fallback;
+  const chosen = parseAppUrl(answer);
+  assertLoopbackPortMatches(chosen, port);
+  return chosen;
+}
+
+/**
+ * Reject a plain-http loopback app URL whose port disagrees with the
+ * host bind port. Such a URL is accessed directly — on localhost there
+ * is no reverse proxy to bridge the two ports — so every derived
+ * artifact (TRUSTED_ORIGINS/CORS, the /claim banner, email links) would
+ * point at a port nothing listens on, while the install itself looks
+ * green (the healthcheck polls the bind port). Fail fast with the fix.
+ *
+ * https loopback is deliberately allowed: TLS on localhost implies a
+ * local terminating proxy (e.g. Caddy on :8443 forwarding to the bind
+ * port), where diverging ports are the whole point. Exported for tests.
+ */
+export function assertLoopbackPortMatches(appUrl: string, port: number): void {
+  const url = new URL(appUrl);
+  if (url.protocol !== "http:") return;
+  const host = url.hostname;
+  if (host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]") return;
+  const urlPort = url.port === "" ? 80 : Number(url.port);
+  if (urlPort !== port) {
+    throw new Error(
+      `App URL ${appUrl} doesn't match the platform bind port ${port} — a plain-http localhost URL is accessed directly (no reverse proxy), so the ports must agree. Did you mean \`--port ${urlPort}\` (without --app-url)?`,
+    );
+  }
+}
 
 /** DI seam for the cross-check with `docker compose ls` — tests inject a fake, production uses the real helper. */
 export interface PortResolverDeps {
@@ -786,9 +892,13 @@ export async function resolveDir(
 async function installTier0(
   dir: string,
   port: number,
+  appUrl: string,
   opts: { autoConfirm: boolean; bootstrap: BootstrapOverrides },
 ): Promise<void> {
-  const appUrl = appUrlForPort(port);
+  // The public URL may sit behind a not-yet-configured reverse proxy;
+  // everything that must reach the platform NOW (dev-server readiness
+  // poll, browser open) goes through the local bind address instead.
+  const localUrl = appUrlForPort(port);
   // Bun — either already present, or install it via the upstream script.
   // We only care whether a working Bun is reachable; the actual path
   // resolution happens inside `runBunInstall` / `spawnDevServer` via
@@ -852,10 +962,10 @@ async function installTier0(
 
   const devSpinner = spinner();
   devSpinner.start("Starting dev server");
-  const { pid } = await spawnDevServer(dir, appUrl);
+  const { pid } = await spawnDevServer(dir, localUrl);
   devSpinner.stop(`Dev server running (pid ${pid})`);
 
-  await openBrowser(appUrl);
+  await openBrowser(localUrl);
   printBootstrapFollowup(appUrl, opts.bootstrap);
   outro(`Appstrate is running at ${appUrl} (pid ${pid}).\nKill it with \`kill ${pid}\` when done.`);
 }
@@ -928,6 +1038,7 @@ async function installDockerTier(
   tier: 1 | 2 | 3,
   port: number,
   minioConsolePort: number | undefined,
+  appUrl: string,
   opts: {
     force: boolean;
     mode: InstallMode;
@@ -937,7 +1048,10 @@ async function installDockerTier(
     bootstrap: BootstrapOverrides;
   },
 ): Promise<void> {
-  const appUrl = appUrlForPort(port);
+  // Healthcheck + browser go through the local bind address: on a
+  // remote deployment the public URL only resolves once the operator's
+  // reverse proxy is configured, which happens AFTER the install.
+  const localUrl = appUrlForPort(port);
   // Docker.
   const dockerSpinner = spinner();
   dockerSpinner.start("Checking Docker");
@@ -1042,7 +1156,7 @@ async function installDockerTier(
       // Healthcheck.
       const healthSpinner = spinner();
       healthSpinner.start("Waiting for Appstrate to become healthy");
-      await waitForAppstrate(appUrl);
+      await waitForAppstrate(localUrl);
       healthSpinner.stop("Appstrate is healthy");
 
       // Persist the project-name binding on success. Written AFTER the
@@ -1063,7 +1177,18 @@ async function installDockerTier(
     },
   );
 
-  await openBrowser(appUrl);
+  await openBrowser(localUrl);
+  // Remote deployment: the installer wired APP_URL / TRUSTED_ORIGINS /
+  // TRUST_PROXY, but provisioning the reverse proxy (TLS, forwarding
+  // the public domain to the host port) is the operator's job — say so
+  // explicitly instead of letting a dead public URL look like a failed
+  // install.
+  if (isRemoteAppUrl(appUrl)) {
+    clack.note(
+      `The platform listens on ${localUrl} (host port ${port}).\nPoint your reverse proxy (Caddy, nginx, Traefik) at it so that\n${appUrl} → ${localUrl}. TLS termination happens at the proxy;\nTRUST_PROXY=true is already set in .env. Until the proxy is up,\nthe platform is reachable at ${localUrl} only.`,
+      "Reverse proxy required",
+    );
+  }
   printBootstrapFollowup(appUrl, opts.bootstrap);
   // The lifecycle commands (#343) read `<dir>/.appstrate/project.json`
   // to find the right `--project-name`, so the user never has to type
