@@ -18613,11 +18613,10 @@ export interface operations {
                      *       "object": "upload",
                      *       "id": "upl_abc123",
                      *       "uri": "upload://upl_abc123",
-                     *       "url": "https://s3.example.com/uploads/app_1/upl_abc123/invoice.pdf?X-Amz-...",
+                     *       "url": "https://app.example.com/api/uploads/_content?token=eyJrIjoi...",
                      *       "method": "PUT",
                      *       "headers": {
-                     *         "Content-Type": "application/pdf",
-                     *         "Content-Length": "24576"
+                     *         "Content-Type": "application/pdf"
                      *       },
                      *       "expiresAt": "2026-04-14T12:15:00Z"
                      *     }

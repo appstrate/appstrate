@@ -109,6 +109,28 @@ export async function detectInstallMode(dir: string): Promise<InstallModeResult>
 }
 
 /**
+ * Infer the tier of an existing Docker-tier install from the compose file
+ * the CLI previously wrote. The tier templates are distinguished by which
+ * services they declare (Tier 3 bundles MinIO, Tier 2 adds Redis, Tier 1 is
+ * PostgreSQL only), and user edits preserve those service keys. Returns
+ * `null` when there is no readable compose file (Tier 0 dirs have none) or
+ * it doesn't look like one of our templates (hand-rolled deployment) — the
+ * caller then keeps whatever tier was resolved normally.
+ */
+export async function inferInstalledTier(dir: string): Promise<1 | 2 | 3 | null> {
+  let text: string;
+  try {
+    text = await readFile(join(dir, "docker-compose.yml"), "utf8");
+  } catch {
+    return null;
+  }
+  if (/^ {2}minio:/m.test(text)) return 3;
+  if (/^ {2}redis:/m.test(text)) return 2;
+  if (/^ {2}postgres:/m.test(text)) return 1;
+  return null;
+}
+
+/**
  * Parse a `.env` file body into a flat dict.
  *
  * Respects the subset of dotenv syntax the CLI itself emits in

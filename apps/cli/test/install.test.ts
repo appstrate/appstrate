@@ -32,6 +32,7 @@ import {
   resolveAppUrl,
   assertLoopbackPortMatches,
   printBootstrapFollowup,
+  reconcileUpgradeTier,
 } from "../src/commands/install.ts";
 import type { RunningComposeProject } from "../src/lib/install/tier123.ts";
 
@@ -1405,5 +1406,47 @@ describe("assertLoopbackPortMatches (issue #822) — loopback port-mismatch guar
         nonInteractive: true,
       }),
     ).resolves.toBe("http://localhost:1234");
+  });
+});
+
+describe("reconcileUpgradeTier", () => {
+  it("inherits the installed tier when the default would silently change the stack", () => {
+    // The #829 hazard: `install --yes` (default Tier 2) re-run on a Tier 3
+    // deployment must NOT rewrite compose with the Tier 2 template — MinIO
+    // would vanish while .env keeps the S3 config, hiding all stored objects.
+    const r = reconcileUpgradeTier(2, undefined, 3);
+    expect(r.tier).toBe(3);
+    expect(r.note).toMatch(/keeping Tier 3/i);
+    expect(r.note).toMatch(/--tier 2/);
+  });
+
+  it("inherits downward too (pre-existing reverse hazard: Tier 2 install, Tier 3 pick)", () => {
+    const r = reconcileUpgradeTier(3, undefined, 2);
+    expect(r.tier).toBe(2);
+    expect(r.note).toMatch(/keeping Tier 2/i);
+  });
+
+  it("an explicit --tier always wins (scripted tier changes stay possible)", () => {
+    const r = reconcileUpgradeTier(2, "2", 3);
+    expect(r.tier).toBe(2);
+    expect(r.note).toBeUndefined();
+  });
+
+  it("keeps the resolved tier when no compose tier could be inferred", () => {
+    const r = reconcileUpgradeTier(2, undefined, null);
+    expect(r.tier).toBe(2);
+    expect(r.note).toBeUndefined();
+  });
+
+  it("keeps a Tier 0 resolution untouched (source-clone dirs have no compose tier)", () => {
+    const r = reconcileUpgradeTier(0, undefined, 3);
+    expect(r.tier).toBe(0);
+    expect(r.note).toBeUndefined();
+  });
+
+  it("is a no-op when the tiers already agree", () => {
+    const r = reconcileUpgradeTier(3, undefined, 3);
+    expect(r.tier).toBe(3);
+    expect(r.note).toBeUndefined();
   });
 });

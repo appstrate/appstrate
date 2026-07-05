@@ -48,6 +48,7 @@ import {
 import { openBrowser, isPortAvailable, describeProcessOnPort } from "../lib/install/os.ts";
 import {
   detectInstallMode,
+  inferInstalledTier,
   mergeEnv,
   backupFiles,
   cleanupBackups,
@@ -207,7 +208,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
 
   try {
     const autoConfirm = opts.autoConfirm === true;
-    const tier = await resolveTier(opts.tier, { autoConfirm });
+    let tier = await resolveTier(opts.tier, { autoConfirm });
     const dir = await resolveDir(opts.dir, { autoConfirm });
     // "Non-interactive" means the caller has opted out of every prompt —
     // either via `--tier` (scripted installs) or `--yes` (curl|bash, CI,
@@ -223,6 +224,19 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     // pass the install mode + parsed env through to the port resolvers
     // so they can skip the preflight on the inherited path.
     const installState = await detectInstallMode(dir);
+
+    // On upgrade, an unexpressed tier inherits the installed stack's tier.
+    // Re-running `appstrate install --yes` on a Tier 3 deployment must not
+    // rewrite the compose file with the Tier 2 default template — that would
+    // drop the MinIO service while `mergeEnv` keeps the S3 config, leaving
+    // every stored object (packages, uploads, run artifacts) unreachable.
+    // Same warn-and-inherit contract as ports and APP_URL: the documented
+    // way to change tiers on an existing install is an explicit `--tier N`.
+    if (installState.mode === "upgrade") {
+      const reconciled = reconcileUpgradeTier(tier, opts.tier, await inferInstalledTier(dir));
+      if (reconciled.note) clack.log.info(reconciled.note);
+      tier = reconciled.tier;
+    }
 
     // For docker tiers, resolve the compose project name BEFORE port
     // resolution so the resolver can cross-check with `docker compose ls`:
@@ -292,6 +306,40 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
   } catch (err) {
     exitWithError(err);
   }
+}
+
+/**
+ * Reconcile the resolved tier with the tier of an already-installed stack
+ * (upgrade mode only). Pure so the contract is unit-testable:
+ *
+ *   - explicit `--tier N` always wins (scripted tier changes stay possible;
+ *     the operator owns the storage migration that comes with them);
+ *   - no readable/recognizable compose (Tier 0 dir, hand-rolled deploy) or
+ *     a Tier 0 resolution → keep the resolved tier;
+ *   - otherwise inherit the installed tier and explain why.
+ *
+ * Without this, changing the smart default (Tier 3 → Tier 2, issue #829)
+ * would make every `install --yes` re-run on an existing Tier 3 deployment
+ * silently swap its compose template — and the reverse hazard (a Tier 2
+ * install silently upgraded to the Tier 3 template, flipping storage from
+ * filesystem to S3 and hiding all existing files) predates the default
+ * change. Inheritance closes both directions.
+ */
+export function reconcileUpgradeTier(
+  resolved: Tier,
+  explicitTier: string | undefined,
+  installed: 1 | 2 | 3 | null,
+): { tier: Tier; note?: string } {
+  if (explicitTier !== undefined) return { tier: resolved };
+  if (installed === null || resolved === 0 || installed === resolved) return { tier: resolved };
+  return {
+    tier: installed,
+    note:
+      `Existing Tier ${installed} install detected — keeping Tier ${installed}. ` +
+      `Switching tiers rewrites docker-compose.yml with a different service set ` +
+      `(and can change the storage backend, hiding existing files), so it requires ` +
+      `an explicit \`--tier ${resolved}\`.`,
+  };
 }
 
 /**

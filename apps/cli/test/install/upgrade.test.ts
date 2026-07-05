@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import {
   detectInstallMode,
+  inferInstalledTier,
   parseEnvFile,
   mergeEnv,
   backupFiles,
@@ -499,5 +500,66 @@ describe("runWithRollback", () => {
         throw new Error("docker compose up failed");
       }),
     ).rejects.toThrow(/^docker compose up failed$/);
+  });
+});
+
+describe("inferInstalledTier", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "appstrate-tier-infer-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const compose = (services: string[]) =>
+    `services:\n${services.map((svc) => `  ${svc}:\n    image: x\n`).join("")}`;
+
+  it("returns 3 when the compose file declares a minio service", async () => {
+    await writeFile(join(dir, "docker-compose.yml"), compose(["postgres", "redis", "minio"]));
+    expect(await inferInstalledTier(dir)).toBe(3);
+  });
+
+  it("returns 2 when redis is declared but minio is not", async () => {
+    await writeFile(join(dir, "docker-compose.yml"), compose(["postgres", "redis"]));
+    expect(await inferInstalledTier(dir)).toBe(2);
+  });
+
+  it("returns 1 for a postgres-only compose file", async () => {
+    await writeFile(join(dir, "docker-compose.yml"), compose(["postgres"]));
+    expect(await inferInstalledTier(dir)).toBe(1);
+  });
+
+  it("returns null when no compose file exists (Tier 0 dirs)", async () => {
+    expect(await inferInstalledTier(dir)).toBeNull();
+  });
+
+  it("returns null for a compose file with none of our service keys", async () => {
+    await writeFile(join(dir, "docker-compose.yml"), compose(["nginx", "app"]));
+    expect(await inferInstalledTier(dir)).toBeNull();
+  });
+
+  it("does not confuse nested keys or comments with top-level services", async () => {
+    // `minio` appearing at a deeper indent (env value, comment) must not
+    // count — only a 2-space-indented service key does.
+    const body =
+      "services:\n  appstrate:\n    environment:\n      - S3_ENDPOINT=http://minio:9000\n    # minio: disabled\n  postgres:\n    image: x\n";
+    await writeFile(join(dir, "docker-compose.yml"), body);
+    expect(await inferInstalledTier(dir)).toBe(1);
+  });
+
+  it("recognizes the real tier templates", async () => {
+    const root = join(import.meta.dir, "..", "..", "..", "..");
+    for (const [tier, file] of [
+      [1, "docker-compose.tier1.yml"],
+      [2, "docker-compose.tier2.yml"],
+      [3, "docker-compose.tier3.yml"],
+    ] as const) {
+      const text = await readFile(join(root, "examples", "self-hosting", file), "utf8");
+      await writeFile(join(dir, "docker-compose.yml"), text);
+      expect(await inferInstalledTier(dir)).toBe(tier);
+    }
   });
 });

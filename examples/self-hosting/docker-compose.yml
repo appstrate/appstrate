@@ -57,7 +57,7 @@ services:
   # Browser uploads proxy through the platform on APP_URL (issue #829 —
   # the platform signs app-domain upload URLs and streams the bytes to
   # MinIO server-side), so MinIO needs no public FQDN and no exposed
-  # port. Only the admin console (:9001) is published, on localhost use.
+  # S3 port. Only the admin console (:9001) is published on the host.
   # To presign direct-to-bucket URLs instead (multi-node offload), expose
   # the S3 API publicly at a domain ROOT (SigV4 signs the full path —
   # subpath proxying is unsupported, minio/minio#7857) and set
