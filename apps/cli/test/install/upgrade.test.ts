@@ -532,7 +532,51 @@ describe("inferInstalledTier", () => {
     expect(await inferInstalledTier(dir)).toBe(1);
   });
 
-  it("returns null when no compose file exists (Tier 0 dirs)", async () => {
+  it("returns null for an empty dir (nothing installed)", async () => {
+    expect(await inferInstalledTier(dir)).toBeNull();
+  });
+
+  it("tolerates user-reformatted 4-space indentation", async () => {
+    const body =
+      "services:\n    postgres:\n        image: x\n    redis:\n        image: x\n    minio:\n        image: x\n";
+    await writeFile(join(dir, "docker-compose.yml"), body);
+    expect(await inferInstalledTier(dir)).toBe(3);
+  });
+
+  it("tolerates CRLF line endings", async () => {
+    const body = compose(["postgres", "redis"]).replace(/\n/g, "\r\n");
+    await writeFile(join(dir, "docker-compose.yml"), body);
+    expect(await inferInstalledTier(dir)).toBe(2);
+  });
+
+  it("recognizes the alternate compose file names Docker itself looks up", async () => {
+    for (const name of ["compose.yaml", "compose.yml", "docker-compose.yaml"]) {
+      const sub = await mkdtemp(join(tmpdir(), "appstrate-tier-alt-"));
+      try {
+        await writeFile(join(sub, name), compose(["postgres", "redis", "minio"]));
+        expect(await inferInstalledTier(sub)).toBe(3);
+      } finally {
+        await rm(sub, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("infers Tier 0 from a CLI-shaped .env with no compose file (PGlite install)", async () => {
+    // Tier 0 `.env` has secrets but neither docker credentials
+    // (POSTGRES_PASSWORD — always rendered for tiers 1-3) nor a hand-rolled
+    // DATABASE_URL. A --yes re-run must inherit Tier 0, not silently convert
+    // the install to Docker/Postgres and hide the PGlite data.
+    await writeFile(
+      join(dir, ".env"),
+      "BETTER_AUTH_SECRET=x\nUPLOAD_SIGNING_SECRET=verylongsecret1\nAPP_URL=http://localhost:3000\n",
+    );
+    expect(await inferInstalledTier(dir)).toBe(0);
+  });
+
+  it("does NOT infer Tier 0 when the .env carries docker or external-DB config", async () => {
+    await writeFile(join(dir, ".env"), "BETTER_AUTH_SECRET=x\nPOSTGRES_PASSWORD=y\n");
+    expect(await inferInstalledTier(dir)).toBeNull();
+    await writeFile(join(dir, ".env"), "BETTER_AUTH_SECRET=x\nDATABASE_URL=postgres://h/db\n");
     expect(await inferInstalledTier(dir)).toBeNull();
   });
 

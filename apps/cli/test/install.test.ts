@@ -1449,4 +1449,20 @@ describe("reconcileUpgradeTier", () => {
     expect(r.tier).toBe(3);
     expect(r.note).toBeUndefined();
   });
+
+  it("inherits an installed Tier 0 (a --yes re-run must not convert PGlite installs to Docker)", () => {
+    // Tier 0 dirs (`.env` without POSTGRES_PASSWORD/DATABASE_URL, no compose)
+    // hold their data in PGlite + ./data — resolving the Docker-aware default
+    // (Tier 2) on top would boot an empty Postgres and hide every user/org.
+    const r = reconcileUpgradeTier(2, undefined, 0);
+    expect(r.tier).toBe(0);
+    expect(r.note).toMatch(/keeping Tier 0/i);
+    expect(r.note).toMatch(/--tier 2/);
+  });
+
+  it("an explicit --tier still converts a Tier 0 install (operator owns the migration)", () => {
+    const r = reconcileUpgradeTier(2, "2", 0);
+    expect(r.tier).toBe(2);
+    expect(r.note).toBeUndefined();
+  });
 });

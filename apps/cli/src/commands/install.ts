@@ -208,7 +208,10 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
 
   try {
     const autoConfirm = opts.autoConfirm === true;
-    let tier = await resolveTier(opts.tier, { autoConfirm });
+    // Resolve the directory FIRST: whether this is an upgrade (and which
+    // tier is installed) must be known BEFORE the tier prompt, otherwise the
+    // prompt would solicit a tier choice on upgrades only to discard it in
+    // favor of the inherited one.
     const dir = await resolveDir(opts.dir, { autoConfirm });
     // "Non-interactive" means the caller has opted out of every prompt —
     // either via `--tier` (scripted installs) or `--yes` (curl|bash, CI,
@@ -225,15 +228,34 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     // so they can skip the preflight on the inherited path.
     const installState = await detectInstallMode(dir);
 
-    // On upgrade, an unexpressed tier inherits the installed stack's tier.
-    // Re-running `appstrate install --yes` on a Tier 3 deployment must not
-    // rewrite the compose file with the Tier 2 default template — that would
-    // drop the MinIO service while `mergeEnv` keeps the S3 config, leaving
-    // every stored object (packages, uploads, run artifacts) unreachable.
-    // Same warn-and-inherit contract as ports and APP_URL: the documented
-    // way to change tiers on an existing install is an explicit `--tier N`.
+    // On upgrade, an unexpressed tier inherits the installed stack's tier —
+    // and SKIPS the tier prompt entirely (a prompt whose answer would be
+    // overridden is worse than no prompt). Re-running `appstrate install
+    // --yes` on a Tier 3 deployment must not rewrite the compose file with
+    // the Tier 2 default template — that would drop the MinIO service while
+    // `mergeEnv` keeps the S3 config, leaving every stored object (packages,
+    // uploads, run artifacts) unreachable. Same for a Tier 0 dir silently
+    // converted to Docker/Postgres (PGlite data hidden). Same warn-and-
+    // inherit contract as ports and APP_URL: the documented way to change
+    // tiers on an existing install is an explicit `--tier N`.
+    const installedTier = installState.mode === "upgrade" ? await inferInstalledTier(dir) : null;
+    let tierArg = opts.tier;
+    if (tierArg === undefined && installedTier !== null) {
+      tierArg = String(installedTier);
+      clack.log.info(
+        `Existing Tier ${installedTier} install detected — keeping Tier ${installedTier}. ` +
+          `Switching tiers rewrites docker-compose.yml with a different service set ` +
+          `(and can change the storage backend, hiding existing files), so it requires ` +
+          `an explicit \`--tier N\`.`,
+      );
+    }
+    let tier = await resolveTier(tierArg, { autoConfirm });
+
+    // Defense in depth: reconcile is a no-op when the inheritance above
+    // already applied (installed === resolved) and still guards the
+    // remaining cells of the matrix.
     if (installState.mode === "upgrade") {
-      const reconciled = reconcileUpgradeTier(tier, opts.tier, await inferInstalledTier(dir));
+      const reconciled = reconcileUpgradeTier(tier, tierArg, installedTier);
       if (reconciled.note) clack.log.info(reconciled.note);
       tier = reconciled.tier;
     }
@@ -310,13 +332,19 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
 
 /**
  * Reconcile the resolved tier with the tier of an already-installed stack
- * (upgrade mode only). Pure so the contract is unit-testable:
+ * (upgrade mode only). The primary inheritance now happens BEFORE tier
+ * resolution in `installCommand` (the prompt is skipped and the installed
+ * tier passed through as the tier argument); this pure function remains as
+ * the unit-testable defense-in-depth contract behind it:
  *
- *   - explicit `--tier N` always wins (scripted tier changes stay possible;
- *     the operator owns the storage migration that comes with them);
- *   - no readable/recognizable compose (Tier 0 dir, hand-rolled deploy) or
- *     a Tier 0 resolution → keep the resolved tier;
- *   - otherwise inherit the installed tier and explain why.
+ *   - explicit tier argument always wins (scripted tier changes stay
+ *     possible; the operator owns the storage migration that comes with
+ *     them);
+ *   - nothing recognizable installed (hand-rolled deploy) or a Tier 0
+ *     resolution → keep the resolved tier;
+ *   - otherwise inherit the installed tier (0-3 — a Tier 0 dir must not be
+ *     silently converted to Docker/Postgres either, that hides all PGlite
+ *     data) and explain why.
  *
  * Without this, changing the smart default (Tier 3 → Tier 2, issue #829)
  * would make every `install --yes` re-run on an existing Tier 3 deployment
@@ -328,7 +356,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
 export function reconcileUpgradeTier(
   resolved: Tier,
   explicitTier: string | undefined,
-  installed: 1 | 2 | 3 | null,
+  installed: 0 | 1 | 2 | 3 | null,
 ): { tier: Tier; note?: string } {
   if (explicitTier !== undefined) return { tier: resolved };
   if (installed === null || resolved === 0 || installed === resolved) return { tier: resolved };
