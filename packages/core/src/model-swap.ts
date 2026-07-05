@@ -174,7 +174,7 @@ export const LLM_PASSTHROUGH_RESPONSE_HEADERS: readonly string[] = [
  * every forgotten field is a new leak). The upstream detail stays in server
  * logs.
  */
-export const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
+const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
 
 /**
  * Caller-facing body replacing a non-2xx upstream response on an ALIASED
@@ -199,19 +199,29 @@ export function syntheticAliasErrorBody(swap: ModelSwap, status?: number): strin
   });
 }
 
+/** Non-null, non-array object — the only shape an error payload can take. */
+function isErrorObject(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
- * True when a parsed SSE frame is an error event — Anthropic emits
- * `{"type":"error","error":{...}}`, OpenAI-family streams emit a standalone
- * top-level `error` object (no `choices` alongside). The `choices` guard
- * keeps any hybrid frame that also carries generated content on the
- * exact-field path — content is never replaced.
+ * True when a parsed SSE frame is an error event:
+ *   - Anthropic: `{"type":"error","error":{...}}`,
+ *   - OpenAI-family: a standalone top-level `error` object (no `choices`
+ *     alongside — the `choices` guard keeps any hybrid frame that also
+ *     carries generated content on the exact-field path; content is never
+ *     replaced),
+ *   - OpenAI Responses terminal failures: `response.failed` /
+ *     `response.incomplete` nest it as `{"response":{"error":{...}}}` (a
+ *     successful snapshot carries `error: null`, which doesn't match).
  */
 function isSseErrorFrame(obj: unknown): boolean {
   if (!obj || typeof obj !== "object") return false;
   const o = obj as Record<string, unknown>;
   if (o["type"] === "error") return true;
-  const error = o["error"];
-  return typeof error === "object" && error !== null && !Array.isArray(error) && !("choices" in o);
+  if (isErrorObject(o["error"]) && !("choices" in o)) return true;
+  const response = o["response"];
+  return isErrorObject(response) && isErrorObject((response as Record<string, unknown>)["error"]);
 }
 
 /** Rewrite a single SSE line's `model` real→alias (data lines only). */

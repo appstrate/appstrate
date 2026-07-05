@@ -16,7 +16,6 @@ import {
   createSseModelSwapStream,
   syntheticAliasErrorBody,
   isAliasableApiShape,
-  ALIAS_UPSTREAM_ERROR_MESSAGE,
 } from "../model-swap.ts";
 
 const swap = { alias: "appstrate-medium", real: "deepseek-chat" };
@@ -238,6 +237,26 @@ describe("createSseModelSwapStream (real→alias, streaming)", () => {
     expect(out).toContain("upstream_error");
   });
 
+  it("replaces an OpenAI Responses terminal-failure frame (nested response.error)", async () => {
+    // `response.failed` / `response.incomplete` nest the error one level down —
+    // the prose there names the backing just like a top-level error frame.
+    const input =
+      `event: response.failed\n` +
+      `data: {"type":"response.failed","response":{"model":"deepseek-chat","error":{"code":"server_error","message":"deepseek-chat unavailable at api.deepseek.com"}}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek");
+    expect(out).toContain("appstrate-medium");
+    expect(out).toContain("upstream_error");
+  });
+
+  it("does NOT replace a response snapshot whose error is null (success case)", async () => {
+    const input = `data: {"type":"response.completed","response":{"model":"deepseek-chat","error":null,"usage":{"total_tokens":5}}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).toContain("total_tokens");
+    expect(out).not.toContain("upstream_error");
+  });
+
   it("keeps content-delta prose intact — only the model field is rewritten", async () => {
     const input = `data: {"model":"deepseek-chat","choices":[{"delta":{"content":"I am deepseek-chat"}}]}\n\n`;
     const out = await pipeSse(input);
@@ -260,7 +279,7 @@ describe("syntheticAliasErrorBody", () => {
   it("names the alias and the neutral message, never the real id", () => {
     const out = syntheticAliasErrorBody(swap);
     expect(out).toContain("appstrate-medium");
-    expect(out).toContain(ALIAS_UPSTREAM_ERROR_MESSAGE);
+    expect(out).toContain("Upstream model error");
     expect(out).not.toContain("deepseek-chat");
   });
 
