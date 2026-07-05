@@ -7,8 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`@appstrate/core/storage-s3`** — proxy-upload mode (issue #829).
+  `S3StorageConfig` gains optional `uploadBaseUrl` + `uploadSecret`: when set
+  and no `publicEndpoint` is configured, `createUploadUrl()` returns an
+  HMAC-signed app-domain URL (`PUT /api/uploads/_content`) instead of a
+  presigned direct-to-bucket URL, so the blob store (e.g. a compose-internal
+  MinIO) never needs to be publicly reachable. Setting `publicEndpoint`
+  opts back into direct presign. Existing configs are unaffected.
+- **`@appstrate/core/storage-fs`** — exports `createProxyUploadDescriptor` +
+  `ProxyUploadUrlConfig`, the shared app-domain signed-URL builder now used
+  by both the filesystem backend and the S3 backend's proxy mode.
+
 ### Fixed
 
+- **`@appstrate/core/storage-s3`** — `uploadStream()` now explicitly aborts
+  the S3 multipart upload when it fails AFTER the parts were uploaded.
+  `@aws-sdk/lib-storage` cleans up after part-upload failures but not when
+  the final `CompleteMultipartUpload` fails — which is exactly the
+  `If-None-Match` 412 path taken by a concurrent or replayed
+  `exclusive: true` PUT (> 5 MiB). Without the abort, every such failure
+  stranded an incomplete multipart upload: MinIO expires those after ~24 h,
+  but AWS S3 / R2 retain (and bill) the parts indefinitely unless the bucket
+  has an `AbortIncompleteMultipartUpload` lifecycle rule.
 - **`@appstrate/core/run-and-wait-client`** — `kind:"inline"` now rejects a
   missing top-level `prompt` before dispatching, with an actionable message.
   When the prompt is found nested inside `manifest` (the common LLM mistake —

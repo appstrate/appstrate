@@ -26,7 +26,7 @@
 #
 # Usage:
 #   curl -fsSL https://get.appstrate.dev | bash
-#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3
+#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 2
 #
 # Env overrides:
 #   APPSTRATE_VERSION             Pin a release tag (default: pinned or "latest").

@@ -5,6 +5,16 @@ Docker Compose. This directory holds the production `docker-compose.yml`
 (the Tier 3 full stack: PostgreSQL + Redis + MinIO) plus progressive
 `docker-compose.tier{1,2,3}.yml` templates used by `appstrate install`.
 
+On a single node the recommended stack is **Tier 2**: PostgreSQL +
+Redis with filesystem storage on a persisted volume. All file traffic
+(uploads included) is served through the platform on `APP_URL`, so a
+separate object store adds a container without adding capability.
+Bundled MinIO remains available as the Tier 3 advanced option — it
+stays fully private inside the compose network (uploads proxy through
+the platform; no published S3 port, no second public domain). To
+offload upload bytes directly to a publicly reachable S3 endpoint
+instead (multi-node deployments), set `S3_PUBLIC_ENDPOINT`.
+
 ## One-Liner Install (Recommended)
 
 ```bash
@@ -26,10 +36,10 @@ email) and sidesteps a Bun macOS regression (#199, oven-sh/bun #6862,
 `curl|bash`. The two-step pattern is the same one Supabase, Vercel,
 Railway, gh CLI, and fly.io use.
 
-Press Enter at the tier prompt to land on the recommended Tier 3 stack:
+Press Enter at the tier prompt to land on the recommended Tier 2 stack:
 
-- **Tier 3** — Postgres + Redis + MinIO (full production, **default**)
-- **Tier 2** — Postgres + Redis (no object storage)
+- **Tier 3** — Postgres + Redis + bundled MinIO object storage (advanced)
+- **Tier 2** — Postgres + Redis, filesystem storage (production, **default**)
 - **Tier 1** — Postgres only (dev / testing)
 - **Tier 0** — Bun + PGlite + filesystem (no Docker, hobby / evaluation)
 
@@ -393,6 +403,59 @@ appstrate.example.com {
     reverse_proxy localhost:3000
 }
 ```
+
+### Reverse proxy body size & timeouts (uploads)
+
+All file uploads flow through the platform on `APP_URL`
+(`PUT /api/uploads/_content`) — for filesystem storage and for S3/MinIO in
+the default proxy mode alike. That means every upload byte transits your
+reverse proxy, and most proxies cap request bodies well below Appstrate's
+own 100 MB upload ceiling. Raise the proxy limit or uploads larger than the
+proxy default fail with an opaque proxy-side `413` that never reaches
+Appstrate:
+
+- **nginx** (default is only 1 MB):
+
+  ```nginx
+  client_max_body_size 100m;
+  # slow links + large files: give the streamed body time to arrive
+  proxy_read_timeout 300s;
+  proxy_send_timeout 300s;
+  # stream the body through instead of buffering it to disk first
+  proxy_request_buffering off;
+  ```
+
+- **Caddy**: no body limit by default — nothing to do (use
+  `request_body { max_size 100MB }` if you had set one).
+- **Traefik**: no body limit by default; if you use the `buffering`
+  middleware, set `maxRequestBodyBytes` ≥ `104857600`.
+
+Only direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) bypasses the proxy —
+browsers then PUT straight at the public S3 endpoint.
+
+### Bring-your-own S3 (AWS, R2): abort incomplete multipart uploads
+
+In proxy mode the platform streams large uploads to S3 as multipart uploads.
+Failed/interrupted uploads are aborted server-side, but as a belt-and-braces
+measure AWS itself recommends a lifecycle rule that expires any incomplete
+multipart upload — parts otherwise accumulate invisibly and are billed:
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "abort-incomplete-mpu",
+      "Status": "Enabled",
+      "Filter": {},
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}
+```
+
+Apply with `aws s3api put-bucket-lifecycle-configuration` (R2: same API).
+The bundled MinIO needs nothing — it expires stale multipart uploads after
+24 h on its own.
 
 Other production notes:
 

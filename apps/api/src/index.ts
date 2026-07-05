@@ -388,3 +388,24 @@ export default {
 };
 
 logger.info("Server started", { port: env.PORT });
+
+// Proxy-upload diagnosability (issue #829): with S3 storage and no
+// S3_PUBLIC_ENDPOINT, upload URLs are signed against APP_URL and the browser
+// PUTs the bytes there. If APP_URL is still a loopback address on a remotely
+// reached production instance, every remote browser PUTs uploads at ITS OWN
+// machine — the request never reaches this server, so nothing is logged and
+// the failure is otherwise invisible server-side. Warn loudly at boot.
+if (
+  env.NODE_ENV === "production" &&
+  env.S3_BUCKET &&
+  !env.S3_PUBLIC_ENDPOINT &&
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(env.APP_URL)
+) {
+  logger.warn(
+    "S3 storage is in proxy-upload mode (S3_PUBLIC_ENDPOINT unset) but APP_URL is a loopback address. " +
+      "Browsers reaching this instance over the network will PUT uploads to their own machine and fail " +
+      "without any server-side trace. Set APP_URL to this instance's public URL, or set " +
+      "S3_PUBLIC_ENDPOINT to presign direct-to-bucket upload URLs instead.",
+    { appUrl: env.APP_URL },
+  );
+}

@@ -52,7 +52,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 
 ## Self-Hosting
 
-Deploy Appstrate with a single command. The installer drops the `appstrate` CLI on PATH and runs `install --yes`, which picks a [tier](#progressive-infrastructure) based on what's available on the host — Tier 3 (PostgreSQL + Redis + MinIO) when Docker is reachable, Tier 0 (embedded Bun-only install) otherwise.
+Deploy Appstrate with a single command. The installer drops the `appstrate` CLI on PATH and runs `install --yes`, which picks a [tier](#progressive-infrastructure) based on what's available on the host — Tier 2 (PostgreSQL + Redis, filesystem storage) when Docker is reachable, Tier 0 (embedded Bun-only install) otherwise.
 
 ```sh
 curl -fsSL https://get.appstrate.dev | bash

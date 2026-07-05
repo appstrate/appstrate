@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Uploads API — direct-upload creation + filesystem sink.
+ * Uploads API — direct-upload creation + proxy-upload sink.
  *
  *   POST /api/uploads            → create upload (auth + app context)
- *   PUT  /api/uploads/_content   → FS sink (public, HMAC token-authenticated)
+ *   PUT  /api/uploads/_content   → proxy sink (public, HMAC token-authenticated)
  *
- * S3 and other cloud storages sign URLs pointing straight at the blob
- * store, so the PUT hits us only in filesystem mode.
+ * The sink serves BOTH storage backends: filesystem always PUTs here, and
+ * the S3 backend does too in proxy mode (`S3_PUBLIC_ENDPOINT` unset — the
+ * platform streams the body to the private bucket server-side, issue #829).
+ * Only direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) sends the PUT
+ * straight at the blob store, bypassing this route.
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
-import { createUpload, writeFsUploadContent } from "../services/uploads.ts";
+import { createUpload, writeProxyUploadContent } from "../services/uploads.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { parseBody, invalidRequest, unauthorized } from "../lib/errors.ts";
 import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
@@ -64,7 +67,8 @@ export function createUploadsRouter() {
 }
 
 /**
- * Public router for the FS direct-upload sink.
+ * Public router for the proxy-upload sink (filesystem storage, and S3
+ * storage in proxy mode).
  *
  *   PUT /api/uploads/_content?token=<signed>
  *
@@ -100,7 +104,7 @@ export function createUploadContentRouter() {
 
     // Fast-fail on an honest oversized Content-Length. Advisory only — a
     // chunked request carries no length up front, so the binding check is the
-    // counting transform inside writeFsUploadContent, which aborts the
+    // counting transform inside writeProxyUploadContent, which aborts the
     // streaming write (and removes the partial file) past the signed max.
     const lenHdr = c.req.header("content-length");
     if (lenHdr) {
@@ -110,10 +114,14 @@ export function createUploadContentRouter() {
       }
     }
 
-    // Stream the body straight to disk — never buffered in memory (this route
-    // is exempt from the global bodyLimit; the token's signed max replaces it).
+    // Stream the body straight to the storage backend (disk, or S3 via
+    // multipart upload) — never buffered in memory (this route is exempt from
+    // the global bodyLimit; the token's signed max replaces it). The token
+    // expiry is passed through so it keeps being enforced WHILE the body
+    // streams — verified only up front, a slow-trickled body could hold the
+    // socket (and an open S3 multipart upload) long past the token window.
     const body = c.req.raw.body ?? new Blob([]).stream();
-    await writeFsUploadContent(payload.k, body, payload.s);
+    await writeProxyUploadContent(payload.k, body, payload.s, payload.e);
     return c.body(null, 204);
   });
 
