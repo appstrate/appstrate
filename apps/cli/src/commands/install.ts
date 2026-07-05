@@ -442,7 +442,10 @@ export async function resolveAppUrl(
     }
   }
 
-  if (requested !== undefined) return requested;
+  if (requested !== undefined) {
+    assertLoopbackPortMatches(requested, port);
+    return requested;
+  }
 
   const fallback = appUrlForPort(port);
   // Tier 0 is local dev; non-interactive keeps the zero-prompt contract
@@ -455,7 +458,34 @@ export async function resolveAppUrl(
   );
   const answer = (await askText("Public URL", fallback)).trim();
   if (!answer || answer === fallback) return fallback;
-  return parseAppUrl(answer);
+  const chosen = parseAppUrl(answer);
+  assertLoopbackPortMatches(chosen, port);
+  return chosen;
+}
+
+/**
+ * Reject a plain-http loopback app URL whose port disagrees with the
+ * host bind port. Such a URL is accessed directly — on localhost there
+ * is no reverse proxy to bridge the two ports — so every derived
+ * artifact (TRUSTED_ORIGINS/CORS, the /claim banner, email links) would
+ * point at a port nothing listens on, while the install itself looks
+ * green (the healthcheck polls the bind port). Fail fast with the fix.
+ *
+ * https loopback is deliberately allowed: TLS on localhost implies a
+ * local terminating proxy (e.g. Caddy on :8443 forwarding to the bind
+ * port), where diverging ports are the whole point. Exported for tests.
+ */
+export function assertLoopbackPortMatches(appUrl: string, port: number): void {
+  const url = new URL(appUrl);
+  if (url.protocol !== "http:") return;
+  const host = url.hostname;
+  if (host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]") return;
+  const urlPort = url.port === "" ? 80 : Number(url.port);
+  if (urlPort !== port) {
+    throw new Error(
+      `App URL ${appUrl} doesn't match the platform bind port ${port} — a plain-http localhost URL is accessed directly (no reverse proxy), so the ports must agree. Did you mean \`--port ${urlPort}\` (without --app-url)?`,
+    );
+  }
 }
 
 /** DI seam for the cross-check with `docker compose ls` — tests inject a fake, production uses the real helper. */

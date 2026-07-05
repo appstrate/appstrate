@@ -30,6 +30,7 @@ import {
   resolveMinioConsolePort,
   resolveBootstrapEmail,
   resolveAppUrl,
+  assertLoopbackPortMatches,
   printBootstrapFollowup,
 } from "../src/commands/install.ts";
 import type { RunningComposeProject } from "../src/lib/install/tier123.ts";
@@ -1358,5 +1359,51 @@ describe("resolveAppUrl (issue #822) — non-interactive paths", () => {
         nonInteractive: true,
       }),
     ).toBe("http://localhost:3000");
+  });
+});
+
+describe("assertLoopbackPortMatches (issue #822) — loopback port-mismatch guard", () => {
+  it("throws when a plain-http localhost URL disagrees with the bind port", () => {
+    expect(() => assertLoopbackPortMatches("http://localhost:1234", 3000)).toThrow(
+      /doesn't match the platform bind port 3000/,
+    );
+    expect(() => assertLoopbackPortMatches("http://127.0.0.1:1234", 3000)).toThrow(/--port 1234/);
+    // Portless http://localhost means :80.
+    expect(() => assertLoopbackPortMatches("http://localhost", 3000)).toThrow(/--port 80/);
+  });
+
+  it("passes when the ports agree", () => {
+    expect(() => assertLoopbackPortMatches("http://localhost:8080", 8080)).not.toThrow();
+    expect(() => assertLoopbackPortMatches("http://localhost", 80)).not.toThrow();
+    expect(() => assertLoopbackPortMatches("http://[::1]:3000", 3000)).not.toThrow();
+  });
+
+  it("skips https loopback (local TLS-terminating proxy is legitimate)", () => {
+    expect(() => assertLoopbackPortMatches("https://localhost:8443", 3000)).not.toThrow();
+  });
+
+  it("skips remote URLs — the proxy bridges public port and bind port", () => {
+    expect(() => assertLoopbackPortMatches("http://example.com", 3000)).not.toThrow();
+    expect(() => assertLoopbackPortMatches("https://example.com", 3000)).not.toThrow();
+  });
+
+  it("is enforced by resolveAppUrl on the flag path", async () => {
+    await expect(
+      resolveAppUrl("http://localhost:1234", 3000, {
+        tier: 3,
+        mode: "fresh",
+        existing: NO_EXISTING,
+        nonInteractive: true,
+      }),
+    ).rejects.toThrow(/doesn't match the platform bind port/);
+    // Matching port stays accepted (equivalent to the derived default).
+    await expect(
+      resolveAppUrl("http://localhost:1234", 1234, {
+        tier: 3,
+        mode: "fresh",
+        existing: NO_EXISTING,
+        nonInteractive: true,
+      }),
+    ).resolves.toBe("http://localhost:1234");
   });
 });
