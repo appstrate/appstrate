@@ -14,8 +14,9 @@ import {
   swapRequestModel,
   swapResponseModelJson,
   createSseModelSwapStream,
-  scrubModelText,
+  syntheticAliasErrorBody,
   isAliasableApiShape,
+  ALIAS_UPSTREAM_ERROR_MESSAGE,
 } from "../model-swap.ts";
 
 const swap = { alias: "appstrate-medium", real: "deepseek-chat" };
@@ -217,26 +218,60 @@ describe("createSseModelSwapStream (real→alias, streaming)", () => {
     expect(out).toContain(`"model":"gpt-4o"`);
     expect(out).not.toContain("appstrate-small");
   });
+
+  it("replaces an Anthropic error frame with the synthetic envelope", async () => {
+    const input = `data: {"type":"error","error":{"type":"overloaded_error","message":"model deepseek-chat is overloaded"}}\n\n`;
+    const out = await pipeSse(input);
+    // Nothing from the upstream frame survives — not the id, not the prose.
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).not.toContain("overloaded");
+    expect(out).toContain("appstrate-medium");
+    expect(out).toContain("upstream_error");
+  });
+
+  it("replaces an OpenAI-family standalone error frame with the synthetic envelope", async () => {
+    const input = `data: {"error":{"message":"deepseek-chat quota exceeded","code":429}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).not.toContain("quota");
+    expect(out).toContain("appstrate-medium");
+    expect(out).toContain("upstream_error");
+  });
+
+  it("keeps content-delta prose intact — only the model field is rewritten", async () => {
+    const input = `data: {"model":"deepseek-chat","choices":[{"delta":{"content":"I am deepseek-chat"}}]}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).toContain("I am deepseek-chat");
+  });
+
+  it("does NOT replace a hybrid frame carrying both an error object and choices content", async () => {
+    // A frame with generated content is never replaced wholesale — the
+    // `choices` guard keeps it on the exact-field rewrite path.
+    const input = `data: {"model":"deepseek-chat","error":{"message":"partial failure"},"choices":[{"delta":{"content":"kept text"}}]}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).toContain("kept text");
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).not.toContain("upstream_error");
+  });
 });
 
-describe("scrubModelText (error-body blind scrub)", () => {
-  it("replaces every real-id mention in free-form error prose", () => {
-    const body = JSON.stringify({
-      error: { message: "The model `deepseek-chat` does not exist (deepseek-chat)" },
-    });
-    const out = scrubModelText(body, swap);
+describe("syntheticAliasErrorBody", () => {
+  it("names the alias and the neutral message, never the real id", () => {
+    const out = syntheticAliasErrorBody(swap);
+    expect(out).toContain("appstrate-medium");
+    expect(out).toContain(ALIAS_UPSTREAM_ERROR_MESSAGE);
     expect(out).not.toContain("deepseek-chat");
-    expect(out.match(/appstrate-medium/g)?.length).toBe(2);
   });
 
-  it("is a no-op when the body never mentions the real id", () => {
-    const body = "upstream unavailable";
-    expect(scrubModelText(body, swap)).toBe(body);
+  it("includes the upstream status when given", () => {
+    expect(syntheticAliasErrorBody(swap, 429)).toContain("429");
   });
 
-  it("no-ops cleanly when alias === real", () => {
-    const noop = { alias: "deepseek-chat", real: "deepseek-chat" };
-    expect(scrubModelText("model deepseek-chat down", noop)).toBe("model deepseek-chat down");
+  it("parses as a JSON error envelope (type + error.message)", () => {
+    const parsed = JSON.parse(syntheticAliasErrorBody(swap, 503));
+    expect(parsed.type).toBe("error");
+    expect(typeof parsed.error.message).toBe("string");
   });
 });
 

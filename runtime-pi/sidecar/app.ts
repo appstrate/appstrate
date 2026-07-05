@@ -25,7 +25,8 @@ import {
   swapRequestModel,
   swapResponseModelJson,
   createSseModelSwapStream,
-  scrubModelText,
+  syntheticAliasErrorBody,
+  LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "./model-swap.ts";
 import { applyClaudeOauthGatewayHeaders } from "@appstrate/core/claude-oauth-gateway";
 import {
@@ -114,32 +115,6 @@ export interface AppDeps {
 }
 
 /**
- * Headers forwarded from the upstream LLM provider verbatim. Limited to
- * the ones the in-container agent legitimately needs to react to:
- *
- *   - `Content-Type` — required for the agent to parse the body
- *   - `Retry-After`, `RateLimit*` — required for backoff on 429
- *   - `x-request-id` — useful for cross-correlating provider-side errors
- *
- * Everything else (Set-Cookie, hop-by-hop, internal Anthropic headers) is
- * dropped to keep the sidecar↔agent boundary tight.
- */
-const PASSTHROUGH_RESPONSE_HEADERS = [
-  "content-type",
-  "retry-after",
-  "ratelimit-limit",
-  "ratelimit-remaining",
-  "ratelimit-reset",
-  "x-ratelimit-limit-requests",
-  "x-ratelimit-remaining-requests",
-  "x-ratelimit-reset-requests",
-  "x-ratelimit-limit-tokens",
-  "x-ratelimit-remaining-tokens",
-  "x-ratelimit-reset-tokens",
-  "x-request-id",
-];
-
-/**
  * Canonical casing for headers whose draft / standard spellings don't
  * match the naive Title-Case derivation. Generic Title-Casing turns
  * `ratelimit-limit` into `Ratelimit-Limit`, but the IETF RateLimit draft
@@ -178,7 +153,10 @@ async function passUpstream(
   swap?: ModelSwap,
 ): Promise<Response> {
   const responseHeaders: Record<string, string> = {};
-  for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
+  // Shared upstream-response header allowlist (content-type, retry/backoff,
+  // x-request-id) — same posture as the platform LLM gateway; everything else
+  // is dropped to keep the sidecar↔agent boundary tight.
+  for (const name of LLM_PASSTHROUGH_RESPONSE_HEADERS) {
     const value = upstream.headers.get(name);
     if (value !== null) {
       // Re-cased to preserve canonical HTTP form for the agent. Special-cased
@@ -197,16 +175,31 @@ async function passUpstream(
 
   const contentType = (upstream.headers.get("content-type") ?? "").toLowerCase();
 
-  // Model-alias scrub for ERROR bodies. Provider error payloads name the model
-  // in free-form prose ("model `deepseek-chat` does not exist"), so the exact-
-  // field swap below misses it — and an alias's whole point is the agent never
-  // learns the backing id. An error body carries no generated content, so a
-  // blind substring replace is safe here (it isn't for 2xx). Applies to ANY
+  // Model-alias ERROR bodies are SYNTHESIZED, never forwarded. Provider error
+  // payloads are free-form prose that can name the backing anywhere (model id,
+  // hostname, provider vocabulary) — and an alias's whole point is the agent
+  // never learns the backing. So the upstream body stays server-side (logged
+  // for the operator, truncated) and the agent gets a neutral JSON envelope;
+  // status + allowlisted headers still flow for retry/backoff. Applies to ANY
   // content type on a non-2xx, mirroring the platform gateway (`llm-proxy/
   // core.ts`); errors are tiny, so buffering them costs nothing.
   if (swap && !upstream.ok) {
-    const text = await upstream.text();
-    return new Response(scrubModelText(text, swap), {
+    let bodySample = "";
+    try {
+      bodySample = await upstream.text();
+    } catch {
+      // body unreadable — log what we have
+    }
+    logger.warn("llm alias: upstream error body replaced by synthetic envelope", {
+      targetUrl: observe?.targetUrl,
+      status: upstream.status,
+      contentType: upstream.headers.get("content-type"),
+      bodySample: bodySample.length > 200 ? bodySample.slice(0, 200) + "…" : bodySample,
+    });
+    // The synthesized body is JSON even when the upstream error was text/html —
+    // the allowlist copied the upstream's content-type, so override it.
+    responseHeaders["Content-Type"] = "application/json";
+    return new Response(syntheticAliasErrorBody(swap, upstream.status), {
       status: upstream.status,
       headers: responseHeaders,
     });
@@ -329,14 +322,22 @@ async function logOauthLlmResponse(
   return upstream;
 }
 
-function llmFetchErrorResponse(c: Context, targetUrl: string, err: unknown): Response {
+function llmFetchErrorResponse(
+  c: Context,
+  targetUrl: string,
+  err: unknown,
+  swap?: ModelSwap,
+): Response {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   let domain: string | undefined;
   try {
     domain = new URL(targetUrl).hostname;
   } catch {}
   const suffix = code ? `: ${code}` : "";
-  const domainHint = domain ? ` (${domain})` : "";
+  // The hostname identifies the backing provider; with an alias it must never
+  // reach the agent. The error `code` (e.g. ConnectionRefused) is generic and
+  // stays — it's useful and names nothing.
+  const domainHint = domain && !swap ? ` (${domain})` : "";
   return c.json({ error: `LLM request failed${suffix}${domainHint}` }, 502);
 }
 
@@ -631,7 +632,7 @@ export function createApp(deps: AppDeps): Hono {
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
       });
     } catch (err) {
-      return llmFetchErrorResponse(c, targetUrl, err);
+      return llmFetchErrorResponse(c, targetUrl, err, apiKeyConfig.modelSwap);
     }
 
     return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
@@ -716,7 +717,7 @@ export function createApp(deps: AppDeps): Hono {
         targetUrl,
         error: err instanceof Error ? err.message : String(err),
       });
-      return llmFetchErrorResponse(c, targetUrl, err);
+      return llmFetchErrorResponse(c, targetUrl, err, llmConfig.modelSwap);
     }
 
     upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);

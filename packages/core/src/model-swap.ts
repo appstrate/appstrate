@@ -28,10 +28,13 @@
  *     are aliasable, so this nesting MUST be covered or the real id leaks in
  *     the stream.
  *
- * The exception is {@link scrubModelText}: error bodies are free-form prose
- * ("the model `deepseek-chat` does not exist"), so the real id can sit anywhere.
- * There a blind substring replace is correct — an error body carries no
- * generated content to clobber.
+ * ERROR surfaces are handled differently: provider error bodies are free-form
+ * prose that can name the backing anywhere (model id, hostname, provider
+ * vocabulary), so for an aliased model they are never forwarded at all —
+ * {@link syntheticAliasErrorBody} REPLACES them with a neutral envelope
+ * (whitelist by construction; a scrub would be a blacklist where every
+ * forgotten surface is a new leak). Status code + allowlisted headers
+ * ({@link LLM_PASSTHROUGH_RESPONSE_HEADERS}) still flow for retry/backoff.
  */
 
 import type { ModelApiShape, ModelSwap } from "./sidecar-types.ts";
@@ -135,27 +138,102 @@ export function swapResponseModelJson(bodyText: string, swap: ModelSwap): string
 }
 
 /**
- * Blind substring replace of the real id with the alias, for ERROR bodies only.
- * Provider error payloads name the model in free-form prose
- * (`{"error":{"message":"model deepseek-chat is overloaded"}}`), so the exact-
- * field swap misses it. An error body carries no generated content, so a blind
- * replace cannot clobber anything meaningful. No-op when the body doesn't
- * mention the real id (the common case).
+ * Response headers forwarded to the caller from an upstream LLM provider.
+ * Shared posture for both inference data paths (the in-container sidecar
+ * proxy on every response, and the platform `/api/llm-proxy/*` gateway on
+ * aliased responses):
+ *
+ *   - `content-type` — required to parse the body
+ *   - `retry-after`, `RateLimit*` — required for backoff on 429
+ *   - `x-request-id` — provider-side error correlation
+ *
+ * Everything else (`server: cloudflare`, `cf-ray`, `anthropic-*`,
+ * `openai-organization`, Set-Cookie, hop-by-hop) is dropped — those headers
+ * fingerprint the backing provider and/or carry credentials.
  */
-export function scrubModelText(text: string, swap: ModelSwap): string {
-  if (!text.includes(swap.real)) return text;
-  return text.split(swap.real).join(swap.alias);
+export const LLM_PASSTHROUGH_RESPONSE_HEADERS: readonly string[] = [
+  "content-type",
+  "retry-after",
+  "ratelimit-limit",
+  "ratelimit-remaining",
+  "ratelimit-reset",
+  "x-ratelimit-limit-requests",
+  "x-ratelimit-remaining-requests",
+  "x-ratelimit-reset-requests",
+  "x-ratelimit-limit-tokens",
+  "x-ratelimit-remaining-tokens",
+  "x-ratelimit-reset-tokens",
+  "x-request-id",
+];
+
+/**
+ * Neutral message used in every synthesized error surface for an aliased
+ * model. Deliberately provider-agnostic: an alias's contract is that the
+ * caller never learns the backing, so error surfaces are SYNTHESIZED
+ * (whitelist by construction), never forwarded-and-scrubbed (blacklist —
+ * every forgotten field is a new leak). The upstream detail stays in server
+ * logs.
+ */
+export const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
+
+/**
+ * Caller-facing body replacing a non-2xx upstream response on an ALIASED
+ * model. Nothing from the upstream body survives, so the backing (model id,
+ * hostname, provider error vocabulary) cannot leak regardless of what the
+ * provider wrote. The status code and the allowlisted headers
+ * ({@link LLM_PASSTHROUGH_RESPONSE_HEADERS} — `retry-after`, RateLimit
+ * family) still flow, so caller retry/backoff behavior is preserved.
+ *
+ * The envelope carries BOTH family discriminators — top-level
+ * `type: "error"` (Anthropic) and `error.message` (OpenAI family) — so a
+ * single shape parses in either SDK regardless of the aliased protocol.
+ */
+export function syntheticAliasErrorBody(swap: ModelSwap, status?: number): string {
+  const statusHint = status ? `, status ${status}` : "";
+  return JSON.stringify({
+    type: "error",
+    error: {
+      type: "upstream_error",
+      message: `${ALIAS_UPSTREAM_ERROR_MESSAGE} (model "${swap.alias}"${statusHint})`,
+    },
+  });
+}
+
+/**
+ * True when a parsed SSE frame is an error event — Anthropic emits
+ * `{"type":"error","error":{...}}`, OpenAI-family streams emit a standalone
+ * top-level `error` object (no `choices` alongside). The `choices` guard
+ * keeps any hybrid frame that also carries generated content on the
+ * exact-field path — content is never replaced.
+ */
+function isSseErrorFrame(obj: unknown): boolean {
+  if (!obj || typeof obj !== "object") return false;
+  const o = obj as Record<string, unknown>;
+  if (o["type"] === "error") return true;
+  const error = o["error"];
+  return typeof error === "object" && error !== null && !Array.isArray(error) && !("choices" in o);
 }
 
 /** Rewrite a single SSE line's `model` real→alias (data lines only). */
 function rewriteSseLine(line: string, swap: ModelSwap): string {
   if (!line.startsWith("data:")) return line;
   const payload = line.slice("data:".length).trimStart();
-  // Fast skip: the [DONE] sentinel and any chunk that doesn't mention the real
-  // id (the vast majority — content deltas) need no parse.
-  if (payload === "[DONE]" || !payload.includes(swap.real)) return line;
+  // Fast skip: the [DONE] sentinel and any chunk that mentions neither the
+  // real id nor an `"error"` key candidate (the vast majority — content
+  // deltas) need no parse. The `"error"` probe stays a plain substring check:
+  // a false positive just costs one parse, never a wrong rewrite.
+  if (payload === "[DONE]" || (!payload.includes(swap.real) && !payload.includes(`"error"`))) {
+    return line;
+  }
   try {
     const obj = JSON.parse(payload);
+    // Mid-stream error frames carry free-form prose that can name the backing
+    // (real id, hostname). Same posture as {@link syntheticAliasErrorBody}:
+    // REPLACE the frame wholesale, never forward-and-scrub. Error frames carry
+    // no generated content, so nothing meaningful is lost by the caller.
+    if (isSseErrorFrame(obj)) {
+      return `data: ${syntheticAliasErrorBody(swap)}`;
+    }
     rewriteModelRealToAlias(obj, swap);
     return `data: ${JSON.stringify(obj)}`;
   } catch {

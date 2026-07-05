@@ -30,7 +30,8 @@ import type { ModelSwap } from "@appstrate/core/sidecar-types";
 import {
   swapResponseModelJson,
   createSseModelSwapStream,
-  scrubModelText,
+  syntheticAliasErrorBody,
+  LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "@appstrate/core/model-swap";
 import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import type { ResolvedModel } from "../org-models.ts";
@@ -39,6 +40,26 @@ import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.
 
 /** Clone upstream response headers, dropping hop-by-hop + stale content encoding/length. */
 export const cloneResponseHeaders = stripUpstreamResponseHeaders;
+
+/**
+ * Client-facing response headers for one upstream reply.
+ *
+ * No swap → the permissive {@link cloneResponseHeaders} (unchanged behavior).
+ * That clone forwards `server: cloudflare`, `cf-ray`, `anthropic-*`,
+ * `openai-organization`, … — headers that fingerprint the backing provider
+ * even when every body field is swapped. An aliased model therefore gets only
+ * the shared allowlist ({@link LLM_PASSTHROUGH_RESPONSE_HEADERS} — same
+ * posture as the sidecar), copying just the entries present upstream.
+ */
+export function buildClientHeaders(upstream: Headers, swap: ModelSwap | null | undefined): Headers {
+  if (!swap) return cloneResponseHeaders(upstream);
+  const headers = new Headers();
+  for (const name of LLM_PASSTHROUGH_RESPONSE_HEADERS) {
+    const value = upstream.get(name);
+    if (value !== null) headers.set(name, value);
+  }
+  return headers;
+}
 
 /**
  * Upper bound on usage-bearing frames retained by {@link tapSseUsage}.
@@ -175,10 +196,12 @@ export interface MeteredForwardContext {
 export interface MeteredForwardOptions {
   /**
    * Model-alias swap (issue #727). When set, the real upstream id echoed by the
-   * upstream is rewritten back to the alias on EVERY response branch (error
-   * prose, SSE frames, JSON body) so the caller never sees the backing model.
-   * The usage tap reads the untouched stream, so accounting still sees the real
-   * id. `null` (the subscription gateways) forwards verbatim.
+   * upstream is rewritten back to the alias on the success branches (SSE
+   * frames, JSON body), upstream error bodies are REPLACED with a synthetic
+   * neutral envelope, and response headers are reduced to the shared allowlist
+   * — so the caller never sees the backing model. The usage tap reads the
+   * untouched stream, so accounting still sees the real id. `null` (the
+   * subscription gateways) forwards verbatim.
    */
   swap?: ModelSwap | null;
   /**
@@ -293,14 +316,30 @@ export async function forwardMeteredResponse(
       durationMs: Date.now() - ctx.started,
     });
 
-  // Upstream errors: surface verbatim, never meter (no tokens produced). Error
-  // bodies are free-form prose that may name the real id — blind-scrub for aliases.
+  // Upstream errors: never meter (no tokens produced). No swap → forwarded
+  // verbatim. With a swap the error body is free-form prose that can name the
+  // backing anywhere (model id, hostname, provider vocabulary), so it is never
+  // forwarded — a synthetic neutral envelope replaces it (whitelist by
+  // construction); the upstream detail stays in server logs only.
   if (!upstream.ok) {
     options.onUpstreamError?.(upstream.status);
     const errorBody = await upstream.text();
-    const headers = cloneResponseHeaders(upstream.headers);
-    const clientBody = swap ? scrubModelText(errorBody, swap) : errorBody;
-    return new Response(clientBody, { status: upstream.status, headers });
+    const headers = buildClientHeaders(upstream.headers, swap);
+    if (swap) {
+      logger.warn(`${logLabel}: upstream error on aliased model — synthesized envelope`, {
+        status: upstream.status,
+        presetId: ctx.presetId,
+        runId: ctx.runId,
+        bodySample: errorBody.slice(0, 200),
+      });
+      // The synthesized body is JSON even when the upstream error wasn't.
+      headers.set("content-type", "application/json");
+      return new Response(syntheticAliasErrorBody(swap, upstream.status), {
+        status: upstream.status,
+        headers,
+      });
+    }
+    return new Response(errorBody, { status: upstream.status, headers });
   }
 
   const isSse = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
@@ -318,7 +357,7 @@ export async function forwardMeteredResponse(
           error: getErrorMessage(err),
         });
       });
-    const headers = cloneResponseHeaders(upstream.headers);
+    const headers = buildClientHeaders(upstream.headers, swap);
     // Guard the raw client branch FIRST (before the alias-swap pipe) so the
     // swapped stream is fed by a source that never errors — see
     // {@link guardSseTeardown} for why guarding after `pipeThrough` would leave
@@ -340,10 +379,25 @@ export async function forwardMeteredResponse(
   try {
     parsed = JSON.parse(bodyText);
   } catch {
-    // Non-JSON 2xx (unexpected) — forward without metering, scrubbing aliases.
-    const headers = cloneResponseHeaders(upstream.headers);
-    const clientBody = swap ? scrubModelText(bodyText, swap) : bodyText;
-    return new Response(clientBody, { status: upstream.status, headers });
+    // Non-JSON 2xx (unexpected) — forward without metering. With a swap the
+    // alias contract can't be upheld on an unparsable body (the echoed real
+    // model id can't be rewritten), so synthesize the neutral envelope and
+    // degrade the 2xx to a 502: a body the caller can't use as a completion
+    // must not masquerade as a success.
+    const headers = buildClientHeaders(upstream.headers, swap);
+    if (swap) {
+      logger.warn(`${logLabel}: non-JSON 2xx on aliased model — synthesized envelope`, {
+        status: upstream.status,
+        presetId: ctx.presetId,
+        runId: ctx.runId,
+      });
+      headers.set("content-type", "application/json");
+      return new Response(syntheticAliasErrorBody(swap, upstream.status), {
+        status: 502,
+        headers,
+      });
+    }
+    return new Response(bodyText, { status: upstream.status, headers });
   }
 
   // The upstream body is fully buffered, so awaiting the insert costs ~1ms and
@@ -351,7 +405,7 @@ export async function forwardMeteredResponse(
   // no-ops on null usage). Streaming uses `void` deliberately — already on wire.
   await meter(adapter.parseJsonUsage(parsed));
 
-  const headers = cloneResponseHeaders(upstream.headers);
+  const headers = buildClientHeaders(upstream.headers, swap);
   // Rewrite the echoed real id back to the alias BEFORE the body leaves the
   // server — and before caching, so a replay returns the alias too.
   const clientBody = swap ? swapResponseModelJson(bodyText, swap) : bodyText;

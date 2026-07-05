@@ -234,9 +234,23 @@ async function handleProxy(
       throw invalidRequest(err.message);
     }
     if (err instanceof LlmProxyUnsupportedSubscriptionError) {
+      // The backing provider id is masked in the caller-facing message
+      // (alias masking) — log it server-side for diagnosability.
+      logger.warn("llm-proxy: rejected OAuth-subscription model", {
+        providerId: err.providerId,
+        orgId,
+      });
       throw invalidRequest(err.message, "model");
     }
     if (err instanceof LlmProxyModelApiMismatchError) {
+      // Same: for an aliased preset the message hides `actual` — keep the
+      // full mismatch detail in server logs.
+      logger.warn("llm-proxy: model/endpoint apiShape mismatch", {
+        presetId: err.presetId,
+        expected: err.expected,
+        actual: err.actual,
+        orgId,
+      });
       throw invalidRequest(err.message, "model");
     }
     // No `status`: the upstream attempt produced no response, which the

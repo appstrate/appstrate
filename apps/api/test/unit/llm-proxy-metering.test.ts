@@ -122,6 +122,25 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
   return out;
 }
 
+/**
+ * Minimal forwarding context. `resolved` is only read by the metering path,
+ * which no-ops when a branch never parses usage (error bodies, non-JSON) — a
+ * stand-in is sufficient for these pure forwarding tests.
+ */
+function makeCtx(overrides: Partial<MeteredForwardContext> = {}): MeteredForwardContext {
+  return {
+    principal: { kind: "jwt_user", userId: "u", orgId: "o" },
+    runId: null,
+    presetId: "preset",
+    resolved: {
+      modelId: "real-model",
+      apiShape: "anthropic-messages",
+    } as unknown as ResolvedModel,
+    started: 0,
+    ...overrides,
+  };
+}
+
 describe("guardSseTeardown", () => {
   it("passes frames through unchanged when the source closes normally", async () => {
     const seen: unknown[] = [];
@@ -178,20 +197,7 @@ describe("guardSseTeardown", () => {
       status: 200,
       headers: { "content-type": "text/event-stream" },
     });
-    const ctx: MeteredForwardContext = {
-      principal: { kind: "jwt_user", userId: "u", orgId: "o" },
-      runId: null,
-      presetId: "preset",
-      // Only read by the metering path, which no-ops on the null usage an
-      // errored stream yields — a minimal stand-in is sufficient here.
-      resolved: {
-        modelId: "real-model",
-        apiShape: "anthropic-messages",
-      } as unknown as ResolvedModel,
-      started: 0,
-    };
-
-    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, ctx, {
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
       swap: { alias: "alias-model", real: "real-model" },
       logLabel: "test",
     });
@@ -218,5 +224,111 @@ describe("guardSseTeardown", () => {
     expect(cancelledWith).toBe("client gone");
     // A normal disconnect must NOT be reported as an upstream teardown.
     expect(seen).toEqual([]);
+  });
+});
+
+// Alias error synthesis + response-header allowlist (issue #727). For an
+// aliased model an upstream error body is never forwarded — it is REPLACED by
+// the neutral synthetic envelope — and response headers are reduced to the
+// shared allowlist, so neither prose nor headers can fingerprint the backing.
+// The no-swap path stays byte-for-byte permissive (subscription gateways).
+describe("forwardMeteredResponse — aliased error synthesis and header allowlist", () => {
+  const swap = { alias: "appstrate-medium", real: "deepseek-SECRET" };
+
+  it("replaces an aliased upstream error body with the synthetic envelope and strips fingerprinting headers", async () => {
+    const upstream = new Response(
+      JSON.stringify({
+        error: { message: "The model `deepseek-SECRET` is overloaded, try api.deepseek.com" },
+      }),
+      {
+        status: 529,
+        headers: {
+          "content-type": "application/json",
+          server: "cloudflare",
+          "cf-ray": "8f2a-CDG",
+          "anthropic-organization-id": "org_123",
+          "openai-organization": "org-abc",
+          "retry-after": "7",
+          "x-request-id": "req_1",
+        },
+      },
+    );
+
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+      swap,
+      logLabel: "test",
+    });
+
+    // Status flows for retry/backoff; the body is the neutral envelope —
+    // nothing of the upstream prose (nor the real id) survives.
+    expect(res.status).toBe(529);
+    expect(res.headers.get("content-type")).toBe("application/json");
+    const text = await res.text();
+    expect(text).toContain("appstrate-medium");
+    expect(text).toContain("Upstream model error");
+    expect(text).not.toContain("deepseek-SECRET");
+    expect(text).not.toContain("overloaded");
+
+    // Fingerprinting headers are dropped; allowlisted operational ones flow.
+    expect(res.headers.get("server")).toBeNull();
+    expect(res.headers.get("cf-ray")).toBeNull();
+    expect(res.headers.get("anthropic-organization-id")).toBeNull();
+    expect(res.headers.get("openai-organization")).toBeNull();
+    expect(res.headers.get("retry-after")).toBe("7");
+    expect(res.headers.get("x-request-id")).toBe("req_1");
+  });
+
+  it("forwards a no-swap upstream error verbatim with permissive headers", async () => {
+    const body = JSON.stringify({ error: { message: "rate limited" } });
+    const upstream = new Response(body, {
+      status: 529,
+      headers: { "content-type": "application/json", server: "cloudflare" },
+    });
+
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+      logLabel: "test",
+    });
+
+    expect(res.status).toBe(529);
+    // Permissive path intact: the fingerprinting header passes through.
+    expect(res.headers.get("server")).toBe("cloudflare");
+    expect(await res.text()).toBe(body);
+  });
+
+  it("synthesizes a 502 envelope for a non-JSON 2xx under a swap", async () => {
+    // An unparsable 2xx body can't have its echoed real id rewritten, so the
+    // alias contract can't be upheld — the gateway degrades it to a 502.
+    const upstream = new Response("<html>served by deepseek-SECRET</html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+      swap,
+      logLabel: "test",
+    });
+
+    expect(res.status).toBe(502);
+    expect(res.headers.get("content-type")).toBe("application/json");
+    const text = await res.text();
+    expect(text).toContain("appstrate-medium");
+    expect(text).toContain("Upstream model error");
+    expect(text).not.toContain("deepseek-SECRET");
+    expect(text).not.toContain("<html>");
+  });
+
+  it("keeps a no-swap non-JSON 2xx verbatim", async () => {
+    const upstream = new Response("plain text ok", {
+      status: 200,
+      headers: { "content-type": "text/plain", server: "cloudflare" },
+    });
+
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+      logLabel: "test",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("server")).toBe("cloudflare");
+    expect(await res.text()).toBe("plain text ok");
   });
 });

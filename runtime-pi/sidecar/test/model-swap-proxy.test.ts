@@ -91,14 +91,14 @@ describe("/llm/* model-alias swap (api_key)", () => {
     expect(text).not.toContain("deepseek-chat");
   });
 
-  it("scrubs the real id from an upstream error body (free-form prose)", async () => {
-    // Provider 4xx names the model in prose, not a top-level `model` field —
-    // the exact-field swap would miss it, so the sidecar must blind-scrub.
+  it("replaces an upstream error body with the synthetic envelope (never forwarded)", async () => {
+    // Provider 4xx names the model in free-form prose — for an alias the body
+    // is never forwarded at all; the agent gets a neutral synthesized envelope.
     const fetchFn = mock(
       async () =>
         new Response(
           JSON.stringify({ error: { message: "The model `deepseek-chat` does not exist" } }),
-          { status: 404, headers: { "Content-Type": "application/json" } },
+          { status: 404, headers: { "Content-Type": "text/plain" } },
         ),
     ) as unknown as typeof fetch;
 
@@ -109,9 +109,51 @@ describe("/llm/* model-alias swap (api_key)", () => {
       body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
     });
     expect(res.status).toBe(404);
+    // The synthesized body is JSON regardless of the upstream content-type.
+    expect(res.headers.get("content-type")).toBe("application/json");
     const text = await res.text();
-    expect(text).not.toContain("deepseek-chat");
     expect(text).toContain("appstrate-medium");
+    expect(text).toContain("Upstream model error");
+    expect(text).not.toContain("deepseek-chat");
+    expect(text).not.toContain("does not exist");
+  });
+
+  it("omits the upstream hostname from a fetch-level 502 when a swap is configured", async () => {
+    const fetchFn = mock(async () => {
+      throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ConnectionRefused" });
+    }) as unknown as typeof fetch;
+
+    const app = createApp(makeDeps(fetchFn));
+    const res = await app.request("/llm/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
+    });
+    expect(res.status).toBe(502);
+    const text = await res.text();
+    // The generic error code stays useful; the hostname would name the backing.
+    expect(text).toContain("ConnectionRefused");
+    expect(text).not.toContain("deepseek");
+  });
+
+  it("keeps the upstream hostname in a fetch-level 502 when NO swap is configured", async () => {
+    const fetchFn = mock(async () => {
+      throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ConnectionRefused" });
+    }) as unknown as typeof fetch;
+
+    const deps = makeDeps(fetchFn);
+    delete (deps.config.llm as { modelSwap?: unknown }).modelSwap;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
+    });
+    expect(res.status).toBe(502);
+    const text = await res.text();
+    // No alias to protect — the hostname keeps its debugging value.
+    expect(text).toContain("ConnectionRefused");
+    expect(text).toContain("api.deepseek.com");
   });
 
   it("rewrites the streaming (SSE) response model real→alias in every chunk", async () => {
