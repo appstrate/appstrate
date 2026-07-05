@@ -136,8 +136,21 @@ async function runPlatformContainerImpl(
   const uploadBundle = input.uploadBundle ?? uploadRunBundle;
   const deleteWorkspace = input.deleteWorkspace ?? deleteRunWorkspace;
 
-  const prompt = await buildPlatformSystemPrompt(context, plan);
   const { llmConfig } = plan;
+
+  // Single source of truth for "what kind of credential is this and how is it
+  // delivered". Reads the provider→engine registry ONCE (plus the oauth-class
+  // flag for the engine-less refuse path); the delivery mode, the oauth-class
+  // boolean, and the resolved engine all flow from here. Resolved BEFORE the
+  // prompt build so the `## Output Format` section renders the delivery
+  // contract of the engine that will actually run (`output` tool on Pi,
+  // native `outputFormat` on the Claude Agent SDK — issue #824).
+  const delivery = resolveCredentialDelivery({
+    providerId: llmConfig.providerId,
+    hasCredentialId: !!llmConfig.credentialId,
+  });
+
+  const prompt = await buildPlatformSystemPrompt(context, plan, { engine: delivery.engine });
   // The container's MODEL_ID is the PUBLIC id: the alias for a model alias, the
   // real id otherwise. The agent sends it verbatim as the request `model`; the
   // sidecar swaps alias→real upstream. The real backing id never enters the
@@ -158,18 +171,6 @@ async function runPlatformContainerImpl(
   // is NOT a spawn failure) must not also emit a spawn data point.
   let spawnRecorded = false;
   try {
-    // Single source of truth for "what kind of credential is this and how is it
-    // delivered". Reads the provider→engine registry ONCE (plus the oauth-class
-    // flag for the engine-less refuse path); the delivery mode, the oauth-class
-    // boolean, and the resolved engine all flow from here, replacing the former
-    // parallel `isOAuthModelProvider` axis. Resolved up front so the fail-closed
-    // isolation guard below consumes the same struct instead of re-reading the
-    // registry.
-    const delivery = resolveCredentialDelivery({
-      providerId: llmConfig.providerId,
-      hasCredentialId: !!llmConfig.credentialId,
-    });
-
     // Fail-closed BEFORE provisioning any isolation boundary: a subscription
     // AGENT run (claude-code → Claude Agent SDK) must execute under the docker
     // orchestrator. The process orchestrator runs in-host and would expose the
