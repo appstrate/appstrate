@@ -243,6 +243,14 @@ async function handleProxy(
       throw invalidRequest(err.message, "model");
     }
     if (err instanceof LlmProxyModelApiMismatchError) {
+      // For an aliased model the message is generic — the backing apiShape is
+      // server-log-only (model-alias masking, same posture as the branch above).
+      logger.warn("llm-proxy: model/endpoint apiShape mismatch", {
+        presetId: err.presetId,
+        expected: err.expected,
+        actual: err.actual,
+        orgId,
+      });
       throw invalidRequest(err.message, "model");
     }
     // No `status`: the upstream attempt produced no response, which the

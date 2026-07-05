@@ -163,25 +163,61 @@ export function hostnameOf(url: string): string | undefined {
 
 export function scrubModelText(text: string, swap: ModelSwap): string {
   let out = text;
-  if (out.includes(swap.real)) out = out.split(swap.real).join(swap.alias);
+  // Host FIRST: if the real id happens to be a substring of the hostname
+  // (possible with operator-configured openai-compatible endpoints), scrubbing
+  // the id first would mutate the hostname and make the host pass miss it. A
+  // hostname is never a substring of a model id, so this order is always safe.
   if (swap.realHost && out.includes(swap.realHost)) {
     out = out.split(swap.realHost).join(SCRUBBED_HOST_MARKER);
   }
+  if (out.includes(swap.real)) out = out.split(swap.real).join(swap.alias);
   return out;
 }
 
 /**
+ * Response headers forwarded to the caller from an upstream LLM provider.
+ * Shared posture for both inference data paths (the in-container sidecar
+ * proxy and the platform `/api/llm-proxy/*` gateway on aliased responses):
+ *
+ *   - `content-type` — required to parse the body
+ *   - `retry-after`, `RateLimit*` — required for backoff on 429
+ *   - `x-request-id` — provider-side error correlation
+ *
+ * Everything else (`server: cloudflare`, `cf-ray`, `anthropic-*`,
+ * `openai-organization`, Set-Cookie, hop-by-hop) is dropped — those headers
+ * fingerprint the backing provider and/or carry credentials.
+ */
+export const LLM_PASSTHROUGH_RESPONSE_HEADERS: readonly string[] = [
+  "content-type",
+  "retry-after",
+  "ratelimit-limit",
+  "ratelimit-remaining",
+  "ratelimit-reset",
+  "x-ratelimit-limit-requests",
+  "x-ratelimit-remaining-requests",
+  "x-ratelimit-reset-requests",
+  "x-ratelimit-limit-tokens",
+  "x-ratelimit-remaining-tokens",
+  "x-ratelimit-reset-tokens",
+  "x-request-id",
+];
+
+/**
  * True when a parsed SSE frame is an error event — Anthropic emits
- * `{"type":"error","error":{...}}`, OpenAI-family streams emit a top-level
- * `error` object. Error frames carry no generated content, so the blind
- * {@link scrubModelText} prose scrub is safe on them (and required: the real
- * id / hostname sits in free-form `error.message` prose the exact-field
- * rewrite can't reach).
+ * `{"type":"error","error":{...}}`, OpenAI-family streams emit a standalone
+ * top-level `error` object (no `choices` alongside). Error frames carry no
+ * generated content, so the blind {@link scrubModelText} prose scrub is safe
+ * on them (and required: the real id / hostname sits in free-form
+ * `error.message` prose the exact-field rewrite can't reach). The `choices`
+ * guard keeps any hybrid frame that also carries content on the exact-field
+ * path — generated content must never be blind-scrubbed.
  */
 function isSseErrorFrame(obj: unknown): boolean {
   if (!obj || typeof obj !== "object") return false;
   const o = obj as Record<string, unknown>;
-  return o["type"] === "error" || (typeof o["error"] === "object" && o["error"] !== null);
+  if (o["type"] === "error") return true;
+  const error = o["error"];
+  return typeof error === "object" && error !== null && !Array.isArray(error) && !("choices" in o);
 }
 
 /** Rewrite a single SSE line's `model` real→alias (data lines only). */

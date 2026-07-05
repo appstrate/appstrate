@@ -58,13 +58,21 @@ export class LlmProxyUnsupportedModelError extends Error {
 }
 
 export class LlmProxyModelApiMismatchError extends Error {
+  // For an ALIASED model the backing `actual` apiShape is hidden (the public
+  // DTO nulls it — `projectAliasedModel`), so naming it here would leak the
+  // backing protocol family. The caller-facing message then stays generic;
+  // `actual` remains a property for server-side logging only. Non-aliased
+  // models keep the detailed message (debugging value, nothing to hide).
   constructor(
     public readonly presetId: string,
     public readonly expected: string,
     public readonly actual: string,
+    aliased = false,
   ) {
     super(
-      `Model "${presetId}" uses "${actual}"; this endpoint serves "${expected}". Use the corresponding /api/llm-proxy/<api>/… route.`,
+      aliased
+        ? `Model "${presetId}" is not served by this endpoint.`
+        : `Model "${presetId}" uses "${actual}"; this endpoint serves "${expected}". Use the corresponding /api/llm-proxy/<api>/… route.`,
     );
     this.name = "LlmProxyModelApiMismatchError";
   }
@@ -128,9 +136,8 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // `realHost` extends the scrub to the backing hostname in error prose
   // (provider error bodies, gateway messages) — the host identifies the
   // backing as surely as the model id.
-  const realHost = resolved.aliased ? hostnameOf(resolved.baseUrl) : undefined;
   const swap: ModelSwap | null = resolved.aliased
-    ? { alias: presetId, real: resolved.modelId, ...(realHost ? { realHost } : {}) }
+    ? { alias: presetId, real: resolved.modelId, realHost: hostnameOf(resolved.baseUrl) }
     : null;
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
@@ -232,7 +239,7 @@ async function resolvePresetForOrg(
     throw new LlmProxyUnsupportedModelError(presetId);
   }
   if (loaded.apiShape !== expectedApi) {
-    throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape);
+    throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape, loaded.aliased);
   }
   return loaded;
 }

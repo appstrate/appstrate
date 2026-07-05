@@ -258,6 +258,20 @@ describe("scrubModelText (error-body blind scrub)", () => {
     // No realHost — only the model id is scrubbed, and it isn't mentioned.
     expect(scrubModelText(body, swap)).toBe(body);
   });
+
+  it("masks the hostname even when the real id is a substring of it", () => {
+    // Operator-configured openai-compatible endpoint whose host literally
+    // contains the model id. Scrubbing the id first would mutate the hostname
+    // and skip the host pass — host must be scrubbed FIRST.
+    const hostSwap = { alias: "appstrate-fast", real: "qwen", realHost: "qwen.internal" };
+    const out = scrubModelText(
+      "ConnectionRefused (qwen.internal): model qwen unreachable",
+      hostSwap,
+    );
+    expect(out).not.toContain("qwen");
+    expect(out).toContain(`(${SCRUBBED_HOST_MARKER})`);
+    expect(out).toContain("appstrate-fast");
+  });
 });
 
 describe("hostnameOf", () => {
@@ -292,6 +306,16 @@ describe("createSseModelSwapStream — mid-stream error frames", () => {
     const input = `data: {"model":"deepseek-chat","choices":[{"delta":{"content":"I am deepseek-chat"}}]}\n\n`;
     const out = await pipeSse(input);
     // Exact-field rewritten, prose content preserved.
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).toContain("I am deepseek-chat");
+  });
+
+  it("keeps the exact-field path for a hybrid frame carrying an error object AND content", async () => {
+    // A frame with `choices` is a content frame regardless of any `error` key
+    // some non-standard upstream stamps on it — its prose must not be
+    // blind-scrubbed.
+    const input = `data: {"model":"deepseek-chat","error":{"message":"partial"},"choices":[{"delta":{"content":"I am deepseek-chat"}}]}\n\n`;
+    const out = await pipeSse(input);
     expect(out).toContain(`"model":"appstrate-medium"`);
     expect(out).toContain("I am deepseek-chat");
   });

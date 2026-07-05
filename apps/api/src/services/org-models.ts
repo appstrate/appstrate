@@ -234,20 +234,44 @@ export async function listOrgModels(
 
 /**
  * Every model-alias swap visible to an org, for scrubbing free-form text
- * (run terminal errors) that may name a real backing id or hostname. Uses the
- * metadata-only credential resolution — no secret is decrypted. Failures
- * degrade to an empty list (scrubbing is defense-in-depth, never a reason to
- * fail a finalize).
+ * (run terminal errors) that may name a real backing id or hostname. Runs on
+ * every errored finalize, so it deliberately does NOT go through
+ * {@link listOrgModels} (which resolves credential metadata for every model
+ * row): system aliases come straight from the in-memory registry, and DB
+ * aliases from one select filtered on `aliased` — credential metadata (for the
+ * backing hostname) is resolved only for those rare rows, never decrypting a
+ * secret. Failures degrade to an empty list (scrubbing is defense-in-depth,
+ * never a reason to fail a finalize).
  */
 export async function listAliasSwapsForOrg(orgId: string): Promise<ModelSwap[]> {
   try {
-    const models = await listOrgModels(orgId, { metadataOnly: true });
-    return models
-      .filter((m) => m.aliased && m.modelId)
-      .map((m) => {
-        const realHost = m.baseUrl ? hostnameOf(m.baseUrl) : undefined;
-        return { alias: m.id, real: m.modelId as string, ...(realHost ? { realHost } : {}) };
-      });
+    const swaps: ModelSwap[] = [];
+    for (const [id, def] of getSystemModels()) {
+      if (def.aliased === true) {
+        swaps.push({ alias: id, real: def.modelId, realHost: hostnameOf(def.baseUrl) });
+      }
+    }
+    const rows = await db
+      .select({
+        id: orgModels.id,
+        modelId: orgModels.modelId,
+        credentialId: orgModels.credentialId,
+      })
+      .from(orgModels)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.aliased, true)] }));
+    await Promise.all(
+      rows.map(async (row) => {
+        // A row whose credential is unreachable still contributes its swap —
+        // the model id must be masked even when the hostname can't be resolved.
+        const creds = await loadCredentialMetadata(row.credentialId, orgId);
+        swaps.push({
+          alias: row.id,
+          real: row.modelId,
+          realHost: creds?.baseUrl ? hostnameOf(creds.baseUrl) : undefined,
+        });
+      }),
+    );
+    return swaps;
   } catch (err) {
     logger.warn("org-models: alias-swap listing failed — skipping scrub", {
       orgId,

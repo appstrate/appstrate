@@ -31,6 +31,7 @@ import {
   swapResponseModelJson,
   createSseModelSwapStream,
   scrubModelText,
+  LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "@appstrate/core/model-swap";
 import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import type { ResolvedModel } from "../org-models.ts";
@@ -41,39 +42,19 @@ import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.
 export const cloneResponseHeaders = stripUpstreamResponseHeaders;
 
 /**
- * Response headers forwarded for an ALIASED model. The permissive
- * `stripUpstreamResponseHeaders` clone forwards everything the upstream sends —
- * `server: cloudflare`, `cf-ray`, `anthropic-*`, `openai-organization`, … —
- * which fingerprints the backing provider even when every body field is
- * swapped. An alias therefore gets a strict allowlist instead (the same
- * posture as the sidecar's `PASSTHROUGH_RESPONSE_HEADERS` and the response
- * cache's `CACHE_REPLAY_HEADERS`): content-type to parse the body, the
- * rate-limit family + retry-after for backoff, x-request-id for provider-side
- * error correlation.
- */
-const ALIAS_PASSTHROUGH_RESPONSE_HEADERS = [
-  "content-type",
-  "retry-after",
-  "ratelimit-limit",
-  "ratelimit-remaining",
-  "ratelimit-reset",
-  "x-ratelimit-limit-requests",
-  "x-ratelimit-remaining-requests",
-  "x-ratelimit-reset-requests",
-  "x-ratelimit-limit-tokens",
-  "x-ratelimit-remaining-tokens",
-  "x-ratelimit-reset-tokens",
-  "x-request-id",
-];
-
-/**
  * Build the client-facing headers for one upstream response: permissive clone
- * for a regular model, strict allowlist when a model-alias swap is active.
+ * for a regular model, strict allowlist when a model-alias swap is active. The
+ * permissive `stripUpstreamResponseHeaders` clone forwards everything the
+ * upstream sends — `server: cloudflare`, `cf-ray`, `anthropic-*`,
+ * `openai-organization`, … — which fingerprints the backing provider even when
+ * every body field is swapped. An alias therefore gets
+ * {@link LLM_PASSTHROUGH_RESPONSE_HEADERS}, the same allowlist the sidecar
+ * applies on its own responses.
  */
 function buildClientHeaders(upstream: Headers, swap: ModelSwap | null | undefined): Headers {
   if (!swap) return cloneResponseHeaders(upstream);
   const out = new Headers();
-  for (const name of ALIAS_PASSTHROUGH_RESPONSE_HEADERS) {
+  for (const name of LLM_PASSTHROUGH_RESPONSE_HEADERS) {
     const value = upstream.get(name);
     if (value !== null) out.set(name, value);
   }

@@ -13,7 +13,11 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
+import {
+  listOrgModels,
+  loadModel,
+  listAliasSwapsForOrg,
+} from "../../../src/services/org-models.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
@@ -79,5 +83,35 @@ describe("org-models — aliased flag (DB path)", () => {
     // The user-selected alias is the row id; the real backing is hidden behind it.
     expect(resolved!.aliasId).toBe(model.id);
     expect(resolved!.modelId).toBe("gpt-4o");
+  });
+
+  it("listAliasSwapsForOrg returns only aliased rows, with realHost from the credential", async () => {
+    const cred = await seedCred();
+    await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: cred.id,
+      label: "Plain GPT-4o",
+      modelId: "gpt-4o",
+      enabled: true,
+    });
+    const alias = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: cred.id,
+      label: "Appstrate Medium",
+      modelId: "gpt-4o-mini",
+      enabled: true,
+      aliased: true,
+    });
+
+    const swaps = await listAliasSwapsForOrg(ctx.orgId);
+    const dbSwaps = swaps.filter((s) => s.alias === alias.id);
+    expect(dbSwaps).toHaveLength(1);
+    expect(dbSwaps[0]).toEqual({
+      alias: alias.id,
+      real: "gpt-4o-mini",
+      realHost: "api.openai.com",
+    });
+    // The non-aliased row contributes no swap.
+    expect(swaps.some((s) => s.real === "gpt-4o")).toBe(false);
   });
 });

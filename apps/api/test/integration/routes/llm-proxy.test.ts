@@ -225,6 +225,27 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       }),
     });
     expect(res.status).toBe(400);
+    // Non-aliased: the detailed message names both shapes (debugging value).
+    expect(await res.text()).toContain("anthropic-messages");
+  });
+
+  it("hides the backing apiShape in the protocol-mismatch error for an ALIASED preset", async () => {
+    // The public DTO nulls an alias's apiShape (`projectAliasedModel`) — the
+    // mismatch error must not hand it back in prose.
+    const h = await buildHarness({ apiShape: "anthropic-messages", aliased: true });
+    mockUpstream(async () => new Response("should not be called", { status: 599 }));
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.text();
+    expect(body).not.toContain("anthropic");
+    expect(body).toContain("is not served by this endpoint");
   });
 
   it("forwards upstream errors verbatim without recording usage", async () => {

@@ -224,12 +224,11 @@ async function runPlatformContainerImpl(
     // `realHost` lets the sidecar scrub the backing hostname out of error
     // prose (fetch failures, provider error bodies) — it identifies the
     // backing as surely as the model id.
-    const realHost = llmConfig.aliased ? hostnameOf(llmConfig.baseUrl) : undefined;
     const modelSwap = llmConfig.aliased
       ? {
           alias: llmConfig.aliasId,
           real: llmConfig.modelId,
-          ...(realHost ? { realHost } : {}),
+          realHost: hostnameOf(llmConfig.baseUrl),
         }
       : undefined;
 

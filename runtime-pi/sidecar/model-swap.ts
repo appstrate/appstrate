@@ -16,4 +16,5 @@ export {
   ALIASABLE_API_SHAPES,
   SCRUBBED_HOST_MARKER,
   hostnameOf,
+  LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "@appstrate/core/model-swap";

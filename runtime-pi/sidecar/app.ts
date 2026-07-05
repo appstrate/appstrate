@@ -27,6 +27,8 @@ import {
   createSseModelSwapStream,
   scrubModelText,
   SCRUBBED_HOST_MARKER,
+  hostnameOf,
+  LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "./model-swap.ts";
 import { applyClaudeOauthGatewayHeaders } from "@appstrate/core/claude-oauth-gateway";
 import {
@@ -115,32 +117,6 @@ export interface AppDeps {
 }
 
 /**
- * Headers forwarded from the upstream LLM provider verbatim. Limited to
- * the ones the in-container agent legitimately needs to react to:
- *
- *   - `Content-Type` — required for the agent to parse the body
- *   - `Retry-After`, `RateLimit*` — required for backoff on 429
- *   - `x-request-id` — useful for cross-correlating provider-side errors
- *
- * Everything else (Set-Cookie, hop-by-hop, internal Anthropic headers) is
- * dropped to keep the sidecar↔agent boundary tight.
- */
-const PASSTHROUGH_RESPONSE_HEADERS = [
-  "content-type",
-  "retry-after",
-  "ratelimit-limit",
-  "ratelimit-remaining",
-  "ratelimit-reset",
-  "x-ratelimit-limit-requests",
-  "x-ratelimit-remaining-requests",
-  "x-ratelimit-reset-requests",
-  "x-ratelimit-limit-tokens",
-  "x-ratelimit-remaining-tokens",
-  "x-ratelimit-reset-tokens",
-  "x-request-id",
-];
-
-/**
  * Canonical casing for headers whose draft / standard spellings don't
  * match the naive Title-Case derivation. Generic Title-Casing turns
  * `ratelimit-limit` into `Ratelimit-Limit`, but the IETF RateLimit draft
@@ -178,8 +154,11 @@ async function passUpstream(
   observe?: LlmStreamObservation,
   swap?: ModelSwap,
 ): Promise<Response> {
+  // Shared allowlist — same posture as the platform gateway's aliased
+  // responses. Everything else (Set-Cookie, hop-by-hop, internal Anthropic
+  // headers) is dropped to keep the sidecar↔agent boundary tight.
   const responseHeaders: Record<string, string> = {};
-  for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
+  for (const name of LLM_PASSTHROUGH_RESPONSE_HEADERS) {
     const value = upstream.headers.get(name);
     if (value !== null) {
       // Re-cased to preserve canonical HTTP form for the agent. Special-cased
@@ -337,16 +316,12 @@ function llmFetchErrorResponse(
   swap?: ModelSwap,
 ): Response {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-  let domain: string | undefined;
-  try {
-    domain = new URL(targetUrl).hostname;
-  } catch {}
   // Model alias: the hostname IS the backing provider ("api.deepseek.com"
   // identifies it as surely as the model id) — the agent must never see it.
   // Replace with a neutral marker unconditionally when a swap is configured,
   // not via scrubModelText, so the guarantee doesn't depend on `realHost`
   // having been populated by the platform.
-  if (swap) domain = SCRUBBED_HOST_MARKER;
+  const domain = swap ? SCRUBBED_HOST_MARKER : hostnameOf(targetUrl);
   const suffix = code ? `: ${code}` : "";
   const domainHint = domain ? ` (${domain})` : "";
   return c.json({ error: `LLM request failed${suffix}${domainHint}` }, 502);
