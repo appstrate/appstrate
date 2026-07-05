@@ -96,6 +96,20 @@ export interface PlatformPromptOptions {
    * weaker models routinely call `output({})` before the correct shape.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * How the agent delivers the structured output declared by
+   * `outputSchema`. Default `"tool"`.
+   *
+   * - `"tool"` — the Pi engine hosts an `output` runtime tool; the prompt
+   *   mandates one terminal `output` call.
+   * - `"native"` — the Claude Agent SDK engine has NO `output` tool; the
+   *   deliverable is captured natively (`outputFormat: json_schema` →
+   *   `structured_output`), so the prompt instructs the agent to end with
+   *   a final JSON message instead of a tool call. Rendering the tool
+   *   mandate here would send the agent hunting for a tool that does not
+   *   exist (issue #824).
+   */
+  outputMode?: "tool" | "native";
 
   /** Uploaded documents surfaced in `## Documents`. */
   uploads?: ReadonlyArray<PromptViewUpload>;
@@ -374,15 +388,30 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // for why this duplicates the tool-level schema.
   if (opts.outputSchema && Object.keys(opts.outputSchema).length > 0) {
     sections.push("## Output Format\n");
-    sections.push(
-      "You MUST call the `output` tool **exactly once**, as your FINAL action, " +
-        "with a `data` parameter that satisfies the JSON Schema below. " +
-        "Provide ALL required fields in that single call — do not probe " +
-        "with `output({})` first, and do not split the payload across " +
-        "multiple calls. A successful `output` call ends the run immediately: " +
-        "finish all other work before calling it, and do not plan any message " +
-        "or step after it.\n",
-    );
+    if ((opts.outputMode ?? "tool") === "native") {
+      // Native delivery (Claude Agent SDK): there is NO `output` tool on
+      // this engine — the platform captures the run's structured output
+      // from the agent's final message. Mandating a tool call here sends
+      // the agent hunting for a tool that does not exist (issue #824).
+      sections.push(
+        "Your FINAL message MUST be the run's deliverable: a single JSON " +
+          "object that satisfies the JSON Schema below, with ALL required " +
+          "fields present. There is NO `output` tool on this runtime — do " +
+          "not try to call one; the platform captures your final message " +
+          "natively. Finish all other work first, then end the run with " +
+          "the JSON deliverable alone — no prose before or after it.\n",
+      );
+    } else {
+      sections.push(
+        "You MUST call the `output` tool **exactly once**, as your FINAL action, " +
+          "with a `data` parameter that satisfies the JSON Schema below. " +
+          "Provide ALL required fields in that single call — do not probe " +
+          "with `output({})` first, and do not split the payload across " +
+          "multiple calls. A successful `output` call ends the run immediately: " +
+          "finish all other work before calling it, and do not plan any message " +
+          "or step after it.\n",
+      );
+    }
 
     const required = Array.isArray(opts.outputSchema.required)
       ? (opts.outputSchema.required as readonly unknown[]).filter(
