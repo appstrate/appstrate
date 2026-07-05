@@ -8,6 +8,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
@@ -177,6 +178,29 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       try {
         await upload.done();
       } catch (err: unknown) {
+        // lib-storage aborts the multipart upload itself when a PART upload
+        // (or the source stream) fails, but NOT when the final
+        // CompleteMultipartUpload fails — which is exactly the
+        // `If-None-Match` 412 path taken by a concurrent or replayed
+        // exclusive PUT. Without an explicit abort the already-uploaded
+        // parts are orphaned as an incomplete MPU: MinIO expires those
+        // after ~24h, but AWS S3 / R2 retain (and bill) them indefinitely
+        // unless the bucket has an AbortIncompleteMultipartUpload
+        // lifecycle rule. `uploadId` is only set once the upload went
+        // multipart; re-aborting an MPU lib-storage already cleaned up
+        // 404s harmlessly (hence the swallow).
+        const uploadId = (upload as unknown as { uploadId?: string }).uploadId;
+        if (uploadId) {
+          await client
+            .send(
+              new AbortMultipartUploadCommand({
+                Bucket: config.bucket,
+                Key: key,
+                UploadId: uploadId,
+              }),
+            )
+            .catch(() => {});
+        }
         if (opts?.exclusive) {
           const s3err = err as S3Error;
           if (
