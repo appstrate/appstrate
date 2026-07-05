@@ -57,6 +57,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3",
     "@mariozechner/pi-coding-agent": "0.73.1",
     "@types/bun": "latest",
     "@types/ioredis": "^5.0.0",

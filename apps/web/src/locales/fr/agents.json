@@ -224,7 +224,7 @@
   "schedule.statusActive": "Actif",
   "editor.breadcrumbNew": "Nouvel agent",
   "editor.breadcrumbEdit": "Modifier",
-  "editor.errorRequired": "Les champs identifiant et nom d'affichage sont requis.",
+  "editor.errorRequired": "Le champ identifiant est requis.",
   "editor.errorPrompt": "Le prompt est requis.",
   "editor.skillsEmpty": "Aucun skill dans les packages. Ajoutez-en depuis la page Packages.",
   "editor.integrationsEmpty": "Aucune intégration importée. Visitez le marketplace Intégrations pour en importer une.",

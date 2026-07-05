@@ -12,7 +12,7 @@ import {
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
 import { BundleError } from "@appstrate/afps-runtime/bundle";
-import { createRun } from "./state/runs.ts";
+import { createRun, appendRunLog } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -35,6 +35,7 @@ import type { Actor } from "../lib/actor.ts";
 import type { FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { runWithSpan } from "../observability/index.ts";
 
 /**
  * Extract the denormalized @scope and display-name snapshot for a loaded
@@ -295,13 +296,21 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // to this pipeline invocation (scheduler / inline runs) so Step 2's
   // snapshot pass and Step 3's spawn resolver still dedupe between them.
   const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
+  // Per-stage wall-clock timings — emitted as one structured line at the end so
+  // the ~1.75 s pre-createRun pipeline is decomposable in prod without a tracer.
+  const pipelineStart = Date.now();
+  const spanAttributes = { "appstrate.run.id": runId, "appstrate.org.id": orgId };
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeRun hook). Shared with the remote origin in run-creation.ts so
   //     drift across the two paths is impossible — one change surface.
-  const gates = await runPreflightGates({
-    orgId,
-    agent: params.agent,
-  });
+  const gatesStart = Date.now();
+  const gates = await runWithSpan("appstrate.run.gates", { attributes: spanAttributes }, () =>
+    runPreflightGates({
+      orgId,
+      agent: params.agent,
+    }),
+  );
+  const gatesMs = Date.now() - gatesStart;
   if (!gates.ok) {
     throw new ApiError({
       status: gates.error.status ?? 500,
@@ -322,12 +331,18 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // persisted so the runtime credential path resolves the SAME version. An
   // unsatisfiable pin fails loud (422), never a silent draft spawn. Shared with
   // the remote origin (`run-creation.ts`) via `freezeRunSpawnDependencies`.
-  const resolvedIntegrationVersions: ResolvedIntegrationVersionMap =
-    await freezeRunSpawnDependencies({
-      agent,
-      dependencyOverrides: params.dependencyOverrides ?? null,
-      manifestCache,
-    });
+  const freezeStart = Date.now();
+  const resolvedIntegrationVersions: ResolvedIntegrationVersionMap = await runWithSpan(
+    "appstrate.run.freeze",
+    { attributes: spanAttributes },
+    () =>
+      freezeRunSpawnDependencies({
+        agent,
+        dependencyOverrides: params.dependencyOverrides ?? null,
+        manifestCache,
+      }),
+  );
+  const freezeMs = Date.now() - freezeStart;
 
   // --- Step 2b: Connection resolution snapshot (#199) ---
   //
@@ -345,19 +360,27 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // needs structured feedback, not a silent fallback. The cascade reads the
   // pinned manifests seeded by Step 2a (auth keys / scopes match the spawn).
   let resolvedConnections: ResolvedConnectionMap | null = null;
+  let connectionsMs = 0;
   // An actor-less run leaves the connection snapshot null (nothing to pin).
   // Scheduled actor-less runs that declare integrations never reach here —
   // the scheduler fail-fasts first (#735); other run paths always have an actor.
   if (actor) {
-    const outcome = await resolveRunConnectionsOrError({
-      agentManifest: agent.manifest as Record<string, unknown>,
-      packageId: agent.id,
-      actor,
-      scope: { orgId, applicationId },
-      runOverrides: params.connectionOverrides ?? null,
-      scheduleOverrides: params.scheduleConnectionOverrides ?? null,
-      manifestCache,
-    });
+    const connectionsStart = Date.now();
+    const outcome = await runWithSpan(
+      "appstrate.run.connections",
+      { attributes: spanAttributes },
+      () =>
+        resolveRunConnectionsOrError({
+          agentManifest: agent.manifest as Record<string, unknown>,
+          packageId: agent.id,
+          actor,
+          scope: { orgId, applicationId },
+          runOverrides: params.connectionOverrides ?? null,
+          scheduleOverrides: params.scheduleConnectionOverrides ?? null,
+          manifestCache,
+        }),
+    );
+    connectionsMs = Date.now() - connectionsStart;
     if (!outcome.ok) {
       throw new ApiError({
         status: outcome.error.status,
@@ -379,6 +402,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   let proxyLabel: string | null;
   let modelLabel: string | null;
   let modelSource: string | null;
+  let contextMs: number;
+  const contextStart = Date.now();
   try {
     ({
       context,
@@ -389,23 +414,26 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       proxyLabel,
       modelLabel,
       modelSource,
-    } = await buildRunContext({
-      runId,
-      agent,
-      orgId,
-      applicationId,
-      actor,
-      input: input ?? undefined,
-      files,
-      config,
-      modelId,
-      proxyId,
-      overrideVersionLabel,
-      dependencyOverrides: params.dependencyOverrides ?? null,
-      traceparent: params.traceparent,
-      resolvedConnections,
-      manifestCache,
-    }));
+    } = await runWithSpan("appstrate.run.context", { attributes: spanAttributes }, () =>
+      buildRunContext({
+        runId,
+        agent,
+        orgId,
+        applicationId,
+        actor,
+        input: input ?? undefined,
+        files,
+        config,
+        modelId,
+        proxyId,
+        overrideVersionLabel,
+        dependencyOverrides: params.dependencyOverrides ?? null,
+        traceparent: params.traceparent,
+        resolvedConnections,
+        manifestCache,
+      }),
+    ));
+    contextMs = Date.now() - contextStart;
   } catch (err) {
     if (err instanceof ModelNotConfiguredError) {
       throw new ApiError({
@@ -466,42 +494,80 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
 
   // --- Step 5: Create run record (with sink state) ---
   const agentDenorm = extractRunAgentDenorm(agent);
-  await createRun(
-    { orgId, applicationId },
-    {
-      id: runId,
-      packageId: agent.id,
-      actor,
-      input: input ?? null,
-      scheduleId,
-      versionLabel: versionLabel ?? undefined,
-      versionRef,
-      proxyLabel: proxyLabel ?? undefined,
-      modelLabel: modelLabel ?? undefined,
-      modelSource: modelSource ?? undefined,
-      apiKeyId,
-      agentScope: agentDenorm.scope,
-      agentName: agentDenorm.name,
-      config,
-      configOverride: params.configOverride ?? null,
-      dependencyOverrides: params.dependencyOverrides ?? null,
-      runOrigin: "platform",
-      sinkSecretEncrypted: encrypt(sinkCredentials.secret),
-      sinkExpiresAt: new Date(sinkCredentials.expiresAt),
-      connectionOverrides: params.connectionOverrides ?? null,
-      resolvedConnections,
-      resolvedIntegrationVersions,
-      runnerName: params.runnerName ?? null,
-      runnerKind: params.runnerKind ?? null,
-      // Model aliases (issue #727, Threat A): the run DTO (`state/runs.ts`)
-      // emits `modelCredentialId` to any dashboard user who can read the run,
-      // and a credential id cross-references — via GET /api/model-provider-
-      // credentials → `available_model_ids` — straight to the backing model.
-      // Drop it for aliases; the operator audit trail already recorded the
-      // create. Non-aliased runs keep it for the connections/credentials panel.
-      modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
-    },
+  const createStart = Date.now();
+  await runWithSpan("appstrate.run.create", { attributes: spanAttributes }, () =>
+    createRun(
+      { orgId, applicationId },
+      {
+        id: runId,
+        packageId: agent.id,
+        actor,
+        input: input ?? null,
+        scheduleId,
+        versionLabel: versionLabel ?? undefined,
+        versionRef,
+        proxyLabel: proxyLabel ?? undefined,
+        modelLabel: modelLabel ?? undefined,
+        modelSource: modelSource ?? undefined,
+        apiKeyId,
+        agentScope: agentDenorm.scope,
+        agentName: agentDenorm.name,
+        config,
+        configOverride: params.configOverride ?? null,
+        dependencyOverrides: params.dependencyOverrides ?? null,
+        runOrigin: "platform",
+        sinkSecretEncrypted: encrypt(sinkCredentials.secret),
+        sinkExpiresAt: new Date(sinkCredentials.expiresAt),
+        connectionOverrides: params.connectionOverrides ?? null,
+        resolvedConnections,
+        resolvedIntegrationVersions,
+        runnerName: params.runnerName ?? null,
+        runnerKind: params.runnerKind ?? null,
+        // Model aliases (issue #727, Threat A): the run DTO (`state/runs.ts`)
+        // emits `modelCredentialId` to any dashboard user who can read the run,
+        // and a credential id cross-references — via GET /api/model-provider-
+        // credentials → `available_model_ids` — straight to the backing model.
+        // Drop it for aliases; the operator audit trail already recorded the
+        // create. Non-aliased runs keep it for the connections/credentials panel.
+        modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
+      },
+    ),
   );
+  const createMs = Date.now() - createStart;
+
+  logger.info("run pipeline timings", {
+    runId,
+    gatesMs,
+    rateLimitMs: gates.timings.rateLimitMs,
+    concurrencyMs: gates.timings.concurrencyMs,
+    beforeRunHookMs: gates.timings.beforeRunHookMs,
+    freezeMs,
+    connectionsMs,
+    contextMs,
+    createMs,
+    totalMs: Date.now() - pipelineStart,
+  });
+
+  // Platform-written progress breadcrumb — first feedback the run page can
+  // render, streamed live over the same run_logs pg_notify → SSE path the
+  // container's own breadcrumbs use (same type/event/level combo). Emitted
+  // right after the row exists so the UI shows something well before the
+  // container's first event (~1.3 s later). Best-effort: a failed breadcrumb
+  // must never fail the run.
+  void appendRunLog(
+    { orgId },
+    runId,
+    "progress",
+    "progress",
+    "run created · starting containers",
+    { platform: true },
+    "info",
+  ).catch((err) => {
+    logger.warn("failed to append platform progress log (run created)", {
+      runId,
+      error: getErrorMessage(err),
+    });
+  });
 
   // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground({

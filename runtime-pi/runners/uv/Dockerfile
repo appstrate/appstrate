@@ -18,10 +18,11 @@
 # combined `uv + python` image that's both small (alpine-based) and
 # guaranteed to track `uv` releases, so we use it directly.
 #
-# Build (linux/amd64 required to match the sidecar's `docker run`
-# target):
+# Build for the HOST architecture (the sidecar's `docker run` pins no
+# platform; an emulated runner pays a ~4x cold-start penalty on the
+# per-integration 30s connect deadline). CI builds multi-arch via buildx.
 #
-#   docker build --platform linux/amd64 \
+#   docker build \
 #     -t appstrate-mcp-runner-uv:latest \
 #     -f runtime-pi/runners/uv/Dockerfile \
 #     runtime-pi/runners/uv

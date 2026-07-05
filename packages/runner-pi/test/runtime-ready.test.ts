@@ -48,6 +48,31 @@ describe("emitRuntimeReady", () => {
       bundleLoaded: true,
       extensions: 4,
       runtimeProtocolVersion: CURRENT_RUNTIME_PROTOCOL_VERSION,
+      totalToReadyMs: 1234,
+    });
+  });
+
+  it("merges caller-supplied phase timings into the readiness data", async () => {
+    const { sink, events } = collectingSink();
+    await emitRuntimeReady(
+      sink,
+      "run_phases",
+      {
+        bundleLoaded: false,
+        extensions: 2,
+        bootDurationMs: 500,
+        phaseTimings: { provisioningMs: 120, sdkImportMs: 200 },
+      },
+      () => 1_700_000_000_000,
+    );
+    const raw = events[0]! as unknown as { data: Record<string, unknown> };
+    expect(raw.data).toEqual({
+      bundleLoaded: false,
+      extensions: 2,
+      runtimeProtocolVersion: CURRENT_RUNTIME_PROTOCOL_VERSION,
+      totalToReadyMs: 500,
+      provisioningMs: 120,
+      sdkImportMs: 200,
     });
   });
 

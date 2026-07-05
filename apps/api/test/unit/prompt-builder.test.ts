@@ -153,9 +153,12 @@ function splitLegacy(ctx: PromptContext): {
   return { context, plan };
 }
 
-function buildEnrichedPrompt(ctx: PromptContext): Promise<string> {
+function buildEnrichedPrompt(
+  ctx: PromptContext,
+  opts?: { engine?: "pi" | "claude" },
+): Promise<string> {
   const { context, plan } = splitLegacy(ctx);
-  return buildPlatformSystemPrompt(context, plan);
+  return buildPlatformSystemPrompt(context, plan, opts ?? {});
 }
 
 function baseContext(overrides?: Partial<PromptContext>): PromptContext {
@@ -551,6 +554,40 @@ describe("buildEnrichedPrompt — tools and skills", () => {
     const ctx = baseContext({ availableSkills: [] });
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Skills");
+  });
+});
+
+// ─── Output Format engine awareness (issue #824) ───────────
+
+describe("buildEnrichedPrompt — Output Format is engine-aware", () => {
+  const outputSchema = {
+    type: "object" as const,
+    required: ["answer"],
+    properties: { answer: { type: "string" as const } },
+  };
+
+  it("pi engine (default) mandates the terminal `output` tool call", async () => {
+    const prompt = await buildEnrichedPrompt(baseContext({ schemas: { output: outputSchema } }));
+    expect(prompt).toContain("## Output Format");
+    expect(prompt).toContain("call the `output` tool");
+  });
+
+  it("claude engine instructs a final JSON message — never a nonexistent `output` tool", async () => {
+    // The claude runner hosts log/note/pin/report only; the deliverable is
+    // native via SDK `outputFormat` → `structured_output`. The tool-call
+    // mandate would send the agent hunting for a tool that does not exist
+    // and the run never completes (issue #824).
+    const prompt = await buildEnrichedPrompt(baseContext({ schemas: { output: outputSchema } }), {
+      engine: "claude",
+    });
+    expect(prompt).toContain("## Output Format");
+    expect(prompt).toContain("FINAL message MUST be the run's deliverable");
+    expect(prompt).not.toContain("call the `output` tool");
+  });
+
+  it("claude engine with no output schema renders no Output Format section", async () => {
+    const prompt = await buildEnrichedPrompt(baseContext(), { engine: "claude" });
+    expect(prompt).not.toContain("## Output Format");
   });
 });
 

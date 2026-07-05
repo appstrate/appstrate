@@ -8,11 +8,13 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
 import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
 import { StorageAlreadyExistsError } from "./storage.ts";
+import { createProxyUploadDescriptor } from "./storage-fs.ts";
 
 /** Configuration for the S3 storage client. */
 export interface S3StorageConfig {
@@ -22,8 +24,32 @@ export interface S3StorageConfig {
   region: string;
   /** Custom endpoint URL for S3-compatible services (MinIO, R2). Enables path-style access. */
   endpoint?: string;
-  /** Public endpoint used only for presigned URLs. Falls back to `endpoint` when unset. */
+  /**
+   * Public endpoint used for presigned URLs. When set, `createUploadUrl()`
+   * presigns direct-to-bucket PUT URLs against it — bytes bypass the
+   * platform, so the bucket must be publicly reachable at this URL (the
+   * GitLab `proxy_download: false` posture, for multi-node deployments that
+   * want to offload upload traffic to S3). When unset and
+   * `uploadBaseUrl`/`uploadSecret` are provided, uploads switch to proxy
+   * mode instead (see `uploadBaseUrl`). When neither is configured,
+   * presigning falls back to `endpoint` (legacy behavior for direct SDK
+   * consumers).
+   */
   publicEndpoint?: string;
+  /**
+   * Absolute public base URL of the platform API (e.g. `APP_URL`). Together
+   * with `uploadSecret`, enables **proxy-upload mode** when `publicEndpoint`
+   * is unset: `createUploadUrl()` returns an HMAC-signed URL on the app
+   * domain (`PUT /api/uploads/_content`) and the platform streams the body
+   * to S3 server-side — the bucket (e.g. a compose-internal MinIO) never
+   * needs to be exposed on a second public FQDN.
+   */
+  uploadBaseUrl?: string;
+  /**
+   * Secret used to HMAC-sign proxy-upload tokens. Same keyring semantics as
+   * the filesystem backend's `uploadSecret` (first key signs, all verify).
+   */
+  uploadSecret?: string | readonly string[];
 }
 
 /** S3 SDK error shape used for status code and name checks. */
@@ -152,6 +178,29 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       try {
         await upload.done();
       } catch (err: unknown) {
+        // lib-storage aborts the multipart upload itself when a PART upload
+        // (or the source stream) fails, but NOT when the final
+        // CompleteMultipartUpload fails — which is exactly the
+        // `If-None-Match` 412 path taken by a concurrent or replayed
+        // exclusive PUT. Without an explicit abort the already-uploaded
+        // parts are orphaned as an incomplete MPU: MinIO expires those
+        // after ~24h, but AWS S3 / R2 retain (and bill) them indefinitely
+        // unless the bucket has an AbortIncompleteMultipartUpload
+        // lifecycle rule. `uploadId` is only set once the upload went
+        // multipart; re-aborting an MPU lib-storage already cleaned up
+        // 404s harmlessly (hence the swallow).
+        const uploadId = (upload as unknown as { uploadId?: string }).uploadId;
+        if (uploadId) {
+          await client
+            .send(
+              new AbortMultipartUploadCommand({
+                Bucket: config.bucket,
+                Key: key,
+                UploadId: uploadId,
+              }),
+            )
+            .catch(() => {});
+        }
         if (opts?.exclusive) {
           const s3err = err as S3Error;
           if (
@@ -239,6 +288,20 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     ): Promise<UploadUrlDescriptor> {
       const expiresIn = opts?.expiresIn ?? 900;
       const key = makeKey(bucket, path);
+      // Proxy-upload mode (issue #829): no public S3 endpoint configured →
+      // sign an app-domain URL instead of presigning against the bucket.
+      // The platform's `/api/uploads/_content` sink streams the body to S3
+      // through `uploadStream` (multipart, bounded memory, `If-None-Match`
+      // exclusivity), so the blob store stays private. Setting
+      // `publicEndpoint` opts back into direct presign for deployments that
+      // want bytes off the platform's network path.
+      if (!config.publicEndpoint && config.uploadBaseUrl && config.uploadSecret) {
+        return createProxyUploadDescriptor(
+          { uploadBaseUrl: config.uploadBaseUrl, uploadSecret: config.uploadSecret },
+          key,
+          opts,
+        );
+      }
       // ContentLength IS signed when the caller declares a size (`maxSize`):
       // `content-length` lands in X-Amz-SignedHeaders, so S3 rejects any PUT
       // whose Content-Length differs from the declared byte count. That makes

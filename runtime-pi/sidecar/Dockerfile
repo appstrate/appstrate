@@ -5,10 +5,15 @@
 # Build from the repo root so the sidecar's `@appstrate/connect` +
 # `@appstrate/afps-runtime` workspace deps resolve via the root bun.lock:
 #
-#   docker build --platform linux/amd64 \
+#   docker build \
 #     -t appstrate-sidecar \
 #     -f runtime-pi/sidecar/Dockerfile \
 #     .
+#
+# No `--platform` flag: build the HOST architecture — an emulated amd64
+# sidecar on an arm64 dev host takes ~1.6s to bind its forward proxy vs
+# ~0.1s native, and that bind sits on the agent's boot critical path.
+# CI's release pipeline builds its own multi-arch images via buildx.
 #
 # Paths below are relative to the repo root.
 

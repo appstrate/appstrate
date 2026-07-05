@@ -17,11 +17,16 @@ function getStore(): Storage {
   const env = getEnv();
 
   if (env.S3_BUCKET) {
+    // Upload URL mode is keyed on S3_PUBLIC_ENDPOINT presence (issue #829):
+    // unset → proxy mode (browser PUTs to APP_URL, platform streams to S3;
+    // the bucket stays private), set → direct presign against that endpoint.
     store = createS3Storage({
       bucket: env.S3_BUCKET,
       region: env.S3_REGION!,
       endpoint: env.S3_ENDPOINT,
       publicEndpoint: env.S3_PUBLIC_ENDPOINT,
+      uploadBaseUrl: env.APP_URL,
+      uploadSecret: env.UPLOAD_SIGNING_SECRET,
     });
   } else {
     store = createFileSystemStorage({

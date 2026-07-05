@@ -29,6 +29,8 @@ import {
   resolveAppstratePort,
   resolveMinioConsolePort,
   resolveBootstrapEmail,
+  resolveAppUrl,
+  assertLoopbackPortMatches,
   printBootstrapFollowup,
   resolveRunBackend,
   readRawRunAdapter,
@@ -38,8 +40,12 @@ import {
   resolveCliInvocation,
   runSameHostRunnerInstall,
   type RunBackendConfig,
+  reconcileUpgradeTier,
 } from "../src/commands/install.ts";
 import type { RunningComposeProject } from "../src/lib/install/tier123.ts";
+
+/** Fresh-install shape reused by the resolveAppUrl suite. */
+const NO_EXISTING = { hasEnv: false, hasCompose: false, existingEnv: {} };
 
 describe("resolveTier", () => {
   it("accepts '0', '1', '2', '3' as literal strings", async () => {
@@ -104,7 +110,7 @@ describe("resolveTier (--yes / autoConfirm)", () => {
   // The tests lock that contract down: any future refactor that
   // accidentally reintroduces `select()` on the --yes path fails here.
 
-  it("returns Tier 3 when Docker is available, without calling select", async () => {
+  it("returns Tier 2 when Docker is available, without calling select", async () => {
     let selectCalls = 0;
     const select = (async () => {
       selectCalls += 1;
@@ -120,9 +126,9 @@ describe("resolveTier (--yes / autoConfirm)", () => {
       isDockerAvailable: async () => true,
       autoConfirm: true,
     });
-    expect(tier).toBe(3);
+    expect(tier).toBe(2);
     expect(selectCalls).toBe(0);
-    expect(noteMsg).toMatch(/Tier 3 selected automatically/i);
+    expect(noteMsg).toMatch(/Tier 2 selected automatically/i);
     expect(noteMsg).toMatch(/Docker detected/i);
   });
 
@@ -158,7 +164,7 @@ describe("resolveTier (--yes / autoConfirm)", () => {
       note: () => {},
       autoConfirm: true,
     });
-    expect(tier).toBe(3);
+    expect(tier).toBe(2);
   });
 
   it("still honors an explicit --tier argument under --yes (granular override wins)", async () => {
@@ -218,7 +224,7 @@ describe("resolveTier (interactive)", () => {
     options?: Array<{ value: number; label: string }>;
   };
 
-  it("defaults to Tier 3 when Docker is available", async () => {
+  it("defaults to Tier 2 when Docker is available", async () => {
     let captured: SelectOpts | undefined;
     const select = (async (opts: SelectOpts) => {
       captured = opts;
@@ -230,10 +236,10 @@ describe("resolveTier (interactive)", () => {
       note: () => {},
       isDockerAvailable: async () => true,
     });
-    expect(tier).toBe(3);
-    expect(captured?.initialValue).toBe(3);
-    expect(captured?.options?.[0]?.value).toBe(3);
-    expect(captured?.options?.[0]?.label).toMatch(/recommended/i);
+    expect(tier).toBe(2);
+    expect(captured?.initialValue).toBe(2);
+    expect(captured?.options?.[1]?.value).toBe(2);
+    expect(captured?.options?.[1]?.label).toMatch(/recommended/i);
   });
 
   it("falls back to Tier 0 default when Docker is missing and surfaces a note", async () => {
@@ -258,14 +264,14 @@ describe("resolveTier (interactive)", () => {
   });
 
   it("returns whatever the user explicitly selects, regardless of default", async () => {
-    const select = (async () => 2) as unknown as typeof import("@clack/prompts").select;
+    const select = (async () => 3) as unknown as typeof import("@clack/prompts").select;
     const tier = await resolveTier(undefined, {
       select,
       isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
       note: () => {},
       isDockerAvailable: async () => true,
     });
-    expect(tier).toBe(2);
+    expect(tier).toBe(3);
   });
 
   it("orders options Tier 3 → 2 → 1 → 0", async () => {
@@ -1650,5 +1656,215 @@ describe("runSameHostRunnerInstall", () => {
     expect(note).toContain("sudo /usr/local/bin/appstrate runner install");
     expect(note).toContain("--platform-url http://10.0.0.5:3000");
     expect(note).toContain("--token pairing-token-123456");
+  });
+});
+
+describe("resolveAppUrl (issue #822) — non-interactive paths", () => {
+  const SNAPSHOT = { APPSTRATE_APP_URL: process.env.APPSTRATE_APP_URL };
+  afterEach(() => {
+    if (SNAPSHOT.APPSTRATE_APP_URL === undefined) delete process.env.APPSTRATE_APP_URL;
+    else process.env.APPSTRATE_APP_URL = SNAPSHOT.APPSTRATE_APP_URL;
+  });
+
+  const FRESH = { mode: "fresh" as const, existing: NO_EXISTING, nonInteractive: true };
+
+  it("defaults to http://localhost:<port> when nothing is expressed", async () => {
+    expect(await resolveAppUrl(undefined, 3000, { tier: 3, ...FRESH })).toBe(
+      "http://localhost:3000",
+    );
+    expect(await resolveAppUrl(undefined, 8080, { tier: 3, ...FRESH })).toBe(
+      "http://localhost:8080",
+    );
+  });
+
+  it("elides the port when the platform binds :80 (matches appUrlForPort)", async () => {
+    expect(await resolveAppUrl(undefined, 80, { tier: 3, ...FRESH })).toBe("http://localhost");
+  });
+
+  it("honors the --app-url flag on a fresh install (normalized)", async () => {
+    expect(await resolveAppUrl("https://appstrate.example.com/", 3000, { tier: 3, ...FRESH })).toBe(
+      "https://appstrate.example.com",
+    );
+  });
+
+  it("honors APPSTRATE_APP_URL (curl|bash path), flag wins over env", async () => {
+    process.env.APPSTRATE_APP_URL = "https://env.example.com";
+    expect(await resolveAppUrl(undefined, 3000, { tier: 3, ...FRESH })).toBe(
+      "https://env.example.com",
+    );
+    expect(await resolveAppUrl("https://flag.example.com", 3000, { tier: 3, ...FRESH })).toBe(
+      "https://flag.example.com",
+    );
+  });
+
+  it("an empty APPSTRATE_APP_URL is treated as unset", async () => {
+    process.env.APPSTRATE_APP_URL = "   ";
+    expect(await resolveAppUrl(undefined, 3000, { tier: 3, ...FRESH })).toBe(
+      "http://localhost:3000",
+    );
+  });
+
+  it("applies the flag on Tier 0 too (no prompt, but scripted override works)", async () => {
+    expect(await resolveAppUrl("https://appstrate.example.com", 3000, { tier: 0, ...FRESH })).toBe(
+      "https://appstrate.example.com",
+    );
+  });
+
+  it("throws on an invalid --app-url (fail-fast at install time)", async () => {
+    await expect(resolveAppUrl("not a url", 3000, { tier: 3, ...FRESH })).rejects.toThrow(
+      /Expected an absolute URL/,
+    );
+    await expect(
+      resolveAppUrl("https://example.com/sub/path", 3000, { tier: 3, ...FRESH }),
+    ).rejects.toThrow(/origin only/);
+  });
+
+  it("upgrade inherits the existing APP_URL from .env (mergeEnv — existing wins)", async () => {
+    const existing = {
+      hasEnv: true,
+      hasCompose: true,
+      existingEnv: { APP_URL: "https://old.example.com" },
+    };
+    expect(
+      await resolveAppUrl(undefined, 3000, {
+        tier: 3,
+        mode: "upgrade",
+        existing,
+        nonInteractive: true,
+      }),
+    ).toBe("https://old.example.com");
+    // A divergent flag is warned about + ignored — same contract as --port.
+    expect(
+      await resolveAppUrl("https://new.example.com", 3000, {
+        tier: 3,
+        mode: "upgrade",
+        existing,
+        nonInteractive: true,
+      }),
+    ).toBe("https://old.example.com");
+  });
+
+  it("upgrade without APP_URL in the existing .env falls through to flag/default", async () => {
+    const existing = { hasEnv: true, hasCompose: true, existingEnv: {} };
+    expect(
+      await resolveAppUrl("https://new.example.com", 3000, {
+        tier: 3,
+        mode: "upgrade",
+        existing,
+        nonInteractive: true,
+      }),
+    ).toBe("https://new.example.com");
+    expect(
+      await resolveAppUrl(undefined, 3000, {
+        tier: 3,
+        mode: "upgrade",
+        existing,
+        nonInteractive: true,
+      }),
+    ).toBe("http://localhost:3000");
+  });
+});
+
+describe("assertLoopbackPortMatches (issue #822) — loopback port-mismatch guard", () => {
+  it("throws when a plain-http localhost URL disagrees with the bind port", () => {
+    expect(() => assertLoopbackPortMatches("http://localhost:1234", 3000)).toThrow(
+      /doesn't match the platform bind port 3000/,
+    );
+    expect(() => assertLoopbackPortMatches("http://127.0.0.1:1234", 3000)).toThrow(/--port 1234/);
+    // Portless http://localhost means :80.
+    expect(() => assertLoopbackPortMatches("http://localhost", 3000)).toThrow(/--port 80/);
+  });
+
+  it("passes when the ports agree", () => {
+    expect(() => assertLoopbackPortMatches("http://localhost:8080", 8080)).not.toThrow();
+    expect(() => assertLoopbackPortMatches("http://localhost", 80)).not.toThrow();
+    expect(() => assertLoopbackPortMatches("http://[::1]:3000", 3000)).not.toThrow();
+  });
+
+  it("skips https loopback (local TLS-terminating proxy is legitimate)", () => {
+    expect(() => assertLoopbackPortMatches("https://localhost:8443", 3000)).not.toThrow();
+  });
+
+  it("skips remote URLs — the proxy bridges public port and bind port", () => {
+    expect(() => assertLoopbackPortMatches("http://example.com", 3000)).not.toThrow();
+    expect(() => assertLoopbackPortMatches("https://example.com", 3000)).not.toThrow();
+  });
+
+  it("is enforced by resolveAppUrl on the flag path", async () => {
+    await expect(
+      resolveAppUrl("http://localhost:1234", 3000, {
+        tier: 3,
+        mode: "fresh",
+        existing: NO_EXISTING,
+        nonInteractive: true,
+      }),
+    ).rejects.toThrow(/doesn't match the platform bind port/);
+    // Matching port stays accepted (equivalent to the derived default).
+    await expect(
+      resolveAppUrl("http://localhost:1234", 1234, {
+        tier: 3,
+        mode: "fresh",
+        existing: NO_EXISTING,
+        nonInteractive: true,
+      }),
+    ).resolves.toBe("http://localhost:1234");
+  });
+});
+
+describe("reconcileUpgradeTier", () => {
+  it("inherits the installed tier when the default would silently change the stack", () => {
+    // The #829 hazard: `install --yes` (default Tier 2) re-run on a Tier 3
+    // deployment must NOT rewrite compose with the Tier 2 template — MinIO
+    // would vanish while .env keeps the S3 config, hiding all stored objects.
+    const r = reconcileUpgradeTier(2, undefined, 3);
+    expect(r.tier).toBe(3);
+    expect(r.note).toMatch(/keeping Tier 3/i);
+    expect(r.note).toMatch(/--tier 2/);
+  });
+
+  it("inherits downward too (pre-existing reverse hazard: Tier 2 install, Tier 3 pick)", () => {
+    const r = reconcileUpgradeTier(3, undefined, 2);
+    expect(r.tier).toBe(2);
+    expect(r.note).toMatch(/keeping Tier 2/i);
+  });
+
+  it("an explicit --tier always wins (scripted tier changes stay possible)", () => {
+    const r = reconcileUpgradeTier(2, "2", 3);
+    expect(r.tier).toBe(2);
+    expect(r.note).toBeUndefined();
+  });
+
+  it("keeps the resolved tier when no compose tier could be inferred", () => {
+    const r = reconcileUpgradeTier(2, undefined, null);
+    expect(r.tier).toBe(2);
+    expect(r.note).toBeUndefined();
+  });
+
+  it("keeps a Tier 0 resolution untouched (source-clone dirs have no compose tier)", () => {
+    const r = reconcileUpgradeTier(0, undefined, 3);
+    expect(r.tier).toBe(0);
+    expect(r.note).toBeUndefined();
+  });
+
+  it("is a no-op when the tiers already agree", () => {
+    const r = reconcileUpgradeTier(3, undefined, 3);
+    expect(r.tier).toBe(3);
+    expect(r.note).toBeUndefined();
+  });
+
+  it("inherits an installed Tier 0 (a --yes re-run must not convert PGlite installs to Docker)", () => {
+    // Tier 0 dirs (`.env` without POSTGRES_PASSWORD/DATABASE_URL, no compose)
+    // hold their data in PGlite + ./data — resolving the Docker-aware default
+    // (Tier 2) on top would boot an empty Postgres and hide every user/org.
+    const r = reconcileUpgradeTier(2, undefined, 0);
+    expect(r.tier).toBe(0);
+    expect(r.note).toMatch(/keeping Tier 0/i);
+    expect(r.note).toMatch(/--tier 2/);
+  });
+
+  it("an explicit --tier still converts a Tier 0 install (operator owns the migration)", () => {
+    const r = reconcileUpgradeTier(2, "2", 0);
+    expect(r.tier).toBe(2);
+    expect(r.note).toBeUndefined();
   });
 });

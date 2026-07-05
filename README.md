@@ -52,7 +52,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 
 ## Self-Hosting
 
-Deploy Appstrate with a single command. The installer drops the `appstrate` CLI on PATH and runs `install --yes`, which picks a [tier](#progressive-infrastructure) based on what's available on the host — Tier 3 (PostgreSQL + Redis + MinIO) when Docker is reachable, Tier 0 (embedded Bun-only install) otherwise.
+Deploy Appstrate with a single command. The installer drops the `appstrate` CLI on PATH and runs `install --yes`, which picks a [tier](#progressive-infrastructure) based on what's available on the host — Tier 2 (PostgreSQL + Redis, filesystem storage) when Docker is reachable, Tier 0 (embedded Bun-only install) otherwise.
 
 ```sh
 curl -fsSL https://get.appstrate.dev | bash
@@ -69,6 +69,14 @@ curl -fsSL https://get.appstrate.dev | bash -s -- --tier 1 --dir ~/apps/appstrat
 ```
 
 `--tier`, `--dir`, and `--port` override the smart defaults. Equivalent env vars: `APPSTRATE_YES=1`, `APPSTRATE_PORT`, `APPSTRATE_BIN_DIR`.
+
+**Deploying on a remote host behind a reverse proxy?** Pass the public URL so OAuth redirects, CORS, and email links point at the right origin (`TRUST_PROXY` is enabled automatically for non-localhost URLs):
+
+```sh
+curl -fsSL https://get.appstrate.dev | bash -s -- --yes --app-url https://appstrate.example.com
+```
+
+Also honored via `APPSTRATE_APP_URL`. The installer does **not** provision the reverse proxy or TLS -- point your proxy (Caddy, nginx, Traefik) at `localhost:<port>` yourself; see [`examples/self-hosting/README.md`](./examples/self-hosting/README.md#production-considerations).
 
 **Want the interactive prompts?** Drop the binary without auto-launching, then run `install` yourself:
 

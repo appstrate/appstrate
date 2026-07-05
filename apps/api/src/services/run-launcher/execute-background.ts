@@ -2,7 +2,7 @@
 
 import { logger } from "../../lib/logger.ts";
 import type { LoadedPackage } from "../../types/index.ts";
-import { updateRun } from "../state/runs.ts";
+import { updateRun, appendRunLog } from "../state/runs.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -104,6 +104,29 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
     // actually accepted its first event). Everything terminal flows
     // through finalizeRun.
     await updateRun(scope, runId, { status: "running" });
+    // Platform-owned latency contribution before the container takes over:
+    // entry → running flip. The subsequent container-spawn cost is captured
+    // by `recordContainerSpawn` inside `runPlatformContainer`.
+    logger.info("run spawn timings", { runId, flipMs: Date.now() - startTime });
+    // Second platform breadcrumb — the run is flipped to running and we are
+    // about to provision the isolation boundary + spawn the sidecar/agent
+    // containers (that work happens inside `runPlatformContainer`, below).
+    // Streams live over the same run_logs pg_notify → SSE path. Best-effort:
+    // a failed breadcrumb must never fail the run.
+    void appendRunLog(
+      scope,
+      runId,
+      "progress",
+      "progress",
+      "containers starting",
+      { platform: true },
+      "info",
+    ).catch((err) => {
+      logger.warn("failed to append platform progress log (containers starting)", {
+        runId,
+        error: getErrorMessage(err),
+      });
+    });
     void emitEvent("onRunStatusChange", {
       orgId,
       runId,

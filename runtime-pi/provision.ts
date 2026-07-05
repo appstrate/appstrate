@@ -23,10 +23,14 @@ import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Generous retry budget: workspace provisioning is the first blocking network
- * call, and with a sidecar the forward proxy may still be binding. 6 attempts
- * with exponential backoff span ~8 s (0.5+1+2+2+2), well inside the boot gate.
+ * call, and with a sidecar the forward proxy may still be binding. The proxy
+ * typically comes up a few hundred ms after the agent's first attempt, so the
+ * early retries poll tightly (120 ms base — a 500 ms base overshot the proxy
+ * by up to a full doubled sleep on every boot); 9 attempts span ~9.7 s
+ * (0.12+0.24+0.48+0.96+1.92+2+2+2 s), a slightly larger total budget than the
+ * previous 6×500ms (7.5 s), still well inside the boot gate.
  */
-export const PROVISION_MAX_ATTEMPTS = 6;
+export const PROVISION_MAX_ATTEMPTS = 9;
 
 export interface ProvisionDeps {
   /** The run-scoped event sink URL (`…/api/runs/:id/events`). The workspace
@@ -89,7 +93,7 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
       lastError = getErrorMessage(err);
     }
     if (attempt < maxAttempts) {
-      await sleep(computeBackoffDelayMs(attempt, { baseMs: 500, capMs: 2000 }));
+      await sleep(computeBackoffDelayMs(attempt, { baseMs: 120, capMs: 2000 }));
     }
   }
   throw new Error(`request to ${url} failed after ${maxAttempts} attempts: ${lastError}`);

@@ -27,12 +27,8 @@
  */
 
 import {
-  AuthStorage,
-  createAgentSession,
-  DefaultResourceLoader,
-  ModelRegistry,
-  SessionManager,
-  SettingsManager,
+  loadPiCodingAgentSdk,
+  type AuthStorage,
   type ExtensionFactory,
   type Api,
   type KnownApi,
@@ -176,33 +172,11 @@ export function derivePiCompactionSettings(
   return { enabled: true, reserveTokens, keepRecentTokens };
 }
 
-/**
- * The Pi `MODEL_API` shape → Pi SDK {@link AuthStorage} provider-key map.
- * Single source of truth for both the in-container path (entrypoint builds
- * `model.provider` from it) and the CLI's local-run resolver, which imports
- * this const + {@link deriveProviderFromApi} rather than keeping its own copy.
- */
-export const PROVIDER_BY_API: Record<ModelApiShape, string> = {
-  "anthropic-messages": "anthropic",
-  "openai-completions": "openai",
-  "openai-responses": "openai",
-  "openai-codex-responses": "openai",
-  "mistral-conversations": "mistral",
-  "google-generative-ai": "google",
-  "google-vertex": "google-vertex",
-  "azure-openai-responses": "azure-openai-responses",
-  "bedrock-converse-stream": "amazon-bedrock",
-};
-
-/**
- * Convert a Pi `MODEL_API` string into the provider key the Pi SDK's
- * {@link AuthStorage} uses to look up API keys.
- */
-export function deriveProviderFromApi(api: string): string {
-  const provider = (PROVIDER_BY_API as Record<string, string>)[api];
-  if (!provider) throw new Error(`PiRunner: unknown model api "${api}"`);
-  return provider;
-}
+// The `MODEL_API` → provider-key map lives in `provider-map.ts` (no Pi SDK
+// import) so boot-critical callers can pull it without dragging this module's
+// SDK graph. Re-exported here so the historical `pi-runner.ts` import path
+// keeps resolving.
+export { PROVIDER_BY_API, deriveProviderFromApi } from "./provider-map.ts";
 
 // Compile error if appstrate ever declares an apiShape Pi does not know.
 type _ApiShapeSubsetOfPi = ModelApiShape extends KnownApi ? true : never;
@@ -404,6 +378,20 @@ export class PiRunner implements Runner {
     const cwd = this.opts.cwd ?? process.cwd();
     const agentDir = this.opts.agentDir ?? "/tmp/pi-agent";
     const thinkingLevel = this.opts.thinkingLevel ?? "medium";
+
+    // Load the heavy Pi SDK value surface here (not at module top) so the
+    // ~200ms `@mariozechner/pi-coding-agent` eval stays off the runtime's
+    // pre-session boot path. ESM caches the module, so when the container
+    // entrypoint has already warmed it during provisioning this await resolves
+    // instantly.
+    const {
+      AuthStorage,
+      createAgentSession,
+      DefaultResourceLoader,
+      ModelRegistry,
+      SessionManager,
+      SettingsManager,
+    } = await loadPiCodingAgentSdk();
 
     const authStorage =
       this.opts.authStorage ??

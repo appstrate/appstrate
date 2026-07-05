@@ -21,7 +21,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import {
   consumeUploadStream,
-  writeFsUploadContent,
+  writeProxyUploadContent,
   cleanupExpiredUploads,
   type UploadStreamSink,
 } from "../../../src/services/uploads.ts";
@@ -535,7 +535,7 @@ describe("cleanupExpiredUploads", () => {
   });
 });
 
-describe("writeFsUploadContent (FS sink)", () => {
+describe("writeProxyUploadContent (FS sink)", () => {
   beforeEach(async () => {
     await truncateAll();
   });
@@ -552,10 +552,10 @@ describe("writeFsUploadContent (FS sink)", () => {
 
   it("refuses to overwrite an existing object at the same storage key", async () => {
     const { key, storagePath } = uniqueKey("replay");
-    await writeFsUploadContent(key, bodyStream(new Uint8Array([1, 2, 3])), 0);
+    await writeProxyUploadContent(key, bodyStream(new Uint8Array([1, 2, 3])), 0);
     // Second PUT with the same (still-valid) token must be rejected.
     try {
-      await writeFsUploadContent(key, bodyStream(new Uint8Array([4, 5, 6])), 0);
+      await writeProxyUploadContent(key, bodyStream(new Uint8Array([4, 5, 6])), 0);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -569,7 +569,7 @@ describe("writeFsUploadContent (FS sink)", () => {
   it("accepts a body at exactly the signed max and reports its size", async () => {
     const { key, storagePath } = uniqueKey("exact");
     const bytes = new Uint8Array(64).fill(7);
-    const result = await writeFsUploadContent(key, bodyStream(bytes), 64);
+    const result = await writeProxyUploadContent(key, bodyStream(bytes), 64);
     expect(result.size).toBe(64);
     expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(bytes);
   });
@@ -586,24 +586,90 @@ describe("writeFsUploadContent (FS sink)", () => {
       },
     });
     try {
-      await writeFsUploadContent(key, source, 4 * 1024);
+      await writeProxyUploadContent(key, source, 4 * 1024);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).status).toBe(400);
       expect((e as ApiError).message).toContain("exceeds signed max");
     }
-    // No partial object left behind — the token stays usable for a clean retry.
+    // No partial object left behind — the token stays usable for a clean
+    // retry (at the exact signed size: `s` binds the declared byte count).
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
-    const retry = new Uint8Array([9, 9, 9]);
-    await writeFsUploadContent(key, bodyStream(retry), 4 * 1024);
+    const retry = new Uint8Array(4 * 1024).fill(9);
+    await writeProxyUploadContent(key, bodyStream(retry), 4 * 1024);
+    expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(retry);
+  });
+
+  it("rejects a completed body SHORTER than the signed size and rolls back (token reusable)", async () => {
+    // Exact-size binding — parity with direct-presign S3 mode, which signs
+    // Content-Length into the presigned PUT (and with S3 presigned-POST's
+    // content-length-range). A truncated upload must fail HERE, not later at
+    // consume time, and must leave no object so the same token can retry.
+    const { key, storagePath } = uniqueKey("short");
+    try {
+      await writeProxyUploadContent(key, bodyStream(new Uint8Array(48).fill(5)), 64);
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(400);
+      expect((e as ApiError).message).toContain("signed size");
+    }
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
+    const retry = new Uint8Array(64).fill(6);
+    await writeProxyUploadContent(key, bodyStream(retry), 64);
     expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(retry);
   });
 
   it("treats a signed max of 0 as unlimited (legacy tokens)", async () => {
     const { key, storagePath } = uniqueKey("nolimit");
     const bytes = new Uint8Array(2048).fill(3);
-    await writeFsUploadContent(key, bodyStream(bytes), 0);
+    await writeProxyUploadContent(key, bodyStream(bytes), 0);
     expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(bytes);
+  });
+
+  it("enforces the token expiry WHILE the body streams, not just at PUT start", async () => {
+    // Slow-loris guard: the route validates expiry when the PUT starts; the
+    // counting transform re-checks it per chunk so a trickled body cannot
+    // hold the socket (and an open S3 multipart upload) past the window.
+    // An already-past expiry makes the very first chunk trip the check
+    // without any real-time waiting.
+    const { key, storagePath } = uniqueKey("expired");
+    const pastExpiry = Math.floor(Date.now() / 1000) - 1;
+    try {
+      await writeProxyUploadContent(key, bodyStream(new Uint8Array(64).fill(4)), 64, pastExpiry);
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(401);
+      expect((e as ApiError).message).toContain("expired");
+    }
+    // Rolled back — nothing written.
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
+  });
+
+  it("concurrent PUTs with the same token: exactly one wins, state stays consistent", async () => {
+    // Replay/race protection under true concurrency (O_EXCL on FS,
+    // `If-None-Match: *` on S3): exactly one body must land, the loser must
+    // report the replay conflict, and the stored object must be one of the
+    // two payloads in full — never interleaved or partial.
+    const { key, storagePath } = uniqueKey("race");
+    const a = new Uint8Array(1024).fill(1);
+    const b = new Uint8Array(1024).fill(2);
+    const results = await Promise.allSettled([
+      writeProxyUploadContent(key, bodyStream(a), 1024),
+      writeProxyUploadContent(key, bodyStream(b), 1024),
+    ]);
+    const winners = results.filter((r) => r.status === "fulfilled");
+    const losers = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(winners.length).toBe(1);
+    expect(losers.length).toBe(1);
+    expect(losers[0]!.reason).toBeInstanceOf(ApiError);
+    expect((losers[0]!.reason as ApiError).status).toBe(409);
+    const stored = await storageGet(UPLOAD_BUCKET, storagePath);
+    expect(stored).not.toBeNull();
+    expect(stored!.length).toBe(1024);
+    expect([1, 2]).toContain(stored![0]!);
+    expect(stored!.every((byte) => byte === stored![0])).toBe(true);
   });
 });

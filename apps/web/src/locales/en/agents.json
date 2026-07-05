@@ -224,7 +224,7 @@
   "schedule.statusActive": "Active",
   "editor.breadcrumbNew": "New agent",
   "editor.breadcrumbEdit": "Edit",
-  "editor.errorRequired": "Identifier and display name are required.",
+  "editor.errorRequired": "Identifier is required.",
   "editor.errorPrompt": "Prompt is required.",
   "editor.skillsEmpty": "No skills in packages. Add some from the Packages page.",
   "editor.integrationsEmpty": "No integrations imported. Visit the Integrations marketplace to import one.",

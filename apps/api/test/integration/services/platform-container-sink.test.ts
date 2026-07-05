@@ -24,7 +24,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { runs, runLogs } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import type {
   RunOrchestrator,
@@ -412,6 +412,28 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
     await executeAgentInBackground(execInput);
     return { runId, packageId: pkg.id };
   }
+
+  it("writes a platform 'containers starting' progress run_log after the pending→running flip", async () => {
+    const { runId } = await runWithFakeOrchestrator({ exitCode: 137 });
+    // The breadcrumb is fire-and-forget inside executeAgentInBackground, so it
+    // may land just after the function resolves — poll briefly for it.
+    let row: typeof runLogs.$inferSelect | undefined;
+    for (let attempt = 0; attempt < 20 && !row; attempt++) {
+      [row] = await db
+        .select()
+        .from(runLogs)
+        .where(eq(runLogs.runId, runId))
+        .then((rows) => rows.filter((r) => r.message === "containers starting"));
+      if (!row) await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(row).toBeTruthy();
+    // Same type/event/level combo the container's own progress breadcrumbs use
+    // (appstrate-event-sink.ts → appendRunLog(progress/progress)) so the run
+    // page renders it as a normal progress line.
+    expect(row!.type).toBe("progress");
+    expect(row!.event).toBe("progress");
+    expect(row!.level).toBe("info");
+  });
 
   it("synthesises a success finalize when the container exits 0 without posting one itself", async () => {
     const { runId } = await runWithFakeOrchestrator({ exitCode: 0 });

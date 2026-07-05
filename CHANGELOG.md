@@ -8,6 +8,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Proxy-upload mode for S3 storage (#829)** — with `S3_PUBLIC_ENDPOINT`
+  unset, upload URLs are now signed against `APP_URL`
+  (`PUT /api/uploads/_content`) and the platform streams the body to the
+  bucket server-side, so S3/MinIO can stay fully private (no published S3
+  port, no second public FQDN). The installer's Docker-aware default tier
+  moves from Tier 3 (bundled MinIO) to Tier 2 (filesystem storage) — MinIO
+  adds no capability on a single node once serving is app-domain. The proxy
+  sink now also binds the token's **exact declared size** (a completed body
+  shorter than declared is rejected and rolled back, parity with the signed
+  `Content-Length` of direct presign) and re-checks the **token expiry while
+  the body streams** (a slow-trickled body can no longer hold the socket
+  past the token window).
+
+  **⚠ Behavior change for existing S3 deployments with `S3_PUBLIC_ENDPOINT`
+  unset**: presigned URLs no longer fall back to `S3_ENDPOINT` — uploads
+  route through `APP_URL` instead. Bytes now transit the platform (and your
+  reverse proxy: check its body-size limit, see
+  `examples/self-hosting/README.md` → Production Considerations), and
+  `APP_URL` must be the instance's real public URL. To keep the previous
+  direct-presign behavior, set `S3_PUBLIC_ENDPOINT` to your public S3
+  endpoint. The platform warns at boot when proxy mode is active in
+  production with a loopback `APP_URL`.
+
 - **Inline file inputs on `runAgent` (#630)** — file-typed input fields now
   also accept RFC 2397 `data:<mime>;name=<filename>;base64,<payload>` URIs
   (≤4 MiB decoded) alongside `upload://` references. The bytes are written to

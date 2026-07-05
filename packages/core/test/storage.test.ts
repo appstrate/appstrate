@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { createS3Storage } from "../src/storage-s3.ts";
+import { verifyFsUploadToken } from "../src/storage-fs.ts";
 
 describe("createS3Storage", () => {
   const storage = createS3Storage({ bucket: "test", region: "us-east-1" });
@@ -112,5 +113,77 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     });
     expect(url.startsWith("https://files.example.com/")).toBe(true);
     expect(new URL(url).searchParams.get("x-amz-checksum-crc32")).toBeNull();
+  });
+});
+
+describe("createS3Storage — proxy-upload mode (issue #829)", () => {
+  const proxyConfig = {
+    bucket: "test",
+    region: "us-east-1",
+    endpoint: "http://internal-minio:9000",
+    uploadBaseUrl: "https://app.example.com",
+    uploadSecret: "proxy-test-secret",
+  };
+
+  it("signs an app-domain URL when no public endpoint is configured", async () => {
+    const storage = createS3Storage(proxyConfig);
+    const descriptor = await storage.createUploadUrl("uploads", "app_1/upl_1/file.pdf", {
+      mime: "application/pdf",
+      maxSize: 123,
+      expiresIn: 600,
+    });
+    expect(descriptor.url.startsWith("https://app.example.com/api/uploads/_content?token=")).toBe(
+      true,
+    );
+    expect(descriptor.method).toBe("PUT");
+    expect(descriptor.expiresIn).toBe(600);
+    // Proxy mode has no presigned Content-Length contract — the sink enforces
+    // the signed max while streaming, so only Content-Type is echoed.
+    expect(descriptor.headers).toEqual({ "Content-Type": "application/pdf" });
+    // The token is verifiable with the same keyring the sink uses and binds
+    // the storage key, size ceiling, and MIME.
+    const token = new URL(descriptor.url).searchParams.get("token")!;
+    const payload = verifyFsUploadToken(token, "proxy-test-secret");
+    expect(payload).not.toBeNull();
+    expect(payload!.k).toBe("uploads/app_1/upl_1/file.pdf");
+    expect(payload!.s).toBe(123);
+    expect(payload!.m).toBe("application/pdf");
+  });
+
+  it("trims trailing slashes off the upload base URL", async () => {
+    const storage = createS3Storage({ ...proxyConfig, uploadBaseUrl: "https://app.example.com//" });
+    const { url } = await storage.createUploadUrl("uploads", "a/b.bin");
+    expect(url.startsWith("https://app.example.com/api/uploads/_content?token=")).toBe(true);
+  });
+
+  it("still rejects path traversal before signing", async () => {
+    const storage = createS3Storage(proxyConfig);
+    await expect(storage.createUploadUrl("uploads", "../escape.bin")).rejects.toThrow(
+      "Path traversal detected",
+    );
+  });
+
+  it("S3_PUBLIC_ENDPOINT-style config wins: presigns direct-to-bucket even with proxy config present", async () => {
+    // Credentials for offline presign (same trick as the presign-shape suite).
+    const saved = {
+      id: process.env.AWS_ACCESS_KEY_ID,
+      secret: process.env.AWS_SECRET_ACCESS_KEY,
+    };
+    process.env.AWS_ACCESS_KEY_ID = "test-access-key";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret-key";
+    try {
+      const storage = createS3Storage({
+        ...proxyConfig,
+        publicEndpoint: "https://files.example.com",
+      });
+      const { url } = await storage.createUploadUrl("uploads", "app/upl_9/file.bin");
+      expect(url.startsWith("https://files.example.com/")).toBe(true);
+      expect(new URL(url).searchParams.get("X-Amz-Signature")).not.toBeNull();
+    } finally {
+      if (saved.id === undefined) delete process.env.AWS_ACCESS_KEY_ID;
+      else process.env.AWS_ACCESS_KEY_ID = saved.id;
+      if (saved.secret === undefined) delete process.env.AWS_SECRET_ACCESS_KEY;
+      else process.env.AWS_SECRET_ACCESS_KEY = saved.secret;
+    }
   });
 });

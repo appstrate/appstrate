@@ -26,7 +26,7 @@
 #
 # Usage:
 #   curl -fsSL https://get.appstrate.dev | bash
-#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3
+#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 2
 #   # Firecracker execution backend (microVMs) on this KVM host:
 #   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 \
 #     --run-adapter firecracker --host-ip 10.0.0.5

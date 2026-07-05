@@ -109,6 +109,101 @@ export async function detectInstallMode(dir: string): Promise<InstallModeResult>
 }
 
 /**
+ * Compose file names recognized when inferring an installed tier. The CLI
+ * itself always writes `docker-compose.yml`, but users legitimately rename
+ * to the other spellings Docker Compose looks up — ordered here by Docker's
+ * own lookup precedence.
+ */
+const COMPOSE_FILENAMES = [
+  "compose.yaml",
+  "compose.yml",
+  "docker-compose.yaml",
+  "docker-compose.yml",
+] as const;
+
+/**
+ * Extract the top-level service names from a compose file body without a
+ * YAML dependency. Indentation-agnostic: finds the `services:` block, takes
+ * the indent of its first child key as the service indent, and collects
+ * every key at exactly that indent until the block ends. Tolerates user
+ * reformatting (4-space indent), CRLF line endings, and comments — and does
+ * NOT confuse deeper keys (environment values, `# minio: disabled` comments)
+ * with service names.
+ */
+export function parseComposeServiceKeys(text: string): Set<string> {
+  const keys = new Set<string>();
+  let inServices = false;
+  let serviceIndent: number | null = null;
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    if (/^services:\s*(#.*)?$/.test(line)) {
+      inServices = true;
+      serviceIndent = null;
+      continue;
+    }
+    if (!inServices) continue;
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0) {
+      // Next top-level block (volumes:, networks:, …) ends the services map.
+      inServices = false;
+      continue;
+    }
+    if (trimmed.startsWith("#")) continue;
+    if (serviceIndent === null) serviceIndent = indent;
+    if (indent !== serviceIndent) continue;
+    const match = /^([A-Za-z0-9._-]+):\s*(#.*)?$/.exec(trimmed);
+    if (match?.[1]) keys.add(match[1]);
+  }
+  return keys;
+}
+
+/**
+ * Infer the tier of an existing install so upgrade re-runs inherit it.
+ *
+ * Docker tiers (1-3) are inferred from the compose file (any of the four
+ * standard file names): the tier templates are distinguished by which
+ * services they declare (Tier 3 bundles MinIO, Tier 2 adds Redis, Tier 1 is
+ * PostgreSQL only), and user edits preserve those service keys.
+ *
+ * Tier 0 is inferred when there is NO compose file but a CLI-shaped `.env`
+ * exists — one WITHOUT docker credentials: every docker-tier `.env` renders
+ * `POSTGRES_PASSWORD` (`generateEnvForTier`), and a hand-rolled
+ * external-Postgres deployment sets `DATABASE_URL`. Without this, a `--yes`
+ * re-run on a Tier 0 dir would silently convert it to a Docker tier and hide
+ * all PGlite data (users, orgs, runs).
+ *
+ * Returns `null` when nothing recognizable is found (hand-rolled deployment)
+ * — the caller then keeps whatever tier was resolved normally.
+ */
+export async function inferInstalledTier(dir: string): Promise<0 | 1 | 2 | 3 | null> {
+  let text: string | null = null;
+  for (const name of COMPOSE_FILENAMES) {
+    try {
+      text = await readFile(join(dir, name), "utf8");
+      break;
+    } catch {
+      // try the next spelling
+    }
+  }
+  if (text !== null) {
+    const services = parseComposeServiceKeys(text);
+    if (services.has("minio")) return 3;
+    if (services.has("redis")) return 2;
+    if (services.has("postgres")) return 1;
+    return null;
+  }
+  try {
+    const env = parseEnvFile(await readFile(join(dir, ".env"), "utf8"));
+    if (env.POSTGRES_PASSWORD === undefined && env.DATABASE_URL === undefined) return 0;
+  } catch {
+    // no readable .env either — nothing to infer
+  }
+  return null;
+}
+
+/**
  * Parse a `.env` file body into a flat dict.
  *
  * Respects the subset of dotenv syntax the CLI itself emits in

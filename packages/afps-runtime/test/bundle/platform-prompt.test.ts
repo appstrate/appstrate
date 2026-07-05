@@ -527,6 +527,47 @@ describe("renderPlatformPrompt", () => {
       expect(sepIdx).toBeGreaterThan(outputIdx);
     });
 
+    it("defaults to the `output` tool mandate when outputMode is omitted", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: schema,
+      });
+      expect(out).toContain("call the `output` tool");
+      expect(out).not.toContain("NO `output` tool");
+    });
+
+    it('outputMode: "tool" renders the terminal `output` tool mandate', () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: schema,
+        outputMode: "tool",
+      });
+      expect(out).toContain("call the `output` tool");
+      expect(out).toContain("exactly once");
+    });
+
+    it('outputMode: "native" instructs a final JSON message and never mandates an `output` tool call', () => {
+      // The claude engine has no `output` tool (deliverable is native via
+      // SDK `outputFormat`); mandating one sends the agent hunting for a
+      // nonexistent tool and the run never completes (issue #824).
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: schema,
+        outputMode: "native",
+      });
+      expect(out).toContain("## Output Format");
+      expect(out).toContain("FINAL message MUST be the run's deliverable");
+      expect(out).toContain("NO `output` tool");
+      expect(out).not.toContain("call the `output` tool");
+      expect(out).not.toContain("output({})");
+      // Schema surfaces stay identical across modes.
+      expect(out).toContain("### Required shape");
+      expect(out).toContain("### Full JSON Schema");
+    });
+
     it("tolerates schemas without `properties` (list section skipped, full schema still shown)", () => {
       const out = renderPlatformPrompt({
         template: "T",

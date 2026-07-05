@@ -18,7 +18,9 @@ import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/u
 import {
   generateBootstrapToken,
   generateEnvForTier,
+  isRemoteAppUrl,
   isValidBootstrapEmail,
+  parseAppUrl,
   renderEnvFile,
   type BootstrapOverrides,
   type RunBackendEnv,
@@ -56,6 +58,7 @@ import { generateRunnerToken } from "../lib/runner/config-files.ts";
 import { RUNNER_DEFAULT_PORT } from "../lib/runner/constants.ts";
 import {
   detectInstallMode,
+  inferInstalledTier,
   mergeEnv,
   backupFiles,
   cleanupBackups,
@@ -87,6 +90,14 @@ export interface InstallOptions {
   port?: string;
   /** Override the host port the MinIO console binds to (Tier 3 only). */
   minioConsolePort?: string;
+  /**
+   * Public URL of the platform (issue #822) — what browsers, OAuth
+   * redirects, and email links use. Independent of `--port` (the host
+   * bind port / reverse-proxy upstream). Origin only, e.g.
+   * `https://appstrate.example.com`. Also honored via
+   * `APPSTRATE_APP_URL`. Defaults to `http://localhost:<port>`.
+   */
+  appUrl?: string;
   /**
    * Bypass the "another stack is already running under this project
    * name" preflight. Escape hatch for edge cases where the operator
@@ -220,11 +231,10 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
 
   try {
     const autoConfirm = opts.autoConfirm === true;
-    const tier = await resolveTier(opts.tier, { autoConfirm });
-    // Fail fast on an EXPLICIT firecracker request on tier 0 — before any
-    // install work starts. Absence of the flag stays silent (tier 0 simply
-    // never offers the backend choice).
-    assertRunAdapterCompatibleWithTier(tier, readRawRunAdapter(opts.runAdapter));
+    // Resolve the directory FIRST: whether this is an upgrade (and which
+    // tier is installed) must be known BEFORE the tier prompt, otherwise the
+    // prompt would solicit a tier choice on upgrades only to discard it in
+    // favor of the inherited one.
     const dir = await resolveDir(opts.dir, { autoConfirm });
     // "Non-interactive" means the caller has opted out of every prompt —
     // either via `--tier` (scripted installs) or `--yes` (curl|bash, CI,
@@ -240,6 +250,43 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     // pass the install mode + parsed env through to the port resolvers
     // so they can skip the preflight on the inherited path.
     const installState = await detectInstallMode(dir);
+
+    // On upgrade, an unexpressed tier inherits the installed stack's tier —
+    // and SKIPS the tier prompt entirely (a prompt whose answer would be
+    // overridden is worse than no prompt). Re-running `appstrate install
+    // --yes` on a Tier 3 deployment must not rewrite the compose file with
+    // the Tier 2 default template — that would drop the MinIO service while
+    // `mergeEnv` keeps the S3 config, leaving every stored object (packages,
+    // uploads, run artifacts) unreachable. Same for a Tier 0 dir silently
+    // converted to Docker/Postgres (PGlite data hidden). Same warn-and-
+    // inherit contract as ports and APP_URL: the documented way to change
+    // tiers on an existing install is an explicit `--tier N`.
+    const installedTier = installState.mode === "upgrade" ? await inferInstalledTier(dir) : null;
+    let tierArg = opts.tier;
+    if (tierArg === undefined && installedTier !== null) {
+      tierArg = String(installedTier);
+      clack.log.info(
+        `Existing Tier ${installedTier} install detected — keeping Tier ${installedTier}. ` +
+          `Switching tiers rewrites docker-compose.yml with a different service set ` +
+          `(and can change the storage backend, hiding existing files), so it requires ` +
+          `an explicit \`--tier N\`.`,
+      );
+    }
+    let tier = await resolveTier(tierArg, { autoConfirm });
+
+    // Defense in depth: reconcile is a no-op when the inheritance above
+    // already applied (installed === resolved) and still guards the
+    // remaining cells of the matrix.
+    if (installState.mode === "upgrade") {
+      const reconciled = reconcileUpgradeTier(tier, tierArg, installedTier);
+      if (reconciled.note) clack.log.info(reconciled.note);
+      tier = reconciled.tier;
+    }
+
+    // Fail fast on an EXPLICIT firecracker request on tier 0 — before any
+    // install work starts. Absence of the flag stays silent (tier 0 simply
+    // never offers the backend choice).
+    assertRunAdapterCompatibleWithTier(tier, readRawRunAdapter(opts.runAdapter));
 
     // For docker tiers, resolve the compose project name BEFORE port
     // resolution so the resolver can cross-check with `docker compose ls`:
@@ -284,8 +331,18 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
       nonInteractive,
     });
 
+    // Public URL (issue #822) — flag/env/prompt, defaults to
+    // http://localhost:<port>. Resolved AFTER the port so the local
+    // default reflects the (possibly auto-picked) final port.
+    const appUrl = await resolveAppUrl(opts.appUrl, port, {
+      tier,
+      mode: installState.mode,
+      existing: installState.existing,
+      nonInteractive,
+    });
+
     if (tier === 0) {
-      await installTier0(dir, port, { autoConfirm, bootstrap });
+      await installTier0(dir, port, appUrl, { autoConfirm, bootstrap });
     } else {
       // Agent execution backend (docker | firecracker) — offered only on
       // Docker tiers. Docker stays the default; firecracker mints a runner
@@ -299,7 +356,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
         appPort: port,
         nonInteractive,
       });
-      await installDockerTier(dir, tier, port, minioConsolePort, {
+      await installDockerTier(dir, tier, port, minioConsolePort, appUrl, {
         force: opts.force ?? false,
         mode: installState.mode,
         existing: installState.existing,
@@ -313,6 +370,46 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
   } catch (err) {
     exitWithError(err);
   }
+}
+
+/**
+ * Reconcile the resolved tier with the tier of an already-installed stack
+ * (upgrade mode only). The primary inheritance now happens BEFORE tier
+ * resolution in `installCommand` (the prompt is skipped and the installed
+ * tier passed through as the tier argument); this pure function remains as
+ * the unit-testable defense-in-depth contract behind it:
+ *
+ *   - explicit tier argument always wins (scripted tier changes stay
+ *     possible; the operator owns the storage migration that comes with
+ *     them);
+ *   - nothing recognizable installed (hand-rolled deploy) or a Tier 0
+ *     resolution → keep the resolved tier;
+ *   - otherwise inherit the installed tier (0-3 — a Tier 0 dir must not be
+ *     silently converted to Docker/Postgres either, that hides all PGlite
+ *     data) and explain why.
+ *
+ * Without this, changing the smart default (Tier 3 → Tier 2, issue #829)
+ * would make every `install --yes` re-run on an existing Tier 3 deployment
+ * silently swap its compose template — and the reverse hazard (a Tier 2
+ * install silently upgraded to the Tier 3 template, flipping storage from
+ * filesystem to S3 and hiding all existing files) predates the default
+ * change. Inheritance closes both directions.
+ */
+export function reconcileUpgradeTier(
+  resolved: Tier,
+  explicitTier: string | undefined,
+  installed: 0 | 1 | 2 | 3 | null,
+): { tier: Tier; note?: string } {
+  if (explicitTier !== undefined) return { tier: resolved };
+  if (installed === null || resolved === 0 || installed === resolved) return { tier: resolved };
+  return {
+    tier: installed,
+    note:
+      `Existing Tier ${installed} install detected — keeping Tier ${installed}. ` +
+      `Switching tiers rewrites docker-compose.yml with a different service set ` +
+      `(and can change the storage backend, hiding existing files), so it requires ` +
+      `an explicit \`--tier ${resolved}\`.`,
+  };
 }
 
 /**
@@ -422,6 +519,92 @@ export async function resolveBootstrapEmail(opts: {
 
 /** Default-shaped `ExistingInstall` used when the resolver is called without upgrade context. */
 const NO_EXISTING_INSTALL: ExistingInstall = { hasEnv: false, hasCompose: false, existingEnv: {} };
+
+/**
+ * Resolve the public app URL for the install (issue #822).
+ *
+ * Order of precedence:
+ *   1. Upgrade with an existing `APP_URL` in `.env` → inherit it.
+ *      `mergeEnv` preserves the existing value anyway (existing wins),
+ *      so honoring a divergent `--app-url` here would print banners
+ *      pointing at a URL the generated `.env` doesn't contain. Same
+ *      warn-and-inherit contract as `resolveAppstratePort`; the
+ *      documented way to change the URL is editing `<dir>/.env`.
+ *   2. `--app-url` flag / `APPSTRATE_APP_URL` env — the scripted and
+ *      `curl | APPSTRATE_APP_URL=… bash` path. Validated strictly
+ *      (throws) so a typo surfaces at install time, not as a broken
+ *      OAuth callback later.
+ *   3. Interactive prompt — Docker tiers only, fresh install. Tier 0
+ *      is local dev where a public URL is meaningless noise. Enter
+ *      keeps the local default (current behavior preserved).
+ *   4. `http://localhost:<port>` — the historical default.
+ */
+export async function resolveAppUrl(
+  raw: string | undefined,
+  port: number,
+  opts: { tier: Tier; mode: InstallMode; existing: ExistingInstall; nonInteractive: boolean },
+): Promise<string> {
+  const envValue = process.env.APPSTRATE_APP_URL?.trim();
+  const expressed = raw ?? (envValue === "" ? undefined : envValue);
+  const requested = expressed === undefined ? undefined : parseAppUrl(expressed);
+
+  if (opts.mode === "upgrade" && opts.existing.hasEnv) {
+    const inherited = opts.existing.existingEnv.APP_URL;
+    if (inherited) {
+      if (requested !== undefined && requested !== inherited) {
+        clack.log.warn(
+          `app URL ${requested} ignored on upgrade — existing .env pins APP_URL=${inherited}, and config is preserved across upgrades (see mergeEnv). Edit <dir>/.env manually (APP_URL + TRUSTED_ORIGINS + TRUST_PROXY) to change the public URL.`,
+        );
+      }
+      return inherited;
+    }
+  }
+
+  if (requested !== undefined) {
+    assertLoopbackPortMatches(requested, port);
+    return requested;
+  }
+
+  const fallback = appUrlForPort(port);
+  // Tier 0 is local dev; non-interactive keeps the zero-prompt contract
+  // of `--yes` / `--tier N` (remote deploys pass --app-url explicitly).
+  if (opts.tier === 0 || opts.nonInteractive) return fallback;
+
+  clack.note(
+    `Remote deployment (behind a reverse proxy)? Enter the public URL users will\nhit, e.g. https://appstrate.example.com — it drives OAuth redirects, CORS\n(TRUSTED_ORIGINS), and email links. The reverse proxy itself (TLS, forwarding\nto localhost:${port}) is not provisioned by the installer.\nPress Enter to keep the local default.`,
+    "Public URL (optional)",
+  );
+  const answer = (await askText("Public URL", fallback)).trim();
+  if (!answer || answer === fallback) return fallback;
+  const chosen = parseAppUrl(answer);
+  assertLoopbackPortMatches(chosen, port);
+  return chosen;
+}
+
+/**
+ * Reject a plain-http loopback app URL whose port disagrees with the
+ * host bind port. Such a URL is accessed directly — on localhost there
+ * is no reverse proxy to bridge the two ports — so every derived
+ * artifact (TRUSTED_ORIGINS/CORS, the /claim banner, email links) would
+ * point at a port nothing listens on, while the install itself looks
+ * green (the healthcheck polls the bind port). Fail fast with the fix.
+ *
+ * https loopback is deliberately allowed: TLS on localhost implies a
+ * local terminating proxy (e.g. Caddy on :8443 forwarding to the bind
+ * port), where diverging ports are the whole point. Exported for tests.
+ */
+export function assertLoopbackPortMatches(appUrl: string, port: number): void {
+  const url = new URL(appUrl);
+  if (url.protocol !== "http:") return;
+  const host = url.hostname;
+  if (host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]") return;
+  const urlPort = url.port === "" ? 80 : Number(url.port);
+  if (urlPort !== port) {
+    throw new Error(
+      `App URL ${appUrl} doesn't match the platform bind port ${port} — a plain-http localhost URL is accessed directly (no reverse proxy), so the ports must agree. Did you mean \`--port ${urlPort}\` (without --app-url)?`,
+    );
+  }
+}
 
 /** DI seam for the cross-check with `docker compose ls` — tests inject a fake, production uses the real helper. */
 export interface PortResolverDeps {
@@ -705,13 +888,17 @@ export interface TierResolverDeps {
  * the "what did I type?" typo recovery. Exported so unit tests can
  * lock down the validation contract without invoking the prompt.
  *
- * Interactive default: Tier 3 (full production stack) when Docker is
- * reachable — the happy path for the one-liner installer is
- * `press Enter → working production-grade Appstrate`. When Docker is
- * missing we silently downgrade the default to Tier 0 and surface a
- * friendly note so the user is not pushed into a tier they cannot
- * actually run; the fatal `DockerMissingError` in `installDockerTier`
- * remains the safety net for the explicit-pick case.
+ * Interactive default: Tier 2 (PostgreSQL + Redis, filesystem storage)
+ * when Docker is reachable — the happy path for the one-liner installer
+ * is `press Enter → working production-grade Appstrate`. Filesystem
+ * storage is the single-node default (issue #829): serving is app-domain
+ * either way, so bundled MinIO adds a container without adding
+ * capability — it stays available as the Tier 3 advanced option (or
+ * bring your own S3 via env on any tier). When Docker is missing we
+ * silently downgrade the default to Tier 0 and surface a friendly note
+ * so the user is not pushed into a tier they cannot actually run; the
+ * fatal `DockerMissingError` in `installDockerTier` remains the safety
+ * net for the explicit-pick case.
  */
 export async function resolveTier(
   raw: string | undefined,
@@ -734,11 +921,11 @@ export async function resolveTier(
   // tier was chosen and how to override it on the next run.
   if (deps.autoConfirm === true) {
     const dockerOk = await probe();
-    const autoTier: Tier = dockerOk ? 3 : 0;
+    const autoTier: Tier = dockerOk ? 2 : 0;
     note(
       dockerOk
-        ? "--yes: Tier 3 selected automatically (Docker detected). Re-run with `--tier N` to override."
-        : "--yes: Tier 0 selected automatically (Docker not detected). Install Docker and re-run with `--tier 3` for the production stack.",
+        ? "--yes: Tier 2 selected automatically (Docker detected). Re-run with `--tier N` to override."
+        : "--yes: Tier 0 selected automatically (Docker not detected). Install Docker and re-run with `--tier 2` for the production stack.",
     );
     return autoTier;
   }
@@ -754,22 +941,25 @@ export async function resolveTier(
       "Cannot prompt for tier: stdin is not a TTY. " +
         "Re-run with `--tier N` (0, 1, 2, or 3), or pass `--yes` to accept the Docker-aware default, " +
         "e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --yes` " +
-        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3`.",
+        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 2`.",
     );
   }
   const dockerOk = await probe();
-  const defaultTier: Tier = dockerOk ? 3 : 0;
+  const defaultTier: Tier = dockerOk ? 2 : 0;
   if (!dockerOk) {
     note(
-      "Docker not detected — Tier 0 selected by default. Install Docker Desktop and re-run for the production stack (Tier 3).",
+      "Docker not detected — Tier 0 selected by default. Install Docker Desktop and re-run for the production stack (Tier 2).",
     );
   }
   const chosen = await select<Tier>({
     message: "Which tier do you want to install?",
     initialValue: defaultTier,
     options: [
-      { value: 3, label: "Tier 3 — Production (PostgreSQL + Redis + MinIO) — recommended" },
-      { value: 2, label: "Tier 2 — Standard (PostgreSQL + Redis, no object storage)" },
+      { value: 3, label: "Tier 3 — Advanced (PostgreSQL + Redis + bundled MinIO object storage)" },
+      {
+        value: 2,
+        label: "Tier 2 — Production (PostgreSQL + Redis, filesystem storage) — recommended",
+      },
       { value: 1, label: "Tier 1 — Minimal (PostgreSQL only, dev/testing)" },
       { value: 0, label: "Tier 0 — Hobby (no Docker, evaluation only)" },
     ],
@@ -807,7 +997,7 @@ export async function resolveDir(
       "Cannot prompt for install directory: stdin is not a TTY. " +
         "Re-run with `--dir <path>` or `--yes` to accept ~/appstrate, " +
         "e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --yes` " +
-        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 --dir ~/appstrate`.",
+        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 2 --dir ~/appstrate`.",
     );
   }
   const chosen = raw ?? (await askText("Install directory", defaultInstallDir()));
@@ -1253,9 +1443,13 @@ export async function runSameHostRunnerInstall(
 async function installTier0(
   dir: string,
   port: number,
+  appUrl: string,
   opts: { autoConfirm: boolean; bootstrap: BootstrapOverrides },
 ): Promise<void> {
-  const appUrl = appUrlForPort(port);
+  // The public URL may sit behind a not-yet-configured reverse proxy;
+  // everything that must reach the platform NOW (dev-server readiness
+  // poll, browser open) goes through the local bind address instead.
+  const localUrl = appUrlForPort(port);
   // Bun — either already present, or install it via the upstream script.
   // We only care whether a working Bun is reachable; the actual path
   // resolution happens inside `runBunInstall` / `spawnDevServer` via
@@ -1319,10 +1513,10 @@ async function installTier0(
 
   const devSpinner = spinner();
   devSpinner.start("Starting dev server");
-  const { pid } = await spawnDevServer(dir, appUrl);
+  const { pid } = await spawnDevServer(dir, localUrl);
   devSpinner.stop(`Dev server running (pid ${pid})`);
 
-  await openBrowser(appUrl);
+  await openBrowser(localUrl);
   printBootstrapFollowup(appUrl, opts.bootstrap);
   outro(`Appstrate is running at ${appUrl} (pid ${pid}).\nKill it with \`kill ${pid}\` when done.`);
 }
@@ -1395,6 +1589,7 @@ async function installDockerTier(
   tier: 1 | 2 | 3,
   port: number,
   minioConsolePort: number | undefined,
+  appUrl: string,
   opts: {
     force: boolean;
     mode: InstallMode;
@@ -1406,7 +1601,6 @@ async function installDockerTier(
     runBackend: RunBackendConfig;
   },
 ): Promise<void> {
-  const appUrl = appUrlForPort(port);
   const runBackend = opts.runBackend;
   // Firecracker `.env` keys (RUN_ADAPTER/MODULES/FIRECRACKER_RUNNER_*). On
   // upgrade these flow through `mergeEnv` like every other secret (existing
@@ -1415,6 +1609,10 @@ async function installDockerTier(
     runBackend.adapter === "firecracker"
       ? { adapter: "firecracker", runnerUrl: runBackend.runnerUrl, runnerToken: runBackend.token }
       : { adapter: "docker" };
+  // Healthcheck + browser go through the local bind address: on a
+  // remote deployment the public URL only resolves once the operator's
+  // reverse proxy is configured, which happens AFTER the install.
+  const localUrl = appUrlForPort(port);
   // Docker.
   const dockerSpinner = spinner();
   dockerSpinner.start("Checking Docker");
@@ -1525,7 +1723,7 @@ async function installDockerTier(
       // Healthcheck.
       const healthSpinner = spinner();
       healthSpinner.start("Waiting for Appstrate to become healthy");
-      await waitForAppstrate(appUrl);
+      await waitForAppstrate(localUrl);
       healthSpinner.stop("Appstrate is healthy");
 
       // Persist the project-name binding on success. Written AFTER the
@@ -1563,7 +1761,18 @@ async function installDockerTier(
     );
   }
 
-  await openBrowser(appUrl);
+  await openBrowser(localUrl);
+  // Remote deployment: the installer wired APP_URL / TRUSTED_ORIGINS /
+  // TRUST_PROXY, but provisioning the reverse proxy (TLS, forwarding
+  // the public domain to the host port) is the operator's job — say so
+  // explicitly instead of letting a dead public URL look like a failed
+  // install.
+  if (isRemoteAppUrl(appUrl)) {
+    clack.note(
+      `The platform listens on ${localUrl} (host port ${port}).\nPoint your reverse proxy (Caddy, nginx, Traefik) at it so that\n${appUrl} → ${localUrl}. TLS termination happens at the proxy;\nTRUST_PROXY=true is already set in .env. Until the proxy is up,\nthe platform is reachable at ${localUrl} only.`,
+      "Reverse proxy required",
+    );
+  }
   printBootstrapFollowup(appUrl, opts.bootstrap);
   // The lifecycle commands (#343) read `<dir>/.appstrate/project.json`
   // to find the right `--project-name`, so the user never has to type
