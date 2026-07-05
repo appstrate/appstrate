@@ -61,9 +61,16 @@ export class LlmProxyModelApiMismatchError extends Error {
     public readonly presetId: string,
     public readonly expected: string,
     public readonly actual: string,
+    aliased = false,
   ) {
     super(
-      `Model "${presetId}" uses "${actual}"; this endpoint serves "${expected}". Use the corresponding /api/llm-proxy/<api>/… route.`,
+      // For an alias the backing apiShape is masked on the public DTO
+      // (`projectAliasedModel` nulls it), so naming `actual` here would leak
+      // the backing protocol family to the caller. `actual` stays a property
+      // for server-side logging; only non-aliased presets get the detail.
+      aliased
+        ? `Model "${presetId}" is not served by this endpoint.`
+        : `Model "${presetId}" uses "${actual}"; this endpoint serves "${expected}". Use the corresponding /api/llm-proxy/<api>/… route.`,
     );
     this.name = "LlmProxyModelApiMismatchError";
   }
@@ -79,9 +86,12 @@ export class LlmProxyModelApiMismatchError extends Error {
  * here — this gateway never forges).
  */
 export class LlmProxyUnsupportedSubscriptionError extends Error {
+  // `providerId` stays a public property for server-side logging, but the
+  // message must not name it — the backing provider of an aliased model is
+  // never caller-facing (alias masking).
   constructor(public readonly providerId: string) {
     super(
-      `Provider "${providerId}" is an OAuth subscription and cannot be served through ` +
+      `This model is backed by an OAuth subscription and cannot be served through ` +
         `this gateway (no fingerprint forging). Subscription chat is only available when ` +
         `the provider's subscription engine has a dedicated official-binary SDK gateway; ` +
         `this credential's engine has none. Use an API-key model instead.`,
@@ -160,7 +170,9 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // documented fail-closed consumer of `@appstrate/core/ssrf`.
   if (isBlockedUrl(upstreamUrl)) {
     logger.error("llm-proxy: refused blocked upstream (SSRF)", { presetId, upstreamUrl });
-    throw invalidRequest(`Refusing to proxy to a blocked address: ${resolved.baseUrl}`);
+    // The resolved base URL is the real backing endpoint — server-log-only
+    // (logged above); the caller-facing message must not embed it.
+    throw invalidRequest(`Model "${presetId}" resolves to a blocked address — refusing to proxy.`);
   }
 
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
@@ -221,7 +233,7 @@ async function resolvePresetForOrg(
     throw new LlmProxyUnsupportedModelError(presetId);
   }
   if (loaded.apiShape !== expectedApi) {
-    throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape);
+    throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape, loaded.aliased);
   }
   return loaded;
 }

@@ -624,7 +624,12 @@ export async function listOrgModelProviderCredentials(
       const aliasOnly = aliasOnlySystemCredentials.has(id);
       return {
         id,
-        label: def.label ?? provider?.displayName ?? def.providerId,
+        // An alias-only credential must not fall back to the provider's
+        // display name / provider id — that would name the very backing this
+        // block hides (apiShape/baseUrl are nulled below for the same reason).
+        // Use a neutral fallback instead.
+        label:
+          def.label ?? (aliasOnly ? "System models" : (provider?.displayName ?? def.providerId)),
         apiShape: aliasOnly ? null : def.apiShape,
         baseUrl: aliasOnly ? null : def.baseUrl,
         source: "built-in",
