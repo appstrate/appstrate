@@ -377,5 +377,24 @@ install dir itself, so use it only when you intend a full wipe.
 - Place a reverse proxy (nginx, Caddy, Traefik) in front of Appstrate for TLS termination
 - Set `APP_URL` to your public HTTPS URL
 - Set `TRUSTED_ORIGINS` to your public domain
+- Set `TRUST_PROXY=true` so client IPs and forwarded-proto are read from `X-Forwarded-*`
+
+The `appstrate install` CLI wires all three for you when you pass the public URL
+(`--app-url https://appstrate.example.com`, or `APPSTRATE_APP_URL` for the
+`curl | bash` one-liner). The public URL is independent of `--port`: `--port`
+stays the host bind port your reverse proxy forwards to, while `--app-url` is
+what browsers, OAuth redirects, and email links use (no port when TLS is
+terminated at the proxy). The installer does **not** provision the reverse
+proxy or TLS itself -- forwarding `appstrate.example.com -> localhost:<port>`
+is your responsibility. Minimal Caddy example:
+
+```
+appstrate.example.com {
+    reverse_proxy localhost:3000
+}
+```
+
+Other production notes:
+
 - Use strong, unique secrets for all `*_SECRET` and `*_PASSWORD` variables
 - Consider backing up the `pgdata` volume regularly

@@ -29,9 +29,13 @@ import {
   resolveAppstratePort,
   resolveMinioConsolePort,
   resolveBootstrapEmail,
+  resolveAppUrl,
   printBootstrapFollowup,
 } from "../src/commands/install.ts";
 import type { RunningComposeProject } from "../src/lib/install/tier123.ts";
+
+/** Fresh-install shape reused by the resolveAppUrl suite. */
+const NO_EXISTING = { hasEnv: false, hasCompose: false, existingEnv: {} };
 
 describe("resolveTier", () => {
   it("accepts '0', '1', '2', '3' as literal strings", async () => {
@@ -1248,5 +1252,111 @@ describe("printBootstrapFollowup (issue #228) — post-install action", () => {
     );
     expect(cap.calls[0]!.message).toContain("http://appstrate.acme.com/register");
     expect(cap.calls[0]!.message).not.toContain("localhost");
+  });
+});
+
+describe("resolveAppUrl (issue #822) — non-interactive paths", () => {
+  const SNAPSHOT = { APPSTRATE_APP_URL: process.env.APPSTRATE_APP_URL };
+  afterEach(() => {
+    if (SNAPSHOT.APPSTRATE_APP_URL === undefined) delete process.env.APPSTRATE_APP_URL;
+    else process.env.APPSTRATE_APP_URL = SNAPSHOT.APPSTRATE_APP_URL;
+  });
+
+  const FRESH = { mode: "fresh" as const, existing: NO_EXISTING, nonInteractive: true };
+
+  it("defaults to http://localhost:<port> when nothing is expressed", async () => {
+    expect(await resolveAppUrl(undefined, 3000, { tier: 3, ...FRESH })).toBe(
+      "http://localhost:3000",
+    );
+    expect(await resolveAppUrl(undefined, 8080, { tier: 3, ...FRESH })).toBe(
+      "http://localhost:8080",
+    );
+  });
+
+  it("elides the port when the platform binds :80 (matches appUrlForPort)", async () => {
+    expect(await resolveAppUrl(undefined, 80, { tier: 3, ...FRESH })).toBe("http://localhost");
+  });
+
+  it("honors the --app-url flag on a fresh install (normalized)", async () => {
+    expect(await resolveAppUrl("https://appstrate.example.com/", 3000, { tier: 3, ...FRESH })).toBe(
+      "https://appstrate.example.com",
+    );
+  });
+
+  it("honors APPSTRATE_APP_URL (curl|bash path), flag wins over env", async () => {
+    process.env.APPSTRATE_APP_URL = "https://env.example.com";
+    expect(await resolveAppUrl(undefined, 3000, { tier: 3, ...FRESH })).toBe(
+      "https://env.example.com",
+    );
+    expect(await resolveAppUrl("https://flag.example.com", 3000, { tier: 3, ...FRESH })).toBe(
+      "https://flag.example.com",
+    );
+  });
+
+  it("an empty APPSTRATE_APP_URL is treated as unset", async () => {
+    process.env.APPSTRATE_APP_URL = "   ";
+    expect(await resolveAppUrl(undefined, 3000, { tier: 3, ...FRESH })).toBe(
+      "http://localhost:3000",
+    );
+  });
+
+  it("applies the flag on Tier 0 too (no prompt, but scripted override works)", async () => {
+    expect(await resolveAppUrl("https://appstrate.example.com", 3000, { tier: 0, ...FRESH })).toBe(
+      "https://appstrate.example.com",
+    );
+  });
+
+  it("throws on an invalid --app-url (fail-fast at install time)", async () => {
+    await expect(resolveAppUrl("not a url", 3000, { tier: 3, ...FRESH })).rejects.toThrow(
+      /Expected an absolute URL/,
+    );
+    await expect(
+      resolveAppUrl("https://example.com/sub/path", 3000, { tier: 3, ...FRESH }),
+    ).rejects.toThrow(/origin only/);
+  });
+
+  it("upgrade inherits the existing APP_URL from .env (mergeEnv — existing wins)", async () => {
+    const existing = {
+      hasEnv: true,
+      hasCompose: true,
+      existingEnv: { APP_URL: "https://old.example.com" },
+    };
+    expect(
+      await resolveAppUrl(undefined, 3000, {
+        tier: 3,
+        mode: "upgrade",
+        existing,
+        nonInteractive: true,
+      }),
+    ).toBe("https://old.example.com");
+    // A divergent flag is warned about + ignored — same contract as --port.
+    expect(
+      await resolveAppUrl("https://new.example.com", 3000, {
+        tier: 3,
+        mode: "upgrade",
+        existing,
+        nonInteractive: true,
+      }),
+    ).toBe("https://old.example.com");
+  });
+
+  it("upgrade without APP_URL in the existing .env falls through to flag/default", async () => {
+    const existing = { hasEnv: true, hasCompose: true, existingEnv: {} };
+    expect(
+      await resolveAppUrl("https://new.example.com", 3000, {
+        tier: 3,
+        mode: "upgrade",
+        existing,
+        nonInteractive: true,
+      }),
+    ).toBe("https://new.example.com");
+    expect(
+      await resolveAppUrl(undefined, 3000, {
+        tier: 3,
+        mode: "upgrade",
+        existing,
+        nonInteractive: true,
+      }),
+    ).toBe("http://localhost:3000");
   });
 });
