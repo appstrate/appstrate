@@ -201,6 +201,14 @@ jobs:
           # The jailer ships in the SAME verified tarball — the smoke boots
           # jailed VMMs (FIRECRACKER_JAILER=on is the orchestrator default).
           sudo install -m 0755 "/tmp/release-${FC_VERSION}-${ARCH}/jailer-${FC_VERSION}-${ARCH}" /usr/local/bin/jailer
+          # GitHub runner images ship /usr/local/bin group/world-writable
+          # (mode 777) — the jailer input trust-chain check (initializeJailer
+          # → assertTrustedPathChain) rightly refuses a writable component on
+          # the FIRECRACKER_BIN path, exactly as it would on a misconfigured
+          # production host. Tighten to the standard root-owned 0755; nothing
+          # in the remaining steps writes there.
+          sudo chown root:root /usr/local/bin
+          sudo chmod 0755 /usr/local/bin
           firecracker --version
           jailer --version
 
