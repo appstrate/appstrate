@@ -31,7 +31,15 @@ fi
 echo "==> Unit tests (firecracker helpers)"
 TEST_TIER=0 bun test apps/api/src/modules/firecracker/test/unit
 
-echo "==> End-to-end smoke (real microVM)"
-bun run apps/api/src/modules/firecracker/scripts/dev/smoke.ts
+echo "==> End-to-end smoke (real microVM, jailed VMM)"
+# Root: the orchestrator's default FIRECRACKER_JAILER=on chroots each VMM
+# and drops it to a per-VM uid — same posture as the production daemon
+# (systemd User=root). `-E` + explicit PATH keep the FIRECRACKER_* env
+# and the caller's bun/jailer resolution across the sudo boundary.
+if [ "$(id -u)" = "0" ]; then
+  bun run apps/api/src/modules/firecracker/scripts/dev/smoke.ts
+else
+  sudo -E env "PATH=$PATH" bun run apps/api/src/modules/firecracker/scripts/dev/smoke.ts
+fi
 
 echo "ALL FIRECRACKER CHECKS PASSED"

@@ -185,9 +185,11 @@ async function allowForwardInIptables(exec: HostExec): Promise<void> {
       // Still best-effort, but never silent: on a dockerd host (FORWARD
       // policy DROP — the exact pipeline this function coexists with) a
       // failed insert means guest egress is fully broken, and the only
-      // symptom would be opaque in-run network timeouts. The likeliest
-      // cause is a sudoers grant that covers ip/nft/sysctl but not
-      // iptables (see FIRECRACKER.md "Requirements & privileges").
+      // symptom would be opaque in-run network timeouts. Production runs
+      // the daemon as root (systemd unit) so this only fails on odd
+      // hosts; in unprivileged dev the `sudo -n` fallback needs a
+      // sudoers grant covering iptables too, not just ip/nft/sysctl
+      // (see FIRECRACKER.md "Requirements & privileges").
       await exec.run(["iptables", "-I", "FORWARD", ...rule]).catch((err) => {
         logger.warn(
           "Could not insert the iptables FORWARD accept for TAP traffic — " +
@@ -233,10 +235,24 @@ export async function teardownHostNetwork(exec: HostExec): Promise<void> {
  * loopback alias). Effective rp_filter is max(conf.all, conf.<iface>), so
  * the per-interface strict setting holds regardless of the host default.
  */
-export async function createTap(exec: HostExec, subnet: RunSubnet): Promise<void> {
+export async function createTap(
+  exec: HostExec,
+  subnet: RunSubnet,
+  opts: {
+    /**
+     * Jailer mode: create the TAP owned by the run's jail uid.
+     * TUNSETIFF on an existing device needs CAP_NET_ADMIN unless the
+     * caller matches the device owner — the jailed VMM (unprivileged
+     * per-VM uid, no capabilities) can only attach to a TAP born as its
+     * own. Absent (jailer off) the device stays root-owned as before.
+     */
+    ownerUid?: number;
+  } = {},
+): Promise<void> {
+  const owner = opts.ownerUid !== undefined ? ` user ${opts.ownerUid}` : "";
   const batch =
     [
-      `tuntap add dev ${subnet.tapDevice} mode tap`,
+      `tuntap add dev ${subnet.tapDevice} mode tap${owner}`,
       `addr add ${subnet.hostIp}/30 dev ${subnet.tapDevice}`,
       `link set dev ${subnet.tapDevice} up`,
     ].join("\n") + "\n";

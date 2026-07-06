@@ -243,7 +243,7 @@ async function downloadAndInstallBinaries(
   daemonSpin.stop(`Installed daemon → ${RUNNER_BIN_PATH}`);
 
   const fcSpin = clack.spinner();
-  fcSpin.start(`Downloading firecracker v${FIRECRACKER_VERSION} (${arch})`);
+  fcSpin.start(`Downloading firecracker + jailer v${FIRECRACKER_VERSION} (${arch})`);
   await installFirecracker({
     http: d.http,
     exec: d.exec,
@@ -251,8 +251,11 @@ async function downloadAndInstallBinaries(
     version: FIRECRACKER_VERSION,
     arch,
     destPath: paths.firecrackerBin,
+    // Same verified tarball — the daemon requires firecracker + jailer
+    // to come from one release (FIRECRACKER_JAILER=on confinement).
+    jailerDestPath: paths.jailerBin,
   });
-  fcSpin.stop(`Installed firecracker → ${paths.firecrackerBin}`);
+  fcSpin.stop(`Installed firecracker → ${paths.firecrackerBin} (+ jailer → ${paths.jailerBin})`);
 }
 
 async function writeHostFiles(config: RunnerConfig, d: ResolvedDeps): Promise<void> {
@@ -431,6 +434,8 @@ export interface RunnerDoctorReport {
     error?: string;
   };
   artifacts: { version?: string; guestProtocol?: number };
+  /** Jailer binary presence (FIRECRACKER_JAILER=on needs it at boot). */
+  jailer: { installed: boolean; path: string };
   ok: boolean;
 }
 
@@ -488,8 +493,13 @@ export async function runnerDoctor(opts: RunnerDoctorOptions = {}): Promise<Runn
     }
   }
 
+  // Jailer presence — informational (the daemon itself refuses to boot
+  // without it when FIRECRACKER_JAILER=on, which the health line shows).
+  const jailerPath = runnerDataPaths(dataDir).jailerBin;
+  const jailer = { installed: await d.fs.exists(jailerPath), path: jailerPath };
+
   const ok = preflight.ok && service.active && health.reachable && health.status === 200;
-  return { preflight, service, health, artifacts, ok };
+  return { preflight, service, health, artifacts, jailer, ok };
 }
 
 export async function runnerDoctorCommand(opts: RunnerDoctorOptions = {}): Promise<void> {
@@ -515,8 +525,15 @@ export async function runnerDoctorCommand(opts: RunnerDoctorOptions = {}): Promi
   const artLine = report.artifacts.version
     ? `✓ guest artifacts: ${report.artifacts.version} (protocol ${report.artifacts.guestProtocol ?? "?"})`
     : "• guest artifacts: not yet installed (daemon downloads them on first boot)";
+  const jailerLine = report.jailer.installed
+    ? `✓ jailer: ${report.jailer.path}`
+    : `✗ jailer: missing at ${report.jailer.path} — the daemon refuses to boot with ` +
+      `FIRECRACKER_JAILER=on (the default); re-run \`appstrate runner install\` to fetch it`;
 
-  clack.note([...pfLines, "", svcLine, healthLine, artLine].join("\n"), "Runner diagnostics");
+  clack.note(
+    [...pfLines, "", svcLine, healthLine, artLine, jailerLine].join("\n"),
+    "Runner diagnostics",
+  );
   if (report.ok) {
     outro("Runner is healthy.");
   } else {

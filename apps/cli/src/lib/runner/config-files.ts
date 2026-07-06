@@ -65,6 +65,7 @@ export function renderRunnerEnvFile(config: RunnerConfig): string {
     "# --- Engine host config (runner/host-env.ts) — absolute paths so the",
     "#     compiled daemon does not depend on its launch working directory. ---",
     `FIRECRACKER_BIN=${paths.firecrackerBin}`,
+    `FIRECRACKER_JAILER_BIN=${paths.jailerBin}`,
     `FIRECRACKER_KERNEL_PATH=${paths.kernelPath}`,
     `FIRECRACKER_ROOTFS_PATH=${paths.rootfsPath}`,
     `FIRECRACKER_DATA_DIR=${paths.runsDir}`,
@@ -94,6 +95,14 @@ export function parseRunnerEnvFile(text: string): Record<string, string> {
 
 /**
  * Render the hardened systemd unit.
+ *
+ * Privilege model: the unit runs as root because the DAEMON needs it —
+ * jailer chroot/uid-drop, TAP creation, nftables, sysctl, /dev/kvm. The
+ * VMMs themselves do NOT run as root: with FIRECRACKER_JAILER=on (the
+ * default) each firecracker process is chrooted and dropped to an
+ * unprivileged per-VM uid (FIRECRACKER_JAIL_UID_BASE + subnet index)
+ * with cgroup bounds, so a VMM escape lands on a uid that owns nothing
+ * but its own jail.
  *
  * Hardening is deliberately CONSERVATIVE: the daemon is a privileged
  * process by necessity (it opens /dev/kvm, creates TAP devices, writes
@@ -151,6 +160,10 @@ export function renderRunnerUnit(config: RunnerConfig): string {
     "RestartSec=2",
     "TimeoutStopSec=30",
     "LimitNOFILE=65536",
+    // cgroup-v2 delegation: the jailer creates one slice per VM under
+    // /sys/fs/cgroup/appstrate-fc/<jailId> (memory.max / pids.max) —
+    // without Delegate systemd may fight the daemon over that subtree.
+    "Delegate=yes",
     "",
     "# --- Hardening (see renderRunnerUnit doc-comment for why the aggressive",
     "#     device/network knobs are intentionally omitted) ---",

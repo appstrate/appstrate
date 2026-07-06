@@ -24,6 +24,37 @@ const firecrackerEnvSchema = z.object({
   FIRECRACKER_KERNEL_PATH: z.string().default("./data/firecracker/vmlinux"),
   FIRECRACKER_ROOTFS_PATH: z.string().default("./data/firecracker/rootfs.ext4"),
   FIRECRACKER_DATA_DIR: z.string().default("./data/firecracker/runs"),
+  // Per-VM confinement via the upstream `jailer` (chroot + per-VM uid +
+  // cgroup bounds). Default ON — production posture. "off" is the dev
+  // escape hatch (unprivileged host, no root): the VMM then runs
+  // unjailed under the daemon's own uid, loudly warned at initialize().
+  // "on" requires the daemon to run as root (the systemd unit does).
+  FIRECRACKER_JAILER: z.enum(["on", "off"]).default("on"),
+  // The jailer binary — ships in the SAME upstream release tarball as
+  // `firecracker` and must come from the same release. The installer
+  // places it at <dataDir>/bin/jailer (on the unit's PATH).
+  FIRECRACKER_JAILER_BIN: z.string().default("jailer"),
+  // Base of the per-VM uid/gid range: VM with subnet index N runs as
+  // uid/gid BASE+N. The range BASE..BASE+FIRECRACKER_MAX_CONCURRENT_VMS
+  // (worst case BASE+16319, the allocator ceiling) must be unallocated
+  // on the host — no /etc/passwd entries are needed or created.
+  FIRECRACKER_JAIL_UID_BASE: z.coerce.number().int().min(1000).default(64000),
+  // cgroup-v2 bounds (memory.max / pids.max under the appstrate-fc
+  // slice) passed to the jailer. The jailer fails HARD when it cannot
+  // write the cgroup files — "off" lets hosts without cgroup-v2
+  // delegation keep the jail while dropping the resource bounds.
+  FIRECRACKER_JAIL_CGROUPS: z.enum(["on", "off"]).default("on"),
+  // How the run's raw credentials reach the guest. "mmds" (default,
+  // production posture) keeps the secret keys OUT of the config drive:
+  // they stay in daemon memory and are served, per-run, through
+  // Firecracker's in-memory MMDS data store (PUT /mmds over the VMM API
+  // socket) — the guest supervisor (root) fetches them at boot over the
+  // link-local 169.254.169.254 interface and injects them in-process,
+  // then the guest firewall clamps MMDS shut for every uid. "config-drive"
+  // is the pre-MMDS behavior (all credentials materialised onto the
+  // read-only ext4 config drive) — an escape hatch for bisecting a boot
+  // regression or developing without the broker.
+  FIRECRACKER_CREDENTIAL_BROKER: z.enum(["mmds", "config-drive"]).default("mmds"),
   // Prebuilt guest-artifact resolution (issue #819, phase 2). At boot the
   // daemon downloads versioned, checksum-verified vmlinux + rootfs from
   // GitHub Release assets instead of requiring an on-host docker build.

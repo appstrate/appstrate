@@ -21,6 +21,7 @@ Restart=always
 RestartSec=2
 TimeoutStopSec=30
 LimitNOFILE=65536
+Delegate=yes
 
 # --- Hardening (see renderRunnerUnit doc-comment for why the aggressive
 #     device/network knobs are intentionally omitted) ---

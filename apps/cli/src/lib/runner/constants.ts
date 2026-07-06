@@ -101,6 +101,7 @@ export function runnerDataPaths(dataDir: string): {
   rootfsPath: string;
   runsDir: string;
   firecrackerBin: string;
+  jailerBin: string;
   binDir: string;
   artifactsMarker: string;
 } {
@@ -110,6 +111,10 @@ export function runnerDataPaths(dataDir: string): {
     runsDir: `${dataDir}/runs`,
     binDir: `${dataDir}/bin`,
     firecrackerBin: `${dataDir}/bin/firecracker`,
+    // From the SAME verified upstream tarball as the VMM — the daemon
+    // requires both binaries to come from one release (FIRECRACKER_JAILER=on
+    // confinement, the production default).
+    jailerBin: `${dataDir}/bin/jailer`,
     // Written by runner/artifacts.ts next to the rootfs (VERSION_MARKER_NAME).
     artifactsMarker: `${dataDir}/.firecracker-artifacts.json`,
   };

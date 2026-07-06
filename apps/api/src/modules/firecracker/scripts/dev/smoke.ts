@@ -16,6 +16,11 @@
  * (`exit 42` → waitForExit 42) — without it, a supervisor hardcoding 0
  * would pass CI.
  *
+ * With FIRECRACKER_JAILER=on (the default) the smoke also asserts the
+ * jail: the live VMM runs as its reserved per-VM uid, the chroot holds
+ * ONLY the expected entries, and the jail tree dies with the teardown.
+ * Requires root in that mode (vm-smoke.sh sudo-wraps this script).
+ *
  * Run inside the Lima dev VM / a Linux KVM host via
  * `bun run test:firecracker` (apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh).
  */
@@ -31,12 +36,105 @@ process.env.FIRECRACKER_DATA_DIR ??= "./data/firecracker/runs";
 
 const { FirecrackerOrchestrator } = await import("../../orchestrator.ts");
 const { platformAliasIp } = await import("../../subnet.ts");
+const { readdir, stat } = await import("node:fs/promises");
+const { dirname, join } = await import("node:path");
 
 const RUN_ID = `smoke_${process.pid}`;
+/** Jailer confinement is the orchestrator default — assert it end-to-end. */
+const JAILER_ON = (process.env.FIRECRACKER_JAILER ?? "on") === "on";
+/** Credential broker — MMDS is the orchestrator default. */
+const BROKER = process.env.FIRECRACKER_CREDENTIAL_BROKER ?? "mmds";
+/**
+ * Distinctive fake run token pushed through the sidecar env. In MMDS mode
+ * it must be brokered in-memory (NOT written to the config drive) — the
+ * drive-inspection assertion below greps the staged ext4 image for it.
+ */
+const FAKE_RUN_TOKEN = "smoke-fake-secret-DEADBEEFCAFE";
 
 function fail(msg: string): never {
   console.error(`SMOKE FAIL: ${msg}`);
   process.exit(1);
+}
+
+/**
+ * Jail assertions while the VMM is ALIVE: (a) the VMM process runs as
+ * the run's reserved jail uid (root would mean the privilege drop
+ * silently failed), (b) the chroot contains ONLY the expected entries —
+ * anything else means files are leaking into the jail. Returns the jail
+ * dir so the post-teardown check can assert it is gone.
+ */
+async function assertJailedVmm(runDir: string): Promise<string> {
+  const state = JSON.parse(await Bun.file(join(runDir, "state.json")).text()) as {
+    pid?: number;
+    jailUid?: number;
+    chrootPath?: string;
+  };
+  if (!state.pid || !state.jailUid || !state.chrootPath) {
+    fail(`state.json is missing the jail fields: ${JSON.stringify(state)}`);
+  }
+  // Poll: the spawn handle exists from t0 but the jailer only drops to
+  // the jail uid after its chroot/cgroup setup (a few ms) — a single
+  // immediate read could race and observe the still-root setup phase.
+  const readUid = async (): Promise<number> => {
+    const status = await Bun.file(`/proc/${state.pid}/status`)
+      .text()
+      .catch(() => "");
+    return Number(/^Uid:\s+(\d+)/m.exec(status)?.[1] ?? -1);
+  };
+  let uid = await readUid();
+  for (let i = 0; i < 50 && uid !== state.jailUid; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    uid = await readUid();
+  }
+  if (uid !== state.jailUid) {
+    fail(`VMM pid ${state.pid} runs as uid ${uid}, expected jail uid ${state.jailUid}`);
+  }
+  console.log(`    jailed VMM ok: pid ${state.pid} uid ${uid}`);
+
+  // `firecracker` = the exec copy the jailer makes; `dev` + `run` are the
+  // jailer-created device/socket dirs; the other four are ours.
+  const allowed = new Set([
+    "firecracker",
+    "vmlinux",
+    "rootfs.ext4",
+    "config.img",
+    "vmconfig.json",
+    "dev",
+    "run",
+  ]);
+  const entries = await readdir(state.chrootPath);
+  const unexpected = entries.filter((e) => !allowed.has(e));
+  if (unexpected.length > 0) {
+    fail(`unexpected entries in the chroot: ${unexpected.join(", ")}`);
+  }
+  for (const required of ["vmlinux", "rootfs.ext4", "config.img", "vmconfig.json"]) {
+    if (!entries.includes(required)) fail(`chroot is missing ${required}`);
+  }
+  console.log(`    chroot contents ok: ${entries.sort().join(", ")}`);
+  return dirname(state.chrootPath);
+}
+
+/**
+ * Credential broker (MMDS): read the staged read-only ext4 config drive
+ * back with debugfs and assert the fake run token is ABSENT — proof the
+ * secret keys were stripped off the drive and delivered via MMDS instead.
+ * `imagePath` is `<chroot>/config.img` (jailer) or `<runDir>/config.img`
+ * (direct). Runs as root (the image is 0400, owned by the jail uid).
+ */
+async function assertConfigDriveOmitsSecret(imagePath: string, secret: string): Promise<void> {
+  const proc = Bun.spawn(["debugfs", "-R", "cat /config.json", imagePath], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const text = await new Response(proc.stdout).text();
+  await proc.exited;
+  if (text.length === 0) {
+    fail(`could not read config.json from ${imagePath} to verify secret redaction`);
+  }
+  if (text.includes(secret)) {
+    fail("config drive still contains the run token — MMDS credential split not applied");
+  }
+  console.log("    config drive omits the MMDS-brokered secret ok");
 }
 
 /**
@@ -77,6 +175,10 @@ const PROBE_SCRIPT = [
   // the umount — a readable node would leak the whole launch spec
   // (credentials + exit nonce) to any workload uid.
   'if dd if=/dev/vdb of=/dev/null count=1 2>/dev/null; then echo "smoke-vdb=readable"; else echo "smoke-vdb=blocked"; fi',
+  // Credential broker: after the supervisor fetched the secrets, the guest
+  // firewall drops all access to the MMDS metadata address for EVERY uid.
+  // A workload reaching it would be a credential-store leak.
+  `if wget -q -T 3 -O /dev/null http://169.254.169.254/latest/meta-data/ 2>/dev/null; then echo "smoke-mmds=reachable"; else echo "smoke-mmds=blocked"; fi`,
   // In-guest sidecar liveness: /health must answer 200 (wget fails on
   // 503). The sidecar cold-starts in parallel with the agent, so retry
   // for up to 30s — a sidecar that crashed at ms 1 never answers.
@@ -116,9 +218,12 @@ console.log("==> boundary");
 const boundary = await orch.createIsolationBoundary(RUN_ID);
 console.log(`    tap+subnet ok, endpoints: ${boundary.sidecarEndpoints.sidecarUrl}`);
 
+/** Set while VM1 runs (jailer mode) — asserted gone after teardown. */
+let vm1JailDir: string | null = null;
+
 try {
   console.log("==> workloads");
-  const sidecar = await orch.createSidecar(RUN_ID, boundary, { runToken: "smoke-token" });
+  const sidecar = await orch.createSidecar(RUN_ID, boundary, { runToken: FAKE_RUN_TOKEN });
   const agent = await orch.createWorkload(
     {
       runId: RUN_ID,
@@ -133,6 +238,24 @@ try {
   console.log("==> boot microVM");
   const bootStart = Date.now();
   await orch.startWorkload(agent);
+
+  // Jail identity + chroot hygiene, checked while the VMM is alive (the
+  // probe script keeps the guest up long enough).
+  if (JAILER_ON) vm1JailDir = await assertJailedVmm(boundary.id);
+
+  // Credential broker: the config drive must NOT carry the fake run token in
+  // MMDS mode (it is delivered in-memory). config.img is inside the chroot
+  // when jailed, else in the run dir. Read it back while the VM is alive.
+  if (BROKER === "mmds") {
+    const state = JSON.parse(await Bun.file(join(boundary.id, "state.json")).text()) as {
+      chrootPath?: string;
+    };
+    const imagePath =
+      JAILER_ON && state.chrootPath
+        ? join(state.chrootPath, "config.img")
+        : join(boundary.id, "config.img");
+    await assertConfigDriveOmitsSecret(imagePath, FAKE_RUN_TOKEN);
+  }
 
   const exitCode = await Promise.race([
     orch.waitForExit(agent),
@@ -172,6 +295,9 @@ try {
   }
   if (!consoleLog.includes("smoke-hidepid=enforced")) {
     fail("agent can see foreign-uid /proc entries — hidepid=2 not effective");
+  }
+  if (!consoleLog.includes("smoke-mmds=blocked")) {
+    fail("agent reached the MMDS metadata address — guest credential-store firewall not effective");
   }
 
   console.log("==> teardown");
@@ -219,6 +345,59 @@ try {
   } finally {
     await orch.removeIsolationBoundary(boundary2).catch(() => {});
   }
+
+  // ---------------------------------------------------------------------
+  // Third VM (B4): the REAL agent entrypoint — NO argv override, so the
+  // supervisor runs the baked default `bun run /runtime/dist/entrypoint.js`.
+  // skipSidecar + a minimal agent env (no valid platform sink) makes the
+  // bundle LOAD, run under bun in-guest, and fail env validation — leaving
+  // runtime-pi's `[runtime-pi fatal]` last-resort line on the serial
+  // console. This catches module-resolution / transpiler breakage that the
+  // /bin/sh probes above cannot see.
+  // ---------------------------------------------------------------------
+  console.log("==> third microVM (real entrypoint boot probe)");
+  const RUN_ID3 = `${RUN_ID}_realentry`;
+  // Clear the smoke DI seam → supervisor uses the default agent argv.
+  Reflect.set(orch, "agentArgvOverride", undefined);
+  const boundary3 = await orch.createIsolationBoundary(RUN_ID3);
+  try {
+    // No createSidecar → skipSidecar path. Minimal env: the entrypoint's
+    // parseRuntimeEnv fails fast on the missing APPSTRATE_SINK_* contract.
+    const agent3 = await orch.createWorkload(
+      {
+        runId: RUN_ID3,
+        role: "agent",
+        image: "unused-by-firecracker",
+        env: { AGENT_RUN_ID: RUN_ID3 },
+        resources: { memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000 },
+      },
+      boundary3,
+    );
+    await orch.startWorkload(agent3);
+    await Promise.race([
+      orch.waitForExit(agent3),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("third VM did not exit within 90s")), 90_000),
+      ),
+    ]);
+    const console3 = await Bun.file(`${boundary3.id}/console.log`)
+      .text()
+      .catch(() => "");
+    await dumpConsole(boundary3.id, "vm3");
+    if (!console3.includes("[runtime-pi fatal]")) {
+      fail(
+        "real entrypoint did not emit '[runtime-pi fatal]' — the bundle failed to load/transpile " +
+          "in-guest (module resolution or transpiler breakage), not a clean env-validation exit",
+      );
+    }
+    console.log("==> real entrypoint loaded + reported its fatal diagnostic ok");
+    await orch.removeWorkload(agent3);
+  } catch (err) {
+    await dumpConsole(boundary3.id, "vm3 exception");
+    throw err;
+  } finally {
+    await orch.removeIsolationBoundary(boundary3).catch(() => {});
+  }
 } catch (err) {
   await dumpConsole(boundary.id, "vm1 exception");
   throw err;
@@ -226,6 +405,18 @@ try {
   platformStub.stop(true);
   await orch.removeIsolationBoundary(boundary).catch(() => {});
   await orch.shutdown().catch(() => {});
+}
+
+// Post-teardown jail hygiene: the per-run chroot tree must die with the
+// boundary — a surviving jail dir would accumulate one rootfs hardlink +
+// exec copy + (worse) a secret config drive per run.
+if (vm1JailDir !== null) {
+  const gone = await stat(vm1JailDir).then(
+    () => false,
+    () => true,
+  );
+  if (!gone) fail(`jail chroot tree survived teardown: ${vm1JailDir}`);
+  console.log("==> jail chroot reclaimed on teardown");
 }
 
 console.log("SMOKE PASS");

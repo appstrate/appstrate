@@ -16,8 +16,8 @@
  *   FIRECRACKER_RUNNER_PLATFORM_URL=http://<host-ip>:3000 \
  *   bun run firecracker:runner
  *
- * Boot order is deliberate: env → artifacts → initialize() → orphan
- * sweep → guest-path self-verification → listen. Guest artifacts
+ * Boot order is deliberate: env → host-hygiene advisory → artifacts →
+ * initialize() → orphan sweep → guest-path self-verification → listen. Guest artifacts
  * (kernel + rootfs) are resolved BEFORE initialize() so its existence
  * check passes on a freshly provisioned host that never ran `bun run
  * firecracker:build`. The port only opens after the host firewall and
@@ -34,6 +34,7 @@ import { createRunnerApp } from "./server.ts";
 import { ensureGuestArtifacts } from "./artifacts.ts";
 import { warmHostPageCache } from "./readahead.ts";
 import { verifyGuestPath, type GuestPathResult } from "./net-probe.ts";
+import { checkHostHygiene } from "./host-hygiene.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
 
@@ -54,6 +55,13 @@ try {
 } catch (err) {
   fatal("invalid environment", err);
 }
+
+// Host-hygiene advisory (Firecracker production host-setup guidance):
+// warn once per violation — SMT on, KSM on, swap active — with the fix
+// to apply. Non-fatal by design (kernel/boot configuration is outside the
+// daemon's reach) and a no-op where the sysfs knobs don't exist (macOS
+// dev, containers).
+await checkHostHygiene({ logger });
 
 // Resolve prebuilt guest artifacts (issue #819, phase 2) BEFORE
 // initialize(): download the versioned, checksum-verified kernel + rootfs

@@ -28,6 +28,12 @@ export interface BuildGuestConfigInput {
   sidecarEnv?: Record<string, string>;
   agentEnv: Record<string, string>;
   agentUnrestrictedEgress: boolean;
+  /**
+   * Where the guest's secrets come from — `"mmds"` (broker; the drive env
+   * maps are stripped of secret keys) or `"inline"` (drive carries them).
+   * See {@link GuestConfig.credentials}.
+   */
+  credentialSource: "mmds" | "inline";
   /** Smoke-harness only — see GuestConfig.agent.argv. */
   agentArgv?: string[];
 }
@@ -35,6 +41,7 @@ export interface BuildGuestConfigInput {
 export function buildGuestConfig(input: BuildGuestConfigInput): GuestConfig {
   return {
     run_id: input.runId,
+    credentials: { source: input.credentialSource },
     exit_marker_nonce: input.exitMarkerNonce,
     network: { platform_ip: input.platformIp, platform_port: input.platformPort },
     sidecar: { enabled: !!input.sidecarEnv, env: input.sidecarEnv ?? {} },
@@ -82,6 +89,12 @@ export function buildKernelBootArgs(subnet: RunSubnet): string {
 }
 
 export interface BuildVmConfigInput {
+  /**
+   * Path mapping is the CALLER's contract: host-absolute paths for a
+   * direct (unjailed) spawn, chroot-relative paths (`/vmlinux`, …) for a
+   * jailed spawn — firecracker resolves them after pivot_root. This
+   * builder never resolves or rewrites them.
+   */
   kernelPath: string;
   rootfsPath: string;
   configDrivePath: string;
@@ -89,7 +102,20 @@ export interface BuildVmConfigInput {
   subnet: RunSubnet;
   vcpuCount: number;
   memSizeMib: number;
+  /**
+   * Add the MMDS config block (credential broker). When true the VMM
+   * intercepts {@link MMDS_IPV4_ADDRESS} on `eth0` and serves the in-memory
+   * data store the daemon PUTs post-boot — the guest supervisor fetches the
+   * run's secrets from it (FIRECRACKER_CREDENTIAL_BROKER=mmds). Omitted for
+   * the config-drive broker.
+   */
+  mmds?: boolean;
 }
+
+/** MMDS default link-local service address (Firecracker default). */
+export const MMDS_IPV4_ADDRESS = "169.254.169.254";
+/** The guest NIC MMDS is bound to — must match the `network-interfaces` iface_id. */
+export const MMDS_NETWORK_INTERFACE = "eth0";
 
 /**
  * Per-device token-bucket rate limiters (Firecracker's dual-bucket
@@ -151,6 +177,19 @@ export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown
       vcpu_count: input.vcpuCount,
       mem_size_mib: input.memSizeMib,
     },
+    // Credential broker: V2 (session-token) MMDS on eth0. The daemon PUTs
+    // the run's secrets to the in-memory store after boot; the guest
+    // supervisor fetches them and then the guest firewall drops all further
+    // access to MMDS_IPV4_ADDRESS. Absent for the config-drive broker.
+    ...(input.mmds
+      ? {
+          "mmds-config": {
+            version: "V2",
+            network_interfaces: [MMDS_NETWORK_INTERFACE],
+            ipv4_address: MMDS_IPV4_ADDRESS,
+          },
+        }
+      : {}),
   };
 }
 

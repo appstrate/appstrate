@@ -49,6 +49,14 @@ const CONFIG_PATH = "/config/config.json";
  */
 const TRANSPILER_CACHE_PATH = "/runtime/.transpiler-cache";
 
+/**
+ * Firecracker MMDS link-local service address (matches the host-side
+ * mmds-config in vm-config.ts). The credential broker serves the run's
+ * secrets here; the supervisor fetches them at boot, then applyFirewall
+ * drops all further access.
+ */
+const MMDS_IPV4_ADDRESS = "169.254.169.254";
+
 function log(msg: string): void {
   process.stdout.write(`[supervisor] ${msg}\n`);
 }
@@ -127,6 +135,15 @@ function applyFirewall(exec: RunHostCmd, cfg: GuestConfig): Promise<void> {
     `table inet appstrate_guest {`,
     `  chain output {`,
     `    type filter hook output priority filter; policy drop;`,
+    // Credential broker: by the time this firewall is applied the
+    // supervisor has already fetched the run's secrets from MMDS. Slam the
+    // link-local metadata address shut for EVERY uid — including root and
+    // any unrestricted_egress agent — so no workload can ever read the
+    // credential store back. First rule = highest precedence (drops before
+    // the skuid-0/sidecar/runner accepts below). Unconditional: in
+    // config-drive mode MMDS is not even configured, so this is a harmless
+    // belt-and-suspenders (the host forward chain also drops 169.254/16).
+    `    ip daddr ${MMDS_IPV4_ADDRESS} drop`,
     `    oifname "lo" accept`,
     `    meta skuid 0 accept`,
     `    meta skuid ${GUEST_SIDECAR_UID} accept`,
@@ -211,10 +228,78 @@ function spawnAs(
   return { pid: proc.pid ?? -1, exited, kill: () => proc.kill("SIGKILL") };
 }
 
+/** MMDS V2 store shape — the broker payload the daemon PUT (snake_case wire). */
+interface MmdsStore {
+  sidecar_env?: Record<string, string>;
+  agent_env?: Record<string, string>;
+}
+
+/**
+ * Credential broker (GuestConfig.credentials.source === "mmds"): the run's
+ * secret keys are NOT on the config drive — fetch them from the Firecracker
+ * MMDS store and merge them over the drive-provided env maps (MMDS wins on
+ * key collision). The daemon PUTs the store just after boot, so a bounded
+ * retry (~20s) absorbs the race where the guest wins it. On final failure
+ * this FAIL-CLOSES the run — a sidecar without its credentials would
+ * silently misbehave.
+ */
+async function fetchAndMergeMmdsCredentials(cfg: GuestConfig): Promise<void> {
+  // Explicit link-local /32 route out eth0 — robust against ARP/gateway
+  // edge cases for the metadata address. Idempotent-ish; ignore "exists".
+  await runHostCmd(["ip", "route", "add", `${MMDS_IPV4_ADDRESS}/32`, "dev", "eth0"]).catch(
+    () => {},
+  );
+
+  const deadline = Date.now() + 20_000;
+  let attempt = 0;
+  let lastErr = "";
+  while (Date.now() < deadline) {
+    attempt++;
+    try {
+      const store = await fetchMmdsStore();
+      if (store.sidecar_env) Object.assign(cfg.sidecar.env, store.sidecar_env);
+      if (store.agent_env) Object.assign(cfg.agent.env, store.agent_env);
+      log(`fetched credentials from MMDS (attempt ${attempt})`);
+      return;
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+    }
+    await delay(Math.min(1000, 100 * attempt));
+  }
+  fatal(`MMDS credential fetch failed after ${attempt} attempts: ${lastErr}`);
+}
+
+/** One MMDS V2 fetch: PUT a session token, then GET the store root as JSON. */
+async function fetchMmdsStore(): Promise<MmdsStore> {
+  const tokenRes = await fetch(`http://${MMDS_IPV4_ADDRESS}/latest/api/token`, {
+    method: "PUT",
+    headers: { "X-metadata-token-ttl-seconds": "60" },
+    signal: AbortSignal.timeout(3_000),
+  });
+  if (!tokenRes.ok) throw new Error(`token PUT HTTP ${tokenRes.status}`);
+  const token = (await tokenRes.text()).trim();
+  const res = await fetch(`http://${MMDS_IPV4_ADDRESS}/`, {
+    headers: { "X-metadata-token": token, Accept: "application/json" },
+    signal: AbortSignal.timeout(3_000),
+  });
+  if (!res.ok) throw new Error(`store GET HTTP ${res.status}`);
+  const raw: unknown = await res.json();
+  if (typeof raw !== "object" || raw === null) throw new Error("MMDS store is not an object");
+  return raw as MmdsStore;
+}
+
 async function main(): Promise<void> {
   const cfg = readConfig();
   exitNonce = cfg.exit_marker_nonce;
   log(`run ${cfg.run_id} starting (sidecar=${cfg.sidecar.enabled})`);
+
+  // Credential broker: fetch the run's secrets from MMDS BEFORE the firewall
+  // goes up (applyFirewall then drops MMDS for every uid). Only the root
+  // supervisor runs at this point — no workload exists yet, so the
+  // pre-firewall window is never exposed to untrusted code.
+  if (cfg.credentials?.source === "mmds") {
+    await fetchAndMergeMmdsCredentials(cfg);
+  }
 
   await applyFirewall(runHostCmd, cfg).catch((err: Error) => {
     // Fail closed: without the firewall the agent could bypass the sidecar

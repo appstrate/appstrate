@@ -48,7 +48,7 @@ provision:
       # Firecracker release binary — pinned version + published checksum,
       # never `latest` (supply chain). Keep FC_VERSION/FC_SHA256 in sync
       # with .github/workflows/firecracker.yml.
-      if ! command -v firecracker >/dev/null; then
+      if ! command -v firecracker >/dev/null || ! command -v jailer >/dev/null; then
         FC_VERSION="v1.16.0"
         ARCH="$(uname -m)"
         case "$ARCH" in
@@ -60,6 +60,9 @@ provision:
         echo "${FC_SHA256}  /tmp/firecracker.tgz" | sha256sum -c -
         tar -xzf /tmp/firecracker.tgz -C /tmp
         install -m 0755 "/tmp/release-${FC_VERSION}-${ARCH}/firecracker-${FC_VERSION}-${ARCH}" /usr/local/bin/firecracker
+        # The jailer ships in the same tarball — the smoke boots jailed
+        # VMMs (FIRECRACKER_JAILER=on is the orchestrator default).
+        install -m 0755 "/tmp/release-${FC_VERSION}-${ARCH}/jailer-${FC_VERSION}-${ARCH}" /usr/local/bin/jailer
         rm -rf "/tmp/release-${FC_VERSION}-${ARCH}" /tmp/firecracker.tgz
       fi
   # User deps: bun.
@@ -75,4 +78,4 @@ probes:
   - description: "firecracker installed"
     script: |
       #!/bin/bash
-      until command -v firecracker >/dev/null 2>&1; do sleep 3; done
+      until command -v firecracker >/dev/null 2>&1 && command -v jailer >/dev/null 2>&1; do sleep 3; done

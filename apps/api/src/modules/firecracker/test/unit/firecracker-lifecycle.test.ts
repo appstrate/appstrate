@@ -83,6 +83,7 @@ function readyOrchestrator(exec: HostExec): FirecrackerOrchestrator {
 }
 
 const ORIGINAL_DATA_DIR = process.env.FIRECRACKER_DATA_DIR;
+const ORIGINAL_JAILER = process.env.FIRECRACKER_JAILER;
 let dataDir: string;
 /** Real subprocesses standing in for VMMs — always reaped in afterEach. */
 const spawned: BunProcess[] = [];
@@ -92,6 +93,9 @@ const extraDirs: string[] = [];
 beforeEach(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "fc-life-test-"));
   process.env.FIRECRACKER_DATA_DIR = dataDir;
+  // Direct-spawn contract under test — jail-mode boundary shapes are
+  // covered in firecracker-orchestrator.test.ts (short data dir).
+  process.env.FIRECRACKER_JAILER = "off";
   _resetCacheForTesting();
 });
 
@@ -114,6 +118,8 @@ afterEach(async () => {
 afterAll(() => {
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.FIRECRACKER_DATA_DIR;
   else process.env.FIRECRACKER_DATA_DIR = ORIGINAL_DATA_DIR;
+  if (ORIGINAL_JAILER === undefined) delete process.env.FIRECRACKER_JAILER;
+  else process.env.FIRECRACKER_JAILER = ORIGINAL_JAILER;
   _resetCacheForTesting();
 });
 
@@ -336,4 +342,105 @@ describe("cleanupOrphans positive kill path", () => {
       expect(await Bun.file(join(runDir, "state.json")).exists()).toBe(false);
     },
   );
+
+  // Jailed orphan identity: inside the chroot every VMM shares the same
+  // argv, so the sweep matches "firecracker in argv AND (chroot root OR
+  // reserved jail uid)". An unprivileged test cannot chroot, but it CAN
+  // exercise the uid branch by recording its OWN uid as the jail uid —
+  // the sweep's >=1000 floor makes this Linux-CI-only (runner uid 1000).
+  it.skipIf(process.platform !== "linux" || (process.getuid?.() ?? 0) < 1000)(
+    "kills a jailed orphan matched by the recorded jail uid (argv gate still required)",
+    async () => {
+      const binDir = await mkdtemp(join(tmpdir(), "fc-decoy-jail-"));
+      extraDirs.push(binDir);
+      const decoyBin = join(binDir, "firecracker");
+      await Bun.write(decoyBin, Bun.file("/bin/sh"));
+      await chmod(decoyBin, 0o755);
+      const decoy = Bun.spawn([decoyBin, "-c", "sleep 30"]);
+      spawned.push(decoy);
+
+      const cmdlineReady = async (): Promise<boolean> => {
+        try {
+          const cmdline = await Bun.file(`/proc/${decoy.pid}/cmdline`).text();
+          return cmdline.split("\0").some((a) => a.includes("firecracker"));
+        } catch {
+          return false;
+        }
+      };
+      for (let i = 0; i < 40 && !(await cmdlineReady()); i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(await cmdlineReady()).toBe(true);
+
+      const runDir = join(dataDir, "run_jailed_orphan");
+      await mkdir(runDir, { recursive: true });
+      await writeFile(
+        join(runDir, "state.json"),
+        JSON.stringify({
+          runId: "run_jailed_orphan",
+          tapDevice: "afc13",
+          jailId: "run-jailed-orphan-3",
+          jailUid: process.getuid?.() ?? 0,
+          chrootPath: join(binDir, "nonexistent-chroot", "root"),
+        }),
+      );
+
+      const { exec } = fakeExec();
+      const orch = readyOrchestrator(exec);
+      const report = await orch.cleanupOrphans();
+
+      expect(report.workloads).toBe(1);
+      await decoy.exited;
+      expect(decoy.signalCode).toBe("SIGKILL");
+    },
+  );
+
+  it("refuses to uid-match a jailed orphan below the unprivileged floor (fail-closed)", async () => {
+    // A corrupted state file recording a system uid (here: 0) must never
+    // aim the sweep at system processes — no /proc match is attempted
+    // for uids < 1000 and the chroot path matches nothing.
+    const runDir = join(dataDir, "run_bad_uid");
+    await mkdir(runDir, { recursive: true });
+    await writeFile(
+      join(runDir, "state.json"),
+      JSON.stringify({
+        runId: "run_bad_uid",
+        tapDevice: "afc14",
+        jailId: "run-bad-uid-4",
+        jailUid: 0,
+        chrootPath: join(dataDir, "nonexistent", "root"),
+      }),
+    );
+
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const report = await orch.cleanupOrphans();
+
+    expect(report.workloads).toBe(0); // nothing killed
+    expect(report.isolationBoundaries).toBe(1); // dir still reclaimed
+  });
+});
+
+describe("bounded VMM reap after SIGKILL (D-state guard)", () => {
+  it("stopByRunId returns even when the VMM never reaps", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_dstate");
+    const vm = getVm(orch, "run_dstate");
+    // A VMM wedged in D-state ignores even SIGKILL: its `exited` promise
+    // never settles. The kill path must time-box the reap (here shrunk
+    // from the production 10s) instead of hanging cancel/teardown.
+    Reflect.set(orch, "vmmReapTimeoutMs", 50);
+    vm.proc = {
+      pid: 999_999,
+      exitCode: null,
+      signalCode: null,
+      kill() {},
+      exited: new Promise<number>(() => {}),
+    } as unknown as BunProcess;
+
+    const result = await orch.stopByRunId("run_dstate", 0);
+    expect(result).toBe("stopped");
+    expect(vm.stopping).toBe(true);
+  });
 });

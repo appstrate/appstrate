@@ -194,7 +194,11 @@ jobs:
           echo "${FC_SHA256}  /tmp/firecracker.tgz" | sha256sum -c -
           tar -xzf /tmp/firecracker.tgz -C /tmp
           sudo install -m 0755 "/tmp/release-${FC_VERSION}-${ARCH}/firecracker-${FC_VERSION}-${ARCH}" /usr/local/bin/firecracker
+          # The jailer ships in the SAME verified tarball — the smoke boots
+          # jailed VMMs (FIRECRACKER_JAILER=on is the orchestrator default).
+          sudo install -m 0755 "/tmp/release-${FC_VERSION}-${ARCH}/jailer-${FC_VERSION}-${ARCH}" /usr/local/bin/jailer
           firecracker --version
+          jailer --version
 
       # The kernel is BUILT (CI kernels lack nftables — see build-kernel.sh).
       # First build ~20 min; afterwards this cache short-circuits it.
@@ -227,6 +231,13 @@ jobs:
         # @appstrate/env — the smoke harness drives it with FIRECRACKER_*
         # alone (same posture as the appstrate-runner daemon).
         run: bash apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh
+
+      # The smoke now runs as root (jailed VMMs — FIRECRACKER_JAILER=on),
+      # so the leftover run dirs are root-owned 0700; the artifact upload
+      # runs as the runner user and needs read access.
+      - name: Make run dirs readable for artifact upload
+        if: failure()
+        run: sudo chmod -R a+rX data/firecracker/runs 2>/dev/null || true
 
       - name: Upload guest console on failure
         if: failure()

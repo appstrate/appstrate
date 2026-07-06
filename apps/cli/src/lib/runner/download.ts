@@ -212,21 +212,26 @@ async function verifyDaemonSignature(opts: {
 export function firecrackerUrls(
   version: string,
   arch: RunnerArch,
-): { tarball: string; sha256: string; innerPath: string } {
+): { tarball: string; sha256: string; innerPath: string; jailerInnerPath: string } {
   const tag = `v${version.replace(/^v/, "")}`;
   const asset = `firecracker-${tag}-${arch}.tgz`;
   return {
     tarball: `${FIRECRACKER_RELEASE_BASE}/${tag}/${asset}`,
     sha256: `${FIRECRACKER_RELEASE_BASE}/${tag}/${asset}.sha256.txt`,
-    // Path of the binary inside the tarball.
+    // Paths of the two binaries inside the tarball. The jailer ships in
+    // the SAME release archive — one verified download covers both.
     innerPath: `release-${tag}-${arch}/firecracker-${tag}-${arch}`,
+    jailerInnerPath: `release-${tag}-${arch}/jailer-${tag}-${arch}`,
   };
 }
 
 /**
- * Download the pinned firecracker VMM, verify its SHA-256, extract the
- * single binary from the tarball, and install it (0755) at `destPath`.
- * Uses `tar` for extraction (always present on a Linux host).
+ * Download the pinned firecracker release, verify its SHA-256, extract
+ * the VMM and the jailer from the tarball, and install them (0755) at
+ * `destPath` / `jailerDestPath`. One verified archive covers both — the
+ * daemon requires the pair to come from the same release
+ * (FIRECRACKER_JAILER=on confinement). Uses `tar` for extraction
+ * (always present on a Linux host).
  */
 export async function installFirecracker(opts: {
   http: RunnerHttp;
@@ -235,6 +240,7 @@ export async function installFirecracker(opts: {
   version: string;
   arch: RunnerArch;
   destPath: string;
+  jailerDestPath: string;
 }): Promise<void> {
   const urls = firecrackerUrls(opts.version, opts.arch);
   const [tgz, sumText] = await Promise.all([
@@ -260,12 +266,16 @@ export async function installFirecracker(opts: {
         `failed to extract firecracker tarball: ${untar.stderr || "tar exited non-zero"}`,
       );
     }
-    const innerPath = join(work, urls.innerPath);
-    const binary = await opts.fs.readFileBytes(innerPath);
-    if (!binary) {
-      throw new Error(`firecracker binary not found in tarball at ${urls.innerPath}`);
+    for (const [inner, dest] of [
+      [urls.innerPath, opts.destPath],
+      [urls.jailerInnerPath, opts.jailerDestPath],
+    ] as const) {
+      const binary = await opts.fs.readFileBytes(join(work, inner));
+      if (!binary) {
+        throw new Error(`binary not found in firecracker tarball at ${inner}`);
+      }
+      await opts.fs.installAtomic(dest, binary, 0o755);
     }
-    await opts.fs.installAtomic(opts.destPath, binary, 0o755);
   } finally {
     await rm(work, { recursive: true, force: true }).catch(() => {});
   }
