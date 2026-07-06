@@ -39,6 +39,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Autonomous AI agents** — Each run executes in an isolated Docker container with a Pi Coding Agent
 - **Flexible authentication** — Connect external services with OAuth 2.0 (RFC 8414 discovery + RFC 8707 resource indicators + PKCE), API key, basic auth, mTLS, and custom credential flows
 - **Sandboxed runs** — Containers are created, run, and destroyed per run
+- **Hardware-isolated execution** (opt-in) — Run each agent in a dedicated [Firecracker](https://firecracker-microvm.github.io/) microVM for a KVM hardware boundary around the whole run, instead of a shared-kernel container. A workload escape compromises a throwaway guest kernel, not the host. See [Firecracker architecture](./docs/architecture/FIRECRACKER.md)
 - **Sidecar isolation** — Credential injection via a sidecar proxy (agent never sees raw credentials)
 - **Cron scheduling** — Schedule agents with cron expressions, distributed lock prevents duplicates
 - **Package import** — Import agents, skills, MCP servers, and integrations from ZIP/AFPS files
@@ -138,6 +139,8 @@ Appstrate adapts to your infrastructure. Start minimal and add services as you g
 Tiers 0-2 run agents as Bun subprocesses — each concurrent run adds ~50-100 MB. On constrained hardware, limit parallel runs accordingly.
 
 **Tier 0** is ideal for personal use, small devices (Raspberry Pi 4+, NAS), or getting started with zero dependencies. **Tiers 1-2** suit small teams and constrained servers. **Tier 3** is for production with full container isolation.
+
+> **Stronger isolation for untrusted workloads?** The execution backend is pluggable. Beyond the built-in Bun-subprocess and Docker-container backends, an opt-in **Firecracker** backend (`RUN_ADAPTER=firecracker`) runs each agent in a dedicated microVM behind a KVM hardware boundary — the standard control-plane / host-daemon split used by AWS, Fly.io, and E2B. It ships as a built-in module (not in the default `MODULES` set, zero footprint when absent) and requires a KVM host running the `appstrate-runner` daemon. See [Firecracker architecture](./docs/architecture/FIRECRACKER.md).
 
 > **Raspberry Pi**: Bun supports ARM64 natively. A Raspberry Pi 4 (4 GB) handles Tiers 0-1 with 2-3 concurrent runs. A Pi 5 (8 GB) can run Tier 2 comfortably or Tier 3 with sequential runs.
 
@@ -283,6 +286,8 @@ Browser (React SPA)              Platform (Bun + Hono :3000)
 - **Parallel setup**: Sidecar + agent creation run concurrently
 - **Credential isolation**: Agent calls sidecar proxy; never sees raw credentials
 - **Output validation**: Native LLM schema enforcement + AJV post-validation against output schema
+
+Deeper design notes — the [Firecracker microVM backend](./docs/architecture/FIRECRACKER.md), [sidecar protocol](./docs/architecture/SIDECAR.md), integrations runtime, run-cost tracking, and more — live in [`docs/architecture/`](./docs/architecture/README.md).
 
 ## Environment Variables
 

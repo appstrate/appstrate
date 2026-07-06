@@ -86,6 +86,8 @@ bun run build-sidecar    # sidecar proxy image
 | `bun run db:migrate`           | Apply database migrations                           |
 | `bun run verify:openapi`       | OpenAPI spec validation                             |
 
+**Working on the Firecracker execution backend?** It's an opt-in built-in module (`apps/api/src/modules/firecracker/`, not in the default `MODULES`). The privileged engine runs as the `appstrate-runner` daemon (`bun run firecracker:runner`) and needs a Linux KVM host (`/dev/kvm`) — on macOS, run it inside a Lima VM with nested virtualization. Guest artifacts build via `bun run firecracker:build:{kernel,rootfs}`. Architecture + dev workflow: [`docs/architecture/FIRECRACKER.md`](./docs/architecture/FIRECRACKER.md).
+
 ### Branch Naming
 
 - `feat/short-description` — New features
