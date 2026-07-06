@@ -39,6 +39,15 @@ const SIDECAR_BIN = "/usr/local/bin/sidecar";
 const RUNNER_EXEC_WRAPPER = "/usr/local/bin/appstrate-runner-exec";
 const AGENT_ENTRY = "/runtime/dist/entrypoint.js";
 const CONFIG_PATH = "/config/config.json";
+/**
+ * Pre-warmed Bun transpiler cache baked into the rootfs at image build (see
+ * runtime-pi/Dockerfile). The guest page cache is empty on every boot
+ * (VM-per-run), so skipping the re-parse of the bundled entrypoint + Pi SDK
+ * is a direct cold-start win. Docker containers inherit this from the image
+ * ENV; here the agent env comes from the config drive, so the supervisor
+ * injects it. New entries written at runtime land in the tmpfs overlay.
+ */
+const TRANSPILER_CACHE_PATH = "/runtime/.transpiler-cache";
 
 function log(msg: string): void {
   process.stdout.write(`[supervisor] ${msg}\n`);
@@ -254,7 +263,7 @@ async function main(): Promise<void> {
   const agent = spawnAs(
     GUEST_AGENT_USER,
     cfg.agent.argv ?? ["/usr/local/bin/bun", "run", AGENT_ENTRY],
-    cfg.agent.env,
+    { BUN_RUNTIME_TRANSPILER_CACHE_PATH: TRANSPILER_CACHE_PATH, ...cfg.agent.env },
     "/workspace",
   );
   log(`agent pid ${agent.pid}`);
