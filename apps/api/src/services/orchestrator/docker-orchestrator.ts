@@ -65,7 +65,6 @@ const DOCKER_SIDECAR_ENDPOINTS: SidecarEndpoints = {
 };
 
 export class DockerOrchestrator implements RunOrchestrator {
-  private egressNetworkId: string | null = null;
   /**
    * Set of sidecar container IDs whose exit is expected (run is being
    * torn down). The {@link watchSidecarExit} watcher consults this set
@@ -93,22 +92,26 @@ export class DockerOrchestrator implements RunOrchestrator {
     // already masks the warm-image sidecar boot, so a pre-warmed pool buys
     // nothing extra on the user-visible latency.
     const env = getEnv();
-    const [, , , egressId] = await Promise.all([
+    await Promise.all([
       docker.ensureImage(env.PI_IMAGE),
       docker.ensureImage(env.SIDECAR_IMAGE),
       docker.detectPlatformNetwork(),
-      docker.createNetwork("appstrate-egress"),
+      // Warm the shared egress network so the first run doesn't pay the
+      // create. The ID is deliberately NOT cached: it is re-resolved by
+      // name on every use (createSidecar / createWorkload) so the process
+      // self-heals when the network disappears mid-lifetime (#834).
+      docker.ensureNetwork(docker.EGRESS_NETWORK_NAME),
     ]);
     this.verifiedImages.add(env.PI_IMAGE);
     this.verifiedImages.add(env.SIDECAR_IMAGE);
-    this.egressNetworkId = egressId;
   }
 
   async shutdown(): Promise<void> {
-    if (this.egressNetworkId) {
-      await docker.removeNetwork(this.egressNetworkId).catch(() => {});
-      this.egressNetworkId = null;
-    }
+    // The egress network is intentionally left in place: it is durable
+    // infra shared with any other Appstrate process on this daemon (#834).
+    // Removing it here used to break the runs of a concurrently-running
+    // instance, whose cached network ID went stale.
+    //
     // Drop any residual entries — long-lived API processes accumulate
     // one per timed-out / aborted run because `removeWorkload` always
     // re-adds after `stopWorkload` consumed the watcher's match.
@@ -148,7 +151,7 @@ export class DockerOrchestrator implements RunOrchestrator {
     const [networkResult, volumeResult] = await Promise.allSettled([
       createNetworkWithPoolRetry(
         () => docker.createNetwork(name, { internal: true }),
-        () => docker.cleanupOrphanedRunNetworks(),
+        () => docker.cleanupOrphanedNetworks(),
         logger,
       ),
       (async () => {
@@ -274,9 +277,14 @@ export class DockerOrchestrator implements RunOrchestrator {
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
     const env = getEnv();
-    const [platformApiUrl, platformNetwork] = await Promise.all([
+    // Resolve the egress network by name on every use (not a boot-time
+    // cached ID): if it vanished mid-lifetime (`docker network prune`,
+    // daemon restart, another Appstrate process), ensureNetwork recreates
+    // it and the run proceeds instead of 404ing until an API restart (#834).
+    const [platformApiUrl, platformNetwork, egressNetworkId] = await Promise.all([
       this.resolvePlatformApiUrl(),
       docker.detectPlatformNetwork(),
+      docker.ensureNetwork(docker.EGRESS_NETWORK_NAME),
     ]);
 
     const sidecarEnv = buildBaseSidecarEnv({
@@ -314,7 +322,7 @@ export class DockerOrchestrator implements RunOrchestrator {
       adapterName: "sidecar",
       memory: SIDECAR_MEMORY_BYTES,
       nanoCpus: SIDECAR_NANO_CPUS,
-      networkId: this.egressNetworkId!,
+      networkId: egressNetworkId,
       extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
       ...sidecarSocketOverrides(spec),
     });
@@ -408,7 +416,14 @@ export class DockerOrchestrator implements RunOrchestrator {
     // as the sidecar (egress network primary + host-gateway / platform net)
     // instead of the internal-only isolation boundary, which has no route
     // out and would fail the agent's first `emitRuntimeReady` POST.
-    const platformNetwork = spec.egress ? await docker.detectPlatformNetwork() : null;
+    // Same by-name resolution as createSidecar: never trust a cached
+    // network ID across the process lifetime (#834).
+    const [platformNetwork, egressNetworkId] = spec.egress
+      ? await Promise.all([
+          docker.detectPlatformNetwork(),
+          docker.ensureNetwork(docker.EGRESS_NETWORK_NAME),
+        ])
+      : [null, null];
 
     // Mount the per-run workspace into the agent container at
     // /workspace (already exists as the agent's CWD, chowned to `pi`
@@ -428,7 +443,7 @@ export class DockerOrchestrator implements RunOrchestrator {
       memory: spec.resources.memoryBytes,
       nanoCpus: spec.resources.nanoCpus,
       pidsLimit: spec.resources.pidsLimit,
-      networkId: spec.egress ? this.egressNetworkId! : boundary.id,
+      networkId: egressNetworkId ?? boundary.id,
       networkAlias: spec.role,
       ...(workspaceBinds.length > 0 ? { binds: workspaceBinds } : {}),
       ...(spec.egress

@@ -11,12 +11,13 @@ import {
   removeContainer,
   stopContainer,
   createNetwork,
+  ensureNetwork,
   connectContainerToNetwork,
   removeNetwork,
   cleanupOrphanedContainers,
   cleanupOrphanedNetworks,
-  cleanupOrphanedRunNetworks,
   cleanupOrphanedVolumes,
+  EGRESS_NETWORK_NAME,
   createVolume,
   removeVolume,
   runEphemeralCommand,
@@ -564,22 +565,22 @@ describeRequiresDocker("cleanupOrphanedNetworks", () => {
     },
     TIMEOUT,
   );
-});
 
-// ─── cleanupOrphanedRunNetworks ──────────────────────────────
-
-describeRequiresDocker("cleanupOrphanedRunNetworks", () => {
+  // Regression #834: the sweep used to also match `appstrate-egress` by
+  // name, so a second API process booting against the same daemon deleted
+  // the shared egress network out from under the first one's live runs.
+  // The egress network is durable infra — never swept.
   it(
-    "only reclaims appstrate-exec-* — leaves egress alone",
+    "leaves the shared egress network alone (#834)",
     async () => {
       await cleanupOrphanedNetworks();
 
       const execOrphan = await createNetwork(`appstrate-exec-orphan-${uid()}`);
       // Simulate the shared infra network the orchestrator stands up at boot.
-      const egress = await createNetwork("appstrate-egress");
+      const egress = await ensureNetwork(EGRESS_NETWORK_NAME);
       trackNetwork(egress);
 
-      const reclaimed = await cleanupOrphanedRunNetworks();
+      const reclaimed = await cleanupOrphanedNetworks();
       expect(reclaimed).toBeGreaterThanOrEqual(1);
 
       const execGone = await fetch(`${DOCKER_URL}/networks/${execOrphan}`);
@@ -587,6 +588,76 @@ describeRequiresDocker("cleanupOrphanedRunNetworks", () => {
 
       const egressStill = await fetch(`${DOCKER_URL}/networks/${egress}`);
       expect(egressStill.status).toBe(200);
+    },
+    TIMEOUT,
+  );
+});
+
+// ─── ensureNetwork ───────────────────────────────────────────
+
+describeRequiresDocker("ensureNetwork", () => {
+  it(
+    "creates the network when absent and returns its ID",
+    async () => {
+      const name = `appstrate-test-ensure-${uid()}`;
+      const id = trackNetwork(await ensureNetwork(name));
+
+      const res = await fetch(`${DOCKER_URL}/networks/${id}`);
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as { Name: string };
+      expect(data.Name).toBe(name);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "is idempotent — returns the existing network's ID without recreating",
+    async () => {
+      const name = `appstrate-test-ensure-${uid()}`;
+      const first = trackNetwork(await ensureNetwork(name));
+      const second = await ensureNetwork(name);
+
+      expect(second).toBe(first);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "self-heals after the network is deleted under a live process (#834)",
+    async () => {
+      // Repro of the issue: resolve once (boot), delete the network out of
+      // band (`docker network rm` / concurrent instance shutdown), resolve
+      // again at next use — must yield a fresh, working network instead of
+      // a stale ID that 404s every subsequent container create.
+      const name = `appstrate-test-ensure-${uid()}`;
+      const staleId = await ensureNetwork(name);
+      await removeNetwork(staleId);
+
+      const freshId = trackNetwork(await ensureNetwork(name));
+      expect(freshId).not.toBe(staleId);
+
+      const res = await fetch(`${DOCKER_URL}/networks/${freshId}`);
+      expect(res.status).toBe(200);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "converges concurrent callers onto a single network (create race)",
+    async () => {
+      // Two API processes booting simultaneously both ensure the egress
+      // network; the 409 loser must adopt the winner's network via
+      // re-inspect, not fail the boot.
+      const name = `appstrate-test-ensure-${uid()}`;
+      const ids = await Promise.all([
+        ensureNetwork(name),
+        ensureNetwork(name),
+        ensureNetwork(name),
+        ensureNetwork(name),
+      ]);
+      trackNetwork(ids[0]!);
+
+      expect(new Set(ids).size).toBe(1);
     },
     TIMEOUT,
   );
