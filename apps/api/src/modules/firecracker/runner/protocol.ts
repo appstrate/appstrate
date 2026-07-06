@@ -63,6 +63,12 @@ export const workloadHandleSchema = z.object({
 export const workloadResourcesSchema = z.looseObject({}) as unknown as z.ZodType<WorkloadResources>;
 
 export const workloadSpecSchema = z.looseObject({
+  // Identity the daemon dereferences straight away (createWorkload reads
+  // `spec.runId`/`spec.role` to build the handle) — pin them so a malformed
+  // body is a clean 400, never an undefined that surfaces as a 500 deeper in
+  // the engine. Additive core fields still pass through untouched.
+  runId: z.string().min(1),
+  role: z.string().min(1),
   resources: workloadResourcesSchema,
   // Host-side lifetime ceiling (B2): the one spec field the daemon must
   // validate — a non-positive bound would silently disable the safety kill.
@@ -77,6 +83,12 @@ export const workspaceHandleSchema = z.looseObject({
 export const sidecarEndpointsSchema = z.looseObject({}) as unknown as z.ZodType<SidecarEndpoints>;
 
 export const isolationBoundarySchema = z.looseObject({
+  // `id` (→ recursive rm, guarded by assertUnderDataDir) and `name` (→ runId
+  // via a `.replace`) are dereferenced the moment a boundary reaches the
+  // engine — pin them non-empty so a missing field is a clean 400, not a
+  // TypeError 500 on `resolve(undefined)`/`.replace(undefined)`.
+  id: z.string().min(1),
+  name: z.string().min(1),
   workspace: workspaceHandleSchema,
   sidecarEndpoints: sidecarEndpointsSchema,
 }) as unknown as z.ZodType<IsolationBoundary>;

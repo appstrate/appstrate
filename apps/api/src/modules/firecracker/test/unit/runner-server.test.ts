@@ -226,6 +226,29 @@ describe("runner server routes", () => {
     expect(calls).toEqual([]);
   });
 
+  it("rejects a boundary missing id/name with 400 (before removeIsolationBoundary)", async () => {
+    // The engine dereferences boundary.id (→ guarded rm) and boundary.name
+    // (→ runId) the moment it runs — a body without them must be a clean 400,
+    // never a TypeError 500 deeper in. Loose passthrough still allows extra
+    // fields; only the consumed identity is pinned.
+    const { app, calls } = makeApp();
+    const res = await post(app, RUNNER_ROUTES.removeBoundary, {
+      boundary: { workspace: { kind: "directory" }, sidecarEndpoints: {} },
+    });
+    expect(res.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects a workload spec missing runId/role with 400 (before createWorkload)", async () => {
+    const { app, calls } = makeApp();
+    const res = await post(app, RUNNER_ROUTES.createWorkload, {
+      spec: { resources: {} },
+      boundary: BOUNDARY,
+    });
+    expect(res.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
   it("rejects a request body over the size cap with 413 (after auth, before the orchestrator)", async () => {
     const { app, calls } = makeApp();
     // A valid-shaped createBoundary body padded past the 4 MiB cap.

@@ -233,7 +233,7 @@ function assetUrl(baseUrl: string, version: string | undefined, asset: string): 
 }
 
 // ---------------------------------------------------------------------------
-// Streaming download + hash
+// Buffered download + hash
 // ---------------------------------------------------------------------------
 
 interface DownloadResult {
