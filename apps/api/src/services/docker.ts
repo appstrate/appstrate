@@ -27,6 +27,20 @@ export const EXEC_NETWORK_PREFIX = "appstrate-exec-";
  */
 export const WORKSPACE_VOLUME_PREFIX = "appstrate-ws-";
 
+/**
+ * Name of the shared egress network sidecars (and `skipSidecar` agents)
+ * attach to for DNS + internet access. Durable infrastructure: it is
+ * resolved **by name at use time** (`ensureNetwork`), never removed by
+ * `shutdown()` nor by the boot orphan sweep — several API processes may
+ * share one Docker daemon (dev server + integration test app, blue/green
+ * deploys), and any of them deleting the network breaks every run of the
+ * others until their cached state is refreshed (#834). Docker itself
+ * refuses to delete a network with attached endpoints, but the network is
+ * empty between runs, so a name-based sweep still races; the only safe
+ * policy is to never delete it at all.
+ */
+export const EGRESS_NETWORK_NAME = "appstrate-egress";
+
 // Support both unix socket (/var/run/docker.sock) and TCP (http://host:port).
 // Bun supports fetch() with unix: option for Unix sockets.
 // Pass timeoutMs=false for long-running calls (streamLogs, waitForExit).
@@ -418,6 +432,52 @@ export async function createNetwork(
   return data.Id;
 }
 
+/**
+ * Resolve a network to its ID, creating it if it doesn't exist.
+ *
+ * This is the single access path for durable infra networks (the shared
+ * `appstrate-egress`): resolving **by name at use time** instead of caching
+ * an ID at boot means the platform self-heals when the network disappears
+ * under a live process — `docker network prune`, a daemon restart, or a
+ * concurrent Appstrate instance tearing it down (#834). The next run simply
+ * recreates it instead of failing every container create with
+ * `network <staleId> not found` until the API is restarted.
+ *
+ * Inspect-first keeps the steady-state cost to one GET (the network exists
+ * for the process's entire lifetime after the first run). The loop absorbs
+ * both races: two processes creating concurrently (409 duplicate → re-
+ * inspect picks up the winner's network) and inspect/create interleaving
+ * with an external delete. Three attempts is plenty — each iteration
+ * requires an external actor to flip the network's existence in a
+ * millisecond window; genuine failures (pool exhaustion, daemon down)
+ * throw immediately via `assertDockerOk`.
+ */
+export async function ensureNetwork(name: string): Promise<string> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const inspect = await dockerFetch(`/networks/${encodeURIComponent(name)}`);
+    if (inspect.ok) {
+      const data = (await inspect.json()) as { Id: string };
+      return data.Id;
+    }
+    await assertDockerOk(inspect, `inspect network ${name}`, [404]);
+
+    const create = await dockerFetch("/networks/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ Name: name, CheckDuplicate: true }),
+    });
+    if (create.ok) {
+      const data = (await create.json()) as { Id: string };
+      return data.Id;
+    }
+    // 409 = a concurrent creator won the race — loop back to inspect and
+    // adopt their network. Anything else (pool exhausted, daemon error) is
+    // a real failure and throws with the pool-exhaustion classification.
+    await assertDockerOk(create, `create network ${name}`, [409]);
+  }
+  throw new Error(`Docker ensure network ${name} failed: inspect/create raced 3 times`);
+}
+
 export async function connectContainerToNetwork(
   networkId: string,
   containerId: string,
@@ -669,30 +729,17 @@ export async function cleanupOrphanedContainers(): Promise<{
 }
 
 /**
- * List all Docker networks matching `appstrate-exec-*` or the shared
- * `appstrate-egress` infra network and remove them. Only safe to call at
- * startup because no runs should be running — egress is actively reused
- * across runs, so tearing it down mid-operation breaks egress routing.
- *
- * For opportunistic recovery during a live operation, use
- * {@link cleanupOrphanedRunNetworks} instead, which is strictly scoped to
- * per-run networks.
- */
-export async function cleanupOrphanedNetworks(): Promise<number> {
-  return removeNetworksMatching(
-    (name) => name.startsWith(EXEC_NETWORK_PREFIX) || name === "appstrate-egress",
-  );
-}
-
-/**
  * Remove orphan per-run networks (`appstrate-exec-*`) without touching the
- * shared infra networks. Safe to call mid-operation: Docker refuses to delete
- * networks that still have attached endpoints (live runs), so only truly
- * abandoned networks from crashed runs get reclaimed. Used as the opportunistic
+ * shared infra networks — {@link EGRESS_NETWORK_NAME} is durable and never
+ * swept (#834: a second API process booting against the same daemon used to
+ * delete it out from under the first one's live runs). Safe to call
+ * mid-operation: Docker refuses to delete networks that still have attached
+ * endpoints (live runs), so only truly abandoned networks from crashed runs
+ * get reclaimed. Called from the boot sweep and as the opportunistic
  * recovery path when `createNetwork` hits address-pool exhaustion —
  * reclaiming even one orphan is often enough to unblock the retry.
  */
-export async function cleanupOrphanedRunNetworks(): Promise<number> {
+export async function cleanupOrphanedNetworks(): Promise<number> {
   return removeNetworksMatching((name) => name.startsWith(EXEC_NETWORK_PREFIX));
 }
 
