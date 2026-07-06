@@ -27,6 +27,27 @@ import { CODE_DEFAULTS } from "../compose-defaults.ts";
 const FIRECRACKER_MODULES = `${CODE_DEFAULTS.MODULES},firecracker`;
 
 /**
+ * Default guest-facing sink listener port written for firecracker installs
+ * (`SINK_LISTENER_PORT`). 3310 is free in the Appstrate port map (platform
+ * :3000, registry :3020, runner daemon :3100) and matches the `.env.example`
+ * suggestion. REQUIRED by the platform when `RUN_ADAPTER=firecracker` — the
+ * backend refuses to initialize without it (guest microVMs must target the
+ * sink-only listener, not the full API).
+ */
+export const SINK_LISTENER_DEFAULT_PORT = 3310;
+
+/**
+ * Pick the sink listener port for a firecracker install: the default,
+ * bumped by one in the degenerate case where the operator put the main app
+ * on 3310 itself (the platform refuses `SINK_LISTENER_PORT === PORT`).
+ */
+export function pickSinkListenerPort(appPort: number): number {
+  return appPort === SINK_LISTENER_DEFAULT_PORT
+    ? SINK_LISTENER_DEFAULT_PORT + 1
+    : SINK_LISTENER_DEFAULT_PORT;
+}
+
+/**
  * Supported tier identifiers. `Tier` matches the `--tier` flag values
  * and the names of the embedded `docker-compose.tier*.yml` templates.
  */
@@ -125,11 +146,17 @@ export interface RunBackendEnv {
    * Same-host topology: the daemon runs on THIS host, so the plaintext
    * runner URL — non-loopback because the platform container reaches the
    * host over the Docker bridge — never leaves the machine. Emits
-   * `FIRECRACKER_RUNNER_TLS_REQUIRED=0` (the platform refuses plaintext
+   * `FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1` (the platform refuses plaintext
    * non-loopback runner URLs by default). Never set for remote daemons —
    * a split-host link must get TLS, not a silent opt-out.
    */
   allowPlaintextRunnerUrl?: boolean;
+  /**
+   * SINK_LISTENER_PORT — the guest-facing sink listener the daemon's
+   * `FIRECRACKER_RUNNER_PLATFORM_URL` points at. Required by the platform
+   * when `RUN_ADAPTER=firecracker`; only for the firecracker adapter.
+   */
+  sinkListenerPort?: number;
 }
 
 export interface BootstrapOverrides {
@@ -319,7 +346,13 @@ export function generateEnvForTier(
     // Same-host only: explicit plaintext opt-out (Docker-bridge traffic
     // never leaves the machine). Without it the platform refuses the
     // non-loopback http:// runner URL at boot.
-    if (runBackend.allowPlaintextRunnerUrl) env.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
+    if (runBackend.allowPlaintextRunnerUrl) env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT = "1";
+    // Guest-facing sink listener — required by the platform for the
+    // firecracker adapter (boot refuses without it). The compose templates
+    // publish the port and pass the variable through.
+    if (runBackend.sinkListenerPort !== undefined) {
+      env.SINK_LISTENER_PORT = String(runBackend.sinkListenerPort);
+    }
   }
 
   return env;

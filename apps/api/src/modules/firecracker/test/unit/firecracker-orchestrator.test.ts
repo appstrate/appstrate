@@ -524,6 +524,38 @@ describe("exit reaper (ROB-1 layer 2)", () => {
     expect(await reapExitedVms.call(orch)).toBe(0);
     expect(vmsOf(orch).has("run_recent")).toBe(true);
   });
+
+  it("reaps a never-booted boundary past the threshold — TAP, index and slot freed, runId creatable again", async () => {
+    const { exec, calls } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    // Platform crash (or captured-bearer replay) right after the boundary
+    // create: a VmRecord with `proc: null` and no VMM ever spawned — no
+    // exit event can ever stamp `exitedAt`, so only its age can reap it.
+    await orch.createIsolationBoundary("run_neverboot");
+    expect(reservedIndexes(orch).size).toBe(1);
+
+    const reapExitedVms = Reflect.get(orch, "reapExitedVms") as (
+      this: FirecrackerOrchestrator,
+      now?: number,
+    ) => Promise<number>;
+
+    // Within the threshold the boundary is left alone — the platform may
+    // still be about to call startWorkload.
+    expect(await reapExitedVms.call(orch)).toBe(0);
+    expect(vmsOf(orch).has("run_neverboot")).toBe(true);
+
+    // Past the threshold the reaper frees everything the create allocated.
+    expect(await reapExitedVms.call(orch, Date.now() + 6 * 60_000)).toBe(1);
+    expect(vmsOf(orch).has("run_neverboot")).toBe(false);
+    expect(calls.filter((c) => c.cmd.join(" ") === "ip link del afc1")).toHaveLength(1);
+    expect(reservedIndexes(orch).size).toBe(0);
+
+    // The admission slot AND the per-runId guard are released — a fresh
+    // run may reuse the id (the leaked boundary no longer pins them).
+    await orch.createIsolationBoundary("run_neverboot");
+    expect(vmsOf(orch).has("run_neverboot")).toBe(true);
+    expect(reservedIndexes(orch).size).toBe(1);
+  });
 });
 
 describe("workloadSpecSchema maxLifetimeSeconds (B2)", () => {

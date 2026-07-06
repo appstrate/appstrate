@@ -42,7 +42,7 @@
 import { stat, readFile, copyFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
-import type { EnvVars } from "./secrets.ts";
+import { pickSinkListenerPort, type EnvVars } from "./secrets.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 export type InstallMode = "fresh" | "upgrade";
@@ -282,6 +282,143 @@ export function mergeEnv(existing: EnvVars, fresh: EnvVars): EnvVars {
     if (key in fresh) merged[key] = fresh[key] as string;
   }
   return merged;
+}
+
+/**
+ * What `reconcileRunnerPlaintextOptOut` decided, so the caller can tell
+ * the operator. `host` is the runner-URL hostname the decision was about.
+ */
+export type RunnerPlaintextOptOutAction =
+  | { kind: "none" }
+  /** Legacy `FIRECRACKER_RUNNER_TLS_REQUIRED=0` rewritten to the new var. */
+  | { kind: "legacy-migrated"; host: string }
+  /** Same-host install detected — opt-out written on the operator's behalf. */
+  | { kind: "opt-out-written"; host: string }
+  /** Can't prove same-host — nothing written, platform will refuse boot. */
+  | { kind: "manual-followup"; host: string };
+
+/** Loopback spellings the installer itself could have written. Mirrors the
+ * platform gate's exemption (which additionally normalizes via WHATWG URL). */
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "[::1]" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
+  );
+}
+
+/**
+ * Upgrade-path reconciliation for the platform's plaintext-transport gate
+ * (`FIRECRACKER_RUNNER_ALLOW_PLAINTEXT`).
+ *
+ * Why this exists: the platform refuses a plaintext `http://` runner URL
+ * to a non-loopback host at boot unless `FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1`
+ * is set. Fresh same-host installs get the opt-out from `generateEnvForTier`,
+ * but an UPGRADE merges the existing `.env` (existing wins) — an install made
+ * before the gate existed has no opt-out, so the upgraded platform would
+ * hard-fail boot with no path forward. Same-host installs are the installer's
+ * own topology (it wrote `http://<LAN-IP>:3100` itself), so writing the
+ * opt-out on upgrade is just completing its own earlier work.
+ *
+ * Rules (only when `RUN_ADAPTER=firecracker` and the runner URL is plaintext
+ * non-loopback; the removed legacy `FIRECRACKER_RUNNER_TLS_REQUIRED` key is
+ * always dropped — the platform no longer reads it):
+ *   1. `FIRECRACKER_RUNNER_ALLOW_PLAINTEXT` already set → keep it, `none`.
+ *   2. Legacy `FIRECRACKER_RUNNER_TLS_REQUIRED=0` (the old opt-out spelling)
+ *      → rewrite to `FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1` (`legacy-migrated`).
+ *   3. URL host is one of THIS machine's IPv4 addresses → same-host by
+ *      construction → write the opt-out (`opt-out-written`).
+ *   4. Otherwise → do NOT silently bless a possibly split-host plaintext
+ *      link; return `manual-followup` so the caller prints a prominent
+ *      blocking note (the platform will refuse to boot until the operator
+ *      either fronts the daemon with TLS or sets the opt-out themselves).
+ *
+ * Pure: returns a new env dict, never mutates the input. `localAddresses`
+ * is injected (callers pass `localIpv4Addresses()`) so tests are hermetic.
+ */
+export function reconcileRunnerPlaintextOptOut(
+  env: EnvVars,
+  localAddresses: ReadonlySet<string>,
+): { env: EnvVars; action: RunnerPlaintextOptOutAction } {
+  const out: EnvVars = { ...env };
+  const legacy = out.FIRECRACKER_RUNNER_TLS_REQUIRED;
+  delete out.FIRECRACKER_RUNNER_TLS_REQUIRED;
+
+  if (out.RUN_ADAPTER !== "firecracker") return { env: out, action: { kind: "none" } };
+  const url = out.FIRECRACKER_RUNNER_URL;
+  if (!url) return { env: out, action: { kind: "none" } };
+  let host: string;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" || isLoopbackHost(parsed.hostname)) {
+      return { env: out, action: { kind: "none" } };
+    }
+    host = parsed.hostname;
+  } catch {
+    // Unparseable URL — the platform's own Zod validation will surface it.
+    return { env: out, action: { kind: "none" } };
+  }
+
+  if (out.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT !== undefined) {
+    return { env: out, action: { kind: "none" } };
+  }
+  if (legacy === "0" || legacy?.toLowerCase() === "false") {
+    out.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT = "1";
+    return { env: out, action: { kind: "legacy-migrated", host } };
+  }
+  if (localAddresses.has(host)) {
+    out.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT = "1";
+    return { env: out, action: { kind: "opt-out-written", host } };
+  }
+  return { env: out, action: { kind: "manual-followup", host } };
+}
+
+/**
+ * What `reconcileSinkListenerPort` decided, so the caller can tell the
+ * operator to repoint the runner daemon at the new port.
+ */
+export type SinkListenerPortAction =
+  | { kind: "none" }
+  /** SINK_LISTENER_PORT was missing and has been written. */
+  | { kind: "port-written"; port: number };
+
+/**
+ * Upgrade-path reconciliation for the platform's guest-facing sink listener
+ * (`SINK_LISTENER_PORT`).
+ *
+ * Why this exists: the platform REQUIRES `SINK_LISTENER_PORT` when
+ * `RUN_ADAPTER=firecracker` (the backend refuses to initialize without it —
+ * hard boot failure). Fresh firecracker installs get it from
+ * `generateEnvForTier`, but an UPGRADE merges the existing `.env` (existing
+ * wins) — an install made before the listener existed has no port, so the
+ * upgraded platform would refuse boot with no path forward. Writing the
+ * default is safe unilaterally: the platform side is self-contained (a
+ * second listener boots, the main port keeps serving the sink routes), so
+ * runs keep working while the operator repoints the daemon's
+ * `FIRECRACKER_RUNNER_PLATFORM_URL` — until then the only effect is a
+ * mismatch warning in the platform boot log. The caller MUST surface that
+ * follow-up (see the `port-written` note in `installDockerTier`).
+ *
+ * Rules (only when `RUN_ADAPTER=firecracker`):
+ *   1. `SINK_LISTENER_PORT` already set (non-empty) → keep it, `none`.
+ *   2. Missing/empty → write the default (3310, or 3311 when the app itself
+ *      sits on 3310 — the platform refuses `SINK_LISTENER_PORT === PORT`),
+ *      return `port-written`.
+ *
+ * Pure: returns a new env dict, never mutates the input.
+ */
+export function reconcileSinkListenerPort(env: EnvVars): {
+  env: EnvVars;
+  action: SinkListenerPortAction;
+} {
+  if (env.RUN_ADAPTER !== "firecracker") return { env: { ...env }, action: { kind: "none" } };
+  // An empty assignment reads as unset platform-side (the env getter
+  // coalesces "" → undefined), so treat it as missing here too.
+  if (env.SINK_LISTENER_PORT) return { env: { ...env }, action: { kind: "none" } };
+  const appPort = Number(env.PORT);
+  const port = pickSinkListenerPort(Number.isInteger(appPort) && appPort > 0 ? appPort : 3000);
+  const out: EnvVars = { ...env, SINK_LISTENER_PORT: String(port) };
+  return { env: out, action: { kind: "port-written", port } };
 }
 
 /**

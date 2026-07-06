@@ -41,10 +41,11 @@ import { getEnv } from "@appstrate/env";
 import { requestId } from "../middleware/request-id.ts";
 import { errorHandler } from "../middleware/error-handler.ts";
 import { bodyLimit } from "../middleware/body-limit.ts";
+import { shutdownGate } from "../middleware/shutdown-gate.ts";
 import { createRunsEventsRouter } from "../routes/runs-events.ts";
 import { createInternalRouter } from "../routes/internal.ts";
 import healthRouter from "../routes/health.ts";
-import { ApiError, notFound } from "./errors.ts";
+import { notFound } from "./errors.ts";
 import type { AppEnv } from "../types/index.ts";
 
 export interface SinkAppOptions {
@@ -67,17 +68,10 @@ export function createSinkApp(opts: SinkAppOptions = {}): Hono<AppEnv> {
   // (`/api/uploads/_content`, signed-token streaming sink) is not mounted
   // here, so the cap applies unconditionally.
   app.use("*", bodyLimit(getEnv().API_BODY_LIMIT_BYTES));
-  app.use("*", async (c, next) => {
-    if (opts.isShuttingDown?.() && c.req.method === "POST") {
-      throw new ApiError({
-        status: 503,
-        code: "shutting_down",
-        title: "Service Unavailable",
-        detail: "Server is shutting down",
-      });
-    }
-    return next();
-  });
+  app.use(
+    "*",
+    shutdownGate(() => opts.isShuttingDown?.() ?? false),
+  );
 
   app.route("/", healthRouter);
   app.route("/api", createRunsEventsRouter());

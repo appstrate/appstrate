@@ -248,27 +248,21 @@ describe("teardown retry hardening", () => {
     expect(vmCount(orch)).toBe(0);
   });
 
-  it("retryCleanup short-circuits errors its predicate marks unretryable", async () => {
+  it("removeJailCgroup treats an absent cgroup dir as success without burning retries", async () => {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec);
-    const retryCleanup = Reflect.get(orch, "retryCleanup") as (
-      op: () => Promise<unknown>,
-      stopRetrying?: (err: unknown) => boolean,
+    // ENOENT ("already gone") is handled INSIDE the retried op — it must
+    // not burn retries + backoff (the cgroup path hits this on every
+    // teardown when cgroups are off). A single retry would sleep 60s here,
+    // well past the test timeout, so a fast clean resolve proves the first
+    // attempt succeeded.
+    Reflect.set(orch, "cleanupRetryBaseMs", 60_000);
+    const removeJailCgroup = Reflect.get(orch, "removeJailCgroup") as (
+      this: FirecrackerOrchestrator,
+      jailId: string,
     ) => Promise<void>;
 
-    // ENOENT-style "already gone" must not burn retries + backoff (the
-    // cgroup path hits this on every teardown when cgroups are off).
-    let opCalls = 0;
-    await expect(
-      retryCleanup.call(
-        orch,
-        () => {
-          opCalls++;
-          return Promise.reject(Object.assign(new Error("gone"), { code: "ENOENT" }));
-        },
-        (err) => (err as { code?: unknown }).code === "ENOENT",
-      ),
-    ).rejects.toThrow("gone");
-    expect(opCalls).toBe(1);
+    // No such cgroup dir exists on this host → rmdir answers ENOENT.
+    await removeJailCgroup.call(orch, "afc-no-such-jail");
   });
 });

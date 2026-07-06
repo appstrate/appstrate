@@ -20,6 +20,7 @@ import type {
   WorkloadSpec,
 } from "@appstrate/core/platform-types";
 import { createRunnerApp, type RunnerOrchestrator } from "../../runner/server.ts";
+import { _resetCacheForTesting as _resetPlatformEnvCacheForTesting } from "@appstrate/env";
 import { RemoteFirecrackerOrchestrator } from "../../remote-orchestrator.ts";
 import { _resetRemoteEnvCacheForTesting } from "../../remote-env.ts";
 
@@ -97,15 +98,20 @@ function makeClient(fake: RunnerOrchestrator) {
 describe("runner protocol round-trip (real client ↔ real server)", () => {
   const savedUrl = process.env.FIRECRACKER_RUNNER_URL;
   const savedToken = process.env.FIRECRACKER_RUNNER_TOKEN;
-  const savedTls = process.env.FIRECRACKER_RUNNER_TLS_REQUIRED;
+  const savedAllowPlaintext = process.env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT;
+  const savedSinkPort = process.env.SINK_LISTENER_PORT;
 
   beforeEach(() => {
     process.env.FIRECRACKER_RUNNER_URL = "http://10.0.0.5:3100";
     process.env.FIRECRACKER_RUNNER_TOKEN = TOKEN;
     // Plaintext non-loopback URL — opt out of the transport gate (its own
     // coverage lives in remote-env.test.ts).
-    process.env.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
+    process.env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT = "1";
+    // firecracker requires the dedicated sink listener; initialize() reads it
+    // via @appstrate/env, so set it and reset that cache too.
+    process.env.SINK_LISTENER_PORT = "3310";
     _resetRemoteEnvCacheForTesting();
+    _resetPlatformEnvCacheForTesting();
   });
 
   afterEach(() => {
@@ -113,9 +119,12 @@ describe("runner protocol round-trip (real client ↔ real server)", () => {
     else process.env.FIRECRACKER_RUNNER_URL = savedUrl;
     if (savedToken === undefined) delete process.env.FIRECRACKER_RUNNER_TOKEN;
     else process.env.FIRECRACKER_RUNNER_TOKEN = savedToken;
-    if (savedTls === undefined) delete process.env.FIRECRACKER_RUNNER_TLS_REQUIRED;
-    else process.env.FIRECRACKER_RUNNER_TLS_REQUIRED = savedTls;
+    if (savedAllowPlaintext === undefined) delete process.env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT;
+    else process.env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT = savedAllowPlaintext;
+    if (savedSinkPort === undefined) delete process.env.SINK_LISTENER_PORT;
+    else process.env.SINK_LISTENER_PORT = savedSinkPort;
     _resetRemoteEnvCacheForTesting();
+    _resetPlatformEnvCacheForTesting();
   });
 
   it("initialize() health-checks the daemon end to end", async () => {

@@ -24,6 +24,7 @@ import {
   inferInstalledTier,
   parseEnvFile,
   mergeEnv,
+  reconcileRunnerPlaintextOptOut,
   backupFiles,
   restoreBackups,
   cleanupBackups,
@@ -236,6 +237,88 @@ describe("mergeEnv", () => {
     const existing = { APPSTRATE_VERSION: "1.0.0-alpha.50" };
     const fresh = {};
     expect(mergeEnv(existing, fresh).APPSTRATE_VERSION).toBe("1.0.0-alpha.50");
+  });
+});
+
+describe("reconcileRunnerPlaintextOptOut", () => {
+  const LOCAL = new Set(["10.0.0.5", "192.168.1.20", "127.0.0.1"]);
+  const firecrackerEnv = (extra: Record<string, string> = {}) => ({
+    RUN_ADAPTER: "firecracker",
+    FIRECRACKER_RUNNER_URL: "http://10.0.0.5:3100",
+    FIRECRACKER_RUNNER_TOKEN: "tok-abcdef1234567890",
+    ...extra,
+  });
+
+  it("writes the opt-out when the plaintext runner URL points at this machine (same-host)", () => {
+    const { env, action } = reconcileRunnerPlaintextOptOut(firecrackerEnv(), LOCAL);
+    expect(action).toEqual({ kind: "opt-out-written", host: "10.0.0.5" });
+    expect(env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT).toBe("1");
+  });
+
+  it("returns manual-followup (nothing written) when the plaintext host is NOT this machine", () => {
+    const { env, action } = reconcileRunnerPlaintextOptOut(
+      firecrackerEnv({ FIRECRACKER_RUNNER_URL: "http://203.0.113.9:3100" }),
+      LOCAL,
+    );
+    expect(action).toEqual({ kind: "manual-followup", host: "203.0.113.9" });
+    // Never silently bless a possibly split-host plaintext link.
+    expect(env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT).toBeUndefined();
+  });
+
+  it("migrates the removed legacy FIRECRACKER_RUNNER_TLS_REQUIRED=0 opt-out to the new var", () => {
+    const { env, action } = reconcileRunnerPlaintextOptOut(
+      firecrackerEnv({
+        FIRECRACKER_RUNNER_URL: "http://203.0.113.9:3100", // even off-host: the operator had opted in
+        FIRECRACKER_RUNNER_TLS_REQUIRED: "0",
+      }),
+      LOCAL,
+    );
+    expect(action).toEqual({ kind: "legacy-migrated", host: "203.0.113.9" });
+    expect(env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT).toBe("1");
+    expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBeUndefined();
+  });
+
+  it("always drops the removed legacy key, whatever its value", () => {
+    const { env, action } = reconcileRunnerPlaintextOptOut(
+      firecrackerEnv({ FIRECRACKER_RUNNER_TLS_REQUIRED: "1" }),
+      LOCAL,
+    );
+    // `=1` was the old "refuse, stated explicitly" — same as the new default;
+    // same-host detection still applies for the opt-out itself.
+    expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBeUndefined();
+    expect(action.kind).toBe("opt-out-written");
+  });
+
+  it("does nothing when the opt-out is already present (existing wins)", () => {
+    const { env, action } = reconcileRunnerPlaintextOptOut(
+      firecrackerEnv({ FIRECRACKER_RUNNER_ALLOW_PLAINTEXT: "1" }),
+      LOCAL,
+    );
+    expect(action).toEqual({ kind: "none" });
+    expect(env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT).toBe("1");
+  });
+
+  it("does nothing for https, loopback, docker-adapter, or missing-URL envs", () => {
+    const cases: Record<string, string>[] = [
+      firecrackerEnv({ FIRECRACKER_RUNNER_URL: "https://runner.internal:3100" }),
+      firecrackerEnv({ FIRECRACKER_RUNNER_URL: "http://127.0.0.1:3100" }),
+      firecrackerEnv({ FIRECRACKER_RUNNER_URL: "http://localhost:3100" }),
+      { RUN_ADAPTER: "docker", FIRECRACKER_RUNNER_URL: "http://10.0.0.5:3100" },
+      { RUN_ADAPTER: "firecracker" },
+    ];
+    for (const input of cases) {
+      const { env, action } = reconcileRunnerPlaintextOptOut(input, LOCAL);
+      expect(action).toEqual({ kind: "none" });
+      expect(env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT).toBeUndefined();
+    }
+  });
+
+  it("returns a new object and never mutates the input", () => {
+    const input = firecrackerEnv({ FIRECRACKER_RUNNER_TLS_REQUIRED: "0" });
+    const snapshot = { ...input };
+    const { env } = reconcileRunnerPlaintextOptOut(input, LOCAL);
+    expect(env).not.toBe(input);
+    expect(input).toEqual(snapshot);
   });
 });
 

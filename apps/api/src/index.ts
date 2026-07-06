@@ -13,6 +13,7 @@ import { requestId } from "./middleware/request-id.ts";
 import { clientIp } from "./middleware/client-ip.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { bodyLimit } from "./middleware/body-limit.ts";
+import { shutdownGate } from "./middleware/shutdown-gate.ts";
 import { createAgentsRouter } from "./routes/agents.ts";
 import { createRunsRouter } from "./routes/runs.ts";
 import { createRunsRemoteRouter } from "./routes/runs-remote.ts";
@@ -52,7 +53,7 @@ import {
   getModuleOpenApiTags,
   registerModuleRoutes,
 } from "./lib/modules/module-loader.ts";
-import { ApiError, notFound } from "./lib/errors.ts";
+import { notFound } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
@@ -151,20 +152,14 @@ Install the CLI (\`curl -fsSL https://get.appstrate.dev | bash\` or \`bunx appst
 `;
 app.get("/llms.txt", (c) => c.text(LLMS_TXT));
 
-// Shutdown gate — reject new write requests during graceful shutdown
+// Shutdown gate — reject new write requests during graceful shutdown.
+// Shared middleware with the sink listener (middleware/shutdown-gate.ts).
 let shuttingDown = false;
 
-app.use("*", async (c, next) => {
-  if (shuttingDown && c.req.method === "POST") {
-    throw new ApiError({
-      status: 503,
-      code: "shutting_down",
-      title: "Service Unavailable",
-      detail: "Server is shutting down",
-    });
-  }
-  return next();
-});
+app.use(
+  "*",
+  shutdownGate(() => shuttingDown),
+);
 
 // Bootstrap-token redemption (#344 Layer 2b) — registered BEFORE the
 // Better Auth catch-all so the more-specific path wins. This route owns

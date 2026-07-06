@@ -33,7 +33,12 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import type { BootHeartbeatOutcome } from "../../services/state/runs.ts";
-import { getRemoteEnv, RunnerTransportSecurityError, type RemoteRunnerEnv } from "./remote-env.ts";
+import {
+  getRemoteEnv,
+  RunnerConfigError,
+  RunnerTransportSecurityError,
+  type RemoteRunnerEnv,
+} from "./remote-env.ts";
 import { parsePlatformApiUrl } from "./runner/platform-url.ts";
 import {
   RUNNER_ROUTES,
@@ -229,6 +234,22 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
    */
   async initialize(): Promise<void> {
     const env = this.requireEnv();
+    // Guest-isolation prerequisite, checked BEFORE any network call: the
+    // firecracker firewall scopes guest→platform egress by port, so without
+    // the dedicated sink listener (lib/sink-server.ts) guests would reach
+    // the FULL platform API and isolation would rest on per-route L7 auth
+    // alone. Static configuration → boot-fatal (RunnerConfigError carries
+    // the `bootFatal` marker boot.ts rethrows on).
+    const sinkPort = getEnv().SINK_LISTENER_PORT;
+    if (sinkPort === undefined) {
+      throw new RunnerConfigError(
+        `RUN_ADAPTER=firecracker requires SINK_LISTENER_PORT: guest microVMs must target ` +
+          `the dedicated sink listener, not the full platform API. Set SINK_LISTENER_PORT ` +
+          `(e.g. 3310) in the platform environment — the platform then boots a second ` +
+          `minimal listener on that port (apps/api/src/lib/sink-server.ts) — and point the ` +
+          `daemon's FIRECRACKER_RUNNER_PLATFORM_URL at it (http://<platform-ip>:3310).`,
+      );
+    }
     const res = await this.call(RUNNER_ROUTES.health, { method: "GET" });
     const parsed = healthResponseSchema.safeParse(await res.json().catch(() => undefined));
     if (!parsed.success) {
@@ -264,31 +285,42 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
       platformReachable: health.platformReachable,
       guestPathVerified: health.guestPathVerified,
     });
-    this.warnIfGuestSurfaceIsFullApi(health.platformUrl);
+    // A dead guest→platform path otherwise surfaces only as 60s run-stall
+    // watchdog failures — make it loud and actionable at boot instead of
+    // buried in the info-level connected line above. `null` means the
+    // daemon could not verify (probe tooling absent) — not warned, only
+    // an explicit negative verdict is.
+    if (health.platformReachable === false || health.guestPathVerified === false) {
+      logger.warn(
+        "firecracker: the daemon reports the guest→platform path unhealthy — runs will " +
+          "produce no sink events and die on the stall watchdog. platformReachable=false: " +
+          "the runner host itself cannot reach FIRECRACKER_RUNNER_PLATFORM_URL — check that " +
+          "URL on the daemon, that this platform's sink listener (SINK_LISTENER_PORT) is up " +
+          "and published, and any firewall between the hosts. guestPathVerified=false: the " +
+          "host reaches it but the GUEST network path is dropped — check the daemon's boot " +
+          "log for its nftables drop diagnostics.",
+        {
+          guestPlatformUrl: health.platformUrl,
+          platformReachable: health.platformReachable,
+          guestPathVerified: health.guestPathVerified,
+        },
+      );
+    }
+    this.warnOnSinkPortMismatch(health.platformUrl, sinkPort);
   }
 
   /**
    * Sink-only isolation check. The daemon's `platformUrl`
    * (FIRECRACKER_RUNNER_PLATFORM_URL) is the ip:port guests reach the
    * platform on — the host/guest nftables rules scope guest egress to
-   * exactly that port. Unless it targets the dedicated sink listener
-   * (`SINK_LISTENER_PORT`, lib/sink-server.ts), guests can reach EVERY
-   * platform route on that port and isolation rests solely on per-route
-   * L7 auth. Warn — never fail — so existing single-listener deployments
-   * keep booting, but the downgraded posture is visible in the boot log.
+   * exactly that port. The dangerous direction is a stale daemon still
+   * pointing at a port this platform may not serve as the sink listener:
+   * either runs stall (nothing listens there) or guests get the full API
+   * (PORT still serves every route). Warn — never fail — because a
+   * container port mapping can legitimately make the guest-visible port
+   * differ from `SINK_LISTENER_PORT`.
    */
-  private warnIfGuestSurfaceIsFullApi(guestPlatformUrl: string): void {
-    const sinkPort = getEnv().SINK_LISTENER_PORT;
-    if (sinkPort === undefined) {
-      logger.warn(
-        "firecracker: SINK_LISTENER_PORT is not set — guest microVMs reach the FULL " +
-          "platform API surface (isolation rests on per-route auth only). Set " +
-          "SINK_LISTENER_PORT and point the daemon's FIRECRACKER_RUNNER_PLATFORM_URL " +
-          "at it so the firewall's port scoping becomes sink-only.",
-        { guestPlatformUrl },
-      );
-      return;
-    }
+  private warnOnSinkPortMismatch(guestPlatformUrl: string, sinkPort: number): void {
     let guestPort: number;
     try {
       guestPort = parsePlatformApiUrl(guestPlatformUrl).port;
@@ -297,10 +329,13 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     }
     if (guestPort !== sinkPort) {
       logger.warn(
-        "firecracker: guests target a platform port that is not SINK_LISTENER_PORT — " +
-          "if that port serves the full API, guest isolation is NOT sink-only. Point the " +
-          "daemon's FIRECRACKER_RUNNER_PLATFORM_URL at the sink listener (or its mapped " +
-          "port) to close the gap. Ignore if the guest port maps onto the sink listener.",
+        "firecracker: the daemon's guest-facing platform URL does not target this " +
+          "platform's sink listener. Guests can only reach the platform on that exact " +
+          "port — if nothing serves it, every run stalls with no sink events; if the " +
+          "full API serves it (PORT), guest isolation is NOT sink-only. Check " +
+          "FIRECRACKER_RUNNER_PLATFORM_URL on the runner host (should point at the sink " +
+          "port) and SINK_LISTENER_PORT on the platform. Ignore only if a port mapping " +
+          "translates the guest port onto the sink listener.",
         { guestPlatformUrl, guestPort, sinkListenerPort: sinkPort },
       );
     }

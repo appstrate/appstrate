@@ -170,6 +170,12 @@ services:
       - appstrate-public
     ports:
       - "${PORT:-3000}:3000"
+      # Guest-facing sink listener (firecracker backend): publishes the
+      # dedicated run-sink port so the runner daemon and its microVMs can
+      # reach it. Inert on the default docker adapter — with
+      # SINK_LISTENER_PORT unset in .env nothing listens on 3310 inside the
+      # container, so the mapping accepts and resets connections.
+      - "${SINK_LISTENER_PORT:-3310}:${SINK_LISTENER_PORT:-3310}"
     restart: unless-stopped
     mem_limit: 8g
     environment:
@@ -200,6 +206,15 @@ services:
       # ── Run / Sidecar ──
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
       - DOCKER_SOCKET=/var/run/docker.sock
+      # ── Firecracker backend (only when RUN_ADAPTER=firecracker) ──
+      # The platform reads only these; the host-side FIRECRACKER_* vars are
+      # daemon-only. SINK_LISTENER_PORT is REQUIRED for firecracker (the
+      # guest-facing sink listener — see apps/api/src/lib/sink-server.ts) and
+      # pairs with the `ports:` mapping above.
+      - FIRECRACKER_RUNNER_URL=${FIRECRACKER_RUNNER_URL:-}
+      - FIRECRACKER_RUNNER_TOKEN=${FIRECRACKER_RUNNER_TOKEN:-}
+      - FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=${FIRECRACKER_RUNNER_ALLOW_PLAINTEXT:-}
+      - SINK_LISTENER_PORT=${SINK_LISTENER_PORT:-}
       # PLATFORM_API_URL intentionally omitted: left unset, the platform
       # auto-detects its Docker network and builds the sidecar-facing URL
       # from the effective container hostname. Forwarding `${PLATFORM_API_URL:-}`

@@ -21,6 +21,7 @@ import {
   isRemoteAppUrl,
   isValidBootstrapEmail,
   parseAppUrl,
+  pickSinkListenerPort,
   renderEnvFile,
   type BootstrapOverrides,
   type RunBackendEnv,
@@ -52,6 +53,7 @@ import {
   describeProcessOnPort,
   detectLanIpv4,
   isIpv4,
+  localIpv4Addresses,
   runCommand,
 } from "../lib/install/os.ts";
 import { generateRunnerToken } from "../lib/runner/config-files.ts";
@@ -60,6 +62,8 @@ import {
   detectInstallMode,
   inferInstalledTier,
   mergeEnv,
+  reconcileRunnerPlaintextOptOut,
+  reconcileSinkListenerPort,
   backupFiles,
   cleanupBackups,
   runWithRollback,
@@ -1039,7 +1043,16 @@ export type RunBackendConfig =
       topology: "same-host" | "remote";
       /** This host's LAN IPv4 — the address the daemon/guests reach the platform on. */
       hostIp: string;
-      /** Full platform URL for `runner install --platform-url` (http://<hostIp>:<appPort>). */
+      /**
+       * Guest-facing sink listener port (SINK_LISTENER_PORT in the platform
+       * `.env`) — required by the platform for the firecracker adapter.
+       */
+      sinkPort: number;
+      /**
+       * Full platform URL for `runner install --platform-url`
+       * (http://<hostIp>:<sinkPort>) — the daemon and its guests must target
+       * the sink listener, never the full API on the app port.
+       */
       platformUrl: string;
     };
 
@@ -1243,6 +1256,7 @@ export async function resolveRunBackend(
       );
     }
     const token = resolveRunnerToken(inputs.runnerToken, mintToken);
+    const sinkPort = pickSinkListenerPort(appPort);
     return {
       adapter: "firecracker",
       runnerUrl: `http://${ip}:${RUNNER_DEFAULT_PORT}`,
@@ -1250,7 +1264,8 @@ export async function resolveRunBackend(
       tokenSource: token.source,
       topology: "same-host",
       hostIp: ip,
-      platformUrl: `http://${ip}:${appPort}`,
+      sinkPort,
+      platformUrl: `http://${ip}:${sinkPort}`,
     };
   }
 
@@ -1308,6 +1323,7 @@ export async function resolveRunBackend(
   // A missing this-host IP (non-interactive, undetectable) degrades only the
   // printed hint — the platform `.env` needs just the runner URL + token.
   const platformHost = hostIp || "<this-host-ip>";
+  const sinkPort = pickSinkListenerPort(appPort);
 
   return {
     adapter: "firecracker",
@@ -1316,7 +1332,8 @@ export async function resolveRunBackend(
     tokenSource: token.source,
     topology: "remote",
     hostIp,
-    platformUrl: `http://${platformHost}:${appPort}`,
+    sinkPort,
+    platformUrl: `http://${platformHost}:${sinkPort}`,
   };
 }
 
@@ -1380,7 +1397,7 @@ export function firecrackerFollowupNote(
       "Split-host transport: the platform refuses a plaintext http:// runner URL",
       "by default (the wire carries run credentials). Put a TLS reverse proxy in",
       "front of the daemon and use https:// in FIRECRACKER_RUNNER_URL, or set",
-      "FIRECRACKER_RUNNER_TLS_REQUIRED=0 only for a genuinely private link.",
+      "FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1 only for a genuinely private link.",
       "",
     );
   }
@@ -1620,6 +1637,9 @@ async function installDockerTier(
           // opt out of the platform's default plaintext-non-loopback refusal.
           // Remote daemons never get the opt-out — split-host needs TLS.
           allowPlaintextRunnerUrl: runBackend.topology === "same-host",
+          // Guest-facing sink listener — required by the platform for the
+          // firecracker adapter; the daemon's platform URL targets it.
+          sinkListenerPort: runBackend.sinkPort,
         }
       : { adapter: "docker" };
   // Healthcheck + browser go through the local bind address: on a
@@ -1717,13 +1737,84 @@ async function installDockerTier(
         opts.bootstrap,
         runBackendEnv,
       );
-      const envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
+      let envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
+      // Upgrade-only: a pre-transport-gate firecracker install has a
+      // plaintext non-loopback runner URL and no opt-out — the upgraded
+      // platform would hard-fail boot. Same-host (URL host is one of this
+      // machine's addresses) gets the opt-out written on the installer's
+      // behalf; anything else gets a prominent note instead of a silent
+      // security downgrade. Also migrates/drops the removed legacy
+      // FIRECRACKER_RUNNER_TLS_REQUIRED key.
+      const upgradeNotes: Array<{ message: string; title: string }> = [];
+      if (mode === "upgrade") {
+        const reconciled = reconcileRunnerPlaintextOptOut(envVars, localIpv4Addresses());
+        envVars = reconciled.env;
+        const action = reconciled.action;
+        if (action.kind === "legacy-migrated") {
+          upgradeNotes.push({
+            message:
+              `Your .env used the removed FIRECRACKER_RUNNER_TLS_REQUIRED=0 opt-out; it was\n` +
+              `rewritten to FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1 (same behavior, new name).`,
+            title: "Firecracker transport opt-out renamed",
+          });
+        } else if (action.kind === "opt-out-written") {
+          upgradeNotes.push({
+            message:
+              `Your firecracker runner URL (http://${action.host}) is plaintext and this\n` +
+              `platform version refuses plaintext non-loopback runner URLs at boot.\n` +
+              `The URL points at this machine (same-host install), so\n` +
+              `FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1 was added to .env — the traffic\n` +
+              `never leaves the host.`,
+            title: "Firecracker transport opt-out added",
+          });
+        } else if (action.kind === "manual-followup") {
+          upgradeNotes.push({
+            message:
+              `FIRECRACKER_RUNNER_URL is plaintext http:// to ${action.host}, which does\n` +
+              `not look like this machine. This platform version REFUSES plaintext\n` +
+              `non-loopback runner URLs at boot — the stack below will NOT come up\n` +
+              `until you either:\n` +
+              `  • put a TLS reverse proxy in front of the daemon and switch\n` +
+              `    FIRECRACKER_RUNNER_URL to https:// (required for split-host), or\n` +
+              `  • add FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1 to ${dir}/.env — ONLY if\n` +
+              `    platform and daemon genuinely share a host or a private link.`,
+            title: "ACTION REQUIRED — Firecracker runner transport",
+          });
+        }
+        // Pre-sink-listener firecracker install: this platform version
+        // REQUIRES SINK_LISTENER_PORT for the firecracker adapter. Write the
+        // default and tell the operator to repoint the daemon.
+        const sinkReconciled = reconcileSinkListenerPort(envVars);
+        envVars = sinkReconciled.env;
+        if (sinkReconciled.action.kind === "port-written") {
+          const sinkPort = sinkReconciled.action.port;
+          upgradeNotes.push({
+            message:
+              `SINK_LISTENER_PORT=${sinkPort} was added to .env — this platform version\n` +
+              `requires a dedicated guest-facing sink listener for firecracker (guest\n` +
+              `microVMs must not reach the full API). Finish the rollout by repointing\n` +
+              `the runner daemon at it:\n` +
+              `  on the runner host, set FIRECRACKER_RUNNER_PLATFORM_URL to\n` +
+              `  http://<platform-ip>:${sinkPort} (edit /etc/appstrate-runner/env, then\n` +
+              `  restart the daemon — or re-run \`appstrate runner install\`).\n` +
+              `Safe order: platform first (the main port keeps serving the sink routes),\n` +
+              `then the daemon — until it is repointed the only effect is a port-mismatch\n` +
+              `warning in the platform boot log.`,
+            title: "Firecracker: sink listener port added — repoint the daemon",
+          });
+        }
+      }
       await writeComposeEnv(dir, renderEnvFile(envVars));
       writeSpinner.stop(
         mode === "upgrade"
           ? `Rewrote ${dir}/docker-compose.yml (secrets preserved)`
           : `Wrote ${dir}/docker-compose.yml + .env`,
       );
+      // After the spinner stops (a note inside an active spinner garbles
+      // the output) but BEFORE `docker compose up` — on the manual-followup
+      // path the platform will refuse to boot and the healthcheck below
+      // will fail; the operator must see the explanation first.
+      for (const note of upgradeNotes) clack.note(note.message, note.title);
 
       // Bring stack up. The project name is pinned via `--project-name`
       // rather than baked into the compose template, so two installs
