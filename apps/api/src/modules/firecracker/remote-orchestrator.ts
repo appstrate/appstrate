@@ -261,21 +261,25 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
   }
 
   /**
-   * No-op ON PURPOSE: the daemon owns its own lifecycle. Shutting down
-   * (or redeploying) the platform must not kill remote microVMs — an
-   * in-flight run keeps executing on the runner host, and the platform
-   * reattaches via waitForExit/streamLogs after restart.
+   * No-op ON PURPOSE: the daemon owns the host's VM lifecycle, and a
+   * platform shutdown/redeploy must not SIGKILL in-flight microVMs from
+   * here. Recovery of the runs this restart orphans happens at the NEXT
+   * platform boot: the boot finalizer sweeps stale-heartbeat runs and
+   * stops each one's workload via `stopByRunId` (see boot.ts), while the
+   * daemon's own exit-reaper sweeps VMs whose run no platform ever
+   * finalized. There is no live reattach (waitForExit/streamLogs) across
+   * a platform restart.
    */
   async shutdown(): Promise<void> {}
 
   /**
-   * No-op ON PURPOSE, mirroring shutdown(): the daemon owns the host's VM
-   * lifecycle. It already sweeps its own orphans at ITS boot (daemon.ts) —
-   * the correct and sufficient crash-recovery point. A PLATFORM boot must
-   * never reap VMs on the runner host: an in-flight run survives a platform
-   * redeploy (see shutdown()), so a host-wide sweep triggered from here
-   * would SIGKILL every live microVM mid-run. The platform reports zero and
-   * leaves host reconciliation to the daemon.
+   * Returns zeros ON PURPOSE, mirroring shutdown(): a host-wide sweep
+   * triggered from a platform boot would SIGKILL live microVMs owned by
+   * other in-flight runs (multi-instance deployments share the runner
+   * host). Per-run reclamation happens elsewhere: the boot finalizer
+   * calls `stopByRunId` for each orphaned run it finalizes (boot.ts),
+   * and the daemon sweeps its own host at ITS boot (daemon.ts) plus
+   * reaps exited VMs continuously via its exit-reaper.
    */
   async cleanupOrphans(): Promise<CleanupReport> {
     return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };

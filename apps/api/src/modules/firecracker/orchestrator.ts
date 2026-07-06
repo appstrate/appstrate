@@ -58,7 +58,7 @@ import { constants as fsConstants } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { getFirecrackerEnv } from "./runner/host-env.ts";
+import { getFirecrackerEnv, jailUidRange } from "./runner/host-env.ts";
 import { parsePlatformApiUrl } from "./runner/platform-url.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { pickOperatorSidecarEnv } from "@appstrate/runner-pi";
@@ -140,6 +140,16 @@ const CONSOLE_MAX_TAIL_BYTES = 256 * 1024;
 /** Most recent archived consoles kept — older ones are pruned at teardown. */
 const CONSOLE_ARCHIVE_MAX_FILES = 100;
 
+/** How often the exit reaper sweeps {@link FirecrackerOrchestrator.vms} (ms). */
+const EXIT_REAPER_INTERVAL_MS = 60_000;
+/**
+ * How long an exited VMM's record may linger before the reaper reclaims
+ * it. Generous on purpose: a healthy platform claims the exit within
+ * seconds (waitForExit long-poll), so anything past this is a platform
+ * that died mid-run — never a live waiter.
+ */
+const EXIT_REAP_AFTER_MS = 5 * 60_000;
+
 /**
  * Why a workload's microVM + workspace were destroyed, logged on every
  * teardown so there is never a silent path from "booted" to "gone".
@@ -150,13 +160,31 @@ const CONSOLE_ARCHIVE_MAX_FILES = 100;
  *   - `orphan-sweep`  — boot-time reclamation of a crashed predecessor
  *   - `shutdown`      — the daemon itself is stopping
  *   - `crash`         — the VMM exited abnormally without an intentional stop
+ *   - `reaper`        — the VMM exited but the run was never finalized by
+ *                       any platform (the platform died mid-run); the
+ *                       periodic exit reaper reclaims the record and its
+ *                       FIRECRACKER_MAX_CONCURRENT_VMS slot
+ *   - `max-lifetime`  — the guest outlived the spec's hard host-side
+ *                       lifetime ceiling (WorkloadSpec.maxLifetimeSeconds)
+ *                       — the last-resort kill for a platform↔daemon
+ *                       partition where the platform's own timeout can no
+ *                       longer reach the workload
  */
-export type TeardownReason = "finalize" | "watchdog-kill" | "orphan-sweep" | "shutdown" | "crash";
+export type TeardownReason =
+  | "finalize"
+  | "watchdog-kill"
+  | "orphan-sweep"
+  | "shutdown"
+  | "crash"
+  | "reaper"
+  | "max-lifetime";
 /**
  * Minimum firecracker binary version. 1.16 is what the docs require, and
  * anything below 1.15.1 is exposed to CVE-2026-5747 (virtio-pci OOB
  * write, guest-root → potential host code execution) — enforce the floor
- * instead of merely documenting it.
+ * instead of merely documenting it. The floor also covers CVE-2026-1386
+ * (jailer symlink following → arbitrary host file overwrite, fixed
+ * upstream in 1.13.2 / 1.14.1) — any ≥1.16 release contains that fix.
  */
 const MIN_FIRECRACKER = { major: 1, minor: 16 };
 
@@ -203,6 +231,20 @@ interface VmRecord {
   exitNonce?: string;
   /** `Date.now()` at VMM spawn — teardown uptime + liveness uptime. */
   bootedAt?: number;
+  /**
+   * `Date.now()` at VMM exit (stamped by startWorkload's exit handler).
+   * The exit reaper destroys records that carry this past
+   * {@link EXIT_REAP_AFTER_MS} — a live platform claims the exit within
+   * seconds (waitForExit), so a lingering stamp means the platform died
+   * mid-run and nobody will ever call removeIsolationBoundary.
+   */
+  exitedAt?: number;
+  /**
+   * Hard host-side lifetime ceiling (WorkloadSpec.maxLifetimeSeconds) —
+   * armed at spawn, cleared by destroyVm. Fires only when the platform's
+   * own timeout could not reach the workload (platform death/partition).
+   */
+  lifetimeTimer?: ReturnType<typeof setTimeout>;
   /**
    * Overrides the teardown reason a caller passes to destroyVm — stamped
    * by kill paths that know WHY the VM is going away (watchdog stop,
@@ -340,6 +382,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    */
   private initialized = false;
 
+  /**
+   * Periodic exit reaper (started by initialize(), cleared by shutdown()):
+   * sweeps {@link vms} for records whose VMM exited but were never
+   * finalized by any platform — see {@link reapExitedVms}.
+   */
+  private exitReaper?: ReturnType<typeof setInterval>;
+
   constructor(deps: FirecrackerOrchestratorDeps = {}) {
     this.hostExec = deps.hostExec ?? createHostExec();
     this.jailFs = deps.jailFs ?? defaultJailFs;
@@ -423,8 +472,20 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       // Remote-platform mode: guests must reach the override's ip:port
       // unconditionally (it typically sits inside the deny CIDRs above).
       ...(this.platformForward ? { platformForward: this.platformForward } : {}),
+      // Escaped-VMM output guard (jailer mode): drop host-output traffic
+      // originated by any jailed VMM uid toward IMDS/RFC1918/loopback —
+      // the TAP-scoped rules above never see it (see host-net.ts).
+      ...(fcEnv.FIRECRACKER_JAILER === "on" ? { vmmUidRange: jailUidRange(fcEnv) } : {}),
     });
     this.initialized = true;
+    // Exit reaper (ROB-1, layer 2): when the platform dies mid-run, nobody
+    // calls waitForExit/removeIsolationBoundary — an exited VMM's record
+    // (and its FIRECRACKER_MAX_CONCURRENT_VMS slot) would leak until the
+    // next daemon restart. Deliberately no unref (consoleWatch's interval
+    // keeps the same convention).
+    this.exitReaper = setInterval(() => {
+      void this.reapExitedVms().catch(() => {});
+    }, EXIT_REAPER_INTERVAL_MS);
     logger.info("Firecracker orchestrator initialized", {
       version,
       kernel: fcEnv.FIRECRACKER_KERNEL_PATH,
@@ -470,7 +531,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // CgroupHierarchyMissing on a v1/hybrid host — at the FIRST RUN, long
     // after initialize() reported green. Probe here instead.
     if (fcEnv.FIRECRACKER_JAIL_CGROUPS === "on") {
-      await this.assertCgroupV2Controllers(["memory", "pids"]);
+      await this.assertCgroupV2Controllers(["memory", "pids", "cpu"]);
     }
     // Jailer input trust (upstream places this on the operator): the two
     // binaries must be root-owned and not group/world-writable along their
@@ -613,6 +674,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   }
 
   async shutdown(): Promise<void> {
+    if (this.exitReaper) {
+      clearInterval(this.exitReaper);
+      this.exitReaper = undefined;
+    }
     // Full per-run teardown (VM, TAP, sockets, run dirs) BEFORE removing
     // the host firewall — a VM must never outlive the policy table.
     const records = [...this.vms.values()];
@@ -964,6 +1029,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     reason: TeardownReason,
   ): Promise<void> {
     if (vm.consoleWatch) clearInterval(vm.consoleWatch);
+    if (vm.lifetimeTimer) clearTimeout(vm.lifetimeTimer);
     await this.killVm(vm, graceSeconds).catch(() => {});
     // Teardown observability (phase 4): read the console tail ONCE, derive
     // the exit-marker signal, archive it, and emit a structured line — all
@@ -1012,6 +1078,37 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     await rm(vm.apiSocketPath, { force: true }).catch(() => {});
     await rm(vm.runDir, { recursive: true, force: true }).catch(() => {});
     this.vms.delete(vm.runId);
+  }
+
+  /**
+   * Exit-reaper sweep (ROB-1, layer 2): destroy every record whose VMM
+   * exited more than {@link EXIT_REAP_AFTER_MS} ago. A healthy platform
+   * claims the exit within seconds (waitForExit long-poll) and then
+   * removes the boundary — a record still carrying `exitedAt` past the
+   * threshold means the platform died mid-run and nobody will ever
+   * finalize this run; without the sweep, the VmRecord and its
+   * FIRECRACKER_MAX_CONCURRENT_VMS slot leak until daemon restart.
+   * Returns the number of records reaped (internal seam for unit tests).
+   */
+  private async reapExitedVms(now = Date.now()): Promise<number> {
+    let reaped = 0;
+    for (const vm of [...this.vms.values()]) {
+      if (vm.exitedAt === undefined || now - vm.exitedAt <= EXIT_REAP_AFTER_MS) continue;
+      logger.info("VMM exited but no platform claimed the run — reaping", {
+        runId: vm.runId,
+        idleMs: now - vm.exitedAt,
+      });
+      try {
+        await this.destroyVm(vm, 0, "reaper");
+        reaped++;
+      } catch (err) {
+        logger.warn("Exit reaper failed to destroy an exited VM — will retry next sweep", {
+          runId: vm.runId,
+          error: getErrorMessage(err),
+        });
+      }
+    }
+    return reaped;
   }
 
   /**
@@ -1154,6 +1251,20 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     vm.proc = proc;
     vm.bootedAt = Date.now();
     drainStream(proc, `fc:${handle.runId}`);
+    // Boot-window cancel latch (B4): stopWorkload/stopByRunId latch
+    // `vm.stopping` even when no VMM has spawned yet — recheck it here so
+    // a cancel that landed while spawnVmm was in flight kills the fresh
+    // VMM instead of letting the run boot anyway. Kept BEFORE
+    // writeStateFileStrict: a cancelled run must not persist a pid as if
+    // it were live.
+    if (vm.stopping) {
+      await this.killVm(vm, 0).catch(() => {});
+      vm.proc = null;
+      throw new Error(
+        `Firecracker orchestrator: run ${handle.runId} was cancelled during boot — ` +
+          `killed the just-spawned VMM`,
+      );
+    }
     // Mandatory (unlike the pre-spawn pid-less write): without the pid on
     // disk, a platform crash leaves a VMM the boot sweep cannot kill. A
     // VMM we cannot account for must not run — kill it and fail the run.
@@ -1203,8 +1314,29 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
 
     this.startConsoleWatch(vm, fcEnv.FIRECRACKER_MAX_CONSOLE_BYTES);
+    // Hard lifetime ceiling (B2): a host-side, last-resort bound on the
+    // guest's wall-clock life. The platform's own safety-net timeout
+    // always fires first when the platform is alive — this timer only
+    // matters under platform death/partition, where a looping guest would
+    // otherwise run forever. Cleared by destroyVm.
+    if (agentSpec.maxLifetimeSeconds !== undefined) {
+      const maxLifetimeSeconds = agentSpec.maxLifetimeSeconds;
+      vm.lifetimeTimer = setTimeout(() => {
+        logger.error("microVM exceeded its hard lifetime ceiling — killing", {
+          runId: handle.runId,
+          maxLifetimeSeconds,
+        });
+        vm.stopping = true;
+        vm.teardownReason = "max-lifetime";
+        void this.killVm(vm, 0).catch(() => {});
+      }, maxLifetimeSeconds * 1000);
+    }
     proc.exited.then((code) => {
       if (vm.consoleWatch) clearInterval(vm.consoleWatch);
+      // Reaper anchor (ROB-1): the exit reaper destroys records whose
+      // stamp lingers past EXIT_REAP_AFTER_MS — i.e. exits no platform
+      // ever claimed because it died mid-run.
+      vm.exitedAt = Date.now();
       if (code !== 0 && !vm.stopping) {
         logger.error("Firecracker VMM exited non-zero", {
           runId: handle.runId,
@@ -1225,8 +1357,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
   async stopWorkload(handle: WorkloadHandle, timeoutSeconds = 5): Promise<void> {
     const vm = this.vms.get(handle.runId);
-    if (!vm?.proc) return;
+    if (!vm) return;
+    // Latch BEFORE the proc check (B4): a cancel landing in the boot
+    // window (record exists, VMM not spawned yet) must not be a silent
+    // no-op — startWorkload rechecks this latch right after spawn and
+    // kills the just-spawned VMM.
     vm.stopping = true;
+    if (!vm.proc) return;
     await this.killVm(vm, timeoutSeconds);
   }
 
@@ -1235,9 +1372,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // teardown reclaims TAP/dir. Pending specs are dropped per-role so a
     // re-created workload can't accidentally reuse stale env.
     const vm = this.vms.get(handle.runId);
-    if (vm?.proc) {
+    if (vm) {
+      // Latch whenever the record exists (B4) — see stopWorkload.
       vm.stopping = true;
-      await this.killVm(vm, 0).catch(() => {});
+      if (vm.proc) await this.killVm(vm, 0).catch(() => {});
     }
     if (handle.role === "sidecar") this.pendingSidecarEnv.delete(handle.runId);
     else this.pendingAgentSpecs.delete(handle.runId);
@@ -1292,12 +1430,15 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
     const vm = this.vms.get(runId);
     if (!vm) return "not_found";
-    if (!vm.proc) return "already_stopped";
+    // Latch BEFORE the proc check (B4): a cancel in the boot window must
+    // stick — startWorkload rechecks the latch right after spawn and
+    // kills the just-spawned VMM instead of letting the run boot anyway.
     vm.stopping = true;
     // The platform stops a run by id from its stall watchdog (and shares
     // this route with user cancel) — record it so the eventual teardown
     // log attributes the kill instead of mislabelling it a clean finalize.
     vm.teardownReason = "watchdog-kill";
+    if (!vm.proc) return "already_stopped";
     await this.killVm(vm, timeoutSeconds ?? 5);
     return "stopped";
   }
@@ -1450,6 +1591,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
               // ceiling (OOM reads as a crash), not workload QoS.
               memoryMaxBytes: (sizing.memSizeMib + JAIL_MEMORY_SLACK_MIB) * 1024 * 1024,
               pidsMax: JAIL_PIDS_MAX,
+              // Bounds cpu.max so this VM can use exactly its vCPUs —
+              // never the whole host (see buildJailerArgv).
+              vcpuCount: sizing.vcpuCount,
             },
           }
         : {}),

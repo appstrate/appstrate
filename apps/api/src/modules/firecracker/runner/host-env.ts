@@ -177,6 +177,21 @@ const firecrackerEnvSchemaChecked = firecrackerEnvSchema.superRefine((env, ctx) 
 
 export type FirecrackerEnv = z.infer<typeof firecrackerEnvSchema>;
 
+/**
+ * The per-VM jail uid interval actually reachable on this host:
+ * `FIRECRACKER_JAIL_UID_BASE` .. base + span, where span is the VM cap
+ * (admission control keeps the lowest-free allocator below it) or the
+ * full allocator ceiling when the cap is the explicit opt-in 0. Single
+ * source shared by the boot-time reserved-range check (superRefine
+ * above) and the host firewall's VMM output guard (host-net.ts) — the
+ * two must never disagree on what "a VMM uid" is.
+ */
+export function jailUidRange(env: FirecrackerEnv): { base: number; hi: number } {
+  const span =
+    env.FIRECRACKER_MAX_CONCURRENT_VMS > 0 ? env.FIRECRACKER_MAX_CONCURRENT_VMS : MAX_JAIL_UID_SPAN;
+  return { base: env.FIRECRACKER_JAIL_UID_BASE, hi: env.FIRECRACKER_JAIL_UID_BASE + span };
+}
+
 let cached: FirecrackerEnv | undefined;
 
 /** Parse (once) and return the module's environment. Throws on invalid values. */

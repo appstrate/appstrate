@@ -27,6 +27,7 @@ import {
   CHROOT_KERNEL_PATH,
   CHROOT_ROOTFS_PATH,
   CHROOT_VMCONFIG_PATH,
+  JAIL_CPU_PERIOD_MICROS,
   MAX_API_SOCKET_PATH_BYTES,
   type JailFs,
 } from "../../jail.ts";
@@ -179,7 +180,7 @@ describe("buildJailerArgv", () => {
       jailerBin: "/usr/local/bin/jailer",
       fcBin: "/usr/local/bin/firecracker",
       jail,
-      cgroups: { memoryMaxBytes: 1_073_741_824, pidsMax: 1000 },
+      cgroups: { memoryMaxBytes: 1_073_741_824, pidsMax: 1000, vcpuCount: 4 },
     });
     expect(argv).toEqual([
       "/usr/local/bin/jailer",
@@ -201,6 +202,10 @@ describe("buildJailerArgv", () => {
       "memory.max=1073741824",
       "--cgroup",
       "pids.max=1000",
+      "--cgroup",
+      // cgroup-v2 "QUOTA PERIOD": 4 vCPUs × the 100 ms period — the VM
+      // gets exactly its vCPUs' worth of CPU time, never the whole host.
+      "cpu.max=400000 100000",
       "--",
       "--api-sock",
       CHROOT_API_SOCKET_PATH,
@@ -209,10 +214,24 @@ describe("buildJailerArgv", () => {
     ]);
   });
 
+  it("scales the cpu.max quota with the vCPU count (B6)", () => {
+    const argv = buildJailerArgv({
+      jailerBin: "jailer",
+      fcBin: "/x/firecracker",
+      jail,
+      cgroups: { memoryMaxBytes: 1, pidsMax: 1, vcpuCount: 8 },
+    });
+    const quota = 8 * JAIL_CPU_PERIOD_MICROS;
+    const at = argv.indexOf(`cpu.max=${quota} ${JAIL_CPU_PERIOD_MICROS}`);
+    expect(at).toBeGreaterThan(0);
+    expect(argv[at - 1]).toBe("--cgroup");
+  });
+
   it("drops every cgroup flag when cgroups are disabled (FIRECRACKER_JAIL_CGROUPS=off)", () => {
     const argv = buildJailerArgv({ jailerBin: "jailer", fcBin: "/x/firecracker", jail });
     expect(argv.join(" ")).not.toContain("--cgroup");
     expect(argv.join(" ")).not.toContain("--parent-cgroup");
+    expect(argv.join(" ")).not.toContain("cpu.max");
     expect(argv).toContain("--");
   });
 

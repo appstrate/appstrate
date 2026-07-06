@@ -11,7 +11,11 @@
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { getFirecrackerEnv, _resetFirecrackerEnvCacheForTesting } from "../../runner/host-env.ts";
+import {
+  getFirecrackerEnv,
+  jailUidRange,
+  _resetFirecrackerEnvCacheForTesting,
+} from "../../runner/host-env.ts";
 
 const KEY = "FIRECRACKER_ARTIFACTS_BASE_URL";
 const original = process.env[KEY];
@@ -166,5 +170,34 @@ describe("FIRECRACKER_CREDENTIAL_BROKER", () => {
     process.env[KEY] = "vsock";
     _resetFirecrackerEnvCacheForTesting();
     expect(() => getFirecrackerEnv()).toThrow();
+  });
+});
+
+describe("jailUidRange", () => {
+  const VMS_KEY = "FIRECRACKER_MAX_CONCURRENT_VMS";
+  const BASE_KEY = "FIRECRACKER_JAIL_UID_BASE";
+  const savedVms = process.env[VMS_KEY];
+  const savedBase = process.env[BASE_KEY];
+
+  afterEach(() => {
+    if (savedVms === undefined) delete process.env[VMS_KEY];
+    else process.env[VMS_KEY] = savedVms;
+    if (savedBase === undefined) delete process.env[BASE_KEY];
+    else process.env[BASE_KEY] = savedBase;
+    _resetFirecrackerEnvCacheForTesting();
+  });
+
+  it("spans base..base+cap with admission control on", () => {
+    process.env[BASE_KEY] = "200000";
+    process.env[VMS_KEY] = "16";
+    _resetFirecrackerEnvCacheForTesting();
+    expect(jailUidRange(getFirecrackerEnv())).toEqual({ base: 200_000, hi: 200_016 });
+  });
+
+  it("falls back to the full allocator ceiling when the cap is the explicit 0", () => {
+    process.env[BASE_KEY] = "200000";
+    process.env[VMS_KEY] = "0";
+    _resetFirecrackerEnvCacheForTesting();
+    expect(jailUidRange(getFirecrackerEnv())).toEqual({ base: 200_000, hi: 216_319 });
   });
 });

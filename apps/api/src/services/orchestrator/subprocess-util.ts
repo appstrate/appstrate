@@ -90,22 +90,51 @@ export interface CollectedProcess {
  * Non-zero exits are NOT thrown here — each caller owns its error
  * message (the host-net executor reports the unprefixed command, not
  * the sudo-wrapped argv it actually spawned).
+ *
+ * `timeoutMs` is the one error that IS ours: it fires when the command
+ * never returned at all (e.g. a kernel-wedged `ip link del`), so no
+ * caller could ever produce an exit-based message for it. On timeout the
+ * process is SIGKILLed and an Error naming the command is thrown; the
+ * kill closes the output pipes so the detached stream readers settle on
+ * their own — we deliberately do NOT await them before throwing (the
+ * whole point is to stop hanging).
  */
 export async function spawnCollect(
   argv: string[],
-  opts: { stdin?: string } = {},
+  opts: { stdin?: string; timeoutMs?: number } = {},
 ): Promise<CollectedProcess> {
   const proc = Bun.spawn(argv, {
     stdin: opts.stdin !== undefined ? new TextEncoder().encode(opts.stdin) : undefined,
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { exitCode, stdout, stderr };
+  const stdoutText = new Response(proc.stdout).text();
+  const stderrText = new Response(proc.stderr).text();
+  if (opts.timeoutMs === undefined) {
+    const [exitCode, stdout, stderr] = await Promise.all([proc.exited, stdoutText, stderrText]);
+    return { exitCode, stdout, stderr };
+  }
+  // When the race throws, the reader promises are abandoned mid-flight;
+  // pre-mark them handled so a late stream error can never surface as an
+  // unhandled rejection. No-op on the success path (await still works).
+  stdoutText.catch(() => {});
+  stderrText.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const exitCode = await Promise.race([
+      proc.exited,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          proc.kill("SIGKILL");
+          reject(new Error(`Command timed out after ${opts.timeoutMs}ms: ${argv.join(" ")}`));
+        }, opts.timeoutMs);
+      }),
+    ]);
+    const [stdout, stderr] = await Promise.all([stdoutText, stderrText]);
+    return { exitCode, stdout, stderr };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

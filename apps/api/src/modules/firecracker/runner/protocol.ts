@@ -54,6 +54,7 @@ export const workloadSpecSchema = z.object({
   env: z.record(z.string(), z.string()),
   resources: workloadResourcesSchema,
   egress: z.boolean().optional(),
+  maxLifetimeSeconds: z.number().int().positive().optional(),
 });
 
 export const workspaceHandleSchema = z.union([

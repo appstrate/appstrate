@@ -422,6 +422,16 @@ async function runPlatformContainerImpl(
           // reach the upstream LLM and the platform sink directly, so it
           // goes on the egress network instead of the internal boundary.
           egress: skipSidecar,
+          // Hard host-side lifetime ceiling (B2): run budget + the same
+          // boot grace the platform safety net uses + a 600 s margin, so
+          // the daemon's kill is strictly a LAST resort behind the
+          // safety-net setTimeout in waitForWorkload — it only ever fires
+          // when the platform died or was partitioned mid-run and its own
+          // stop can no longer reach the workload.
+          maxLifetimeSeconds:
+            plan.timeout +
+            Math.ceil((input.timeoutBootGraceMs ?? PLATFORM_TIMEOUT_BOOT_GRACE_MS) / 1000) +
+            600,
         },
         boundary,
       ),

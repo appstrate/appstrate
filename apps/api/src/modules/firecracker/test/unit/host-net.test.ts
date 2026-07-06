@@ -85,6 +85,51 @@ describe("buildNftScript", () => {
   });
 });
 
+describe("buildNftScript with a jailed-VMM uid range (escaped-VMM output guard)", () => {
+  const RANGE = { base: 200_000, hi: 200_016 };
+  const script = buildNftScript({ ...PARAMS, vmmUidRange: RANGE });
+  const guardRule =
+    `meta skuid 200000-200016 ip daddr ` +
+    `{ 169.254.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } drop`;
+
+  it("emits an output-hook chain dropping VMM-uid traffic to the deny CIDRs plus loopback", () => {
+    const chainIdx = script.indexOf("chain output");
+    const ruleIdx = script.indexOf(guardRule);
+    expect(chainIdx).toBeGreaterThan(-1);
+    expect(script).toContain("type filter hook output priority filter; policy accept;");
+    expect(ruleIdx).toBeGreaterThan(chainIdx);
+  });
+
+  it("always includes loopback exactly once, even when the deny list already carries it", () => {
+    const withLo = buildNftScript({
+      ...PARAMS,
+      egressDenyCidrs: [...PARAMS.egressDenyCidrs, "127.0.0.0/8"],
+      vmmUidRange: RANGE,
+    });
+    const outputChain = withLo.slice(withLo.indexOf("chain output"));
+    expect(outputChain.split("127.0.0.0/8").length - 1).toBe(1);
+  });
+
+  it("still guards loopback when the operator empties the deny list", () => {
+    const open = buildNftScript({ ...PARAMS, egressDenyCidrs: [], vmmUidRange: RANGE });
+    expect(open).toContain("meta skuid 200000-200016 ip daddr { 127.0.0.0/8 } drop");
+  });
+
+  it("omits the chain entirely without a uid range (jailer off — VMM runs as the daemon uid)", () => {
+    expect(buildNftScript(PARAMS)).not.toContain("chain output");
+  });
+
+  it("dies with the table (no separate teardown needed): the chain lives inside appstrate_fc", () => {
+    // Structural: the output chain sits between the table's braces, so the
+    // add+delete idempotency pair and teardownHostNetwork cover it.
+    const tableOpen = script.indexOf("table ip appstrate_fc {");
+    const tableClose = script.lastIndexOf("}");
+    const chainIdx = script.indexOf("chain output");
+    expect(chainIdx).toBeGreaterThan(tableOpen);
+    expect(chainIdx).toBeLessThan(tableClose);
+  });
+});
+
 describe("buildNftScript with a remote platform (platformForward)", () => {
   const FORWARD = { ip: "172.17.0.1", port: 3000 };
   const script = buildNftScript({ ...PARAMS, platformForward: FORWARD });

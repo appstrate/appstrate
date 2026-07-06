@@ -53,7 +53,9 @@ export const RUNNER_DEFAULT_PORT = 3100;
  * Firecracker VMM version the daemon is validated against. The engine
  * enforces `>= 1.16` at initialize() (older releases are exposed to
  * CVE-2026-5747); pin the exact release the repo's build scripts already
- * target (`scripts/build-kernel.sh`, `scripts/dev/lima.yaml`).
+ * target (`scripts/build-kernel.sh`, `scripts/dev/lima.yaml`). The 1.16.0
+ * pin also covers CVE-2026-1386 (jailer symlink, fixed upstream
+ * 1.13.2/1.14.1) — checked 2026-07, no 1.16.1 bump required.
  */
 export const FIRECRACKER_VERSION = "1.16.0";
 

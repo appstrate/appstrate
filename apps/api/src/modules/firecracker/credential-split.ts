@@ -47,6 +47,10 @@ export const MMDS_SAFETY_MARGIN_BYTES = 4_096;
  * per-integration spawn env with live credentials, cookie-session logins,
  * the forward-proxy URL — it can embed `user:pass@host` credentials).
  * Everything else in the sidecar env is non-secret configuration.
+ *
+ * Coverage-enforced: test/unit/credential-classification.test.ts fails
+ * whenever the sidecar env builders emit a key not classified here or
+ * there.
  */
 export const SIDECAR_SECRET_KEYS: readonly string[] = [
   "RUN_TOKEN",

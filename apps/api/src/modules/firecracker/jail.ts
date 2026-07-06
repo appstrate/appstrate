@@ -58,6 +58,15 @@ export const JAIL_MEMORY_SLACK_MIB = 256;
 export const JAIL_PIDS_MAX = 1000;
 
 /**
+ * cgroup-v2 `cpu.max` period (µs) for every jailed VMM. The quota is
+ * `vcpuCount × period`, so a VM may consume exactly as much CPU time as
+ * its vCPU count entitles it to — a 16-VM host of 8-vCPU guests can no
+ * longer starve the host by having every guest spin (B6). 100 ms is the
+ * kernel default period.
+ */
+export const JAIL_CPU_PERIOD_MICROS = 100_000;
+
+/**
  * Chroot-relative paths the VM config references (Firecracker resolves
  * `--config-file` paths inside its pivot_root'ed chroot). Fixed names —
  * whatever the host artifacts are called, they are linked in as these.
@@ -177,9 +186,10 @@ export interface BuildJailerArgvInput {
    * cgroup-v2 bounds, or undefined when FIRECRACKER_JAIL_CGROUPS=off
    * (the jailer fails HARD when the cgroup files cannot be written —
    * hosts without cgroup-v2 delegation need the escape hatch without
-   * losing the jail itself).
+   * losing the jail itself). `vcpuCount` sizes the `cpu.max` quota (see
+   * {@link JAIL_CPU_PERIOD_MICROS}).
    */
-  cgroups?: { memoryMaxBytes: number; pidsMax: number };
+  cgroups?: { memoryMaxBytes: number; pidsMax: number; vcpuCount: number };
   /**
    * Extra flags forwarded to the exec'd firecracker (after the `--`
    * separator, before the fixed api-sock/config-file pair) — e.g. the
@@ -227,6 +237,11 @@ export function buildJailerArgv(input: BuildJailerArgvInput): string[] {
       `memory.max=${input.cgroups.memoryMaxBytes}`,
       "--cgroup",
       `pids.max=${input.cgroups.pidsMax}`,
+      // cgroup-v2 cpu.max format is "QUOTA PERIOD" (µs): quota
+      // proportional to the vCPU count, so the VM can use exactly its
+      // vCPUs' worth of CPU time — never the whole host (B6).
+      "--cgroup",
+      `cpu.max=${input.cgroups.vcpuCount * JAIL_CPU_PERIOD_MICROS} ${JAIL_CPU_PERIOD_MICROS}`,
     );
   }
   return [

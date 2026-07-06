@@ -18,6 +18,10 @@
  *   3. A run whose sink is already closed is untouched (no double
  *      finalize — CAS idempotency).
  *   4. The sweep is bounded by `maxFinalizesPerTick`.
+ *   5. The sweep also stops the stalled run's workload through the
+ *      orchestrator (same route as user cancel) — a stalled runner is
+ *      not necessarily dead, and a remote microVM left running keeps
+ *      executing and billing.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -30,6 +34,15 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { runWatchdogTick } from "../../../src/services/run-watchdog.ts";
+import {
+  _setOrchestratorForTesting,
+  type RunOrchestrator,
+  type WorkloadHandle,
+  type WorkloadSpec,
+  type IsolationBoundary,
+  type CleanupReport,
+  type StopResult,
+} from "../../../src/services/orchestrator/index.ts";
 
 // Boot the test app so its lazy module loads happen once — irrelevant
 // to the watchdog itself but keeps DB migrations applied.
@@ -230,4 +243,114 @@ describe("run watchdog — unified stall detection", () => {
     // billing reads off the run row to charge the org.
     expect(row?.cost).toBeCloseTo(0.0234, 5);
   });
+
+  // B1 regression — a stalled runner is not necessarily a dead one. A
+  // remote workload (e.g. a firecracker microVM that lost its event
+  // path) keeps executing and billing after the row is finalized, so
+  // the sweep must also route a stop through the orchestrator — the
+  // same path the user-cancel route takes.
+  it("stops the stalled run's workload through the orchestrator", async () => {
+    const stoppedRunIds: string[] = [];
+    _setOrchestratorForTesting(createRecordingOrchestrator(stoppedRunIds));
+    try {
+      const runId = await seedRun(ctx, "@test/watchdog-agent", {
+        status: "running",
+        lastHeartbeatAt: new Date(Date.now() - 3600_000),
+      });
+
+      const finalizedCount = await runWatchdogTick({
+        intervalSeconds: 30,
+        stallThresholdSeconds: 60,
+        maxFinalizesPerTick: 100,
+      });
+
+      expect(finalizedCount).toBe(1);
+      // stopByRunId is fire-and-forget from the sweep's perspective —
+      // the recording stub resolves synchronously enough that the call
+      // has landed once the tick returns.
+      expect(stoppedRunIds).toEqual([runId]);
+
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.status).toBe("failed");
+    } finally {
+      _setOrchestratorForTesting(null);
+    }
+  });
+
+  it("does not stop workloads when nothing stalled", async () => {
+    const stoppedRunIds: string[] = [];
+    _setOrchestratorForTesting(createRecordingOrchestrator(stoppedRunIds));
+    try {
+      await seedRun(ctx, "@test/watchdog-agent", {
+        status: "running",
+        lastHeartbeatAt: new Date(), // fresh
+      });
+
+      const finalizedCount = await runWatchdogTick({
+        intervalSeconds: 30,
+        stallThresholdSeconds: 60,
+        maxFinalizesPerTick: 100,
+      });
+
+      expect(finalizedCount).toBe(0);
+      expect(stoppedRunIds).toEqual([]);
+    } finally {
+      _setOrchestratorForTesting(null);
+    }
+  });
 });
+
+/**
+ * Minimal RunOrchestrator stub — every method present and inert, with
+ * `stopByRunId` recording the run ids it was called with. Same shape as
+ * the fake in `test/integration/routes/runs.test.ts`.
+ */
+function createRecordingOrchestrator(stoppedRunIds: string[]): RunOrchestrator {
+  const handle = (runId: string, role: string): WorkloadHandle => ({
+    id: `${role}_${runId}`,
+    runId,
+    role,
+  });
+  return {
+    async initialize() {},
+    async shutdown() {},
+    async cleanupOrphans(): Promise<CleanupReport> {
+      return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };
+    },
+    async ensureImages() {},
+    async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+      return {
+        id: `net_${runId}`,
+        name: `appstrate-exec-${runId}`,
+        workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+        sidecarEndpoints: {
+          sidecarUrl: "http://sidecar:8080",
+          llmProxyUrl: "http://sidecar:8080/llm",
+          forwardProxyUrl: "http://sidecar:8081",
+          noProxy: "sidecar,localhost,127.0.0.1",
+        },
+      };
+    },
+    async removeIsolationBoundary() {},
+    async createSidecar(runId: string): Promise<WorkloadHandle> {
+      return handle(runId, "sidecar");
+    },
+    async createWorkload(spec: WorkloadSpec): Promise<WorkloadHandle> {
+      return handle(spec.runId, spec.role);
+    },
+    async startWorkload() {},
+    async stopWorkload() {},
+    async removeWorkload() {},
+    async waitForExit(): Promise<number> {
+      return 0;
+    },
+    async *streamLogs(): AsyncGenerator<string> {},
+    async stopByRunId(runId: string): Promise<StopResult> {
+      stoppedRunIds.push(runId);
+      return "stopped";
+    },
+    async resolvePlatformApiUrl(): Promise<string> {
+      return "http://platform:3000";
+    },
+  };
+}

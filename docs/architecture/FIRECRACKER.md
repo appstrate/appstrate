@@ -36,7 +36,10 @@ Setting `RUN_ADAPTER=firecracker` without the module is a fatal boot error
 listing the registered backends; a stale `RUN_ADAPTER=firecracker-remote`
 (the id before the in-process backend was removed) gets a targeted "renamed to
 `firecracker`" error. Platform-side only `FIRECRACKER_RUNNER_URL`/`_TOKEN` are
-read (validated lazily, on the first `initialize()`). The host-side
+read (validated lazily, on the first `initialize()`), plus the opt-in
+`FIRECRACKER_RUNNER_TLS_REQUIRED=1` — also platform-side, NOT a daemon
+variable — which turns the plaintext-`http://`-to-non-loopback-host boot
+warning into a hard refusal (see _Transport & auth_). The host-side
 `FIRECRACKER_*` variables (kernel/rootfs, subnet CIDR, …) are **daemon-only** —
 never parsed platform-side. None of these are part of the `@appstrate/env`
 schema.
@@ -56,9 +59,14 @@ ip:port ahead of the egress-deny CIDRs. Capabilities: `isolatesWorkloads: true`
 (the VM lives on the runner host, credentials never enter the platform
 process), `supportsSidecarOnly: false`.
 
-**Transport & auth.** The wire carries run tokens and credential bundles
-(`POST /v1/sidecars`), so keep the link trusted: same machine, private network,
-or TLS via a reverse proxy in front of the daemon. Auth is a single shared
+**Transport & auth.** The wire carries the bearer token and per-run
+credential bundles (`POST /v1/sidecars`). Same machine or a genuinely
+private network is acceptable; for any **split-host** deployment TLS (a
+reverse proxy in front of the daemon) is REQUIRED, not advised. The
+platform enforces the posture at boot: a plaintext `http://`
+`FIRECRACKER_RUNNER_URL` pointing at a non-loopback host logs a loud
+warning, and setting `FIRECRACKER_RUNNER_TLS_REQUIRED=1` (platform-side)
+turns it into a hard boot refusal. Auth is a single shared
 token compared in constant time; run **one platform per daemon** (the orphan
 sweep is daemon-wide). The protocol is JSON over HTTP (`runner/protocol.ts`,
 versioned — the client refuses a daemon speaking another major version); logs
@@ -179,13 +187,14 @@ security review first — the backend has not yet had one. Hardening status:
    `jailer` (`FIRECRACKER_JAILER=on`, the default): chrooted at
    `<data-dir>/../jail/<vmm>/<jailId>/root`, dropped to a dedicated
    unprivileged per-VM uid (`FIRECRACKER_JAIL_UID_BASE` + subnet index)
-   with cgroup-v2 `memory.max`/`pids.max` bounds under the
+   with cgroup-v2 `memory.max`/`pids.max`/`cpu.max` bounds under the
    `appstrate-fc` slice. A VMM escape lands on a uid that owns nothing
    but its own jail — in production the daemon runs as root under the
    systemd unit (no sudoers grant involved; the `sudo -n` host-net
    fallback is unprivileged-dev-only). Still deferred: a per-VM network
-   namespace (the TAP stays on the host — the jail uid cannot touch host
-   network config anyway) and a seccomp profile for the agent process;
+   namespace (the TAP stays on the host — an escaped VMM lands in the host
+   netns, now fenced by the uid-scoped nft `output` guard, see _Residual
+   hardening_) and a seccomp profile for the agent process;
    `--new-pid-ns` is deferred because the jailer's parent process exits
    without propagating the VMM exit status, which would break
    `waitForExit` (see `jail.ts`).
@@ -217,10 +226,15 @@ boundary itself.
 
 Residual hardening, deliberately not pursued:
 
-- **Per-VM network namespace** — deferred. The TAP lives on the host and the
-  jail uid cannot touch host network config, so a netns adds no isolation
-  today; it becomes relevant only when snapshot-clone work needs identical
-  guest IPs (see `jail.ts`).
+- **Per-VM network namespace** — deferred. The real risk of the shared host
+  netns is a VMM **escape**: the escaped process lives on the host network
+  stack, where the TAP-scoped nft rules never see its traffic, and
+  Firecracker's default seccomp filter still allows `socket`/`connect` — so
+  pre-fix it could reach 127.0.0.1 (Redis/Postgres/platform) and
+  169.254.169.254 (cloud IMDS → host credentials). Now mitigated by the
+  uid-scoped nft `output` guard (see _Per-run resources_). A full per-VM
+  netns remains the stronger fix, deferred until the snapshot-clone work
+  needs it anyway (identical guest IPs, see `jail.ts`).
 - **In-guest seccomp for the agent process** — not planned. Firecracker's
   own default seccomp filter already confines the VMM (the host-facing
   boundary). A second, per-workload seccomp profile _inside_ the guest is
@@ -276,6 +290,14 @@ chain (`FIRECRACKER_EGRESS_DENY_CIDRS`) — "egress" means the internet, never
 the host's private neighbourhood. Everything else guest→internet is
 masqueraded and reserved, inside the guest, to the sidecar/runner uids
 (default-deny `output` chain; IPv6 is disabled in the guest entirely).
+The `appstrate_fc` table also carries a host-side `output`-hook chain:
+host-originated traffic whose socket uid falls in the jailed-VMM range
+(`FIRECRACKER_JAIL_UID_BASE` … base + cap) is dropped toward the
+egress-deny CIDRs **plus `127.0.0.0/8`** — an escaped VMM lives in the
+host netns where the TAP-scoped rules never see its traffic, and the
+default firecracker seccomp still allows `socket`/`connect`, so without
+this guard it could reach 127.0.0.1 (Redis/Postgres/platform) and
+169.254.169.254 (cloud IMDS → host credentials).
 
 Fail-closed: `initialize()` sets up the host firewall; if it failed at boot,
 `createIsolationBoundary` refuses to start runs rather than running without
@@ -290,9 +312,13 @@ host↔guest isolation.
    `INTEGRATION_RUNTIME_ADAPTER=process`).
 3. `startWorkload(agent)` — builds the guest config (snake_case
    `config.json`), materialises it as a **read-only ext4 config drive**
-   (`mkfs.ext4 -d`, no root needed; secrets never on the kernel cmdline, no
-   MMDS size limits), writes the Firecracker `vmconfig.json` (shared rootfs
-   attached **read-only**), spawns the VMM. Serial console → `console.log`.
+   (`mkfs.ext4 -d`, no root needed). With the default MMDS broker the drive
+   carries only non-secret configuration — the known-secret keys are
+   stripped out and PUT to the VMM's in-memory MMDS store right after spawn
+   (fail-closed above `FIRECRACKER_MMDS_MAX_BYTES`); secrets are never on
+   the kernel cmdline. Writes the Firecracker `vmconfig.json` (shared
+   rootfs attached **read-only**), spawns the VMM. Serial console →
+   `console.log`.
 4. Guest boots: kernel `ip=` statics eth0 → init overlays tmpfs on `/`
    (pivot_root, `/proc` mounted `hidepid=2`) → mounts the config drive →
    supervisor applies the default-deny uid firewall → **unmounts the config
@@ -309,8 +335,22 @@ host↔guest isolation.
    marker code; a missing/forged marker = crash (1) or kill (137).
 
 Timeout/cancel flow through `stopWorkload`/`stopByRunId` (graceful
-`SendCtrlAltDel` attempt, then SIGKILL). Orphans (crash recovery): run-dir
-`state.json` pids are killed, `afc*` TAPs deleted, dirs removed at boot.
+`SendCtrlAltDel` attempt, then SIGKILL). A cancel landing during the boot
+window latches (`vm.stopping`) and the just-spawned VMM is killed on the
+post-spawn recheck — a cancel can no longer race the boot into a running
+VM. The platform stall watchdog calls `stopByRunId` when it finalizes a
+stalled run (the VM is killed, not just the DB row), and at platform boot
+the orphan finalizer does the same for every stale-heartbeat run before
+finalizing it failed — a platform restart never leaks running microVMs
+(and frees their `FIRECRACKER_MAX_CONCURRENT_VMS` slots). Daemon-side
+backstops that hold even under a platform↔daemon partition: the agent
+WorkloadSpec carries `maxLifetimeSeconds` (run timeout + boot grace +
+10 min margin), enforced as a hard last-resort lifetime ceiling (teardown
+reason `max-lifetime`), and a periodic exit-reaper destroys a VMM that
+exited but whose run no platform ever claimed via `waitForExit` after
+~5 min (teardown reason `reaper`) — there is NO `waitForExit` re-attach.
+Daemon-crash orphans: run-dir `state.json` pids are killed, `afc*` TAPs
+deleted, dirs removed at daemon boot.
 
 ## Artifacts
 
@@ -364,8 +404,11 @@ combined manifest to each `v*` GitHub Release.
 
 ## Requirements & privileges
 
-- Linux + `/dev/kvm` (+ `firecracker` ≥1.16 — enforced at `initialize()`,
-  older releases are exposed to CVE-2026-5747 —, `mkfs.ext4` and `debugfs`
+- Linux + `/dev/kvm` (+ `firecracker` ≥1.16 — enforced at `initialize()`;
+  older releases are exposed to CVE-2026-5747 (virtio OOB, fixed 1.15.1)
+  and CVE-2026-1386 (jailer symlink → arbitrary host file overwrite,
+  fixed upstream 1.13.2/1.14.1) — both fixed well before 1.16, so any
+  ≥1.16 release is covered —, `mkfs.ext4` and `debugfs`
   — both from e2fsprogs — on PATH).
 - **Production runs the daemon as root** (the installed systemd unit,
   `User=root`) — required by the jailer (chroot + per-VM uid drop), TAP
@@ -390,9 +433,12 @@ combined manifest to each `v*` GitHub Release.
   65534/65535 or the systemd DynamicUser pool 61184–65519 are rejected at
   boot; the range must be unallocated on the host and no /etc/passwd
   entries are created or needed),
-  and cgroup-v2 `memory.max`/`pids.max` bounds under the `appstrate-fc`
-  parent slice (`FIRECRACKER_JAIL_CGROUPS=off` drops the bounds — not the
-  jail — on hosts without cgroup-v2 delegation). Same-filesystem
+  and cgroup-v2 `memory.max`/`pids.max`/`cpu.max` bounds under the
+  `appstrate-fc` parent slice — the `cpu.max` quota is proportional to the
+  VM's vCPU count (vcpus × the 100 ms period), and the boot cgroup-v2 probe
+  requires the cpu controller too (`FIRECRACKER_JAIL_CGROUPS=off` drops the
+  bounds — not the jail — on hosts without cgroup-v2 delegation).
+  Same-filesystem
   constraint: the kernel/rootfs are **hardlinked** into each chroot
   (never copied), so the jail dir must share a filesystem with
   `FIRECRACKER_KERNEL_PATH`/`FIRECRACKER_ROOTFS_PATH` — pointing
@@ -427,6 +473,14 @@ combined manifest to each `v*` GitHub Release.
 - **Console ceiling.** The serial console (guest kernel + supervisor + full
   workload stdout) appends unbounded; a per-VM watchdog kills the VM — the
   run fails — once `console.log` exceeds `FIRECRACKER_MAX_CONSOLE_BYTES`.
+- **Platform restart / partition behavior.** A platform restart never leaks
+  running microVMs: at boot the orphan finalizer stops each stale-heartbeat
+  run's workload via `stopByRunId` (kills the VM, frees the admission slot)
+  before finalizing it failed, and the stall watchdog does the same for
+  runs it finalizes while up. If the platform never comes back, the daemon
+  self-limits: the WorkloadSpec's `maxLifetimeSeconds` is a hard lifetime
+  ceiling, and the periodic exit-reaper destroys an exited-but-unclaimed
+  VMM after ~5 min (see _Launch sequence_).
 - **Capacity planning.** Per-run guest RAM =
   `agent MiB + 512 MiB` (256 MiB sidecar — dropped for skipSidecar runs —
   plus 256 MiB kernel/init/overlay headroom), **plus workspace bytes**: the
@@ -446,7 +500,10 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
   ended, `removeIsolationBoundary`), `watchdog-kill` (platform stopped the
   run by id via `stopByRunId` — the stall watchdog and user cancel share
   this route), `orphan-sweep` (boot-time reclamation of a crashed
-  predecessor), `shutdown` (daemon stopping), or `crash` (VMM exited
+  predecessor), `max-lifetime` (the daemon's hard lifetime ceiling —
+  `maxLifetimeSeconds` from the WorkloadSpec), `reaper` (periodic
+  exit-reaper destroyed a VMM that exited but was never claimed via
+  `waitForExit`), `shutdown` (daemon stopping), or `crash` (VMM exited
   non-zero without an intentional stop, incl. the console-ceiling kill).
   `exitMarkerFound` is the nonce-authenticated supervisor exit marker — the
   same signal `waitForExit` trusts. There is no longer a silent gap between
@@ -507,26 +564,26 @@ boots on a bare KVM host with only these variables.
 
 ### Engine host config — `FIRECRACKER_*` (`runner/host-env.ts`)
 
-| Var                              | Default                          | Notes                                                                                                                                    |
-| -------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                                                                                               |
-| `FIRECRACKER_JAILER`             | `on`                             | per-VM jailer confinement (chroot + uid drop + cgroups); `off` = unjailed direct spawn, unprivileged dev ONLY                            |
-| `FIRECRACKER_JAILER_BIN`         | `jailer`                         | jailer binary — must come from the SAME release as `FIRECRACKER_BIN`                                                                     |
-| `FIRECRACKER_JAIL_UID_BASE`      | `200000`                         | per-VM uid/gid = base + subnet index; range must be unallocated and must not intersect 61184–65535 (min 1000)                            |
-| `FIRECRACKER_JAIL_CGROUPS`       | `on`                             | cgroup-v2 `memory.max`/`pids.max` per VM; `off` keeps the jail, drops the bounds (hosts without cgroup-v2 delegation)                    |
-| `FIRECRACKER_CREDENTIAL_BROKER`  | `mmds`                           | how run secrets reach the guest: `mmds` (in-memory MMDS store, off the config drive) or `config-drive` (pre-MMDS behavior, escape hatch) |
-| `FIRECRACKER_MMDS_MAX_BYTES`     | `16777216`                       | ceiling on the brokered credential payload; above the 50 KiB Firecracker default the VMM store limit is raised, above THIS the run fails |
-| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                                                                                                             |
-| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                                                                                                                  |
-| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended — jailer mode then needs the artifacts on the same tmpfs, see _Requirements_)                           |
-| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                                                                                                                   |
-| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach                                                                                         |
-| `FIRECRACKER_MAX_CONCURRENT_VMS` | `16` (`0` = unlimited)           | admission cap — see _Operational constraints_                                                                                            |
-| `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)                                                                                      |
-| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | guest-artifact download base (mirror for air-gapped)                                                                                     |
-| `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present                                                                                         |
-| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)                                                                                              |
-| `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot guest→platform path probe: `warn` logs a drop, `strict` fails boot                                                                  |
+| Var                              | Default                          | Notes                                                                                                                                               |
+| -------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                                                                                                          |
+| `FIRECRACKER_JAILER`             | `on`                             | per-VM jailer confinement (chroot + uid drop + cgroups); `off` = unjailed direct spawn, unprivileged dev ONLY                                       |
+| `FIRECRACKER_JAILER_BIN`         | `jailer`                         | jailer binary — must come from the SAME release as `FIRECRACKER_BIN`                                                                                |
+| `FIRECRACKER_JAIL_UID_BASE`      | `200000`                         | per-VM uid/gid = base + subnet index; range must be unallocated and must not intersect 61184–65535 (min 1000)                                       |
+| `FIRECRACKER_JAIL_CGROUPS`       | `on`                             | cgroup-v2 `memory.max`/`pids.max`/`cpu.max` per VM (cpu quota ∝ vCPUs); `off` keeps the jail, drops the bounds (hosts without cgroup-v2 delegation) |
+| `FIRECRACKER_CREDENTIAL_BROKER`  | `mmds`                           | how run secrets reach the guest: `mmds` (in-memory MMDS store, off the config drive) or `config-drive` (pre-MMDS behavior, escape hatch)            |
+| `FIRECRACKER_MMDS_MAX_BYTES`     | `16777216`                       | ceiling on the brokered credential payload; above the 50 KiB Firecracker default the VMM store limit is raised, above THIS the run fails            |
+| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                                                                                                                        |
+| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                                                                                                                             |
+| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended — jailer mode then needs the artifacts on the same tmpfs, see _Requirements_)                                      |
+| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                                                                                                                              |
+| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach                                                                                                    |
+| `FIRECRACKER_MAX_CONCURRENT_VMS` | `16` (`0` = unlimited)           | admission cap — see _Operational constraints_                                                                                                       |
+| `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)                                                                                                 |
+| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | guest-artifact download base (mirror for air-gapped)                                                                                                |
+| `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present                                                                                                    |
+| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)                                                                                                         |
+| `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot guest→platform path probe: `warn` logs a drop, `strict` fails boot                                                                             |
 
 ## Development on macOS
 
@@ -579,8 +636,6 @@ Files under `apps/api/src/modules/firecracker/`:
   sidecar-only workload (connect-run) cannot start. The connect executor
   fails fast (`ConnectNotSupportedError`) — use docker/process for connect
   flows.
-- **No jailer, credentials in-guest**: see _Production status_ at the top —
-  the backend is experimental until both close.
 - Workspace and rootfs overlay are tmpfs-backed → bounded by guest RAM
   (`vmSizing` adds a fixed envelope over the agent budget; see _Operational
   constraints_ for the capacity formula).

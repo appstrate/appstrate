@@ -16,7 +16,20 @@ import { join } from "node:path";
 import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../runner/host-env.ts";
 import { FirecrackerOrchestrator, type FirecrackerOrchestratorDeps } from "../../orchestrator.ts";
 import { deriveJailId } from "../../jail.ts";
+import { workloadSpecSchema } from "../../runner/protocol.ts";
 import type { HostExec } from "../../host-net.ts";
+
+/** The VmRecord fields these tests assert on (private map, read via Reflect). */
+interface VmRecordView {
+  stopping: boolean;
+  teardownReason?: string;
+  exitedAt?: number;
+}
+
+/** The orchestrator's private per-run record map, via the Reflect precedent. */
+function vmsOf(orch: FirecrackerOrchestrator): Map<string, VmRecordView> {
+  return Reflect.get(orch, "vms") as Map<string, VmRecordView>;
+}
 
 interface RecordedCall {
   cmd: string[];
@@ -439,6 +452,100 @@ describe("waitForExit without a booted VM", () => {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec);
     expect(await orch.waitForExit({ id: "x", runId: "nope", role: "agent" })).toBe(1);
+  });
+});
+
+describe("boot-window cancel latch (B4)", () => {
+  // A boundary created but never started has a VmRecord with `proc: null`
+  // — exactly the window where a cancel used to be a silent no-op and the
+  // VM booted anyway. Both stop paths must latch `stopping` so
+  // startWorkload's post-spawn recheck kills the just-spawned VMM.
+
+  it("stopByRunId returns already_stopped AND latches stopping on a proc-less record", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_boot");
+
+    expect(await orch.stopByRunId("run_boot")).toBe("already_stopped");
+
+    const vm = vmsOf(orch).get("run_boot");
+    expect(vm?.stopping).toBe(true);
+    expect(vm?.teardownReason).toBe("watchdog-kill");
+  });
+
+  it("stopWorkload latches stopping on a proc-less record", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_boot2");
+
+    await orch.stopWorkload({ id: "x", runId: "run_boot2", role: "agent" });
+
+    expect(vmsOf(orch).get("run_boot2")?.stopping).toBe(true);
+  });
+});
+
+describe("exit reaper (ROB-1 layer 2)", () => {
+  it("reaps only records whose VMM exited past the threshold", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_stale");
+    await orch.createIsolationBoundary("run_fresh");
+    // A VMM that exited 6 min ago and was never claimed by any platform —
+    // vs a live boundary (exitedAt undefined) the reaper must not touch.
+    const stale = vmsOf(orch).get("run_stale");
+    expect(stale).toBeDefined();
+    if (stale) stale.exitedAt = Date.now() - 6 * 60_000;
+
+    const reapExitedVms = Reflect.get(orch, "reapExitedVms") as (
+      this: FirecrackerOrchestrator,
+      now?: number,
+    ) => Promise<number>;
+    const reaped = await reapExitedVms.call(orch);
+
+    expect(reaped).toBe(1);
+    expect(vmsOf(orch).has("run_stale")).toBe(false);
+    expect(vmsOf(orch).has("run_fresh")).toBe(true);
+    // The stale run's workspace was reclaimed with the record.
+    expect(await Bun.file(join(dataDir, "run_stale", "state.json")).exists()).toBe(false);
+  });
+
+  it("leaves a recently-exited record alone (the platform may still claim it)", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_recent");
+    const recent = vmsOf(orch).get("run_recent");
+    expect(recent).toBeDefined();
+    if (recent) recent.exitedAt = Date.now() - 10_000;
+
+    const reapExitedVms = Reflect.get(orch, "reapExitedVms") as (
+      this: FirecrackerOrchestrator,
+      now?: number,
+    ) => Promise<number>;
+    expect(await reapExitedVms.call(orch)).toBe(0);
+    expect(vmsOf(orch).has("run_recent")).toBe(true);
+  });
+});
+
+describe("workloadSpecSchema maxLifetimeSeconds (B2)", () => {
+  const base = {
+    runId: "run_1",
+    role: "agent",
+    image: "img",
+    env: {},
+    resources: { memoryBytes: 1024, nanoCpus: 1_000_000_000 },
+  };
+
+  it("accepts a positive integer ceiling (and its absence)", () => {
+    expect(workloadSpecSchema.safeParse({ ...base, maxLifetimeSeconds: 3600 }).success).toBe(true);
+    expect(workloadSpecSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("rejects zero, negative and fractional ceilings", () => {
+    for (const bad of [0, -1, 1.5]) {
+      expect(workloadSpecSchema.safeParse({ ...base, maxLifetimeSeconds: bad }).success).toBe(
+        false,
+      );
+    }
   });
 });
 

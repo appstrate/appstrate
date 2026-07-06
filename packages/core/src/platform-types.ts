@@ -109,6 +109,16 @@ export interface WorkloadSpec {
    * by orchestrators without network isolation (e.g. the process orchestrator).
    */
   egress?: boolean;
+  /**
+   * Hard, last-resort lifetime ceiling (seconds) an orchestrator MAY
+   * enforce host-side — kill the workload with crash semantics once it
+   * outlives this bound. Only matters when the platform's own timeout can
+   * no longer reach the workload (platform death or platform↔daemon
+   * partition); callers size it comfortably ABOVE the platform safety net
+   * so it never fires first on a healthy deployment. Additive and
+   * optional — orchestrators without host-side enforcement ignore it.
+   */
+  maxLifetimeSeconds?: number;
 }
 
 /**

@@ -17,6 +17,14 @@
  *   - guest→internet is forwarded + masqueraded (the in-guest uid rules
  *     restrict WHICH process gets to use that egress)
  *   - guest→guest is dropped (per-run isolation)
+ *   - HOST-OUTPUT traffic originated by a jailed VMM uid is dropped
+ *     toward IMDS/RFC1918/loopback (`vmmUidRange`): the TAP rules above
+ *     only see traffic coming FROM the guest — a VMM process that
+ *     escaped KVM runs in the host netns, where the default firecracker
+ *     seccomp still permits socket/connect, and could otherwise reach
+ *     127.0.0.1 (Redis, Postgres, the platform API) or 169.254.169.254
+ *     (cloud IMDS → host IAM credentials). The skuid guard closes that
+ *     blast radius; a full per-VM netns is the deferred stronger fix.
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -30,6 +38,14 @@ export interface HostExec {
   run(cmd: string[], opts?: { stdin?: string }): Promise<string>;
 }
 
+/**
+ * Privileged host ops (`ip`/`nft`/`mkfs.ext4`/`debugfs`) are all
+ * sub-second; a command that has not returned in 30 s is wedged (e.g. a
+ * kernel `unregister_netdevice` hang under `ip link del`) — kill it and
+ * surface a loud error instead of hanging destroyVm/shutdown forever.
+ */
+const HOST_EXEC_TIMEOUT_MS = 30_000;
+
 /** Production executor — Bun.spawn, `sudo -n` prefixed when not root. */
 export function createHostExec(): HostExec {
   return {
@@ -37,7 +53,10 @@ export function createHostExec(): HostExec {
       const argv = process.getuid?.() === 0 ? cmd : ["sudo", "-n", ...cmd];
       // The error reports the unprefixed command — the sudo wrapper is an
       // executor detail, not part of what the caller asked to run.
-      const { exitCode, stdout, stderr } = await spawnCollect(argv, { stdin: opts?.stdin });
+      const { exitCode, stdout, stderr } = await spawnCollect(argv, {
+        stdin: opts?.stdin,
+        timeoutMs: HOST_EXEC_TIMEOUT_MS,
+      });
       if (exitCode !== 0) {
         throw new Error(`Host command failed (${exitCode}): ${cmd.join(" ")} — ${stderr.trim()}`);
       }
@@ -73,8 +92,18 @@ export function buildNftScript(params: {
    * script unchanged.
    */
   platformForward?: { ip: string; port: number };
+  /**
+   * Per-VM jail uid interval (FIRECRACKER_JAILER=on). When present, an
+   * `output`-hook chain drops any HOST-ORIGINATED traffic whose socket
+   * uid falls in the range and whose destination is a deny CIDR or
+   * loopback — the escaped-VMM guard described in the module doc. Absent
+   * with the jailer off (the VMM then runs as the daemon's own uid, which
+   * a uid match could never single out).
+   */
+  vmmUidRange?: { base: number; hi: number };
 }): string {
-  const { subnetCidr, aliasIp, platformPort, egressDenyCidrs, platformForward } = params;
+  const { subnetCidr, aliasIp, platformPort, egressDenyCidrs, platformForward, vmmUidRange } =
+    params;
   const tap = `"${TAP_DEVICE_PREFIX}*"`;
   const denySet = egressDenyCidrs.join(", ");
   // Whether guest→platform traffic is delivered locally (INPUT hook — the
@@ -100,6 +129,26 @@ export function buildNftScript(params: {
         `    iifname ${tap} ct original ip daddr ${platformForward.ip} ct original proto-dst ${platformForward.port} accept`,
       ]
     : [];
+  // Escaped-VMM output guard (SEC-1): drop host-output traffic originated
+  // by a jailed VMM uid toward the deny CIDRs PLUS loopback. Loopback is
+  // added here (not in FIRECRACKER_EGRESS_DENY_CIDRS) because the forward
+  // path never carries 127/8, while a host-netns VMM process reaches it
+  // trivially — the whole point of this chain. A legitimate VMM process
+  // originates NO IP traffic (its API socket is unix, MMDS is in-process),
+  // so nothing real can match. Note the daemon runs as root — never inside
+  // the jail uid range (enforced min 1000, reserved-range check at boot).
+  const outputDenySet = [
+    ...egressDenyCidrs.filter((cidr) => cidr !== "127.0.0.0/8"),
+    "127.0.0.0/8",
+  ].join(", ");
+  const vmmOutputGuard = vmmUidRange
+    ? [
+        `  chain output {`,
+        `    type filter hook output priority filter; policy accept;`,
+        `    meta skuid ${vmmUidRange.base}-${vmmUidRange.hi} ip daddr { ${outputDenySet} } drop`,
+        `  }`,
+      ]
+    : [];
   return [
     `add table ip appstrate_fc`,
     `delete table ip appstrate_fc`,
@@ -122,6 +171,7 @@ export function buildNftScript(params: {
     `    oifname ${tap} ct state established,related accept`,
     `    oifname ${tap} drop`,
     `  }`,
+    ...vmmOutputGuard,
     `  chain postrouting {`,
     `    type nat hook postrouting priority srcnat; policy accept;`,
     `    ip saddr ${subnetCidr} oifname != ${tap} masquerade`,
@@ -141,6 +191,8 @@ export async function setupHostNetwork(
     egressDenyCidrs: string[];
     /** Remote platform endpoint guests must always reach — see buildNftScript. */
     platformForward?: { ip: string; port: number };
+    /** Jailed-VMM uid interval for the escaped-VMM output guard — see buildNftScript. */
+    vmmUidRange?: { base: number; hi: number };
   },
 ): Promise<void> {
   // `replace` (not `add`) → idempotent across restarts.
