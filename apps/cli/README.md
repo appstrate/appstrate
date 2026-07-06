@@ -50,6 +50,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                            |
 | `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.            |
 | `appstrate run`       | Execute an agent locally — by package id or from a `.afps`/`.afps-bundle` path. |
+| `appstrate runner`    | Install and manage the Firecracker runner daemon on a KVM host.                 |
 
 All commands accept `--profile <name>` to target a specific profile (see [Profiles](#profiles)).
 
@@ -67,10 +68,13 @@ appstrate install --tier 0 --dir ~/demo-appstrate
 
 **Flags**
 
-| Flag           | Values       | Description                                 |
-| -------------- | ------------ | ------------------------------------------- |
-| `-t`, `--tier` | `0\|1\|2\|3` | Skip the interactive tier prompt.           |
-| `-d`, `--dir`  | path         | Install directory (default: `~/appstrate`). |
+| Flag             | Values                | Description                                                                                                                                                                                                                                           |
+| ---------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-t`, `--tier`   | `0\|1\|2\|3`          | Skip the interactive tier prompt.                                                                                                                                                                                                                     |
+| `-d`, `--dir`    | path                  | Install directory (default: `~/appstrate`).                                                                                                                                                                                                           |
+| `--run-adapter`  | `docker\|firecracker` | Agent execution backend (default `docker`). `firecracker` runs each agent in a microVM on a KVM host running the appstrate-runner daemon; Docker tiers only. Also `APPSTRATE_RUN_ADAPTER`. Writes `RUN_ADAPTER` / `MODULES` / `FIRECRACKER_RUNNER_*`. |
+| `--runner-url`   | url                   | Firecracker (remote): URL of an existing appstrate-runner daemon, e.g. `http://10.0.0.9:3100`. Implies the remote topology.                                                                                                                           |
+| `--runner-token` | token                 | Firecracker: shared bearer token for the runner daemon (default: generate one).                                                                                                                                                                       |
 
 **Tiers**
 
@@ -568,6 +572,36 @@ The full flag set is documented under `appstrate run --help`.
 **Connection readiness**
 
 Connection readiness is enforced server-side at run-trigger time: a run that targets an integration without a healthy connection is rejected with HTTP 412 (`missing_integration_connection`) before the container launches. Connect or repair the connection from the dashboard's connectors panel (`${instance}/preferences/connectors`).
+
+---
+
+### `appstrate runner`
+
+Install and manage the **Firecracker runner daemon** (`appstrate-runner`) on a KVM host. The daemon owns the privileged surface — KVM, TAP devices, nftables — and boots one microVM per run; the containerized platform stays a thin HTTP client (`RUN_ADAPTER=firecracker`, `FIRECRACKER_RUNNER_URL`/`_TOKEN`). This is the same control-plane / host-daemon split AWS, Fly.io, and E2B use. Architecture: [`../../docs/architecture/FIRECRACKER.md`](../../docs/architecture/FIRECRACKER.md).
+
+Runs on a Linux KVM host (not macOS). Requires `/dev/kvm` and root (systemd).
+
+```sh
+appstrate runner install --platform-url http://10.0.0.5:3000   # preflight + install + start via systemd
+appstrate runner doctor                                         # preflight + systemd state + daemon health + artifacts version
+appstrate runner doctor --json                                  # machine-readable
+appstrate runner update                                         # re-download the daemon for this CLI's version, verify, swap, restart
+appstrate runner status                                         # systemctl status appstrate-runner
+appstrate runner logs -f                                        # journalctl -u appstrate-runner
+```
+
+**`appstrate runner install` flags**
+
+| Flag             | Description                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------- |
+| `--platform-url` | IPv4 URL the guests reach the platform on (e.g. `http://10.0.0.5:3000`).              |
+| `--token`        | Shared bearer token (default: preserve existing, else generate one).                  |
+| `--port`         | Daemon listen port (default: `3100`).                                                 |
+| `--data-dir`     | State root for kernel/rootfs/runs/firecracker (default: `/var/lib/appstrate-runner`). |
+| `--host`         | Daemon bind address (default: `0.0.0.0`).                                             |
+| `-y`, `--yes`    | Skip prompts (requires `--platform-url`).                                             |
+
+Point the platform at the daemon by setting `RUN_ADAPTER=firecracker`, adding `firecracker` to `MODULES`, and exporting `FIRECRACKER_RUNNER_URL` / `FIRECRACKER_RUNNER_TOKEN` — or pass `--run-adapter firecracker` to `appstrate install`, which writes these for you.
 
 ## Profiles
 
