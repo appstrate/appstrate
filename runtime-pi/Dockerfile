@@ -305,6 +305,10 @@ RUN mkdir -p /runtime/.transpiler-cache \
  && if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then \
       bun -e 'await import("@anthropic-ai/claude-agent-sdk");'; \
     fi \
+ # Fail the build if priming produced nothing — an empty cache would be a
+ # silent cold-start regression (the entrypoint run above swallows its exit
+ # code by design, so this is the only guard that the graph actually loaded).
+ && [ -n "$(ls -A /runtime/.transpiler-cache)" ] \
  && chown -R pi:pi /runtime/.transpiler-cache
 
 # Agent workspace. Bundled package entrypoints keep only the Pi SDK
