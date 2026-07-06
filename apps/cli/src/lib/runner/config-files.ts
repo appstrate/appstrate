@@ -27,6 +27,14 @@ export interface RunnerConfig {
   host: string;
   /** State root — kernel/rootfs/runs/firecracker all live under here. */
   dataDir: string;
+  /**
+   * Guest-artifact release the daemon pins at boot (FIRECRACKER_ARTIFACTS_VERSION).
+   * Set to the daemon binary's own version so the kernel/rootfs are fetched from
+   * the SAME release — a daemon and its guest artifacts MUST speak one guest
+   * protocol. Left undefined for a dev ("latest") install, where the daemon
+   * tracks the latest release to match a latest binary.
+   */
+  artifactsVersion?: string;
 }
 
 /**
@@ -69,9 +77,46 @@ export function renderRunnerEnvFile(config: RunnerConfig): string {
     `FIRECRACKER_KERNEL_PATH=${paths.kernelPath}`,
     `FIRECRACKER_ROOTFS_PATH=${paths.rootfsPath}`,
     `FIRECRACKER_DATA_DIR=${paths.runsDir}`,
+    // Lock the guest kernel/rootfs to the SAME release as the daemon binary so
+    // the two always agree on the guest protocol. Omitted for a dev "latest"
+    // install (config.artifactsVersion undefined) — the daemon then tracks the
+    // latest release, matching a latest binary.
+    ...(config.artifactsVersion
+      ? [`FIRECRACKER_ARTIFACTS_VERSION=${config.artifactsVersion}`]
+      : []),
     "",
   ];
   return lines.join("\n");
+}
+
+/**
+ * Surgically upsert (or, for a dev "latest" install, remove) the
+ * FIRECRACKER_ARTIFACTS_VERSION pin in an existing EnvironmentFile, preserving
+ * every other line — comments, blank lines, and any host-specific tuning an
+ * operator added — verbatim. `runner update` uses this after swapping the
+ * daemon binary so the guest-artifact release stays locked to the newly
+ * installed daemon version across a guest-protocol bump, without re-rendering
+ * (and thereby wiping) the whole file. `version` undefined strips the pin.
+ */
+export function withArtifactsVersionPin(envText: string, version: string | undefined): string {
+  const KEY = "FIRECRACKER_ARTIFACTS_VERSION";
+  const lines = envText.split(/\r?\n/);
+  const idx = lines.findIndex((l) => l.trim().startsWith(`${KEY}=`));
+  if (version) {
+    const line = `${KEY}=${version}`;
+    if (idx >= 0) {
+      lines[idx] = line;
+    } else {
+      // Append after the last non-blank line so the pin never lands in a
+      // trailing run of blank lines.
+      let end = lines.length;
+      while (end > 0 && lines[end - 1]!.trim() === "") end--;
+      lines.splice(end, 0, line);
+    }
+  } else if (idx >= 0) {
+    lines.splice(idx, 1);
+  }
+  return `${lines.join("\n").replace(/\n+$/, "")}\n`;
 }
 
 /**

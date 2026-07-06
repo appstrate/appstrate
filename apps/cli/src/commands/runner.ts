@@ -48,6 +48,7 @@ import {
   parseRunnerEnvFile,
   renderRunnerUnit,
   firewallCommands,
+  withArtifactsVersionPin,
   type RunnerConfig,
 } from "../lib/runner/config-files.ts";
 import { downloadDaemon, installFirecracker } from "../lib/runner/download.ts";
@@ -133,6 +134,13 @@ export async function runnerInstallCommand(opts: RunnerInstallOptions = {}): Pro
     // 3. Download + install the daemon binary (lockstep version) + firecracker.
     const version = resolveDaemonVersion();
     await downloadAndInstallBinaries(config, version, arch, d);
+
+    // Pin the guest artifacts to the SAME release as the daemon binary (unless
+    // this is a dev "latest" install) — the daemon downloads its kernel/rootfs
+    // at boot, and a daemon paired with a different-protocol artifact release
+    // fails fatally. Locking both to one version keeps a pinned/older-CLI
+    // install deterministic and bootable instead of tracking a moving `latest`.
+    config.artifactsVersion = version === "latest" ? undefined : version;
 
     // 4. Provision state dirs + config + unit.
     await writeHostFiles(config, d);
@@ -577,6 +585,18 @@ export async function runnerUpdateCommand(opts: RunnerUpdateOptions = {}): Promi
     // process's fd valid; the restart below picks up the new inode.
     await d.fs.installAtomic(RUNNER_BIN_PATH, bytes, 0o755);
     spin.stop(`Installed daemon → ${RUNNER_BIN_PATH}`);
+
+    // Re-pin the guest artifacts to the new daemon version BEFORE the restart:
+    // if this update crosses a guest-protocol bump, a pin still pointing at the
+    // old release would make the fresh daemon fatally reject the on-disk (and
+    // re-downloaded) artifacts. Surgical patch — every other env line is
+    // preserved. Skipped silently when no env file exists yet (update before
+    // install), where the restart error below is the clearer signal.
+    const envText = await d.fs.readFile(RUNNER_ENV_PATH);
+    if (envText !== null) {
+      const pin = version === "latest" ? undefined : version;
+      await d.fs.writeFile(RUNNER_ENV_PATH, withArtifactsVersionPin(envText, pin), 0o600);
+    }
 
     const restart = await d.exec.run("systemctl", ["restart", RUNNER_SERVICE_NAME]);
     if (!restart.ok) {

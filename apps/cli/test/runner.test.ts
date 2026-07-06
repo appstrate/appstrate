@@ -18,6 +18,7 @@ import {
   parseRunnerEnvFile,
   renderRunnerUnit,
   firewallCommands,
+  withArtifactsVersionPin,
   type RunnerConfig,
 } from "../src/lib/runner/config-files.ts";
 import {
@@ -31,6 +32,7 @@ import {
   resolveRunnerArch,
   runnerDataPaths,
   daemonAssetName,
+  RUNNER_ENV_PATH,
   APPSTRATE_RELEASE_BASE,
 } from "../src/lib/runner/constants.ts";
 import {
@@ -259,6 +261,46 @@ describe("renderRunnerEnvFile / parseRunnerEnvFile", () => {
     const env = parseRunnerEnvFile("# comment\n\nKEY=value\n  OTHER = x \n");
     expect(env).toEqual({ KEY: "value", OTHER: "x" });
   });
+
+  it("omits the artifacts-version pin for a dev (latest) install", () => {
+    const env = parseRunnerEnvFile(renderRunnerEnvFile(config));
+    expect(env.FIRECRACKER_ARTIFACTS_VERSION).toBeUndefined();
+  });
+
+  it("pins the artifacts version to the daemon release when set", () => {
+    const env = parseRunnerEnvFile(renderRunnerEnvFile({ ...config, artifactsVersion: "1.2.3" }));
+    expect(env.FIRECRACKER_ARTIFACTS_VERSION).toBe("1.2.3");
+  });
+});
+
+describe("withArtifactsVersionPin", () => {
+  it("upserts the pin in place, preserving every other line", () => {
+    const original = renderRunnerEnvFile({ ...config, artifactsVersion: "1.0.0" });
+    const patched = withArtifactsVersionPin(original, "2.0.0");
+    const env = parseRunnerEnvFile(patched);
+    expect(env.FIRECRACKER_ARTIFACTS_VERSION).toBe("2.0.0");
+    // Untouched keys survive the surgical patch.
+    expect(env.FIRECRACKER_RUNNER_TOKEN).toBe(config.token);
+    expect(env.FIRECRACKER_KERNEL_PATH).toBe(runnerDataPaths(config.dataDir).kernelPath);
+    // No duplicate pin line.
+    expect(patched.match(/FIRECRACKER_ARTIFACTS_VERSION=/g)).toHaveLength(1);
+  });
+
+  it("appends the pin when absent, keeping operator customizations", () => {
+    const base = `${renderRunnerEnvFile(config)}FIRECRACKER_MAX_CONCURRENT_VMS=32\n`;
+    const patched = withArtifactsVersionPin(base, "3.1.4");
+    const env = parseRunnerEnvFile(patched);
+    expect(env.FIRECRACKER_ARTIFACTS_VERSION).toBe("3.1.4");
+    expect(env.FIRECRACKER_MAX_CONCURRENT_VMS).toBe("32");
+  });
+
+  it("strips the pin for a dev (latest) update", () => {
+    const original = renderRunnerEnvFile({ ...config, artifactsVersion: "1.0.0" });
+    const env = parseRunnerEnvFile(withArtifactsVersionPin(original, undefined));
+    expect(env.FIRECRACKER_ARTIFACTS_VERSION).toBeUndefined();
+    // Other keys remain.
+    expect(env.FIRECRACKER_RUNNER_PORT).toBe("3100");
+  });
 });
 
 describe("renderRunnerUnit", () => {
@@ -445,6 +487,30 @@ describe("runnerUpdateCommand", () => {
     expect(installed[0]!.dest).toBe("/usr/local/bin/appstrate-runner");
     expect(installed[0]!.mode).toBe(0o755);
     expect(calls).toContainEqual(["systemctl", "restart", "appstrate-runner"]);
+  });
+
+  it("re-pins the artifacts version off the old release so the new daemon can boot", async () => {
+    const bytes = new Uint8Array([4, 2]);
+    const sha = sha256Hex(bytes);
+    // A prior install pinned an OLD artifact release; the new daemon must not be
+    // left pointing at it (a guest-protocol bump would fatally reject it).
+    const { fs, files } = fakeFs({
+      [RUNNER_ENV_PATH]: renderRunnerEnvFile({ ...config, artifactsVersion: "0.0.1-old" }),
+    });
+    const { exec } = fakeExec();
+    const asset = daemonAssetName(resolveRunnerArch());
+    await runnerUpdateCommand({
+      deps: {
+        getuid: () => 0,
+        fs,
+        exec,
+        http: fakeHttp({ binary: bytes, sha: `${sha}  ${asset}` }),
+      },
+    });
+    // The stale pin is gone (replaced with the new daemon version, or stripped
+    // for a dev "latest" update) and the bearer token is untouched.
+    expect(files[RUNNER_ENV_PATH]).not.toContain("0.0.1-old");
+    expect(parseRunnerEnvFile(files[RUNNER_ENV_PATH]!).FIRECRACKER_RUNNER_TOKEN).toBe(config.token);
   });
 });
 
