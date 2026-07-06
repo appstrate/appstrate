@@ -12,6 +12,7 @@ import { describe, it, expect } from "bun:test";
 import { join } from "node:path";
 import {
   assertApiSocketPathLength,
+  assertJailerVersionParity,
   buildJailerArgv,
   computeJailPaths,
   deriveJailId,
@@ -81,27 +82,22 @@ function fakeJailFs(fail?: { op: keyof JailFs; code: string; oncePath?: string }
 }
 
 describe("deriveJailId", () => {
-  it("keeps jailer-charset runIds and appends the subnet index", () => {
-    expect(deriveJailId("abc-123", 7)).toBe("abc-123-7");
-  });
-
-  it("replaces characters outside the jailer charset ([a-zA-Z0-9-])", () => {
-    // RUN_ID_RE also admits `_` and `.` — the jailer does not.
-    expect(deriveJailId("run_1.alpha", 2)).toBe("run-1-alpha-2");
-  });
-
-  it("always differs across runs that sanitize identically (index suffix)", () => {
-    // "run_1" and "run.1" both sanitize to "run-1" — a shared chroot
-    // between two live runs would be catastrophic; the per-run subnet
-    // index keeps the ids distinct.
-    expect(deriveJailId("run_1", 3)).not.toBe(deriveJailId("run.1", 4));
-  });
-
-  it("caps the id at 64 chars including the suffix", () => {
-    const id = deriveJailId("x".repeat(200), 16319);
-    expect(id.length).toBe(64);
-    expect(id.endsWith("-16319")).toBe(true);
+  it("derives a short, deterministic, jailer-charset id (digest + subnet index)", () => {
+    const id = deriveJailId("run_9f0c2b1a-1234-5678-9abc-def012345678", 7);
+    expect(id).toBe(deriveJailId("run_9f0c2b1a-1234-5678-9abc-def012345678", 7));
+    expect(/^fc-[0-9a-f]{12}-7$/.test(id)).toBe(true);
     expect(/^[a-zA-Z0-9-]{1,64}$/.test(id)).toBe(true);
+  });
+
+  it("differs across distinct runIds and across indexes", () => {
+    expect(deriveJailId("run_1", 3)).not.toBe(deriveJailId("run.1", 3));
+    expect(deriveJailId("run_1", 3)).not.toBe(deriveJailId("run_1", 4));
+  });
+
+  it("stays short regardless of the runId length (socket-path budget)", () => {
+    const id = deriveJailId("x".repeat(200), 16319);
+    expect(id.length).toBeLessThanOrEqual(3 + 12 + 1 + 5);
+    expect(id.endsWith("-16319")).toBe(true);
   });
 });
 
@@ -113,23 +109,39 @@ describe("computeJailPaths", () => {
     subnetIndex: 5,
     uidBase: 64_000,
   };
+  const jailId = deriveJailId("run_42", 5);
 
   it("lays out the jailer-conventional chroot tree beside the runs dir", () => {
     const paths = computeJailPaths(input);
-    expect(paths.jailId).toBe("run-42-5");
+    expect(paths.jailId).toBe(jailId);
     expect(paths.uid).toBe(64_005);
     expect(paths.gid).toBe(64_005);
     expect(paths.chrootBaseDir).toBe("/var/lib/fc/jail");
-    expect(paths.jailDir).toBe("/var/lib/fc/jail/firecracker/run-42-5");
-    expect(paths.rootDir).toBe("/var/lib/fc/jail/firecracker/run-42-5/root");
+    expect(paths.jailDir).toBe(`/var/lib/fc/jail/firecracker/${jailId}`);
+    expect(paths.rootDir).toBe(`/var/lib/fc/jail/firecracker/${jailId}/root`);
     expect(paths.apiSocketHostPath).toBe(
-      "/var/lib/fc/jail/firecracker/run-42-5/root/run/firecracker.socket",
+      `/var/lib/fc/jail/firecracker/${jailId}/root/run/firecracker.socket`,
     );
   });
 
   it("nests the chroot under the exec-file basename (jailer layout contract)", () => {
     const paths = computeJailPaths({ ...input, fcExecName: "firecracker-v1.16.0" });
-    expect(paths.jailDir).toBe("/var/lib/fc/jail/firecracker-v1.16.0/run-42-5");
+    expect(paths.jailDir).toBe(`/var/lib/fc/jail/firecracker-v1.16.0/${jailId}`);
+  });
+
+  it("fits the AF_UNIX socket cap with a REAL run id under the production layout (B-2)", () => {
+    // Installer defaults (/var/lib/appstrate-runner/runs) + the platform's
+    // actual `run_<uuid>` id shape — the pre-digest jailId derivation blew
+    // the ~108-byte sun_path cap here and refused 100% of jailed prod runs.
+    // Only toy ids like "run-42" kept the old tests green.
+    const paths = computeJailPaths({
+      dataDir: "/var/lib/appstrate-runner/runs",
+      fcExecName: "firecracker",
+      runId: `run_${crypto.randomUUID()}`,
+      subnetIndex: 16319,
+      uidBase: 200_000,
+    });
+    expect(Buffer.byteLength(paths.apiSocketHostPath)).toBeLessThan(MAX_API_SOCKET_PATH_BYTES);
   });
 
   it("throws the operator-facing error when the socket path would exceed the AF_UNIX cap", () => {
@@ -204,6 +216,30 @@ describe("buildJailerArgv", () => {
     expect(argv).toContain("--");
   });
 
+  it("forwards extra firecracker flags after the -- separator (MMDS size overrides)", () => {
+    const argv = buildJailerArgv({
+      jailerBin: "jailer",
+      fcBin: "/x/firecracker",
+      jail,
+      extraFcArgs: ["--mmds-size-limit", "123456", "--http-api-max-payload-size", "123456"],
+    });
+    const sep = argv.indexOf("--");
+    expect(sep).toBeGreaterThan(0);
+    expect(argv.slice(sep + 1, sep + 5)).toEqual([
+      "--mmds-size-limit",
+      "123456",
+      "--http-api-max-payload-size",
+      "123456",
+    ]);
+    // The fixed api-sock/config-file pair still closes the argv.
+    expect(argv.slice(-4)).toEqual([
+      "--api-sock",
+      CHROOT_API_SOCKET_PATH,
+      "--config-file",
+      CHROOT_VMCONFIG_PATH,
+    ]);
+  });
+
   it("never detaches the VMM from the spawn handle (no daemonize / pid-ns / netns)", () => {
     // --daemonize redirects stdio to /dev/null and setsid()s; with
     // --new-pid-ns the PARENT jailer exits 0 immediately without
@@ -213,6 +249,25 @@ describe("buildJailerArgv", () => {
     expect(argv).not.toContain("--daemonize");
     expect(argv).not.toContain("--new-pid-ns");
     expect(argv).not.toContain("--netns");
+  });
+});
+
+describe("assertJailerVersionParity", () => {
+  it("accepts matching releases regardless of the surrounding text", () => {
+    expect(() => assertJailerVersionParity("Firecracker v1.16.0", "Jailer v1.16.0")).not.toThrow();
+  });
+
+  it("rejects a version mismatch (env override bypassing the installer lockstep)", () => {
+    expect(() => assertJailerVersionParity("Firecracker v1.16.0", "Jailer v1.15.1")).toThrow(
+      /same upstream release/,
+    );
+  });
+
+  it("rejects unparseable probes — no parity proof, no pass", () => {
+    expect(() => assertJailerVersionParity("Firecracker v1.16.0", "garbage")).toThrow(
+      /version parity/,
+    );
+    expect(() => assertJailerVersionParity("", "Jailer v1.16.0")).toThrow(/version parity/);
   });
 });
 

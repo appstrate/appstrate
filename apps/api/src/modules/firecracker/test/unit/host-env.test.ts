@@ -76,12 +76,14 @@ describe("jailer confinement surface (FIRECRACKER_JAILER* / FIRECRACKER_JAIL_*)"
     return getFirecrackerEnv();
   }
 
-  it("defaults to the production posture: jailer ON, PATH binary, uid base 64000, cgroups ON", () => {
+  it("defaults to the production posture: jailer ON, PATH binary, uid base 200000, cgroups ON", () => {
     for (const k of JAIL_KEYS) delete process.env[k];
     const env = freshEnv();
     expect(env.FIRECRACKER_JAILER).toBe("on");
     expect(env.FIRECRACKER_JAILER_BIN).toBe("jailer");
-    expect(env.FIRECRACKER_JAIL_UID_BASE).toBe(64_000);
+    // Above the whole 16-bit uid space: the per-VM range must never cross
+    // nobody (65534/65535) or the systemd DynamicUser pool (61184–65519).
+    expect(env.FIRECRACKER_JAIL_UID_BASE).toBe(200_000);
     expect(env.FIRECRACKER_JAIL_CGROUPS).toBe("on");
   });
 
@@ -108,6 +110,33 @@ describe("jailer confinement surface (FIRECRACKER_JAILER* / FIRECRACKER_JAIL_*)"
     process.env.FIRECRACKER_JAIL_UID_BASE = "500";
     _resetFirecrackerEnvCacheForTesting();
     expect(() => getFirecrackerEnv()).toThrow();
+  });
+
+  it("rejects uid ranges intersecting nobody / systemd DynamicUser (S-3)", () => {
+    // Base inside the DynamicUser pool (61184–65519).
+    process.env.FIRECRACKER_JAIL_UID_BASE = "64000";
+    _resetFirecrackerEnvCacheForTesting();
+    expect(() => getFirecrackerEnv()).toThrow(/DynamicUser/);
+    // Base below the pool whose range CROSSES into it (default 16 VMs).
+    process.env.FIRECRACKER_JAIL_UID_BASE = "61180";
+    _resetFirecrackerEnvCacheForTesting();
+    expect(() => getFirecrackerEnv()).toThrow(/DynamicUser/);
+    // Just past nobody: clean.
+    process.env.FIRECRACKER_JAIL_UID_BASE = "65536";
+    expect(freshEnv().FIRECRACKER_JAIL_UID_BASE).toBe(65_536);
+  });
+
+  it("validates the uid range against the ALLOCATOR ceiling when the VM cap is unlimited", () => {
+    // With FIRECRACKER_MAX_CONCURRENT_VMS=0 the reachable index span is the
+    // full 16319 — a base of 50000 then crosses 61184.
+    process.env.FIRECRACKER_JAIL_UID_BASE = "50000";
+    process.env.FIRECRACKER_MAX_CONCURRENT_VMS = "0";
+    _resetFirecrackerEnvCacheForTesting();
+    try {
+      expect(() => getFirecrackerEnv()).toThrow(/DynamicUser/);
+    } finally {
+      delete process.env.FIRECRACKER_MAX_CONCURRENT_VMS;
+    }
   });
 });
 

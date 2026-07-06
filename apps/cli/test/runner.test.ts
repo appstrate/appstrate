@@ -439,13 +439,14 @@ describe("enableService", () => {
 // ─── doctor assembly ───────────────────────────────────────────────────────
 
 describe("runnerDoctor", () => {
-  it("reports healthy when preflight + systemd + health + artifacts all pass", async () => {
+  it("reports healthy when preflight + systemd + health + artifacts + jailer all pass", async () => {
     const envText = renderRunnerEnvFile(config);
     const marker = runnerDataPaths(config.dataDir).artifactsMarker;
     const { fs } = fakeFs({
       "/etc/appstrate-runner/env": envText,
       "/etc/systemd/system/appstrate-runner.service": "unit",
       [marker]: JSON.stringify({ version: "1.2.3", guest_protocol: 1 }),
+      [runnerDataPaths(config.dataDir).jailerBin]: "<installed>",
     });
     const { exec } = fakeExec({
       "systemctl is-active": () => ({ ok: true, exitCode: 0, stdout: "active\n", stderr: "" }),
@@ -468,28 +469,57 @@ describe("runnerDoctor", () => {
     expect(report.health.status).toBe(200);
     expect(report.artifacts.version).toBe("1.2.3");
     expect(report.artifacts.guestProtocol).toBe(1);
-    // Jailer presence is surfaced (informational — the daemon's own boot
-    // gate is what fails hard when it is missing with FIRECRACKER_JAILER=on).
     expect(report.jailer.path).toBe(`${config.dataDir}/bin/jailer`);
-    expect(report.jailer.installed).toBe(false);
+    expect(report.jailer.installed).toBe(true);
   });
 
-  it("reports the jailer as installed when the binary exists", async () => {
-    const jailerPath = runnerDataPaths(config.dataDir).jailerBin;
+  it("reports NOT-ok when the jailer is required but missing (S-11)", async () => {
+    // Everything else green — but FIRECRACKER_JAILER defaults to "on" and
+    // the binary is absent: the daemon would refuse its next boot, so a
+    // green doctor here would lie.
+    const marker = runnerDataPaths(config.dataDir).artifactsMarker;
     const { fs } = fakeFs({
       "/etc/appstrate-runner/env": renderRunnerEnvFile(config),
-      [jailerPath]: "<installed>",
+      "/etc/systemd/system/appstrate-runner.service": "unit",
+      [marker]: JSON.stringify({ version: "1.2.3", guest_protocol: 1 }),
     });
-    const { exec } = fakeExec();
+    const { exec } = fakeExec({
+      "systemctl is-active": () => ({ ok: true, exitCode: 0, stdout: "active\n", stderr: "" }),
+      "systemctl is-enabled": () => ({ ok: true, exitCode: 0, stdout: "enabled\n", stderr: "" }),
+    });
     const report = await runnerDoctor({
       deps: {
         fs,
         exec,
-        http: fakeHttp({}),
+        http: fakeHttp({ health: { status: 200, body: { protocol: 1, initialized: true } } }),
         preflight: async () => ({ ok: true, arch: "x86_64", checks: [] }),
       },
     });
-    expect(report.jailer.installed).toBe(true);
+    expect(report.jailer.installed).toBe(false);
+    expect(report.ok).toBe(false);
+  });
+
+  it("stays ok without the jailer when FIRECRACKER_JAILER=off in the env file", async () => {
+    const marker = runnerDataPaths(config.dataDir).artifactsMarker;
+    const { fs } = fakeFs({
+      "/etc/appstrate-runner/env": `${renderRunnerEnvFile(config)}\nFIRECRACKER_JAILER=off\n`,
+      "/etc/systemd/system/appstrate-runner.service": "unit",
+      [marker]: JSON.stringify({ version: "1.2.3", guest_protocol: 1 }),
+    });
+    const { exec } = fakeExec({
+      "systemctl is-active": () => ({ ok: true, exitCode: 0, stdout: "active\n", stderr: "" }),
+      "systemctl is-enabled": () => ({ ok: true, exitCode: 0, stdout: "enabled\n", stderr: "" }),
+    });
+    const report = await runnerDoctor({
+      deps: {
+        fs,
+        exec,
+        http: fakeHttp({ health: { status: 200, body: { protocol: 1, initialized: true } } }),
+        preflight: async () => ({ ok: true, arch: "x86_64", checks: [] }),
+      },
+    });
+    expect(report.jailer.installed).toBe(false);
+    expect(report.ok).toBe(true);
   });
 
   it("reports not-ok when the daemon is unreachable", async () => {

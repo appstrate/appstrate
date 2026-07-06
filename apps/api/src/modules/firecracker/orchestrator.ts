@@ -95,9 +95,16 @@ import {
   parseExitMarker,
   vmSizing,
 } from "./vm-config.ts";
-import { splitCredentials, type MmdsPayload } from "./credential-split.ts";
+import {
+  mmdsPayloadBytes,
+  splitCredentials,
+  MMDS_SAFETY_MARGIN_BYTES,
+  MMDS_STORE_LIMIT_BYTES,
+  type MmdsPayload,
+} from "./credential-split.ts";
 import { RUN_ID_RE } from "./runner/protocol.ts";
 import {
+  assertJailerVersionParity,
   buildJailerArgv,
   computeJailPaths,
   defaultJailFs,
@@ -204,6 +211,16 @@ interface VmRecord {
   teardownReason?: TeardownReason;
   /** Jailer confinement layout — set when FIRECRACKER_JAILER=on. */
   jail?: JailPaths;
+  /**
+   * Settles when {@link FirecrackerOrchestrator.killVm} abandons a
+   * D-state VMM after the bounded post-SIGKILL reap. `proc.exited` never
+   * resolves for such a process, so every waiter (waitForExit — the
+   * promise pi.ts blocks a whole run on) must race against this signal
+   * instead of hanging behind one wedged kernel ioctl.
+   */
+  reapAbandoned: Promise<void>;
+  /** Resolver for {@link reapAbandoned}. */
+  abandonReap: () => void;
 }
 
 /** Per-run state persisted for the boot-time orphan sweep. */
@@ -305,6 +322,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   /** FIRECRACKER_BIN resolved to an absolute path (jailer `--exec-file`). */
   private fcBinResolved: string | null = null;
 
+  /** FIRECRACKER_JAILER_BIN resolved to an absolute path (spawned argv[0]). */
+  private jailerBinResolved: string | null = null;
+
   /**
    * Bound on the post-SIGKILL `proc.exited` wait (see killVm): a VMM
    * wedged in D-state (broken KVM ioctl) never reaps, and an unbounded
@@ -380,8 +400,12 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
 
+    // Data dir before the jailer gates — initializeJailer validates the
+    // directory chain it lives in.
+    await mkdir(resolve(fcEnv.FIRECRACKER_DATA_DIR), { recursive: true, mode: 0o700 });
+
     if (fcEnv.FIRECRACKER_JAILER === "on") {
-      await this.initializeJailer(fcEnv);
+      await this.initializeJailer(fcEnv, version);
     } else {
       logger.warn(
         "FIRECRACKER_JAILER=off — VMMs will run UNJAILED (no chroot, no per-VM uid drop, " +
@@ -390,7 +414,6 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
 
-    await mkdir(resolve(fcEnv.FIRECRACKER_DATA_DIR), { recursive: true, mode: 0o700 });
     await this.acquireHostLock(resolve(fcEnv.FIRECRACKER_DATA_DIR));
     await setupHostNetwork(this.hostExec, {
       subnetCidr: fcEnv.FIRECRACKER_SUBNET_CIDR,
@@ -412,11 +435,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
   /**
    * Jailer-mode boot gates (FIRECRACKER_JAILER=on): root, a working
-   * jailer binary, the chroot base, and world-readable artifacts. Runs
-   * before the host lock so a misconfigured host fails loudly at boot,
-   * never at the first run.
+   * jailer binary FROM THE SAME RELEASE as firecracker, a cgroup-v2
+   * hierarchy when cgroup bounds are on, trustworthy jailer inputs
+   * (binaries + directory chains), the chroot base, and world-readable
+   * artifacts. Runs before the host lock so a misconfigured host fails
+   * loudly at boot, never at the first run.
    */
-  private async initializeJailer(fcEnv: FirecrackerEnv): Promise<void> {
+  private async initializeJailer(fcEnv: FirecrackerEnv, fcVersion: string): Promise<void> {
     if (process.getuid?.() !== 0) {
       throw new Error(
         "FIRECRACKER_JAILER=on (the default) requires the daemon to run as root — the " +
@@ -428,17 +453,45 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
     // Fails loudly here (not at first run) when the jailer binary is
     // absent/broken — same pattern as the firecracker version probe.
-    // jailer and firecracker ship in the same upstream release tarball
-    // and MUST come from the same release; the installer keeps the two
-    // binaries in lockstep under <dataDir>/bin.
     const jailerVersion =
       (await this.execLocal([fcEnv.FIRECRACKER_JAILER_BIN, "--version"])).split("\n")[0] ?? "";
-    // `--exec-file` needs a real path; resolve the (possibly bare) bin
-    // name now so a PATH problem also surfaces at boot.
-    this.resolveFcBinPath(fcEnv);
+    // jailer and firecracker ship in the same upstream release tarball and
+    // MUST come from the same release (upstream requirement). The installer
+    // keeps the two in lockstep under <dataDir>/bin, but env overrides can
+    // bypass it — enforce, don't assume.
+    assertJailerVersionParity(fcVersion, jailerVersion);
+    // Both binaries need real paths: `--exec-file` requires one, and the
+    // trust checks below stat the resolved chain. A PATH problem surfaces
+    // at boot, not at the first run.
+    const fcBin = this.resolveFcBinPath(fcEnv);
+    const jailerBin = this.resolveJailerBinPath(fcEnv);
+    // cgroup-v2 probe: with FIRECRACKER_JAIL_CGROUPS=on the jailer writes
+    // memory.max/pids.max under the unified hierarchy and exits with
+    // CgroupHierarchyMissing on a v1/hybrid host — at the FIRST RUN, long
+    // after initialize() reported green. Probe here instead.
+    if (fcEnv.FIRECRACKER_JAIL_CGROUPS === "on") {
+      await this.assertCgroupV2Controllers(["memory", "pids"]);
+    }
+    // Jailer input trust (upstream places this on the operator): the two
+    // binaries must be root-owned and not group/world-writable along their
+    // whole path chain — the jailer copies --exec-file into every chroot
+    // and runs it as the VMM. The chroot base / data dir chains must not
+    // be world-writable (an attacker-writable parent lets the jail tree be
+    // swapped out from under the daemon). Ownership of the dirs is not
+    // enforced: dev/CI layouts legitimately live under user homes.
+    await this.assertTrustedPathChain(fcBin, "FIRECRACKER_BIN", { requireRootOwned: true });
+    await this.assertTrustedPathChain(jailerBin, "FIRECRACKER_JAILER_BIN", {
+      requireRootOwned: true,
+    });
     // Chroot base: sibling of the runs dir, same filesystem as the
     // artifacts (hardlink constraint — see jail.ts).
     await mkdir(jailChrootBase(fcEnv.FIRECRACKER_DATA_DIR), { recursive: true, mode: 0o700 });
+    await this.assertTrustedPathChain(jailChrootBase(fcEnv.FIRECRACKER_DATA_DIR), "jail base", {
+      requireRootOwned: false,
+    });
+    await this.assertTrustedPathChain(resolve(fcEnv.FIRECRACKER_DATA_DIR), "FIRECRACKER_DATA_DIR", {
+      requireRootOwned: false,
+    });
     // The kernel/rootfs are hardlinked into every VM's chroot and read
     // by unprivileged per-VM uids → they must be root:root 0644. They
     // are not secret (public release artifacts); enforce, don't document.
@@ -476,6 +529,87 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
     this.fcBinResolved = resolved;
     return resolved;
+  }
+
+  /** Resolve FIRECRACKER_JAILER_BIN to an absolute path (cached). */
+  private resolveJailerBinPath(fcEnv: FirecrackerEnv): string {
+    if (this.jailerBinResolved) return this.jailerBinResolved;
+    const bin = fcEnv.FIRECRACKER_JAILER_BIN;
+    const resolved = bin.includes("/") ? resolve(bin) : Bun.which(bin);
+    if (!resolved) {
+      throw new Error(`Firecracker jailer: FIRECRACKER_JAILER_BIN "${bin}" was not found on PATH`);
+    }
+    this.jailerBinResolved = resolved;
+    return resolved;
+  }
+
+  /**
+   * Boot probe for the unified cgroup-v2 hierarchy: the named controllers
+   * must appear in /sys/fs/cgroup/cgroup.controllers. On a v1/hybrid host
+   * (or without delegation) the file is absent or lacks them — fail HERE
+   * with the escape hatch spelled out, not at the first run as an opaque
+   * jailer CgroupHierarchyMissing crash.
+   */
+  private async assertCgroupV2Controllers(needed: string[]): Promise<void> {
+    const controllers = await Bun.file("/sys/fs/cgroup/cgroup.controllers")
+      .text()
+      .catch(() => null);
+    const available = controllers?.trim().split(/\s+/) ?? [];
+    const missing = needed.filter((c) => !available.includes(c));
+    if (controllers === null || missing.length > 0) {
+      throw new Error(
+        `Firecracker jailer: FIRECRACKER_JAIL_CGROUPS=on requires the cgroup-v2 unified ` +
+          `hierarchy with the ${needed.join("+")} controllers, but ` +
+          (controllers === null
+            ? `/sys/fs/cgroup/cgroup.controllers is not readable (cgroup v1/hybrid host?)`
+            : `controller(s) ${missing.join(", ")} are not enabled at the root`) +
+          `. Enable cgroup v2 on this host, or set FIRECRACKER_JAIL_CGROUPS=off to keep ` +
+          `the jail without resource bounds.`,
+      );
+    }
+  }
+
+  /**
+   * Walk `path` and every parent up to `/`, enforcing the jailer-input
+   * trust rules (upstream explicitly delegates these to the operator):
+   * no component may be world-writable, and — for the binaries the jailer
+   * will copy into chroots and exec — every component must be root-owned
+   * and not group-writable either. The sticky bit does not exempt a dir:
+   * jailer inputs have no business living under /tmp-style directories.
+   */
+  private async assertTrustedPathChain(
+    path: string,
+    what: string,
+    opts: { requireRootOwned: boolean },
+  ): Promise<void> {
+    let current = resolve(path);
+    for (;;) {
+      const st = await stat(current).catch((err: unknown) => {
+        throw new Error(
+          `Firecracker jailer: cannot stat "${current}" while validating ${what}: ` +
+            getErrorMessage(err),
+        );
+      });
+      const badModeBits = opts.requireRootOwned ? 0o022 : 0o002;
+      if ((st.mode & badModeBits) !== 0) {
+        throw new Error(
+          `Firecracker jailer: "${current}" (in the path of ${what}) is ` +
+            `${opts.requireRootOwned ? "group/world" : "world"}-writable ` +
+            `(mode ${(st.mode & 0o7777).toString(8)}) — a writable component lets an ` +
+            `unprivileged user swap the jailer's inputs. Tighten its permissions.`,
+        );
+      }
+      if (opts.requireRootOwned && st.uid !== 0) {
+        throw new Error(
+          `Firecracker jailer: "${current}" (in the path of ${what}) is owned by uid ` +
+            `${st.uid}, not root — the jailer executes this input as the VMM; only ` +
+            `root-owned chains are trusted.`,
+        );
+      }
+      const parent = dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -568,10 +702,20 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       // Reclaim the run's jail tree (chrootPath = <jailDir>/root — remove
       // the whole <jailDir>). Hardlinks only drop a link count; the
       // shared artifacts survive. Best-effort like every step here.
+      // Containment first: this is a recursive root rm whose target comes
+      // from an on-disk JSON file — a corrupted state.json must never aim
+      // it outside the jail base (chrootPath:"/x" would rm "/").
       if (state?.chrootPath) {
-        await rm(dirname(resolve(state.chrootPath)), { recursive: true, force: true }).catch(
-          () => {},
-        );
+        const jailBase = jailChrootBase(fcEnv.FIRECRACKER_DATA_DIR);
+        const jailDir = dirname(resolve(state.chrootPath));
+        if (jailDir.startsWith(jailBase + sep)) {
+          await rm(jailDir, { recursive: true, force: true }).catch(() => {});
+        } else {
+          logger.warn(
+            "Orphan sweep: state.json chrootPath resolves outside the jail base — skipping rm",
+            { runId: state.runId, chrootPath: state.chrootPath, jailBase },
+          );
+        }
         if (state.jailId) await this.removeJailCgroup(state.jailId);
       }
       // Preserve the crashed run's console before its workspace is reclaimed
@@ -603,6 +747,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // and the pre-spawn state write, or a wiped data dir): a firecracker
     // whose /proc root points under OUR chroot base is positively ours.
     workloads += await this.sweepJailBase();
+
+    // Empty per-VM cgroup dirs orphaned by a reap-timeout teardown: when a
+    // D-state VMM outlives its runDir/state.json, nothing above reaches its
+    // cgroup — once the kernel finally releases the process the dir sits
+    // empty under appstrate-fc/ forever. rmdir(2) only: a still-populated
+    // group fails and is left alone.
+    await this.sweepJailCgroups();
 
     // Sweep TAP devices with no backing run dir (crash between TAP create
     // and state write). The platform owns the `afc<n>` namespace.
@@ -730,6 +881,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       // host lo alias — the noProxy exemption must track whichever one the
       // sink POSTs actually target.
       const platformIp = this.platformForward?.ip ?? platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
+      let abandonReap!: () => void;
+      const reapAbandoned = new Promise<void>((resolveAbandon) => {
+        abandonReap = resolveAbandon;
+      });
       this.vms.set(runId, {
         runId,
         subnet,
@@ -738,6 +893,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         apiSocketPath,
         proc: null,
         stopping: false,
+        reapAbandoned,
+        abandonReap,
         ...(jail ? { jail } : {}),
       });
 
@@ -867,6 +1024,25 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     await rmdir(join("/sys/fs/cgroup", JAIL_PARENT_CGROUP, jailId)).catch(() => {});
   }
 
+  /**
+   * Boot-time sweep of EVERY per-VM cgroup dir under the appstrate-fc
+   * slice (see cleanupOrphans). rmdir(2) only — cgroupfs refuses to remove
+   * a populated group, so a dir that still hosts a live VMM survives.
+   */
+  private async sweepJailCgroups(): Promise<void> {
+    const base = join("/sys/fs/cgroup", JAIL_PARENT_CGROUP);
+    let dirents;
+    try {
+      dirents = await readdir(base, { withFileTypes: true });
+    } catch {
+      return; // Slice absent — the jailer never ran with cgroups on this host.
+    }
+    for (const dirent of dirents) {
+      if (!dirent.isDirectory()) continue;
+      await rmdir(join(base, dirent.name)).catch(() => {});
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Workloads
   // -------------------------------------------------------------------------
@@ -933,13 +1109,19 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           driveSidecarEnv: sidecarEnv,
           driveAgentEnv: agentSpec.env,
           mmdsPayload: { sidecar_env: {}, agent_env: {} } satisfies MmdsPayload,
-          spilledKeys: [] as string[],
         };
-    if (split.spilledKeys.length > 0) {
-      logger.warn(
-        "Firecracker MMDS payload exceeded the store budget — spilled the largest " +
-          "secret(s) back onto the config drive (names only, never values)",
-        { runId: handle.runId, spilledKeys: split.spilledKeys },
+    // Capacity, fail-closed: a known secret NEVER falls back onto the
+    // config drive. Payloads above Firecracker's 50 KiB store default get
+    // the VMM's limits raised at spawn (see mmdsSpawnArgs); beyond the
+    // operator ceiling the run fails loudly instead of silently degrading
+    // the at-rest guarantee.
+    const mmdsBytes = mmdsMode ? mmdsPayloadBytes(split.mmdsPayload) : 0;
+    if (mmdsMode && mmdsBytes > fcEnv.FIRECRACKER_MMDS_MAX_BYTES) {
+      throw new Error(
+        `Firecracker orchestrator: the run's brokered credential payload is ${mmdsBytes} bytes, ` +
+          `above FIRECRACKER_MMDS_MAX_BYTES (${fcEnv.FIRECRACKER_MMDS_MAX_BYTES}) — refusing to ` +
+          `start run ${handle.runId} rather than write known secrets to the config drive. ` +
+          `Raise the ceiling, or shrink the run's integration payload.`,
       );
     }
 
@@ -963,7 +1145,12 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     await this.buildConfigDrive(vm.runDir, configDrivePath, guestConfig);
 
     const sizing = vmSizing(agentSpec.resources, sidecarEnv !== undefined);
-    const proc = await this.spawnVmm(vm, configDrivePath, sizing, mmdsMode);
+    const proc = await this.spawnVmm(
+      vm,
+      configDrivePath,
+      sizing,
+      mmdsMode ? { payloadBytes: mmdsBytes } : null,
+    );
     vm.proc = proc;
     vm.bootedAt = Date.now();
     drainStream(proc, `fc:${handle.runId}`);
@@ -982,12 +1169,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       });
     } catch (err) {
       vm.stopping = true;
-      try {
-        proc.kill("SIGKILL");
-      } catch {
-        // Already dead.
-      }
-      await proc.exited.catch(() => {});
+      // Bounded kill+reap (killVm), NOT a raw `await proc.exited`: a VMM
+      // wedged in D-state never settles `exited` even after SIGKILL, and
+      // an unbounded await here would hang the run's start path forever.
+      await this.killVm(vm, 0).catch(() => {});
       vm.proc = null;
       throw new Error(
         `Firecracker orchestrator: failed to persist the VMM pid for run ${handle.runId} — ` +
@@ -1061,7 +1246,23 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   async waitForExit(handle: WorkloadHandle): Promise<number> {
     const vm = this.vms.get(handle.runId);
     if (!vm?.proc) return 1;
-    await vm.proc.exited;
+    // Race the exit against the D-state abandon signal: after a timeout or
+    // cancel, killVm SIGKILLs and reaps with a bound — but a VMM wedged in
+    // an uninterruptible KVM/block ioctl never settles `exited`, and this
+    // is the promise pi.ts blocks the whole run on. When killVm gives up,
+    // resolve with the killed/crashed semantics instead of hanging.
+    const outcome = await Promise.race([
+      vm.proc.exited.then(
+        () => "exited" as const,
+        () => "exited" as const,
+      ),
+      vm.reapAbandoned.then(() => "abandoned" as const),
+    ]);
+    if (outcome === "abandoned") {
+      // The leaked VMM cannot have printed an exit marker (the guest is
+      // wedged with it) — killed vs crashed is decided by intent.
+      return vm.stopping ? 137 : 1;
+    }
     // The VMM exiting 0 only means the guest powered off — the workload
     // outcome is the supervisor's nonce-authenticated exit marker on the
     // serial console (the console is shared with workload stdout, so an
@@ -1127,7 +1328,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     vm: VmRecord,
     configDrivePath: string,
     sizing: { vcpuCount: number; memSizeMib: number },
-    mmds: boolean,
+    mmds: { payloadBytes: number } | null,
   ): Promise<BunProcess> {
     const argv = vm.jail
       ? await this.prepareJailedSpawn(vm, vm.jail, configDrivePath, sizing, mmds)
@@ -1144,12 +1345,28 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     });
   }
 
+  /**
+   * MMDS store-size flags for the firecracker argv. Firecracker bounds
+   * both the in-VMM store (`--mmds-size-limit`, default = the HTTP API
+   * payload cap) and the PUT body itself (`--http-api-max-payload-size`,
+   * default 51200) — a brokered payload above the default needs BOTH
+   * raised or the credential PUT 400s and the run fail-closes for the
+   * wrong reason. The startWorkload ceiling has already bounded
+   * `payloadBytes` by FIRECRACKER_MMDS_MAX_BYTES.
+   */
+  private mmdsSpawnArgs(mmds: { payloadBytes: number } | null): string[] {
+    if (!mmds) return [];
+    const needed = mmds.payloadBytes + MMDS_SAFETY_MARGIN_BYTES;
+    if (needed <= MMDS_STORE_LIMIT_BYTES) return [];
+    return ["--mmds-size-limit", String(needed), "--http-api-max-payload-size", String(needed)];
+  }
+
   /** Direct (unjailed) spawn plan — host-absolute paths, dev only. */
   private async prepareDirectSpawn(
     vm: VmRecord,
     configDrivePath: string,
     sizing: { vcpuCount: number; memSizeMib: number },
-    mmds: boolean,
+    mmds: { payloadBytes: number } | null,
   ): Promise<string[]> {
     const fcEnv = getFirecrackerEnv();
     const vmConfig = buildVmConfig({
@@ -1160,11 +1377,18 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       subnet: vm.subnet,
       vcpuCount: sizing.vcpuCount,
       memSizeMib: sizing.memSizeMib,
-      mmds,
+      mmds: mmds !== null,
     });
     const vmConfigPath = join(vm.runDir, "vmconfig.json");
     await writeFile(vmConfigPath, JSON.stringify(vmConfig, null, 2), { mode: 0o600 });
-    return [fcEnv.FIRECRACKER_BIN, "--api-sock", vm.apiSocketPath, "--config-file", vmConfigPath];
+    return [
+      fcEnv.FIRECRACKER_BIN,
+      ...this.mmdsSpawnArgs(mmds),
+      "--api-sock",
+      vm.apiSocketPath,
+      "--config-file",
+      vmConfigPath,
+    ];
   }
 
   /**
@@ -1178,7 +1402,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     jail: JailPaths,
     configDrivePath: string,
     sizing: { vcpuCount: number; memSizeMib: number },
-    mmds: boolean,
+    mmds: { payloadBytes: number } | null,
   ): Promise<string[]> {
     const fcEnv = getFirecrackerEnv();
     await prepareChrootArtifacts(
@@ -1208,16 +1432,17 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       subnet: vm.subnet,
       vcpuCount: sizing.vcpuCount,
       memSizeMib: sizing.memSizeMib,
-      mmds,
+      mmds: mmds !== null,
     });
     await writeChrootVmConfig(
       { rootDir: jail.rootDir, vmConfig, uid: jail.uid, gid: jail.gid },
       this.jailFs,
     );
     return buildJailerArgv({
-      jailerBin: fcEnv.FIRECRACKER_JAILER_BIN,
+      jailerBin: this.resolveJailerBinPath(fcEnv),
       fcBin: this.resolveFcBinPath(fcEnv),
       jail,
+      ...(this.mmdsSpawnArgs(mmds).length > 0 ? { extraFcArgs: this.mmdsSpawnArgs(mmds) } : {}),
       ...(fcEnv.FIRECRACKER_JAIL_CGROUPS === "on"
         ? {
             cgroups: {
@@ -1331,6 +1556,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           "its resources will be swept at next boot",
         { runId: vm.runId, pid: proc.pid },
       );
+      // Unblock every waiter racing on this signal (waitForExit): the
+      // leaked process's `exited` promise may never settle.
+      vm.abandonReap();
     }
   }
 
@@ -1446,21 +1674,42 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   }
 
   /**
-   * argv[0]'s BASENAME contains "firecracker" — i.e. the process was
-   * exec'd as the VMM binary itself. Deliberately argv[0]-only (stricter
-   * than {@link pidIsOurVmm}'s full-argv scan): the jail sweep pairs
-   * this gate with a uid/chroot match, and a full-argv scan would match
-   * any process whose ARGUMENTS merely mention a firecracker path — the
+   * argv[0]'s BASENAME is the configured firecracker binary's basename,
+   * or contains "firecracker" — i.e. the process was exec'd as the VMM
+   * binary itself. Deliberately argv[0]-only (stricter than
+   * {@link pidIsOurVmm}'s full-argv scan): the jail sweep pairs this gate
+   * with a per-run identity match, and a full-argv scan would match any
+   * process whose ARGUMENTS merely mention a firecracker path — the
    * `bun test …/modules/firecracker/…` runner included — turning the
-   * uid branch into a self-kill.
+   * sweep into a self-kill. The configured-basename branch keeps the
+   * gate working when FIRECRACKER_BIN points at a renamed binary.
    */
   private async pidLooksLikeVmmBinary(pid: number): Promise<boolean> {
     try {
       const cmdline = await Bun.file(`/proc/${pid}/cmdline`).text();
       const argv0 = cmdline.split("\0")[0] ?? "";
-      return (argv0.split("/").pop() ?? "").includes("firecracker");
+      const base = argv0.split("/").pop() ?? "";
+      return (
+        base.includes("firecracker") || base === fcExecName(getFirecrackerEnv().FIRECRACKER_BIN)
+      );
     } catch {
       return false; // Process already gone.
+    }
+  }
+
+  /**
+   * The `--id` value in a process's argv, or null. The jailer always
+   * injects `--id <jailId>` into the firecracker argv it exec()s, so this
+   * is a positive PER-RUN identity for jailed VMMs — immune to pid reuse
+   * and to same-uid neighbours, unlike a bare uid match.
+   */
+  private async procJailArgvId(pid: number): Promise<string | null> {
+    try {
+      const argv = (await Bun.file(`/proc/${pid}/cmdline`).text()).split("\0");
+      const flagIndex = argv.indexOf("--id");
+      return flagIndex >= 0 ? (argv[flagIndex + 1] ?? null) : null;
+    } catch {
+      return null;
     }
   }
 
@@ -1473,38 +1722,25 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
   }
 
-  /** Real uid from /proc/<pid>/status; null when unreadable. */
-  private async procUid(pid: number): Promise<number | null> {
-    try {
-      const status = await Bun.file(`/proc/${pid}/status`).text();
-      const match = /^Uid:\s+(\d+)/m.exec(status);
-      return match ? Number(match[1]) : null;
-    } catch {
-      return null;
-    }
-  }
-
   /**
    * Kill a jailed run's VMM by JAIL identity: a process exec'd as the
    * firecracker binary (argv[0] gate — see pidLooksLikeVmmBinary) whose
-   * /proc root IS the recorded chroot, or whose uid IS the run's
-   * reserved jail uid. Both are positive identities (the chroot path is
-   * per-run; the uid range is reserved for this host's VMs) and both
-   * are immune to pid reuse. The argv[0] gate always applies — the
-   * sweep must never mass-kill by uid alone on a host where the
-   * reserved range turns out to be occupied.
+   * jailer-injected `--id` IS the recorded jailId, or whose /proc root
+   * IS the recorded chroot. Both are positive PER-RUN identities immune
+   * to pid reuse. Deliberately NO bare-uid branch: a uid match alone
+   * would false-kill an unrelated same-uid process (the jail uid range
+   * being "reserved" is an operator promise, not a kernel guarantee),
+   * and every jailed VMM carries the `--id` in its argv anyway.
    */
   private async sweepJailedVmm(state: RunStateFile): Promise<number> {
-    // Fail-closed sanity: never uid-match below the unprivileged floor —
-    // a corrupted state file must not aim the sweep at system uids.
-    const jailUid = state.jailUid !== undefined && state.jailUid >= 1000 ? state.jailUid : null;
     const chrootPath = state.chrootPath !== undefined ? resolve(state.chrootPath) : null;
+    const jailId = state.jailId ?? null;
     let killed = 0;
     for (const pid of await this.listProcPids()) {
       if (!(await this.pidLooksLikeVmmBinary(pid))) continue;
+      const idMatch = jailId !== null && (await this.procJailArgvId(pid)) === jailId;
       const rootMatch = chrootPath !== null && (await this.procRoot(pid)) === chrootPath;
-      const uidMatch = jailUid !== null && (await this.procUid(pid)) === jailUid;
-      if (!rootMatch && !uidMatch) continue;
+      if (!idMatch && !rootMatch) continue;
       try {
         process.kill(pid, "SIGKILL");
         killed++;

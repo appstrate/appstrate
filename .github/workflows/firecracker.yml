@@ -20,6 +20,8 @@ on:
       - "packages/core/**"
       - "packages/env/**"
       - "runtime-pi/Dockerfile"
+      - "runtime-pi/entrypoint.ts"
+      - "packages/runner-pi/**"
       - "runtime-pi/sidecar/**"
       - ".github/workflows/firecracker.yml"
   pull_request:
@@ -33,6 +35,8 @@ on:
       - "packages/core/**"
       - "packages/env/**"
       - "runtime-pi/Dockerfile"
+      - "runtime-pi/entrypoint.ts"
+      - "packages/runner-pi/**"
       - "runtime-pi/sidecar/**"
       - ".github/workflows/firecracker.yml"
   workflow_dispatch:

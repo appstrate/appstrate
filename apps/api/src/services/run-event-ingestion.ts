@@ -363,7 +363,14 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // the CAS on `sink_closed_at` guarantees a terminal usage arriving
   // after this finalize can never re-open the run.
   let validatedUsage = validateFinalizeUsage(result.usage, run.id);
-  if (validatedUsage === null && status !== "success") {
+  // Non-success without runner-posted usage: the run-row column must keep
+  // whatever cumulative snapshot the `appstrate.metric` side-channel last
+  // wrote. The COLUMN preservation happens atomically in the CAS below
+  // (SQL COALESCE) — a JS read-then-write here would race a concurrent
+  // metric event and clobber a newer snapshot with the stale read. The
+  // read below only feeds the ledger-row fallback (result.cost > 0).
+  const preserveLastKnownUsage = validatedUsage === null && status !== "success";
+  if (preserveLastKnownUsage) {
     validatedUsage = await readLastKnownUsage(run.id);
   }
   if (validatedUsage === null) {
@@ -500,9 +507,13 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       // The finalize body is the authoritative terminal usage. Metric events
       // may still update this column before finalize for live charts, but the
       // close path writes the terminal value exactly once. When a non-success
-      // terminal carried no usage, `validatedUsage` is the preserved
-      // last-known snapshot — never a masking zero.
-      tokenUsage: validatedUsage,
+      // terminal carried no usage, the column keeps its last-known snapshot
+      // ATOMICALLY (COALESCE evaluates in the UPDATE itself — a metric event
+      // landing between the JS read above and this CAS cannot be clobbered
+      // by a stale value); zeros only when nothing was ever recorded.
+      tokenUsage: preserveLastKnownUsage
+        ? sql`COALESCE(${runs.tokenUsage}, ${JSON.stringify({ input_tokens: 0, output_tokens: 0 })}::jsonb)`
+        : validatedUsage,
       ...(metadata ? { metadata } : {}),
     })
     .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))

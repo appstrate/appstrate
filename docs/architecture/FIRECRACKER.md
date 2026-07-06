@@ -202,12 +202,13 @@ security review first — the backend has not yet had one. Hardening status:
    (a) after injection the secrets still live in the sidecar's process
    memory/env inside the guest — a guest-kernel LPE can read _that_ run's
    credentials via `/proc` (the per-run VM still protects the host and
-   every other run); (b) an oversized `INTEGRATIONS_TO_SPAWN_JSON` that
-   exceeds the ~50 KiB MMDS store limit spills back onto the config drive
-   with a boot-time `logger.warn` (names only) — that one key then rides the
-   drive as before. `FIRECRACKER_CREDENTIAL_BROKER=config-drive` restores
-   the pre-MMDS behavior (all secrets on the drive) for bisecting a boot
-   regression.
+   every other run). A known secret NEVER falls back onto the drive: a
+   payload above Firecracker's 50 KiB store default gets the VMM's
+   `--mmds-size-limit`/`--http-api-max-payload-size` raised at spawn, and
+   beyond `FIRECRACKER_MMDS_MAX_BYTES` (default 16 MiB) the run FAILS
+   fail-closed instead of silently degrading the at-rest guarantee.
+   `FIRECRACKER_CREDENTIAL_BROKER=config-drive` restores the pre-MMDS
+   behavior (all secrets on the drive) for bisecting a boot regression.
 
 To be explicit about what defends what: **the security boundary is the
 per-run VM (KVM)**. The in-guest uid + nftables separation is
@@ -381,10 +382,14 @@ combined manifest to each `v*` GitHub Release.
   the SAME release tarball as `firecracker` — the two must come from one
   release; `appstrate runner install` keeps them in lockstep at
   `<data-dir>/bin/`). Per VM: chroot at
-  `<FIRECRACKER_DATA_DIR>/../jail/<vmm-name>/<jailId>/root`, privilege
+  `<FIRECRACKER_DATA_DIR>/../jail/<vmm-name>/<jailId>/root` (the jailId
+  is a short digest of the runId + the subnet index, keeping the
+  host-side API socket path under the AF_UNIX ~108-byte cap), privilege
   drop to uid/gid `FIRECRACKER_JAIL_UID_BASE + <subnet index>` (default
-  base 64000 — the range `base..base+16319` worst-case must be
-  unallocated on the host; no /etc/passwd entries are created or needed),
+  base 200000, above the 16-bit uid space — ranges intersecting nobody
+  65534/65535 or the systemd DynamicUser pool 61184–65519 are rejected at
+  boot; the range must be unallocated on the host and no /etc/passwd
+  entries are created or needed),
   and cgroup-v2 `memory.max`/`pids.max` bounds under the `appstrate-fc`
   parent slice (`FIRECRACKER_JAIL_CGROUPS=off` drops the bounds — not the
   jail — on hosts without cgroup-v2 delegation). Same-filesystem
@@ -507,9 +512,10 @@ boots on a bare KVM host with only these variables.
 | `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                                                                                               |
 | `FIRECRACKER_JAILER`             | `on`                             | per-VM jailer confinement (chroot + uid drop + cgroups); `off` = unjailed direct spawn, unprivileged dev ONLY                            |
 | `FIRECRACKER_JAILER_BIN`         | `jailer`                         | jailer binary — must come from the SAME release as `FIRECRACKER_BIN`                                                                     |
-| `FIRECRACKER_JAIL_UID_BASE`      | `64000`                          | per-VM uid/gid = base + subnet index; range must be unallocated on the host (min 1000)                                                   |
+| `FIRECRACKER_JAIL_UID_BASE`      | `200000`                         | per-VM uid/gid = base + subnet index; range must be unallocated and must not intersect 61184–65535 (min 1000)                            |
 | `FIRECRACKER_JAIL_CGROUPS`       | `on`                             | cgroup-v2 `memory.max`/`pids.max` per VM; `off` keeps the jail, drops the bounds (hosts without cgroup-v2 delegation)                    |
 | `FIRECRACKER_CREDENTIAL_BROKER`  | `mmds`                           | how run secrets reach the guest: `mmds` (in-memory MMDS store, off the config drive) or `config-drive` (pre-MMDS behavior, escape hatch) |
+| `FIRECRACKER_MMDS_MAX_BYTES`     | `16777216`                       | ceiling on the brokered credential payload; above the 50 KiB Firecracker default the VMM store limit is raised, above THIS the run fails |
 | `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                                                                                                             |
 | `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                                                                                                                  |
 | `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended — jailer mode then needs the artifacts on the same tmpfs, see _Requirements_)                           |

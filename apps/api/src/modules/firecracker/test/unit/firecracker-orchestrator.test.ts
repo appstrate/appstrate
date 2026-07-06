@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../runner/host-env.ts";
 import { FirecrackerOrchestrator, type FirecrackerOrchestratorDeps } from "../../orchestrator.ts";
+import { deriveJailId } from "../../jail.ts";
 import type { HostExec } from "../../host-net.ts";
 
 interface RecordedCall {
@@ -87,9 +88,9 @@ function readyOrchestrator(
 }
 
 /**
- * The allocator is round-robin (a released index is only re-drawn after a
- * full wrap), so "which index does the next run get" cannot observe a
- * release. The reserved-set is the actual accounting — read it directly.
+ * The reserved-set is the allocator's actual accounting — read it
+ * directly rather than inferring releases from "which index does the
+ * next run get".
  */
 function reservedIndexes(orch: FirecrackerOrchestrator): Set<number> {
   const allocator = Reflect.get(orch, "allocator") as object;
@@ -466,15 +467,16 @@ describe("jailer-mode boundary (FIRECRACKER_JAILER=on)", () => {
     const state = JSON.parse(
       await Bun.file(join(jailTestRoot, "runs", "run_1", "state.json")).text(),
     ) as Record<string, unknown>;
-    // jailId = sanitized runId ("_" is outside the jailer's charset) +
-    // the run's subnet index (collision-proofing).
-    expect(state.jailId).toBe("run-1-1");
-    expect(state.jailUid).toBe(64_001); // FIRECRACKER_JAIL_UID_BASE default + index 1
-    const expectedRoot = join(jailTestRoot, "jail", "firecracker", "run-1-1", "root");
+    // jailId = short runId digest + the run's subnet index (jailer charset,
+    // AF_UNIX socket-path budget, collision-proofing).
+    const jailId = deriveJailId("run_1", 1);
+    expect(state.jailId).toBe(jailId);
+    expect(state.jailUid).toBe(200_001); // FIRECRACKER_JAIL_UID_BASE default + index 1
+    const expectedRoot = join(jailTestRoot, "jail", "firecracker", jailId, "root");
     expect(state.chrootPath).toBe(expectedRoot);
     expect(state.apiSocketPath).toBe(join(expectedRoot, "run", "firecracker.socket"));
     // The unprivileged jailed VMM can only TUNSETIFF a TAP born as its own.
-    expect(calls[0]?.stdin).toContain("tuntap add dev afc1 mode tap user 64001\n");
+    expect(calls[0]?.stdin).toContain("tuntap add dev afc1 mode tap user 200001\n");
     expect(boundary.name).toBe("firecracker-run_1");
   });
 
@@ -497,7 +499,7 @@ describe("jailer-mode boundary (FIRECRACKER_JAILER=on)", () => {
     const boundary = await orch.createIsolationBoundary("run_1");
 
     // Simulate the chroot a spawn would have populated.
-    const jailDir = join(jailTestRoot, "jail", "firecracker", "run-1-1");
+    const jailDir = join(jailTestRoot, "jail", "firecracker", deriveJailId("run_1", 1));
     await mkdir(join(jailDir, "root", "run"), { recursive: true });
     await writeFile(join(jailDir, "root", "vmconfig.json"), "{}");
 

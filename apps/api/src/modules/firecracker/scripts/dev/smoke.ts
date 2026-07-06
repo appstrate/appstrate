@@ -50,6 +50,13 @@ const BROKER = process.env.FIRECRACKER_CREDENTIAL_BROKER ?? "mmds";
  * drive-inspection assertion below greps the staged ext4 image for it.
  */
 const FAKE_RUN_TOKEN = "smoke-fake-secret-DEADBEEFCAFE";
+/**
+ * Distinctive fake model API key pushed through the AGENT env. In MMDS
+ * mode it must be brokered too (skipSidecar/direct-provider runs put the
+ * REAL provider key in the agent env — regression guard for it landing
+ * on the config drive).
+ */
+const FAKE_MODEL_KEY = "sk-smoke-fake-model-key-0DEFACED";
 
 function fail(msg: string): never {
   console.error(`SMOKE FAIL: ${msg}`);
@@ -177,8 +184,13 @@ const PROBE_SCRIPT = [
   'if dd if=/dev/vdb of=/dev/null count=1 2>/dev/null; then echo "smoke-vdb=readable"; else echo "smoke-vdb=blocked"; fi',
   // Credential broker: after the supervisor fetched the secrets, the guest
   // firewall drops all access to the MMDS metadata address for EVERY uid.
-  // A workload reaching it would be a credential-store leak.
-  `if wget -q -T 3 -O /dev/null http://169.254.169.254/latest/meta-data/ 2>/dev/null; then echo "smoke-mmds=reachable"; else echo "smoke-mmds=blocked"; fi`,
+  // A workload reaching it would be a credential-store leak. The probe
+  // performs the REAL V2 handshake step (token PUT) via bun: a tokenless
+  // wget GET would 401 under MMDS V2 even with NO firewall rule at all,
+  // reading as "blocked" and making the assertion tautological. The token
+  // PUT succeeds whenever MMDS is reachable — only the firewall DROP
+  // (connect timeout) makes it fail.
+  `if bun -e "const ok=await fetch('http://169.254.169.254/latest/api/token',{method:'PUT',headers:{'X-metadata-token-ttl-seconds':'60'},signal:AbortSignal.timeout(3000)}).then(r=>r.ok,()=>false);process.exit(ok?0:1)" >/dev/null 2>&1; then echo "smoke-mmds=reachable"; else echo "smoke-mmds=blocked"; fi`,
   // In-guest sidecar liveness: /health must answer 200 (wget fails on
   // 503). The sidecar cold-starts in parallel with the agent, so retry
   // for up to 30s — a sidecar that crashed at ms 1 never answers.
@@ -229,7 +241,7 @@ try {
       runId: RUN_ID,
       role: "agent",
       image: "unused-by-firecracker",
-      env: { SMOKE: "1" },
+      env: { SMOKE: "1", MODEL_API_KEY: FAKE_MODEL_KEY },
       resources: { memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000 },
     },
     boundary,
@@ -255,6 +267,9 @@ try {
         ? join(state.chrootPath, "config.img")
         : join(boundary.id, "config.img");
     await assertConfigDriveOmitsSecret(imagePath, FAKE_RUN_TOKEN);
+    // Agent-env secret: the model API key (real on direct-provider runs)
+    // must be brokered off the drive too.
+    await assertConfigDriveOmitsSecret(imagePath, FAKE_MODEL_KEY);
   }
 
   const exitCode = await Promise.race([

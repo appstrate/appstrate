@@ -37,8 +37,22 @@ const firecrackerEnvSchema = z.object({
   // Base of the per-VM uid/gid range: VM with subnet index N runs as
   // uid/gid BASE+N. The range BASE..BASE+FIRECRACKER_MAX_CONCURRENT_VMS
   // (worst case BASE+16319, the allocator ceiling) must be unallocated
-  // on the host — no /etc/passwd entries are needed or created.
-  FIRECRACKER_JAIL_UID_BASE: z.coerce.number().int().min(1000).default(64000),
+  // on the host — no /etc/passwd entries are needed or created. The
+  // default sits ABOVE the 16-bit uid space so the range can never
+  // collide with nobody (65534/65535) or the systemd DynamicUser pool
+  // (61184–65519) — a VMM silently running as `nobody` would cross an
+  // unrelated trust domain. Ranges intersecting 61184–65535 are rejected
+  // at boot (see the superRefine below).
+  FIRECRACKER_JAIL_UID_BASE: z.coerce.number().int().min(1000).default(200_000),
+  // Ceiling on the per-run MMDS credential payload (serialized bytes).
+  // Above Firecracker's 50 KiB store default the daemon raises the VMM's
+  // --mmds-size-limit/--http-api-max-payload-size to fit the payload;
+  // above THIS ceiling the run FAILS instead — a known secret is never
+  // silently written to the config drive (fail-closed). Default 16 MiB:
+  // INTEGRATIONS_TO_SPAWN_JSON carries bundle bytes + live tokens and
+  // can legitimately reach several MiB; the store lives in VMM memory,
+  // covered by the jail's memory slack.
+  FIRECRACKER_MMDS_MAX_BYTES: z.coerce.number().int().positive().default(16_777_216),
   // cgroup-v2 bounds (memory.max / pids.max under the appstrate-fc
   // slice) passed to the jailer. The jailer fails HARD when it cannot
   // write the cgroup files — "off" lets hosts without cgroup-v2
@@ -130,6 +144,37 @@ const firecrackerEnvSchema = z.object({
   FIRECRACKER_NET_VERIFY: z.enum(["warn", "strict"]).default("warn"),
 });
 
+/**
+ * Reserved uid interval no jail uid may fall into: systemd DynamicUser
+ * (61184–65519) plus nobody/overflow (65534/65535). A VMM allocated one
+ * of these uids would share an identity with unrelated system services —
+ * file ownership, TAP ownership and the orphan sweep all key on the uid.
+ */
+const RESERVED_UID_RANGE = { lo: 61_184, hi: 65_535 } as const;
+
+/** Allocator index ceiling (see subnet.ts MAX_INDEX) — the worst-case uid span. */
+const MAX_JAIL_UID_SPAN = 16_319;
+
+const firecrackerEnvSchemaChecked = firecrackerEnvSchema.superRefine((env, ctx) => {
+  // The uid range actually reachable: with admission control on, the
+  // lowest-free allocator keeps indexes <= the VM cap; without a cap
+  // (explicit 0) the full allocator ceiling applies.
+  const span =
+    env.FIRECRACKER_MAX_CONCURRENT_VMS > 0 ? env.FIRECRACKER_MAX_CONCURRENT_VMS : MAX_JAIL_UID_SPAN;
+  const lo = env.FIRECRACKER_JAIL_UID_BASE;
+  const hi = env.FIRECRACKER_JAIL_UID_BASE + span;
+  if (lo <= RESERVED_UID_RANGE.hi && hi >= RESERVED_UID_RANGE.lo) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["FIRECRACKER_JAIL_UID_BASE"],
+      message:
+        `jail uid range ${lo}..${hi} intersects the reserved interval ` +
+        `${RESERVED_UID_RANGE.lo}..${RESERVED_UID_RANGE.hi} (systemd DynamicUser + nobody) — ` +
+        `pick a base whose whole range clears it (e.g. the default 200000)`,
+    });
+  }
+});
+
 export type FirecrackerEnv = z.infer<typeof firecrackerEnvSchema>;
 
 let cached: FirecrackerEnv | undefined;
@@ -137,7 +182,7 @@ let cached: FirecrackerEnv | undefined;
 /** Parse (once) and return the module's environment. Throws on invalid values. */
 export function getFirecrackerEnv(): FirecrackerEnv {
   if (!cached) {
-    cached = firecrackerEnvSchema.parse(process.env);
+    cached = firecrackerEnvSchemaChecked.parse(process.env);
   }
   return cached;
 }

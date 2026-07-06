@@ -344,25 +344,28 @@ describe("cleanupOrphans positive kill path", () => {
   );
 
   // Jailed orphan identity: inside the chroot every VMM shares the same
-  // argv, so the sweep matches "firecracker in argv AND (chroot root OR
-  // reserved jail uid)". An unprivileged test cannot chroot, but it CAN
-  // exercise the uid branch by recording its OWN uid as the jail uid —
-  // the sweep's >=1000 floor makes this Linux-CI-only (runner uid 1000).
-  it.skipIf(process.platform !== "linux" || (process.getuid?.() ?? 0) < 1000)(
-    "kills a jailed orphan matched by the recorded jail uid (argv gate still required)",
+  // exec path, so the sweep matches "exec'd as firecracker (argv[0] gate)
+  // AND (jailer-injected `--id` == recorded jailId OR /proc root == the
+  // recorded chroot)". The `--id` branch is exercisable unprivileged: a
+  // decoy carrying the flag pair in its argv.
+  it.skipIf(process.platform !== "linux")(
+    "kills a jailed orphan matched by the jailer-injected --id (argv gate still required)",
     async () => {
       const binDir = await mkdtemp(join(tmpdir(), "fc-decoy-jail-"));
       extraDirs.push(binDir);
       const decoyBin = join(binDir, "firecracker");
       await Bun.write(decoyBin, Bun.file("/bin/sh"));
       await chmod(decoyBin, 0o755);
-      const decoy = Bun.spawn([decoyBin, "-c", "sleep 30"]);
+      // Positional args after `-c <script>` land in the decoy's cmdline —
+      // mirroring the `--id <jailId>` the jailer injects into every VMM.
+      const decoy = Bun.spawn([decoyBin, "-c", "sleep 30", "sh", "--id", "fc-abcdef123456-3"]);
       spawned.push(decoy);
 
       const cmdlineReady = async (): Promise<boolean> => {
         try {
           const cmdline = await Bun.file(`/proc/${decoy.pid}/cmdline`).text();
-          return cmdline.split("\0").some((a) => a.includes("firecracker"));
+          const argv = cmdline.split("\0");
+          return argv.some((a) => a.includes("firecracker")) && argv.includes("--id");
         } catch {
           return false;
         }
@@ -379,8 +382,8 @@ describe("cleanupOrphans positive kill path", () => {
         JSON.stringify({
           runId: "run_jailed_orphan",
           tapDevice: "afc13",
-          jailId: "run-jailed-orphan-3",
-          jailUid: process.getuid?.() ?? 0,
+          jailId: "fc-abcdef123456-3",
+          jailUid: 64_003,
           chrootPath: join(binDir, "nonexistent-chroot", "root"),
         }),
       );
@@ -395,18 +398,58 @@ describe("cleanupOrphans positive kill path", () => {
     },
   );
 
-  it("refuses to uid-match a jailed orphan below the unprivileged floor (fail-closed)", async () => {
-    // A corrupted state file recording a system uid (here: 0) must never
-    // aim the sweep at system processes — no /proc match is attempted
-    // for uids < 1000 and the chroot path matches nothing.
-    const runDir = join(dataDir, "run_bad_uid");
+  it.skipIf(process.platform !== "linux")(
+    "never kills by uid alone — a same-uid firecracker-argv0 process without the run's --id survives",
+    async () => {
+      // The old sweep uid branch would false-kill this decoy (same uid as
+      // the recorded jailUid, argv0 gate satisfied, but a DIFFERENT run).
+      const binDir = await mkdtemp(join(tmpdir(), "fc-decoy-samuid-"));
+      extraDirs.push(binDir);
+      const decoyBin = join(binDir, "firecracker");
+      await Bun.write(decoyBin, Bun.file("/bin/sh"));
+      await chmod(decoyBin, 0o755);
+      const decoy = Bun.spawn([decoyBin, "-c", "sleep 30", "sh", "--id", "fc-000000000000-9"]);
+      spawned.push(decoy);
+      for (let i = 0; i < 40; i++) {
+        const ready = await Bun.file(`/proc/${decoy.pid}/cmdline`)
+          .text()
+          .then((c) => c.includes("firecracker"))
+          .catch(() => false);
+        if (ready) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+
+      const runDir = join(dataDir, "run_other");
+      await mkdir(runDir, { recursive: true });
+      await writeFile(
+        join(runDir, "state.json"),
+        JSON.stringify({
+          runId: "run_other",
+          tapDevice: "afc15",
+          jailId: "fc-111111111111-2",
+          jailUid: process.getuid?.() ?? 0,
+          chrootPath: join(dataDir, "nonexistent", "root"),
+        }),
+      );
+
+      const { exec } = fakeExec();
+      const orch = readyOrchestrator(exec);
+      const report = await orch.cleanupOrphans();
+
+      expect(report.workloads).toBe(0); // decoy untouched
+      expect(decoy.signalCode).toBe(null);
+    },
+  );
+
+  it("kills nothing on a corrupted state file whose identities match no process", async () => {
+    const runDir = join(dataDir, "run_bad_state");
     await mkdir(runDir, { recursive: true });
     await writeFile(
       join(runDir, "state.json"),
       JSON.stringify({
-        runId: "run_bad_uid",
+        runId: "run_bad_state",
         tapDevice: "afc14",
-        jailId: "run-bad-uid-4",
+        jailId: "fc-deadbeef0000-4",
         jailUid: 0,
         chrootPath: join(dataDir, "nonexistent", "root"),
       }),
@@ -442,5 +485,89 @@ describe("bounded VMM reap after SIGKILL (D-state guard)", () => {
     const result = await orch.stopByRunId("run_dstate", 0);
     expect(result).toBe("stopped");
     expect(vm.stopping).toBe(true);
+  });
+
+  it("waitForExit unblocks with killed semantics when the reap is abandoned (B-1)", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_dstate_wait");
+    const vm = getVm(orch, "run_dstate_wait");
+    Reflect.set(orch, "vmmReapTimeoutMs", 50);
+    // `exited` NEVER settles — the production hang: pi.ts awaits
+    // waitForExit for the whole run, the timeout fires stopWorkload, the
+    // kill path gives up on the D-state VMM… and the old waitForExit kept
+    // awaiting `proc.exited` forever.
+    vm.proc = {
+      pid: 999_998,
+      exitCode: null,
+      signalCode: null,
+      kill() {},
+      exited: new Promise<number>(() => {}),
+    } as unknown as BunProcess;
+
+    const handle = {
+      id: "fc-run_dstate_wait-agent",
+      runId: "run_dstate_wait",
+      role: "agent" as const,
+    };
+    const exitPromise = orch.waitForExit(handle);
+    await orch.stopByRunId("run_dstate_wait", 0);
+    // Must resolve (bounded), with the killed code — not hang.
+    expect(await exitPromise).toBe(137);
+  });
+
+  it("the failed-state-write kill path is bounded too (startWorkload catch → killVm)", async () => {
+    // Direct unit of the same guarantee for the second unbounded waiter
+    // the review flagged: killVm(vm, 0) on a never-reaping proc returns
+    // within the (shrunk) reap bound instead of awaiting `exited` raw.
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_dstate_kill");
+    const vm = getVm(orch, "run_dstate_kill");
+    Reflect.set(orch, "vmmReapTimeoutMs", 50);
+    vm.proc = {
+      pid: 999_997,
+      exitCode: null,
+      signalCode: null,
+      kill() {},
+      exited: new Promise<number>(() => {}),
+    } as unknown as BunProcess;
+    const killVm = Reflect.get(orch, "killVm") as (v: unknown, g: number) => Promise<void>;
+    const start = Date.now();
+    await killVm.call(orch, vm, 0);
+    expect(Date.now() - start).toBeLessThan(5_000);
+  });
+});
+
+describe("orphan sweep containment (S-10)", () => {
+  it("refuses to rm a chrootPath outside the jail base (corrupted state.json)", async () => {
+    // A directory OUTSIDE the data dir tree, referenced by a corrupted
+    // state file — the recursive root rm must be contained to the jail
+    // base, never aimed at arbitrary host paths.
+    const outsideDir = await mkdtemp(join(tmpdir(), "fc-outside-"));
+    extraDirs.push(outsideDir);
+    await mkdir(join(outsideDir, "root"), { recursive: true });
+    await writeFile(join(outsideDir, "canary.txt"), "still here");
+
+    const runDir = join(dataDir, "run_escape");
+    await mkdir(runDir, { recursive: true });
+    await writeFile(
+      join(runDir, "state.json"),
+      JSON.stringify({
+        runId: "run_escape",
+        tapDevice: "afc16",
+        jailId: "fc-222222222222-1",
+        jailUid: 64_001,
+        chrootPath: join(outsideDir, "root"),
+      }),
+    );
+
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.cleanupOrphans();
+
+    // The out-of-base tree survived; the run dir itself was reclaimed.
+    expect(await Bun.file(join(outsideDir, "canary.txt")).text()).toBe("still here");
+    expect(await Bun.file(join(runDir, "state.json")).exists()).toBe(false);
   });
 });
