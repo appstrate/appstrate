@@ -26,7 +26,15 @@
 #
 # Usage:
 #   curl -fsSL https://get.appstrate.dev | bash
-#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3
+#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 2
+#   # Firecracker execution backend (microVMs) on this KVM host:
+#   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 \
+#     --run-adapter firecracker --host-ip 10.0.0.5
+#   # ...or paired with a remote runner daemon:
+#   #   --run-adapter firecracker --runner-url http://10.0.0.9:3100 --runner-token <token>
+#
+# All `appstrate install` flags (including --run-adapter / --runner-url /
+# --runner-token / --host-ip) pass straight through this wrapper.
 #
 # Env overrides:
 #   APPSTRATE_VERSION             Pin a release tag (default: pinned or "latest").
@@ -82,12 +90,12 @@ _appstrate_bootstrap() {
   esac
 
   # Default version pinned by `publish-installer.yml` at publish time —
-  # rewriting `v1.0.0-beta.34` so `curl get.appstrate.dev | bash`
+  # rewriting `v1.0.0-beta.36` so `curl get.appstrate.dev | bash`
   # downloads the binary matching the release that published this script.
   # Users can override via APPSTRATE_VERSION env var (e.g. to pin an older
   # release). When the placeholder is still present (local dev / unrendered
   # copy), fall back to `latest` so the script stays runnable out of tree.
-  _DEFAULT_VERSION="v1.0.0-beta.34"
+  _DEFAULT_VERSION="v1.0.0-beta.36"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
   # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
