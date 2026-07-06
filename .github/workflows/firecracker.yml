@@ -246,23 +246,28 @@ jobs:
           # The GH workspace path is too deep for the jailed VMM's AF_UNIX
           # API socket (<data>/../jail/<vmm>/<jailId>/root/run/… blows the
           # ~108-byte sun_path cap — computeJailPaths refuses at boundary
-          # creation). Keep run state under /tmp: short, and on the SAME
-          # filesystem as the checkout on GH runners, so the jail's
+          # creation), and /tmp is out too (world-writable 1777 — the jailer
+          # input trust-chain check refuses sticky dirs by design). Use
+          # /var/lib/fc: short, a root-owned 0755 chain (created below, the
+          # same posture as the production /var/lib/appstrate-runner), and on
+          # the SAME filesystem as the checkout on GH runners so the jail's
           # kernel/rootfs hardlinks still work (EXDEV guard in jail.ts).
-          FIRECRACKER_DATA_DIR: /tmp/fc/runs
-        run: bash apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh
+          FIRECRACKER_DATA_DIR: /var/lib/fc/runs
+        run: |
+          sudo mkdir -p /var/lib/fc
+          bash apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh
 
       # The smoke now runs as root (jailed VMMs — FIRECRACKER_JAILER=on),
       # so the leftover run dirs are root-owned 0700; the artifact upload
       # runs as the runner user and needs read access.
       - name: Make run dirs readable for artifact upload
         if: failure()
-        run: sudo chmod -R a+rX /tmp/fc/runs 2>/dev/null || true
+        run: sudo chmod -R a+rX /var/lib/fc/runs 2>/dev/null || true
 
       - name: Upload guest console on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: firecracker-run-dirs
-          path: /tmp/fc/runs/**/console.log
+          path: /var/lib/fc/runs/**/console.log
           if-no-files-found: ignore
