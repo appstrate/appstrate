@@ -32,6 +32,7 @@ import { getFirecrackerEnv } from "./host-env.ts";
 import { getRunnerEnv } from "./env.ts";
 import { createRunnerApp } from "./server.ts";
 import { ensureGuestArtifacts } from "./artifacts.ts";
+import { warmHostPageCache } from "./readahead.ts";
 import { verifyGuestPath, type GuestPathResult } from "./net-probe.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
@@ -73,6 +74,15 @@ try {
 } catch (err) {
   fatal("guest artifacts", err);
 }
+
+// Warm the host page cache for the boot artifacts in the background
+// (issue #835): after a host reboot the first run otherwise pays cold-disk
+// virtio-blk latency for the whole guest boot read set. Deliberately not
+// awaited — a slow disk must not delay daemon readiness, and the warm is
+// pure best-effort (it logs, never throws).
+void warmHostPageCache([fcEnv.FIRECRACKER_ROOTFS_PATH, fcEnv.FIRECRACKER_KERNEL_PATH], {
+  logger,
+});
 
 // The guest-visible platform URL comes from the daemon's env, not from
 // the platform process env — on this host there IS no platform process.
