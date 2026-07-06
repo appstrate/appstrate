@@ -46,18 +46,6 @@ import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
 
-/**
- * Boot-fatal contract for `orchestrator.initialize()`: an execution backend
- * marks a STATIC configuration refusal — one that would fail every run
- * identically if boot proceeded — by setting `bootFatal: true` on the thrown
- * error (e.g. `RunnerConfigError` in the firecracker module). Duck-typed so
- * core boot never imports error classes from opt-in modules. Anything else
- * is treated as transient and only logged.
- */
-function isBootFatalError(err: unknown): boolean {
-  return err instanceof Error && (err as { bootFatal?: unknown }).bootFatal === true;
-}
-
 export async function boot(): Promise<void> {
   // Register RBAC denial audit handler BEFORE modules load. Every guard
   // created from this point on — core routes via `requirePermission`,
@@ -273,14 +261,6 @@ export async function boot(): Promise<void> {
   // Parallel init: orchestrator, scheduler, and DB cleanups are all independent
   const parallelInits: Promise<void>[] = [
     orchestrator.initialize().catch((err) => {
-      // A static-configuration refusal (transport security, missing sink
-      // listener, …) is not a transient init hiccup (daemon unreachable,
-      // image pull, …): the platform would boot green and then fail EVERY
-      // run identically. Rethrow so boot fails hard with the backend's
-      // already-actionable message. The contract is a duck-typed
-      // `bootFatal: true` marker on the error — one mechanism for every
-      // backend, and core boot never imports from opt-in modules.
-      if (isBootFatalError(err)) throw err;
       logger.warn("Could not initialize container orchestrator", {
         error: getErrorMessage(err),
       });

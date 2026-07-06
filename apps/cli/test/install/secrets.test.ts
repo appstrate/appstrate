@@ -311,25 +311,6 @@ describe("generateEnvForTier — Firecracker backend (#819)", () => {
     expect(env.MODULES).toBe("oidc,webhooks,mcp,core-providers,firecracker");
     expect(env.FIRECRACKER_RUNNER_URL).toBe("http://10.0.0.5:3100");
     expect(env.FIRECRACKER_RUNNER_TOKEN).toBe("tok-abcdef1234567890");
-    // Remote topology (no opt-out flag): the platform's default plaintext
-    // refusal stands — split-host must get TLS, never a silent opt-out.
-    expect(env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT).toBeUndefined();
-  });
-
-  it("emits FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1 for the same-host topology (Docker-bridge plaintext opt-out)", () => {
-    const env = generateEnvForTier(
-      3,
-      "http://localhost:3000",
-      {},
-      {},
-      {
-        adapter: "firecracker",
-        runnerUrl: "http://10.0.0.5:3100",
-        runnerToken: "tok-abcdef1234567890",
-        allowPlaintextRunnerUrl: true,
-      },
-    );
-    expect(env.FIRECRACKER_RUNNER_ALLOW_PLAINTEXT).toBe("1");
   });
 
   it("never emits firecracker keys on Tier 0 (option is Docker-tier only)", () => {

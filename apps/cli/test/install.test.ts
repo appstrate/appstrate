@@ -1437,8 +1437,7 @@ describe("resolveRunBackend — firecracker same-host", () => {
       tokenSource: "generated",
       topology: "same-host",
       hostIp: "10.0.0.5",
-      sinkPort: 3310,
-      platformUrl: "http://10.0.0.5:3310",
+      platformUrl: "http://10.0.0.5:8080",
     } satisfies RunBackendConfig);
   });
 
@@ -1476,7 +1475,7 @@ describe("resolveRunBackend — firecracker remote", () => {
     expect(cfg.runnerUrl).toBe("http://10.0.0.9:3100");
     expect(cfg.token).toBe("remote-token-abcdef1234");
     expect(cfg.tokenSource).toBe("flag");
-    expect(cfg.platformUrl).toBe("http://192.168.1.20:3310");
+    expect(cfg.platformUrl).toBe("http://192.168.1.20:3000");
   });
 
   it("falls back to a <this-host-ip> placeholder when LAN detection fails", async () => {
@@ -1492,7 +1491,7 @@ describe("resolveRunBackend — firecracker remote", () => {
     );
     if (cfg.adapter !== "firecracker") throw new Error("expected firecracker");
     expect(cfg.hostIp).toBe("");
-    expect(cfg.platformUrl).toBe("http://<this-host-ip>:3310");
+    expect(cfg.platformUrl).toBe("http://<this-host-ip>:3000");
   });
 });
 
@@ -1565,11 +1564,10 @@ describe("runner-install command builder + follow-up", () => {
       tokenSource: "generated",
       topology: "remote",
       hostIp: "192.168.1.20",
-      sinkPort: 3310,
-      platformUrl: "http://192.168.1.20:3310",
+      platformUrl: "http://192.168.1.20:3000",
     });
     expect(note).toContain("curl -fsSL https://get.appstrate.dev/runner");
-    expect(note).toContain("--platform-url http://192.168.1.20:3310");
+    expect(note).toContain("--platform-url http://192.168.1.20:3000");
     expect(note).toContain("--token pairing-token-123456");
     expect(note).toContain("appstrate runner status");
   });
@@ -1582,8 +1580,7 @@ describe("runner-install command builder + follow-up", () => {
       tokenSource: "generated",
       topology: "same-host",
       hostIp: "10.0.0.5",
-      sinkPort: 3310,
-      platformUrl: "http://10.0.0.5:3310",
+      platformUrl: "http://10.0.0.5:3000",
     });
     expect(note).not.toContain("curl -fsSL");
     expect(note).toContain("appstrate runner logs -f");
@@ -1598,8 +1595,7 @@ describe("runSameHostRunnerInstall", () => {
     tokenSource: "generated",
     topology: "same-host",
     hostIp: "10.0.0.5",
-    sinkPort: 3310,
-    platformUrl: "http://10.0.0.5:3310",
+    platformUrl: "http://10.0.0.5:3000",
   } satisfies RunBackendConfig;
 
   it("interactive + exit 0: spawns sudo, no warning, no manual-command note", async () => {
@@ -1636,7 +1632,7 @@ describe("runSameHostRunnerInstall", () => {
     expect(warns).toHaveLength(1);
     const warning = warns[0] ?? "";
     expect(warning).toContain("sudo /usr/local/bin/appstrate runner install");
-    expect(warning).toContain("--platform-url http://10.0.0.5:3310");
+    expect(warning).toContain("--platform-url http://10.0.0.5:3000");
     expect(warning).toContain("--token pairing-token-123456");
   });
 
@@ -1658,7 +1654,7 @@ describe("runSameHostRunnerInstall", () => {
     expect(notes).toHaveLength(1);
     const note = notes[0] ?? "";
     expect(note).toContain("sudo /usr/local/bin/appstrate runner install");
-    expect(note).toContain("--platform-url http://10.0.0.5:3310");
+    expect(note).toContain("--platform-url http://10.0.0.5:3000");
     expect(note).toContain("--token pairing-token-123456");
   });
 });

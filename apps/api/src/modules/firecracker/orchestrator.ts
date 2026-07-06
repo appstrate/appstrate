@@ -218,24 +218,9 @@ const MIN_FIRECRACKER = { major: 1, minor: 16 };
  * at this port). Read straight from the environment (default 3000) so
  * this class — the daemon's engine and the smoke harness's driver —
  * never pulls the full platform env schema (`@appstrate/env`).
- *
- * `SINK_LISTENER_PORT` wins when present: on a host that shares the
- * platform's env (bare-metal single-host dev), guests must target the
- * dedicated sink listener — the host nft rule scopes guest→platform to
- * this exact port, so preferring the sink port makes that scoping
- * sink-only instead of full-API. Unset = today's behavior (PORT).
  */
 function loAliasPlatformPort(): number {
-  // Daemon-side raw env read outside the host-env.ts schema — used only on
-  // the bare-metal lo-alias dev path (the daemon always supplies
-  // platformApiUrl). Empty/NaN/non-positive values count as unset: an empty
-  // assignment would otherwise yield Number("") === 0 → nft dport 0 and
-  // guest platformPort 0, silently broken.
-  for (const raw of [process.env.SINK_LISTENER_PORT, process.env.PORT]) {
-    const port = Number(raw);
-    if (raw && Number.isInteger(port) && port > 0) return port;
-  }
-  return 3000;
+  return Number(process.env.PORT ?? 3000);
 }
 
 type BunProcess = ReturnType<typeof Bun.spawn>;

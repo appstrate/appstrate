@@ -13,7 +13,6 @@ import { requestId } from "./middleware/request-id.ts";
 import { clientIp } from "./middleware/client-ip.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { bodyLimit } from "./middleware/body-limit.ts";
-import { shutdownGate } from "./middleware/shutdown-gate.ts";
 import { createAgentsRouter } from "./routes/agents.ts";
 import { createRunsRouter } from "./routes/runs.ts";
 import { createRunsRemoteRouter } from "./routes/runs-remote.ts";
@@ -53,12 +52,11 @@ import {
   getModuleOpenApiTags,
   registerModuleRoutes,
 } from "./lib/modules/module-loader.ts";
-import { notFound } from "./lib/errors.ts";
+import { ApiError, notFound } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
-import { createSinkApp } from "./lib/sink-server.ts";
 import type { AppEnv } from "./types/index.ts";
 
 // Fail-fast: validate all env vars at startup
@@ -152,14 +150,20 @@ Install the CLI (\`curl -fsSL https://get.appstrate.dev | bash\` or \`bunx appst
 `;
 app.get("/llms.txt", (c) => c.text(LLMS_TXT));
 
-// Shutdown gate — reject new write requests during graceful shutdown.
-// Shared middleware with the sink listener (middleware/shutdown-gate.ts).
+// Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
 
-app.use(
-  "*",
-  shutdownGate(() => shuttingDown),
-);
+app.use("*", async (c, next) => {
+  if (shuttingDown && c.req.method === "POST") {
+    throw new ApiError({
+      status: 503,
+      code: "shutting_down",
+      title: "Service Unavailable",
+      detail: "Server is shutting down",
+    });
+  }
+  return next();
+});
 
 // Bootstrap-token redemption (#344 Layer 2b) — registered BEFORE the
 // Better Auth catch-all so the more-specific path wins. This route owns
@@ -384,31 +388,6 @@ export default {
 };
 
 logger.info("Server started", { port: env.PORT });
-
-// Guest-facing sink listener (opt-in) — a second minimal listener that
-// mounts ONLY the routes sandboxed run workloads need (see
-// lib/sink-server.ts). Isolated runtimes whose network policy scopes
-// guest→platform traffic by port (Firecracker) point their guest path at
-// this port so the full API on PORT stays unreachable from workloads.
-// Shares the shutdown gate above; the `process.exit` in lib/shutdown.ts
-// closes both listeners together.
-if (env.SINK_LISTENER_PORT !== undefined) {
-  if (env.SINK_LISTENER_PORT === env.PORT) {
-    throw new Error(
-      `SINK_LISTENER_PORT (${env.SINK_LISTENER_PORT}) must differ from PORT (${env.PORT}) — ` +
-        `the sink listener is a separate socket so guest network policy can scope to it.`,
-    );
-  }
-  Bun.serve({
-    port: env.SINK_LISTENER_PORT,
-    hostname: "0.0.0.0",
-    fetch: createSinkApp({ isShuttingDown: () => shuttingDown }).fetch,
-    idleTimeout: 255,
-  });
-  logger.info("Sink listener started (guest-facing run-event surface)", {
-    port: env.SINK_LISTENER_PORT,
-  });
-}
 
 // Proxy-upload diagnosability (issue #829): with S3 storage and no
 // S3_PUBLIC_ENDPOINT, upload URLs are signed against APP_URL and the browser

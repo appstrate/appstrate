@@ -290,26 +290,6 @@ export function detectLanIpv4(
 }
 
 /**
- * Every IPv4 address bound on this machine (internal interfaces included).
- * Used by the upgrade path to prove a firecracker runner URL is same-host:
- * the installer only ever writes `http://<this-host's-IP>:<port>` for the
- * same-host topology, so "URL host ∈ local addresses" is a reliable check.
- */
-export function localIpv4Addresses(
-  ifaces: () => NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces,
-): Set<string> {
-  const out = new Set<string>();
-  for (const list of Object.values(ifaces())) {
-    if (!list) continue;
-    for (const info of list) {
-      const isV4 = info.family === "IPv4" || (info.family as unknown) === 4;
-      if (isV4) out.add(info.address);
-    }
-  }
-  return out;
-}
-
-/**
  * Open a URL in the user's default browser. Thin wrapper over `open`
  * that swallows errors — on a headless host (SSH / container / CI)
  * there's no browser to open and that's fine; the URL is already

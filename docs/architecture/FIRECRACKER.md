@@ -28,22 +28,18 @@ Zero footprint when absent: no env vars read, no backend registered.
 # Platform (container)
 MODULES=oidc,webhooks,mcp,core-providers,firecracker
 RUN_ADAPTER=firecracker
-FIRECRACKER_RUNNER_URL=https://<runner-host>:3100  # https for split-host; plaintext non-loopback is refused by default
+FIRECRACKER_RUNNER_URL=http://<runner-host>:3100
 FIRECRACKER_RUNNER_TOKEN=<shared secret, >=16 chars>
-SINK_LISTENER_PORT=3310                            # guest-facing sink listener — REQUIRED (see below)
 ```
 
 Setting `RUN_ADAPTER=firecracker` without the module is a fatal boot error
 listing the registered backends; a stale `RUN_ADAPTER=firecracker-remote`
 (the id before the in-process backend was removed) gets a targeted "renamed to
 `firecracker`" error. Platform-side only `FIRECRACKER_RUNNER_URL`/`_TOKEN` are
-read (validated lazily, on the first `initialize()`), plus the opt-out
-`FIRECRACKER_RUNNER_ALLOW_PLAINTEXT` — also platform-side, NOT a daemon
-variable. A plaintext `http://` URL to a non-loopback host is refused —
-a hard boot failure; `FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1` is the
-explicit opt-out for same-host Docker-bridge / trusted-private-link
-topologies and downgrades the refusal to a loud warning (any other
-non-empty value is a hard validation error; see _Transport & auth_). The host-side
+read (validated lazily, on the first `initialize()`), plus the opt-in
+`FIRECRACKER_RUNNER_TLS_REQUIRED=1` — also platform-side, NOT a daemon
+variable — which turns the plaintext-`http://`-to-non-loopback-host boot
+warning into a hard refusal (see _Transport & auth_). The host-side
 `FIRECRACKER_*` variables (kernel/rootfs, subnet CIDR, …) are **daemon-only** —
 never parsed platform-side. None of these are part of the `@appstrate/env`
 schema.
@@ -68,50 +64,13 @@ credential bundles (`POST /v1/sidecars`). Same machine or a genuinely
 private network is acceptable; for any **split-host** deployment TLS (a
 reverse proxy in front of the daemon) is REQUIRED, not advised. The
 platform enforces the posture at boot: a plaintext `http://`
-`FIRECRACKER_RUNNER_URL` pointing at a non-loopback host is a hard boot
-failure (the transport refusal is rethrown out of the orchestrator init —
-the platform does not come up). Same-host installs — where the platform
-container reaches the host daemon over the Docker bridge, so the URL is
-non-loopback but traffic never leaves the machine — set
-`FIRECRACKER_RUNNER_ALLOW_PLAINTEXT=1` (platform-side) to explicitly
-accept plaintext; the platform then logs a
-loud warning instead. Auth is a single shared
+`FIRECRACKER_RUNNER_URL` pointing at a non-loopback host logs a loud
+warning, and setting `FIRECRACKER_RUNNER_TLS_REQUIRED=1` (platform-side)
+turns it into a hard boot refusal. Auth is a single shared
 token compared in constant time; run **one platform per daemon** (the orphan
 sweep is daemon-wide). The protocol is JSON over HTTP (`runner/protocol.ts`,
 versioned — the client refuses a daemon speaking another major version); logs
 stream as NDJSON with reconnect-and-skip and exit codes long-poll.
-
-## Guest-facing sink listener — `SINK_LISTENER_PORT` (mandatory)
-
-The nftables rules scope guest→platform egress to the single ip:port in
-`FIRECRACKER_RUNNER_PLATFORM_URL`. If that were the main API port, guests
-could reach **every** platform route and isolation would rest on per-route L7
-auth alone (SSRF surface). The backend therefore REQUIRES the dedicated sink
-listener: `initialize()` throws a boot-fatal config error when the platform
-env lacks `SINK_LISTENER_PORT`.
-
-- **Platform side** — `SINK_LISTENER_PORT` (installer default `3310`) boots a
-  second minimal listener (`apps/api/src/lib/sink-server.ts`, the
-  authoritative route list) serving only the run sink surface workloads call;
-  everything else 404s. The self-hosting compose templates publish the port
-  and pass the variable through; the installer writes it for firecracker
-  installs.
-- **Daemon side** — `FIRECRACKER_RUNNER_PLATFORM_URL` points at that port
-  (`--platform-url http://<PLATFORM_IPV4>:3310`); the nft accept then admits
-  the sink surface only.
-- **Mismatch warning** — at initialize, the platform compares the daemon's
-  guest-facing platform-URL port with `SINK_LISTENER_PORT` and logs a warning
-  on disagreement: a stale daemon pointing at a port the platform does not
-  serve makes every run stall (no sink events → 60s watchdog), and one
-  pointing at the main API port defeats the sink-only scoping. Check
-  `FIRECRACKER_RUNNER_PLATFORM_URL` in `/etc/appstrate-runner/env` on the
-  runner host and `SINK_LISTENER_PORT` in the platform `.env`. (A container
-  port mapping that translates the guest port onto the sink listener is the
-  one legitimate reason to ignore it.)
-- **Rollout order on upgrades** — platform first (the main API port keeps
-  serving the sink routes, so runs keep working through the transition), then
-  repoint the daemon and restart it; until then the only effect is the
-  mismatch warning.
 
 ## Installing the daemon — `appstrate runner install` (issue #819, phase 3)
 
@@ -119,13 +78,12 @@ The supported install path is the **CLI**, not a manual checkout. On a fresh
 KVM host:
 
 ```sh
-# One-liner (downloads the CLI, verifies it, then execs `runner install`).
-# The URL targets the platform's SINK listener (SINK_LISTENER_PORT), not the API port:
+# One-liner (downloads the CLI, verifies it, then execs `runner install`):
 curl -fsSL https://get.appstrate.dev/runner | sudo bash -s -- \
-  --platform-url http://<PLATFORM_IPV4>:3310
+  --platform-url http://<PLATFORM_IPV4>:3000
 
 # Or, if the CLI is already installed:
-sudo appstrate runner install --platform-url http://<PLATFORM_IPV4>:3310
+sudo appstrate runner install --platform-url http://<PLATFORM_IPV4>:3000
 ```
 
 `appstrate runner install` (`apps/cli/src/commands/runner.ts`):
@@ -178,17 +136,14 @@ atomic-swap, restart); `runner status`; `runner logs [-f]`.
 
 The main installer offers Firecracker as an **execution-backend option**, not a
 tier. After the tier + port prompts, a Docker-tier install (1/2/3 — never tier 0) asks for the agent execution backend: `docker` (default) or `firecracker`.
-Choosing `firecracker` writes five keys into the generated `.env` (preserved
-across upgrades by `mergeEnv` like every other secret; an upgrade over a
-pre-sink-listener install adds the missing `SINK_LISTENER_PORT` and prints
-the daemon-repoint follow-up):
+Choosing `firecracker` writes four keys into the generated `.env` (preserved
+across upgrades by `mergeEnv` like every other secret):
 
 ```sh
 RUN_ADAPTER=firecracker
 MODULES=oidc,webhooks,mcp,core-providers,firecracker
 FIRECRACKER_RUNNER_URL=http://<runner-ip>:3100
 FIRECRACKER_RUNNER_TOKEN=<minted or --runner-token>
-SINK_LISTENER_PORT=3310
 ```
 
 > **Re-installing over a hand-edited `.env`:** `mergeEnv` keeps the existing
@@ -201,7 +156,7 @@ The main install itself stays **rootless** — it never sudo's. Two topologies:
 - **Same host** — the runner daemon runs on the install host. The installer
   detects the host LAN IPv4 (confirm/override interactively, or `--host-ip`),
   mints a runner token, brings up the platform, and _then_ runs
-  `sudo appstrate runner install --platform-url http://<host-ip>:<sink-port> --token <token> --yes`
+  `sudo appstrate runner install --platform-url http://<host-ip>:<port> --token <token> --yes`
   as a subprocess (sudo prompts on the same TTY). If that step fails — or the
   install is non-interactive (`--host-ip` + `--yes`, which can't sudo-prompt) —
   it prints the exact command to run by hand. A runner-install hiccup is a
@@ -210,10 +165,7 @@ The main install itself stays **rootless** — it never sudo's. Two topologies:
   `--runner-url http://<kvm-ip>:3100 --runner-token <token>` (or answer the
   prompts). The installer writes the platform `.env`, then prints the one-liner
   to run on the KVM host:
-  `curl -fsSL https://get.appstrate.dev/runner | bash -s -- --platform-url http://<this-host-ip>:<sink-port> --token <token>`.
-  In both topologies `<sink-port>` is the platform's `SINK_LISTENER_PORT`
-  (3310 by default) — the daemon and its guests target the sink listener,
-  never the full API port.
+  `curl -fsSL https://get.appstrate.dev/runner | bash -s -- --platform-url http://<this-host-ip>:<port> --token <token>`.
 
 Flags (Docker tiers only): `--run-adapter <docker|firecracker>` (env
 `APPSTRATE_RUN_ADAPTER`), `--runner-url`, `--runner-token`, `--host-ip`.
@@ -612,27 +564,26 @@ boots on a bare KVM host with only these variables.
 
 ### Engine host config — `FIRECRACKER_*` (`runner/host-env.ts`)
 
-| Var                              | Default                          | Notes                                                                                                                                                                                         |
-| -------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                                                                                                                                                    |
-| `FIRECRACKER_JAILER`             | `on`                             | per-VM jailer confinement (chroot + uid drop + cgroups); `off` = unjailed direct spawn, unprivileged dev ONLY                                                                                 |
-| `FIRECRACKER_JAILER_BIN`         | `jailer`                         | jailer binary — must come from the SAME release as `FIRECRACKER_BIN`                                                                                                                          |
-| `FIRECRACKER_JAIL_UID_BASE`      | `200000`                         | per-VM uid/gid = base + subnet index; range must be unallocated and must not intersect 61184–65535 (min 1000)                                                                                 |
-| `FIRECRACKER_JAIL_CGROUPS`       | `on`                             | cgroup-v2 `memory.max`/`pids.max`/`cpu.max` per VM (cpu quota ∝ vCPUs); `off` keeps the jail, drops the bounds (hosts without cgroup-v2 delegation)                                           |
-| `FIRECRACKER_CREDENTIAL_BROKER`  | `mmds`                           | how run secrets reach the guest: `mmds` (in-memory MMDS store, off the config drive) or `config-drive` (pre-MMDS behavior, escape hatch)                                                      |
-| `FIRECRACKER_MMDS_MAX_BYTES`     | `16777216`                       | ceiling on the brokered credential payload; above the 50 KiB Firecracker default the VMM store limit is raised, above THIS the run fails                                                      |
-| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                                                                                                                                                                  |
-| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                                                                                                                                                                       |
-| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended — jailer mode then needs the artifacts on the same tmpfs, see _Requirements_)                                                                                |
-| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                                                                                                                                                                        |
-| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach                                                                                                                                              |
-| `FIRECRACKER_MAX_CONCURRENT_VMS` | `16` (`0` = unlimited)           | admission cap — see _Operational constraints_                                                                                                                                                 |
-| `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)                                                                                                                                           |
-| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | guest-artifact download base (mirror for air-gapped)                                                                                                                                          |
-| `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present                                                                                                                                              |
-| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)                                                                                                                                                   |
-| `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot guest→platform path probe: `warn` logs a drop, `strict` fails boot                                                                                                                       |
-| `SINK_LISTENER_PORT`             | unset (falls back to `PORT`)     | DAEMON-env raw read, bare-metal lo-alias dev path only (`loAliasPlatformPort` in `orchestrator.ts` — used when no `platformApiUrl` is supplied); the daemon always supplies one in production |
+| Var                              | Default                          | Notes                                                                                                                                               |
+| -------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FIRECRACKER_BIN`                | `firecracker`                    | VMM binary                                                                                                                                          |
+| `FIRECRACKER_JAILER`             | `on`                             | per-VM jailer confinement (chroot + uid drop + cgroups); `off` = unjailed direct spawn, unprivileged dev ONLY                                       |
+| `FIRECRACKER_JAILER_BIN`         | `jailer`                         | jailer binary — must come from the SAME release as `FIRECRACKER_BIN`                                                                                |
+| `FIRECRACKER_JAIL_UID_BASE`      | `200000`                         | per-VM uid/gid = base + subnet index; range must be unallocated and must not intersect 61184–65535 (min 1000)                                       |
+| `FIRECRACKER_JAIL_CGROUPS`       | `on`                             | cgroup-v2 `memory.max`/`pids.max`/`cpu.max` per VM (cpu quota ∝ vCPUs); `off` keeps the jail, drops the bounds (hosts without cgroup-v2 delegation) |
+| `FIRECRACKER_CREDENTIAL_BROKER`  | `mmds`                           | how run secrets reach the guest: `mmds` (in-memory MMDS store, off the config drive) or `config-drive` (pre-MMDS behavior, escape hatch)            |
+| `FIRECRACKER_MMDS_MAX_BYTES`     | `16777216`                       | ceiling on the brokered credential payload; above the 50 KiB Firecracker default the VMM store limit is raised, above THIS the run fails            |
+| `FIRECRACKER_KERNEL_PATH`        | `./data/firecracker/vmlinux`     | guest kernel                                                                                                                                        |
+| `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                                                                                                                             |
+| `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended — jailer mode then needs the artifacts on the same tmpfs, see _Requirements_)                                      |
+| `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                                                                                                                              |
+| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach                                                                                                    |
+| `FIRECRACKER_MAX_CONCURRENT_VMS` | `16` (`0` = unlimited)           | admission cap — see _Operational constraints_                                                                                                       |
+| `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)                                                                                                 |
+| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | guest-artifact download base (mirror for air-gapped)                                                                                                |
+| `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present                                                                                                    |
+| `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)                                                                                                         |
+| `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot guest→platform path probe: `warn` logs a drop, `strict` fails boot                                                                             |
 
 ## Development on macOS
 

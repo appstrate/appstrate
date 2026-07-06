@@ -360,19 +360,6 @@ const envSchema = z
       ),
     PORT: z.coerce.number().int().positive().default(3000),
     /**
-     * Guest-facing sink listener port. When set, the API boots a SECOND
-     * minimal HTTP listener on this port that mounts ONLY the run sink
-     * surface sandboxed workloads need — authoritative route list in
-     * `apps/api/src/lib/sink-server.ts`; everything else 404s. REQUIRED
-     * when `RUN_ADAPTER=firecracker` (the backend refuses to initialize
-     * without it — hard boot failure); optional otherwise. Point isolated
-     * runtimes (e.g. the Firecracker daemon's
-     * `FIRECRACKER_RUNNER_PLATFORM_URL`) at this port so their network
-     * policy scopes guest→platform traffic to the sink surface instead of
-     * the full API on `PORT`. Unset = single listener (guests share `PORT`).
-     */
-    SINK_LISTENER_PORT: z.coerce.number().int().positive().optional(),
-    /**
      * `/api/llm-proxy/*` response cache mode. Opt-in — default `off` keeps
      * every API-key call hitting upstream verbatim.
      *

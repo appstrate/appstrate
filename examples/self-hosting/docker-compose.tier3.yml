@@ -140,12 +140,6 @@ services:
       - appstrate-public
     ports:
       - "${PORT:-3000}:3000"
-      # Guest-facing sink listener (firecracker backend): publishes the
-      # dedicated run-sink port so the runner daemon and its microVMs can
-      # reach it. Inert on the default docker adapter — with
-      # SINK_LISTENER_PORT unset in .env nothing listens on 3310 inside the
-      # container, so the mapping accepts and resets connections.
-      - "${SINK_LISTENER_PORT:-3310}:${SINK_LISTENER_PORT:-3310}"
     restart: unless-stopped
     # Docker socket access — DOCKER_GID is the GID owning /var/run/docker.sock on
     # the host. Set automatically by the installer (default 0 = root, fits macOS
@@ -218,13 +212,8 @@ services:
       # --run-adapter firecracker`). Empty/unset when running the default
       # Docker backend — the firecracker module only reads them when
       # RUN_ADAPTER=firecracker selects the runner orchestrator.
-      # SINK_LISTENER_PORT is REQUIRED for firecracker (guest-facing sink
-      # listener — see apps/api/src/lib/sink-server.ts); it pairs with the
-      # `ports:` mapping above.
       - FIRECRACKER_RUNNER_URL
       - FIRECRACKER_RUNNER_TOKEN
-      - FIRECRACKER_RUNNER_ALLOW_PLAINTEXT
-      - SINK_LISTENER_PORT
       - RUN_TOKEN_SECRET
       - SYSTEM_PROVIDER_KEYS
       - AUTH_DISABLE_SIGNUP
