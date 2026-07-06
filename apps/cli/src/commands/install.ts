@@ -1377,6 +1377,11 @@ export function firecrackerFollowupNote(
       "",
       `  curl -fsSL https://get.appstrate.dev/runner | bash -s -- --platform-url ${rb.platformUrl} --token ${rb.token}`,
       "",
+      "Split-host transport: the platform refuses a plaintext http:// runner URL",
+      "by default (the wire carries run credentials). Put a TLS reverse proxy in",
+      "front of the daemon and use https:// in FIRECRACKER_RUNNER_URL, or set",
+      "FIRECRACKER_RUNNER_TLS_REQUIRED=0 only for a genuinely private link.",
+      "",
     );
   }
   lines.push(
@@ -1607,7 +1612,15 @@ async function installDockerTier(
   // wins), so re-running install never rotates the runner token.
   const runBackendEnv: RunBackendEnv =
     runBackend.adapter === "firecracker"
-      ? { adapter: "firecracker", runnerUrl: runBackend.runnerUrl, runnerToken: runBackend.token }
+      ? {
+          adapter: "firecracker",
+          runnerUrl: runBackend.runnerUrl,
+          runnerToken: runBackend.token,
+          // Same-host: the plaintext runner URL is Docker-bridge-local, so
+          // opt out of the platform's default plaintext-non-loopback refusal.
+          // Remote daemons never get the opt-out — split-host needs TLS.
+          allowPlaintextRunnerUrl: runBackend.topology === "same-host",
+        }
       : { adapter: "docker" };
   // Healthcheck + browser go through the local bind address: on a
   // remote deployment the public URL only resolves once the operator's

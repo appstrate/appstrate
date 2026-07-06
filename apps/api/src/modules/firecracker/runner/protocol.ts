@@ -107,6 +107,23 @@ export const createBoundaryBodySchema = z.object({
   opts: z.object({ skipSidecar: z.boolean().optional() }).optional(),
 });
 
+/**
+ * Thrown by the engine when createIsolationBoundary is asked to allocate
+ * for a runId that already owns a boundary (live record OR an allocation
+ * still in flight). The daemon maps it to HTTP 409 — a replayed or
+ * duplicated create must never allocate a second TAP + subnet slot for
+ * the same run (resource leak + admission-cap DoS on a captured bearer).
+ * Lives here (not orchestrator.ts) because both wire sides share it: the
+ * server checks `instanceof` for the status mapping without importing
+ * the whole engine.
+ */
+export class BoundaryExistsError extends Error {
+  constructor(runId: string) {
+    super(`a boundary already exists for run ${runId} — refusing to allocate a duplicate`);
+    this.name = "BoundaryExistsError";
+  }
+}
+
 export const removeBoundaryBodySchema = z.object({
   boundary: isolationBoundarySchema,
 });

@@ -30,13 +30,23 @@ const remoteEnvSchema = z.object({
   // Transport-security gate (SEC-2): the wire carries the bearer token
   // plus per-run credentials (MODEL_API_KEY, APPSTRATE_SINK_SECRET,
   // CONNECT_LOGIN_JSON), so plaintext http:// to a NON-loopback daemon is
-  // an on-path capture + replay exposure. Default: loud boot warning.
-  // `=1`/`true` upgrades the warning to a hard refusal — set it on any
-  // split-host deployment once TLS (reverse proxy) is in front.
+  // an on-path capture + replay exposure. Tri-state:
+  //   unset        → plaintext to a non-loopback host is REFUSED (default)
+  //   `1`/`true`   → same refusal, stated explicitly
+  //   `0`/`false`  → explicit opt-out: allow plaintext with a loud boot
+  //                  warning (same-host Docker-bridge / trusted private link)
+  // Loopback http:// and https:// always pass regardless.
   FIRECRACKER_RUNNER_TLS_REQUIRED: z
     .string()
     .optional()
-    .transform((v) => v === "1" || v?.toLowerCase() === "true"),
+    // An empty assignment (`FIRECRACKER_RUNNER_TLS_REQUIRED=` in a .env)
+    // reads as unset — anything else must be an explicit yes/no, so a typo
+    // can never silently opt out of the transport gate.
+    .refine((v) => !v || ["1", "true", "0", "false"].includes(v.toLowerCase()), {
+      message:
+        "FIRECRACKER_RUNNER_TLS_REQUIRED must be '1'/'true' (require TLS) or '0'/'false' (explicitly allow plaintext)",
+    })
+    .transform((v) => (!v ? undefined : v === "1" || v.toLowerCase() === "true")),
 });
 
 export type RemoteRunnerEnv = z.infer<typeof remoteEnvSchema>;
@@ -45,32 +55,52 @@ export type RemoteRunnerEnv = z.infer<typeof remoteEnvSchema>;
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /**
+ * Refusal from the plaintext-transport gate. A distinct class so the
+ * orchestrator's requireEnv() can rethrow it verbatim — its message is
+ * already the actionable one, and wrapping it in the generic "set
+ * FIRECRACKER_RUNNER_URL / _TOKEN" hint would point at the wrong fix.
+ */
+export class RunnerTransportSecurityError extends Error {}
+
+/**
  * Enforce the plaintext-transport policy on the runner URL. Pure —
  * exported for unit tests; getRemoteEnv() applies it with the module
- * logger. `https://` and loopback `http://` always pass; non-loopback
- * `http://` warns (default) or throws (`tlsRequired`).
+ * logger. `https://` and loopback `http://` always pass. Non-loopback
+ * `http://` is REFUSED unless `FIRECRACKER_RUNNER_TLS_REQUIRED=0` opts
+ * out explicitly (`tlsRequired === false`), in which case it warns.
  */
 export function assertRunnerTransportSecurity(
   runnerUrl: string,
-  tlsRequired: boolean,
+  tlsRequired: boolean | undefined,
   warn: (message: string) => void = (message) => logger.warn(message),
 ): void {
   const parsed = new URL(runnerUrl);
   if (parsed.protocol !== "http:") return;
   if (LOOPBACK_HOSTNAMES.has(parsed.hostname)) return;
-  const message =
-    `FIRECRACKER_RUNNER_URL is plaintext http:// to a non-loopback host (${parsed.hostname}) — ` +
+  const risk =
     `the platform↔daemon wire carries the bearer token AND per-run credentials ` +
-    `(model API keys, sink secrets, connect logins). Anyone on the network path can ` +
-    `capture and replay them. Put TLS in front of the daemon (reverse proxy) and use ` +
-    `https://, or keep platform and daemon on the same host / a trusted private link. ` +
-    `Set FIRECRACKER_RUNNER_TLS_REQUIRED=1 to turn this warning into a hard refusal.`;
-  if (tlsRequired) {
-    throw new Error(
-      `FIRECRACKER_RUNNER_TLS_REQUIRED=1 refuses a plaintext non-loopback runner URL: ${message}`,
+    `(model API keys, sink secrets, connect logins) — anyone on the network path can ` +
+    `capture and replay them`;
+  if (tlsRequired === false) {
+    warn(
+      `FIRECRACKER_RUNNER_TLS_REQUIRED=0: allowing plaintext http:// to a non-loopback ` +
+        `host (${parsed.hostname}) — ${risk}. This opt-out is only acceptable when platform ` +
+        `and daemon share a host (e.g. the Docker-bridge path of a same-host install) or a ` +
+        `genuinely private link; otherwise put TLS in front of the daemon and use https://.`,
     );
+    return;
   }
-  warn(message);
+  const refusedBy = tlsRequired
+    ? `refused (FIRECRACKER_RUNNER_TLS_REQUIRED=1):`
+    : `refused by default:`;
+  throw new RunnerTransportSecurityError(
+    `FIRECRACKER_RUNNER_URL is plaintext http:// to a non-loopback host (${parsed.hostname}) — ` +
+      `${refusedBy} ${risk}. Put TLS in front of the daemon (reverse proxy) and use https://` +
+      (tlsRequired
+        ? `.`
+        : `, or — ONLY when platform and daemon share a host (Docker bridge) or a trusted ` +
+          `private link — set FIRECRACKER_RUNNER_TLS_REQUIRED=0 to explicitly accept plaintext.`),
+  );
 }
 
 let cached: RemoteRunnerEnv | undefined;
@@ -79,8 +109,9 @@ let cached: RemoteRunnerEnv | undefined;
  * Parse (once) and return the remote-runner environment. Throws a Zod
  * error on missing/invalid values — callers (the orchestrator's
  * `initialize()`) wrap it with an actionable message. The transport
- * policy runs on the SAME first read (a plaintext split-host link either
- * warns loudly or refuses, before any credential crosses the wire).
+ * policy runs on the SAME first read (a plaintext split-host link is
+ * refused — or, with the explicit opt-out, warned about — before any
+ * credential crosses the wire).
  */
 export function getRemoteEnv(): RemoteRunnerEnv {
   if (!cached) {

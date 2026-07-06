@@ -30,9 +30,11 @@ import type {
   StopResult,
 } from "@appstrate/core/platform-types";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import type { BootHeartbeatOutcome } from "../../services/state/runs.ts";
-import { getRemoteEnv, type RemoteRunnerEnv } from "./remote-env.ts";
+import { getRemoteEnv, RunnerTransportSecurityError, type RemoteRunnerEnv } from "./remote-env.ts";
+import { parsePlatformApiUrl } from "./runner/platform-url.ts";
 import {
   RUNNER_ROUTES,
   RUNNER_PROTOCOL_VERSION,
@@ -162,6 +164,10 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     try {
       return getRemoteEnv();
     } catch (err) {
+      // A transport-security refusal is already fully actionable (it names
+      // the exact env var to set) — the generic "set URL/TOKEN" wrapper
+      // below would point the operator at the wrong fix.
+      if (err instanceof RunnerTransportSecurityError) throw err;
       throw new Error(
         `firecracker backend is not configured: set FIRECRACKER_RUNNER_URL ` +
           `(http(s) address of the appstrate-runner daemon) and FIRECRACKER_RUNNER_TOKEN ` +
@@ -258,6 +264,46 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
       platformReachable: health.platformReachable,
       guestPathVerified: health.guestPathVerified,
     });
+    this.warnIfGuestSurfaceIsFullApi(health.platformUrl);
+  }
+
+  /**
+   * Sink-only isolation check. The daemon's `platformUrl`
+   * (FIRECRACKER_RUNNER_PLATFORM_URL) is the ip:port guests reach the
+   * platform on — the host/guest nftables rules scope guest egress to
+   * exactly that port. Unless it targets the dedicated sink listener
+   * (`SINK_LISTENER_PORT`, lib/sink-server.ts), guests can reach EVERY
+   * platform route on that port and isolation rests solely on per-route
+   * L7 auth. Warn — never fail — so existing single-listener deployments
+   * keep booting, but the downgraded posture is visible in the boot log.
+   */
+  private warnIfGuestSurfaceIsFullApi(guestPlatformUrl: string): void {
+    const sinkPort = getEnv().SINK_LISTENER_PORT;
+    if (sinkPort === undefined) {
+      logger.warn(
+        "firecracker: SINK_LISTENER_PORT is not set — guest microVMs reach the FULL " +
+          "platform API surface (isolation rests on per-route auth only). Set " +
+          "SINK_LISTENER_PORT and point the daemon's FIRECRACKER_RUNNER_PLATFORM_URL " +
+          "at it so the firewall's port scoping becomes sink-only.",
+        { guestPlatformUrl },
+      );
+      return;
+    }
+    let guestPort: number;
+    try {
+      guestPort = parsePlatformApiUrl(guestPlatformUrl).port;
+    } catch {
+      return; // daemon-side schema already validated it; nothing to compare
+    }
+    if (guestPort !== sinkPort) {
+      logger.warn(
+        "firecracker: guests target a platform port that is not SINK_LISTENER_PORT — " +
+          "if that port serves the full API, guest isolation is NOT sink-only. Point the " +
+          "daemon's FIRECRACKER_RUNNER_PLATFORM_URL at the sink listener (or its mapped " +
+          "port) to close the gap. Ignore if the guest port maps onto the sink listener.",
+        { guestPlatformUrl, guestPort, sinkListenerPort: sinkPort },
+      );
+    }
   }
 
   /**

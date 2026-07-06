@@ -102,7 +102,7 @@ import {
   MMDS_STORE_LIMIT_BYTES,
   type MmdsPayload,
 } from "./credential-split.ts";
-import { RUN_ID_RE } from "./runner/protocol.ts";
+import { BoundaryExistsError, RUN_ID_RE } from "./runner/protocol.ts";
 import {
   assertJailerVersionParity,
   buildJailerArgv,
@@ -142,6 +142,23 @@ const CONSOLE_ARCHIVE_MAX_FILES = 100;
 
 /** How often the exit reaper sweeps {@link FirecrackerOrchestrator.vms} (ms). */
 const EXIT_REAPER_INTERVAL_MS = 60_000;
+/**
+ * Attempts for transiently-failing teardown host ops (TAP delete, cgroup
+ * rmdir). Kept small: the only legitimate transient is the kernel still
+ * releasing a just-killed VMM's resources, which clears in milliseconds —
+ * anything that survives the retries is left for the boot sweep.
+ */
+const CLEANUP_RETRY_ATTEMPTS = 3;
+
+/** ENOENT narrowing for teardown paths — "already gone" is done, not a retry. */
+function isMissingFsEntry(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "ENOENT"
+  );
+}
 /**
  * How long an exited VMM's record may linger before the reaper reclaims
  * it. Generous on purpose: a healthy platform claims the exit within
@@ -196,9 +213,15 @@ const MIN_FIRECRACKER = { major: 1, minor: 16 };
  * at this port). Read straight from the environment (default 3000) so
  * this class — the daemon's engine and the smoke harness's driver —
  * never pulls the full platform env schema (`@appstrate/env`).
+ *
+ * `SINK_LISTENER_PORT` wins when present: on a host that shares the
+ * platform's env (bare-metal single-host dev), guests must target the
+ * dedicated sink listener — the host nft rule scopes guest→platform to
+ * this exact port, so preferring the sink port makes that scoping
+ * sink-only instead of full-API. Unset = today's behavior (PORT).
  */
 function loAliasPlatformPort(): number {
-  return Number(process.env.PORT ?? 3000);
+  return Number(process.env.SINK_LISTENER_PORT ?? process.env.PORT ?? 3000);
 }
 
 type BunProcess = ReturnType<typeof Bun.spawn>;
@@ -263,6 +286,13 @@ interface VmRecord {
   reapAbandoned: Promise<void>;
   /** Resolver for {@link reapAbandoned}. */
   abandonReap: () => void;
+  /**
+   * The single in-flight teardown for this record (see
+   * {@link FirecrackerOrchestrator.destroyVm}) — set on the first destroy
+   * request, shared by every concurrent/subsequent one so the subnet
+   * index, TAP device and `vms` entry are released exactly once.
+   */
+  teardown?: Promise<void>;
 }
 
 /** Per-run state persisted for the boot-time orphan sweep. */
@@ -351,6 +381,23 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    * the concurrency cap is race-free across the awaits between the two.
    */
   private reservedSlots = 0;
+
+  /**
+   * runIds whose boundary allocation is currently in flight (added
+   * synchronously before the first await of createIsolationBoundary,
+   * removed in its finally). Together with {@link vms} this is the
+   * one-boundary-per-runId guard: a duplicate/replayed create — including
+   * one racing the original — is rejected atomically instead of
+   * allocating a second TAP + subnet index for the same run.
+   */
+  private readonly creatingBoundaries = new Set<string>();
+
+  /**
+   * Base backoff between teardown-cleanup retries, doubling per attempt
+   * (see retryCleanup). Instance field so tests can shrink it — same
+   * precedent as {@link vmmReapTimeoutMs}.
+   */
+  private cleanupRetryBaseMs = 200;
 
   /** Host-lock pidfile path once acquired (see acquireHostLock). */
   private hostLockPath: string | null = null;
@@ -867,6 +914,16 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           `safe set [A-Za-z0-9_.-] — refusing (it reaches the filesystem verbatim)`,
       );
     }
+    // One boundary per runId, ever-live. Checked here and reserved below in
+    // the SAME synchronous stretch (no await between check and add) so two
+    // concurrent creates for the same runId cannot both pass — the loser
+    // throws and allocates nothing. A record still in `vms` (including one
+    // whose teardown is in flight) also counts: a replayed POST — the
+    // captured-bearer attack this guards against — must never draw a second
+    // TAP + subnet index that removeIsolationBoundary would then leak.
+    if (this.vms.has(runId) || this.creatingBoundaries.has(runId)) {
+      throw new BoundaryExistsError(runId);
+    }
     const fcEnv = getFirecrackerEnv();
     // Admission control BEFORE any allocation: overcommitting host RAM
     // with unbounded concurrent VMs is worse than failing the run fast.
@@ -884,6 +941,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
     this.reservedSlots++;
+    this.creatingBoundaries.add(runId);
     try {
       const jailerOn = fcEnv.FIRECRACKER_JAILER === "on";
       // Jailer mode needs no tmpdir socket root — the API socket lives
@@ -982,8 +1040,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     } finally {
       // A run that reached `vms.set` is now counted by `this.vms.size`; one
       // that threw released its subnet/dir above. Either way the reservation
-      // is done — drop it so the two counters never double-count.
+      // is done — drop it so the two counters never double-count. Same for
+      // the per-runId guard: a successful create is now covered by the
+      // `vms.has` check, a failed one may legitimately be retried.
       this.reservedSlots--;
+      this.creatingBoundaries.delete(runId);
     }
   }
 
@@ -1022,15 +1083,42 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     return resolved;
   }
 
-  /** Tear down one run's VM + network + on-disk state. Idempotent, best-effort. */
-  private async destroyVm(
+  /**
+   * Tear down one run's VM + network + on-disk state. Idempotent AND
+   * single-flight: concurrent teardowns for the same run (a double remove
+   * from the wire, the exit reaper racing a finalize, shutdown racing a
+   * cancel) all await ONE underlying teardown — the subnet index, the TAP
+   * device and the `vms` record are released exactly once, so a second
+   * teardown can never delete a TAP name a new run has already re-drawn
+   * from the allocator. A FAILED teardown drops the memo so the reaper's
+   * next sweep runs a fresh attempt instead of replaying the rejection.
+   */
+  private destroyVm(vm: VmRecord, graceSeconds: number, reason: TeardownReason): Promise<void> {
+    vm.teardown ??= this.destroyVmOnce(vm, graceSeconds, reason).catch((err: unknown) => {
+      vm.teardown = undefined;
+      throw err;
+    });
+    return vm.teardown;
+  }
+
+  /** The actual teardown — only ever entered once per record via destroyVm. */
+  private async destroyVmOnce(
     vm: VmRecord,
     graceSeconds: number,
     reason: TeardownReason,
   ): Promise<void> {
     if (vm.consoleWatch) clearInterval(vm.consoleWatch);
     if (vm.lifetimeTimer) clearTimeout(vm.lifetimeTimer);
-    await this.killVm(vm, graceSeconds).catch(() => {});
+    // Kill AND confirm the reap BEFORE touching the VMM's resources: a
+    // not-yet-reaped process still holds the TAP fd and populates its
+    // cgroup, so deleting them first would only manufacture EBUSY.
+    const vmmReaped = await this.killVm(vm, graceSeconds).catch((err: unknown) => {
+      logger.warn("Firecracker VMM kill errored during teardown — continuing cleanup", {
+        runId: vm.runId,
+        error: getErrorMessage(err),
+      });
+      return false;
+    });
     // Teardown observability (phase 4): read the console tail ONCE, derive
     // the exit-marker signal, archive it, and emit a structured line — all
     // BEFORE the workspace (with console.log) is deleted below. No silent
@@ -1047,19 +1135,23 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       runId: vm.runId,
       reason: this.effectiveTeardownReason(vm, reason),
       exitMarkerFound,
+      vmmReaped,
       uptimeMs: vm.bootedAt !== undefined ? Date.now() - vm.bootedAt : 0,
     });
     try {
-      await deleteTap(this.hostExec, vm.subnet.tapDevice);
+      // Retried: right after the kill the kernel may still be releasing
+      // the VMM's TAP fd, so the first `ip link del` can transiently fail.
+      await this.retryCleanup(() => deleteTap(this.hostExec, vm.subnet.tapDevice));
       // Only a confirmed delete frees the index — releasing it while the
       // device lingers would poison the next run that draws the same index
       // (its `ip tuntap add` fails on the existing device). A stuck index
       // is reclaimed by the boot-time orphan sweep.
       this.allocator.release(vm.subnet.index);
     } catch (err) {
-      logger.warn("Failed to delete TAP device — keeping its subnet index reserved", {
+      logger.warn("Failed to delete TAP device after retries — keeping its subnet index reserved", {
         runId: vm.runId,
         tap: vm.subnet.tapDevice,
+        attempts: CLEANUP_RETRY_ATTEMPTS,
         error: getErrorMessage(err),
       });
     }
@@ -1112,13 +1204,51 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   }
 
   /**
-   * Best-effort removal of the per-VM cgroup dir the jailer created
+   * Bounded retry for teardown host ops that transiently fail while the
+   * kernel finishes releasing a just-killed VMM's resources — cgroup
+   * rmdir answers EBUSY until the VMM is fully reaped, and a TAP delete
+   * can race the fd release the same way. Backoff doubles per attempt
+   * (base {@link cleanupRetryBaseMs}); `stopRetrying` short-circuits
+   * errors retrying can never fix (e.g. ENOENT — already gone). The last
+   * error propagates so each caller decides how loudly to log.
+   */
+  private async retryCleanup(
+    op: () => Promise<unknown>,
+    stopRetrying?: (err: unknown) => boolean,
+  ): Promise<void> {
+    let delayMs = this.cleanupRetryBaseMs;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await op();
+        return;
+      } catch (err) {
+        if (attempt >= CLEANUP_RETRY_ATTEMPTS || stopRetrying?.(err)) throw err;
+        await new Promise((r) => setTimeout(r, delayMs));
+        delayMs *= 2;
+      }
+    }
+  }
+
+  /**
+   * Removal of the per-VM cgroup dir the jailer created
    * (`/sys/fs/cgroup/appstrate-fc/<jailId>`, cgroup v2). rmdir(2) only —
    * cgroupfs semantics: succeeds once the VMM is reaped and the group is
-   * empty; a still-populated or absent dir is left for the boot sweep.
+   * empty. Retried (a just-killed VMM may not be reaped yet → EBUSY);
+   * absent (ENOENT) is success; anything that survives the retries is
+   * logged and left for the boot sweep — never swallowed silently.
    */
   private async removeJailCgroup(jailId: string): Promise<void> {
-    await rmdir(join("/sys/fs/cgroup", JAIL_PARENT_CGROUP, jailId)).catch(() => {});
+    const path = join("/sys/fs/cgroup", JAIL_PARENT_CGROUP, jailId);
+    try {
+      await this.retryCleanup(() => rmdir(path), isMissingFsEntry);
+    } catch (err) {
+      if (isMissingFsEntry(err)) return; // Already gone (or the jailer never created it).
+      logger.warn("Failed to remove the run's per-VM cgroup after retries — left for boot sweep", {
+        jailId,
+        attempts: CLEANUP_RETRY_ATTEMPTS,
+        error: getErrorMessage(err),
+      });
+    }
   }
 
   /**
@@ -1651,10 +1781,15 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    * VMM process. SendCtrlAltDel is x86_64-only — on aarch64 the call
    * fails and we fall through to the kill, which is acceptable: by the
    * time stop is requested the run is already terminal platform-side.
+   *
+   * Returns whether the VMM is confirmed gone (no process, exited, or
+   * reaped after the SIGKILL) — `false` means the reap was abandoned
+   * (D-state) and the process may still hold its TAP fd / cgroup, so the
+   * caller's resource cleanup should expect transient failures.
    */
-  private async killVm(vm: VmRecord, graceSeconds: number): Promise<void> {
+  private async killVm(vm: VmRecord, graceSeconds: number): Promise<boolean> {
     const proc = vm.proc;
-    if (!proc) return;
+    if (!proc) return true;
     if (graceSeconds > 0) {
       try {
         await fetch("http://localhost/actions", {
@@ -1675,7 +1810,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         proc.exited.then(() => true),
         new Promise<false>((r) => setTimeout(() => r(false), graceSeconds * 1000)),
       ]);
-      if (exited) return;
+      if (exited) return true;
     }
     try {
       proc.kill("SIGKILL");
@@ -1704,6 +1839,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       // leaked process's `exited` promise may never settle.
       vm.abandonReap();
     }
+    return reaped;
   }
 
   /**

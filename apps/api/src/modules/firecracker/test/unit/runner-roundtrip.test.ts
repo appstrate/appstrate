@@ -97,10 +97,14 @@ function makeClient(fake: RunnerOrchestrator) {
 describe("runner protocol round-trip (real client ↔ real server)", () => {
   const savedUrl = process.env.FIRECRACKER_RUNNER_URL;
   const savedToken = process.env.FIRECRACKER_RUNNER_TOKEN;
+  const savedTls = process.env.FIRECRACKER_RUNNER_TLS_REQUIRED;
 
   beforeEach(() => {
     process.env.FIRECRACKER_RUNNER_URL = "http://10.0.0.5:3100";
     process.env.FIRECRACKER_RUNNER_TOKEN = TOKEN;
+    // Plaintext non-loopback URL — opt out of the transport gate (its own
+    // coverage lives in remote-env.test.ts).
+    process.env.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
     _resetRemoteEnvCacheForTesting();
   });
 
@@ -109,6 +113,8 @@ describe("runner protocol round-trip (real client ↔ real server)", () => {
     else process.env.FIRECRACKER_RUNNER_URL = savedUrl;
     if (savedToken === undefined) delete process.env.FIRECRACKER_RUNNER_TOKEN;
     else process.env.FIRECRACKER_RUNNER_TOKEN = savedToken;
+    if (savedTls === undefined) delete process.env.FIRECRACKER_RUNNER_TLS_REQUIRED;
+    else process.env.FIRECRACKER_RUNNER_TLS_REQUIRED = savedTls;
     _resetRemoteEnvCacheForTesting();
   });
 

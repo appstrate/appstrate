@@ -4,9 +4,10 @@
  * Unit tests for the platform-side remote-runner env (remote-env.ts):
  * the SEC-2 transport-security gate. The platform↔daemon wire carries the
  * bearer token plus per-run credentials, so plaintext http:// to a
- * NON-loopback daemon warns loudly by default and becomes a hard refusal
- * when FIRECRACKER_RUNNER_TLS_REQUIRED=1. Loopback http:// and https://
- * always pass.
+ * NON-loopback daemon is REFUSED by default (and with
+ * FIRECRACKER_RUNNER_TLS_REQUIRED=1); the explicit opt-out
+ * FIRECRACKER_RUNNER_TLS_REQUIRED=0 downgrades the refusal to a loud
+ * warning. Loopback http:// and https:// always pass.
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
@@ -35,7 +36,9 @@ describe("assertRunnerTransportSecurity", () => {
   it("passes an https non-loopback URL silently", () => {
     const warnings: string[] = [];
     expect(() =>
-      assertRunnerTransportSecurity("https://runner.internal:3100", false, (m) => warnings.push(m)),
+      assertRunnerTransportSecurity("https://runner.internal:3100", undefined, (m) =>
+        warnings.push(m),
+      ),
     ).not.toThrow();
     expect(warnings).toEqual([]);
   });
@@ -44,25 +47,37 @@ describe("assertRunnerTransportSecurity", () => {
     const warnings: string[] = [];
     for (const url of ["http://127.0.0.1:3100", "http://localhost:3100"]) {
       expect(() =>
-        assertRunnerTransportSecurity(url, false, (m) => warnings.push(m)),
+        assertRunnerTransportSecurity(url, undefined, (m) => warnings.push(m)),
       ).not.toThrow();
     }
     expect(warnings).toEqual([]);
   });
 
-  it("warns exactly once (mentioning TLS) on plaintext non-loopback, without throwing", () => {
+  it("refuses plaintext non-loopback BY DEFAULT, naming the opt-out env var", () => {
+    expect(() => assertRunnerTransportSecurity("http://10.0.0.5:3100", undefined)).toThrow(
+      /FIRECRACKER_RUNNER_TLS_REQUIRED=0/,
+    );
+  });
+
+  it("refuses plaintext non-loopback when tlsRequired, without suggesting the opt-out", () => {
+    let message = "";
+    try {
+      assertRunnerTransportSecurity("http://10.0.0.5:3100", true);
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).toContain("FIRECRACKER_RUNNER_TLS_REQUIRED=1");
+    expect(message).not.toContain("FIRECRACKER_RUNNER_TLS_REQUIRED=0");
+  });
+
+  it("allows plaintext non-loopback with the explicit opt-out, warning exactly once", () => {
     const warnings: string[] = [];
     expect(() =>
       assertRunnerTransportSecurity("http://10.0.0.5:3100", false, (m) => warnings.push(m)),
     ).not.toThrow();
     expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("FIRECRACKER_RUNNER_TLS_REQUIRED=0");
     expect(warnings[0]).toContain("TLS");
-  });
-
-  it("throws on plaintext non-loopback when tlsRequired, mentioning the env var", () => {
-    expect(() => assertRunnerTransportSecurity("http://10.0.0.5:3100", true)).toThrow(
-      /FIRECRACKER_RUNNER_TLS_REQUIRED/,
-    );
   });
 });
 
@@ -75,16 +90,28 @@ describe("getRemoteEnv transport gate (end-to-end)", () => {
     _resetRemoteEnvCacheForTesting();
   }
 
+  it("refuses a plaintext non-loopback URL by default (no env var set)", () => {
+    setEnv("http://10.0.0.5:3100");
+    expect(() => getRemoteEnv()).toThrow(/FIRECRACKER_RUNNER_TLS_REQUIRED=0/);
+  });
+
   it("refuses a plaintext non-loopback URL when FIRECRACKER_RUNNER_TLS_REQUIRED=1", () => {
     setEnv("http://10.0.0.5:3100", "1");
     expect(() => getRemoteEnv()).toThrow(/FIRECRACKER_RUNNER_TLS_REQUIRED/);
   });
 
-  it("parses (warn-only) when FIRECRACKER_RUNNER_TLS_REQUIRED is unset", () => {
-    setEnv("http://10.0.0.5:3100");
+  it("parses a plaintext non-loopback URL when FIRECRACKER_RUNNER_TLS_REQUIRED=0 (explicit opt-out)", () => {
+    setEnv("http://10.0.0.5:3100", "0");
     const env = getRemoteEnv();
     expect(env.FIRECRACKER_RUNNER_URL).toBe("http://10.0.0.5:3100");
     expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBe(false);
+  });
+
+  it("parses a loopback plaintext URL with no env var set", () => {
+    setEnv("http://127.0.0.1:3100");
+    const env = getRemoteEnv();
+    expect(env.FIRECRACKER_RUNNER_URL).toBe("http://127.0.0.1:3100");
+    expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBeUndefined();
   });
 
   it("accepts an https URL with FIRECRACKER_RUNNER_TLS_REQUIRED=1", () => {
@@ -92,5 +119,15 @@ describe("getRemoteEnv transport gate (end-to-end)", () => {
     const env = getRemoteEnv();
     expect(env.FIRECRACKER_RUNNER_URL).toBe("https://runner.internal:3100");
     expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBe(true);
+  });
+
+  it("rejects an unrecognized FIRECRACKER_RUNNER_TLS_REQUIRED value (no accidental opt-out)", () => {
+    setEnv("https://runner.internal:3100", "yes");
+    expect(() => getRemoteEnv()).toThrow(/'1'\/'true' .* '0'\/'false'/);
+  });
+
+  it("treats an empty FIRECRACKER_RUNNER_TLS_REQUIRED as unset (default refusal stands)", () => {
+    setEnv("http://10.0.0.5:3100", "");
+    expect(() => getRemoteEnv()).toThrow(/FIRECRACKER_RUNNER_TLS_REQUIRED=0/);
   });
 });

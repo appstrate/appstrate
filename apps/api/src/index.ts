@@ -57,6 +57,7 @@ import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
+import { createSinkApp } from "./lib/sink-server.ts";
 import type { AppEnv } from "./types/index.ts";
 
 // Fail-fast: validate all env vars at startup
@@ -388,6 +389,31 @@ export default {
 };
 
 logger.info("Server started", { port: env.PORT });
+
+// Guest-facing sink listener (opt-in) — a second minimal listener that
+// mounts ONLY the routes sandboxed run workloads need (see
+// lib/sink-server.ts). Isolated runtimes whose network policy scopes
+// guest→platform traffic by port (Firecracker) point their guest path at
+// this port so the full API on PORT stays unreachable from workloads.
+// Shares the shutdown gate above; the `process.exit` in lib/shutdown.ts
+// closes both listeners together.
+if (env.SINK_LISTENER_PORT !== undefined) {
+  if (env.SINK_LISTENER_PORT === env.PORT) {
+    throw new Error(
+      `SINK_LISTENER_PORT (${env.SINK_LISTENER_PORT}) must differ from PORT (${env.PORT}) — ` +
+        `the sink listener is a separate socket so guest network policy can scope to it.`,
+    );
+  }
+  Bun.serve({
+    port: env.SINK_LISTENER_PORT,
+    hostname: "0.0.0.0",
+    fetch: createSinkApp({ isShuttingDown: () => shuttingDown }).fetch,
+    idleTimeout: 255,
+  });
+  logger.info("Sink listener started (guest-facing run-event surface)", {
+    port: env.SINK_LISTENER_PORT,
+  });
+}
 
 // Proxy-upload diagnosability (issue #829): with S3 storage and no
 // S3_PUBLIC_ENDPOINT, upload URLs are signed against APP_URL and the browser

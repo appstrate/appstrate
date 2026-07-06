@@ -141,6 +141,7 @@ services:
       # RUN_ADAPTER=firecracker selects the runner orchestrator.
       - FIRECRACKER_RUNNER_URL
       - FIRECRACKER_RUNNER_TOKEN
+      - FIRECRACKER_RUNNER_TLS_REQUIRED
       - RUN_TOKEN_SECRET
       - SYSTEM_PROVIDER_KEYS
       - AUTH_DISABLE_SIGNUP

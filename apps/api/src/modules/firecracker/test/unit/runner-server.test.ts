@@ -17,6 +17,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import { createRunnerApp, type RunnerOrchestrator } from "../../runner/server.ts";
 import {
+  BoundaryExistsError,
   CONSOLE_MAX_TAIL_BYTES,
   RUNNER_PROTOCOL_VERSION,
   RUNNER_ROUTES,
@@ -235,6 +236,30 @@ describe("runner server routes", () => {
     expect(res.status).toBe(413);
     expect(((await res.json()) as { error: string }).error).toContain("too large");
     expect(calls).toEqual([]);
+  });
+
+  it("maps a replayed boundary creation to 409, not a second allocation", async () => {
+    // Engine contract (see FirecrackerOrchestrator.createIsolationBoundary):
+    // a runId that already owns a boundary throws BoundaryExistsError. The
+    // wire mapping under test: first create 200, replay 409 — never a 200
+    // that would hide the duplicate from the caller.
+    const seen = new Set<string>();
+    const { app } = makeApp({
+      createIsolationBoundary: (runId: string) => {
+        if (seen.has(runId)) return Promise.reject(new BoundaryExistsError(runId));
+        seen.add(runId);
+        return Promise.resolve(BOUNDARY);
+      },
+    });
+    const first = await post(app, RUNNER_ROUTES.createBoundary, { runId: "run-1" });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual(BOUNDARY as unknown as Record<string, unknown>);
+
+    const replay = await post(app, RUNNER_ROUTES.createBoundary, { runId: "run-1" });
+    expect(replay.status).toBe(409);
+    expect(((await replay.json()) as { error: string }).error).toContain("run-1");
+    // Only the first request allocated.
+    expect(seen.size).toBe(1);
   });
 
   it("maps an orchestrator error to 500 with the message only", async () => {

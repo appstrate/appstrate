@@ -21,7 +21,11 @@ import type { IsolationBoundary, WorkloadHandle } from "@appstrate/core/platform
 
 const BASE_URL = "http://runner.test:8811";
 const TOKEN = "unit-test-token-0123456789";
-const ENV_KEYS = ["FIRECRACKER_RUNNER_URL", "FIRECRACKER_RUNNER_TOKEN"] as const;
+const ENV_KEYS = [
+  "FIRECRACKER_RUNNER_URL",
+  "FIRECRACKER_RUNNER_TOKEN",
+  "FIRECRACKER_RUNNER_TLS_REQUIRED",
+] as const;
 
 const HANDLE: WorkloadHandle = { id: "w-1", runId: "r-1", role: "agent" };
 
@@ -99,6 +103,9 @@ beforeEach(() => {
   // Trailing slash on purpose: the env getter must strip it.
   process.env.FIRECRACKER_RUNNER_URL = `${BASE_URL}/`;
   process.env.FIRECRACKER_RUNNER_TOKEN = TOKEN;
+  // BASE_URL is plaintext non-loopback — opt out of the transport gate
+  // (its own coverage lives in remote-env.test.ts).
+  process.env.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
   _resetRemoteEnvCacheForTesting();
 });
 
@@ -140,6 +147,24 @@ describe("RemoteFirecrackerOrchestrator.initialize", () => {
     expect(error?.message).toContain("FIRECRACKER_RUNNER_URL");
     expect(error?.message).toContain("FIRECRACKER_RUNNER_TOKEN");
     expect(error?.message).toContain("README");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("surfaces the transport refusal verbatim (not the generic not-configured hint)", async () => {
+    // Plaintext non-loopback with NO opt-out — refused by the SEC-2 gate.
+    delete process.env.FIRECRACKER_RUNNER_TLS_REQUIRED;
+    _resetRemoteEnvCacheForTesting();
+    const { fn, calls } = fetchStub(() => json(HEALTH_OK));
+    const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
+
+    const error = await orchestrator.initialize().then(
+      () => undefined,
+      (err: unknown) => err as Error,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toContain("FIRECRACKER_RUNNER_TLS_REQUIRED=0");
+    expect(error?.message).not.toContain("not configured");
     expect(calls).toHaveLength(0);
   });
 

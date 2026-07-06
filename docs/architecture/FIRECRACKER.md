@@ -28,7 +28,7 @@ Zero footprint when absent: no env vars read, no backend registered.
 # Platform (container)
 MODULES=oidc,webhooks,mcp,core-providers,firecracker
 RUN_ADAPTER=firecracker
-FIRECRACKER_RUNNER_URL=http://<runner-host>:3100
+FIRECRACKER_RUNNER_URL=https://<runner-host>:3100  # https for split-host; plaintext non-loopback is refused by default
 FIRECRACKER_RUNNER_TOKEN=<shared secret, >=16 chars>
 ```
 
@@ -36,10 +36,12 @@ Setting `RUN_ADAPTER=firecracker` without the module is a fatal boot error
 listing the registered backends; a stale `RUN_ADAPTER=firecracker-remote`
 (the id before the in-process backend was removed) gets a targeted "renamed to
 `firecracker`" error. Platform-side only `FIRECRACKER_RUNNER_URL`/`_TOKEN` are
-read (validated lazily, on the first `initialize()`), plus the opt-in
-`FIRECRACKER_RUNNER_TLS_REQUIRED=1` — also platform-side, NOT a daemon
-variable — which turns the plaintext-`http://`-to-non-loopback-host boot
-warning into a hard refusal (see _Transport & auth_). The host-side
+read (validated lazily, on the first `initialize()`), plus the tri-state
+`FIRECRACKER_RUNNER_TLS_REQUIRED` — also platform-side, NOT a daemon
+variable. A plaintext `http://` URL to a non-loopback host is refused at
+boot by default; `=1` states that refusal explicitly, `=0` is the explicit
+opt-out for same-host Docker-bridge / trusted-private-link topologies and
+downgrades the refusal to a loud warning (see _Transport & auth_). The host-side
 `FIRECRACKER_*` variables (kernel/rootfs, subnet CIDR, …) are **daemon-only** —
 never parsed platform-side. None of these are part of the `@appstrate/env`
 schema.
@@ -64,9 +66,13 @@ credential bundles (`POST /v1/sidecars`). Same machine or a genuinely
 private network is acceptable; for any **split-host** deployment TLS (a
 reverse proxy in front of the daemon) is REQUIRED, not advised. The
 platform enforces the posture at boot: a plaintext `http://`
-`FIRECRACKER_RUNNER_URL` pointing at a non-loopback host logs a loud
-warning, and setting `FIRECRACKER_RUNNER_TLS_REQUIRED=1` (platform-side)
-turns it into a hard boot refusal. Auth is a single shared
+`FIRECRACKER_RUNNER_URL` pointing at a non-loopback host is a hard boot
+refusal by default (`FIRECRACKER_RUNNER_TLS_REQUIRED=1` states it
+explicitly). Same-host installs — where the platform container reaches the
+host daemon over the Docker bridge, so the URL is non-loopback but traffic
+never leaves the machine — set `FIRECRACKER_RUNNER_TLS_REQUIRED=0`
+(platform-side) to explicitly accept plaintext; the platform then logs a
+loud warning instead. Auth is a single shared
 token compared in constant time; run **one platform per daemon** (the orphan
 sweep is daemon-wide). The protocol is JSON over HTTP (`runner/protocol.ts`,
 versioned — the client refuses a daemon speaking another major version); logs

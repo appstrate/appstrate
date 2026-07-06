@@ -121,6 +121,15 @@ export interface RunBackendEnv {
   runnerUrl?: string;
   /** FIRECRACKER_RUNNER_TOKEN — shared bearer secret. Only for the firecracker adapter. */
   runnerToken?: string;
+  /**
+   * Same-host topology: the daemon runs on THIS host, so the plaintext
+   * runner URL — non-loopback because the platform container reaches the
+   * host over the Docker bridge — never leaves the machine. Emits
+   * `FIRECRACKER_RUNNER_TLS_REQUIRED=0` (the platform refuses plaintext
+   * non-loopback runner URLs by default). Never set for remote daemons —
+   * a split-host link must get TLS, not a silent opt-out.
+   */
+  allowPlaintextRunnerUrl?: boolean;
 }
 
 export interface BootstrapOverrides {
@@ -307,6 +316,10 @@ export function generateEnvForTier(
     env.MODULES = FIRECRACKER_MODULES;
     if (runBackend.runnerUrl) env.FIRECRACKER_RUNNER_URL = runBackend.runnerUrl;
     if (runBackend.runnerToken) env.FIRECRACKER_RUNNER_TOKEN = runBackend.runnerToken;
+    // Same-host only: explicit plaintext opt-out (Docker-bridge traffic
+    // never leaves the machine). Without it the platform refuses the
+    // non-loopback http:// runner URL at boot.
+    if (runBackend.allowPlaintextRunnerUrl) env.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
   }
 
   return env;

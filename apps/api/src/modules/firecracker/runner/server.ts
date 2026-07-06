@@ -27,6 +27,7 @@ import type {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
 import {
+  BoundaryExistsError,
   CONSOLE_DEFAULT_TAIL_BYTES,
   CONSOLE_ID_RE,
   CONSOLE_ROUTE_PATTERN,
@@ -192,8 +193,22 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
   app.post(RUNNER_ROUTES.createBoundary, async (c) => {
     const body = await readBody(c, createBoundaryBodySchema);
     if (!body.ok) return body.res;
-    const boundary = await orchestrator.createIsolationBoundary(body.data.runId, body.data.opts);
-    return c.json(boundary);
+    try {
+      const boundary = await orchestrator.createIsolationBoundary(body.data.runId, body.data.opts);
+      return c.json(boundary);
+    } catch (err) {
+      // Replay/duplicate guard: on a plaintext-bearer transport a captured
+      // request can be re-POSTed verbatim — a duplicate create must never
+      // allocate a second boundary (TAP + subnet slot) for the same run.
+      // 409 (not 200 with the existing boundary) keeps ownership single:
+      // handing the boundary back would let a second caller believe it
+      // owns the run and tear it down under the first one's feet.
+      if (err instanceof BoundaryExistsError) {
+        logger.warn("Duplicate boundary creation rejected", { runId: body.data.runId });
+        return c.json({ error: getErrorMessage(err) }, 409);
+      }
+      throw err;
+    }
   });
 
   app.post(RUNNER_ROUTES.removeBoundary, async (c) => {
