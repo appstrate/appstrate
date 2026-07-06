@@ -206,6 +206,7 @@ describe("renderRunnerEnvFile / parseRunnerEnvFile", () => {
     expect(env.FIRECRACKER_ROOTFS_PATH).toBe(paths.rootfsPath);
     expect(env.FIRECRACKER_DATA_DIR).toBe(paths.runsDir);
     expect(env.FIRECRACKER_BIN).toBe(paths.firecrackerBin);
+    expect(env.FIRECRACKER_JAILER_BIN).toBe(paths.jailerBin);
     // No cwd-relative default leaked through.
     expect(text).not.toContain("./data/firecracker");
   });
@@ -234,6 +235,8 @@ describe("renderRunnerUnit", () => {
     expect(unit).toContain("ReadWritePaths=/run/netns");
     expect(unit).toContain("ExecStartPre=+/bin/mkdir -p /run/netns");
     expect(unit).toContain("WorkingDirectory=/srv/runner");
+    // cgroup-v2 delegation for the jailer's per-VM appstrate-fc slices.
+    expect(unit).toContain("Delegate=yes");
     expect(unit).toContain("Restart=always");
     // Start-rate limit bounds the Restart=always loop (StartLimit* live in [Unit]).
     expect(unit).toContain("StartLimitIntervalSec=300");
@@ -277,11 +280,12 @@ describe("url builders", () => {
     expect(pinned.checksums).toBe(`${APPSTRATE_RELEASE_BASE}/download/v1.2.3/checksums.txt`);
     expect(pinned.checksumsSig).toBe(`${pinned.checksums}.minisig`);
   });
-  it("firecrackerUrls: tarball + sha + inner path", () => {
+  it("firecrackerUrls: tarball + sha + inner paths (VMM and jailer from ONE archive)", () => {
     const u = firecrackerUrls("1.16.0", "x86_64");
     expect(u.tarball).toContain("/v1.16.0/firecracker-v1.16.0-x86_64.tgz");
     expect(u.sha256).toContain(".tgz.sha256.txt");
     expect(u.innerPath).toBe("release-v1.16.0-x86_64/firecracker-v1.16.0-x86_64");
+    expect(u.jailerInnerPath).toBe("release-v1.16.0-x86_64/jailer-v1.16.0-x86_64");
   });
 });
 
@@ -464,6 +468,28 @@ describe("runnerDoctor", () => {
     expect(report.health.status).toBe(200);
     expect(report.artifacts.version).toBe("1.2.3");
     expect(report.artifacts.guestProtocol).toBe(1);
+    // Jailer presence is surfaced (informational — the daemon's own boot
+    // gate is what fails hard when it is missing with FIRECRACKER_JAILER=on).
+    expect(report.jailer.path).toBe(`${config.dataDir}/bin/jailer`);
+    expect(report.jailer.installed).toBe(false);
+  });
+
+  it("reports the jailer as installed when the binary exists", async () => {
+    const jailerPath = runnerDataPaths(config.dataDir).jailerBin;
+    const { fs } = fakeFs({
+      "/etc/appstrate-runner/env": renderRunnerEnvFile(config),
+      [jailerPath]: "<installed>",
+    });
+    const { exec } = fakeExec();
+    const report = await runnerDoctor({
+      deps: {
+        fs,
+        exec,
+        http: fakeHttp({}),
+        preflight: async () => ({ ok: true, arch: "x86_64", checks: [] }),
+      },
+    });
+    expect(report.jailer.installed).toBe(true);
   });
 
   it("reports not-ok when the daemon is unreachable", async () => {

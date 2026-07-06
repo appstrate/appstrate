@@ -249,6 +249,17 @@ describe("createTap / deleteTap", () => {
     );
   });
 
+  it("creates the TAP owned by the jail uid when ownerUid is given (jailer mode)", async () => {
+    // TUNSETIFF on an existing device needs CAP_NET_ADMIN unless the
+    // caller matches the device owner — the jailed VMM (unprivileged
+    // per-VM uid) can only attach to a TAP born as its own.
+    const { exec, calls } = fakeExec();
+    await createTap(exec, subnet, { ownerUid: 64_003 });
+    expect(calls[0]?.stdin).toBe(
+      "tuntap add dev afc3 mode tap user 64003\naddr add 10.231.0.13/30 dev afc3\nlink set dev afc3 up\n",
+    );
+  });
+
   it("reclaims a half-created TAP when the batch fails", async () => {
     const { exec, calls } = fakeExec((cmd) => (cmd[1] === "-batch" ? new Error("boom") : ""));
     await expect(createTap(exec, subnet)).rejects.toThrow("boom");

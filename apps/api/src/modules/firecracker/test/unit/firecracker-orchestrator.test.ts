@@ -46,11 +46,17 @@ function defaultRespond(cmd: string[]): string {
 }
 
 const ORIGINAL_DATA_DIR = process.env.FIRECRACKER_DATA_DIR;
+const ORIGINAL_JAILER = process.env.FIRECRACKER_JAILER;
 let dataDir: string;
 
 beforeEach(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "fc-orch-test-"));
   process.env.FIRECRACKER_DATA_DIR = dataDir;
+  // These tests pin the direct-spawn contract; jail-mode boundary
+  // behavior has its own describe below (with a SHORT data dir — the
+  // in-chroot API socket path is AF_UNIX-length-guarded and macOS
+  // tmpdirs are long).
+  process.env.FIRECRACKER_JAILER = "off";
   _resetCacheForTesting();
 });
 
@@ -61,6 +67,8 @@ afterEach(async () => {
 afterAll(() => {
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.FIRECRACKER_DATA_DIR;
   else process.env.FIRECRACKER_DATA_DIR = ORIGINAL_DATA_DIR;
+  if (ORIGINAL_JAILER === undefined) delete process.env.FIRECRACKER_JAILER;
+  else process.env.FIRECRACKER_JAILER = ORIGINAL_JAILER;
   _resetCacheForTesting();
 });
 
@@ -430,5 +438,236 @@ describe("waitForExit without a booted VM", () => {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec);
     expect(await orch.waitForExit({ id: "x", runId: "nope", role: "agent" })).toBe(1);
+  });
+});
+
+describe("jailer-mode boundary (FIRECRACKER_JAILER=on)", () => {
+  // A SHORT root (mkdtemp under /tmp, not os.tmpdir()): the in-chroot API
+  // socket host path is guarded against the AF_UNIX sun_path cap, and
+  // macOS per-user tmpdirs (/var/folders/…) are long enough to trip it.
+  let jailTestRoot: string;
+
+  beforeEach(async () => {
+    jailTestRoot = await mkdtemp("/tmp/fcj-");
+    process.env.FIRECRACKER_DATA_DIR = join(jailTestRoot, "runs");
+    process.env.FIRECRACKER_JAILER = "on";
+    _resetCacheForTesting();
+  });
+
+  afterEach(async () => {
+    await rm(jailTestRoot, { recursive: true, force: true });
+  });
+
+  it("persists the jail identity + in-chroot socket path, and owns the TAP by the jail uid", async () => {
+    const { exec, calls } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const boundary = await orch.createIsolationBoundary("run_1");
+
+    const state = JSON.parse(
+      await Bun.file(join(jailTestRoot, "runs", "run_1", "state.json")).text(),
+    ) as Record<string, unknown>;
+    // jailId = sanitized runId ("_" is outside the jailer's charset) +
+    // the run's subnet index (collision-proofing).
+    expect(state.jailId).toBe("run-1-1");
+    expect(state.jailUid).toBe(64_001); // FIRECRACKER_JAIL_UID_BASE default + index 1
+    const expectedRoot = join(jailTestRoot, "jail", "firecracker", "run-1-1", "root");
+    expect(state.chrootPath).toBe(expectedRoot);
+    expect(state.apiSocketPath).toBe(join(expectedRoot, "run", "firecracker.socket"));
+    // The unprivileged jailed VMM can only TUNSETIFF a TAP born as its own.
+    expect(calls[0]?.stdin).toContain("tuntap add dev afc1 mode tap user 64001\n");
+    expect(boundary.name).toBe("firecracker-run_1");
+  });
+
+  it("rejects a data dir whose jail socket path exceeds the AF_UNIX cap — fully rolled back", async () => {
+    process.env.FIRECRACKER_DATA_DIR = join(jailTestRoot, "a".repeat(80), "runs");
+    _resetCacheForTesting();
+    const { exec, calls } = fakeExec();
+    const orch = readyOrchestrator(exec);
+
+    await expect(orch.createIsolationBoundary("run_1")).rejects.toThrow(/AF_UNIX/);
+
+    // Index released, and the guard fired BEFORE any TAP was created.
+    expect(reservedIndexes(orch).size).toBe(0);
+    expect(calls.some((c) => c.cmd.join(" ") === "ip -batch -")).toBe(false);
+  });
+
+  it("removes the whole jail tree on boundary teardown", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const boundary = await orch.createIsolationBoundary("run_1");
+
+    // Simulate the chroot a spawn would have populated.
+    const jailDir = join(jailTestRoot, "jail", "firecracker", "run-1-1");
+    await mkdir(join(jailDir, "root", "run"), { recursive: true });
+    await writeFile(join(jailDir, "root", "vmconfig.json"), "{}");
+
+    await orch.removeIsolationBoundary(boundary);
+    expect(await Bun.file(join(jailDir, "root", "vmconfig.json")).exists()).toBe(false);
+    expect(await Bun.file(join(jailTestRoot, "runs", "run_1", "state.json")).exists()).toBe(false);
+  });
+});
+
+describe("cleanupOrphans jail residue reclamation", () => {
+  it("reclaims a jailed orphan's chroot tree recorded in state.json", async () => {
+    // Isolated layout: runs + jail nested under one temp root so the
+    // base sweep never touches a shared tmpdir.
+    const root = await mkdtemp(join(tmpdir(), "fc-jail-sweep-"));
+    process.env.FIRECRACKER_DATA_DIR = join(root, "runs");
+    _resetCacheForTesting();
+    try {
+      const chrootPath = join(root, "jail", "firecracker", "run-jail-1", "root");
+      await mkdir(join(chrootPath, "run"), { recursive: true });
+      await writeFile(join(chrootPath, "config.img"), "secret");
+      const runDir = join(root, "runs", "run_jail");
+      await mkdir(runDir, { recursive: true });
+      await writeFile(
+        runDir + "/state.json",
+        JSON.stringify({
+          runId: "run_jail",
+          tapDevice: "afc12",
+          apiSocketPath: join(chrootPath, "run", "firecracker.socket"),
+          jailId: "run-jail-1",
+          jailUid: 64_001,
+          chrootPath,
+        }),
+      );
+
+      const { exec, calls } = fakeExec();
+      const orch = readyOrchestrator(exec);
+      const report = await orch.cleanupOrphans();
+
+      // No live VMM to kill (fail-closed on hosts without /proc), but the
+      // run dir, TAP and the whole jail tree are reclaimed.
+      expect(report.isolationBoundaries).toBe(1);
+      expect(calls.map((c) => c.cmd.join(" "))).toContain("ip link del afc12");
+      expect(await Bun.file(join(chrootPath, "config.img")).exists()).toBe(false);
+      expect(await Bun.file(runDir + "/state.json").exists()).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reclaims state-less jail dirs left under the chroot base (crash before state write)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fc-jail-base-"));
+    process.env.FIRECRACKER_DATA_DIR = join(root, "runs");
+    _resetCacheForTesting();
+    try {
+      await mkdir(join(root, "runs"), { recursive: true });
+      const strayJail = join(root, "jail", "firecracker", "stray-7", "root");
+      await mkdir(strayJail, { recursive: true });
+      await writeFile(join(strayJail, "vmlinux"), "x");
+
+      const { exec } = fakeExec();
+      const orch = readyOrchestrator(exec);
+      await orch.cleanupOrphans();
+
+      expect(await Bun.file(join(strayJail, "vmlinux")).exists()).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
+  const ORIGINAL_BROKER = process.env.FIRECRACKER_CREDENTIAL_BROKER;
+
+  afterEach(() => {
+    if (ORIGINAL_BROKER === undefined) delete process.env.FIRECRACKER_CREDENTIAL_BROKER;
+    else process.env.FIRECRACKER_CREDENTIAL_BROKER = ORIGINAL_BROKER;
+    _resetCacheForTesting();
+  });
+
+  /** Minimal BunProcess stand-in: no streams, already-exited (drainStream no-ops). */
+  function fakeVmmProc(): unknown {
+    return {
+      pid: 4321,
+      stderr: null,
+      stdout: null,
+      exited: Promise.resolve(0),
+      exitCode: 0,
+      kill() {},
+    };
+  }
+
+  /**
+   * Drive an orchestrator to `startWorkload(agent)` with the KVM-touching
+   * seams stubbed: `spawnVmm` (no real VMM), `buildConfigDrive` (no
+   * mkfs.ext4 on macOS CI), `startConsoleWatch` (no leaked timer). The MMDS
+   * PUT stays live so the broker contract is what is exercised.
+   */
+  async function primeToStart(
+    runId: string,
+    mmdsPut: (socketPath: string, payload: unknown) => Promise<void>,
+    withSidecar = true,
+  ): Promise<{ orch: FirecrackerOrchestrator; start: () => Promise<void> }> {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec, {
+      mmdsPut: mmdsPut as FirecrackerOrchestratorDeps["mmdsPut"],
+    });
+    Reflect.set(orch, "spawnVmm", async () => fakeVmmProc());
+    Reflect.set(orch, "buildConfigDrive", async () => {});
+    Reflect.set(orch, "startConsoleWatch", () => {});
+
+    const boundary = await orch.createIsolationBoundary(runId);
+    if (withSidecar) await orch.createSidecar(runId, boundary, { runToken: "broker-run-token" });
+    const agent = await orch.createWorkload(
+      {
+        runId,
+        role: "agent",
+        image: "unused",
+        env: withSidecar ? {} : { APPSTRATE_SINK_SECRET: "hmac" },
+        resources: { memoryBytes: 256 * 1024 * 1024, nanoCpus: 1_000_000_000 },
+      },
+      boundary,
+    );
+    return { orch, start: () => orch.startWorkload(agent) };
+  }
+
+  it("PUTs the secret payload exactly once on the happy path (default broker)", async () => {
+    delete process.env.FIRECRACKER_CREDENTIAL_BROKER; // default = mmds
+    _resetCacheForTesting();
+    const calls: Array<{ socketPath: string; payload: unknown }> = [];
+    const { orch, start } = await primeToStart("run_mmds_ok", async (socketPath, payload) => {
+      // Deep-copy: the orchestrator scrubs the payload in place after the
+      // PUT, so a live reference would read back as blanked values.
+      calls.push({ socketPath, payload: JSON.parse(JSON.stringify(payload)) });
+    });
+    await start();
+
+    expect(calls).toHaveLength(1);
+    const payload = calls[0]?.payload as { sidecar_env: Record<string, string> };
+    // The run token was brokered via MMDS, not left on the drive.
+    expect(payload.sidecar_env.RUN_TOKEN).toBe("broker-run-token");
+    // The VM is live (not destroyed).
+    expect((Reflect.get(orch, "vms") as Map<string, unknown>).size).toBe(1);
+    await orch.shutdown();
+  });
+
+  it("destroys the VM and fails the run when the MMDS PUT never succeeds", async () => {
+    delete process.env.FIRECRACKER_CREDENTIAL_BROKER;
+    _resetCacheForTesting();
+    let attempts = 0;
+    const { orch, start } = await primeToStart("run_mmds_fail", async () => {
+      attempts++;
+      throw new Error("socket refused");
+    });
+    await expect(start()).rejects.toThrow(/MMDS credential injection failed/);
+    // Retried (5 attempts) then gave up.
+    expect(attempts).toBe(5);
+    // Fail-closed: the VM was torn down, not left booted without credentials.
+    expect((Reflect.get(orch, "vms") as Map<string, unknown>).size).toBe(0);
+    await orch.shutdown();
+  });
+
+  it("never PUTs in config-drive mode (secrets ride the drive)", async () => {
+    process.env.FIRECRACKER_CREDENTIAL_BROKER = "config-drive";
+    _resetCacheForTesting();
+    let called = 0;
+    const { orch, start } = await primeToStart("run_drive", async () => {
+      called++;
+    });
+    await start();
+    expect(called).toBe(0);
+    await orch.shutdown();
   });
 });

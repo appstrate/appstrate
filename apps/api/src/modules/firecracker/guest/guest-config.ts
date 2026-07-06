@@ -19,9 +19,28 @@ export interface GuestNetworkConfig {
   platform_port: number;
 }
 
+/**
+ * Where the run's raw credentials come from.
+ *   - `"mmds"`: the secret keys are NOT on the config drive — the
+ *     supervisor fetches them from the Firecracker MMDS store at boot and
+ *     merges them over the drive env maps (FIRECRACKER_CREDENTIAL_BROKER=mmds).
+ *   - `"inline"`: the drive env maps already carry every credential
+ *     (FIRECRACKER_CREDENTIAL_BROKER=config-drive).
+ */
+export interface GuestCredentialsConfig {
+  source: "mmds" | "inline";
+}
+
 /** `config.json` consumed by the guest supervisor (snake_case wire). */
 export interface GuestConfig {
   run_id: string;
+  /**
+   * How the supervisor obtains the run's secrets — see
+   * {@link GuestCredentialsConfig}. Optional on the wire: a config without
+   * it (older producer, hand-written) is treated as `"inline"` (secrets on
+   * the drive). `buildGuestConfig` always emits it.
+   */
+  credentials?: GuestCredentialsConfig;
   /**
    * Per-run random nonce the supervisor embeds in its serial-console exit
    * marker (`APPSTRATE_EXIT:<nonce>:<code>`). Workloads share the console

@@ -37,6 +37,7 @@ const internals = (orch: FirecrackerOrchestrator): ArchiveInternals =>
   orch as unknown as ArchiveInternals;
 
 const ORIGINAL_DATA_DIR = process.env.FIRECRACKER_DATA_DIR;
+const ORIGINAL_JAILER = process.env.FIRECRACKER_JAILER;
 let rootDir: string;
 let dataDir: string;
 let archiveDir: string;
@@ -46,6 +47,10 @@ beforeEach(async () => {
   dataDir = join(rootDir, "runs");
   await mkdir(dataDir, { recursive: true });
   process.env.FIRECRACKER_DATA_DIR = dataDir;
+  // Direct-spawn path: the archive behavior is jail-agnostic, and the
+  // jail layout's AF_UNIX socket-length guard would trip on long macOS
+  // tmpdirs (jail-mode shapes are covered in firecracker-orchestrator.test.ts).
+  process.env.FIRECRACKER_JAILER = "off";
   _resetFirecrackerEnvCacheForTesting();
   archiveDir = join(resolve(dataDir), "..", "console-archive");
 });
@@ -57,6 +62,8 @@ afterEach(async () => {
 afterAll(() => {
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.FIRECRACKER_DATA_DIR;
   else process.env.FIRECRACKER_DATA_DIR = ORIGINAL_DATA_DIR;
+  if (ORIGINAL_JAILER === undefined) delete process.env.FIRECRACKER_JAILER;
+  else process.env.FIRECRACKER_JAILER = ORIGINAL_JAILER;
   _resetFirecrackerEnvCacheForTesting();
 });
 

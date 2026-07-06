@@ -65,6 +65,25 @@ describe("buildVmConfig", () => {
     });
   });
 
+  it("passes caller-mapped paths through verbatim (jailer mode feeds chroot-relative paths)", () => {
+    // Path mapping is the caller's contract: a jailed spawn references
+    // everything chroot-relative (firecracker resolves after
+    // pivot_root); the builder must never resolve or rewrite.
+    const jailed = buildVmConfig({
+      kernelPath: "/vmlinux",
+      rootfsPath: "/rootfs.ext4",
+      configDrivePath: "/config.img",
+      bootArgs: "console=ttyS0",
+      subnet: SUBNET,
+      vcpuCount: 2,
+      memSizeMib: 1024,
+    });
+    expect((jailed["boot-source"] as Record<string, unknown>).kernel_image_path).toBe("/vmlinux");
+    const drives = jailed.drives as Array<Record<string, unknown>>;
+    expect(drives[0]?.path_on_host).toBe("/rootfs.ext4");
+    expect(drives[1]?.path_on_host).toBe("/config.img");
+  });
+
   it("binds eth0 to the run's TAP with the derived MAC", () => {
     const ifaces = config["network-interfaces"] as Array<Record<string, unknown>>;
     expect(ifaces).toHaveLength(1);
@@ -92,6 +111,31 @@ describe("buildVmConfig", () => {
 
   it("carries the machine sizing", () => {
     expect(config["machine-config"]).toEqual({ vcpu_count: 2, mem_size_mib: 2048 });
+  });
+
+  it("omits the MMDS config block by default (config-drive broker)", () => {
+    expect(config["mmds-config"]).toBeUndefined();
+  });
+
+  it("adds the V2 MMDS config block on eth0 when the broker is mmds", () => {
+    const withMmds = buildVmConfig({
+      kernelPath: "/data/vmlinux",
+      rootfsPath: "/data/rootfs.ext4",
+      configDrivePath: "/runs/run_1/config.img",
+      bootArgs: "console=ttyS0",
+      subnet: SUBNET,
+      vcpuCount: 2,
+      memSizeMib: 2048,
+      mmds: true,
+    });
+    expect(withMmds["mmds-config"]).toEqual({
+      version: "V2",
+      network_interfaces: ["eth0"],
+      ipv4_address: "169.254.169.254",
+    });
+    // The MMDS iface_id must reference a declared network interface.
+    const ifaces = withMmds["network-interfaces"] as Array<Record<string, unknown>>;
+    expect(ifaces[0]?.iface_id).toBe("eth0");
   });
 });
 
@@ -123,6 +167,7 @@ describe("buildGuestConfig", () => {
       platformPort: 3000,
       agentEnv: { A: "1" },
       agentUnrestrictedEgress: true,
+      credentialSource: "inline",
     });
     expect(cfg.sidecar).toEqual({ enabled: false, env: {} });
     expect(cfg.agent.unrestricted_egress).toBe(true);
@@ -139,10 +184,28 @@ describe("buildGuestConfig", () => {
       sidecarEnv: { RUN_TOKEN: "t" },
       agentEnv: {},
       agentUnrestrictedEgress: false,
+      credentialSource: "inline",
     });
     expect(cfg.sidecar).toEqual({ enabled: true, env: { RUN_TOKEN: "t" } });
     expect(cfg.agent.unrestricted_egress).toBe(false);
     expect(cfg.network).toEqual({ platform_ip: "10.231.255.1", platform_port: 3000 });
+  });
+
+  it("records the credential source (mmds vs inline broker)", () => {
+    const base = {
+      runId: "run_1",
+      exitMarkerNonce: "abc123",
+      platformIp: "10.231.255.1",
+      platformPort: 3000,
+      agentEnv: {},
+      agentUnrestrictedEgress: false,
+    } as const;
+    expect(buildGuestConfig({ ...base, credentialSource: "mmds" }).credentials).toEqual({
+      source: "mmds",
+    });
+    expect(buildGuestConfig({ ...base, credentialSource: "inline" }).credentials).toEqual({
+      source: "inline",
+    });
   });
 });
 
