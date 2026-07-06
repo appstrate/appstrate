@@ -222,20 +222,37 @@ interface FakeDepsState {
   binary: Uint8Array;
   checksumsTxt: string;
   checksumsSig: Uint8Array;
-  /** Hash returned by the fake sha256Hex — must match parseChecksumLine output for happy path. */
+  /** SHA-256 returned by the fake fetchToFile — must match parseChecksumLine output for happy path. */
   hashOverride?: string;
   minisignAvailable: boolean;
   minisignOk: boolean;
   execPath: string;
   /** Side effects collected for assertions. */
   written: Array<{ path: string; bytes: number }>;
-  replaced: Array<{ dest: string; bytes: number }>;
+  replaced: Array<{ dest: string }>;
   fetched: string[];
   commands: Array<{ cmd: string; args: string[] }>;
 }
 
+/** Deterministic content-dependent fake SHA (matches the checksumsTxt fixtures). */
+function fakeSha(data: Uint8Array): string {
+  let n = 0;
+  for (const b of data) n = (n + b) | 0;
+  return `${"f".repeat(60)}${(n & 0xffff).toString(16).padStart(4, "0")}`;
+}
+
 function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
   return {
+    async fetchToFile(url, _dest, onProgress) {
+      state.fetched.push(url);
+      onProgress?.({
+        received: state.binary.byteLength,
+        total: state.binary.byteLength,
+        rateBytesPerSec: 1,
+      });
+      // Simulate a tampered download by overriding the streamed digest.
+      return { sha256: state.hashOverride ?? fakeSha(state.binary) };
+    },
     async fetchBinary(url) {
       state.fetched.push(url);
       if (url.endsWith(".minisig")) return state.checksumsSig;
@@ -244,15 +261,6 @@ function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
     async fetchText(url) {
       state.fetched.push(url);
       return state.checksumsTxt;
-    },
-    async sha256Hex(data) {
-      // Either return the override (used to simulate mismatch) or produce a deterministic hash.
-      if (state.hashOverride) return state.hashOverride;
-      // Sum bytes for a stable, content-dependent fake hash. Tests inject the
-      // matching value into checksumsTxt so the round-trip succeeds.
-      let n = 0;
-      for (const b of data) n = (n + b) | 0;
-      return `${"f".repeat(60)}${(n & 0xffff).toString(16).padStart(4, "0")}`;
     },
     async runCommand(cmd, args) {
       state.commands.push({ cmd, args });
@@ -267,8 +275,8 @@ function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
       return { ok: true, exitCode: 0, stdout: "", stderr: "" };
     },
     execPath: () => state.execPath,
-    async atomicReplace(bytes, dest) {
-      state.replaced.push({ dest, bytes: bytes.byteLength });
+    async promoteFile(_staged, dest) {
+      state.replaced.push({ dest });
     },
     async makeWorkDir() {
       return "/tmp/fake-work";
@@ -281,6 +289,9 @@ function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
         path,
         bytes: typeof data === "string" ? data.length : data.byteLength,
       });
+    },
+    async removeFile() {
+      // no-op
     },
   };
 }
@@ -355,7 +366,7 @@ describe("runSelfUpdate — curl flow", () => {
       "https://github.com/appstrate/appstrate/releases/download/v1.2.3/checksums.txt.minisig",
     ]);
     expect(state.commands.find((c) => c.cmd === "minisign" && c.args[0] === "-Vm")).toBeTruthy();
-    expect(state.replaced).toEqual([{ dest: "/home/user/.local/bin/appstrate", bytes: 5 }]);
+    expect(state.replaced).toEqual([{ dest: "/home/user/.local/bin/appstrate" }]);
   });
 
   it("reports already-up-to-date and skips replace when versions match", async () => {

@@ -33,12 +33,17 @@ import {
   runnerDataPaths,
   daemonAssetName,
   RUNNER_ENV_PATH,
+  RUNNER_BIN_PATH,
+  RUNNER_UNIT_PATH,
+  RUNNER_ETC_DIR,
+  RUNNER_DATA_DIR,
   APPSTRATE_RELEASE_BASE,
 } from "../src/lib/runner/constants.ts";
 import {
   resolveDaemonVersion,
   resolveInstallConfig,
   runnerUpdateCommand,
+  runnerUninstallCommand,
   runnerDoctor,
   pollHealth,
   enableService,
@@ -74,10 +79,12 @@ function fakeExec(
 function fakeFs(seed: Record<string, string> = {}): {
   fs: RunnerFs;
   installed: { dest: string; bytes: Uint8Array; mode: number }[];
+  removed: string[];
   files: Record<string, string>;
 } {
   const files: Record<string, string> = { ...seed };
   const installed: { dest: string; bytes: Uint8Array; mode: number }[] = [];
+  const removed: string[] = [];
   const fs: RunnerFs = {
     async writeFile(path, data) {
       files[path] = typeof data === "string" ? data : "<bytes>";
@@ -97,13 +104,23 @@ function fakeFs(seed: Record<string, string> = {}): {
       return true;
     },
     async rename() {},
-    async remove() {},
+    async remove(path) {
+      removed.push(path);
+      delete files[path];
+    },
     async installAtomic(dest, bytes, mode) {
       installed.push({ dest, bytes, mode });
       files[dest] = "<installed>";
     },
+    async promoteFile(staged, dest, mode) {
+      // The streamed daemon binary is promoted here (not installAtomic); record
+      // it into the same `installed` list so existing assertions still hold.
+      installed.push({ dest, bytes: new Uint8Array(), mode });
+      files[dest] = "<installed>";
+      delete files[staged];
+    },
   };
-  return { fs, installed, files };
+  return { fs, installed, removed, files };
 }
 
 function fakeHttp(opts: {
@@ -111,9 +128,16 @@ function fakeHttp(opts: {
   sha?: string;
   health?: { status: number; body: unknown };
 }): RunnerHttp {
+  const binary = opts.binary ?? new Uint8Array([1, 2, 3]);
   return {
+    async fetchToFile(_url, _dest, onProgress) {
+      // The daemon binary streams through here; return its on-the-fly digest so
+      // downloadDaemon can compare it to the signed checksums line.
+      onProgress?.({ received: binary.byteLength, total: binary.byteLength, rateBytesPerSec: 1 });
+      return { sha256: sha256Hex(binary) };
+    },
     async fetchBinary() {
-      return opts.binary ?? new Uint8Array([1, 2, 3]);
+      return binary;
     },
     async fetchText() {
       return opts.sha ?? "";
@@ -125,6 +149,9 @@ function fakeHttp(opts: {
     },
   };
 }
+
+/** Default install path passed to downloadDaemon in the unit tests. */
+const TEST_DAEMON_DEST = "/usr/local/bin/appstrate-runner";
 
 // ─── preflight ──────────────────────────────────────────────────────────
 
@@ -376,31 +403,51 @@ describe("url builders", () => {
 });
 
 describe("downloadDaemon", () => {
-  it("returns the bytes when the signed checksum matches", async () => {
+  it("returns a staged path next to dest when the signed checksum matches", async () => {
     const bytes = new Uint8Array([9, 8, 7, 6]);
     const sha = sha256Hex(bytes);
     // `sha` doubles as the checksums.txt body (fetchText) — one line for the asset.
     const http = fakeHttp({ binary: bytes, sha: `${sha}  appstrate-runner-x86_64` });
     const { fs } = fakeFs();
     const { exec } = fakeExec(); // default minisign probe + -Vm both `ok`.
-    const out = await downloadDaemon({ http, exec, fs, version: "1.0.0", arch: "x86_64" });
-    expect(out).toEqual(bytes);
+    const out = await downloadDaemon({
+      http,
+      exec,
+      fs,
+      version: "1.0.0",
+      arch: "x86_64",
+      destPath: TEST_DAEMON_DEST,
+    });
+    // Staged next to the destination (same dir → atomic promote).
+    expect(out.stagedPath.startsWith("/usr/local/bin/")).toBe(true);
+    expect(out.stagedPath).toContain("appstrate-runner-x86_64");
   });
 
-  it("throws on a sha256 mismatch (never returns tampered bytes)", async () => {
+  it("throws on a sha256 mismatch and removes the staged file", async () => {
     const bytes = new Uint8Array([1, 1, 1]);
     const http = fakeHttp({ binary: bytes, sha: `${"b".repeat(64)}  appstrate-runner-x86_64` });
-    const { fs } = fakeFs();
+    const { fs, removed } = fakeFs();
     const { exec } = fakeExec();
     await expect(
-      downloadDaemon({ http, exec, fs, version: "1.0.0", arch: "x86_64" }),
+      downloadDaemon({
+        http,
+        exec,
+        fs,
+        version: "1.0.0",
+        arch: "x86_64",
+        destPath: TEST_DAEMON_DEST,
+      }),
     ).rejects.toThrow(/mismatch/);
+    // The unverified staged download must be cleaned up, never left on disk.
+    expect(removed.some((p) => p.includes("appstrate-runner-x86_64"))).toBe(true);
   });
 
   it("gives an actionable error when the release omitted runner assets (404)", async () => {
-    const bytes = new Uint8Array([1, 2, 3]);
     const http: RunnerHttp = {
-      // Mirror defaultRunnerHttp's non-2xx message shape.
+      // Mirror defaultRunnerHttp's non-2xx message shape (now on fetchToFile).
+      async fetchToFile(url) {
+        throw new Error(`GET ${url} → HTTP 404`);
+      },
       async fetchBinary(url) {
         throw new Error(`GET ${url} → HTTP 404`);
       },
@@ -414,10 +461,15 @@ describe("downloadDaemon", () => {
     const { fs } = fakeFs();
     const { exec } = fakeExec();
     await expect(
-      downloadDaemon({ http, exec, fs, version: "1.2.3", arch: "x86_64" }),
+      downloadDaemon({
+        http,
+        exec,
+        fs,
+        version: "1.2.3",
+        arch: "x86_64",
+        destPath: TEST_DAEMON_DEST,
+      }),
     ).rejects.toThrow(/published WITHOUT runner assets/);
-    // Sanity: the raw bytes are never leaked when the fetch failed.
-    expect(bytes).toBeDefined();
   });
 
   it("fails closed when minisign is not installed", async () => {
@@ -430,7 +482,14 @@ describe("downloadDaemon", () => {
       minisign: () => ({ ok: false, exitCode: -1, stdout: "", stderr: "" }),
     });
     await expect(
-      downloadDaemon({ http, exec, fs, version: "1.0.0", arch: "x86_64" }),
+      downloadDaemon({
+        http,
+        exec,
+        fs,
+        version: "1.0.0",
+        arch: "x86_64",
+        destPath: TEST_DAEMON_DEST,
+      }),
     ).rejects.toThrow(/minisign is required/);
   });
 
@@ -445,7 +504,14 @@ describe("downloadDaemon", () => {
       "minisign -Vm": () => ({ ok: false, exitCode: 1, stdout: "", stderr: "bad sig" }),
     });
     await expect(
-      downloadDaemon({ http, exec, fs, version: "1.0.0", arch: "x86_64" }),
+      downloadDaemon({
+        http,
+        exec,
+        fs,
+        version: "1.0.0",
+        arch: "x86_64",
+        destPath: TEST_DAEMON_DEST,
+      }),
     ).rejects.toThrow(/Signature verification FAILED/);
   });
 });
@@ -690,5 +756,63 @@ describe("pollHealth", () => {
     const { exec } = fakeExec();
     // timeoutMs 0 → the loop never enters; no 3s sleeps in the test.
     expect(await pollHealth(cfg, { exec, http }, 0)).toBe(false);
+  });
+});
+
+// ─── uninstall ──────────────────────────────────────────────────────────────
+
+describe("runnerUninstallCommand", () => {
+  it("stops+disables the unit and removes binary, unit, drop-in, config, and data (--yes)", async () => {
+    const { fs, removed } = fakeFs();
+    const { exec, calls } = fakeExec();
+    await runnerUninstallCommand({ yes: true, deps: { getuid: () => 0, fs, exec } });
+
+    // systemctl lifecycle: stop → disable → daemon-reload → reset-failed.
+    expect(calls).toContainEqual(["systemctl", "stop", "appstrate-runner"]);
+    expect(calls).toContainEqual(["systemctl", "disable", "appstrate-runner"]);
+    expect(calls).toContainEqual(["systemctl", "daemon-reload"]);
+    expect(calls).toContainEqual(["systemctl", "reset-failed", "appstrate-runner"]);
+
+    // Every install artefact is removed, including the drop-in dir and the
+    // default state root.
+    expect(removed).toContain(RUNNER_UNIT_PATH);
+    expect(removed).toContain(`${RUNNER_UNIT_PATH}.d`);
+    expect(removed).toContain(RUNNER_BIN_PATH);
+    expect(removed).toContain(RUNNER_ETC_DIR);
+    expect(removed).toContain(RUNNER_DATA_DIR);
+  });
+
+  it("preserves the state dir with --keep-data", async () => {
+    const { fs, removed } = fakeFs();
+    const { exec } = fakeExec();
+    await runnerUninstallCommand({
+      yes: true,
+      keepData: true,
+      deps: { getuid: () => 0, fs, exec },
+    });
+
+    expect(removed).toContain(RUNNER_BIN_PATH);
+    expect(removed).toContain(RUNNER_ETC_DIR);
+    // The state root (kernel/rootfs/runs) is intentionally kept.
+    expect(removed).not.toContain(RUNNER_DATA_DIR);
+  });
+
+  it("recovers a non-default data dir from the env file (FIRECRACKER_KERNEL_PATH)", async () => {
+    const { fs, removed } = fakeFs({
+      [RUNNER_ENV_PATH]: "FIRECRACKER_KERNEL_PATH=/srv/runner/vmlinux\n",
+    });
+    const { exec } = fakeExec();
+    await runnerUninstallCommand({ yes: true, deps: { getuid: () => 0, fs, exec } });
+
+    expect(removed).toContain("/srv/runner");
+    expect(removed).not.toContain(RUNNER_DATA_DIR);
+  });
+
+  it("is idempotent — removing an absent install never throws", async () => {
+    const { fs, removed } = fakeFs(); // empty: nothing on disk
+    const { exec } = fakeExec();
+    await runnerUninstallCommand({ yes: true, deps: { getuid: () => 0, fs, exec } });
+    // Still targets the canonical paths (remove is rm -rf → no-op on missing).
+    expect(removed).toContain(RUNNER_BIN_PATH);
   });
 });

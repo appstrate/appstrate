@@ -68,6 +68,7 @@ import {
   runnerUpdateCommand,
   runnerStatusCommand,
   runnerLogsCommand,
+  runnerUninstallCommand,
 } from "./commands/runner.ts";
 import { internalInfoCommand } from "./commands/internal.ts";
 import {
@@ -830,6 +831,25 @@ runnerGroup
   .option("-f, --follow", "Stream new lines as they arrive.")
   .action(async (opts) => {
     await runnerLogsCommand({ follow: opts.follow === true });
+  });
+
+runnerGroup
+  .command("uninstall")
+  .description(
+    "Stop + remove the appstrate-runner daemon, unit, config, and (unless --keep-data) its state dir. Destructive — prompts unless --yes / APPSTRATE_YES=1.",
+  )
+  .option("--keep-data", "Preserve the state dir (kernel/rootfs/runs/firecracker binaries).")
+  .option(
+    "--data-dir <path>",
+    "State root to remove (default: recovered from the install, else /var/lib/appstrate-runner).",
+  )
+  .option("-y, --yes", "Skip the destructive confirmation. Equivalent to APPSTRATE_YES=1.")
+  .action(async (opts) => {
+    await runnerUninstallCommand({
+      keepData: opts.keepData === true,
+      yes: opts.yes === true,
+      dataDir: typeof opts.dataDir === "string" ? opts.dataDir : undefined,
+    });
   });
 
 // Hidden command: machine-readable introspection for `doctor` to call across binaries.
