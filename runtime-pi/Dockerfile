@@ -288,6 +288,29 @@ COPY --chown=pi:pi runtime-pi/mcp/        ./mcp/
 COPY --chown=pi:pi runtime-pi/*.ts        ./
 COPY --from=deps --chown=pi:pi /build/runtime-pi/dist/entrypoint.js ./dist/entrypoint.js
 
+# Pre-warmed Bun transpiler cache (issue #835). Bun re-parses every JS file
+# >50 KB on each process start — for the 1.6 MB bundled entrypoint plus the
+# external Pi SDK dist files that is a large share of the per-run cold start,
+# and on the firecracker adapter (VM-per-run, empty guest page cache) it is
+# paid on EVERY run. Baking the cache into the image turns that parse into a
+# single mmap-able `.pile` read. Priming = actually loading the module graph
+# with the cache path set: the entrypoint run exits 1 on env validation
+# (expected — AFTER the full static graph evaluated), then the lazily-imported
+# SDKs are loaded explicitly. Entries are keyed by content hash + Bun version,
+# so a stale cache is ignored, never wrong.
+ENV BUN_RUNTIME_TRANSPILER_CACHE_PATH=/runtime/.transpiler-cache
+RUN mkdir -p /runtime/.transpiler-cache \
+ && (bun /runtime/dist/entrypoint.js > /dev/null 2>&1 || true) \
+ && bun -e 'await import("@mariozechner/pi-ai"); await import("@mariozechner/pi-coding-agent");' \
+ && if [ "$INCLUDE_SUBSCRIPTION_ENGINES" = "true" ]; then \
+      bun -e 'await import("@anthropic-ai/claude-agent-sdk");'; \
+    fi \
+ # Fail the build if priming produced nothing — an empty cache would be a
+ # silent cold-start regression (the entrypoint run above swallows its exit
+ # code by design, so this is the only guard that the graph actually loaded).
+ && [ -n "$(ls -A /runtime/.transpiler-cache)" ] \
+ && chown -R pi:pi /runtime/.transpiler-cache
+
 # Agent workspace. Bundled package entrypoints keep only the Pi SDK
 # pair external, resolved from `/runtime/packages/runner-pi/node_modules`
 # by `prepareBundleForPi`, so nothing under `/workspace` needs to

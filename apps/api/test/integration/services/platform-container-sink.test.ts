@@ -16,7 +16,7 @@
  *      the container exits without calling finalize itself, covering
  *      crashes, timeouts, and defensive success-on-exit-0.
  *
- * Uses a fake `ContainerOrchestrator` so the tests exercise the real
+ * Uses a fake `RunOrchestrator` so the tests exercise the real
  * lifecycle code without Docker. Every DB assertion hits the real
  * Postgres instance started by the test preload.
  */
@@ -27,7 +27,7 @@ import { db } from "@appstrate/db/client";
 import { runs, runLogs } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import type {
-  ContainerOrchestrator,
+  RunOrchestrator,
   IsolationBoundary,
   SidecarLaunchSpec,
   WorkloadHandle,
@@ -69,7 +69,7 @@ interface FakeWorkload extends WorkloadHandle {
 }
 
 interface FakeOrchestratorHandle {
-  orchestrator: ContainerOrchestrator;
+  orchestrator: RunOrchestrator;
   workloads: FakeWorkload[];
   boundaries: IsolationBoundary[];
   capturedAgentEnv: Record<string, string> | null;
@@ -77,13 +77,13 @@ interface FakeOrchestratorHandle {
 
 function createFakeOrchestrator(config: FakeOrchestratorConfig = {}): FakeOrchestratorHandle {
   const handle: FakeOrchestratorHandle = {
-    orchestrator: null as unknown as ContainerOrchestrator,
+    orchestrator: null as unknown as RunOrchestrator,
     workloads: [],
     boundaries: [],
     capturedAgentEnv: null,
   };
 
-  const orchestrator: ContainerOrchestrator = {
+  const orchestrator: RunOrchestrator = {
     async initialize() {},
     async shutdown() {},
     async cleanupOrphans(): Promise<CleanupReport> {
@@ -95,6 +95,12 @@ function createFakeOrchestrator(config: FakeOrchestratorConfig = {}): FakeOrches
         id: `net_${runId}`,
         name: `appstrate-exec-${runId}`,
         workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+        sidecarEndpoints: {
+          sidecarUrl: "http://sidecar:8080",
+          llmProxyUrl: "http://sidecar:8080/llm",
+          forwardProxyUrl: "http://sidecar:8081",
+          noProxy: "sidecar,localhost,127.0.0.1",
+        },
       };
       handle.boundaries.push(boundary);
       return boundary;

@@ -146,6 +146,12 @@ services:
       - APP_URL
       - LOG_LEVEL
       - MODULES
+      # Firecracker execution backend (set by `appstrate install
+      # --run-adapter firecracker`). Empty/unset when running the default
+      # Docker backend — the firecracker module only reads them when
+      # RUN_ADAPTER=firecracker selects the runner orchestrator.
+      - FIRECRACKER_RUNNER_URL
+      - FIRECRACKER_RUNNER_TOKEN
       - RUN_TOKEN_SECRET
       - SYSTEM_PROVIDER_KEYS
       - AUTH_DISABLE_SIGNUP

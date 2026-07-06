@@ -14,6 +14,17 @@
 
 import { randomBytes } from "node:crypto";
 import { resolveDockerImageTag } from "../version.ts";
+import { CODE_DEFAULTS } from "../compose-defaults.ts";
+
+/**
+ * `MODULES` value written when the Firecracker execution backend is
+ * selected: the platform's default module set plus `firecracker` (the
+ * opt-in module that registers the microVM orchestrator). The base list
+ * is read from `compose-defaults.ts` (mirror of the Zod schema default in
+ * `packages/env/src/index.ts`) so this can never silently drift from the
+ * single source of truth.
+ */
+const FIRECRACKER_MODULES = `${CODE_DEFAULTS.MODULES},firecracker`;
 
 /**
  * Supported tier identifiers. `Tier` matches the `--tier` flag values
@@ -93,6 +104,25 @@ export interface PortOverrides {
  * (`APPSTRATE_BOOTSTRAP_OWNER_EMAIL=… curl|bash`). Empty / undefined →
  * open mode (status quo).
  */
+/**
+ * Optional agent-execution-backend selection written into `.env` (the
+ * `firecracker` install option). `docker` (the default) writes nothing —
+ * the compose file already defaults `RUN_ADAPTER` to `docker`. When
+ * `firecracker` is chosen the four keys below are emitted so the platform
+ * loads the firecracker module and points at the runner daemon.
+ *
+ * Only the two `runner*` values are secrets/deployment-specific; they are
+ * preserved across upgrades by `mergeEnv` (existing wins) like every other
+ * generated secret.
+ */
+export interface RunBackendEnv {
+  adapter: "docker" | "firecracker";
+  /** FIRECRACKER_RUNNER_URL — http://<ip>:3100. Only for the firecracker adapter. */
+  runnerUrl?: string;
+  /** FIRECRACKER_RUNNER_TOKEN — shared bearer secret. Only for the firecracker adapter. */
+  runnerToken?: string;
+}
+
 export interface BootstrapOverrides {
   bootstrapOwnerEmail?: string;
   /** Org name shown in the dashboard. Defaults to "Default" when unset. */
@@ -188,6 +218,7 @@ export function generateEnvForTier(
   appUrl = "http://localhost:3000",
   ports: PortOverrides = {},
   bootstrap: BootstrapOverrides = {},
+  runBackend: RunBackendEnv = { adapter: "docker" },
 ): EnvVars {
   const env: EnvVars = {
     APP_URL: appUrl,
@@ -265,6 +296,17 @@ export function generateEnvForTier(
     if (ports.minioConsolePort !== undefined && ports.minioConsolePort !== 9001) {
       env.MINIO_CONSOLE_PORT = String(ports.minioConsolePort);
     }
+  }
+
+  // Firecracker execution backend (Docker tiers only — never reached on
+  // tier 0, which returns above). Switches RUN_ADAPTER away from the
+  // compose default `docker` and loads the `firecracker` module so the
+  // platform talks to the runner daemon over HTTP.
+  if (runBackend.adapter === "firecracker") {
+    env.RUN_ADAPTER = "firecracker";
+    env.MODULES = FIRECRACKER_MODULES;
+    if (runBackend.runnerUrl) env.FIRECRACKER_RUNNER_URL = runBackend.runnerUrl;
+    if (runBackend.runnerToken) env.FIRECRACKER_RUNNER_TOKEN = runBackend.runnerToken;
   }
 
   return env;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { getEnv } from "@appstrate/env";
+import { getEnv, type Env } from "@appstrate/env";
 
 /** Returns true when a Redis URL is configured. */
 export function hasRedis(): boolean {
@@ -17,7 +17,17 @@ export function hasS3(): boolean {
   return !!getEnv().S3_BUCKET;
 }
 
+/**
+ * Execution backend id for agent runs — an open string resolved against the
+ * orchestrator registry at boot (core backends + module contributions). The
+ * registry is the single source of truth for valid ids: an unknown value is
+ * a fatal error at first orchestrator resolution, and the registry's
+ * capability accessors degrade fail-closed ("no capability") for ids that
+ * are not registered.
+ */
+export type ExecutionMode = Env["RUN_ADAPTER"];
+
 /** Returns the execution backend for agent runs. */
-export function getExecutionMode(): "docker" | "process" {
-  return getEnv().RUN_ADAPTER === "process" ? "process" : "docker";
+export function getExecutionMode(): ExecutionMode {
+  return getEnv().RUN_ADAPTER;
 }

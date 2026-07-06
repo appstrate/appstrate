@@ -33,6 +33,7 @@
  */
 
 import * as fs from "node:fs/promises";
+import { writeSync } from "node:fs";
 import * as path from "node:path";
 import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
@@ -119,6 +120,30 @@ function buildInContainerBundle(prompt: string): Bundle {
   };
 }
 
+/**
+ * Last-resort operator diagnostic for fatal paths whose normal reporting
+ * channel (the sink POST) failed or was deliberately skipped. Under
+ * Firecracker the serial console captures stderr, so this single line is
+ * the only recoverable trace of WHY the container died. Blocking write
+ * (`writeSync(2, …)`): async stdout/stderr writes get truncated by the
+ * `process.exit` that immediately follows (same rationale as the exit
+ * marker's synchronous write). `exitCode` is the code the caller is about
+ * to exit with — `null` when the caller may not exit (non-fatal emitError).
+ * Only pass error messages already destined for the sink — never secrets.
+ */
+function lastResortStderr(exitCode: number | null, reason: string, cause?: unknown): void {
+  try {
+    const line =
+      `[runtime-pi fatal] ${new Date().toISOString()}` +
+      (exitCode === null ? "" : ` exit=${exitCode}`) +
+      ` ${reason}` +
+      (cause === undefined ? "" : ` — cause: ${getErrorMessage(cause)}`);
+    writeSync(2, `${line.replace(/\r?\n/g, " | ")}\n`);
+  } catch {
+    // stderr itself is gone — nothing left to try.
+  }
+}
+
 // --- 0. Env validation + sink bootstrap ---
 // Every runtime-pi invocation MUST come from a platform run that has
 // already minted sink credentials + inserted a pending run row. We
@@ -132,11 +157,12 @@ try {
 } catch (err) {
   // Before the sink is live, stderr is the only channel — the platform's
   // container monitor will synthesise a `failed` finalize from the exit
-  // code so the run record still reaches a terminal state.
+  // code so the run record still reaches a terminal state. Blocking write:
+  // an async one would be truncated by the exit that follows.
   if (err instanceof RuntimeEnvError) {
-    process.stderr.write(`${err.message}\n`);
+    lastResortStderr(1, err.message);
   } else {
-    process.stderr.write(`runtime-pi: env validation failed — ${getErrorMessage(err)}\n`);
+    lastResortStderr(1, "env validation failed", err);
   }
   process.exit(1);
 }
@@ -189,9 +215,11 @@ async function emitError(message: string, data?: Record<string, unknown>): Promi
       message,
       ...(data !== undefined ? { data } : {}),
     });
-  } catch {
+  } catch (sinkErr) {
     // The sink POST failed — let the container exit with non-zero code.
-    // Finalize synthesis on the server will record the failure.
+    // Finalize synthesis on the server will record the failure. The platform
+    // never saw this error, so leave a last-resort trace on stderr.
+    lastResortStderr(null, `error event POST failed — original error: ${message}`, sinkErr);
   }
 }
 
@@ -207,8 +235,9 @@ async function die(message: string, data?: Record<string, unknown>): Promise<nev
     failureResult.error = { message };
     failureResult.status = "failed";
     await sink.finalize(failureResult);
-  } catch {
-    // fall through
+  } catch (finalizeErr) {
+    // fall through — server-side synthesis covers us, but leave a trace.
+    lastResortStderr(1, `failed-finalize POST failed — dying on: ${message}`, finalizeErr);
   }
   process.exit(1);
 }
@@ -963,6 +992,7 @@ try {
   // NOT finalize (nor emit a spurious adapter_error): just exit non-zero and
   // let `execute-background` synthesise the real terminal state.
   if (runAbort.signal.aborted) {
+    lastResortStderr(1, "run aborted (SIGTERM/SIGINT) — finalize intentionally skipped", err);
     process.exit(1);
   }
 
@@ -974,8 +1004,10 @@ try {
     failureResult.status = "failed";
     failureResult.durationMs = Date.now() - startTime;
     await sink.finalize(failureResult);
-  } catch {
-    // swallow — container exit code + server-side synthesis cover us
+  } catch (finalizeErr) {
+    // swallow — container exit code + server-side synthesis cover us,
+    // but leave a last-resort trace for the serial console.
+    lastResortStderr(1, `failed-finalize POST failed — run error: ${message}`, finalizeErr);
   }
   process.exit(1);
 }

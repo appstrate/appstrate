@@ -56,5 +56,6 @@ function serializeReport(report: DoctorReport): unknown {
     multiSource: report.multiSource,
     localInstall: report.localInstall,
     composeDrift: report.composeDrift,
+    firecracker: report.firecracker,
   };
 }

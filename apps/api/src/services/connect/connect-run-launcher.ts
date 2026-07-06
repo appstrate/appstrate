@@ -12,7 +12,7 @@
  *   2. builds a single {@link IntegrationSpawnSpec} carrying a `connectLogin`
  *      block derived from the execution's manifest auth,
  *   3. launches a STRIPPED sidecar (isolation boundary + sidecar, NO agent
- *      container) in connect mode via {@link ContainerOrchestrator.createSidecar}
+ *      container) in connect mode via {@link RunOrchestrator.createSidecar}
  *      with `connectLoginSpec` set,
  *   4. captures the sidecar's stdout, parses the `APPSTRATE_CONNECT_RESULT:` /
  *      `APPSTRATE_CONNECT_ERROR:` sentinel into a {@link CredentialBundle} (or a
@@ -47,10 +47,12 @@ import {
 } from "../integration-manifest-helpers.ts";
 import {
   getOrchestrator,
-  type ContainerOrchestrator,
+  orchestratorSupportsSidecarOnly,
+  type RunOrchestrator,
   type IsolationBoundary,
   type WorkloadHandle,
 } from "../orchestrator/index.ts";
+import { getExecutionMode } from "../../infra/mode.ts";
 import type { ConnectToolExecution, ConnectToolExecutor } from "./orchestrated-strategy.ts";
 import type { CredentialBundle } from "./strategy.ts";
 
@@ -77,9 +79,24 @@ function stringifyInputs(inputs: Record<string, unknown>): Record<string, string
 /** How long to wait for the connect-run sidecar to mint the session before killing it. */
 const DEFAULT_CONNECT_TIMEOUT_MS = 60_000;
 
+/**
+ * The configured execution backend cannot host a connect-run (sidecar-only
+ * workload). Thrown BEFORE any boundary is created so the caller gets a
+ * clear diagnosis instead of "sidecar exited without emitting a result".
+ */
+export class ConnectNotSupportedError extends Error {
+  constructor(mode: string) {
+    super(
+      `connect-runs are not supported with RUN_ADAPTER="${mode}" — this backend cannot ` +
+        `run a sidecar-only workload. Use RUN_ADAPTER=docker (or process) for connect flows.`,
+    );
+    this.name = "ConnectNotSupportedError";
+  }
+}
+
 export interface ConnectRunExecutorOptions {
   /** Injectable orchestrator — production defaults to the global singleton. */
-  orchestrator?: ContainerOrchestrator;
+  orchestrator?: RunOrchestrator;
   /** Override the connect-run timeout (ms). Defaults to 60s. */
   timeoutMs?: number;
   /**
@@ -241,7 +258,7 @@ export function parseConnectResult(lines: readonly string[]): CredentialBundle {
 }
 
 class ConnectRunExecutor implements ConnectToolExecutor {
-  private readonly orchestrator: ContainerOrchestrator | undefined;
+  private readonly orchestrator: RunOrchestrator | undefined;
   private readonly timeoutMs: number;
   private readonly resolveMcpServer: McpServerResolver;
 
@@ -252,6 +269,11 @@ class ConnectRunExecutor implements ConnectToolExecutor {
   }
 
   async run(execution: ConnectToolExecution): Promise<CredentialBundle> {
+    // Capability gate on the GLOBAL backend only — an injected orchestrator
+    // (tests) is the caller's contract to honour.
+    if (!this.orchestrator && !orchestratorSupportsSidecarOnly(getExecutionMode())) {
+      throw new ConnectNotSupportedError(getExecutionMode());
+    }
     const orch = this.orchestrator ?? getOrchestrator();
     const connectId = `connect_${randomBytes(12).toString("hex")}`;
     const runToken = signRunToken(connectId);
@@ -307,7 +329,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
    * throw surfaces. On exit, the sentinel is parsed from the captured lines.
    */
   private async captureBundle(
-    orch: ContainerOrchestrator,
+    orch: RunOrchestrator,
     sidecar: WorkloadHandle,
   ): Promise<CredentialBundle> {
     await orch.startWorkload(sidecar);

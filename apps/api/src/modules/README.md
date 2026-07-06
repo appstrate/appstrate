@@ -175,6 +175,18 @@ Declarative gate: `requiredIdentityClaims: readonly (keyof ModelProviderIdentity
 
 Reference module: `core-providers` (openai/anthropic/openai-compatible — API keys only, no hooks needed). Workspace OAuth modules under `packages/module-*/` show how to implement the four hooks together with `requiredIdentityClaims`. External operator-installed providers extend the catalog the same way.
 
+## Orchestrators (execution backends)
+
+Modules contribute execution backends via `orchestrators(): Record<string, OrchestratorRegistration>` — keys are `RUN_ADAPTER` values, registered by the loader at load time (before any orchestrator is instantiated). Core ships `docker` and `process`; the built-in `firecracker` module (opt-in, not in the default `MODULES`) is the reference contribution — it registers a single backend, `firecracker`, an HTTP client (`RemoteFirecrackerOrchestrator`) that proxies to an `appstrate-runner` host daemon (the daemon embeds the in-process `FirecrackerOrchestrator` as its engine; see `modules/firecracker/README.md`).
+
+Each `OrchestratorRegistration` (`@appstrate/core/platform-types`) declares:
+
+- **`isolatesWorkloads`** — security-sensitive: whether each run gets a real isolation boundary (container, microVM) keeping run credentials out of the host API process. The subscription-run policy refuses OAuth-subscription runs on any backend that does not declare it. The declaration is trusted (a module in `MODULES` is operator-installed code), but unknown/unregistered ids always degrade fail-closed to "no capability".
+- **`supportsSidecarOnly`** — whether the backend can run a sidecar-only workload (connect-runs). Backends whose lifecycle is driven by the agent (one-shot microVM boot) declare `false`; connect fails fast.
+- **`create()`** — builds the `RunOrchestrator` instance (singleton, created lazily at first `getOrchestrator()`).
+
+A duplicate id across modules/core is a fatal boot error (never silently shadowed). `RUN_ADAPTER` is an open string in the env schema — the registry validates it at first resolution; an unknown id is fatal with the registered list and a `MODULES` hint. Heavy prerequisite checks (binaries, kernels, /dev/kvm) belong in the orchestrator's `initialize()`, NOT in module `init()`: a loaded module whose backend is not the selected `RUN_ADAPTER` must not fail boot.
+
 ## Hooks and events
 
 - **Hooks** (`callHook`, first-match-wins): `beforeRun`, `afterRun`, `beforeSignup`. The first module that provides a hook is called, subsequent modules are skipped. `beforeRun` gates a run, `afterRun` returns a metadata patch persisted on the final run record, `beforeSignup` gates signup.

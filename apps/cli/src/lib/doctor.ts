@@ -25,6 +25,7 @@ import {
 import { upgradeHint, type InstallSource } from "./install-source.ts";
 import { defaultInstallDir, readProjectFile } from "./install/project.ts";
 import { analyzeComposeDefaults, type ComposeFinding } from "./compose-defaults.ts";
+import { parseEnvFile } from "./install/upgrade.ts";
 
 export interface InstallationInfo {
   /** PATH directory containing the binary. */
@@ -76,6 +77,22 @@ export interface DoctorReport {
    * --upgrade-compose` strips the safe-to-remove duplicates.
    */
   composeDrift?: ComposeFinding[];
+  /**
+   * Reachability of the Firecracker runner daemon — only populated when a
+   * local install's `.env` selects `RUN_ADAPTER=firecracker` and declares a
+   * `FIRECRACKER_RUNNER_URL`. A lightweight `GET /v1/health` probe (with the
+   * bearer token) classifies it as ok / unauthorized / unreachable. The
+   * deep validation lives in `appstrate runner doctor` (on the KVM host).
+   */
+  firecracker?: FirecrackerHealth;
+}
+
+export interface FirecrackerHealth {
+  status: "ok" | "unauthorized" | "unreachable";
+  /** The probed base URL (trailing slash stripped). */
+  url: string;
+  /** Extra context on a non-ok result (HTTP status, connection error). */
+  detail?: string;
 }
 
 export interface ProbeBinary {
@@ -143,6 +160,17 @@ export interface RunDoctorOptions {
    * formatting without touching disk.
    */
   readComposeFile?: (dir: string) => Promise<string | null>;
+  /**
+   * Read `<dir>/.env` for the Firecracker backend check. Returns the file
+   * content, or `null` when absent. Defaults to a real `readFile`. Injected
+   * by tests to drive the firecracker probe without touching disk.
+   */
+  readEnvFile?: (dir: string) => Promise<string | null>;
+  /**
+   * Probe the runner daemon's `/v1/health`. Injected by tests (fake ok /
+   * timeout / 401); production issues a short-timeout authenticated GET.
+   */
+  probeFirecracker?: (url: string, token: string) => Promise<FirecrackerHealth>;
 }
 
 /**
@@ -240,6 +268,28 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
     }
   }
 
+  // Firecracker runner reachability (#819) — only when a local install's
+  // `.env` selects the firecracker backend. Soft-fails on any read/probe
+  // error: an unreadable/absent `.env` is normal for the "no local install"
+  // case (already gated by `localInstall`), and a probe failure surfaces as
+  // an `unreachable` status rather than perturbing the rest of the report.
+  let firecracker: FirecrackerHealth | undefined;
+  if (localInstall) {
+    const readEnv = opts.readEnvFile ?? defaultReadEnvFile;
+    try {
+      const envText = await readEnv(localInstall.dir);
+      if (envText !== null) {
+        const env = parseEnvFile(envText);
+        if (env.RUN_ADAPTER === "firecracker" && env.FIRECRACKER_RUNNER_URL) {
+          const probe = opts.probeFirecracker ?? defaultProbeFirecracker;
+          firecracker = await probe(env.FIRECRACKER_RUNNER_URL, env.FIRECRACKER_RUNNER_TOKEN ?? "");
+        }
+      }
+    } catch {
+      // intentional swallow — the firecracker check is best-effort.
+    }
+  }
+
   return {
     installations,
     runningIndex,
@@ -247,7 +297,57 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
     multiSource: sources.size > 1,
     ...(localInstall ? { localInstall } : {}),
     ...(composeDrift ? { composeDrift } : {}),
+    ...(firecracker ? { firecracker } : {}),
   };
+}
+
+/**
+ * Default `.env` reader — reads `<dir>/.env`. Returns `null` (not a throw)
+ * when the file is missing so `runDoctor` skips the firecracker section
+ * cleanly; other I/O errors propagate to the caller's soft-fail catch.
+ */
+async function defaultReadEnvFile(dir: string): Promise<string | null> {
+  try {
+    return await readFile(join(dir, ".env"), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+/**
+ * Default runner health probe — a short-timeout authenticated
+ * `GET <url>/v1/health`. Classifies 200 → ok, 401/403 → unauthorized,
+ * any other status or connection error → unreachable. Never throws (a
+ * connection failure is the common "daemon down" case, reported as
+ * `unreachable`). The deep check is `appstrate runner doctor`.
+ */
+export async function defaultProbeFirecracker(
+  url: string,
+  token: string,
+): Promise<FirecrackerHealth> {
+  const base = url.replace(/\/+$/, "");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = await fetch(`${base}/v1/health`, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal: controller.signal,
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { status: "unauthorized", url: base, detail: `HTTP ${res.status}` };
+    }
+    if (res.ok) return { status: "ok", url: base };
+    return { status: "unreachable", url: base, detail: `HTTP ${res.status}` };
+  } catch (err) {
+    return {
+      status: "unreachable",
+      url: base,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -336,6 +436,10 @@ export function formatDoctorReport(report: DoctorReport, runningExecPath: string
     lines.push(...formatComposeDrift(report.composeDrift));
   }
 
+  if (report.firecracker) {
+    lines.push(...formatFirecrackerHealth(report.firecracker));
+  }
+
   if (report.dualInstall) {
     lines.push(``);
     lines.push(`Multiple installations detected.`);
@@ -403,6 +507,28 @@ function formatComposeDrift(findings: ComposeFinding[]): string[] {
     lines.push(`  Left untouched by --upgrade-compose — review by hand if unexpected.`);
   }
 
+  return lines;
+}
+
+/**
+ * Render the Firecracker runner reachability line (#819). Lightweight by
+ * design — a red line points the operator at `appstrate runner doctor` on
+ * the KVM host for the deep diagnosis.
+ */
+function formatFirecrackerHealth(health: FirecrackerHealth): string[] {
+  const lines: string[] = [""];
+  if (health.status === "ok") {
+    lines.push(`Firecracker runner (${health.url}): ✓ reachable and authorized.`);
+    return lines;
+  }
+  const label =
+    health.status === "unauthorized"
+      ? "unauthorized — FIRECRACKER_RUNNER_TOKEN does not match the daemon"
+      : "unreachable";
+  lines.push(
+    `Firecracker runner (${health.url}): ✗ ${label}${health.detail ? ` (${health.detail})` : ""}.`,
+    `  Diagnose on the KVM host: appstrate runner doctor`,
+  );
   return lines;
 }
 

@@ -1366,14 +1366,25 @@ const SKIP_FILES = new Set<string>([
   // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
   // any literal route; an unresolvable `${…}` fails the run.)
   "routes/llm-proxy",
+  // NOT a platform router: the appstrate-runner daemon's Hono app, served by
+  // its own Bun.serve on the KVM host (modules/firecracker/runner/daemon.ts)
+  // and never mounted into the platform API — its endpoints must NOT appear
+  // in the platform OpenAPI spec. The wire contract is pinned by
+  // modules/firecracker/runner/protocol.ts + the runner-server/roundtrip
+  // unit tests instead.
+  "modules/firecracker/runner/server",
 ]);
 
 // Meta-guard: a whole-file skip lets every endpoint in that file escape the
 // Code ⊆ Spec check (above), so adding one must be a deliberate, reviewed act.
-// The only sanctioned skip is `routes/llm-proxy` (variable-path config loop).
+// Sanctioned skips: `routes/llm-proxy` (variable-path config loop) and the
+// firecracker runner daemon server (standalone process, not platform API).
 // If anyone widens this set, fail loudly here and force per-route handling or
 // an explicit, justified decision instead of a silent coverage hole.
-const ALLOWED_SKIP_FILES = new Set<string>(["routes/llm-proxy"]);
+const ALLOWED_SKIP_FILES = new Set<string>([
+  "routes/llm-proxy",
+  "modules/firecracker/runner/server",
+]);
 const unexpectedSkips = [...SKIP_FILES].filter((f) => !ALLOWED_SKIP_FILES.has(f));
 if (SKIP_FILES.size > ALLOWED_SKIP_FILES.size || unexpectedSkips.length > 0) {
   exitCode = 1;
@@ -1453,6 +1464,8 @@ if (existsSync(modulesDir)) {
       const src = readFileSync(filePath, "utf8");
       if (!src.includes("new Hono")) continue; // only files that define a router
       const rel = "modules/" + filePath.slice(modulesDir.length + 1);
+      // Same sanctioned whole-file skip as 4b (guarded by ALLOWED_SKIP_FILES).
+      if (SKIP_FILES.has(rel.replace(/\.ts$/, ""))) continue;
       for (const reg of extractRouterRegistrations(src, src, rel)) {
         const fullPath = normaliseHonoPath(reg.path);
         for (const ep of expandRegistration(reg.verb, fullPath)) {

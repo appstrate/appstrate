@@ -709,6 +709,89 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.tokenUsage).toEqual({ input_tokens: 12, output_tokens: 3 });
   });
 
+  // B2 preservation semantics: a NON-success terminal that carries no
+  // runner-posted usage must keep the cumulative snapshot the
+  // `appstrate.metric` side-channel wrote during the run — done atomically
+  // in SQL (COALESCE in the CAS UPDATE), so a metric event racing the
+  // finalize can never be clobbered by a stale JS read (review S-9).
+  it("preserves the last-known metric snapshot on a non-success finalize without usage", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 50, output_tokens: 25 },
+    });
+
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "failed";
+    result.error = { message: "container crashed", code: "crash" };
+    // No result.usage at all — the watchdog-kill / crash shape.
+
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.sinkClosedAt).not.toBeNull();
+    // The side-channel snapshot survives — never masked by zeros.
+    expect(row?.tokenUsage).toEqual({ input_tokens: 50, output_tokens: 25 });
+  });
+
+  it("malformed usage on a NON-success finalize also preserves the snapshot (B2)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 7, output_tokens: 2 },
+    });
+
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "failed";
+    result.error = { message: "boom", code: "crash" };
+    // Bypass the route schema deliberately — exercise the service boundary.
+    (result as { usage?: unknown }).usage = { input_tokens: "lots", bogus: true };
+
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.tokenUsage).toEqual({ input_tokens: 7, output_tokens: 2 });
+  });
+
+  it("zero-fills a non-success finalize when NO usage was ever recorded", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "failed";
+    result.error = { message: "died at boot", code: "crash" };
+
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.tokenUsage).toEqual({ input_tokens: 0, output_tokens: 0 });
+  });
+
+  it("does not throw on a corrupt tokenUsage JSONB during a non-success finalize", async () => {
+    // readLastKnownUsage's tolerant Zod boundary: a corrupt column value
+    // degrades to null for the ledger fallback, and the finalize still
+    // closes the run — never a crash mid-terminal-transition.
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: "corrupt" } as unknown as Record<string, number>,
+    });
+
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "failed";
+    result.error = { message: "boom", code: "crash" };
+
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.sinkClosedAt).not.toBeNull();
+  });
+
   // Zod boundary on `runs.result` (runResultSchema, 512 KiB cap): an
   // over-cap payload degrades to `result: null` + a warn log — it must
   // never fail the terminal transition of an already-completed run.
@@ -861,10 +944,12 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
   });
 
-  it("does not fall back to runs.tokenUsage when result.usage is absent", async () => {
-    // The terminal finalize body is authoritative. A side-channel metric may
-    // have populated the column, but absence from finalize is treated as
-    // explicit zero usage and overwrites the column.
+  it("does not fall back to runs.tokenUsage when result.usage is absent on a success terminal", async () => {
+    // On a SUCCESS terminal the finalize body is authoritative. A side-channel
+    // metric may have populated the column, but absence from finalize is
+    // treated as explicit zero usage and overwrites the column — this keeps
+    // the zero-token liveness heuristic honest. (Non-success terminals
+    // preserve the column instead — see the killed-run tests below.)
     const runId = await seedRunWithSink(ctx, "@test/final-agent", {
       tokenUsage: { input_tokens: 50, output_tokens: 25 },
     });
@@ -1119,6 +1204,114 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.cost).toBeCloseTo(0.003, 5);
     expect(row?.tokenUsage).toMatchObject({ input_tokens: 300, output_tokens: 125 });
+  });
+
+  // ---------------------------------------------------------------------
+  // Killed-run usage preservation — a run that dies without posting a
+  // terminal `result.usage` (watchdog kill, container crash, runner-declared
+  // failure with no billing block) must NOT have its recorded spend erased
+  // at finalize. The per-call usage already flowed through the platform
+  // during the run (`appstrate.metric` → runner ledger row + the
+  // `runs.tokenUsage` snapshot); the "absent usage = explicit zero" rule
+  // only applies to success terminals, where it feeds the zero-token
+  // liveness heuristic. Pre-fix, the zero-token terminal path overwrote
+  // the snapshot with `{0, 0}` on every kill path.
+  // ---------------------------------------------------------------------
+  it("preserves last-known metric usage and ledger cost when a failed finalize carries no usage", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+
+    // Live metric event during the run — writes the runner-source ledger
+    // row AND the runs.tokenUsage running-total snapshot.
+    const ev = buildEnvelope(
+      runId,
+      "appstrate.metric",
+      {
+        usage: { input_tokens: 300, output_tokens: 125 },
+        cost: 0.003,
+        timestamp: Date.now(),
+      },
+      1,
+    );
+    expect((await postEvent(runId, ev)).status).toBe(200);
+
+    // Runner dies mid-flight: the terminal POST carries a failure and no
+    // usage/cost fields (the billing block is assembled last).
+    const res = await postFinalize(runId, {
+      status: "failed",
+      error: { message: "container killed" },
+      durationMs: 100,
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    // Snapshot preserved — not masked by a zero-token terminal write.
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 300, output_tokens: 125 });
+    // Cost captured from the ledger row the metric event wrote.
+    expect(row?.cost).toBeCloseTo(0.003, 5);
+
+    // Exactly one runner-source ledger row — preservation writes nothing,
+    // so there is no double count.
+    const ledger = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.costUsd).toBeCloseTo(0.003, 5);
+    expect(ledger[0]!.inputTokens).toBe(300);
+    expect(ledger[0]!.outputTokens).toBe(125);
+  });
+
+  it("captures usage and cost for a watchdog-style kill (service-level finalize without result.usage)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+
+    const ev = buildEnvelope(
+      runId,
+      "appstrate.metric",
+      {
+        usage: { input_tokens: 450, output_tokens: 60 },
+        cost: 0.0071,
+        timestamp: Date.now(),
+      },
+      1,
+    );
+    expect((await postEvent(runId, ev)).status).toBe(200);
+
+    // Mirror `finalizeStalledRun` (run-watchdog.ts): the platform
+    // synthesises a bare failed RunResult with NO usage reconstruction —
+    // finalizeRun itself must fall back to the metric snapshot.
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "failed";
+    result.error = { message: "Runner stopped reporting — no heartbeat for 60s." };
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 450, output_tokens: 60 });
+    expect(row?.cost).toBeCloseTo(0.0071, 5);
+  });
+
+  it("terminal result.usage stays authoritative on a failed finalize — preservation only fills absence", async () => {
+    // Guard direction: when the dying runner DID post terminal usage with
+    // its failure, the body wins over the column snapshot exactly as on the
+    // success path — the fallback never overrides an explicit value.
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 999, output_tokens: 999 },
+    });
+
+    const res = await postFinalize(runId, {
+      status: "failed",
+      error: { message: "adapter blew up after the last turn" },
+      durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.tokenUsage).toMatchObject({ input_tokens: 10, output_tokens: 5 });
   });
 });
 

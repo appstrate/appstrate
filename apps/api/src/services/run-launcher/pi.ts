@@ -35,7 +35,7 @@ import {
 import { getExecutionMode } from "../../infra/mode.ts";
 import {
   getOrchestrator,
-  type ContainerOrchestrator,
+  type RunOrchestrator,
   type WorkloadHandle,
   type IsolationBoundary,
 } from "../orchestrator/index.ts";
@@ -85,7 +85,7 @@ export interface RunPlatformContainerInput {
   /** Cancellation token — aborted = the run was cancelled by user. */
   signal?: AbortSignal;
   /** Injectable orchestrator — production defaults to the global singleton. */
-  orchestrator?: ContainerOrchestrator;
+  orchestrator?: RunOrchestrator;
   /**
    * Injectable workspace provisioning — production defaults to the
    * run-workspace storage helpers. The agent fetches the bundle itself at
@@ -172,8 +172,9 @@ async function runPlatformContainerImpl(
   let spawnRecorded = false;
   try {
     // Fail-closed BEFORE provisioning any isolation boundary: a subscription
-    // AGENT run (claude-code → Claude Agent SDK) must execute under the docker
-    // orchestrator. The process orchestrator runs in-host and would expose the
+    // AGENT run (claude-code → Claude Agent SDK) must execute under an
+    // orchestrator that declares `isolatesWorkloads` (docker, firecracker).
+    // The process orchestrator runs in-host and would expose the
     // subscription credential to the API process. API-key providers are
     // unaffected. Consumes the engine already resolved above.
     assertSubscriptionEngineIsolation({
@@ -182,22 +183,12 @@ async function runPlatformContainerImpl(
       orchestratorMode: getExecutionMode(),
     });
 
-    boundary = await orch.createIsolationBoundary(runId);
-
     const llmApiKey = llmConfig.apiKey;
 
     // OAuth credentials must take the sidecar's OAuth branch — the API-key
     // path can't refresh tokens or inject the provider's identity routing
     // headers at request time.
     const isOauthCredential = delivery.isOauthCredential;
-
-    // The placeholder is what actually lands in MODEL_API_KEY inside the
-    // agent container. Provider-specific shape (e.g. a structured JWT) is
-    // built by the module's `buildApiKeyPlaceholder` hook — see
-    // `deriveOauthPlaceholder` below.
-    const llmPlaceholder = isOauthCredential
-      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
-      : deriveKeyPlaceholder(llmApiKey);
 
     // Skip the sidecar entirely when the run declares no integrations AND
     // uses a static API key AND has no egress proxy. The sidecar's purposes
@@ -217,6 +208,18 @@ async function runPlatformContainerImpl(
       !isOauthCredential &&
       !plan.proxyUrl &&
       !llmConfig.aliased;
+
+    // Resolved BEFORE the boundary so port-allocating backends don't
+    // reserve a sidecar port this run will never bind.
+    boundary = await orch.createIsolationBoundary(runId, { skipSidecar });
+
+    // The placeholder is what actually lands in MODEL_API_KEY inside the
+    // agent container. Provider-specific shape (e.g. a structured JWT) is
+    // built by the module's `buildApiKeyPlaceholder` hook — see
+    // `deriveOauthPlaceholder` below.
+    const llmPlaceholder = isOauthCredential
+      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
+      : deriveKeyPlaceholder(llmApiKey);
 
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
@@ -351,6 +354,10 @@ async function runPlatformContainerImpl(
       // The platform setTimeout in `waitForWorkload` is the longer safety net.
       timeoutSeconds: plan.timeout,
       noSidecar: skipSidecar,
+      // All sidecar-relative URLs come from the boundary — the orchestrator
+      // owns the topology (Docker DNS alias, host loopback port, in-guest
+      // loopback for microVMs) and pi.ts stays backend-agnostic.
+      sidecarUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.sidecarUrl,
       // Sidecar-backed runs route LLM traffic through the sidecar proxy
       // (sidecarProxyLlmUrl below). No-sidecar runs talk to the upstream
       // directly, so buildRuntimePiEnv derives MODEL_BASE_URL from the
@@ -360,10 +367,11 @@ async function runPlatformContainerImpl(
       sidecarProxyLlmUrl: skipSidecar
         ? undefined
         : llmApiKey
-          ? "http://sidecar:8080/llm"
+          ? boundary.sidecarEndpoints.llmProxyUrl
           : undefined,
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
-      forwardProxyUrl: skipSidecar ? undefined : "http://sidecar:8081",
+      forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
+      noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
       sink: {
         url: sinkCredentials.url,
         finalizeUrl: sinkCredentials.finalize_url,
@@ -414,6 +422,16 @@ async function runPlatformContainerImpl(
           // reach the upstream LLM and the platform sink directly, so it
           // goes on the egress network instead of the internal boundary.
           egress: skipSidecar,
+          // Hard host-side lifetime ceiling (B2): run budget + the same
+          // boot grace the platform safety net uses + a 600 s margin, so
+          // the daemon's kill is strictly a LAST resort behind the
+          // safety-net setTimeout in waitForWorkload — it only ever fires
+          // when the platform died or was partitioned mid-run and its own
+          // stop can no longer reach the workload.
+          maxLifetimeSeconds:
+            plan.timeout +
+            Math.ceil((input.timeoutBootGraceMs ?? PLATFORM_TIMEOUT_BOOT_GRACE_MS) / 1000) +
+            600,
         },
         boundary,
       ),
@@ -487,7 +505,7 @@ async function runPlatformContainerImpl(
  * lingers after the run has ended.
  */
 async function waitForWorkload(
-  orch: ContainerOrchestrator,
+  orch: RunOrchestrator,
   agent: WorkloadHandle,
   sidecar: WorkloadHandle | undefined,
   timeoutSeconds: number,

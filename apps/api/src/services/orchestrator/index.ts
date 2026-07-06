@@ -1,35 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getExecutionMode } from "../../infra/mode.ts";
-import { DockerOrchestrator } from "./docker-orchestrator.ts";
-import { ProcessOrchestrator } from "./process-orchestrator.ts";
-import type { ContainerOrchestrator } from "@appstrate/core/platform-types";
+import { selectOrchestrator } from "./registry.ts";
+import type { RunOrchestrator } from "@appstrate/core/platform-types";
+
+export {
+  orchestratorIsolatesWorkloads,
+  orchestratorSupportsSidecarOnly,
+  isolatingOrchestratorIds,
+} from "./registry.ts";
 
 export type {
-  ContainerOrchestrator,
+  RunOrchestrator,
   WorkloadHandle,
   WorkloadResources,
   WorkloadSpec,
   IsolationBoundary,
+  SidecarEndpoints,
   CleanupReport,
   StopResult,
   SidecarConfig,
   LlmProxyConfig,
 } from "@appstrate/core/platform-types";
 
-let instance: ContainerOrchestrator | undefined;
+let instance: RunOrchestrator | undefined;
 
-export function getOrchestrator(): ContainerOrchestrator {
+export function getOrchestrator(): RunOrchestrator {
   if (!instance) {
-    instance = createOrchestrator();
+    instance = selectOrchestrator(getExecutionMode());
   }
   return instance;
-}
-
-function createOrchestrator(): ContainerOrchestrator {
-  const mode = getExecutionMode();
-  if (mode === "process") return new ProcessOrchestrator();
-  return new DockerOrchestrator();
 }
 
 /**
@@ -39,6 +39,6 @@ function createOrchestrator(): ContainerOrchestrator {
  * `null` to reset; the next `getOrchestrator()` re-creates the real one.
  * Never call in production code.
  */
-export function _setOrchestratorForTesting(orchestrator: ContainerOrchestrator | null): void {
+export function _setOrchestratorForTesting(orchestrator: RunOrchestrator | null): void {
   instance = orchestrator ?? undefined;
 }

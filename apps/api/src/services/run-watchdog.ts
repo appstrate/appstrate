@@ -14,7 +14,12 @@
  * This service sweeps open-sink rows whose heartbeat slipped past the
  * stall threshold, and routes each one through the same
  * {@link finalizeRun} used by natural termination and container-exit
- * synthesis. `finalizeRun`'s CAS on `sink_closed_at IS NULL` makes the
+ * synthesis. Each stalled run's workload is also stopped through the
+ * orchestrator (same route as user cancel) — fire-and-forget, so a
+ * wedged daemon or runtime can never block the finalize — because a
+ * stalled runner is not necessarily a dead one (e.g. a firecracker
+ * microVM that lost network keeps executing and billing).
+ * `finalizeRun`'s CAS on `sink_closed_at IS NULL` makes the
  * sweep race-safe against a late event POST or the platform's own
  * container-exit synthesis path:
  *
@@ -39,6 +44,7 @@ import { db, isEmbeddedDb } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { finalizeRun, getRunSinkContext } from "./run-event-ingestion.ts";
+import { getOrchestrator } from "./orchestrator/index.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -208,6 +214,19 @@ async function finalizeStalledRun(runId: string, stallThresholdSeconds: number):
   result.error = {
     message: `Runner stopped reporting — no heartbeat for ${stallThresholdSeconds}s. The runner process may have crashed or lost network connectivity.`,
   };
+
+  // Stop the workload too — a stalled runner is not necessarily dead
+  // (a remote microVM that lost its event path keeps executing and
+  // billing). Fire-and-forget, mirroring the cancel route: the finalize
+  // must never block on a wedged daemon or container runtime.
+  getOrchestrator()
+    .stopByRunId(runId)
+    .catch((err) => {
+      logger.warn("run watchdog could not stop the stalled run's workload", {
+        runId,
+        error: getErrorMessage(err),
+      });
+    });
 
   await finalizeRun({ run, result });
 }

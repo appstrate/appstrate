@@ -26,6 +26,8 @@
 
 import type { LlmProxyOauthConfig, ModelSwap } from "@appstrate/core/sidecar-types";
 import { isSubscriptionEngine, type RunEngine } from "@appstrate/core/subscription-engines";
+import type { ExecutionMode } from "../../infra/mode.ts";
+import { isolatingOrchestratorIds, orchestratorIsolatesWorkloads } from "../orchestrator/index.ts";
 import {
   isOAuthModelProvider,
   subscriptionEngineForProvider,
@@ -105,34 +107,45 @@ export function assertRunnableOnEngine(params: {
 }
 
 /**
- * Thrown when a subscription AGENT run is launched outside a Docker container.
- * A subscription engine drives the vendor's official binary against a personal
- * login/subscription; that credential must never execute in the host process,
- * only inside the per-run isolation boundary. Fail-closed: refuse rather than
- * leak the credential into the API process.
+ * Thrown when a subscription AGENT run is launched without an isolation
+ * boundary (e.g. RUN_ADAPTER=process). A subscription engine drives the
+ * vendor's official binary against a personal login/subscription; that
+ * credential must never execute in the host process, only inside the per-run
+ * isolation boundary (Docker container or Firecracker microVM). Fail-closed:
+ * refuse rather than leak the credential into the API process.
  */
-export class SubscriptionRequiresDockerError extends Error {
-  constructor(public readonly providerId: string) {
+export class SubscriptionRequiresIsolationError extends Error {
+  constructor(
+    public readonly providerId: string,
+    orchestratorMode: string,
+  ) {
+    const isolating = isolatingOrchestratorIds()
+      .map((id) => `RUN_ADAPTER=${id}`)
+      .join(" or ");
     super(
-      `Provider "${providerId}" is an OAuth subscription and can only run as a ` +
-        `Docker-isolated agent (RUN_ADAPTER=docker). The current execution mode is ` +
-        `"process", which runs the agent in the host API process — unsafe for a ` +
-        `subscription credential. Switch RUN_ADAPTER to docker, or run this agent ` +
-        `with an API-key model provider.`,
+      `Provider "${providerId}" is an OAuth subscription and can only run inside ` +
+        `an isolated agent boundary (${isolating}). The current execution mode ` +
+        `"${orchestratorMode}" does not isolate the agent from the host API process — ` +
+        `unsafe for a subscription credential. Switch RUN_ADAPTER, or run this ` +
+        `agent with an API-key model provider.`,
     );
-    this.name = "SubscriptionRequiresDockerError";
+    this.name = "SubscriptionRequiresIsolationError";
   }
 }
 
 /**
  * Fail-closed isolation guard for subscription AGENT runs. If the provider maps
  * to a subscription engine (claude-code → Claude Agent SDK) the run MUST execute
- * under the docker orchestrator — the only mode that puts
- * the official binary + its credential inside the per-run boundary. The process
- * orchestrator runs in-host and would expose the subscription token to the API
- * process, so it is refused. API-key providers (no subscription engine def) are
- * unaffected. Claude *chat* never reaches this path (host-side, token swapped
- * gateway-side). Throws {@link SubscriptionRequiresDockerError}.
+ * under an orchestrator whose registration declares `isolatesWorkloads` —
+ * docker (container boundary) and firecracker (microVM boundary) — the backends
+ * that put the official binary + its credential inside the per-run boundary.
+ * The check is an allowlist against the orchestrator registry, not a denylist
+ * of known-bad modes: a backend that never declared isolation (including any
+ * future one) is refused by default. The process orchestrator runs in-host and
+ * would expose the subscription token to the API process. API-key providers
+ * (no subscription engine def) are unaffected. Claude *chat* never reaches
+ * this path (host-side, token swapped gateway-side). Throws
+ * {@link SubscriptionRequiresIsolationError}.
  *
  * Consumes the engine already resolved by {@link resolveCredentialDelivery} so
  * the launcher reads the provider→engine registry once rather than re-deriving
@@ -143,11 +156,11 @@ export class SubscriptionRequiresDockerError extends Error {
 export function assertSubscriptionEngineIsolation(params: {
   engine: RunEngine;
   providerId: string;
-  orchestratorMode: "docker" | "process";
+  orchestratorMode: ExecutionMode;
 }): void {
   const { engine, providerId, orchestratorMode } = params;
-  if (isSubscriptionEngine(engine) && orchestratorMode !== "docker") {
-    throw new SubscriptionRequiresDockerError(providerId);
+  if (isSubscriptionEngine(engine) && !orchestratorIsolatesWorkloads(orchestratorMode)) {
+    throw new SubscriptionRequiresIsolationError(providerId, orchestratorMode);
   }
 }
 

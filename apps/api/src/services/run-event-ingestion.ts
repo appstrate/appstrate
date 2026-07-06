@@ -343,11 +343,42 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // zero tokens, no terminal error surfaced" shape.
 
   // Zod boundary on the runner-supplied terminal usage (tolerant: known
-  // numeric fields kept, unknown keys stripped, absent/invalid shapes become
-  // explicit zero usage + a warn log). Finalize never consults the side-channel
-  // metric event for liveness; the terminal result is the single source of
-  // truth.
-  const validatedUsage = validateFinalizeUsage(result.usage, run.id);
+  // numeric fields kept, unknown keys stripped). The fallback semantics
+  // split on the terminal status:
+  //
+  //   - SUCCESS: the finalize body is the single source of truth — an
+  //     absent/invalid shape becomes explicit zero usage so the zero-token
+  //     liveness heuristic below cannot be defeated by a late side-channel
+  //     metric event.
+  //   - NON-SUCCESS (watchdog kill, container crash, runner-declared
+  //     failure without a billing block): the run died before it could
+  //     post terminal usage. Coercing to zeros here would ERASE the
+  //     last-known cumulative snapshot the `appstrate.metric` side-channel
+  //     wrote onto `runs.tokenUsage` during the run — the per-call spend
+  //     is already in the `llm_usage` ledger (runner/proxy rows) and the
+  //     column is its run-row mirror, so preserve it instead.
+  //
+  // No double-counting is possible: preservation writes no ledger row
+  // (only `result.cost > 0` triggers the runner-row fallback below), and
+  // the CAS on `sink_closed_at` guarantees a terminal usage arriving
+  // after this finalize can never re-open the run.
+  let validatedUsage = validateFinalizeUsage(result.usage, run.id);
+  // Non-success without runner-posted usage: the run-row column must keep
+  // whatever cumulative snapshot the `appstrate.metric` side-channel last
+  // wrote. The COLUMN preservation happens atomically in the CAS below
+  // (SQL COALESCE) — a JS read-then-write here would race a concurrent
+  // metric event and clobber a newer snapshot with the stale read. The
+  // read below only feeds the ledger-row fallback (result.cost > 0).
+  const preserveLastKnownUsage = validatedUsage === null && status !== "success";
+  if (preserveLastKnownUsage) {
+    validatedUsage = await readLastKnownUsage(run.id);
+  }
+  if (validatedUsage === null) {
+    logger.warn("finalize: missing result.usage; treating as zero-token terminal usage", {
+      runId: run.id,
+    });
+    validatedUsage = { input_tokens: 0, output_tokens: 0 };
+  }
 
   if (status === "success") {
     if (runHadZeroTokens(validatedUsage)) {
@@ -475,8 +506,14 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
       // The finalize body is the authoritative terminal usage. Metric events
       // may still update this column before finalize for live charts, but the
-      // close path writes the terminal value exactly once.
-      tokenUsage: validatedUsage,
+      // close path writes the terminal value exactly once. When a non-success
+      // terminal carried no usage, the column keeps its last-known snapshot
+      // ATOMICALLY (COALESCE evaluates in the UPDATE itself — a metric event
+      // landing between the JS read above and this CAS cannot be clobbered
+      // by a stale value); zeros only when nothing was ever recorded.
+      tokenUsage: preserveLastKnownUsage
+        ? sql`COALESCE(${runs.tokenUsage}, ${JSON.stringify({ input_tokens: 0, output_tokens: 0 })}::jsonb)`
+        : validatedUsage,
       ...(metadata ? { metadata } : {}),
     })
     .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
@@ -722,13 +759,11 @@ export async function synthesiseFinalize(
   // from the `runs.tokenUsage` column the `appstrate.metric` side-channel wrote
   // during the run so the zero-token liveness heuristic in `finalizeRun` sees
   // the tokens that were actually consumed — otherwise a synthesised `success`
-  // for a run that DID reach the LLM is wrongly flipped to `failed`.
-  const [row] = await db
-    .select({ tokenUsage: runs.tokenUsage })
-    .from(runs)
-    .where(eq(runs.id, runId))
-    .limit(1);
-  if (row?.tokenUsage) result.usage = row.tokenUsage;
+  // for a run that DID reach the LLM is wrongly flipped to `failed`. (For
+  // non-success terminals, `finalizeRun` performs the same reconstruction
+  // itself; doing it here too keeps the synthesised RunResult self-consistent.)
+  const lastKnownUsage = await readLastKnownUsage(runId);
+  if (lastKnownUsage) result.usage = lastKnownUsage;
 
   await finalizeRun({ run, result });
 }
@@ -766,24 +801,43 @@ function runHadZeroTokens(usage: TokenUsage): boolean {
 
 /**
  * Tolerant Zod boundary on the runner-supplied finalize `usage`: known numeric
- * fields validated, unknown keys stripped, and absent/invalid shapes become
- * explicit zero usage (+ warn log) so a malformed billing field can never leave
- * an already-completed run unfinalized.
+ * fields validated, unknown keys stripped. Absent/invalid shapes return `null`
+ * (+ warn log for the malformed case) so the caller decides the fallback —
+ * zero usage on a success terminal, last-known snapshot on a non-success one.
+ * A malformed billing field can never leave an already-completed run
+ * unfinalized.
  */
-function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage {
-  if (usage === null || usage === undefined) {
-    logger.warn("finalize: missing result.usage; treating as zero-token terminal usage", { runId });
-    return { input_tokens: 0, output_tokens: 0 };
-  }
+function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage | null {
+  if (usage === null || usage === undefined) return null;
   const parsed = tokenUsageSchema.safeParse(usage);
   if (!parsed.success) {
-    logger.warn("finalize: malformed result.usage; treating as zero-token terminal usage", {
+    logger.warn("finalize: malformed result.usage; ignoring terminal usage field", {
       runId,
       reason: parsed.error.issues[0]?.message ?? "validation failed",
     });
-    return { input_tokens: 0, output_tokens: 0 };
+    return null;
   }
   return parsed.data;
+}
+
+/**
+ * Last-known cumulative usage snapshot for a run — the value the
+ * `appstrate.metric` side-channel wrote onto `runs.tokenUsage` during the
+ * run. Parsed through the same tolerant Zod boundary as the finalize body so
+ * a corrupt JSONB value degrades to `null`, never a throw. Used by finalize
+ * to avoid erasing real usage when a run dies without posting a terminal
+ * `result.usage`, and by {@link synthesiseFinalize} to reconstruct the
+ * terminal usage for platform-synthesised closures.
+ */
+async function readLastKnownUsage(runId: string): Promise<TokenUsage | null> {
+  const [row] = await db
+    .select({ tokenUsage: runs.tokenUsage })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+  if (!row?.tokenUsage) return null;
+  const parsed = tokenUsageSchema.safeParse(row.tokenUsage);
+  return parsed.success ? parsed.data : null;
 }
 
 /**

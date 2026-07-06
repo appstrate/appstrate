@@ -1,0 +1,273 @@
+name: Firecracker
+
+# End-to-end smoke of the Firecracker orchestrator (RUN_ADAPTER=firecracker):
+# builds the guest kernel/rootfs artifacts, runs the focused unit tests, then
+# boots a REAL microVM through the orchestrator (apps/api/src/modules/firecracker/scripts/dev/).
+# GitHub's Linux runners expose KVM, so this runs on ubuntu-latest.
+#
+# Scoped to the paths that can break the guest boot machinery — the generic
+# check/test workflows already cover the platform-side TypeScript.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/src/modules/firecracker/**"
+      - "apps/api/src/services/orchestrator/**"
+      - "apps/api/src/services/run-launcher/**"
+      - "apps/api/src/services/connect/**"
+      - "apps/api/src/lib/modules/**"
+      - "packages/core/**"
+      - "packages/env/**"
+      - "runtime-pi/Dockerfile"
+      - "runtime-pi/entrypoint.ts"
+      - "packages/runner-pi/**"
+      - "runtime-pi/sidecar/**"
+      - ".github/workflows/firecracker.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/api/src/modules/firecracker/**"
+      - "apps/api/src/services/orchestrator/**"
+      - "apps/api/src/services/run-launcher/**"
+      - "apps/api/src/services/connect/**"
+      - "apps/api/src/lib/modules/**"
+      - "packages/core/**"
+      - "packages/env/**"
+      - "runtime-pi/Dockerfile"
+      - "runtime-pi/entrypoint.ts"
+      - "packages/runner-pi/**"
+      - "runtime-pi/sidecar/**"
+      - ".github/workflows/firecracker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firecracker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Regression guard for the guest→platform DNAT drop (issue #819, phase 5):
+  # the 3h-of-tcpdump incident where Docker's DNAT rewrote the destination
+  # before the daemon's nft forward hook, so a plain `ip daddr` match missed
+  # and the RFC1918 deny silently killed the platform sink traffic. This job
+  # reproduces a real guest's L3 path with a netns — no microVM, no kernel
+  # build — through the DAEMON'S REAL nft script (buildNftScript output). If
+  # someone reverts the `ct original` forward rule to a plain `ip daddr`, the
+  # generated script changes, the DNAT'd packet hits the deny, and the curl
+  # below fails the job. Fast (<1 min) and self-cleaning.
+  dnat-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      # buildNftScript pulls @appstrate/core (logger/errors) into its import
+      # closure — deps must be installed to render the real script.
+      - name: Install dependencies
+        run: bun install
+
+      - name: Reproduce the guest→platform path through the real nft script
+        run: |
+          set -euo pipefail
+          # The host's own routable IP — a docker-published port lands on it,
+          # and (being RFC1918, e.g. 10.x on GH runners) it sits INSIDE the
+          # egress-deny CIDRs. That is precisely what makes a reverted
+          # `ip daddr` rule fatal: after Docker's DNAT the deny eats the packet.
+          HOST_IP="$(ip route get 1.1.1.1 | awk '{print $7; exit}')"
+          export HOST_IP
+          echo "host IP under test: ${HOST_IP}"
+
+          # Dummy HTTP target behind a PUBLISHED port → Docker installs the
+          # nat/PREROUTING DNAT rule that the daemon's forward accept must
+          # match on its conntrack-original tuple.
+          docker run -d --name fc-dnat-target -p 18080:5678 \
+            hashicorp/http-echo -listen=:5678 -text=ok >/dev/null
+          for _ in $(seq 1 20); do
+            curl -fsS --max-time 2 "http://127.0.0.1:18080" >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+
+          sudo sysctl -qw net.ipv4.ip_forward=1
+
+          # Render the DAEMON'S nft policy with the published port as the
+          # remote platform endpoint, then apply it verbatim.
+          bun -e 'import { buildNftScript } from "./apps/api/src/modules/firecracker/host-net.ts";
+            process.stdout.write(buildNftScript({
+              subnetCidr: "10.231.0.0/16",
+              aliasIp: "10.231.255.1",
+              platformPort: 3000,
+              egressDenyCidrs: ["169.254.0.0/16","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"],
+              platformForward: { ip: process.env.HOST_IP, port: 18080 },
+            }));' > /tmp/appstrate_fc.nft
+          echo "----- rendered nft ruleset -----"; cat /tmp/appstrate_fc.nft
+          # HOST_IP is already baked into the rendered file — nft -f is static.
+          sudo nft -f /tmp/appstrate_fc.nft
+
+          # Docker sets the iptables FORWARD policy to DROP; mirror what the
+          # daemon does (allowForwardInIptables) so the ONLY differentiator
+          # between pass and fail is the appstrate_fc nft table under test.
+          sudo iptables -I FORWARD -i afc+ -j ACCEPT
+          sudo iptables -I FORWARD -o afc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+          # A "guest": a netns whose HOST-side veth carries the afc* prefix
+          # (so the iifname rules fire) addressed in a run /30 (index 1).
+          sudo ip netns add guest
+          sudo ip link add afcprobe0 type veth peer name afcprobe0p
+          sudo ip link set afcprobe0p netns guest
+          sudo ip addr add 10.231.0.5/30 dev afcprobe0
+          sudo ip link set afcprobe0 up
+          sudo sysctl -qw net.ipv4.conf.afcprobe0.rp_filter=1
+          sudo ip -n guest addr add 10.231.0.6/30 dev afcprobe0p
+          sudo ip -n guest link set afcprobe0p up
+          sudo ip -n guest link set lo up
+          sudo ip -n guest route add default via 10.231.0.5
+
+          echo "curling http://${HOST_IP}:18080 from the guest netns..."
+          # MUST succeed. A reverted `ct original` rule → DNAT'd packet hits
+          # the RFC1918 deny → timeout → this fails the job (the regression).
+          sudo ip netns exec guest curl -fsS --max-time 5 "http://${HOST_IP}:18080"
+          echo "" # http-echo omits a trailing newline
+          echo "guest→platform path OK through the nft policy"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo ip netns del guest 2>/dev/null || true
+          sudo ip link del afcprobe0 2>/dev/null || true
+          sudo nft delete table ip appstrate_fc 2>/dev/null || true
+          sudo iptables -D FORWARD -i afc+ -j ACCEPT 2>/dev/null || true
+          sudo iptables -D FORWARD -o afc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+          docker rm -f fc-dnat-target 2>/dev/null || true
+
+  smoke:
+    runs-on: ubuntu-latest
+    # Cold cache pays the full ~20 min kernel build + the rootfs docker
+    # builds before the smoke even starts — 30 min would loop forever
+    # without ever saving the kernel cache.
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      - name: Enable KVM access
+        # GitHub's Linux runners expose nested virt on most pools, but the kvm
+        # module is not always pre-loaded and the /dev/kvm node can appear a
+        # beat after the udev trigger. Load the module explicitly, then poll
+        # for the node so a transient race doesn't red the whole 20-min build.
+        run: |
+          set -euo pipefail
+          sudo modprobe kvm 2>/dev/null || true
+          sudo modprobe kvm_intel 2>/dev/null || sudo modprobe kvm_amd 2>/dev/null || true
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          for _ in $(seq 1 20); do
+            [ -e /dev/kvm ] && break
+            sleep 0.5
+          done
+          if ! { test -r /dev/kvm && test -w /dev/kvm; }; then
+            echo "::error::/dev/kvm unavailable on this runner — nested virt not exposed by the host pool" >&2
+            ls -l /dev/kvm 2>&1 || true
+            exit 1
+          fi
+
+      - name: Install Firecracker
+        # Pinned release + published checksum — never `latest` (supply chain).
+        # Keep FC_VERSION/FC_SHA256 in sync with apps/api/src/modules/firecracker/scripts/dev/lima.yaml.
+        run: |
+          FC_VERSION="v1.16.0"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64)  FC_SHA256="bd04e26952d4e158085778c6230a0b383d2619c319182e27eaa9d61a212e92d6" ;;
+            aarch64) FC_SHA256="531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7" ;;
+            *) echo "unsupported arch $ARCH" >&2; exit 1 ;;
+          esac
+          curl -fsSL -o /tmp/firecracker.tgz "https://github.com/firecracker-microvm/firecracker/releases/download/${FC_VERSION}/firecracker-${FC_VERSION}-${ARCH}.tgz"
+          echo "${FC_SHA256}  /tmp/firecracker.tgz" | sha256sum -c -
+          tar -xzf /tmp/firecracker.tgz -C /tmp
+          sudo install -m 0755 "/tmp/release-${FC_VERSION}-${ARCH}/firecracker-${FC_VERSION}-${ARCH}" /usr/local/bin/firecracker
+          # The jailer ships in the SAME verified tarball — the smoke boots
+          # jailed VMMs (FIRECRACKER_JAILER=on is the orchestrator default).
+          sudo install -m 0755 "/tmp/release-${FC_VERSION}-${ARCH}/jailer-${FC_VERSION}-${ARCH}" /usr/local/bin/jailer
+          # GitHub runner images ship /usr/local/bin group/world-writable
+          # (mode 777) — the jailer input trust-chain check (initializeJailer
+          # → assertTrustedPathChain) rightly refuses a writable component on
+          # the FIRECRACKER_BIN path, exactly as it would on a misconfigured
+          # production host. Tighten to the standard root-owned 0755; nothing
+          # in the remaining steps writes there.
+          sudo chown root:root /usr/local/bin
+          sudo chmod 0755 /usr/local/bin
+          firecracker --version
+          jailer --version
+
+      # The kernel is BUILT (CI kernels lack nftables — see build-kernel.sh).
+      # First build ~20 min; afterwards this cache short-circuits it.
+      # Explicit restore/build/save split (NOT the monolithic actions/cache):
+      # the monolithic post-step only saves on job SUCCESS, so a failing or
+      # cancelled smoke — exactly what an iterating branch produces — would
+      # discard the 20-min build and re-pay it on every push.
+      - name: Restore guest kernel cache
+        id: kernel-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
+        with:
+          path: data/firecracker/vmlinux
+          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('apps/api/src/modules/firecracker/scripts/build-kernel.sh') }}
+
+      - name: Build guest kernel
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: bash apps/api/src/modules/firecracker/scripts/build-kernel.sh data/firecracker/vmlinux
+
+      - name: Save guest kernel cache
+        if: >-
+          always() && steps.kernel-cache.outputs.cache-hit != 'true' &&
+          hashFiles('data/firecracker/vmlinux') != ''
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
+        with:
+          path: data/firecracker/vmlinux
+          key: fc-kernel-${{ runner.arch }}-${{ hashFiles('apps/api/src/modules/firecracker/scripts/build-kernel.sh') }}
+
+      - name: Run smoke suite
+        # No platform secrets: the FirecrackerOrchestrator is decoupled from
+        # @appstrate/env — the smoke harness drives it with FIRECRACKER_*
+        # alone (same posture as the appstrate-runner daemon).
+        env:
+          # The GH workspace path is too deep for the jailed VMM's AF_UNIX
+          # API socket (<data>/../jail/<vmm>/<jailId>/root/run/… blows the
+          # ~108-byte sun_path cap — computeJailPaths refuses at boundary
+          # creation), and /tmp is out too (world-writable 1777 — the jailer
+          # input trust-chain check refuses sticky dirs by design). Use
+          # /var/lib/fc: short, a root-owned 0755 chain (created below, the
+          # same posture as the production /var/lib/appstrate-runner), and on
+          # the SAME filesystem as the checkout on GH runners so the jail's
+          # kernel/rootfs hardlinks still work (EXDEV guard in jail.ts).
+          FIRECRACKER_DATA_DIR: /var/lib/fc/runs
+        run: |
+          sudo mkdir -p /var/lib/fc
+          bash apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh
+
+      # The smoke now runs as root (jailed VMMs — FIRECRACKER_JAILER=on),
+      # so the leftover run dirs are root-owned 0700; the artifact upload
+      # runs as the runner user and needs read access.
+      - name: Make run dirs readable for artifact upload
+        if: failure()
+        run: sudo chmod -R a+rX /var/lib/fc/runs 2>/dev/null || true
+
+      - name: Upload guest console on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: firecracker-run-dirs
+          path: /var/lib/fc/runs/**/console.log
+          if-no-files-found: ignore

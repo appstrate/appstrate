@@ -5,7 +5,7 @@ import {
   assertRunnableOnEngine,
   assertSubscriptionEngineIsolation,
   resolveCredentialDelivery,
-  SubscriptionRequiresDockerError,
+  SubscriptionRequiresIsolationError,
   buildOauthSidecarLlm,
   UnrunnableOauthProviderError,
 } from "../../../src/services/run-launcher/subscription-run-policy.ts";
@@ -15,6 +15,10 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import {
+  registerOrchestrator,
+  _resetOrchestratorRegistryForTesting,
+} from "../../../src/services/orchestrator/registry.ts";
 
 function fakeProvider(
   id: string,
@@ -100,9 +104,10 @@ describe("buildOauthSidecarLlm", () => {
 });
 
 describe("assertSubscriptionEngineIsolation", () => {
-  // The guard now consumes the engine resolved by resolveCredentialDelivery
-  // (claude → subscription engine, pi → API-key) rather than re-reading the
-  // registry; the docker-isolation contract is unchanged.
+  // The guard consumes the engine resolved by resolveCredentialDelivery
+  // (claude → subscription engine, pi → API-key) and allowlists against the
+  // orchestrator registry's `isolatesWorkloads` flag — any backend that
+  // never declared isolation is refused, not just the known in-host mode.
   it("rejects a claude-code subscription run under the process orchestrator", () => {
     expect(() =>
       assertSubscriptionEngineIsolation({
@@ -110,7 +115,7 @@ describe("assertSubscriptionEngineIsolation", () => {
         providerId: "claude-code",
         orchestratorMode: "process",
       }),
-    ).toThrow(SubscriptionRequiresDockerError);
+    ).toThrow(SubscriptionRequiresIsolationError);
   });
 
   it("allows a claude-code subscription run under docker", () => {
@@ -121,6 +126,42 @@ describe("assertSubscriptionEngineIsolation", () => {
         orchestratorMode: "docker",
       }),
     ).not.toThrow();
+  });
+
+  it("allows a claude-code subscription run under a module-contributed isolating backend", () => {
+    registerOrchestrator(
+      "fake-isolated",
+      {
+        isolatesWorkloads: true,
+        supportsSidecarOnly: false,
+        create: () => ({}) as never,
+      },
+      "test",
+    );
+    try {
+      expect(() =>
+        assertSubscriptionEngineIsolation({
+          engine: "claude",
+          providerId: "claude-code",
+          orchestratorMode: "fake-isolated",
+        }),
+      ).not.toThrow();
+    } finally {
+      _resetOrchestratorRegistryForTesting();
+    }
+  });
+
+  it("fails closed: a backend that never declared isolation is refused", () => {
+    // A future RUN_ADAPTER value that passed env validation but whose
+    // registration forgot `isolatesWorkloads: true` must be refused by
+    // default — the guard is an allowlist, not a denylist of known-bad modes.
+    expect(() =>
+      assertSubscriptionEngineIsolation({
+        engine: "claude",
+        providerId: "claude-code",
+        orchestratorMode: "some-future-backend" as never,
+      }),
+    ).toThrow(SubscriptionRequiresIsolationError);
   });
 
   it("allows an API-key provider under either orchestrator mode", () => {

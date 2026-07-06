@@ -58,22 +58,17 @@ FROM oven/bun:1.3.14-alpine
 
 WORKDIR /app
 
-# Runtime dependencies (root hoisted + workspace-specific).
-# ⚠️ MANUAL allowlist — NOT graph-derived (unlike the src/manifest COPYs below).
-# Any new package the runtime imports whose deps DON'T hoist to the root
-# node_modules (e.g. bun isolated installs, like afps-shared's `semver`) must be
-# added here explicitly — its `src` ships automatically via the glob below, but
-# its node_modules will be SILENTLY missing and crash-loop at runtime.
+# Runtime dependencies (root hoisted + every workspace member's isolated
+# node_modules), graph-derived via `COPY --parents` like the build stage.
+# Bun isolated installs keep each package's deps OUT of the root hoist
+# (e.g. @anthropic-ai/claude-agent-sdk under module-claude-code, zod under
+# module-chat) as symlink farms into the root .bun store — cheap to ship,
+# and a missing one crash-loops at module load. A manual allowlist here
+# caused exactly that three times (afps-shared/semver, module-claude-code,
+# module-chat); the glob can't miss a member and skips absent dirs instead
+# of failing the build.
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
-COPY --from=deps /app/packages/afps-runtime/node_modules ./packages/afps-runtime/node_modules
-COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modules
-COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
-COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
-COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
-COPY --from=deps /app/packages/mcp-transport/node_modules ./packages/mcp-transport/node_modules
-COPY --from=deps /app/packages/runner-pi/node_modules ./packages/runner-pi/node_modules
-COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
+COPY --from=deps --parents /app/./apps/api/node_modules /app/./packages/*/node_modules ./
 
 # ── Workspace package sources (Bun runs TypeScript directly — no build step) ──
 # Graph-derived via `COPY --parents`: apps/api source + every packages/*/src
@@ -94,11 +89,6 @@ COPY --from=build --parents /app/./packages/*/src /app/./packages/*/package.json
 #   db/drizzle  — SQL migrations applied at boot
 COPY --from=build /app/packages/core/schema ./packages/core/schema
 COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
-
-# AFPS shared declares `semver` in its OWN isolated node_modules (bun isolated
-# install), so it MUST ship — otherwise the runtime crash-loops with
-# `Cannot find package 'semver' from .../packages/afps-shared/src/semver-resolve.ts`.
-COPY --from=deps /app/packages/afps-shared/node_modules ./packages/afps-shared/node_modules
 
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist

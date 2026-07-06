@@ -201,12 +201,29 @@ export async function boot(): Promise<void> {
   // LLM tokens before the previous process died. The CAS in `finalizeRun`
   // makes this race-safe against a delayed metric POST that lands during
   // the same boot window.
+  const orchestrator = getOrchestrator();
   try {
     const orphanIds = await listOrphanRunIds();
     if (orphanIds.length > 0) {
       let finalized = 0;
       for (const runId of orphanIds) {
         try {
+          // An orphaned run may still have a live remote workload — a
+          // firecracker microVM on the runner host keeps executing (and
+          // billing) across a platform restart, and holds a concurrency
+          // slot. Stop it before synthesising the failed terminal. This
+          // is safe for every adapter: docker stops idempotently, process
+          // finds nothing after a restart, firecracker proxies the stop
+          // to the daemon which kills the microVM. `listOrphanRunIds`
+          // already excludes runs a live sibling instance heartbeats
+          // (stall-threshold cutoff), so this never kills another
+          // instance's in-flight run.
+          await orchestrator.stopByRunId(runId).catch((err) => {
+            logger.warn("Could not stop orphaned run's workload", {
+              runId,
+              error: getErrorMessage(err),
+            });
+          });
           await synthesiseFinalize(runId, {
             status: "failed",
             error: { message: "Server restarted while run was in progress. Please retry." },
@@ -227,7 +244,6 @@ export async function boot(): Promise<void> {
     });
   }
 
-  const orchestrator = getOrchestrator();
   try {
     const report = await orchestrator.cleanupOrphans();
     if (report.workloads > 0 || report.isolationBoundaries > 0) {

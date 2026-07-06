@@ -8,7 +8,7 @@ import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { runPlatformContainer } from "./pi.ts";
 import type { PlatformContainerResult } from "./pi.ts";
-import type { ContainerOrchestrator } from "../orchestrator/index.ts";
+import type { RunOrchestrator } from "../orchestrator/index.ts";
 import { trackRun, untrackRun } from "../run-tracker.ts";
 import { emitEvent } from "../../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "../inline-run.ts";
@@ -34,7 +34,7 @@ export interface ExecuteAgentInBackgroundInput {
    * global singleton drives Docker. Tests inject a fake orchestrator to
    * exercise the lifecycle without a real container runtime.
    */
-  orchestrator?: ContainerOrchestrator;
+  orchestrator?: RunOrchestrator;
   /**
    * Grace (ms) added to `plan.timeout` for the platform's safety-net
    * container watchdog. Production leaves this unset (the runner owns the

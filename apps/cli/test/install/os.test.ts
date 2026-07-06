@@ -25,12 +25,16 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { createServer, type Server } from "node:net";
 import { platform } from "node:os";
+import type { NetworkInterfaceInfo } from "node:os";
 import {
   runCommand,
   waitForHttp,
   commandExists,
   isPortAvailable,
   describeProcessOnPort,
+  detectLanIpv4,
+  isIpv4,
+  parseIpv4HttpUrl,
 } from "../../src/lib/install/os.ts";
 
 const originalFetch = globalThis.fetch;
@@ -229,6 +233,108 @@ describe("describeProcessOnPort", () => {
     const port = await pickEphemeralPort();
     const hint = await describeProcessOnPort(port);
     expect(hint).toBeNull();
+  });
+});
+
+describe("isIpv4", () => {
+  it("accepts well-formed IPv4 literals", () => {
+    expect(isIpv4("10.0.0.5")).toBe(true);
+    expect(isIpv4("192.168.1.20")).toBe(true);
+    expect(isIpv4("255.255.255.255")).toBe(true);
+    expect(isIpv4("0.0.0.0")).toBe(true);
+  });
+
+  it("rejects hostnames, out-of-range octets, and malformed input", () => {
+    expect(isIpv4("runner.local")).toBe(false);
+    expect(isIpv4("10.0.0")).toBe(false);
+    expect(isIpv4("256.0.0.1")).toBe(false);
+    expect(isIpv4("10.0.0.5.6")).toBe(false);
+    expect(isIpv4("")).toBe(false);
+  });
+});
+
+describe("parseIpv4HttpUrl", () => {
+  it("accepts http(s)://<IPv4>[:port][/] and normalizes it", () => {
+    expect(parseIpv4HttpUrl("http://10.0.0.5:3100")).toEqual({
+      url: "http://10.0.0.5:3100",
+      host: "10.0.0.5",
+      port: 3100,
+    });
+    // Trailing slash stripped; scheme-default port filled in.
+    expect(parseIpv4HttpUrl("http://10.0.0.5/")).toEqual({
+      url: "http://10.0.0.5",
+      host: "10.0.0.5",
+      port: 80,
+    });
+    expect(parseIpv4HttpUrl("https://192.168.1.20")).toEqual({
+      url: "https://192.168.1.20",
+      host: "192.168.1.20",
+      port: 443,
+    });
+  });
+
+  it("rejects out-of-range octets (matches the daemon's parsePlatformApiUrl)", () => {
+    // The old `IPV4_URL_RE` regex accepted these — the WHATWG URL parser +
+    // isIpv4 octet-range check do not.
+    expect(parseIpv4HttpUrl("http://999.0.0.1")).toBeNull();
+    expect(parseIpv4HttpUrl("http://256.256.256.256:3000")).toBeNull();
+    expect(parseIpv4HttpUrl("http://300.0.0.1:3100")).toBeNull();
+  });
+
+  it("rejects non-IPv4 hosts and non-http schemes", () => {
+    expect(parseIpv4HttpUrl("http://runner.local:3000")).toBeNull();
+    expect(parseIpv4HttpUrl("ftp://10.0.0.5")).toBeNull();
+    expect(parseIpv4HttpUrl("10.0.0.5:3000")).toBeNull();
+    expect(parseIpv4HttpUrl("not a url")).toBeNull();
+    expect(parseIpv4HttpUrl("")).toBeNull();
+  });
+});
+
+describe("detectLanIpv4", () => {
+  // Minimal helper — only the fields detectLanIpv4 reads.
+  const iface = (
+    address: string,
+    opts: { internal?: boolean; family?: "IPv4" | "IPv6" } = {},
+  ): NetworkInterfaceInfo =>
+    ({
+      address,
+      family: opts.family ?? "IPv4",
+      internal: opts.internal ?? false,
+      netmask: "255.255.255.0",
+      mac: "00:00:00:00:00:00",
+      cidr: null,
+    }) as NetworkInterfaceInfo;
+
+  it("prefers an RFC 1918 private address over a public one", () => {
+    const ip = detectLanIpv4(() => ({
+      en0: [iface("8.8.8.8"), iface("192.168.1.42")],
+    }));
+    expect(ip).toBe("192.168.1.42");
+  });
+
+  it("skips loopback / internal interfaces", () => {
+    const ip = detectLanIpv4(() => ({
+      lo0: [iface("127.0.0.1", { internal: true })],
+      en0: [iface("10.1.2.3")],
+    }));
+    expect(ip).toBe("10.1.2.3");
+  });
+
+  it("ignores IPv6 addresses", () => {
+    const ip = detectLanIpv4(() => ({
+      en0: [iface("fe80::1", { family: "IPv6" }), iface("172.16.5.5")],
+    }));
+    expect(ip).toBe("172.16.5.5");
+  });
+
+  it("falls back to a non-private IPv4 when no RFC 1918 address exists", () => {
+    const ip = detectLanIpv4(() => ({ en0: [iface("203.0.113.7")] }));
+    expect(ip).toBe("203.0.113.7");
+  });
+
+  it("returns null on a loopback-only host", () => {
+    const ip = detectLanIpv4(() => ({ lo0: [iface("127.0.0.1", { internal: true })] }));
+    expect(ip).toBeNull();
   });
 });
 

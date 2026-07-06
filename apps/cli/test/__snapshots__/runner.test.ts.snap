@@ -1,0 +1,38 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`renderRunnerUnit is a hardened, PATH-corrected, always-restarting unit (snapshot) 1`] = `
+"[Unit]
+Description=Appstrate Firecracker runner daemon
+Documentation=https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=30
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=+/bin/mkdir -p /run/netns
+ExecStart=/usr/local/bin/appstrate-runner
+EnvironmentFile=/etc/appstrate-runner/env
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/var/lib/appstrate-runner/bin
+WorkingDirectory=/var/lib/appstrate-runner
+Restart=always
+RestartSec=2
+TimeoutStopSec=30
+LimitNOFILE=65536
+Delegate=yes
+
+# --- Hardening (see renderRunnerUnit doc-comment for why the aggressive
+#     device/network knobs are intentionally omitted) ---
+ProtectSystem=strict
+PrivateTmp=true
+ReadWritePaths=/var/lib/appstrate-runner
+ReadWritePaths=/run/netns
+ProtectHome=true
+ProtectClock=true
+
+[Install]
+WantedBy=multi-user.target
+"
+`;
