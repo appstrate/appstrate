@@ -782,12 +782,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         // since the crash — only kill it if /proc still shows a
         // firecracker VMM bound to THIS run's API socket.
         if (await this.pidIsOurVmm(state.pid, state.apiSocketPath)) {
-          try {
-            process.kill(state.pid, "SIGKILL");
-            workloads++;
-          } catch {
-            // Already dead.
-          }
+          if (this.killPid(state.pid)) workloads++;
         } else {
           logger.warn("Orphan sweep: pid is not this run's firecracker VMM — skipping kill", {
             runId: state.runId,
@@ -802,14 +797,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         // a /proc entry that IS a firecracker VMM referencing this socket
         // is a positive match; anything else is left untouched.
         const pid = await this.findVmmByApiSocket(state.apiSocketPath);
-        if (pid !== null) {
-          try {
-            process.kill(pid, "SIGKILL");
-            workloads++;
-          } catch {
-            // Already dead.
-          }
-        }
+        if (pid !== null && this.killPid(pid)) workloads++;
       }
       if (state?.tapDevice) {
         await deleteTap(this.hostExec, state.tapDevice).catch(() => {});
@@ -2032,6 +2020,32 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
   }
 
+  /** SIGKILL a pid; returns whether the signal landed (false = already dead). */
+  private killPid(pid: number): boolean {
+    try {
+      process.kill(pid, "SIGKILL");
+      return true;
+    } catch {
+      return false; // Already dead.
+    }
+  }
+
+  /**
+   * Scan /proc for firecracker VMMs (argv[0] gate) matching `predicate`,
+   * SIGKILL each, and return the count killed. The predicate carries the
+   * distinct per-run identity test (jailId/chroot vs under-base prefix);
+   * this skeleton owns only the shared scan-gate-kill loop.
+   */
+  private async killMatchingVmms(predicate: (pid: number) => Promise<boolean>): Promise<number> {
+    let killed = 0;
+    for (const pid of await this.listProcPids()) {
+      if (!(await this.pidLooksLikeVmmBinary(pid))) continue;
+      if (!(await predicate(pid))) continue;
+      if (this.killPid(pid)) killed++;
+    }
+    return killed;
+  }
+
   /**
    * Kill a jailed run's VMM by JAIL identity: a process exec'd as the
    * firecracker binary (argv[0] gate — see pidLooksLikeVmmBinary) whose
@@ -2045,20 +2059,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   private async sweepJailedVmm(state: RunStateFile): Promise<number> {
     const chrootPath = state.chrootPath !== undefined ? resolve(state.chrootPath) : null;
     const jailId = state.jailId ?? null;
-    let killed = 0;
-    for (const pid of await this.listProcPids()) {
-      if (!(await this.pidLooksLikeVmmBinary(pid))) continue;
+    return this.killMatchingVmms(async (pid) => {
       const idMatch = jailId !== null && (await this.procJailArgvId(pid)) === jailId;
       const rootMatch = chrootPath !== null && (await this.procRoot(pid)) === chrootPath;
-      if (!idMatch && !rootMatch) continue;
-      try {
-        process.kill(pid, "SIGKILL");
-        killed++;
-      } catch {
-        // Already dead.
-      }
-    }
-    return killed;
+      return idMatch || rootMatch;
+    });
   }
 
   /**
@@ -2071,20 +2076,12 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    */
   private async sweepJailBase(): Promise<number> {
     const base = jailChrootBase(getFirecrackerEnv().FIRECRACKER_DATA_DIR);
-    let killed = 0;
     // Kill BEFORE reclaiming: removing a live VMM's chroot files would
     // only leak the process (it holds them open), never stop it.
-    for (const pid of await this.listProcPids()) {
-      if (!(await this.pidLooksLikeVmmBinary(pid))) continue;
+    const killed = await this.killMatchingVmms(async (pid) => {
       const root = await this.procRoot(pid);
-      if (root === null || !root.startsWith(base + sep)) continue;
-      try {
-        process.kill(pid, "SIGKILL");
-        killed++;
-      } catch {
-        // Already dead.
-      }
-    }
+      return root !== null && root.startsWith(base + sep);
+    });
     try {
       for (const dirent of await readdir(base, { withFileTypes: true })) {
         await rm(join(base, dirent.name), { recursive: true, force: true }).catch(() => {});
@@ -2099,14 +2096,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     consolePath: string,
     bytes: number = EXIT_MARKER_SCAN_BYTES,
   ): Promise<string> {
-    try {
-      const file = Bun.file(consolePath);
-      const size = file.size;
-      const from = Math.max(0, size - bytes);
-      return await file.slice(from, size).text();
-    } catch {
-      return "";
-    }
+    // Same byte-tail read as readFileTail, but collapses both the absent
+    // (null) and unreadable (throw) cases to "" — callers here never need
+    // to distinguish a missing console from an empty one.
+    return (await this.readFileTail(consolePath, bytes).catch(() => null)) ?? "";
   }
 
   /**
@@ -2177,13 +2170,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    * daemon still holds a VMM process that has not exited — the platform's
    * heartbeat pump reads this so it never masks a dead VM.
    */
-  workloadStatus(handle: WorkloadHandle): { running: boolean; uptimeMs?: number } {
+  workloadStatus(handle: WorkloadHandle): { running: boolean } {
     const vm = this.vms.get(handle.runId);
     // `exitCode === null` while the process is alive; a number once reaped.
     const running = vm?.proc != null && vm.proc.exitCode === null;
-    return vm?.bootedAt !== undefined
-      ? { running, uptimeMs: Date.now() - vm.bootedAt }
-      : { running };
+    return { running };
   }
 
   /**

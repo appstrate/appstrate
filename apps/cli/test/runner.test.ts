@@ -35,6 +35,7 @@ import {
 } from "../src/lib/runner/constants.ts";
 import {
   resolveDaemonVersion,
+  resolveInstallConfig,
   runnerUpdateCommand,
   runnerDoctor,
   pollHealth,
@@ -181,6 +182,49 @@ describe("generateRunnerToken", () => {
   it("is unique across calls", () => {
     const seen = new Set(Array.from({ length: 50 }, () => generateRunnerToken()));
     expect(seen.size).toBe(50);
+  });
+});
+
+// ─── install config: --platform-url validation ────────────────────────────
+
+describe("resolveInstallConfig — --platform-url validation", () => {
+  // Only fs is exercised (for token preservation); the URL check runs first,
+  // so invalid URLs throw before any dep is touched.
+  const deps = () =>
+    ({
+      exec: fakeExec().exec,
+      fs: fakeFs().fs,
+      http: fakeHttp({}),
+      getuid: () => 0,
+      preflight: async () => ({ ok: true, arch: "x86_64", checks: [] }),
+    }) as unknown as Parameters<typeof resolveInstallConfig>[1];
+
+  it("accepts a valid IPv4 --platform-url and normalizes it", async () => {
+    const { config } = await resolveInstallConfig(
+      { platformUrl: "http://10.0.0.5:3100/", token: "x".repeat(16), yes: true },
+      deps(),
+    );
+    expect(config.platformUrl).toBe("http://10.0.0.5:3100");
+  });
+
+  it("rejects out-of-range octets (shared IPv4 validator, like the daemon)", async () => {
+    // The old `IPV4_URL_RE` regex accepted these dotted-quad-shaped hosts,
+    // so the daemon then refused the config at boot. parseIpv4HttpUrl closes
+    // the gap — same accept/reject rules as install --runner-url.
+    for (const platformUrl of ["http://999.0.0.1", "http://256.256.256.256:3000"]) {
+      await expect(
+        resolveInstallConfig({ platformUrl, token: "x".repeat(16), yes: true }, deps()),
+      ).rejects.toThrow(/must be http\(s\):\/\/<IPv4>/);
+    }
+  });
+
+  it("rejects a non-IPv4 host --platform-url", async () => {
+    await expect(
+      resolveInstallConfig(
+        { platformUrl: "http://platform.local:3000", token: "x".repeat(16), yes: true },
+        deps(),
+      ),
+    ).rejects.toThrow(/must be http\(s\):\/\/<IPv4>/);
   });
 });
 

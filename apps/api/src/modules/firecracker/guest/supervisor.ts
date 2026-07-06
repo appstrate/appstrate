@@ -25,6 +25,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, chownSync, readFileSync, writeFileSync } from "node:fs";
+import { constants as osConstants } from "node:os";
 // Wire contract shared with the host-side producer (vm-config.ts's
 // buildGuestConfig). Type-only: erased by `bun build`, so the supervisor
 // bundle stays self-contained.
@@ -71,30 +72,6 @@ function fatal(msg: string): never {
   printExitMarker(126);
   powerOff();
 }
-
-/**
- * POSIX 128+n signal exit codes, mirroring what the docker adapter
- * reports for the same death (Docker's ExitCode follows this
- * convention). Flattening every signal to 137 would misdiagnose a
- * SIGSEGV crash as an OOM kill in the run's user-facing error.
- */
-const SIGNAL_EXIT_CODES: Record<string, number> = {
-  SIGHUP: 129,
-  SIGINT: 130,
-  SIGQUIT: 131,
-  SIGILL: 132,
-  SIGTRAP: 133,
-  SIGABRT: 134,
-  SIGBUS: 135,
-  SIGFPE: 136,
-  SIGKILL: 137,
-  SIGUSR1: 138,
-  SIGSEGV: 139,
-  SIGUSR2: 140,
-  SIGPIPE: 141,
-  SIGALRM: 142,
-  SIGTERM: 143,
-};
 
 function readConfig(): GuestConfig {
   const raw: unknown = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
@@ -215,8 +192,14 @@ function spawnAs(
     stdio: ["ignore", "inherit", "inherit"],
   });
   const exited = new Promise<number>((resolve) => {
-    proc.on("exit", (code: number | null, signal: string | null) =>
-      resolve(code ?? (signal ? (SIGNAL_EXIT_CODES[signal] ?? 137) : 1)),
+    // POSIX 128+n signal exit codes, mirroring what the docker adapter
+    // reports for the same death (Docker's ExitCode follows this
+    // convention). Preserving the signal number (vs flattening every
+    // signal to 137) keeps a SIGSEGV crash from being misdiagnosed as an
+    // OOM kill in the run's user-facing error. `os.constants.signals`
+    // supplies the name→number map; the ?? 9 fallback yields 137 (SIGKILL).
+    proc.on("exit", (code: number | null, signal: NodeJS.Signals | null) =>
+      resolve(code ?? (signal ? 128 + (osConstants.signals[signal] ?? 9) : 1)),
     );
     proc.on("error", (err: Error) => {
       log(`spawn error for ${argv[0]}: ${err.message}`);
@@ -297,7 +280,7 @@ async function main(): Promise<void> {
   // goes up (applyFirewall then drops MMDS for every uid). Only the root
   // supervisor runs at this point — no workload exists yet, so the
   // pre-firewall window is never exposed to untrusted code.
-  if (cfg.credentials?.source === "mmds") {
+  if (cfg.credentials.source === "mmds") {
     await fetchAndMergeMmdsCredentials(cfg);
   }
 

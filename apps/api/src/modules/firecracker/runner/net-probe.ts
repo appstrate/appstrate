@@ -194,30 +194,12 @@ async function logDropDiagnostics(
     dockerDnat.includes("--to-destination") &&
     dockerDnat.includes(String(target.port));
 
-  const ufw = await exec.run(["ufw", "status"]).catch(() => "");
-  const firewalld = await exec.run(["firewall-cmd", "--state"]).catch(() => "");
-  const firewallHints: string[] = [];
-  if (ufw.toLowerCase().includes("active")) {
-    firewallHints.push(
-      `ufw route allow in on ${TAP_DEVICE_PREFIX}+ out on any`,
-      `ufw allow in on ${TAP_DEVICE_PREFIX}+`,
-    );
-  }
-  if (firewalld.trim() === "running") {
-    firewallHints.push(
-      `firewall-cmd --permanent --zone=trusted --add-interface=${TAP_DEVICE_PREFIX}0`,
-      `firewall-cmd --reload`,
-    );
-  }
-
   const hint = [
     `The host can reach ${platformUrl} but the GUEST path through the nft policy cannot — this is the DNAT drop signature.`,
     platformIsDnat
       ? `The platform endpoint IS a Docker-published port: Docker's DNAT (nat/PREROUTING) rewrites the destination before the forward hook, so the forward accept MUST match the conntrack ORIGINAL tuple (\`ct original\`), NOT a plain \`ip daddr\`. Check host-net.ts buildNftScript for a reverted rule.`
       : `Confirm the forward-chain accept for the platform endpoint precedes the RFC1918/egress deny in table ip appstrate_fc.`,
-    firewallHints.length > 0
-      ? `A host firewall is active — likely needed:\n  ${firewallHints.join("\n  ")}`
-      : `No ufw/firewalld detected — the drop is inside table ip appstrate_fc, not a host firewall.`,
+    `If table ip appstrate_fc checks out, verify a host firewall is not also dropping forwarded ${TAP_DEVICE_PREFIX}* traffic.`,
   ].join(" ");
 
   logger[level]("guest→platform path verification FAILED", {

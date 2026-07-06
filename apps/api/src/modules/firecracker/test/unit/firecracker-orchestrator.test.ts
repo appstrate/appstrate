@@ -9,7 +9,7 @@
  * harness on a real KVM host (scripts/firecracker-dev/smoke.ts).
  */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,7 +17,13 @@ import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "..
 import { FirecrackerOrchestrator, type FirecrackerOrchestratorDeps } from "../../orchestrator.ts";
 import { deriveJailId } from "../../jail.ts";
 import { workloadSpecSchema } from "../../runner/protocol.ts";
-import type { HostExec } from "../../host-net.ts";
+import { fakeHostExec as fakeExec, defaultRespond } from "../helpers/fake-host-exec.ts";
+import {
+  installFirecrackerDataDir,
+  readyOrchestrator,
+  reservedIndexes,
+  vmsOf as vmsOfInternal,
+} from "../helpers/orchestrator-fixture.ts";
 
 /** The VmRecord fields these tests assert on (private map, read via Reflect). */
 interface VmRecordView {
@@ -26,89 +32,15 @@ interface VmRecordView {
   exitedAt?: number;
 }
 
-/** The orchestrator's private per-run record map, via the Reflect precedent. */
+/** Typed view over the shared Reflect accessor for this file's assertions. */
 function vmsOf(orch: FirecrackerOrchestrator): Map<string, VmRecordView> {
-  return Reflect.get(orch, "vms") as Map<string, VmRecordView>;
+  return vmsOfInternal<VmRecordView>(orch);
 }
 
-interface RecordedCall {
-  cmd: string[];
-  stdin?: string;
-}
-
-function fakeExec(respond: (cmd: string[]) => string | Error = defaultRespond): {
-  exec: HostExec;
-  calls: RecordedCall[];
-} {
-  const calls: RecordedCall[] = [];
-  return {
-    calls,
-    exec: {
-      async run(cmd, opts) {
-        calls.push({ cmd, ...(opts?.stdin !== undefined ? { stdin: opts.stdin } : {}) });
-        const result = respond(cmd);
-        if (result instanceof Error) throw result;
-        return result;
-      },
-    },
-  };
-}
-
-/** All host commands succeed; `ip -j link show` reports no TAP devices. */
-function defaultRespond(cmd: string[]): string {
-  return cmd.join(" ") === "ip -j link show" ? "[]" : "";
-}
-
-const ORIGINAL_DATA_DIR = process.env.FIRECRACKER_DATA_DIR;
-const ORIGINAL_JAILER = process.env.FIRECRACKER_JAILER;
 let dataDir: string;
-
-beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "fc-orch-test-"));
-  process.env.FIRECRACKER_DATA_DIR = dataDir;
-  // These tests pin the direct-spawn contract; jail-mode boundary
-  // behavior has its own describe below (with a SHORT data dir — the
-  // in-chroot API socket path is AF_UNIX-length-guarded and macOS
-  // tmpdirs are long).
-  process.env.FIRECRACKER_JAILER = "off";
-  _resetCacheForTesting();
+installFirecrackerDataDir("fc-orch-test-", (d) => {
+  dataDir = d;
 });
-
-afterEach(async () => {
-  await rm(dataDir, { recursive: true, force: true });
-});
-
-afterAll(() => {
-  if (ORIGINAL_DATA_DIR === undefined) delete process.env.FIRECRACKER_DATA_DIR;
-  else process.env.FIRECRACKER_DATA_DIR = ORIGINAL_DATA_DIR;
-  if (ORIGINAL_JAILER === undefined) delete process.env.FIRECRACKER_JAILER;
-  else process.env.FIRECRACKER_JAILER = ORIGINAL_JAILER;
-  _resetCacheForTesting();
-});
-
-/**
- * The initialization gate is what the fail-closed tests below bypass: a
- * real initialize() needs Linux + KVM + built artifacts. Everything past
- * the gate is host-command driven and fully faked.
- */
-function readyOrchestrator(
-  exec: HostExec,
-  deps: Omit<FirecrackerOrchestratorDeps, "hostExec"> = {},
-): FirecrackerOrchestrator {
-  const orch = new FirecrackerOrchestrator({ hostExec: exec, ...deps });
-  Reflect.set(orch, "initialized", true);
-  return orch;
-}
-
-/**
- * The reserved-set is the allocator's actual accounting — read it
- * directly rather than inferring releases from "which index does the
- * next run get".
- */
-function reservedIndexes(orch: FirecrackerOrchestrator): Set<number> {
-  const allocator = Reflect.get(orch, "allocator") as object;
-  return Reflect.get(allocator, "inUse") as Set<number>;
-}
 
 describe("fail-closed initialization gate", () => {
   it("refuses to create a boundary when initialize() never succeeded", async () => {

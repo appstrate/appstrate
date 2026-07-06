@@ -229,27 +229,48 @@ const IPTABLES_FORWARD_RULES: string[][] = [
   ],
 ];
 
+/**
+ * Idempotent iptables FORWARD mutation gated on a `-C` existence probe.
+ * The acting branch differs by action so the rule set converges either
+ * way: an insert (`-I`) runs only when the probe MISSES (rule absent), a
+ * delete (`-D`) only when the probe HITS (rule present). The apply
+ * command's own failure is handed to `onApplyError` (default: swallow) —
+ * teardown ignores it, setup warns loudly.
+ */
+async function probeThenApply(
+  exec: HostExec,
+  rule: string[],
+  action: "-I" | "-D",
+  onApplyError: (err: unknown) => void = () => {},
+): Promise<void> {
+  let present: boolean;
+  try {
+    await exec.run(["iptables", "-C", "FORWARD", ...rule]);
+    present = true;
+  } catch {
+    present = false;
+  }
+  if (action === "-I" ? present : !present) return; // Already converged.
+  await exec.run(["iptables", action, "FORWARD", ...rule]).catch(onApplyError);
+}
+
 async function allowForwardInIptables(exec: HostExec): Promise<void> {
   for (const rule of IPTABLES_FORWARD_RULES) {
-    try {
-      await exec.run(["iptables", "-C", "FORWARD", ...rule]);
-    } catch {
-      // Still best-effort, but never silent: on a dockerd host (FORWARD
-      // policy DROP — the exact pipeline this function coexists with) a
-      // failed insert means guest egress is fully broken, and the only
-      // symptom would be opaque in-run network timeouts. Production runs
-      // the daemon as root (systemd unit) so this only fails on odd
-      // hosts; in unprivileged dev the `sudo -n` fallback needs a
-      // sudoers grant covering iptables too, not just ip/nft/sysctl
-      // (see FIRECRACKER.md "Requirements & privileges").
-      await exec.run(["iptables", "-I", "FORWARD", ...rule]).catch((err) => {
-        logger.warn(
-          "Could not insert the iptables FORWARD accept for TAP traffic — " +
-            "guest egress will be blocked on hosts where iptables owns FORWARD (e.g. dockerd)",
-          { rule: rule.join(" "), error: getErrorMessage(err) },
-        );
-      });
-    }
+    // Still best-effort, but never silent: on a dockerd host (FORWARD
+    // policy DROP — the exact pipeline this function coexists with) a
+    // failed insert means guest egress is fully broken, and the only
+    // symptom would be opaque in-run network timeouts. Production runs
+    // the daemon as root (systemd unit) so this only fails on odd
+    // hosts; in unprivileged dev the `sudo -n` fallback needs a
+    // sudoers grant covering iptables too, not just ip/nft/sysctl
+    // (see FIRECRACKER.md "Requirements & privileges").
+    await probeThenApply(exec, rule, "-I", (err) => {
+      logger.warn(
+        "Could not insert the iptables FORWARD accept for TAP traffic — " +
+          "guest egress will be blocked on hosts where iptables owns FORWARD (e.g. dockerd)",
+        { rule: rule.join(" "), error: getErrorMessage(err) },
+      );
+    });
   }
 }
 
@@ -264,12 +285,7 @@ export async function teardownHostNetwork(exec: HostExec): Promise<void> {
   // errors are swallowed like every other teardown step here.
   await exec.run(["nft", "delete", "table", "ip", "appstrate_fc"]).catch(() => {});
   for (const rule of IPTABLES_FORWARD_RULES) {
-    try {
-      await exec.run(["iptables", "-C", "FORWARD", ...rule]);
-    } catch {
-      continue; // Rule absent — nothing to remove.
-    }
-    await exec.run(["iptables", "-D", "FORWARD", ...rule]).catch(() => {});
+    await probeThenApply(exec, rule, "-D");
   }
 }
 

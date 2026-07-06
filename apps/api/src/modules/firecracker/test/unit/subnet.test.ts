@@ -36,7 +36,6 @@ describe("subnetForIndex", () => {
     expect(s.hostIp).toBe("10.231.0.5");
     expect(s.guestIp).toBe("10.231.0.6");
     expect(s.tapDevice).toBe("afc1");
-    expect(s.netmask).toBe("255.255.255.252");
   });
 
   it("rolls the third octet every 64 blocks", () => {

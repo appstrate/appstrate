@@ -15,7 +15,7 @@
  *
  * At daemon boot (before the orchestrator's initialize()) the resolver
  * downloads the manifest + the two files for the current arch, verifies
- * SHA256 while streaming, decompresses the rootfs (zstd), and installs
+ * their SHA256, decompresses the rootfs (zstd), and installs
  * both atomically (tmp write + rename) into the paths the engine reads
  * (FIRECRACKER_KERNEL_PATH / FIRECRACKER_ROOTFS_PATH). A version marker
  * records what is installed so subsequent boots skip the download.
@@ -117,7 +117,7 @@ export interface ArtifactsConfig {
   kernelPath: string;
   /** FIRECRACKER_ROOTFS_PATH — where the engine reads the guest rootfs. */
   rootfsPath: string;
-  /** FIRECRACKER_ARTIFACTS_BASE_URL — GH Release download base (optional). */
+  /** GH Release download base — defaults to {@link DEFAULT_ARTIFACTS_BASE_URL}. */
   baseUrl?: string;
   /** FIRECRACKER_ARTIFACTS_VERSION — pin a release (optional). */
   version?: string;
@@ -242,44 +242,18 @@ interface DownloadResult {
 }
 
 /**
- * Fetch `url`, hashing every chunk as it arrives (verify-while-streaming),
- * and return the assembled bytes plus the hex digest. The caller compares
- * the digest against the manifest before trusting the bytes.
+ * Fetch `url`, buffer the whole response, and return the bytes plus their
+ * hex sha256 digest. The caller compares the digest against the manifest
+ * before trusting the bytes.
  */
 async function downloadHashed(fetchFn: typeof fetch, url: string): Promise<DownloadResult> {
   const res = await fetchFn(url);
   if (!res.ok) {
     throw new Error(`GET ${url} → HTTP ${res.status}`);
   }
-  const hasher = new Bun.CryptoHasher("sha256");
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  const body = res.body;
-  if (body) {
-    const reader = body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        hasher.update(value);
-        chunks.push(value);
-        total += value.byteLength;
-      }
-    }
-  } else {
-    // Fallback for responses without a streaming body.
-    const buf = new Uint8Array(await res.arrayBuffer());
-    hasher.update(buf);
-    chunks.push(buf);
-    total = buf.byteLength;
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { bytes, sha256: hasher.digest("hex") };
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+  return { bytes, sha256 };
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +345,7 @@ export async function ensureGuestArtifacts(
     // protocol) and we could not fetch: the daemon cannot run VMs.
     throw new Error(
       `Firecracker guest artifacts are ${present ? `installed at an incompatible guest protocol (daemon speaks ${GUEST_PROTOCOL_VERSION})` : "missing"} and could not be downloaded: ${getErrorMessage(err)}. ` +
-        `Set FIRECRACKER_ARTIFACTS_BASE_URL / FIRECRACKER_ARTIFACTS_VERSION to a reachable release, ` +
+        `Pin FIRECRACKER_ARTIFACTS_VERSION to a reachable release, ` +
         `build them locally with \`bun run firecracker:build\` (then set FIRECRACKER_ARTIFACTS_LOCAL=1), ` +
         `or check network access to ${baseUrl}.`,
     );

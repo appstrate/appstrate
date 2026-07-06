@@ -15,41 +15,17 @@
  * asserted here is the orchestrator's contract, not VMM behavior.
  */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../runner/host-env.ts";
 import { FirecrackerOrchestrator } from "../../orchestrator.ts";
-import type { HostExec } from "../../host-net.ts";
-
-interface RecordedCall {
-  cmd: string[];
-  stdin?: string;
-}
-
-function fakeExec(respond: (cmd: string[]) => string | Error = defaultRespond): {
-  exec: HostExec;
-  calls: RecordedCall[];
-} {
-  const calls: RecordedCall[] = [];
-  return {
-    calls,
-    exec: {
-      async run(cmd, opts) {
-        calls.push({ cmd, ...(opts?.stdin !== undefined ? { stdin: opts.stdin } : {}) });
-        const result = respond(cmd);
-        if (result instanceof Error) throw result;
-        return result;
-      },
-    },
-  };
-}
-
-/** All host commands succeed; `ip -j link show` reports no TAP devices. */
-function defaultRespond(cmd: string[]): string {
-  return cmd.join(" ") === "ip -j link show" ? "[]" : "";
-}
+import { fakeHostExec as fakeExec } from "../helpers/fake-host-exec.ts";
+import {
+  installFirecrackerDataDir,
+  readyOrchestrator,
+  getVm as getVmInternal,
+} from "../helpers/orchestrator-fixture.ts";
 
 type BunProcess = ReturnType<typeof Bun.spawn>;
 
@@ -69,34 +45,19 @@ interface TestVmRecord {
   exitNonce?: string;
 }
 
+/** Typed view over the shared Reflect accessor for this file's assertions. */
 function getVm(orch: FirecrackerOrchestrator, runId: string): TestVmRecord {
-  const vms = Reflect.get(orch, "vms") as Map<string, TestVmRecord>;
-  const vm = vms.get(runId);
-  if (!vm) throw new Error(`no VmRecord for ${runId}`);
-  return vm;
+  return getVmInternal<TestVmRecord>(orch, runId);
 }
 
-function readyOrchestrator(exec: HostExec): FirecrackerOrchestrator {
-  const orch = new FirecrackerOrchestrator({ hostExec: exec });
-  Reflect.set(orch, "initialized", true);
-  return orch;
-}
-
-const ORIGINAL_DATA_DIR = process.env.FIRECRACKER_DATA_DIR;
-const ORIGINAL_JAILER = process.env.FIRECRACKER_JAILER;
-let dataDir: string;
 /** Real subprocesses standing in for VMMs — always reaped in afterEach. */
 const spawned: BunProcess[] = [];
 /** Extra temp dirs (decoy binaries) — outside dataDir so the sweep never counts them. */
 const extraDirs: string[] = [];
 
-beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "fc-life-test-"));
-  process.env.FIRECRACKER_DATA_DIR = dataDir;
-  // Direct-spawn contract under test — jail-mode boundary shapes are
-  // covered in firecracker-orchestrator.test.ts (short data dir).
-  process.env.FIRECRACKER_JAILER = "off";
-  _resetCacheForTesting();
+let dataDir: string;
+installFirecrackerDataDir("fc-life-test-", (d) => {
+  dataDir = d;
 });
 
 afterEach(async () => {
@@ -108,19 +69,10 @@ afterEach(async () => {
     }
   }
   spawned.length = 0;
-  await rm(dataDir, { recursive: true, force: true });
   for (const dir of extraDirs) {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
   extraDirs.length = 0;
-});
-
-afterAll(() => {
-  if (ORIGINAL_DATA_DIR === undefined) delete process.env.FIRECRACKER_DATA_DIR;
-  else process.env.FIRECRACKER_DATA_DIR = ORIGINAL_DATA_DIR;
-  if (ORIGINAL_JAILER === undefined) delete process.env.FIRECRACKER_JAILER;
-  else process.env.FIRECRACKER_JAILER = ORIGINAL_JAILER;
-  _resetCacheForTesting();
 });
 
 /**

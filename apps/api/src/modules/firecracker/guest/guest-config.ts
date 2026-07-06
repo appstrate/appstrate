@@ -36,11 +36,9 @@ export interface GuestConfig {
   run_id: string;
   /**
    * How the supervisor obtains the run's secrets — see
-   * {@link GuestCredentialsConfig}. Optional on the wire: a config without
-   * it (older producer, hand-written) is treated as `"inline"` (secrets on
-   * the drive). `buildGuestConfig` always emits it.
+   * {@link GuestCredentialsConfig}. Always emitted by `buildGuestConfig`.
    */
-  credentials?: GuestCredentialsConfig;
+  credentials: GuestCredentialsConfig;
   /**
    * Per-run random nonce the supervisor embeds in its serial-console exit
    * marker (`APPSTRATE_EXIT:<nonce>:<code>`). Workloads share the console

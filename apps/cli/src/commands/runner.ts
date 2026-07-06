@@ -51,9 +51,7 @@ import {
   type RunnerConfig,
 } from "../lib/runner/config-files.ts";
 import { downloadDaemon, installFirecracker } from "../lib/runner/download.ts";
-
-/** IPv4-literal platform URL — guests have no DNS (mirrors runner/env.ts). */
-const IPV4_URL_RE = /^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\/?$/;
+import { parseIpv4HttpUrl } from "../lib/install/os.ts";
 
 /** Shared DI surface for every runner subcommand. */
 export interface RunnerDeps {
@@ -160,8 +158,12 @@ export async function runnerInstallCommand(opts: RunnerInstallOptions = {}): Pro
 
 type TokenSource = "flag" | "preserved" | "generated";
 
-/** Resolve + validate the install config from flags / prompts / existing env. */
-async function resolveInstallConfig(
+/**
+ * Resolve + validate the install config from flags / prompts / existing env.
+ * Exported for unit testing (the --platform-url validation is the interesting
+ * bit — it shares one IPv4-URL validator with `install --runner-url`).
+ */
+export async function resolveInstallConfig(
   opts: RunnerInstallOptions,
   d: ResolvedDeps,
 ): Promise<{ config: RunnerConfig; tokenSource: TokenSource }> {
@@ -181,13 +183,14 @@ async function resolveInstallConfig(
     }
     platformUrl = (await askText("Platform URL the daemon reaches (http://<IPv4>[:port])")).trim();
   }
-  if (!IPV4_URL_RE.test(platformUrl)) {
+  const parsedPlatformUrl = parseIpv4HttpUrl(platformUrl);
+  if (!parsedPlatformUrl) {
     throw new Error(
       `Invalid --platform-url "${platformUrl}" — must be http(s)://<IPv4>[:port]. ` +
         "Firecracker guests have no DNS resolver, so a hostname would fail inside every microVM.",
     );
   }
-  platformUrl = platformUrl.replace(/\/+$/, "");
+  platformUrl = parsedPlatformUrl.url;
 
   // Token: flag > existing env file > freshly generated (printed once).
   let token = opts.token?.trim();

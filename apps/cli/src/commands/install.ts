@@ -52,6 +52,7 @@ import {
   describeProcessOnPort,
   detectLanIpv4,
   isIpv4,
+  parseIpv4HttpUrl,
   runCommand,
 } from "../lib/install/os.ts";
 import { generateRunnerToken } from "../lib/runner/config-files.ts";
@@ -1071,9 +1072,6 @@ export interface RunBackendResolverDeps {
   generateToken?: () => string;
 }
 
-/** IPv4-literal URL — guests have no DNS (mirrors `IPV4_URL_RE` in commands/runner.ts). */
-const IPV4_URL_RE = /^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\/?$/;
-
 /** Resolve + validate the runner token (flag > freshly minted). */
 function resolveRunnerToken(
   flagToken: string | undefined,
@@ -1258,23 +1256,17 @@ export async function resolveRunBackend(
   // Runner daemon URL: flag (full URL) > interactive prompt for the KVM host IP.
   let runnerUrl = inputs.runnerUrl?.trim();
   if (runnerUrl) {
-    runnerUrl = runnerUrl.replace(/\/+$/, "");
-    if (!IPV4_URL_RE.test(runnerUrl)) {
+    // One shared validator with `runner install --platform-url`: it rejects a
+    // non-IPv4 host AND out-of-range octets (`300.0.0.1`, `256.256.256.256`),
+    // so a bogus literal fails here with the DNS hint, not inside a guest —
+    // and never writes a config the daemon then refuses at boot.
+    const parsed = parseIpv4HttpUrl(runnerUrl);
+    if (!parsed) {
       throw new Error(
         `Invalid --runner-url "${runnerUrl}" — must be http(s)://<IPv4>[:port]. ${IPV4_HINT}`,
       );
     }
-    // The regex only shapes the host as four dotted numbers — it happily
-    // accepts out-of-range octets like `300.0.0.1`. Range-check the host
-    // with `isIpv4` so a bogus literal fails here with the DNS hint, not
-    // inside a guest. Extract via regex (not `new URL`, which throws its own
-    // opaque "cannot be parsed" on out-of-range octets before we can).
-    const runnerHost = runnerUrl.replace(/^https?:\/\//, "").replace(/:\d+$/, "");
-    if (!isIpv4(runnerHost)) {
-      throw new Error(
-        `Invalid --runner-url "${runnerUrl}" — the host must be an IPv4 literal (e.g. 10.0.0.9). ${IPV4_HINT}`,
-      );
-    }
+    runnerUrl = parsed.url;
   } else {
     const runnerIp = (await promptText("Runner (KVM host) LAN IPv4", "")).trim();
     if (!isIpv4(runnerIp)) {

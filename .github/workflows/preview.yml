@@ -8,9 +8,6 @@ name: Preview Images
 # Opt-in per PR: add the `preview` label. A labeled PR re-publishes on every
 # push. `workflow_dispatch` builds any ref on demand. amd64 only (the staging
 # server is x86_64). See docs/deployment/PREVIEW_DEPLOY.md.
-#
-# NOTE: this REPLACES the temporary preview-images.yml (branch-pinned, dies at
-# merge) — do not delete that file here; it is still in use on the branch.
 
 on:
   workflow_dispatch:

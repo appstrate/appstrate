@@ -24,6 +24,13 @@
  */
 
 import { z } from "zod";
+import type {
+  IsolationBoundary,
+  SidecarEndpoints,
+  WorkloadResources,
+  WorkloadSpec,
+  WorkspaceHandle,
+} from "@appstrate/core/platform-types";
 
 /**
  * Bumped on any wire-incompatible change. The client refuses to start
@@ -34,6 +41,18 @@ export const RUNNER_PROTOCOL_VERSION = 1;
 // ---------------------------------------------------------------------------
 // Platform-type mirrors
 // ---------------------------------------------------------------------------
+//
+// These payloads carry `@appstrate/core/platform-types` shapes that the
+// SAME platform codebase both produces (this client) and consumes (the
+// daemon, which hands them straight to its in-process orchestrator). A
+// strict, field-by-field mirror would strip any additive core field before
+// it reached the orchestrator and turn every core shape change into a
+// lockstep daemon redeploy. So — exactly as `sidecarLaunchSpecSchema` has
+// always done — they are `z.looseObject`s that pin ONLY the fields carrying
+// real semantics (a discriminant, a validated bound) and pass everything
+// else through untouched, cast to the platform type. The one exception is
+// the security-relevant `runId` path guard (see `RUN_ID_RE`), kept strict
+// and never loosened.
 
 export const workloadHandleSchema = z.object({
   id: z.string().min(1),
@@ -41,47 +60,31 @@ export const workloadHandleSchema = z.object({
   role: z.string().min(1),
 });
 
-export const workloadResourcesSchema = z.object({
-  memoryBytes: z.number().int().positive(),
-  nanoCpus: z.number().int().positive(),
-  pidsLimit: z.number().int().positive().optional(),
-});
+export const workloadResourcesSchema = z.looseObject({}) as unknown as z.ZodType<WorkloadResources>;
 
-export const workloadSpecSchema = z.object({
-  runId: z.string().min(1),
-  role: z.string().min(1),
-  image: z.string(),
-  env: z.record(z.string(), z.string()),
+export const workloadSpecSchema = z.looseObject({
   resources: workloadResourcesSchema,
-  egress: z.boolean().optional(),
+  // Host-side lifetime ceiling (B2): the one spec field the daemon must
+  // validate — a non-positive bound would silently disable the safety kill.
   maxLifetimeSeconds: z.number().int().positive().optional(),
-});
+}) as unknown as z.ZodType<WorkloadSpec>;
 
-export const workspaceHandleSchema = z.union([
-  z.object({ kind: z.literal("volume"), name: z.string().min(1) }),
-  z.object({ kind: z.literal("directory"), path: z.string().min(1) }),
-]);
+export const workspaceHandleSchema = z.looseObject({
+  // Consumers branch on `kind` (docker volume vs guest directory) — pin it.
+  kind: z.string().min(1),
+}) as unknown as z.ZodType<WorkspaceHandle>;
 
-export const sidecarEndpointsSchema = z.object({
-  sidecarUrl: z.string(),
-  llmProxyUrl: z.string(),
-  forwardProxyUrl: z.string(),
-  noProxy: z.string(),
-});
+export const sidecarEndpointsSchema = z.looseObject({}) as unknown as z.ZodType<SidecarEndpoints>;
 
-export const isolationBoundarySchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
+export const isolationBoundarySchema = z.looseObject({
   workspace: workspaceHandleSchema,
   sidecarEndpoints: sidecarEndpointsSchema,
-});
+}) as unknown as z.ZodType<IsolationBoundary>;
 
 /**
- * `SidecarLaunchSpec` mirror. Loose on purpose: the spec is produced and
- * consumed by the same platform codebase on both ends — the daemon only
- * needs to pin the fields it inspects (`runToken`) and forwards the rest
- * untouched. A strict mirror would turn every additive core field into a
- * lockstep daemon redeploy.
+ * `SidecarLaunchSpec` mirror. Loose like the shapes above — the daemon
+ * only needs to pin the field it inspects (`runToken`) and forwards the
+ * rest untouched.
  */
 export const sidecarLaunchSpecSchema = z.looseObject({
   runToken: z.string().min(1),
@@ -208,11 +211,9 @@ export const logLineSchema = z.object({
  * `running` reflects whether the daemon still holds a live VMM process for
  * the workload. The platform's boot-phase heartbeat pump synthesises
  * heartbeats ONLY while this is `true`, so a dead VM is never masked.
- * `uptimeMs` is present once the microVM has booted.
  */
 export const workloadStatusResponseSchema = z.object({
   running: z.boolean(),
-  uptimeMs: z.number().int().nonnegative().optional(),
 });
 
 /** Default console tail served when `?tailBytes=` is absent or malformed. */

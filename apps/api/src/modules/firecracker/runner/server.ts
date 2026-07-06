@@ -57,7 +57,6 @@ const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
 /** Liveness snapshot returned by {@link RunnerOrchestrator.workloadStatus}. */
 export interface WorkloadStatus {
   running: boolean;
-  uptimeMs?: number;
 }
 
 /**

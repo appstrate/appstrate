@@ -26,13 +26,14 @@ export interface RunSubnet {
   readonly hostIp: string;
   /** Guest eth0 IP. */
   readonly guestIp: string;
-  /** Netmask of the /30. */
-  readonly netmask: "255.255.255.252";
   /** Deterministic guest MAC derived from the index. */
   readonly guestMac: string;
 }
 
 export const TAP_DEVICE_PREFIX = "afc";
+
+/** Netmask of every /30 block (a fixed invariant of the allocation). */
+export const SUBNET_NETMASK = "255.255.255.252";
 
 /** Highest usable index: /16 holds 16384 /30 blocks; keep the last /24 (indexes 16320+) reserved. */
 const MAX_INDEX = 16319;
@@ -74,7 +75,6 @@ export function subnetForIndex(cidr: string, index: number): RunSubnet {
     tapDevice: `${TAP_DEVICE_PREFIX}${index}`,
     hostIp: `${a}.${b}.${oct3}.${oct4 + 1}`,
     guestIp: `${a}.${b}.${oct3}.${oct4 + 2}`,
-    netmask: "255.255.255.252",
     // Locally-administered, unicast prefix 06 (mirrors the Firecracker
     // getting-started convention) + the index spread over the low bytes.
     guestMac: `06:00:ac:00:${hex(index >> 8)}:${hex(index & 0xff)}`,

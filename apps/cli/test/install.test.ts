@@ -1422,6 +1422,25 @@ describe("resolveRunBackend — non-interactive firecracker validation matrix", 
       ),
     ).rejects.toThrow(/must be http\(s\):\/\/<IPv4>/);
   });
+
+  it("rejects an out-of-range-octet --runner-url (shared IPv4 validator)", async () => {
+    // The old `IPV4_URL_RE` regex accepted these dotted-quad-shaped hosts;
+    // the shared parseIpv4HttpUrl (like the daemon) range-checks each octet.
+    for (const runnerUrl of ["http://300.0.0.1:3100", "http://256.256.256.256:3000"]) {
+      await expect(
+        resolveRunBackend(
+          {
+            runAdapter: "firecracker",
+            runnerUrl,
+            runnerToken: "x".repeat(16),
+            appPort: 3000,
+            nonInteractive: true,
+          },
+          {},
+        ),
+      ).rejects.toThrow(/must be http\(s\):\/\/<IPv4>/);
+    }
+  });
 });
 
 describe("resolveRunBackend — firecracker same-host", () => {

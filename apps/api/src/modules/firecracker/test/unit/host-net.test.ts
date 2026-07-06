@@ -8,32 +8,9 @@ import {
   listTapDevices,
   setupHostNetwork,
   teardownHostNetwork,
-  type HostExec,
 } from "../../host-net.ts";
 import { subnetForIndex } from "../../subnet.ts";
-
-interface RecordedCall {
-  cmd: string[];
-  stdin?: string;
-}
-
-function fakeExec(respond: (cmd: string[]) => string | Error = () => ""): {
-  exec: HostExec;
-  calls: RecordedCall[];
-} {
-  const calls: RecordedCall[] = [];
-  return {
-    calls,
-    exec: {
-      async run(cmd, opts) {
-        calls.push({ cmd, ...(opts?.stdin !== undefined ? { stdin: opts.stdin } : {}) });
-        const result = respond(cmd);
-        if (result instanceof Error) throw result;
-        return result;
-      },
-    },
-  };
-}
+import { fakeHostExec as fakeExec } from "../helpers/fake-host-exec.ts";
 
 const PARAMS = {
   subnetCidr: "10.231.0.0/16",

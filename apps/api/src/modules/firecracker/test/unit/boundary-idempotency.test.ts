@@ -19,46 +19,24 @@
  * faked, the initialization gate is bypassed via Reflect.
  */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../runner/host-env.ts";
+import { describe, it, expect } from "bun:test";
 import { FirecrackerOrchestrator } from "../../orchestrator.ts";
 import { BoundaryExistsError } from "../../runner/protocol.ts";
 import type { HostExec } from "../../host-net.ts";
-
-interface RecordedCall {
-  cmd: string[];
-  stdin?: string;
-}
-
-function fakeExec(respond: (cmd: string[]) => string | Error = defaultRespond): {
-  exec: HostExec;
-  calls: RecordedCall[];
-} {
-  const calls: RecordedCall[] = [];
-  return {
-    calls,
-    exec: {
-      async run(cmd, opts) {
-        calls.push({ cmd, ...(opts?.stdin !== undefined ? { stdin: opts.stdin } : {}) });
-        const result = respond(cmd);
-        if (result instanceof Error) throw result;
-        return result;
-      },
-    },
-  };
-}
-
-/** All host commands succeed; `ip -j link show` reports no TAP devices. */
-function defaultRespond(cmd: string[]): string {
-  return cmd.join(" ") === "ip -j link show" ? "[]" : "";
-}
+import {
+  fakeHostExec as fakeExec,
+  defaultRespond,
+  type RecordedCall,
+} from "../helpers/fake-host-exec.ts";
+import {
+  installFirecrackerDataDir,
+  readyOrchestrator as readyOrch,
+  reservedIndexes,
+  vmCount,
+} from "../helpers/orchestrator-fixture.ts";
 
 function readyOrchestrator(exec: HostExec): FirecrackerOrchestrator {
-  const orch = new FirecrackerOrchestrator({ hostExec: exec });
-  Reflect.set(orch, "initialized", true);
+  const orch = readyOrch(exec);
   // Teardown retry backoff shrunk from the production 200ms base — the
   // retry-path tests below exercise up to 3 attempts.
   Reflect.set(orch, "cleanupRetryBaseMs", 1);
@@ -75,43 +53,7 @@ function tapDeletes(calls: RecordedCall[], device: string): number {
   return calls.filter((c) => c.cmd.join(" ") === `ip link del ${device}`).length;
 }
 
-/**
- * The reserved-set is the allocator's actual accounting — read it directly
- * (Reflect precedent from firecracker-orchestrator.test.ts).
- */
-function reservedIndexes(orch: FirecrackerOrchestrator): Set<number> {
-  const allocator = Reflect.get(orch, "allocator") as object;
-  return Reflect.get(allocator, "inUse") as Set<number>;
-}
-
-function vmCount(orch: FirecrackerOrchestrator): number {
-  return (Reflect.get(orch, "vms") as Map<string, unknown>).size;
-}
-
-const ORIGINAL_DATA_DIR = process.env.FIRECRACKER_DATA_DIR;
-const ORIGINAL_JAILER = process.env.FIRECRACKER_JAILER;
-let dataDir: string;
-
-beforeEach(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "fc-bound-test-"));
-  process.env.FIRECRACKER_DATA_DIR = dataDir;
-  // Direct-spawn contract — jail-mode boundary shapes are covered in
-  // firecracker-orchestrator.test.ts.
-  process.env.FIRECRACKER_JAILER = "off";
-  _resetCacheForTesting();
-});
-
-afterEach(async () => {
-  await rm(dataDir, { recursive: true, force: true });
-});
-
-afterAll(() => {
-  if (ORIGINAL_DATA_DIR === undefined) delete process.env.FIRECRACKER_DATA_DIR;
-  else process.env.FIRECRACKER_DATA_DIR = ORIGINAL_DATA_DIR;
-  if (ORIGINAL_JAILER === undefined) delete process.env.FIRECRACKER_JAILER;
-  else process.env.FIRECRACKER_JAILER = ORIGINAL_JAILER;
-  _resetCacheForTesting();
-});
+installFirecrackerDataDir("fc-bound-test-");
 
 describe("createIsolationBoundary replay guard", () => {
   it("rejects a sequential replay for the same runId with exactly one allocation", async () => {

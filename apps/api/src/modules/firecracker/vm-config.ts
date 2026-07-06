@@ -13,7 +13,7 @@
  *     `apps/api/src/modules/firecracker/guest/supervisor.ts` inside the microVM.
  */
 
-import type { RunSubnet } from "./subnet.ts";
+import { SUBNET_NETMASK, type RunSubnet } from "./subnet.ts";
 // The config-drive wire contract is shared with its in-guest consumer —
 // single definition next to the supervisor, imported type-only.
 import type { GuestConfig } from "./guest/guest-config.ts";
@@ -83,7 +83,7 @@ export function buildKernelBootArgs(subnet: RunSubnet): string {
     // rules are IPv4-only — no IPv6 in the guest means no unfiltered v6
     // path to link-local host services.
     "ipv6.disable=1",
-    `ip=${subnet.guestIp}::${subnet.hostIp}:${subnet.netmask}::eth0:off`,
+    `ip=${subnet.guestIp}::${subnet.hostIp}:${SUBNET_NETMASK}::eth0:off`,
     "init=/sbin/appstrate-init",
   ].join(" ");
 }
@@ -114,8 +114,8 @@ export interface BuildVmConfigInput {
 
 /** MMDS default link-local service address (Firecracker default). */
 export const MMDS_IPV4_ADDRESS = "169.254.169.254";
-/** The guest NIC MMDS is bound to — must match the `network-interfaces` iface_id. */
-export const MMDS_NETWORK_INTERFACE = "eth0";
+/** The guest NIC MMDS is bound to — wired into the `network-interfaces` iface_id below. */
+const MMDS_NETWORK_INTERFACE = "eth0";
 
 /**
  * Per-device token-bucket rate limiters (Firecracker's dual-bucket
@@ -166,7 +166,7 @@ export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown
     ],
     "network-interfaces": [
       {
-        iface_id: "eth0",
+        iface_id: MMDS_NETWORK_INTERFACE,
         guest_mac: input.subnet.guestMac,
         host_dev_name: input.subnet.tapDevice,
         rx_rate_limiter: NET_RATE_LIMITER,
@@ -230,15 +230,14 @@ export function vmSizing(
  */
 export function parseExitMarker(consoleTail: string, nonce: string): number | null {
   if (nonce.length === 0) return null;
-  const marker = new RegExp(`APPSTRATE_EXIT:${escapeRegExp(nonce)}:(\\d+)`);
+  // The nonce is a daemon-generated random hex token (randomBytes(...).
+  // toString("hex") in orchestrator.ts) — [0-9a-f] only, no regex
+  // metacharacters — so it interpolates into the pattern directly.
+  const marker = new RegExp(`APPSTRATE_EXIT:${nonce}:(\\d+)`);
   let last: number | null = null;
   for (const line of consoleTail.split("\n")) {
     const match = marker.exec(line);
     if (match) last = Number(match[1]);
   }
   return last;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

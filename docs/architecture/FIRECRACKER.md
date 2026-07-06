@@ -376,9 +376,9 @@ A released daemon does **not** build artifacts on the host. At boot, BEFORE
 1. **Skip** when the files already exist and — if `FIRECRACKER_ARTIFACTS_VERSION`
    is pinned — the on-disk version marker matches. Otherwise:
 2. **Download** `firecracker-artifacts-manifest.json`, `vmlinux-<arch>`, and
-   `rootfs-<arch>.ext4.zst` from `FIRECRACKER_ARTIFACTS_BASE_URL` (default: this
-   repo's GitHub Releases — `latest`, or `download/v<version>` when pinned).
-3. **Verify** SHA256 while streaming; **decompress** the rootfs with Bun's
+   `rootfs-<arch>.ext4.zst` from this repo's GitHub Releases (`latest`, or
+   `download/v<version>` when pinned).
+3. **Verify** SHA256 after download; **decompress** the rootfs with Bun's
    native zstd (`Bun.zstdDecompressSync` — no external `zstd` binary, no extra
    dependency) and verify the DECOMPRESSED digest against the manifest.
 4. **Install atomically** (tmp write + rename) into the engine's paths and
@@ -580,7 +580,6 @@ boots on a bare KVM host with only these variables.
 | `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach                                                                                                    |
 | `FIRECRACKER_MAX_CONCURRENT_VMS` | `16` (`0` = unlimited)           | admission cap — see _Operational constraints_                                                                                                       |
 | `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)                                                                                                 |
-| `FIRECRACKER_ARTIFACTS_BASE_URL` | this repo's GH Releases          | guest-artifact download base (mirror for air-gapped)                                                                                                |
 | `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present                                                                                                    |
 | `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)                                                                                                         |
 | `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot guest→platform path probe: `warn` logs a drop, `strict` fails boot                                                                             |

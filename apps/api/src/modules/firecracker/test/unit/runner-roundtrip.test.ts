@@ -76,7 +76,7 @@ function makeFakeOrchestrator(): RunnerOrchestrator & { calls: Array<[string, un
     resolvePlatformApiUrl: record("resolvePlatformApiUrl", "http://192.168.1.10:3000"),
     workloadStatus: (handle) => {
       calls.push(["workloadStatus", [handle]]);
-      return { running: true, uptimeMs: 500 };
+      return { running: true };
     },
     readConsole: (id, tailBytes) => {
       calls.push(["readConsole", [id, tailBytes]]);

@@ -15,36 +15,10 @@ import {
   type VerifyGuestPathDeps,
 } from "../../runner/net-probe.ts";
 import type { HostExec } from "../../host-net.ts";
+import { fakeHostExec as fakeExec, type RecordedCall } from "../helpers/fake-host-exec.ts";
 
 const SUBNET_CIDR = "10.231.0.0/16";
 const PLATFORM_URL = "http://10.0.0.5:3000";
-
-interface RecordedCall {
-  cmd: string[];
-  stdin?: string;
-}
-
-/**
- * Fake HostExec. `respond` maps a command to its stdout, or an Error to
- * simulate a non-zero exit (thrown, exactly like the real executor).
- */
-function fakeExec(respond: (cmd: string[]) => string | Error = () => ""): {
-  exec: HostExec;
-  calls: RecordedCall[];
-} {
-  const calls: RecordedCall[] = [];
-  return {
-    calls,
-    exec: {
-      async run(cmd, opts) {
-        calls.push({ cmd, ...(opts?.stdin !== undefined ? { stdin: opts.stdin } : {}) });
-        const result = respond(cmd);
-        if (result instanceof Error) throw result;
-        return result;
-      },
-    },
-  };
-}
 
 /** Records logger calls by level for assertions. */
 function fakeLogger(): {

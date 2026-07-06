@@ -13,18 +13,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { _resetFirecrackerEnvCacheForTesting } from "../../runner/host-env.ts";
 import { FirecrackerOrchestrator } from "../../orchestrator.ts";
-import type { HostExec } from "../../host-net.ts";
-
-const fakeExec = (): HostExec => ({
-  async run(cmd) {
-    return cmd.join(" ") === "ip -j link show" ? "[]" : "";
-  },
-});
+import { fakeHostExec } from "../helpers/fake-host-exec.ts";
+import { readyOrchestrator as readyOrch } from "../helpers/orchestrator-fixture.ts";
 
 function readyOrchestrator(): FirecrackerOrchestrator {
-  const orch = new FirecrackerOrchestrator({ hostExec: fakeExec() });
-  Reflect.set(orch, "initialized", true);
-  return orch;
+  return readyOrch(fakeHostExec().exec);
 }
 
 /** Private-method access, same Reflect precedent as the sibling lifecycle test. */

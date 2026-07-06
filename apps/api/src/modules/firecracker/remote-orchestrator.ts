@@ -217,21 +217,32 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
   }
 
   /**
+   * GET /v1/health and validate the payload — the single health round-trip
+   * that both initialize() (the handshake) and resolvePlatformApiUrl() (the
+   * guest-visible platform URL) share. Throws an actionable error when the
+   * URL does not answer with a runner health payload.
+   */
+  private async fetchHealth() {
+    const res = await this.call(RUNNER_ROUTES.health, { method: "GET" });
+    const parsed = healthResponseSchema.safeParse(await res.json().catch(() => undefined));
+    if (!parsed.success) {
+      const env = this.requireEnv();
+      throw new Error(
+        `appstrate-runner at ${env.FIRECRACKER_RUNNER_URL} returned an unexpected health ` +
+          `payload — is this URL really an appstrate-runner daemon?`,
+      );
+    }
+    return parsed.data;
+  }
+
+  /**
    * Handshake with the daemon. This is where a misconfigured deployment
    * fails — missing env vars, unreachable daemon, protocol drift — all
    * with actionable messages, BEFORE the first run is accepted.
    */
   async initialize(): Promise<void> {
     const env = this.requireEnv();
-    const res = await this.call(RUNNER_ROUTES.health, { method: "GET" });
-    const parsed = healthResponseSchema.safeParse(await res.json().catch(() => undefined));
-    if (!parsed.success) {
-      throw new Error(
-        `appstrate-runner at ${env.FIRECRACKER_RUNNER_URL} returned an unexpected health ` +
-          `payload — is this URL really an appstrate-runner daemon?`,
-      );
-    }
-    const health = parsed.data;
+    const health = await this.fetchHealth();
     if (health.protocol !== RUNNER_PROTOCOL_VERSION) {
       throw new Error(
         `appstrate-runner at ${env.FIRECRACKER_RUNNER_URL}: daemon speaks protocol ` +
@@ -564,8 +575,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
    * transient error does not poison every subsequent run.
    */
   resolvePlatformApiUrl(): Promise<string> {
-    this.platformUrlPromise ??= this.call(RUNNER_ROUTES.health, { method: "GET" })
-      .then(async (res) => healthResponseSchema.parse(await res.json()).platformUrl)
+    this.platformUrlPromise ??= this.fetchHealth()
+      .then((health) => health.platformUrl)
       .catch((err: unknown) => {
         this.platformUrlPromise = undefined;
         throw err;

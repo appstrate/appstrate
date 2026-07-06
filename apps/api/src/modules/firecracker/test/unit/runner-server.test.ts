@@ -84,7 +84,7 @@ function fakeOrchestrator(overrides: Partial<RunnerOrchestrator> = {}): {
     resolvePlatformApiUrl: record("resolvePlatformApiUrl", "http://10.0.0.1:3000"),
     workloadStatus: (handle) => {
       calls.push({ method: "workloadStatus", args: [handle] });
-      return { running: true, uptimeMs: 1234 };
+      return { running: true };
     },
     readConsole: (id, tailBytes) => {
       calls.push({ method: "readConsole", args: [id, tailBytes] });
@@ -333,7 +333,7 @@ describe("runner server routes", () => {
     const { app, calls } = makeApp();
     const res = await post(app, RUNNER_ROUTES.workloadStatus, { handle: AGENT_HANDLE });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ running: true, uptimeMs: 1234 });
+    expect(await res.json()).toEqual({ running: true });
     expect(calls).toEqual([{ method: "workloadStatus", args: [AGENT_HANDLE] }]);
   });
 });

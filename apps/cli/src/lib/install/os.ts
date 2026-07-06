@@ -242,9 +242,7 @@ function parseSsOutput(raw: string): string | null {
 /**
  * Strict IPv4-literal check (each octet 0..255). Firecracker guests have
  * no DNS resolver, so the platform URL the runner + guests reach must be
- * an IPv4 literal — a hostname would fail inside every microVM. Mirrors
- * the intent of `IPV4_URL_RE` in `commands/runner.ts` (that one matches a
- * full URL; this one matches a bare address).
+ * an IPv4 literal — a hostname would fail inside every microVM.
  */
 const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
 
@@ -254,6 +252,47 @@ export function isIpv4(value: string): boolean {
     const n = Number(octet);
     return Number.isInteger(n) && n >= 0 && n <= 255;
   });
+}
+
+export interface ParsedIpv4HttpUrl {
+  /** Input with trailing slashes stripped. */
+  url: string;
+  /** IPv4 literal (each octet 0..255) the daemon + guests must reach. */
+  host: string;
+  /** Port, with the scheme default filled in (80 http / 443 https). */
+  port: number;
+}
+
+/**
+ * Parse + validate an `http(s)://<IPv4>[:port][/]` URL, returning the
+ * normalized URL, IPv4 host, and port — or `null` when the input is not a
+ * well-formed IPv4-literal HTTP URL.
+ *
+ * This is the ONE validator both `runner install --platform-url` and
+ * `install --runner-url` use, so the CLI never writes a config the daemon
+ * then refuses at boot. Its accept/reject rules mirror the daemon's
+ * canonical `parsePlatformApiUrl` (apps/api/src/modules/firecracker/runner/
+ * platform-url.ts): the WHATWG `URL` parser rejects out-of-range octets
+ * (`999.0.0.1`, `256.256.256.256`) and normalizes numeric hosts, and the
+ * host must be a dotted-quad IPv4 literal (guests have no DNS resolver, so a
+ * hostname would never resolve in-guest). A stray `IPV4_URL_RE`-style regex
+ * that only shapes four dotted numbers would wrongly accept out-of-range
+ * octets — `isIpv4` (and `new URL`) close that gap.
+ */
+export function parseIpv4HttpUrl(raw: string): ParsedIpv4HttpUrl | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  const host = parsed.hostname;
+  if (!isIpv4(host)) return null;
+  // URL normalizes an explicit default port away (":80"/":443" → "") —
+  // re-derive it from the scheme.
+  const port = parsed.port !== "" ? Number(parsed.port) : parsed.protocol === "https:" ? 443 : 80;
+  return { url: raw.replace(/\/+$/, ""), host, port };
 }
 
 /** Private (RFC 1918) IPv4 ranges — preferred over public/other addresses. */

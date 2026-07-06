@@ -70,26 +70,10 @@ const firecrackerEnvSchema = z.object({
   // regression or developing without the broker.
   FIRECRACKER_CREDENTIAL_BROKER: z.enum(["mmds", "config-drive"]).default("mmds"),
   // Prebuilt guest-artifact resolution (issue #819, phase 2). At boot the
-  // daemon downloads versioned, checksum-verified vmlinux + rootfs from
-  // GitHub Release assets instead of requiring an on-host docker build.
+  // daemon downloads versioned, checksum-verified vmlinux + rootfs from this
+  // repo's GitHub Release assets (see DEFAULT_ARTIFACTS_BASE_URL in
+  // runner/artifacts.ts) instead of requiring an on-host docker build.
   //
-  // Base URL of the release assets. Optional — defaults to this repo's GH
-  // Releases (see DEFAULT_ARTIFACTS_BASE_URL in runner/artifacts.ts). Point
-  // it at a mirror for air-gapped or self-hosted deployments.
-  //
-  // MUST be https:// — the manifest is the sole trust anchor (the vmlinux +
-  // rootfs SHA256s come from it), so a plaintext fetch lets a network
-  // attacker swap the manifest AND the artifacts consistently and boot a
-  // tampered guest. http:// is permitted ONLY for localhost/127.0.0.1
-  // (a mirror on the same host, dev).
-  FIRECRACKER_ARTIFACTS_BASE_URL: z
-    .url()
-    .refine(
-      (u) => u.startsWith("https://") || /^http:\/\/(localhost|127\.0\.0\.1)([:/]|$)/.test(u),
-      "must use https:// (the manifest is the sole trust anchor for artifact checksums); " +
-        "http:// is allowed only for localhost/127.0.0.1",
-    )
-    .optional(),
   // Pin a specific release (e.g. "1.2.3" or "v1.2.3"). Optional — when the
   // artifacts already exist on disk and no version is pinned, the resolver
   // skips the download; when they are missing and no version is pinned it

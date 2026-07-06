@@ -34,6 +34,7 @@ import {
   describeProcessOnPort,
   detectLanIpv4,
   isIpv4,
+  parseIpv4HttpUrl,
 } from "../../src/lib/install/os.ts";
 
 const originalFetch = globalThis.fetch;
@@ -249,6 +250,43 @@ describe("isIpv4", () => {
     expect(isIpv4("256.0.0.1")).toBe(false);
     expect(isIpv4("10.0.0.5.6")).toBe(false);
     expect(isIpv4("")).toBe(false);
+  });
+});
+
+describe("parseIpv4HttpUrl", () => {
+  it("accepts http(s)://<IPv4>[:port][/] and normalizes it", () => {
+    expect(parseIpv4HttpUrl("http://10.0.0.5:3100")).toEqual({
+      url: "http://10.0.0.5:3100",
+      host: "10.0.0.5",
+      port: 3100,
+    });
+    // Trailing slash stripped; scheme-default port filled in.
+    expect(parseIpv4HttpUrl("http://10.0.0.5/")).toEqual({
+      url: "http://10.0.0.5",
+      host: "10.0.0.5",
+      port: 80,
+    });
+    expect(parseIpv4HttpUrl("https://192.168.1.20")).toEqual({
+      url: "https://192.168.1.20",
+      host: "192.168.1.20",
+      port: 443,
+    });
+  });
+
+  it("rejects out-of-range octets (matches the daemon's parsePlatformApiUrl)", () => {
+    // The old `IPV4_URL_RE` regex accepted these — the WHATWG URL parser +
+    // isIpv4 octet-range check do not.
+    expect(parseIpv4HttpUrl("http://999.0.0.1")).toBeNull();
+    expect(parseIpv4HttpUrl("http://256.256.256.256:3000")).toBeNull();
+    expect(parseIpv4HttpUrl("http://300.0.0.1:3100")).toBeNull();
+  });
+
+  it("rejects non-IPv4 hosts and non-http schemes", () => {
+    expect(parseIpv4HttpUrl("http://runner.local:3000")).toBeNull();
+    expect(parseIpv4HttpUrl("ftp://10.0.0.5")).toBeNull();
+    expect(parseIpv4HttpUrl("10.0.0.5:3000")).toBeNull();
+    expect(parseIpv4HttpUrl("not a url")).toBeNull();
+    expect(parseIpv4HttpUrl("")).toBeNull();
   });
 });
 

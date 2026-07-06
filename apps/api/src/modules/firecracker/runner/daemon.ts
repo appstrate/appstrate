@@ -73,7 +73,6 @@ try {
     {
       kernelPath: fcEnv.FIRECRACKER_KERNEL_PATH,
       rootfsPath: fcEnv.FIRECRACKER_ROOTFS_PATH,
-      baseUrl: fcEnv.FIRECRACKER_ARTIFACTS_BASE_URL,
       version: fcEnv.FIRECRACKER_ARTIFACTS_VERSION,
       local: fcEnv.FIRECRACKER_ARTIFACTS_LOCAL,
     },
