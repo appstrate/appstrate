@@ -98,10 +98,13 @@ async function assertJailedVmm(runDir: string): Promise<string> {
   }
   console.log(`    jailed VMM ok: pid ${state.pid} uid ${uid}`);
 
-  // `firecracker` = the exec copy the jailer makes; `dev` + `run` are the
+  // `firecracker` = the exec copy the jailer makes; `firecracker.pid` = the
+  // pidfile the jailer writes beside it (the handle a future --new-pid-ns
+  // move would track the VMM through — see jail.ts); `dev` + `run` are the
   // jailer-created device/socket dirs; the other four are ours.
   const allowed = new Set([
     "firecracker",
+    "firecracker.pid",
     "vmlinux",
     "rootfs.ext4",
     "config.img",
