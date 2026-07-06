@@ -242,7 +242,17 @@ describe("runner server routes", () => {
   it("rejects a workload spec missing runId/role with 400 (before createWorkload)", async () => {
     const { app, calls } = makeApp();
     const res = await post(app, RUNNER_ROUTES.createWorkload, {
-      spec: { resources: {} },
+      spec: { resources: { memoryBytes: 1, nanoCpus: 1 } },
+      boundary: BOUNDARY,
+    });
+    expect(res.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects a workload spec whose resources omit memoryBytes/nanoCpus (400, VM sizing key)", async () => {
+    const { app, calls } = makeApp();
+    const res = await post(app, RUNNER_ROUTES.createWorkload, {
+      spec: { runId: "run-1", role: "agent", resources: {} },
       boundary: BOUNDARY,
     });
     expect(res.status).toBe(400);

@@ -60,7 +60,13 @@ export const workloadHandleSchema = z.object({
   role: z.string().min(1),
 });
 
-export const workloadResourcesSchema = z.looseObject({}) as unknown as z.ZodType<WorkloadResources>;
+export const workloadResourcesSchema = z.looseObject({
+  // The daemon sizes the microVM straight from these (vm-config.ts derives
+  // guest MiB / vCPU) — a missing field would size the VM as NaN. Pin them;
+  // additive fields (pidsLimit, …) still pass through.
+  memoryBytes: z.number().positive(),
+  nanoCpus: z.number().positive(),
+}) as unknown as z.ZodType<WorkloadResources>;
 
 export const workloadSpecSchema = z.looseObject({
   // Identity the daemon dereferences straight away (createWorkload reads
@@ -80,7 +86,17 @@ export const workspaceHandleSchema = z.looseObject({
   kind: z.string().min(1),
 }) as unknown as z.ZodType<WorkspaceHandle>;
 
-export const sidecarEndpointsSchema = z.looseObject({}) as unknown as z.ZodType<SidecarEndpoints>;
+export const sidecarEndpointsSchema = z.looseObject({
+  // The run-launcher (pi.ts) dereferences these to wire the agent's proxy +
+  // sink routing; the firecracker orchestrator always populates all four
+  // (even on skipSidecar runs — that flag gates createSidecar, not the
+  // boundary shape). Pin them so a boundary missing an endpoint is a clean
+  // parse error, not an undefined proxy URL surfacing mid-run.
+  sidecarUrl: z.string().min(1),
+  llmProxyUrl: z.string().min(1),
+  forwardProxyUrl: z.string().min(1),
+  noProxy: z.string().min(1),
+}) as unknown as z.ZodType<SidecarEndpoints>;
 
 export const isolationBoundarySchema = z.looseObject({
   // `id` (→ recursive rm, guarded by assertUnderDataDir) and `name` (→ runId

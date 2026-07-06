@@ -1163,6 +1163,14 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     }
     await rm(vm.apiSocketPath, { force: true }).catch(() => {});
     await rm(vm.runDir, { recursive: true, force: true }).catch(() => {});
+    // Wipe the run's credential-bearing pending maps HERE — the single
+    // teardown funnel — so the never-booted-then-reaped path (platform died
+    // between createWorkload and startWorkload) can't leave the run token,
+    // model keys, or integration tokens in daemon heap until restart. The
+    // happy path already cleared them at startWorkload; this covers the
+    // reaper/finalize/exit paths that never call removeIsolationBoundary.
+    this.pendingSidecarEnv.delete(vm.runId);
+    this.pendingAgentSpecs.delete(vm.runId);
     this.vms.delete(vm.runId);
   }
 
@@ -1251,7 +1259,17 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    * boot sweep — never swallowed silently.
    */
   private async removeJailCgroup(jailId: string): Promise<void> {
-    const path = join("/sys/fs/cgroup", JAIL_PARENT_CGROUP, jailId);
+    const parent = join("/sys/fs/cgroup", JAIL_PARENT_CGROUP);
+    const path = join(parent, jailId);
+    // Containment: at boot this jailId comes from an on-disk state.json — a
+    // crafted value ("../../…") must never aim the rmdir outside the
+    // appstrate-fc slice. join() has already normalized any traversal, so a
+    // resolved path that no longer sits under the parent is rejected. The
+    // in-memory teardown caller passes a trusted jailId and always passes.
+    if (!resolve(path).startsWith(resolve(parent) + sep)) {
+      logger.warn("Skipping cgroup removal: jailId escapes the appstrate-fc slice", { jailId });
+      return;
+    }
     try {
       await this.retryCleanup(async () => {
         try {
@@ -1298,6 +1316,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     boundary: IsolationBoundary,
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
+    // Admission: a sidecar spec carries the run token + credential bundle env.
+    // Refuse to stash it unless the run owns a live boundary — otherwise a
+    // stray (or replayed-on-a-captured-bearer) call would leave secrets in a
+    // pending map with no VmRecord for the reaper to ever sweep.
+    this.assertBoundaryExists(runId, "createSidecar");
     const sidecarEnv = buildBaseSidecarEnv({
       spec,
       baseEnv: pickOperatorSidecarEnv(),
@@ -1318,8 +1341,26 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   }
 
   async createWorkload(spec: WorkloadSpec, _boundary: IsolationBoundary): Promise<WorkloadHandle> {
+    // Same admission gate as createSidecar: the agent spec's env carries
+    // credentials — never stash it for a run with no live boundary.
+    this.assertBoundaryExists(spec.runId, "createWorkload");
     this.pendingAgentSpecs.set(spec.runId, spec);
     return { id: `fc-${spec.runId}-${spec.role}`, runId: spec.runId, role: spec.role };
+  }
+
+  /**
+   * Guard the credential-stashing create* calls: the run must already own a
+   * boundary VmRecord (createIsolationBoundary ran). Without it a pending
+   * env/spec entry would have no VmRecord, so neither the exit reaper nor a
+   * finalize teardown would ever wipe the secrets it holds.
+   */
+  private assertBoundaryExists(runId: string, verb: string): void {
+    if (!this.vms.has(runId)) {
+      throw new Error(
+        `Firecracker orchestrator: ${verb} for run ${runId} has no isolation boundary — ` +
+          `createIsolationBoundary must run first`,
+      );
+    }
   }
 
   async startWorkload(handle: WorkloadHandle): Promise<void> {
@@ -2057,8 +2098,23 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    * and every jailed VMM carries the `--id` in its argv anyway.
    */
   private async sweepJailedVmm(state: RunStateFile): Promise<number> {
-    const chrootPath = state.chrootPath !== undefined ? resolve(state.chrootPath) : null;
+    // Contain the chrootPath match key exactly like the jail rm does: a
+    // corrupted state.json chrootPath ("/", "/proc/1/root") would otherwise
+    // widen the kill to VMMs OUTSIDE this daemon's jail base (procRoot="/"
+    // matches every unjailed process). jailId stays a pure equality key
+    // against the VMM's own argv — no path, so no containment needed there.
+    const jailBase = jailChrootBase(getFirecrackerEnv().FIRECRACKER_DATA_DIR);
+    const resolved = state.chrootPath !== undefined ? resolve(state.chrootPath) : null;
+    const chrootPath = resolved !== null && resolved.startsWith(jailBase + sep) ? resolved : null;
+    if (resolved !== null && chrootPath === null) {
+      logger.warn("Orphan sweep: state.json chrootPath resolves outside the jail base — ignoring", {
+        runId: state.runId,
+        chrootPath: state.chrootPath,
+        jailBase,
+      });
+    }
     const jailId = state.jailId ?? null;
+    if (chrootPath === null && jailId === null) return 0;
     return this.killMatchingVmms(async (pid) => {
       const idMatch = jailId !== null && (await this.procJailArgvId(pid)) === jailId;
       const rootMatch = chrootPath !== null && (await this.procRoot(pid)) === chrootPath;

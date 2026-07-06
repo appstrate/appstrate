@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "../../runner/host-env.ts";
 import { FirecrackerOrchestrator, type FirecrackerOrchestratorDeps } from "../../orchestrator.ts";
-import { deriveJailId } from "../../jail.ts";
+import { deriveJailId, jailChrootBase } from "../../jail.ts";
 import { workloadSpecSchema } from "../../runner/protocol.ts";
 import { fakeHostExec as fakeExec, defaultRespond } from "../helpers/fake-host-exec.ts";
 import {
@@ -268,6 +268,49 @@ describe("cleanupOrphans PID-reuse guard", () => {
   });
 });
 
+describe("orphan sweep containment (corrupted state.json)", () => {
+  it("ignores a chrootPath outside the jail base as a jailed-VMM kill key", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const killed: number[] = [];
+    Reflect.set(orch, "listProcPids", async () => [4242]);
+    Reflect.set(orch, "pidLooksLikeVmmBinary", async () => true);
+    Reflect.set(orch, "procRoot", async () => "/"); // the scanned VMM is rooted at /
+    Reflect.set(orch, "procJailArgvId", async () => "otherjail");
+    Reflect.set(orch, "killPid", (pid: number) => {
+      killed.push(pid);
+      return true;
+    });
+    const sweepJailedVmm = Reflect.get(orch, "sweepJailedVmm") as (
+      this: FirecrackerOrchestrator,
+      s: unknown,
+    ) => Promise<number>;
+
+    // chrootPath "/" resolves OUTSIDE the jail base — it must not become a
+    // match key (procRoot="/" would otherwise reap every unjailed process).
+    // jailId also mismatches, so nothing is killed.
+    const outside = await sweepJailedVmm.call(orch, {
+      runId: "run_evil",
+      jailId: "jailZ",
+      chrootPath: "/",
+    });
+    expect(outside).toBe(0);
+    expect(killed).toEqual([]);
+
+    // A chrootPath UNDER the jail base that equals the VMM's root DOES match —
+    // containment narrows, it does not disable the sweep.
+    const inBase = join(jailChrootBase(dataDir), "run_ok", "root");
+    Reflect.set(orch, "procRoot", async () => inBase);
+    const contained = await sweepJailedVmm.call(orch, {
+      runId: "run_ok",
+      jailId: "jailZ",
+      chrootPath: inBase,
+    });
+    expect(contained).toBe(1);
+    expect(killed).toEqual([4242]);
+  });
+});
+
 describe("streamLogs partial-line cap", () => {
   it("flushes an overlong newline-less line instead of buffering it unbounded", async () => {
     const { exec } = fakeExec();
@@ -487,6 +530,87 @@ describe("exit reaper (ROB-1 layer 2)", () => {
     await orch.createIsolationBoundary("run_neverboot");
     expect(vmsOf(orch).has("run_neverboot")).toBe(true);
     expect(reservedIndexes(orch).size).toBe(1);
+  });
+
+  it("wipes the run's credential-bearing pending maps when it reaps a never-booted boundary", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const pending = (name: string) => Reflect.get(orch, name) as Map<string, unknown>;
+
+    // Boundary + sidecar + workload staged, but startWorkload never runs
+    // (platform died) — so the run token / credential env sit in the pending
+    // maps with a `proc: null` VmRecord.
+    const boundary = await orch.createIsolationBoundary("run_leak");
+    await orch.createSidecar("run_leak", boundary, { runToken: "secret-run-token" });
+    await orch.createWorkload(
+      {
+        runId: "run_leak",
+        role: "agent",
+        image: "unused",
+        env: { MODEL_API_KEY: "sk-secret" },
+        resources: { memoryBytes: 256 * 1024 * 1024, nanoCpus: 1_000_000_000 },
+      },
+      boundary,
+    );
+    expect(pending("pendingSidecarEnv").has("run_leak")).toBe(true);
+    expect(pending("pendingAgentSpecs").has("run_leak")).toBe(true);
+
+    const reapExitedVms = Reflect.get(orch, "reapExitedVms") as (
+      this: FirecrackerOrchestrator,
+      now?: number,
+    ) => Promise<number>;
+    expect(await reapExitedVms.call(orch, Date.now() + 6 * 60_000)).toBe(1);
+
+    // Reaping the record must also drop the secrets it never got to use —
+    // otherwise they linger in daemon heap until restart.
+    expect(pending("pendingSidecarEnv").has("run_leak")).toBe(false);
+    expect(pending("pendingAgentSpecs").has("run_leak")).toBe(false);
+  });
+});
+
+describe("create* admission gate (no orphan credential maps)", () => {
+  const spec = {
+    runId: "run_x",
+    role: "agent",
+    image: "img",
+    env: { MODEL_API_KEY: "sk" },
+    resources: { memoryBytes: 256 * 1024 * 1024, nanoCpus: 1_000_000_000 },
+  };
+  const endpoints = {
+    sidecarUrl: "http://127.0.0.1:8080",
+    llmProxyUrl: "http://127.0.0.1:8080/llm",
+    forwardProxyUrl: "http://127.0.0.1:8081",
+    noProxy: "127.0.0.1",
+  };
+  const boundary = {
+    id: "/tmp/x",
+    name: "firecracker-run_x",
+    workspace: { kind: "directory" as const, path: "/workspace" },
+    sidecarEndpoints: endpoints,
+  };
+
+  it("refuses createWorkload / createSidecar for a run with no boundary", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const pending = (name: string) => Reflect.get(orch, name) as Map<string, unknown>;
+
+    await expect(orch.createWorkload(spec, boundary)).rejects.toThrow(/no isolation boundary/);
+    await expect(
+      orch.createSidecar("run_x", boundary, { runToken: "tok-secret-000000000000" }),
+    ).rejects.toThrow(/no isolation boundary/);
+    // The credential maps stayed empty — no orphan entry with no VmRecord.
+    expect(pending("pendingSidecarEnv").size).toBe(0);
+    expect(pending("pendingAgentSpecs").size).toBe(0);
+  });
+
+  it("accepts them once the boundary exists", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    const live = await orch.createIsolationBoundary("run_x");
+    await expect(orch.createWorkload({ ...spec }, live)).resolves.toMatchObject({ runId: "run_x" });
+    await expect(
+      orch.createSidecar("run_x", live, { runToken: "tok-secret-000000000000" }),
+    ).resolves.toMatchObject({ role: "sidecar" });
   });
 });
 
