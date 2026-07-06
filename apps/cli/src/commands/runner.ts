@@ -493,12 +493,20 @@ export async function runnerDoctor(opts: RunnerDoctorOptions = {}): Promise<Runn
     }
   }
 
-  // Jailer presence — informational (the daemon itself refuses to boot
-  // without it when FIRECRACKER_JAILER=on, which the health line shows).
+  // Jailer presence. Counted in `ok` whenever the jailer is required
+  // (FIRECRACKER_JAILER unset or "on"): the daemon refuses to boot without
+  // it in that mode, so a green doctor next to a missing jailer would lie
+  // about the next restart.
   const jailerPath = runnerDataPaths(dataDir).jailerBin;
   const jailer = { installed: await d.fs.exists(jailerPath), path: jailerPath };
+  const jailerRequired = (env.FIRECRACKER_JAILER ?? "on") !== "off";
 
-  const ok = preflight.ok && service.active && health.reachable && health.status === 200;
+  const ok =
+    preflight.ok &&
+    service.active &&
+    health.reachable &&
+    health.status === 200 &&
+    (!jailerRequired || jailer.installed);
   return { preflight, service, health, artifacts, jailer, ok };
 }
 

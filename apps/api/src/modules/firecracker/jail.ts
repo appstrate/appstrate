@@ -107,16 +107,20 @@ export function jailChrootBase(dataDir: string): string {
 
 /**
  * Jailer ids must match `^[a-zA-Z0-9-]{1,64}$` (stricter than our
- * RUN_ID_RE, which also admits `_` and `.`). Sanitizing alone could
- * collide two live runs (`run_1` / `run.1` → `run-1`), and a shared
- * chroot dir between runs would be catastrophic — so the id always
- * carries the run's subnet index, unique among this host's live VMs.
- * The runId → jailId mapping is persisted in the run's state.json.
+ * RUN_ID_RE, which also admits `_` and `.`). The id is a SHORT digest of
+ * the runId, not the runId itself: the jailId rides the host-side API
+ * socket path (`<base>/<exec>/<jailId>/root/run/firecracker.socket`),
+ * which AF_UNIX caps at ~108 bytes — a real `run_<uuid>` id (40 chars)
+ * under the production data dir (`/var/lib/appstrate-runner/runs`)
+ * blows the cap and would refuse 100% of jailed runs. The digest also
+ * collision-proofs runs whose ids only differ outside the jailer
+ * charset (`run_1` / `run.1`); the subnet index — unique among this
+ * host's live VMs — is appended as a second guarantee. The runId →
+ * jailId mapping is persisted in the run's state.json.
  */
 export function deriveJailId(runId: string, subnetIndex: number): string {
-  const suffix = `-${subnetIndex}`;
-  const sanitized = runId.replace(/[^a-zA-Z0-9-]/g, "-");
-  return sanitized.slice(0, 64 - suffix.length) + suffix;
+  const digest = new Bun.CryptoHasher("sha256").update(runId).digest("hex").slice(0, 12);
+  return `fc-${digest}-${subnetIndex}`;
 }
 
 /**
@@ -176,6 +180,13 @@ export interface BuildJailerArgvInput {
    * losing the jail itself).
    */
   cgroups?: { memoryMaxBytes: number; pidsMax: number };
+  /**
+   * Extra flags forwarded to the exec'd firecracker (after the `--`
+   * separator, before the fixed api-sock/config-file pair) — e.g. the
+   * MMDS store-size overrides when a run's brokered payload exceeds the
+   * 50 KiB Firecracker default.
+   */
+  extraFcArgs?: string[];
 }
 
 /**
@@ -221,11 +232,34 @@ export function buildJailerArgv(input: BuildJailerArgvInput): string[] {
   return [
     ...argv,
     "--",
+    ...(input.extraFcArgs ?? []),
     "--api-sock",
     CHROOT_API_SOCKET_PATH,
     "--config-file",
     CHROOT_VMCONFIG_PATH,
   ];
+}
+
+/**
+ * Enforce upstream's hard requirement that `jailer` and `firecracker`
+ * come from the SAME release: compare the semver each `--version` line
+ * reports and throw when they differ. An env override pointing at a
+ * mismatched pair (bypassing the installer's lockstep) would otherwise
+ * only surface as an opaque first-run failure. Lines whose version
+ * cannot be parsed are rejected too — an unparseable probe is not proof
+ * of parity.
+ */
+export function assertJailerVersionParity(fcVersionLine: string, jailerVersionLine: string): void {
+  const fc = /v?(\d+\.\d+\.\d+)/.exec(fcVersionLine)?.[1];
+  const jailer = /v?(\d+\.\d+\.\d+)/.exec(jailerVersionLine)?.[1];
+  if (!fc || !jailer || fc !== jailer) {
+    throw new Error(
+      `Firecracker jailer: version parity check failed — firecracker reports ` +
+        `"${fcVersionLine}" and jailer reports "${jailerVersionLine}". The two binaries ` +
+        `MUST come from the same upstream release; reinstall them together ` +
+        `(\`appstrate runner install\` keeps them in lockstep).`,
+    );
+  }
 }
 
 /**

@@ -709,6 +709,89 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.tokenUsage).toEqual({ input_tokens: 12, output_tokens: 3 });
   });
 
+  // B2 preservation semantics: a NON-success terminal that carries no
+  // runner-posted usage must keep the cumulative snapshot the
+  // `appstrate.metric` side-channel wrote during the run — done atomically
+  // in SQL (COALESCE in the CAS UPDATE), so a metric event racing the
+  // finalize can never be clobbered by a stale JS read (review S-9).
+  it("preserves the last-known metric snapshot on a non-success finalize without usage", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 50, output_tokens: 25 },
+    });
+
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "failed";
+    result.error = { message: "container crashed", code: "crash" };
+    // No result.usage at all — the watchdog-kill / crash shape.
+
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.sinkClosedAt).not.toBeNull();
+    // The side-channel snapshot survives — never masked by zeros.
+    expect(row?.tokenUsage).toEqual({ input_tokens: 50, output_tokens: 25 });
+  });
+
+  it("malformed usage on a NON-success finalize also preserves the snapshot (B2)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 7, output_tokens: 2 },
+    });
+
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "failed";
+    result.error = { message: "boom", code: "crash" };
+    // Bypass the route schema deliberately — exercise the service boundary.
+    (result as { usage?: unknown }).usage = { input_tokens: "lots", bogus: true };
+
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.tokenUsage).toEqual({ input_tokens: 7, output_tokens: 2 });
+  });
+
+  it("zero-fills a non-success finalize when NO usage was ever recorded", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "failed";
+    result.error = { message: "died at boot", code: "crash" };
+
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.tokenUsage).toEqual({ input_tokens: 0, output_tokens: 0 });
+  });
+
+  it("does not throw on a corrupt tokenUsage JSONB during a non-success finalize", async () => {
+    // readLastKnownUsage's tolerant Zod boundary: a corrupt column value
+    // degrades to null for the ledger fallback, and the finalize still
+    // closes the run — never a crash mid-terminal-transition.
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: "corrupt" } as unknown as Record<string, number>,
+    });
+
+    const run = await getRunSinkContext(runId);
+    expect(run).not.toBeNull();
+    const result = emptyRunResult();
+    result.status = "failed";
+    result.error = { message: "boom", code: "crash" };
+
+    await finalizeRun({ run: run!, result });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.sinkClosedAt).not.toBeNull();
+  });
+
   // Zod boundary on `runs.result` (runResultSchema, 512 KiB cap): an
   // over-cap payload degrades to `result: null` + a warn log — it must
   // never fail the terminal transition of an already-completed run.

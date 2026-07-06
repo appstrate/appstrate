@@ -92,14 +92,19 @@ function hex(n: number): string {
  */
 export class SubnetAllocator {
   private readonly inUse = new Set<number>();
-  private next = 1;
 
   constructor(private readonly cidr: string) {}
 
+  /**
+   * Lowest-free scan, NOT round-robin: the index also derives the run's
+   * jail uid (FIRECRACKER_JAIL_UID_BASE + index), so it must stay bounded
+   * by the number of CONCURRENT runs — a round-robin cursor walks the
+   * whole 1..16319 space over the host's lifetime and eventually hands
+   * out uids colliding with foreign uid ranges. Immediate reuse is safe:
+   * an index is only released after its TAP device is confirmed deleted.
+   */
   allocate(): RunSubnet {
-    for (let scanned = 0; scanned <= MAX_INDEX; scanned++) {
-      const candidate = this.next > MAX_INDEX ? 1 : this.next;
-      this.next = candidate + 1;
+    for (let candidate = 1; candidate <= MAX_INDEX; candidate++) {
       if (!this.inUse.has(candidate)) {
         this.inUse.add(candidate);
         return subnetForIndex(this.cidr, candidate);

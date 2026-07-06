@@ -59,8 +59,15 @@ import { logger as defaultLogger } from "./logger.ts";
  * (a supervisor bugfix, a new optional field the daemon does not require).
  * A bump is a lockstep release: publish artifacts at protocol N together
  * with the daemon that speaks N.
+ *
+ * History:
+ *   2 — MMDS credential broker (config-drive `credentials.source: "mmds"`
+ *       strips RUN_TOKEN/APPSTRATE_SINK_SECRET off the drive; a protocol-1
+ *       supervisor ignores the field, never fetches MMDS, and boots the
+ *       run without credentials).
+ *   1 — initial config-drive contract.
  */
-export const GUEST_PROTOCOL_VERSION = 1;
+export const GUEST_PROTOCOL_VERSION = 2;
 
 /** GitHub Release download base for this repo (versioned + `latest`). */
 export const DEFAULT_ARTIFACTS_BASE_URL = "https://github.com/appstrate/appstrate/releases";
@@ -304,14 +311,24 @@ export async function ensureGuestArtifacts(
 
   const present = (await fs.exists(config.kernelPath)) && (await fs.exists(config.rootfsPath));
   const markerPath = join(dirname(config.rootfsPath), VERSION_MARKER_NAME);
-  const installedVersion = await readMarker(fs, markerPath);
+  const installed = await readMarker(fs, markerPath);
 
-  // Skip: artifacts present and either no version pinned, or the marker
-  // already matches the pinned version.
-  if (present && (!config.version || installedVersion === config.version)) {
+  // The skip fast-path (and the keep-existing network-failure fallback
+  // below) require the on-disk install to speak THIS daemon's guest
+  // protocol. A daemon upgraded in place next to a stale rootfs must
+  // re-download — a protocol-N-1 supervisor booting under a protocol-N
+  // daemon fails in confusing, run-level ways (e.g. it ignores
+  // `credentials.source: "mmds"` and comes up with no credentials).
+  // No marker at all (pre-marker install, hand-copied files) counts as
+  // unverifiable, not as compatible.
+  const installedProtocolOk = installed?.guestProtocol === GUEST_PROTOCOL_VERSION;
+
+  // Skip: artifacts present, protocol verified, and either no version
+  // pinned or the marker already matches the pinned version.
+  if (present && installedProtocolOk && (!config.version || installed.version === config.version)) {
     log.info("Firecracker artifacts: present, skipping download", {
       arch,
-      installedVersion: installedVersion ?? "(unknown)",
+      installedVersion: installed.version,
       requestedVersion: config.version ?? "(none)",
     });
     return;
@@ -337,8 +354,12 @@ export async function ensureGuestArtifacts(
     if (err instanceof FatalArtifactsError) {
       throw err;
     }
-    // Network/transient failure with artifacts already on disk: keep them.
-    if (present) {
+    // Network/transient failure with artifacts already on disk: keep them
+    // — but ONLY when the installed protocol is verified compatible. A
+    // stale-protocol install must never be "kept" through a download
+    // failure; that would resurrect exactly the daemon-upgraded-next-to-
+    // old-rootfs state the protocol gate exists to prevent.
+    if (present && installedProtocolOk) {
       log.warn("Firecracker artifacts: download failed, using existing on-disk artifacts", {
         error: getErrorMessage(err),
         kernelPath: config.kernelPath,
@@ -346,9 +367,10 @@ export async function ensureGuestArtifacts(
       });
       return;
     }
-    // Nothing on disk and we could not fetch: the daemon cannot run VMs.
+    // Nothing usable on disk (absent, or present at an incompatible guest
+    // protocol) and we could not fetch: the daemon cannot run VMs.
     throw new Error(
-      `Firecracker guest artifacts are missing and could not be downloaded: ${getErrorMessage(err)}. ` +
+      `Firecracker guest artifacts are ${present ? `installed at an incompatible guest protocol (daemon speaks ${GUEST_PROTOCOL_VERSION})` : "missing"} and could not be downloaded: ${getErrorMessage(err)}. ` +
         `Set FIRECRACKER_ARTIFACTS_BASE_URL / FIRECRACKER_ARTIFACTS_VERSION to a reachable release, ` +
         `build them locally with \`bun run firecracker:build\` (then set FIRECRACKER_ARTIFACTS_LOCAL=1), ` +
         `or check network access to ${baseUrl}.`,
@@ -489,12 +511,21 @@ async function installAtomic(fs: ArtifactsFs, finalPath: string, bytes: Uint8Arr
   }
 }
 
-async function readMarker(fs: ArtifactsFs, markerPath: string): Promise<string | null> {
+interface InstalledMarker {
+  version: string;
+  /** Absent on markers written before the protocol was recorded. */
+  guestProtocol: number | undefined;
+}
+
+async function readMarker(fs: ArtifactsFs, markerPath: string): Promise<InstalledMarker | null> {
   const text = await fs.readText(markerPath);
   if (!text) return null;
   try {
-    const parsed = z.object({ version: z.string() }).safeParse(JSON.parse(text));
-    return parsed.success ? parsed.data.version : null;
+    const parsed = z
+      .object({ version: z.string(), guest_protocol: z.number().int().optional() })
+      .safeParse(JSON.parse(text));
+    if (!parsed.success) return null;
+    return { version: parsed.data.version, guestProtocol: parsed.data.guest_protocol };
   } catch {
     return null;
   }

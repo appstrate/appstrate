@@ -277,11 +277,15 @@ describe("ensureGuestArtifacts — checksum verification", () => {
 });
 
 describe("ensureGuestArtifacts — skip when present", () => {
-  it("does not fetch when artifacts exist and no version is pinned", async () => {
+  it("does not fetch when artifacts exist with a protocol-matching marker and no version pinned", async () => {
     const s = scenario();
     const { fs } = makeFs({
       [KERNEL_PATH]: new Uint8Array([1]),
       [ROOTFS_PATH]: new Uint8Array([2]),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION,
+      }),
     });
 
     await ensureGuestArtifacts(
@@ -297,7 +301,10 @@ describe("ensureGuestArtifacts — skip when present", () => {
     const { fs } = makeFs({
       [KERNEL_PATH]: new Uint8Array([1]),
       [ROOTFS_PATH]: new Uint8Array([2]),
-      [MARKER_PATH]: JSON.stringify({ version: "1.2.3", guest_protocol: 1 }),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION,
+      }),
     });
 
     await ensureGuestArtifacts(
@@ -314,12 +321,57 @@ describe("ensureGuestArtifacts — skip when present", () => {
     expect(s.calls).toHaveLength(0);
   });
 
+  it("re-downloads when the installed marker records a STALE guest protocol (B-4)", async () => {
+    // Daemon upgraded in place next to an old rootfs: the skip path must
+    // not keep a supervisor that cannot speak this daemon's protocol
+    // (e.g. one that ignores `credentials.source: "mmds"` and boots the
+    // run without credentials).
+    const s = scenario();
+    const { fs, files } = makeFs({
+      [KERNEL_PATH]: new Uint8Array([1]),
+      [ROOTFS_PATH]: new Uint8Array([2]),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION - 1,
+      }),
+    });
+
+    await ensureGuestArtifacts(
+      { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
+      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+    );
+
+    expect(s.calls.length).toBeGreaterThan(0);
+    expect(files.get(KERNEL_PATH)).toEqual(s.kernelBytes);
+    expect(JSON.parse(files.get(MARKER_PATH) as string).guest_protocol).toBe(
+      GUEST_PROTOCOL_VERSION,
+    );
+  });
+
+  it("re-downloads when artifacts exist WITHOUT a marker (unverifiable protocol)", async () => {
+    const s = scenario();
+    const { fs } = makeFs({
+      [KERNEL_PATH]: new Uint8Array([1]),
+      [ROOTFS_PATH]: new Uint8Array([2]),
+    });
+
+    await ensureGuestArtifacts(
+      { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
+      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+    );
+
+    expect(s.calls.length).toBeGreaterThan(0);
+  });
+
   it("re-downloads when the pinned version differs from the installed marker", async () => {
     const s = scenario({ version: "2.0.0" });
     const { fs, files } = makeFs({
       [KERNEL_PATH]: new Uint8Array([1]),
       [ROOTFS_PATH]: new Uint8Array([2]),
-      [MARKER_PATH]: JSON.stringify({ version: "1.2.3", guest_protocol: 1 }),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION,
+      }),
     });
 
     await ensureGuestArtifacts(
@@ -405,10 +457,14 @@ describe("ensureGuestArtifacts — arch not published", () => {
 });
 
 describe("ensureGuestArtifacts — network failure policy", () => {
-  it("warns and continues when download fails but artifacts are already present", async () => {
+  it("warns and continues when download fails but PROTOCOL-COMPATIBLE artifacts are present", async () => {
     const { fs } = makeFs({
       [KERNEL_PATH]: new Uint8Array([1]),
       [ROOTFS_PATH]: new Uint8Array([2]),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION,
+      }),
     });
 
     // Pinned version forces a download attempt; fetch throws.
@@ -424,6 +480,27 @@ describe("ensureGuestArtifacts — network failure policy", () => {
         { fetchFn: throwingFetch, fs, arch: "x86_64" },
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it("does NOT keep a stale-protocol install through a download failure (B-4)", async () => {
+    // Present artifacts whose marker records an older protocol: the
+    // keep-existing fallback must not resurrect exactly the incompatible
+    // state the protocol gate exists to prevent.
+    const { fs } = makeFs({
+      [KERNEL_PATH]: new Uint8Array([1]),
+      [ROOTFS_PATH]: new Uint8Array([2]),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION - 1,
+      }),
+    });
+
+    await expect(
+      ensureGuestArtifacts(
+        { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
+        { fetchFn: throwingFetch, fs, arch: "x86_64" },
+      ),
+    ).rejects.toThrow(/incompatible guest protocol.*could not be downloaded/);
   });
 
   it("is fatal with an actionable message when download fails and nothing is on disk", async () => {
