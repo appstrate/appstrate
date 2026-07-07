@@ -224,6 +224,8 @@ interface FakeDepsState {
   checksumsSig: Uint8Array;
   /** SHA-256 returned by the fake fetchToFile — must match parseChecksumLine output for happy path. */
   hashOverride?: string;
+  /** When set, the small manifest fetch (fetchText) rejects with this message. */
+  checksumsError?: string;
   minisignAvailable: boolean;
   minisignOk: boolean;
   execPath: string;
@@ -260,6 +262,7 @@ function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
     },
     async fetchText(url) {
       state.fetched.push(url);
+      if (state.checksumsError) throw new Error(state.checksumsError);
       return state.checksumsTxt;
     },
     async runCommand(cmd, args) {
@@ -357,10 +360,11 @@ describe("runSelfUpdate — curl flow", () => {
 
     expect(out.exitCode).toBe(SELF_UPDATE_EXIT.OK);
     expect(out.message).toContain("Updated appstrate to 1.2.3");
+    // Signed manifest first (checksums + sig), then the large binary stream.
     expect(state.fetched).toEqual([
-      "https://github.com/appstrate/appstrate/releases/download/v1.2.3/appstrate-linux-x64",
       "https://github.com/appstrate/appstrate/releases/download/v1.2.3/checksums.txt",
       "https://github.com/appstrate/appstrate/releases/download/v1.2.3/checksums.txt.minisig",
+      "https://github.com/appstrate/appstrate/releases/download/v1.2.3/appstrate-linux-x64",
     ]);
     expect(state.commands.find((c) => c.cmd === "minisign" && c.args[0] === "-Vm")).toBeTruthy();
     expect(state.replaced).toEqual([{ dest: "/home/user/.local/bin/appstrate" }]);
@@ -424,6 +428,25 @@ describe("runSelfUpdate — curl flow", () => {
     });
     expect(out.exitCode).toBe(SELF_UPDATE_EXIT.UPDATE_FAILED);
     expect(out.message).toContain("Signature verification FAILED");
+    expect(state.replaced).toEqual([]);
+  });
+
+  it("never starts the binary stream when the manifest fetch fails (no orphan staged download)", async () => {
+    const state = freshState({ checksumsError: "GET checksums.txt → HTTP 500" });
+    const binaryUrl =
+      "https://github.com/appstrate/appstrate/releases/download/v1.2.3/appstrate-linux-x64";
+    const out = await runSelfUpdate({
+      source: "curl",
+      platform: { platform: "linux", arch: "x64" },
+      log: () => {},
+      version: "1.2.3",
+      currentVersion: "1.0.0",
+      deps: makeFakeDeps(state),
+    });
+    expect(out.exitCode).toBe(SELF_UPDATE_EXIT.UPDATE_FAILED);
+    // The large binary is fetched AFTER the signed manifest, so a manifest
+    // failure means the stream never started — nothing to leak on disk.
+    expect(state.fetched).not.toContain(binaryUrl);
     expect(state.replaced).toEqual([]);
   });
 

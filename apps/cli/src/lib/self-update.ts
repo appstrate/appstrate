@@ -459,13 +459,15 @@ export async function performCurlUpdate(
     const urls = releaseUrls(target, opts.platform);
     const asset = assetName(opts.platform);
 
-    log(`→ Downloading Appstrate CLI ${target} (${asset})`);
-    const [{ sha256: actual }, checksumsTxt, checksumsSig] = await Promise.all([
-      deps.fetchToFile(urls.binary, staged, opts.onProgress),
+    // Fetch + verify the small signed manifest FIRST, before the large binary
+    // stream. Two reasons: (1) it fails fast on a bad/missing signature without
+    // pulling ~113 MB; (2) it avoids running the big stream concurrently with
+    // the sidecars — a Promise.all reject would run cleanup while the stream is
+    // still writing `staged`, leaving an orphan download behind.
+    const [checksumsTxt, checksumsSig] = await Promise.all([
       deps.fetchText(urls.checksums),
       deps.fetchBinary(urls.checksumsSig),
     ]);
-
     const sumsPath = join(workDir, "checksums.txt");
     const sigPath = join(workDir, "checksums.txt.minisig");
     await deps.writeFile(sumsPath, checksumsTxt);
@@ -485,6 +487,9 @@ export async function performCurlUpdate(
           `Refusing to install. Report at https://github.com/appstrate/appstrate/issues`,
       );
     }
+
+    log(`→ Downloading Appstrate CLI ${target} (${asset})`);
+    const { sha256: actual } = await deps.fetchToFile(urls.binary, staged, opts.onProgress);
 
     log(`→ Verifying binary integrity (SHA-256)`);
     const expected = parseChecksumLine(checksumsTxt, asset);

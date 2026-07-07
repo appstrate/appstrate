@@ -472,6 +472,41 @@ describe("downloadDaemon", () => {
     ).rejects.toThrow(/published WITHOUT runner assets/);
   });
 
+  it("does not stream the daemon binary when the signed manifest fetch fails", async () => {
+    let fetchToFileCalled = false;
+    const http: RunnerHttp = {
+      async fetchToFile() {
+        fetchToFileCalled = true;
+        return { sha256: "unused" };
+      },
+      async fetchBinary(url) {
+        throw new Error(`GET ${url} → HTTP 500`);
+      },
+      async fetchText(url) {
+        throw new Error(`GET ${url} → HTTP 500`);
+      },
+      async getJson() {
+        return { reachable: false, error: "n/a" };
+      },
+    };
+    const { fs, removed } = fakeFs();
+    const { exec } = fakeExec();
+    await expect(
+      downloadDaemon({
+        http,
+        exec,
+        fs,
+        version: "1.0.0",
+        arch: "x86_64",
+        destPath: TEST_DAEMON_DEST,
+      }),
+    ).rejects.toThrow();
+    // The manifest is fetched first; its failure aborts before the ~70 MB
+    // stream ever starts, so nothing is staged and nothing needs cleanup.
+    expect(fetchToFileCalled).toBe(false);
+    expect(removed).toEqual([]);
+  });
+
   it("fails closed when minisign is not installed", async () => {
     const bytes = new Uint8Array([5, 5, 5]);
     const sha = sha256Hex(bytes);

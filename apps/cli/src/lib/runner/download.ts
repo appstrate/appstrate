@@ -99,38 +99,34 @@ export async function downloadDaemon(opts: {
   const asset = daemonAssetName(opts.arch);
   const stagedPath = join(dirname(opts.destPath), `.${asset}.download-${process.pid}`);
 
-  // 1. Stream the daemon binary to disk. A 404 here almost always means this
-  //    release shipped WITHOUT runner assets — the firecracker/daemon build
-  //    jobs are decoupled from the core release (release.yml) and may have
-  //    failed for this tag. Turn the opaque "HTTP 404" into an actionable fix.
+  // 1. Fetch + verify the small signed manifest BEFORE the large binary
+  //    stream: it fails fast on a bad/missing signature without pulling the
+  //    ~70 MB daemon, and it keeps the stream off the parallel path so a
+  //    sidecar reject can never run cleanup while the stream is still writing
+  //    `stagedPath`. A 404 here almost always means this release shipped
+  //    WITHOUT runner assets — the firecracker/daemon build jobs are decoupled
+  //    from the core release (release.yml) and may have failed for this tag.
+  let checksumsTxt: string;
+  let checksumsSig: Uint8Array;
+  try {
+    [checksumsTxt, checksumsSig] = await Promise.all([
+      opts.http.fetchText(urls.checksums),
+      opts.http.fetchBinary(urls.checksumsSig),
+    ]);
+  } catch (err) {
+    throw asRunnerAssetError(err, opts.version, asset);
+  }
+  await verifyDaemonSignature({ exec: opts.exec, fs: opts.fs, checksumsTxt, checksumsSig });
+
+  // 2. Stream the daemon binary to disk, then verify its streamed digest
+  //    against the (now trusted) manifest line for this asset.
   let actual: string;
   try {
     ({ sha256: actual } = await opts.http.fetchToFile(urls.binary, stagedPath, opts.onProgress));
   } catch (err) {
     throw asRunnerAssetError(err, opts.version, asset);
   }
-
   try {
-    // 2. The signed checksums manifest + its minisign signature (small).
-    let checksumsTxt: string;
-    let checksumsSig: Uint8Array;
-    try {
-      [checksumsTxt, checksumsSig] = await Promise.all([
-        opts.http.fetchText(urls.checksums),
-        opts.http.fetchBinary(urls.checksumsSig),
-      ]);
-    } catch (err) {
-      throw asRunnerAssetError(err, opts.version, asset);
-    }
-
-    // 3. Verify the manifest signature, then the streamed digest against the
-    //    (now trusted) manifest line for this asset.
-    await verifyDaemonSignature({
-      exec: opts.exec,
-      fs: opts.fs,
-      checksumsTxt,
-      checksumsSig,
-    });
     const expected = parseChecksumLine(checksumsTxt, asset);
     if (actual !== expected) {
       throw new Error(
@@ -262,14 +258,14 @@ export async function installFirecracker(opts: {
   const urls = firecrackerUrls(opts.version, opts.arch);
   const work = await mkdtemp(join(tmpdir(), "appstrate-firecracker-"));
   try {
-    // Stream the tarball to the work dir (verified below, then extracted — it
-    // is never renamed onto a live target, so the temp dir is fine).
+    // Fetch the small checksum sidecar FIRST, then stream the tarball — keeping
+    // the big stream off the parallel path (a Promise.all reject would run the
+    // `finally` rm(work) while the stream is still writing into it) and failing
+    // fast if the sidecar is missing. Extracted below, never renamed onto a
+    // live target, so the temp dir is fine.
+    const expected = parseSha256(await opts.http.fetchText(urls.sha256));
     const tgzPath = join(work, "firecracker.tgz");
-    const [{ sha256: actual }, sumText] = await Promise.all([
-      opts.http.fetchToFile(urls.tarball, tgzPath, opts.onProgress),
-      opts.http.fetchText(urls.sha256),
-    ]);
-    const expected = parseSha256(sumText);
+    const { sha256: actual } = await opts.http.fetchToFile(urls.tarball, tgzPath, opts.onProgress);
     if (actual !== expected) {
       throw new Error(
         `firecracker tarball SHA-256 mismatch: expected ${expected}, got ${actual} — ` +
