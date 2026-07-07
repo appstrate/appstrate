@@ -130,6 +130,8 @@
   "run.tabPrompt": "Prompt",
   "run.emptyUsage": "Aucune donnée d'utilisation",
   "run.infoTrigger": "Déclenché par",
+  "run.infoVersion": "Version",
+  "run.infoMetadata": "Métadonnées",
   "run.infoInput": "Entrées",
   "run.infoConfig": "Configuration",
   "run.infoExecution": "Exécution",

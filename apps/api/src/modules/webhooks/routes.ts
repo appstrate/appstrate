@@ -287,7 +287,10 @@ export function createWebhooksRouter() {
     rateLimit(300),
     requireModulePermission("webhooks", "read"),
     async (c) => {
-      const limit = c.req.query("limit") ? Number(c.req.query("limit")) : 20;
+      // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
+      // would otherwise reach the query and 500. Out-of-range / unparseable
+      // falls back to 20.
+      const limit = z.coerce.number().int().min(1).max(100).catch(20).parse(c.req.query("limit"));
       const result = await listDeliveries(webhookScope(c), c.req.param("id")!, limit);
       return c.json(listResponse(result));
     },

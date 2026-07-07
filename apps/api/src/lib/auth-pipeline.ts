@@ -38,8 +38,9 @@ import type { AppEnv } from "../types/index.ts";
 export interface AuthPipelineOptions {
   /**
    * Accessor for paths that bypass the auth middleware entirely.
-   * Module-contributed public paths (e.g. Stripe webhook, OIDC login page)
-   * are merged into this set by the caller. Wrapped in a function so the
+   * Module-contributed public paths (e.g. a module's inbound webhook
+   * endpoint, OIDC login page) are merged into this set by the caller.
+   * Wrapped in a function so the
    * value is read at request time — in production the pipeline is wired
    * before `await boot()` finishes loading modules, so a snapshot at
    * wire-time would miss module contributions.

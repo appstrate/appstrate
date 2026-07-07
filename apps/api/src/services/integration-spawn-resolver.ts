@@ -552,9 +552,11 @@ async function resolveOne(
 /**
  * Render the optional `workspaceMount` field on the spawn spec from
  * the referenced mcp-server's `_meta["dev.appstrate/workspace"]`. The
- * core parser throws on malformed entries; we surface that as a
- * skipped integration with a structured log so the run boot reports
- * the misconfig without aborting the entire run.
+ * core parser throws on malformed entries; that error propagates (with
+ * integration context) so a bad manifest fails fast at run kickoff —
+ * matching the caller's contract — rather than producing a silently
+ * degraded spawn (runner with no workspace mount) the operator can't
+ * diagnose.
  */
 function resolveWorkspaceMount(
   integrationId: string,
@@ -564,15 +566,11 @@ function resolveWorkspaceMount(
   try {
     mount = getMcpServerWorkspaceMount(mcpServer);
   } catch (err) {
-    logger.warn(
-      "mcp-server _meta.workspace is malformed; integration will spawn without workspace mount",
-      {
-        integrationId,
-        mcpServer: (mcpServer as { name?: string }).name,
-        error: err instanceof Error ? err.message : String(err),
-      },
+    throw new Error(
+      `Integration '${integrationId}': mcp-server _meta.workspace is malformed — ${
+        err instanceof Error ? err.message : String(err)
+      }`,
     );
-    return {};
   }
   if (!mount) return {};
   return { workspaceMount: { mount: mount.mount, access: mount.access } };

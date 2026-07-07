@@ -153,8 +153,13 @@ app.get("/llms.txt", (c) => c.text(LLMS_TXT));
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
 
+// Every mutating method must be drained, not just POST — a PUT/PATCH/DELETE
+// arriving mid-shutdown would otherwise slip past the gate and race the
+// in-flight wait, leaving a half-applied write behind.
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 app.use("*", async (c, next) => {
-  if (shuttingDown && c.req.method === "POST") {
+  if (shuttingDown && MUTATING_METHODS.has(c.req.method)) {
     throw new ApiError({
       status: 503,
       code: "shutting_down",

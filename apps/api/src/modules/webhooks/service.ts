@@ -507,11 +507,16 @@ export function buildEventEnvelope(params: {
     delete execObj.input;
   }
 
-  // Truncate: if data exceeds 256KB, strip result
-  const dataJson = JSON.stringify(execObj);
-  if (dataJson.length > MAX_PAYLOAD_SIZE && execObj.result) {
+  // Truncate: if the envelope exceeds MAX_PAYLOAD_SIZE, strip the largest
+  // optional fields — `result` first, then `input` (a large run input can
+  // blow the payload just as easily). Both remain recoverable via the API.
+  if (JSON.stringify(execObj).length > MAX_PAYLOAD_SIZE && execObj.result) {
     delete execObj.result;
     execObj.resultTruncated = true;
+  }
+  if (JSON.stringify(execObj).length > MAX_PAYLOAD_SIZE && execObj.input) {
+    delete execObj.input;
+    execObj.inputTruncated = true;
   }
 
   return {

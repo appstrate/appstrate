@@ -110,7 +110,7 @@ export interface AppstrateModule {
    * Merged into `AppConfig.features` at boot (simple `Object.assign`).
    * Absent modules contribute nothing — their flags stay at base defaults.
    *
-   * @example features: { billing: true }
+   * @example features: { metering: true }
    */
   features?: Record<string, boolean>;
 
@@ -386,12 +386,12 @@ export interface ModuleHooks {
   beforeRun: (params: BeforeRunParams) => Promise<RunRejection | null>;
   /**
    * Pre-signup gate — throw to reject signup (e.g. domain allowlist,
-   * free-tier quota, per-client org-signup policy).
+   * free-tier usage limits, per-client org-signup policy).
    *
    * Unlike other hooks in this map, `beforeSignup` is dispatched to EVERY
    * loaded module rather than first-match-wins (the platform calls all
    * handlers in turn; any thrown error aborts the signup). This lets
-   * unrelated modules — e.g. cloud billing + OIDC auto-provisioning —
+   * unrelated modules — e.g. cloud usage metering + OIDC auto-provisioning —
    * coexist cleanly.
    */
   beforeSignup: (email: string, ctx?: BeforeSignupContext) => Promise<void>;
@@ -407,8 +407,8 @@ export interface ModuleHooks {
   /**
    * Post-run hook — called on terminal status before the final run record is
    * persisted. Symmetric with `beforeRun`. Modules return a metadata patch
-   * stored as `runs.metadata` (e.g. `{ creditsUsed }` from cloud billing), or
-   * null to leave it untouched.
+   * stored as `runs.metadata` (e.g. `{ usage }` from the cloud metering
+   * module), or null to leave it untouched.
    */
   afterRun: (params: RunStatusChangeParams) => Promise<Record<string, unknown> | null>;
 }
@@ -1012,7 +1012,7 @@ export interface ModuleInitContext {
 // Deliberately minimal: a capability lands here ONLY when a real cross-tenant
 // consumer needs it (the same razor `scripts/verify-module-contract.ts`
 // applies to the `AppstrateModule` members). Today the sole consumer is the
-// `cloud` billing module, which reads the per-run `llm_usage` ledger via
+// `cloud` metering module, which reads the per-run `llm_usage` ledger via
 // `runs.listLlmUsage`. The previous broad surface (orchestrator / pubsub /
 // realtime / inline / packages / models / applications / run CRUD) mirrored
 // the in-process `chat` module that has since been removed — it carried zero

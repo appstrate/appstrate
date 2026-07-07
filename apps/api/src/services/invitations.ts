@@ -2,7 +2,7 @@
 
 import { db } from "@appstrate/db/client";
 import { orgInvitations, organizations, user, profiles, orgRoleEnum } from "@appstrate/db/schema";
-import { eq, and, lt, desc } from "drizzle-orm";
+import { eq, and, lt, gt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
@@ -110,10 +110,14 @@ export async function getOrgInvitations(orgId: string) {
 
 /**
  * Atomically claim a single-use invitation: flips `pending → accepted` only if
- * it is still pending, in one conditional UPDATE. Returns `true` if THIS call
- * won the claim, `false` if the row was already consumed (lost a concurrent
- * race). The `WHERE status = 'pending'` guard is what makes two simultaneous
- * accepts safe — the row lock lets exactly one UPDATE match.
+ * it is still pending AND not yet expired, in one conditional UPDATE. Returns
+ * `true` if THIS call won the claim, `false` if the row was already consumed
+ * (lost a concurrent race) or has passed `expiresAt`. The `WHERE status =
+ * 'pending'` guard is what makes two simultaneous accepts safe — the row lock
+ * lets exactly one UPDATE match. The `expiresAt > now()` guard closes the gap
+ * between real expiry and the periodic `expireOldInvitations()` sweep that
+ * flips the status to `expired`: without it an expired-but-not-yet-swept
+ * invitation was still acceptable.
  */
 export async function markInvitationAccepted(
   invitationId: string,
@@ -123,7 +127,13 @@ export async function markInvitationAccepted(
   const claimed = await tx
     .update(orgInvitations)
     .set({ status: "accepted", acceptedBy: userId, acceptedAt: new Date() })
-    .where(and(eq(orgInvitations.id, invitationId), eq(orgInvitations.status, "pending")))
+    .where(
+      and(
+        eq(orgInvitations.id, invitationId),
+        eq(orgInvitations.status, "pending"),
+        gt(orgInvitations.expiresAt, new Date()),
+      ),
+    )
     .returning({ id: orgInvitations.id });
   return claimed.length > 0;
 }

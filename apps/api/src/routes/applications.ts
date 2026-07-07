@@ -76,7 +76,7 @@ export function createApplicationsRouter() {
   router.use("/:applicationId/*", apiKeyAppScopeGuard);
 
   // GET /api/applications — list applications for the org
-  router.get("/", async (c) => {
+  router.get("/", requirePermission("applications", "read"), async (c) => {
     const orgId = c.get("orgId");
     const apps = await listApplications(orgId);
     const authMethod = c.get("authMethod");
@@ -121,9 +121,9 @@ export function createApplicationsRouter() {
   });
 
   // GET /api/applications/:id — get application detail
-  router.get("/:id", async (c) => {
+  router.get("/:id", requirePermission("applications", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.req.param("id");
+    const applicationId = c.req.param("id")!;
 
     try {
       const app = await getApplication(orgId, applicationId);

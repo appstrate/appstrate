@@ -105,6 +105,14 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
   if (!countOutcome.ok) throw countOutcome.error;
   const runningCount = countOutcome.count;
 
+  // Fast pre-check only — NOT the atomic reservation. Two launches can both
+  // observe `count < cap` in the window between here and the run INSERT
+  // (~1.75s of pipeline work later) and overshoot the cap. The authoritative,
+  // atomic enforcement lives in `createRun` (`state/runs.ts`): it re-counts and
+  // inserts the run row in ONE transaction under a per-org advisory lock, so
+  // admission is serialized per org and the cap holds exactly. This gate stays
+  // as a cheap early 429 that rejects most over-cap launches before the
+  // pipeline spends any real work.
   if (runningCount >= platformLimits.max_concurrent_per_org) {
     return {
       ok: false,

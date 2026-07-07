@@ -4,22 +4,19 @@ import { useCallback } from "react";
 import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
-import { authStore } from "../stores/auth-store";
+import { authStore, type AuthProfile } from "../stores/auth-store";
 import { orgStore } from "../stores/org-store";
 import { appStore } from "../stores/app-store";
 import i18n from "../i18n";
-import type { UserProfile } from "@appstrate/shared-types";
 
-async function fetchProfile(): Promise<UserProfile | null> {
+async function fetchProfile(): Promise<AuthProfile | null> {
   try {
     const { data } = await client.GET("/api/profile");
     if (!data) return null;
-    const profile: UserProfile = {
+    const profile: AuthProfile = {
       id: data.id,
       displayName: data.displayName ?? null,
       language: data.language,
-      createdAt: new Date(),
-      updatedAt: new Date(),
     };
     if (profile.language && profile.language !== i18n.language) {
       i18n.changeLanguage(profile.language);
@@ -46,7 +43,7 @@ function clearSession() {
 
 function setAuthenticatedUser(
   user: { id: string; email: string; emailVerified: boolean; name: string },
-  profile: UserProfile | null,
+  profile: AuthProfile | null,
 ) {
   authStore.setState({
     user: { id: user.id, email: user.email, emailVerified: user.emailVerified, name: user.name },

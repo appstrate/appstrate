@@ -445,14 +445,17 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
     expect(otherOrg.id).not.toBe(orgId);
 
-    // Token scoped to org X.
+    // Token scoped to org X. `applications:read` is requested so the token can
+    // reach the guarded `GET /api/applications` probe below (dashboard perms =
+    // requested-scope ∩ role-ceiling; admin's ceiling allows it). The spoof
+    // guard under test is orthogonal to the resource scope.
     const token = await mintToken({
       sub: authUserId,
       actor_type: "dashboard_user",
       org_id: orgId,
       org_role: "admin",
       email: "stage3@example.com",
-      scope: "openid",
+      scope: "openid applications:read",
     });
 
     // Send token + X-Org-Id: Y (spoof attempt). Hit an org-scoped route that

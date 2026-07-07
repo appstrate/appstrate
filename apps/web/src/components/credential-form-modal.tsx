@@ -364,7 +364,7 @@ function CredentialFormBody({
                   try {
                     new URL(v.trim());
                   } catch {
-                    return t("validation.required", { ns: "common" });
+                    return t("validation.urlFormat", { ns: "common" });
                   }
                   return undefined;
                 },

@@ -57,9 +57,19 @@ export function PinnedSlotCard({ slot, onDelete, isDeleting }: PinnedSlotCardPro
   const [copied, setCopied] = useState(false);
   const onCopy = () => {
     const text = isString ? (slot.content as string) : JSON.stringify(slot.content, null, 2);
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    // clipboard.writeText can reject (permission denied, insecure context,
+    // unfocused document). Only flip the "copied" affordance on success so we
+    // never signal a copy that didn't happen.
+    navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {
+        // Best-effort: swallow the rejection — nothing was copied, so leave
+        // the button in its idle state rather than surfacing a hard error.
+      },
+    );
   };
 
   return (

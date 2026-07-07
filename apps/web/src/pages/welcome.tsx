@@ -44,7 +44,7 @@ export function WelcomePage() {
 
       finishAndRedirect();
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : "Erreur");
+      setServerError(err instanceof Error ? err.message : t("error.generic", { ns: "common" }));
       setLoading(false);
     }
   };

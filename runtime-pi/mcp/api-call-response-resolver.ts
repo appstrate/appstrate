@@ -95,8 +95,12 @@ async function extractBodyBytes(
       chunks.push(enc.encode(block.text));
     } else if (block.type === "resource_link" && typeof block.uri === "string") {
       const c = (await readResource(block.uri)).contents?.[0];
-      if (c?.text != null) chunks.push(enc.encode(c.text));
-      else if (c?.blob != null) chunks.push(decodeBase64(c.blob));
+      // Prefer the base64 `blob` (byte-exact) over `text`: a non-UTF-8 /
+      // binary body round-tripped through `TextEncoder` would corrupt bytes
+      // (invalid sequences replaced with U+FFFD). Only fall back to `text`
+      // when the resource carries no blob (genuine text resource).
+      if (c?.blob != null) chunks.push(decodeBase64(c.blob));
+      else if (c?.text != null) chunks.push(enc.encode(c.text));
     }
   }
   const total = chunks.reduce((n, c) => n + c.byteLength, 0);

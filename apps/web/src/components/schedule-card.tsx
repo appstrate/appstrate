@@ -14,6 +14,11 @@ interface ScheduleCardProps {
 }
 
 export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
+  // PERF: N+1 — each card issues its own `GET .../schedules/:id/runs`, so a
+  // list of N schedules fans out to N requests. Acceptable at current list
+  // sizes; if this list grows, hoist the running/unread/last-run counts into
+  // the parent's schedule list payload (server-side aggregate) or a single
+  // batch endpoint and pass them down as props instead of querying per row.
   const { data: runs } = useScheduleRuns(schedule.id);
 
   // Running + unread counts scoped to this schedule's runs

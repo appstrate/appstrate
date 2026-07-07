@@ -164,6 +164,46 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
+/**
+ * Re-install (overwrite) an existing item's draft manifest + content.
+ *
+ * Distinct from {@link updateOrgItem}, which is optimistic (returns null so the
+ * route surfaces a 409) for USER-facing edits where a stale `lock_version`
+ * means "someone else edited, reload". A re-install is machine-driven
+ * (post-install / bundle import) and last-writer-wins: it re-reads the CURRENT
+ * `lock_version` and retries the update when a concurrent write bumped it, so
+ * the install is never silently dropped on a lock mismatch (the previous
+ * caller passed a lock_version read moments earlier and ignored the null
+ * return — a concurrent edit would make the re-install a no-op). Returns the
+ * updated row, or null when the item no longer exists (caller should insert).
+ */
+export async function reinstallOrgItem(
+  orgId: string,
+  id: string,
+  payload: {
+    manifest: Record<string, unknown>;
+    content: string;
+  },
+): Promise<Package | null> {
+  const MAX_ATTEMPTS = 5;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const [current] = await db
+      .select({ lockVersion: packages.lockVersion })
+      .from(packages)
+      .where(scopedWhere(packages, { orgId, extra: [eq(packages.id, id)] }))
+      .limit(1);
+    if (!current) return null;
+
+    const updated = await updateOrgItem(orgId, id, payload, current.lockVersion);
+    if (updated) return updated;
+    // Lost the optimistic-lock race (a concurrent write bumped lock_version) —
+    // re-read the fresh version and retry the overwrite.
+  }
+  throw new Error(
+    `reinstallOrgItem: exceeded retry budget for '${id}' under concurrent modification`,
+  );
+}
+
 /** List items of a type accessible to an application (system + installed). */
 export async function listOrgItems(
   orgId: string,

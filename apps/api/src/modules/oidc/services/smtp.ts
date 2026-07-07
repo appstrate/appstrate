@@ -96,6 +96,15 @@ function resolveSecure(mode: "auto" | "tls" | "starttls" | "none", port: number)
 
 type SmtpRow = typeof applicationSmtpConfigs.$inferSelect;
 
+// CASING: `SmtpConfigView` is wire-facing (returned by the admin SMTP-config
+// routes) but carries camelCase members (`fromAddress`, `fromName`,
+// `secureMode`) where the snake_case wire convention would want
+// `from_address` / `from_name` / `secure_mode`. `applicationId`, `createdAt`,
+// `updatedAt` are legitimate universal-field carve-outs; the three others are
+// a genuine drift. NOT fixed here: the shape is defined by `SmtpConfigView` in
+// `@appstrate/shared-types` (outside this module) and consumed by the SPA, so
+// renaming is a coordinated wire-breaking change, not a local edit. Tracked
+// note only — see docs/CASING_CONVENTIONS.md.
 function mapRow(row: SmtpRow): SmtpConfigView {
   return {
     applicationId: row.applicationId,

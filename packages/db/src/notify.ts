@@ -71,7 +71,11 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'org_id', NEW.org_id,
         'application_id', NEW.application_id,
         'schedule_id', NEW.schedule_id,
-        'error', NEW.error,
+        -- Bound the error text: the whole NOTIFY payload must stay under
+        -- Postgres' 8 KB limit, else pg_notify raises and aborts the
+        -- finalize transaction — orphaning the run in 'running'. 2 KB is
+        -- ample for a surfaced error message; the full text lives in run_logs.
+        'error', LEFT(NEW.error, 2000),
         'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'duration', NEW.duration

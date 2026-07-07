@@ -80,17 +80,23 @@ export async function createBootstrapOrg(
     slug = `${baseSlug}-${attempt + 2}`;
   }
 
-  const [org] = await db
-    .insert(organizations)
-    .values({ name: orgName, slug, createdBy: userId })
-    .returning({ id: organizations.id, slug: organizations.slug });
-  if (!org) {
-    throw new Error("createBootstrapOrg: organizations insert returned no row");
-  }
-  await db.insert(organizationMembers).values({
-    orgId: org.id,
-    userId,
-    role: "owner",
+  // Org row + owner membership commit together: a partial write (org created
+  // but membership insert failing) would strand an org with no owner. The
+  // transaction makes the pair atomic.
+  const org = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(organizations)
+      .values({ name: orgName, slug, createdBy: userId })
+      .returning({ id: organizations.id, slug: organizations.slug });
+    if (!created) {
+      throw new Error("createBootstrapOrg: organizations insert returned no row");
+    }
+    await tx.insert(organizationMembers).values({
+      orgId: created.id,
+      userId,
+      role: "owner",
+    });
+    return created;
   });
 
   return { created: true, orgId: org.id, slug: org.slug };

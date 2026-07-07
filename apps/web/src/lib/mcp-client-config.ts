@@ -27,10 +27,14 @@ export interface McpClientConfig {
   vscodeDeeplink: string;
 }
 
-/** URL-safe base64 of an ASCII string (config snippets contain only ASCII). */
+/** Base64 of an arbitrary UTF-8 string. */
 function toBase64(value: string): string {
-  // btoa is safe here: server names and URLs are ASCII.
-  return btoa(value);
+  // btoa throws on code points > U+00FF, so encode to UTF-8 bytes first —
+  // server names can carry non-ASCII characters (accents, CJK, …).
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 export function buildMcpClientConfig(serverName: string, url: string): McpClientConfig {

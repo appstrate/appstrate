@@ -47,6 +47,23 @@ export interface UpsertSocialProviderInput {
   scopes?: string[] | null;
 }
 
+/**
+ * Canonical runtime list of every supported social provider. Single source of
+ * truth for iterating over providers (e.g. cache invalidation) instead of
+ * hardcoding the pair at each callsite. The compile-time assertion below fails
+ * the build if `SocialProviderId` gains a member that is not listed here, so
+ * the list can never silently drift out of sync with the type.
+ */
+export const SOCIAL_PROVIDER_IDS = [
+  "google",
+  "github",
+] as const satisfies readonly SocialProviderId[];
+// If this line errors, a new SocialProviderId was added — append it above.
+type _AssertAllProvidersListed =
+  Exclude<SocialProviderId, (typeof SOCIAL_PROVIDER_IDS)[number]> extends never ? true : never;
+const _assertAllProvidersListed: _AssertAllProvidersListed = true;
+void _assertAllProvidersListed;
+
 const cache = createTtlCache<ResolvedSocialProvider>("oidc:social-cache-invalidate");
 
 function cacheKey(applicationId: string, provider: SocialProviderId): string {
@@ -135,10 +152,7 @@ export async function invalidateSocialCache(
     await cache.delete(cacheKey(applicationId, provider));
     return;
   }
-  await Promise.all([
-    cache.delete(cacheKey(applicationId, "google")),
-    cache.delete(cacheKey(applicationId, "github")),
-  ]);
+  await Promise.all(SOCIAL_PROVIDER_IDS.map((p) => cache.delete(cacheKey(applicationId, p))));
 }
 
 /** Test-only: clear the entire cache. */

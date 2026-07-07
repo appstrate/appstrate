@@ -67,7 +67,7 @@
  */
 
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { user as userTable, organizationMembers } from "@appstrate/db/schema";
@@ -1009,6 +1009,19 @@ export async function listSessionsForOrg(orgId: string): Promise<AdminCliSession
  * separate "the user signed their own device out" from "an org admin
  * forced a member's device out".
  *
+ * Cross-org over-reach guard: a CLI credential is USER-global — it is minted
+ * per `(user, CLI client)`, carries no `orgId`, and grants its holder access
+ * to EVERY org they belong to (the org is chosen per request via `X-Org-Id`).
+ * Revoking the family is therefore all-or-nothing across the user's orgs; the
+ * schema has no per-org token granularity to partially revoke. So an admin of
+ * `orgId` may only force-revoke a member's session when `orgId` is the ONLY
+ * org that member belongs to. If the member also belongs to another org, the
+ * shared credential also serves an org outside this admin's authority, and we
+ * refuse (`false`) rather than sever access the admin has no right to cut —
+ * the member can still sign the device out themselves via the personal
+ * endpoints. This confines the blast radius of an org-admin revoke to the
+ * caller's own org.
+ *
  * The two-query shape (lookup head → revoke family) is deliberate: a
  * single UPDATE with the membership join would silently skip the
  * "already revoked" case without surfacing it to the caller, and we
@@ -1036,6 +1049,20 @@ export async function revokeFamilyForOrgAdmin(params: {
     .limit(1);
   if (!head) return false;
   if (head.revokedAt) return false;
+  // Refuse if the user's user-global credential is shared with any OTHER org —
+  // see the cross-org over-reach guard in the doc comment above.
+  const [otherOrgMembership] = await db
+    .select({ orgId: organizationMembers.orgId })
+    .from(organizationMembers)
+    .where(and(eq(organizationMembers.userId, head.userId), ne(organizationMembers.orgId, orgId)))
+    .limit(1);
+  if (otherOrgMembership) {
+    logger.info(
+      "oidc: org-admin CLI revoke refused — credential is shared across the member's other orgs",
+      { module: "oidc", orgId, familyId },
+    );
+    return false;
+  }
   await revokeFamily(familyId, "org_admin_revoked");
   return true;
 }
@@ -1213,12 +1240,14 @@ function hashRefreshToken(plain: string): string {
  * dropped and audit-logged so operators can spot a misconfigured
  * upstream or a crafted `/device/code` that slipped past BA's plugin.
  *
- * Empty-client-scopes (NULL or `[]`) is treated as "no restriction"
- * ONLY when the client is explicitly declared without a `scopes`
- * column — the allowlist below defaults to the canonical CLI scope
- * set so a misseeded client cannot accidentally widen grants. Callers
- * that actually want unrestricted minting (admin tooling, etc.) should
- * declare their scopes explicitly.
+ * Empty-client-scopes (NULL or `[]`) FAILS CLOSED: the returned scope is
+ * the empty string (every requested scope dropped), never "no restriction".
+ * A client that reached `/device/code` always has its scope string written
+ * as-posted by BA's plugin, so a client row with no declared `scopes` is a
+ * misconfiguration — echoing an un-gated `scope` claim into the JWT would be
+ * a privilege-escalation vector, so we drop all and audit-log instead. A
+ * client that legitimately needs to mint scopes must declare them explicitly
+ * on its `scopes` column.
  */
 function narrowScopeToClient(
   requested: string,

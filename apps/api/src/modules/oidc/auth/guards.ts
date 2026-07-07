@@ -251,16 +251,42 @@ function extractClientId(body: TokenRequestBody, request: Request | undefined): 
     const decoded = atob(authHeader.slice(6).trim());
     const sep = decoded.indexOf(":");
     if (sep <= 0) return null;
-    return decoded.slice(0, sep);
+    // RFC 6749 §2.3.1: the `client_id` and `client_secret` are
+    // `application/x-www-form-urlencoded` BEFORE being joined with `:` and
+    // base64-encoded. Reverse that here (`+` → space, then percent-decode) so
+    // a client_id containing reserved characters keys the rate limiter under
+    // its true value rather than its still-encoded form. `decodeURIComponent`
+    // throws on a malformed `%` sequence — the enclosing try/catch degrades to
+    // IP-only limiting for that request.
+    const rawClientId = decoded.slice(0, sep);
+    return decodeURIComponent(rawClientId.replace(/\+/g, " "));
   } catch {
     return null;
   }
 }
 
-async function enforceClientRateLimit(clientId: string): Promise<void> {
+/**
+ * Compute the per-client token-limiter key. Keyed on `client_id` + source IP,
+ * NOT `client_id` alone: a single OAuth client is shared by MANY end users
+ * (e.g. the dashboard SPA / CLI use one `client_id` for the whole instance),
+ * so a global-per-client bucket lets any one caller exhaust the budget and
+ * DoS every other user's login through that client. Scoping to the source IP
+ * confines the blast radius to one caller while still catching a single IP
+ * hammering `client_secret` against one client. The complementary per-IP
+ * limiter (`enforceRateLimit("oauth-token", …)`) already caps raw IP volume.
+ */
+function clientRateLimitKey(clientId: string, request: Request | undefined): string {
+  const ip = getClientIpFromRequest(request) ?? "unknown";
+  return `client:${clientId}:${ip}`;
+}
+
+async function enforceClientRateLimit(
+  clientId: string,
+  request: Request | undefined,
+): Promise<void> {
   const limiter = await getLimiter("oauth-token-client", TOKEN_CLIENT_RL_POINTS);
   try {
-    await limiter.consume(`client:${clientId}`);
+    await limiter.consume(clientRateLimitKey(clientId, request));
   } catch (rej) {
     const retry =
       rej && typeof rej === "object" && "msBeforeNext" in rej
@@ -291,6 +317,24 @@ async function enforceClientRateLimit(clientId: string): Promise<void> {
       },
       { "Retry-After": String(retry), "X-RateLimit-Scope": "client" },
     );
+  }
+}
+
+/**
+ * Release the per-(client + IP) token-limiter reservation on a SUCCESSFUL
+ * token exchange, so a legitimate `authorization_code` / `refresh_token`
+ * grant does not count against the budget — the limiter degrades to a
+ * failed-attempt counter (same reserve-then-reset-on-success shape as the
+ * login-email limiter). Without this a burst of legit logins from one IP
+ * through a shared client could self-DoS. Best-effort: a cleanup failure
+ * must never turn a successful token response into an error.
+ */
+async function resetClientRateLimit(clientId: string, request: Request | undefined): Promise<void> {
+  try {
+    const limiter = await getLimiter("oauth-token-client", TOKEN_CLIENT_RL_POINTS);
+    await limiter.delete(clientRateLimitKey(clientId, request));
+  } catch {
+    // Best-effort — see doc comment.
   }
 }
 
@@ -725,7 +769,7 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
             // misbehaving / compromised satellite is rate-limited
             // regardless of where its requests come from.
             const clientId = extractClientId(body, ctx.request);
-            if (clientId) await enforceClientRateLimit(clientId);
+            if (clientId) await enforceClientRateLimit(clientId, ctx.request);
 
             const grantType = body.grant_type;
             // Every grant that reaches `createUserTokens` and can carry a
@@ -823,6 +867,27 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
         },
       ],
       after: [
+        {
+          // Release the per-(client + IP) token-limiter reservation when the
+          // token exchange SUCCEEDED, so legitimate grants don't erode the
+          // shared budget (see `resetClientRateLimit`). We re-derive the same
+          // key from the request body + IP and only reset when the response
+          // carries an `access_token` — a rejected exchange leaves the
+          // reservation in place so brute-force attempts still accrue.
+          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/token",
+          handler: createAuthMiddleware(async (ctx) => {
+            const returned = (ctx.context as { returned?: unknown }).returned;
+            const succeeded =
+              returned &&
+              typeof returned === "object" &&
+              "access_token" in returned &&
+              typeof (returned as { access_token?: unknown }).access_token === "string";
+            if (!succeeded) return;
+            const body = (ctx.body ?? {}) as TokenRequestBody;
+            const clientId = extractClientId(body, ctx.request);
+            if (clientId) await resetClientRateLimit(clientId, ctx.request);
+          }),
+        },
         {
           // Stamp the freshly-registered DCR client as a self-service instance
           // client. Done in an AFTER-hook (not before) because the RFC 7591

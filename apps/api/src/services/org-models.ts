@@ -172,7 +172,18 @@ export async function listOrgModels(
       const creds = opts?.metadataOnly
         ? await loadCredentialMetadata(r.credentialId, orgId)
         : await loadInferenceCredentials(orgId, r.credentialId);
-      if (creds) credByRow.set(r.id, creds);
+      if (!creds) return;
+      // `metadataOnly` skips the decrypt, so it cannot see the OAuth blob's
+      // `needsReconnection` flag — a dead OAuth credential would otherwise
+      // leak into the model picker as a selectable (but unusable) model.
+      // Route OAuth rows through the decrypt gate (`loadInferenceCredentials`
+      // returns null for dead credentials), matching the default listing.
+      // api-key credentials can never be "dead", so they skip this probe.
+      if (opts?.metadataOnly && getModelProvider(creds.providerId)?.authMode === "oauth2") {
+        const live = await loadInferenceCredentials(orgId, r.credentialId);
+        if (!live) return;
+      }
+      credByRow.set(r.id, creds);
     }),
   );
   const reachableRows = rows.filter((r) => credByRow.has(r.id));

@@ -76,9 +76,14 @@ const applicationLevelClientRequest = {
   },
 };
 
+// No `discriminator` here: OpenAPI's discriminator resolves mapping targets
+// via `$ref`, so it is only meaningful when the `oneOf` branches are `$ref`s —
+// with inline branch schemas (as here) linters flag it as unresolvable. The
+// branches are already unambiguous without it: each declares a distinct
+// single-value `level` enum (`["org"]` vs `["application"]`), so exactly one
+// branch matches any given request body.
 const createClientRequest = {
   oneOf: [orgLevelClientRequest, applicationLevelClientRequest],
-  discriminator: { propertyName: "level" },
 };
 
 const updateClientRequest = {
@@ -307,6 +312,11 @@ export const oidcPaths = {
   "/api/auth/oauth2/authorize": {
     get: {
       operationId: "oauth2Authorize",
+      // Public OAuth 2.1 protocol endpoint — NOT protected by the platform's
+      // global cookie/apikey scheme. `security: []` overrides the inherited
+      // global requirement so tooling doesn't advertise a session/API-key
+      // requirement on an endpoint any client reaches unauthenticated.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "OAuth 2.1 authorization endpoint",
       description:
@@ -357,6 +367,9 @@ export const oidcPaths = {
   "/api/auth/oauth2/token": {
     post: {
       operationId: "oauth2Token",
+      // Public OAuth 2.1 protocol endpoint — client auth rides the request
+      // body / Basic header, not the platform session. Override the global scheme.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "OAuth 2.1 token endpoint",
       description:
@@ -422,6 +435,9 @@ export const oidcPaths = {
   "/api/auth/oauth2/userinfo": {
     get: {
       operationId: "oauth2Userinfo",
+      // Authenticated by the OIDC access token (`Authorization: Bearer ey…`),
+      // NOT the platform cookie/apikey scheme — override the global requirement.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "OIDC UserInfo endpoint",
       description:
@@ -435,6 +451,8 @@ export const oidcPaths = {
   "/api/auth/oauth2/introspect": {
     post: {
       operationId: "oauth2Introspect",
+      // Public OAuth 2.0 protocol endpoint (RFC 7662) — override the global scheme.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "RFC 7662 token introspection",
       requestBody: {
@@ -481,6 +499,8 @@ export const oidcPaths = {
   "/api/auth/oauth2/revoke": {
     post: {
       operationId: "oauth2Revoke",
+      // Public OAuth 2.0 protocol endpoint (RFC 7009) — override the global scheme.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "RFC 7009 token revocation",
       requestBody: {
@@ -503,6 +523,8 @@ export const oidcPaths = {
   "/api/auth/jwks": {
     get: {
       operationId: "oauth2Jwks",
+      // Fully public — signing keys are meant to be fetched by anyone. Override.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "JWKS endpoint",
       description: "Public ES256 signing keys used to verify access tokens. Cacheable.",
@@ -528,6 +550,8 @@ export const oidcPaths = {
   "/.well-known/openid-configuration": {
     get: {
       operationId: "oidcDiscovery",
+      // Public discovery document — override the global scheme.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "OpenID Connect discovery document",
       description:
@@ -538,6 +562,8 @@ export const oidcPaths = {
   "/.well-known/oauth-authorization-server": {
     get: {
       operationId: "oauthServerMetadata",
+      // Public metadata document — override the global scheme.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "OAuth 2.0 Authorization Server Metadata (RFC 8414)",
       responses: { "200": { description: "Authorization server metadata document." } },
@@ -546,6 +572,8 @@ export const oidcPaths = {
   "/.well-known/openid-configuration/api/auth": {
     get: {
       operationId: "oidcDiscoveryPathInserted",
+      // Public discovery document — override the global scheme.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "OpenID Connect discovery document (RFC 8414 path-inserted)",
       description:
@@ -556,6 +584,8 @@ export const oidcPaths = {
   "/.well-known/oauth-authorization-server/api/auth": {
     get: {
       operationId: "oauthServerMetadataPathInserted",
+      // Public metadata document — override the global scheme.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "OAuth 2.0 Authorization Server Metadata (RFC 8414 path-inserted)",
       description:
@@ -569,6 +599,9 @@ export const oidcPaths = {
   "/api/oauth/logout": {
     get: {
       operationId: "oauthLogout",
+      // Public RP-initiated logout — clears the session cookie if present, but
+      // requires no prior platform auth. Override the global scheme.
+      security: [],
       tags: ["OAuth Clients"],
       summary: "Clear session + RP-initiated logout redirect",
       description:
@@ -832,6 +865,10 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "deviceAuthorizationCode",
+      // Public device-authorization grant (RFC 8628) — the client is gated by
+      // `validateClient`, not the platform session. Matches the sibling public
+      // device-flow endpoints (`/cli/token`, `/cli/revoke`) which are also `[]`.
+      security: [],
       summary: "Request a device + user code (RFC 8628 §3.2)",
       description:
         "Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/cli/token` with (issue #165). Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.2, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them. Clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.",

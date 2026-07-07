@@ -146,6 +146,11 @@ const PROTECTED_HEADERS = new Set<string>([
   ...FORWARDED_AUTH_HEADERS,
   "host",
   "content-length",
+  // Client-source headers: the model must not be able to influence the
+  // audited source IP of the in-process dispatch (the request pipeline
+  // resolves the real client IP per `TRUST_PROXY`).
+  "x-forwarded-for",
+  "x-real-ip",
   internalDispatchHeader()[0],
 ]);
 // Cap the buffered response body so a large list endpoint can't dump
@@ -164,6 +169,26 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * Map a run's terminal status to an HTTP-shaped code for telemetry, so a
+ * failed / timed-out / cancelled run is reported distinctly rather than always
+ * as 200 (the polling GET's status).
+ */
+function runStatusToHttp(status: unknown): number {
+  switch (status) {
+    case "success":
+      return 200;
+    case "failed":
+      return 500;
+    case "timeout":
+      return 504;
+    case "cancelled":
+      return 499;
+    default:
+      return 200;
+  }
 }
 
 function scoreOperation(op: CatalogOperation, tokens: string[]): number {
@@ -583,7 +608,22 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     if (extraHeaders) {
       for (const [name, value] of Object.entries(extraHeaders)) {
         if (PROTECTED_HEADERS.has(name.toLowerCase())) continue;
-        if (typeof value === "string") headers.set(name, value);
+        if (typeof value !== "string") continue;
+        // A model-supplied header name/value may be syntactically invalid
+        // (`Headers.set` throws a TypeError). Surface a graceful tool error
+        // instead of a 500 so the model can self-correct.
+        try {
+          headers.set(name, value);
+        } catch {
+          emit(ctx, {
+            tool: "invoke_operation",
+            durationMs: performance.now() - start,
+            operationId,
+            method: op.method,
+            outcome: "rejected",
+          });
+          return textResult({ error: `Invalid header name or value: ${name}` }, true);
+        }
       }
     }
     // Auto-map OpenAPI `in: header` parameters: a model often supplies a
@@ -606,6 +646,20 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const url = new URL(path, ctx.origin);
     applyQuery(url, query);
 
+    // Every Appstrate API request body is a JSON object. A model that passes
+    // an array or primitive as `body` would otherwise have it silently
+    // dropped by `asRecord` (→ request sent with no body → confusing 400).
+    // Surface a clear tool error instead so the model can self-correct.
+    if (args.body !== undefined && args.body !== null && asRecord(args.body) === undefined) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        method: op.method,
+        outcome: "rejected",
+      });
+      return textResult({ error: "`body` must be a JSON object." }, true);
+    }
     const body = asRecord(args.body);
     const sendBody = body !== undefined && METHODS_WITH_BODY.has(op.method);
     if (sendBody) headers.set("content-type", "application/json");
@@ -905,12 +959,17 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       signal,
     });
 
+    // Report the REAL run outcome, not the polling GET's HTTP status (which is
+    // always 200 for a completed run). Map the run's terminal status to an
+    // HTTP-shaped code so a failed/timed-out/cancelled run is distinguishable
+    // in telemetry.
+    const runStatus = (final.payload as { status?: unknown }).status;
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
       operationId: "getRun",
       method: "GET",
-      status: typeof final.payload.status === "number" ? final.payload.status : 200,
+      status: typeof runStatus === "number" ? runStatus : runStatusToHttp(runStatus),
       outcome: "invoked",
     });
     return textResult(final.payload, final.isError);

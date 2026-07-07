@@ -48,6 +48,7 @@ import {
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, invalidRequest, internalError, notFound, parseBody } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
   parseListPagination,
@@ -470,7 +471,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
-      const body = parseBody(setDefaultClientSchema, await c.req.json());
+      const body = await readJsonBody(c, setDefaultClientSchema);
       await setDefaultIntegrationClient(scope, packageId, authKey, body.client_ref);
       await recordAuditFromContext(c, {
         action: "integration.default_client.set",
@@ -493,7 +494,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
-      const body = parseBody(oauthClientSchema, await c.req.json());
+      const body = await readJsonBody(c, oauthClientSchema);
       // Reject a manual client on an auto-provisioned (remote MCP) auth. Its
       // token endpoint only accepts a DCR/CIMD-acquired public client, so a
       // hand-entered client_id points at the wrong OAuth server and, once
@@ -533,7 +534,7 @@ export function createIntegrationsRouter() {
         throw notFound(`OAuth client '${clientId}' not found`);
       }
       const scope = getAppScope(c);
-      const body = parseBody(oauthClientSchema, await c.req.json());
+      const body = await readJsonBody(c, oauthClientSchema);
       const client = await updateIntegrationOAuthClient(scope, clientId, {
         clientId: body.client_id,
         clientSecret: body.client_secret,
@@ -589,7 +590,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
-      const body = parseBody(importConnectionSchema, await c.req.json());
+      const body = await readJsonBody(c, importConnectionSchema);
       // A reconnect target must be the caller's own connection in this app —
       // otherwise the credential write below would overwrite an arbitrary
       // (possibly another actor's) connection (IDOR).
@@ -921,7 +922,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
-      const body = parseBody(updateSettingsSchema, await c.req.json());
+      const body = await readJsonBody(c, updateSettingsSchema);
       const result = await setBlockUserConnections(scope, packageId, body.block_user_connections);
       await recordAuditFromContext(c, {
         action: "integration.block_user_connections.updated",
@@ -972,7 +973,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getAppScope(c);
-      const body = parseBody(setPinSchema, await c.req.json());
+      const body = await readJsonBody(c, setPinSchema);
       const userId = c.get("user")?.id ?? null;
       const pin = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
@@ -1036,7 +1037,7 @@ export function createIntegrationsRouter() {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
-      const body = parseBody(setOrgDefaultSchema, await c.req.json());
+      const body = await readJsonBody(c, setOrgDefaultSchema);
       const userId = c.get("user")?.id ?? null;
       const def = await upsertOrgDefault(scope, packageId, {
         connectionId: body.connection_id,
@@ -1106,7 +1107,7 @@ export function createIntegrationsRouter() {
           detail: "Only the connection owner or an org admin can update this connection",
         });
       }
-      const body = parseBody(updateConnectionSchema, await c.req.json());
+      const body = await readJsonBody(c, updateConnectionSchema);
       if (body.shared_with_org !== undefined && !isOwner) {
         throw new ApiError({
           status: 403,

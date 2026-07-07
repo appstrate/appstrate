@@ -18,6 +18,7 @@ import { auditEvents } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { getClientIpFromRequest } from "../lib/client-ip.ts";
 
 export type AuditActorType = "user" | "end_user" | "api_key" | "system" | (string & {});
 
@@ -108,7 +109,7 @@ export async function recordAuditFromContext(
     applicationId: c.get("applicationId") ?? null,
     actorType,
     actorId,
-    ip: c.req.header("x-forwarded-for") ?? null,
+    ip: getClientIpFromRequest(c.req.raw),
     userAgent: c.req.header("user-agent") ?? null,
     requestId: c.get("requestId") ?? null,
   });

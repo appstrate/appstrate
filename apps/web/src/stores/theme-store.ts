@@ -26,7 +26,14 @@ function resolve(theme: Theme): "dark" | "light" {
   return theme === "system" ? getSystemTheme() : theme;
 }
 
-const stored = (localStorage.getItem(STORAGE_KEY) as Theme) || "system";
+const THEMES: readonly Theme[] = ["dark", "light", "system"];
+
+/** Coerce an untrusted localStorage value into a valid Theme, defaulting to "system". */
+function parseStoredTheme(value: string | null): Theme {
+  return value && (THEMES as readonly string[]).includes(value) ? (value as Theme) : "system";
+}
+
+const stored = parseStoredTheme(localStorage.getItem(STORAGE_KEY));
 
 export const useTheme = create<ThemeState>()((set) => ({
   theme: stored,

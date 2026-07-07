@@ -276,19 +276,35 @@ async function resolveEndUser(claims: AccessTokenClaims): Promise<AuthResolution
     return null;
   }
 
+  // Revocation-by-deletion: the token's subject (`claims.authUserId`) MUST
+  // still resolve to a live Better Auth user row. Every end_user token is
+  // minted against a real auth identity (the `oidc_end_user_profiles` link is
+  // created at first OIDC login, backed by a `user` row), so a missing row
+  // means the underlying identity was deleted — deleting the auth user is a
+  // supported way to revoke access. Reject immediately rather than falling
+  // back to the self-asserted `claims.email`/`claims.name`, which would let a
+  // deleted identity keep authenticating until the access-token TTL expires.
   const [authUserRow] = await db
     .select({ id: authUsers.id, email: authUsers.email, name: authUsers.name })
     .from(authUsers)
     .where(eq(authUsers.id, claims.authUserId))
     .limit(1);
+  if (!authUserRow) {
+    logger.info("OIDC strategy: end-user auth identity row deleted — rejecting token", {
+      module: "oidc",
+      endUserId: endUser.endUserId,
+      authUserId: claims.authUserId,
+    });
+    return null;
+  }
 
   const permissions = [...scopesToPermissions(claims.scope, "end_user")];
 
   return {
     user: {
       id: claims.authUserId,
-      email: authUserRow?.email ?? claims.email ?? "",
-      name: authUserRow?.name ?? claims.name ?? "",
+      email: authUserRow.email ?? claims.email ?? "",
+      name: authUserRow.name ?? claims.name ?? "",
     },
     orgId: endUser.orgId,
     // End-users are NOT org members — core's strict end-user filter

@@ -344,7 +344,25 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // (redirect/post-logout/client URIs must share the client_id origin) is
     // left at its secure default.
     cimd({
-      allowFetch: async (url) => !(await isBlockedUrlWithDns(url)),
+      // TOCTOU: `isBlockedUrlWithDns` resolves the hostname and blocks any
+      // A/AAAA in a private/internal range, but the actual metadata-document
+      // fetch is performed by the upstream CIMD plugin against the HOSTNAME —
+      // it re-resolves independently, so a hostile resolver can return a
+      // public IP to this check and an internal one at connect time (classic
+      // DNS-rebind). Fully closing this needs resolve-then-connect-to-pinned-IP,
+      // which the runtime-agnostic plugin does not expose via `allowFetch`
+      // (boolean-only seam). This guard is defence-in-depth over the
+      // literal-only `isBlockedUrl`, not a complete pin. FAIL CLOSED: any
+      // error (incl. resolution failure) blocks the fetch — `isBlockedUrlWithDns`
+      // already returns `true` on every failure path, and the explicit
+      // try/catch guarantees a thrown error can never be read as "allowed".
+      allowFetch: async (url) => {
+        try {
+          return !(await isBlockedUrlWithDns(url));
+        } catch {
+          return false;
+        }
+      },
       // A CIMD client is written straight to the DB by the plugin with no
       // platform `level`, so `buildClaimsForClient` would reject its tokens.
       // Stamp it as a self-service instance client (same model as a DCR
@@ -571,9 +589,14 @@ async function buildApplicationLevelClaims(
         userId: user.id,
       },
     );
-    throw new Error(
-      "oidc: application-level oauth client missing referencedApplicationId in metadata",
-    );
+    // Structured OAuth2 error (like the org-level path) so the caller gets a
+    // diagnosable body instead of a bare Error that BA surfaces as an opaque
+    // 500. The client's server-side config is broken, not the request.
+    throw new APIError("INTERNAL_SERVER_ERROR", {
+      error: "server_error",
+      error_description:
+        "This application client is misconfigured (no application is bound to it). Contact the administrator.",
+    });
   }
   const app = await loadAppById(applicationId);
   if (!app) {
@@ -582,7 +605,11 @@ async function buildApplicationLevelClaims(
       userId: user.id,
       applicationId,
     });
-    throw new Error("oidc: referenced application not found");
+    throw new APIError("INTERNAL_SERVER_ERROR", {
+      error: "server_error",
+      error_description:
+        "The application bound to this client no longer exists. Contact the administrator.",
+    });
   }
 
   // Application-level tokens are end-user tokens. Enforce that the

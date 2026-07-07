@@ -863,6 +863,10 @@ async function spawnAndConnectLocalIntegration(params: {
     }));
   }
   const connectPromise = client.connect(spawnedIntegration.transport);
+  // If the timeout wins the race, `connectPromise` is orphaned and may reject
+  // later (once the hung transport finally errors) — attach a no-op catch so
+  // that late rejection never surfaces as an unhandledRejection.
+  connectPromise.catch(() => {});
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => reject(new Error("MCP connect timeout (30s)")), 30_000);
@@ -870,6 +874,13 @@ async function spawnAndConnectLocalIntegration(params: {
   });
   try {
     await Promise.race([connectPromise, timeoutPromise]);
+  } catch (err) {
+    // Connect failed or timed out: reclaim the just-spawned runtime by closing
+    // its transport (the adapter's subprocess/container exits with it) so a
+    // hung MCP server doesn't leak a runtime for the whole run. Best-effort —
+    // the original error is what the caller must see.
+    await spawnedIntegration.transport.close().catch(() => {});
+    throw err;
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
