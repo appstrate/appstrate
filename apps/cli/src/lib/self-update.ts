@@ -17,11 +17,12 @@
  *     this binary, so we cannot prove the update target matches.
  */
 
-import { mkdtemp, rename, rm, writeFile, chmod, mkdir } from "node:fs/promises";
+import { mkdtemp, rename, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { runCommand, type CommandResult } from "./install/os.ts";
 import { CLI_USER_AGENT, CLI_VERSION, DEV_CLI_VERSION } from "./version.ts";
+import { streamDownload, type ProgressFn } from "./download.ts";
 
 /** Pubkey baked into the curl bootstrap (`scripts/bootstrap.sh`). Same key signs every release. */
 export const APPSTRATE_MINISIGN_PUBKEY = "RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e";
@@ -237,31 +238,42 @@ export function normalizeVersion(raw: string): string {
 }
 
 export interface SelfUpdateDeps {
-  /** GET a URL and return the body as bytes. Throws on HTTP error. */
+  /**
+   * Stream a URL to `dest` on disk and return its on-the-fly SHA-256. Used for
+   * the large CLI binary — progress ticks feed a spinner, and a stalled
+   * download aborts instead of hanging forever. Throws on HTTP error.
+   */
+  fetchToFile(url: string, dest: string, onProgress?: ProgressFn): Promise<{ sha256: string }>;
+  /** GET a URL and return the body as bytes (small artefacts: the minisig). */
   fetchBinary(url: string): Promise<Uint8Array>;
-  /** GET a URL and return the body as text. */
+  /** GET a URL and return the body as text (small artefact: checksums.txt). */
   fetchText(url: string): Promise<string>;
-  /** Compute hex SHA-256 of bytes. */
-  sha256Hex(data: Uint8Array): Promise<string>;
   /** Run a subprocess; same shape as `runCommand`. */
   runCommand(cmd: string, args: string[]): Promise<CommandResult>;
   /** `process.execPath` — the running binary path that gets atomic-renamed over. */
   execPath(): string;
   /**
-   * Atomically install `bytes` at `dest`. The default impl writes to a same-
-   * directory temp file, chmods +x, and `rename(2)`s on top of `dest`. Tests
-   * stub this entirely to avoid touching the real binary.
+   * Atomically promote an already-downloaded staged file onto `dest`: chmod +x
+   * then `rename(2)` on top. The staged file MUST already live in `dest`'s
+   * directory (same filesystem) so the rename is atomic and works over the
+   * running binary. Tests stub this to avoid touching the real binary.
    */
-  atomicReplace(bytes: Uint8Array, dest: string): Promise<void>;
-  /** Working directory for downloaded artefacts (binary + checksums + sig). */
+  promoteFile(staged: string, dest: string): Promise<void>;
+  /** Working directory for downloaded artefacts (checksums + sig). */
   makeWorkDir(): Promise<string>;
-  /** Cleanup helper. */
+  /** Best-effort `rm -rf` — cleans the work dir and the staged download. */
   removeDir(path: string): Promise<void>;
   /** Write a file (used in the work dir for minisign input). */
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
 }
 
 export const defaultSelfUpdateDeps: SelfUpdateDeps = {
+  fetchToFile(url, dest, onProgress) {
+    return streamDownload(url, dest, {
+      headers: { "User-Agent": CLI_USER_AGENT },
+      onProgress,
+    });
+  },
   async fetchBinary(url) {
     const res = await fetch(url, {
       headers: { "User-Agent": CLI_USER_AGENT },
@@ -292,32 +304,15 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
     }
     return res.text();
   },
-  async sha256Hex(data) {
-    // Bun.CryptoHasher is available in the bundled binary (Bun runtime baked in).
-    const hasher = new Bun.CryptoHasher("sha256");
-    hasher.update(data);
-    return hasher.digest("hex");
-  },
   runCommand,
   execPath: () => process.execPath,
-  async atomicReplace(bytes, dest) {
+  async promoteFile(staged, dest) {
     // POSIX rename(2) on the same filesystem is atomic and works on the
     // running binary: the kernel detaches the inode but keeps the open fd
-    // in this process valid. The temp file MUST live in the same dir as
-    // dest (same fs by construction).
-    const dir = dirname(dest);
-    await mkdir(dir, { recursive: true });
-    const stagedDir = await mkdtemp(`${dest}.staging.`);
-    try {
-      const staged = join(stagedDir, "appstrate.new");
-      await writeFile(staged, bytes);
-      await chmod(staged, 0o755);
-      await rename(staged, dest);
-    } finally {
-      // Best-effort cleanup. If rename succeeded the staging dir is empty;
-      // if it failed we still want the (possibly large) staged file gone.
-      await rm(stagedDir, { recursive: true, force: true }).catch(() => {});
-    }
+    // in this process valid. `staged` is created same-dir as `dest` by the
+    // caller (streamed there), so the rename never crosses a filesystem.
+    await chmod(staged, 0o755);
+    await rename(staged, dest);
   },
   makeWorkDir() {
     return mkdtemp(join(tmpdir(), "appstrate-self-update-"));
@@ -399,6 +394,8 @@ export interface PerformCurlUpdateOptions {
   deps?: SelfUpdateDeps;
   /** Logger sink — defaults to `console.error` so tests can collect output. */
   log?: (line: string) => void;
+  /** Download-progress sink for the CLI binary (bytes/percent/rate). */
+  onProgress?: ProgressFn;
 }
 
 export interface PerformCurlUpdateResult {
@@ -454,17 +451,23 @@ export async function performCurlUpdate(
 
   const dest = deps.execPath();
   const workDir = await deps.makeWorkDir();
+  // Stage the (large) binary in the SAME directory as `dest` so the final
+  // promotion is an atomic same-filesystem rename over the running binary.
+  // The small checksums + signature live in the throwaway work dir.
+  const staged = join(dirname(dest), `.appstrate.download.${process.pid}`);
   try {
     const urls = releaseUrls(target, opts.platform);
     const asset = assetName(opts.platform);
 
-    log(`→ Downloading Appstrate CLI ${target} (${asset})`);
-    const [binary, checksumsTxt, checksumsSig] = await Promise.all([
-      deps.fetchBinary(urls.binary),
+    // Fetch + verify the small signed manifest FIRST, before the large binary
+    // stream. Two reasons: (1) it fails fast on a bad/missing signature without
+    // pulling ~113 MB; (2) it avoids running the big stream concurrently with
+    // the sidecars — a Promise.all reject would run cleanup while the stream is
+    // still writing `staged`, leaving an orphan download behind.
+    const [checksumsTxt, checksumsSig] = await Promise.all([
       deps.fetchText(urls.checksums),
       deps.fetchBinary(urls.checksumsSig),
     ]);
-
     const sumsPath = join(workDir, "checksums.txt");
     const sigPath = join(workDir, "checksums.txt.minisig");
     await deps.writeFile(sumsPath, checksumsTxt);
@@ -485,9 +488,11 @@ export async function performCurlUpdate(
       );
     }
 
+    log(`→ Downloading Appstrate CLI ${target} (${asset})`);
+    const { sha256: actual } = await deps.fetchToFile(urls.binary, staged, opts.onProgress);
+
     log(`→ Verifying binary integrity (SHA-256)`);
     const expected = parseChecksumLine(checksumsTxt, asset);
-    const actual = await deps.sha256Hex(binary);
     if (actual !== expected) {
       throw new Error(
         `SHA-256 mismatch for ${asset}: expected ${expected}, got ${actual}. ` +
@@ -497,10 +502,14 @@ export async function performCurlUpdate(
     }
 
     log(`→ Installing ${asset} → ${dest}`);
-    await deps.atomicReplace(binary, dest);
+    await deps.promoteFile(staged, dest);
 
     return { status: "updated", version: target, destination: dest };
   } finally {
+    // Remove the staged download if it survived (verification/promotion failed
+    // before the rename consumed it), then the small-artefact work dir. Both
+    // go through the same best-effort `rm -rf`.
+    await deps.removeDir(staged).catch(() => {});
     await deps.removeDir(workDir).catch(() => {});
   }
 }

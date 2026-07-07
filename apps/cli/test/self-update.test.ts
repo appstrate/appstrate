@@ -222,20 +222,39 @@ interface FakeDepsState {
   binary: Uint8Array;
   checksumsTxt: string;
   checksumsSig: Uint8Array;
-  /** Hash returned by the fake sha256Hex — must match parseChecksumLine output for happy path. */
+  /** SHA-256 returned by the fake fetchToFile — must match parseChecksumLine output for happy path. */
   hashOverride?: string;
+  /** When set, the small manifest fetch (fetchText) rejects with this message. */
+  checksumsError?: string;
   minisignAvailable: boolean;
   minisignOk: boolean;
   execPath: string;
   /** Side effects collected for assertions. */
   written: Array<{ path: string; bytes: number }>;
-  replaced: Array<{ dest: string; bytes: number }>;
+  replaced: Array<{ dest: string }>;
   fetched: string[];
   commands: Array<{ cmd: string; args: string[] }>;
 }
 
+/** Deterministic content-dependent fake SHA (matches the checksumsTxt fixtures). */
+function fakeSha(data: Uint8Array): string {
+  let n = 0;
+  for (const b of data) n = (n + b) | 0;
+  return `${"f".repeat(60)}${(n & 0xffff).toString(16).padStart(4, "0")}`;
+}
+
 function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
   return {
+    async fetchToFile(url, _dest, onProgress) {
+      state.fetched.push(url);
+      onProgress?.({
+        received: state.binary.byteLength,
+        total: state.binary.byteLength,
+        rateBytesPerSec: 1,
+      });
+      // Simulate a tampered download by overriding the streamed digest.
+      return { sha256: state.hashOverride ?? fakeSha(state.binary) };
+    },
     async fetchBinary(url) {
       state.fetched.push(url);
       if (url.endsWith(".minisig")) return state.checksumsSig;
@@ -243,16 +262,8 @@ function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
     },
     async fetchText(url) {
       state.fetched.push(url);
+      if (state.checksumsError) throw new Error(state.checksumsError);
       return state.checksumsTxt;
-    },
-    async sha256Hex(data) {
-      // Either return the override (used to simulate mismatch) or produce a deterministic hash.
-      if (state.hashOverride) return state.hashOverride;
-      // Sum bytes for a stable, content-dependent fake hash. Tests inject the
-      // matching value into checksumsTxt so the round-trip succeeds.
-      let n = 0;
-      for (const b of data) n = (n + b) | 0;
-      return `${"f".repeat(60)}${(n & 0xffff).toString(16).padStart(4, "0")}`;
     },
     async runCommand(cmd, args) {
       state.commands.push({ cmd, args });
@@ -267,8 +278,8 @@ function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
       return { ok: true, exitCode: 0, stdout: "", stderr: "" };
     },
     execPath: () => state.execPath,
-    async atomicReplace(bytes, dest) {
-      state.replaced.push({ dest, bytes: bytes.byteLength });
+    async promoteFile(_staged, dest) {
+      state.replaced.push({ dest });
     },
     async makeWorkDir() {
       return "/tmp/fake-work";
@@ -349,13 +360,14 @@ describe("runSelfUpdate — curl flow", () => {
 
     expect(out.exitCode).toBe(SELF_UPDATE_EXIT.OK);
     expect(out.message).toContain("Updated appstrate to 1.2.3");
+    // Signed manifest first (checksums + sig), then the large binary stream.
     expect(state.fetched).toEqual([
-      "https://github.com/appstrate/appstrate/releases/download/v1.2.3/appstrate-linux-x64",
       "https://github.com/appstrate/appstrate/releases/download/v1.2.3/checksums.txt",
       "https://github.com/appstrate/appstrate/releases/download/v1.2.3/checksums.txt.minisig",
+      "https://github.com/appstrate/appstrate/releases/download/v1.2.3/appstrate-linux-x64",
     ]);
     expect(state.commands.find((c) => c.cmd === "minisign" && c.args[0] === "-Vm")).toBeTruthy();
-    expect(state.replaced).toEqual([{ dest: "/home/user/.local/bin/appstrate", bytes: 5 }]);
+    expect(state.replaced).toEqual([{ dest: "/home/user/.local/bin/appstrate" }]);
   });
 
   it("reports already-up-to-date and skips replace when versions match", async () => {
@@ -416,6 +428,25 @@ describe("runSelfUpdate — curl flow", () => {
     });
     expect(out.exitCode).toBe(SELF_UPDATE_EXIT.UPDATE_FAILED);
     expect(out.message).toContain("Signature verification FAILED");
+    expect(state.replaced).toEqual([]);
+  });
+
+  it("never starts the binary stream when the manifest fetch fails (no orphan staged download)", async () => {
+    const state = freshState({ checksumsError: "GET checksums.txt → HTTP 500" });
+    const binaryUrl =
+      "https://github.com/appstrate/appstrate/releases/download/v1.2.3/appstrate-linux-x64";
+    const out = await runSelfUpdate({
+      source: "curl",
+      platform: { platform: "linux", arch: "x64" },
+      log: () => {},
+      version: "1.2.3",
+      currentVersion: "1.0.0",
+      deps: makeFakeDeps(state),
+    });
+    expect(out.exitCode).toBe(SELF_UPDATE_EXIT.UPDATE_FAILED);
+    // The large binary is fetched AFTER the signed manifest, so a manifest
+    // failure means the stream never started — nothing to leak on disk.
+    expect(state.fetched).not.toContain(binaryUrl);
     expect(state.replaced).toEqual([]);
   });
 

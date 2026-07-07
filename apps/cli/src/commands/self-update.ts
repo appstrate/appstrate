@@ -12,6 +12,7 @@
 import * as clack from "@clack/prompts";
 import { INSTALL_SOURCE, upgradeHint, type InstallSource } from "../lib/install-source.ts";
 import { CLI_VERSION } from "../lib/version.ts";
+import { formatProgress, type ProgressFn } from "../lib/download.ts";
 import {
   detectPlatform,
   performCurlUpdate,
@@ -38,6 +39,8 @@ export interface SelfUpdateOptions {
   platform?: PlatformInfo;
   /** Logger override for tests; production uses `console.error`. */
   log?: (line: string) => void;
+  /** Download-progress sink; the command wrapper wires a spinner. */
+  onProgress?: ProgressFn;
 }
 
 /**
@@ -124,6 +127,7 @@ export async function runSelfUpdate(opts: SelfUpdateOptions = {}): Promise<SelfU
       deps,
       currentVersion: opts.currentVersion,
       log: opts.log,
+      onProgress: opts.onProgress,
     });
   } catch (err) {
     return {
@@ -152,7 +156,22 @@ export async function runSelfUpdate(opts: SelfUpdateOptions = {}): Promise<SelfU
  */
 export async function selfUpdateCommand(opts: SelfUpdateOptions = {}): Promise<never> {
   clack.intro(`Appstrate self-update`);
-  const result = await runSelfUpdate(opts);
+  // Live download progress so a 113 MB binary is not a silent multi-minute gap
+  // (issue #821). The spinner starts on the first byte-tick and stops once the
+  // run finishes; it degrades to a static line on a non-TTY (piped installs).
+  const spin = clack.spinner();
+  let spinning = false;
+  const onProgress: ProgressFn = (p) => {
+    if (!spinning) {
+      spin.start("Downloading appstrate binary");
+      spinning = true;
+    }
+    spin.message(`Downloading appstrate binary — ${formatProgress(p)}`);
+  };
+  const result = await runSelfUpdate({ ...opts, onProgress });
+  if (spinning) {
+    spin.stop(result.exitCode === SELF_UPDATE_EXIT.OK ? "Download complete" : "Download failed");
+  }
   if (result.exitCode === SELF_UPDATE_EXIT.OK) {
     clack.outro(result.message);
   } else {

@@ -23,6 +23,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { runCommand, commandExists, type CommandResult } from "../install/os.ts";
+import { streamDownload, type ProgressFn } from "../download.ts";
 
 export interface RunnerExec {
   /** Run `cmd args…`; never throws on non-zero (returns `ok:false`). */
@@ -49,10 +50,22 @@ export interface RunnerFs {
   remove(path: string): Promise<void>;
   /** Atomic install of bytes at `dest` (tmp write in the same dir + rename). */
   installAtomic(dest: string, bytes: Uint8Array, mode: number): Promise<void>;
+  /**
+   * Promote an already-streamed staged file onto `dest`: chmod then atomic
+   * `rename(2)`. `staged` MUST already live in `dest`'s directory (same
+   * filesystem) so the rename works over a live binary.
+   */
+  promoteFile(staged: string, dest: string, mode: number): Promise<void>;
 }
 
 export interface RunnerHttp {
-  /** GET → bytes (throws on non-2xx). */
+  /**
+   * Stream a URL to `dest` on disk and return its on-the-fly SHA-256. Used for
+   * the large daemon binary + firecracker tarball so a stalled download aborts
+   * (instead of hanging) and progress feeds a spinner. Throws on non-2xx.
+   */
+  fetchToFile(url: string, dest: string, onProgress?: ProgressFn): Promise<{ sha256: string }>;
+  /** GET → bytes (throws on non-2xx). Small artefacts only (checksums sig). */
   fetchBinary(url: string): Promise<Uint8Array>;
   /** GET → text (throws on non-2xx). */
   fetchText(url: string): Promise<string>;
@@ -134,9 +147,17 @@ export const defaultRunnerFs: RunnerFs = {
       throw err;
     }
   },
+  async promoteFile(staged, dest, mode) {
+    await mkdir(dirname(dest), { recursive: true });
+    await chmod(staged, mode);
+    await rename(staged, dest);
+  },
 };
 
 export const defaultRunnerHttp: RunnerHttp = {
+  fetchToFile(url, dest, onProgress) {
+    return streamDownload(url, dest, { onProgress });
+  },
   async fetchBinary(url) {
     const res = await fetch(url, { redirect: "follow" });
     if (!res.ok) throw new Error(`GET ${url} → HTTP ${res.status}`);

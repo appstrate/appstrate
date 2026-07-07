@@ -17,7 +17,7 @@
 
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   APPSTRATE_RELEASE_BASE,
   FIRECRACKER_RELEASE_BASE,
@@ -25,6 +25,7 @@ import {
   type RunnerArch,
 } from "./constants.ts";
 import type { RunnerExec, RunnerFs, RunnerHttp } from "./exec.ts";
+import type { ProgressFn } from "../download.ts";
 import { APPSTRATE_MINISIGN_PUBKEY, parseChecksumLine } from "../self-update.ts";
 
 /** Hex SHA-256 of a byte buffer via Bun's baked-in hasher. */
@@ -68,10 +69,15 @@ export function daemonUrls(
 }
 
 /**
- * Download the daemon binary and verify it against the release's
- * minisign-signed `checksums.txt`, then return the bytes. Never writes the
- * binary to disk — the caller installs atomically at the destination it
- * controls (so `update` can swap over the live binary).
+ * Stream the daemon binary to a staged file next to `destPath` and verify it
+ * against the release's minisign-signed `checksums.txt`. Returns the staged
+ * path; the caller promotes it atomically onto `destPath` (so `update` can
+ * swap over the live binary) — or, on any verification failure, the staged
+ * file is removed and this throws.
+ *
+ * Streaming (not buffering the whole ~70 MB into memory) gives a live progress
+ * spinner and a stall watchdog: a wedged GitHub→CDN redirect aborts with an
+ * actionable error instead of hanging forever (issue #821).
  *
  * minisign is REQUIRED (fail-closed, matching `self-update` and
  * `scripts/bootstrap-runner.sh`): a signed-checksum check the host cannot
@@ -85,22 +91,21 @@ export async function downloadDaemon(opts: {
   fs: RunnerFs;
   version: string;
   arch: RunnerArch;
-}): Promise<Uint8Array> {
+  /** Final install path; the staged download lands in the same directory. */
+  destPath: string;
+  onProgress?: ProgressFn;
+}): Promise<{ stagedPath: string }> {
   const urls = daemonUrls(opts.version, opts.arch);
   const asset = daemonAssetName(opts.arch);
+  const stagedPath = join(dirname(opts.destPath), `.${asset}.download-${process.pid}`);
 
-  // 1. The daemon binary. A 404 here almost always means this release shipped
+  // 1. Fetch + verify the small signed manifest BEFORE the large binary
+  //    stream: it fails fast on a bad/missing signature without pulling the
+  //    ~70 MB daemon, and it keeps the stream off the parallel path so a
+  //    sidecar reject can never run cleanup while the stream is still writing
+  //    `stagedPath`. A 404 here almost always means this release shipped
   //    WITHOUT runner assets — the firecracker/daemon build jobs are decoupled
   //    from the core release (release.yml) and may have failed for this tag.
-  //    Turn the opaque "HTTP 404" into an actionable fix.
-  let bytes: Uint8Array;
-  try {
-    bytes = await opts.http.fetchBinary(urls.binary);
-  } catch (err) {
-    throw asRunnerAssetError(err, opts.version, asset);
-  }
-
-  // 2. The signed checksums manifest + its minisign signature.
   let checksumsTxt: string;
   let checksumsSig: Uint8Array;
   try {
@@ -111,25 +116,32 @@ export async function downloadDaemon(opts: {
   } catch (err) {
     throw asRunnerAssetError(err, opts.version, asset);
   }
+  await verifyDaemonSignature({ exec: opts.exec, fs: opts.fs, checksumsTxt, checksumsSig });
 
-  // 3. Verify the manifest signature, then the binary's digest against the
-  //    (now trusted) manifest line for this asset.
-  await verifyDaemonSignature({
-    exec: opts.exec,
-    fs: opts.fs,
-    checksumsTxt,
-    checksumsSig,
-  });
-  const expected = parseChecksumLine(checksumsTxt, asset);
-  const actual = sha256Hex(bytes);
-  if (actual !== expected) {
-    throw new Error(
-      `daemon binary SHA-256 mismatch: expected ${expected}, got ${actual} — ` +
-        `the download does NOT match the signed checksums manifest. ` +
-        `Refusing to install (broken release or tampering).`,
-    );
+  // 2. Stream the daemon binary to disk, then verify its streamed digest
+  //    against the (now trusted) manifest line for this asset.
+  let actual: string;
+  try {
+    ({ sha256: actual } = await opts.http.fetchToFile(urls.binary, stagedPath, opts.onProgress));
+  } catch (err) {
+    throw asRunnerAssetError(err, opts.version, asset);
   }
-  return bytes;
+  try {
+    const expected = parseChecksumLine(checksumsTxt, asset);
+    if (actual !== expected) {
+      throw new Error(
+        `daemon binary SHA-256 mismatch: expected ${expected}, got ${actual} — ` +
+          `the download does NOT match the signed checksums manifest. ` +
+          `Refusing to install (broken release or tampering).`,
+      );
+    }
+  } catch (err) {
+    // Never leave an unverified staged binary behind.
+    await opts.fs.remove(stagedPath).catch(() => {});
+    throw err;
+  }
+
+  return { stagedPath };
 }
 
 /**
@@ -241,25 +253,26 @@ export async function installFirecracker(opts: {
   arch: RunnerArch;
   destPath: string;
   jailerDestPath: string;
+  onProgress?: ProgressFn;
 }): Promise<void> {
   const urls = firecrackerUrls(opts.version, opts.arch);
-  const [tgz, sumText] = await Promise.all([
-    opts.http.fetchBinary(urls.tarball),
-    opts.http.fetchText(urls.sha256),
-  ]);
-  const expected = parseSha256(sumText);
-  const actual = sha256Hex(tgz);
-  if (actual !== expected) {
-    throw new Error(
-      `firecracker tarball SHA-256 mismatch: expected ${expected}, got ${actual} — ` +
-        `refusing to install (broken download or tampering).`,
-    );
-  }
-
   const work = await mkdtemp(join(tmpdir(), "appstrate-firecracker-"));
   try {
+    // Fetch the small checksum sidecar FIRST, then stream the tarball — keeping
+    // the big stream off the parallel path (a Promise.all reject would run the
+    // `finally` rm(work) while the stream is still writing into it) and failing
+    // fast if the sidecar is missing. Extracted below, never renamed onto a
+    // live target, so the temp dir is fine.
+    const expected = parseSha256(await opts.http.fetchText(urls.sha256));
     const tgzPath = join(work, "firecracker.tgz");
-    await opts.fs.writeFile(tgzPath, tgz);
+    const { sha256: actual } = await opts.http.fetchToFile(urls.tarball, tgzPath, opts.onProgress);
+    if (actual !== expected) {
+      throw new Error(
+        `firecracker tarball SHA-256 mismatch: expected ${expected}, got ${actual} — ` +
+          `refusing to install (broken download or tampering).`,
+      );
+    }
+
     const untar = await opts.exec.run("tar", ["-xzf", tgzPath, "-C", work]);
     if (!untar.ok) {
       throw new Error(

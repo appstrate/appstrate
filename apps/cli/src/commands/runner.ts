@@ -18,7 +18,8 @@
  */
 
 import * as clack from "@clack/prompts";
-import { intro, outro, askText, exitWithError } from "../lib/ui.ts";
+import { dirname } from "node:path";
+import { intro, outro, askText, confirm, exitWithError } from "../lib/ui.ts";
 import { CLI_VERSION, DEV_CLI_VERSION } from "../lib/version.ts";
 import {
   RUNNER_BIN_PATH,
@@ -52,6 +53,7 @@ import {
   type RunnerConfig,
 } from "../lib/runner/config-files.ts";
 import { downloadDaemon, installFirecracker } from "../lib/runner/download.ts";
+import { formatProgress } from "../lib/download.ts";
 import { parseIpv4HttpUrl } from "../lib/install/os.ts";
 
 /** Shared DI surface for every runner subcommand. */
@@ -242,19 +244,23 @@ async function downloadAndInstallBinaries(
   await d.fs.mkdirp(paths.binDir);
 
   const daemonSpin = clack.spinner();
-  daemonSpin.start(`Downloading runner daemon ${version} (${arch})`);
-  const daemonBytes = await downloadDaemon({
+  const daemonLabel = `Downloading runner daemon ${version} (${arch})`;
+  daemonSpin.start(daemonLabel);
+  const { stagedPath } = await downloadDaemon({
     http: d.http,
     exec: d.exec,
     fs: d.fs,
     version,
     arch,
+    destPath: RUNNER_BIN_PATH,
+    onProgress: (p) => daemonSpin.message(`${daemonLabel} — ${formatProgress(p)}`),
   });
-  await d.fs.installAtomic(RUNNER_BIN_PATH, daemonBytes, 0o755);
+  await d.fs.promoteFile(stagedPath, RUNNER_BIN_PATH, 0o755);
   daemonSpin.stop(`Installed daemon → ${RUNNER_BIN_PATH}`);
 
   const fcSpin = clack.spinner();
-  fcSpin.start(`Downloading firecracker + jailer v${FIRECRACKER_VERSION} (${arch})`);
+  const fcLabel = `Downloading firecracker + jailer v${FIRECRACKER_VERSION} (${arch})`;
+  fcSpin.start(fcLabel);
   await installFirecracker({
     http: d.http,
     exec: d.exec,
@@ -265,6 +271,7 @@ async function downloadAndInstallBinaries(
     // Same verified tarball — the daemon requires firecracker + jailer
     // to come from one release (FIRECRACKER_JAILER=on confinement).
     jailerDestPath: paths.jailerBin,
+    onProgress: (p) => fcSpin.message(`${fcLabel} — ${formatProgress(p)}`),
   });
   fcSpin.stop(`Installed firecracker → ${paths.firecrackerBin} (+ jailer → ${paths.jailerBin})`);
 }
@@ -579,11 +586,20 @@ export async function runnerUpdateCommand(opts: RunnerUpdateOptions = {}): Promi
     const version = resolveDaemonVersion();
 
     const spin = clack.spinner();
-    spin.start(`Downloading runner daemon ${version} (${arch})`);
-    const bytes = await downloadDaemon({ http: d.http, exec: d.exec, fs: d.fs, version, arch });
+    const label = `Downloading runner daemon ${version} (${arch})`;
+    spin.start(label);
+    const { stagedPath } = await downloadDaemon({
+      http: d.http,
+      exec: d.exec,
+      fs: d.fs,
+      version,
+      arch,
+      destPath: RUNNER_BIN_PATH,
+      onProgress: (p) => spin.message(`${label} — ${formatProgress(p)}`),
+    });
     // Atomic swap over the live binary — rename(2) keeps the running
     // process's fd valid; the restart below picks up the new inode.
-    await d.fs.installAtomic(RUNNER_BIN_PATH, bytes, 0o755);
+    await d.fs.promoteFile(stagedPath, RUNNER_BIN_PATH, 0o755);
     spin.stop(`Installed daemon → ${RUNNER_BIN_PATH}`);
 
     // Re-pin the guest artifacts to the new daemon version BEFORE the restart:
@@ -638,4 +654,121 @@ export async function runnerLogsCommand(opts: RunnerLogsOptions = {}): Promise<v
   const res = await d.exec.run("journalctl", args, { stdio: "inherit" });
   // Ctrl-C on `-f` exits 130 — a clean user stop, not an error.
   if (!res.ok && res.exitCode !== 130) process.exitCode = res.exitCode === -1 ? 1 : res.exitCode;
+}
+
+// ─── uninstall ──────────────────────────────────────────────────────────────
+
+export interface RunnerUninstallOptions {
+  /** Preserve the state dir (kernel/rootfs/runs/firecracker). */
+  keepData?: boolean;
+  /** Skip the destructive confirmation (or set APPSTRATE_YES=1). */
+  yes?: boolean;
+  /** State root to remove; recovered from the env file or defaulted otherwise. */
+  dataDir?: string;
+  deps?: RunnerDeps;
+}
+
+/**
+ * Recover the install's state root: an explicit `--data-dir` wins, else the
+ * `FIRECRACKER_KERNEL_PATH` pin in the env file (`<dataDir>/vmlinux`), else the
+ * compiled default. This makes `uninstall` remove the SAME dir a non-default
+ * `install --data-dir` created.
+ */
+async function resolveUninstallDataDir(
+  explicit: string | undefined,
+  d: ResolvedDeps,
+): Promise<string> {
+  if (explicit) return explicit;
+  const envText = await d.fs.readFile(RUNNER_ENV_PATH);
+  if (envText) {
+    const kernel = parseRunnerEnvFile(envText).FIRECRACKER_KERNEL_PATH;
+    if (kernel && kernel.endsWith("/vmlinux")) return dirname(kernel);
+  }
+  return RUNNER_DATA_DIR;
+}
+
+/**
+ * Tear down an `appstrate runner install`: stop + disable the unit, remove the
+ * binary / unit / drop-ins / config (bearer token), and — unless
+ * `--keep-data` — the state dir. Every step is best-effort and idempotent (a
+ * partial or already-removed install never errors), so it doubles as a repair
+ * for a half-finished install. Issue #821.
+ */
+export async function runnerUninstallCommand(opts: RunnerUninstallOptions = {}): Promise<void> {
+  intro("Appstrate runner uninstall");
+  const d = resolve(opts.deps ?? {});
+  try {
+    requireRoot(d.getuid, "uninstall");
+
+    const dataDir = await resolveUninstallDataDir(opts.dataDir, d);
+    const removeData = opts.keepData !== true;
+    const willRemove = [
+      `  • systemd unit ${RUNNER_SERVICE_NAME} (stop + disable)`,
+      `  • ${RUNNER_BIN_PATH}`,
+      `  • ${RUNNER_UNIT_PATH} (+ drop-ins)`,
+      `  • ${RUNNER_ETC_DIR} (config + bearer token)`,
+      removeData
+        ? `  • ${dataDir} (kernel, rootfs, runs, firecracker)`
+        : `  • keeping ${dataDir} (--keep-data)`,
+    ].join("\n");
+
+    // Destructive: this removes the bearer token and (by default) all guest
+    // state. Confirm unless --yes/APPSTRATE_YES=1; in a non-interactive context
+    // without that flag, refuse rather than block on a prompt.
+    const bypass = opts.yes === true || process.env.APPSTRATE_YES === "1";
+    if (!bypass) {
+      if (!process.stdin.isTTY) {
+        throw new Error(
+          `Refusing to uninstall without confirmation in a non-interactive context. ` +
+            `This removes:\n${willRemove}\n\nRe-run with --yes (or APPSTRATE_YES=1) to proceed.`,
+        );
+      }
+      clack.note(willRemove, "This will remove");
+      if (!(await confirm(`Remove the ${RUNNER_SERVICE_NAME} daemon?`, false))) {
+        outro("Uninstall cancelled — nothing was removed.");
+        return;
+      }
+    }
+
+    const spin = clack.spinner();
+    spin.start("Removing appstrate-runner");
+
+    // 1. Stop + disable the unit. Both tolerate an absent/inactive unit
+    //    (systemctl exits non-zero, which we intentionally ignore here).
+    await d.exec.run("systemctl", ["stop", RUNNER_SERVICE_NAME]);
+    await d.exec.run("systemctl", ["disable", RUNNER_SERVICE_NAME]);
+
+    // 2. Remove the unit + any drop-in dir, reload, and clear a lingering
+    //    failed state so a later reinstall starts clean. `remove` is
+    //    rm -rf (force) → removing a missing path is a no-op.
+    const removed: string[] = [];
+    for (const p of [RUNNER_UNIT_PATH, `${RUNNER_UNIT_PATH}.d`]) {
+      await d.fs.remove(p);
+      removed.push(p);
+    }
+    await d.exec.run("systemctl", ["daemon-reload"]);
+    await d.exec.run("systemctl", ["reset-failed", RUNNER_SERVICE_NAME]);
+
+    // 3. Binary + config (token).
+    for (const p of [RUNNER_BIN_PATH, RUNNER_ETC_DIR]) {
+      await d.fs.remove(p);
+      removed.push(p);
+    }
+
+    // 4. State dir — only when not preserving it.
+    if (removeData) {
+      await d.fs.remove(dataDir);
+      removed.push(dataDir);
+    }
+
+    spin.stop("appstrate-runner removed");
+    clack.note(removed.map((p) => `  • ${p}`).join("\n"), "Removed");
+    outro(
+      removeData
+        ? "Runner fully uninstalled."
+        : `Runner uninstalled — state preserved at ${dataDir}.`,
+    );
+  } catch (err) {
+    exitWithError(err);
+  }
 }
