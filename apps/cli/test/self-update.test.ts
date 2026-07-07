@@ -290,9 +290,6 @@ function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
         bytes: typeof data === "string" ? data.length : data.byteLength,
       });
     },
-    async removeFile() {
-      // no-op
-    },
   };
 }
 

@@ -4,12 +4,8 @@ import { describe, it, expect, afterEach } from "bun:test";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  streamDownload,
-  formatBytes,
-  formatProgress,
-  type DownloadProgress,
-} from "../src/lib/download.ts";
+import { streamDownload, formatProgress } from "../src/lib/download.ts";
+import type { DownloadProgress } from "../src/lib/download.ts";
 
 const workDirs: string[] = [];
 async function tmpDest(name = "download.bin"): Promise<string> {
@@ -141,13 +137,7 @@ describe("streamDownload", () => {
   });
 });
 
-describe("formatBytes / formatProgress", () => {
-  it("formats byte magnitudes", () => {
-    expect(formatBytes(512)).toBe("512 B");
-    expect(formatBytes(1536)).toBe("1.5 KB");
-    expect(formatBytes(113 * 1024 * 1024)).toBe("113.0 MB");
-  });
-
+describe("formatProgress", () => {
   it("includes percent when total is known", () => {
     const s = formatProgress({
       received: 5 * 1024 * 1024,

@@ -261,12 +261,10 @@ export interface SelfUpdateDeps {
   promoteFile(staged: string, dest: string): Promise<void>;
   /** Working directory for downloaded artefacts (checksums + sig). */
   makeWorkDir(): Promise<string>;
-  /** Cleanup helper. */
+  /** Best-effort `rm -rf` — cleans the work dir and the staged download. */
   removeDir(path: string): Promise<void>;
   /** Write a file (used in the work dir for minisign input). */
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
-  /** Remove a single file (staged download cleanup). Best-effort. */
-  removeFile(path: string): Promise<void>;
 }
 
 export const defaultSelfUpdateDeps: SelfUpdateDeps = {
@@ -324,9 +322,6 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
   },
   writeFile(path, data) {
     return writeFile(path, data);
-  },
-  removeFile(path) {
-    return rm(path, { force: true });
   },
 };
 
@@ -507,8 +502,9 @@ export async function performCurlUpdate(
     return { status: "updated", version: target, destination: dest };
   } finally {
     // Remove the staged download if it survived (verification/promotion failed
-    // before the rename consumed it), then the small-artefact work dir.
-    await deps.removeFile(staged).catch(() => {});
+    // before the rename consumed it), then the small-artefact work dir. Both
+    // go through the same best-effort `rm -rf`.
+    await deps.removeDir(staged).catch(() => {});
     await deps.removeDir(workDir).catch(() => {});
   }
 }

@@ -27,6 +27,7 @@
  */
 
 import { rm } from "node:fs/promises";
+import { formatBytes } from "@appstrate/core/format";
 
 /** Progress tick. `total` is null when the server sent no `Content-Length`. */
 export interface DownloadProgress {
@@ -214,23 +215,11 @@ function explainAbort(
   return err instanceof Error ? err : new Error(String(err));
 }
 
-/** Human-readable byte count, e.g. `113.4 MB`. */
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(1)} ${units[i]}`;
-}
-
 /**
  * Format a progress tick for a spinner line, e.g.
- * `42.1 MB / 113.4 MB (37%) · 4.2 MB/s`. Percent is omitted when the total is
- * unknown (no Content-Length behind a CDN).
+ * `42.1 MB / 113 MB (37%) · 4.2 MB/s`. Percent is omitted when the total is
+ * unknown (no Content-Length behind a CDN). Byte magnitudes use the shared
+ * `@appstrate/core/format` formatter.
  */
 export function formatProgress(p: DownloadProgress): string {
   const rate = `${formatBytes(p.rateBytesPerSec)}/s`;
