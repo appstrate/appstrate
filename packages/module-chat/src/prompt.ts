@@ -91,6 +91,8 @@ After a successful \`run_and_wait\`, deliver the result directly and briefly: pr
 
 Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
+Some know-how lives in **assistant skills** you load on demand (listed under "## Assistant skills" in your context or instructions, when present) — when one's description matches the situation (e.g. the user wants to automate something or doesn't know where to start, needs a web search, or must connect a new service), load it BEFORE acting: call \`invoke_operation\` with \`operation_id: "getSkill"\` and \`path_params\` splitting the skill's \`@scope/name\` id (KEEP the leading \`@\` on the scope), read the returned \`content\`, and follow it.
+
 When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error. One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this application — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is organization-wide). Activate it instead: call \`activateIntegration\` on that package id, then re-run once. Activation is admin-only, so that call is refused (403) when the user is not an administrator — in that case say plainly that an administrator must activate that integration, and stop.
 
 Documents the user attaches to the conversation are shown to you as \`[Attached document: <name> — document://doc_… — <mime>, <size>]\` lines. Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`document://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. For an INLINE run, declare nothing: list the \`document://\` URIs in \`run_and_wait\`'s top-level \`context_documents\` and the platform mounts them read-only under \`documents/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` still works, and remains the ONLY way for a \`kind:"agent"\` run: a published agent's input schema is a versioned contract the platform never rewrites, so pass the URI through one of its declared file fields. \`upload://\` URIs need that declared field either way — \`context_documents\` takes \`document://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`document://\` itself, and the launch is REFUSED (400) when the prompt names a document the input does not mount, so put the URI in \`context_documents\` (or a declared file field) and name it in the prompt only to refer to it. Never invent a \`document://\` URI.
@@ -145,6 +147,17 @@ interface CallerContext {
       }[]
     | null;
   skills_truncated?: boolean | null;
+  /**
+   * Assistant skills (unlisted system skills) — know-how for the assistant
+   * itself, present regardless of the caller's `agents:run` permission.
+   */
+  assistant_skills?:
+    | {
+        package_id: string;
+        display_name?: string | null;
+        description?: string | null;
+      }[]
+    | null;
 }
 
 /**
@@ -189,6 +202,7 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
     !ctx.connections?.length &&
     !ctx.agents?.length &&
     !ctx.skills?.length &&
+    !ctx.assistant_skills?.length &&
     !ctx.recent_runs?.length
   )
     return "";
@@ -282,6 +296,27 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
         "skills fits the task, declare it under the agent manifest's `dependencies.skills` keyed by " +
         'its id (e.g. `"@appstrate/web-research": "^1.2.0"`) — use the version shown, or `"*"` ' +
         "if none. The run route validates that declared skills exist.",
+    );
+  }
+  if (ctx.assistant_skills?.length) {
+    // Distinct from the "attach to an agent" index above: these are for YOU,
+    // the assistant, not for agent manifests. Present regardless of the
+    // caller's `agents:run` permission — the copilot skill exists precisely
+    // for users who have nothing configured yet.
+    lines.push("", "## Assistant skills");
+    for (const s of ctx.assistant_skills) {
+      const desc = s.description?.trim();
+      const label = s.display_name?.trim();
+      lines.push(
+        `- \`${s.package_id}\`${label && label !== s.package_id ? ` — ${label}` : ""}` +
+          (desc ? `: ${desc}` : ""),
+      );
+    }
+    lines.push(
+      "These are instruction sets for you, the assistant — not packages to attach to an agent. " +
+        "When one matches the situation, load it BEFORE acting: call `invoke_operation` with " +
+        '`operation_id: "getSkill"` and `path_params` splitting the skill\'s `@scope/name` id ' +
+        "(KEEP the leading `@` on the scope), then follow the returned `content`.",
     );
   }
   if (ctx.recent_runs?.length) {

@@ -15,6 +15,7 @@ import {
   getPackageDisplayName,
   notEphemeralFilter,
 } from "../../lib/package-helpers.ts";
+import { isUnlisted } from "../../lib/package-visibility.ts";
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
@@ -331,7 +332,11 @@ export async function listOrgItems(
   // tenant — issued concurrently rather than one after the other.
   const [data, countMap] = await Promise.all([dataQuery, countDependencyEdges(orgId)]);
 
-  return data.map((row) => {
+  // Unlisted packages (`_meta["dev.appstrate/visibility"]`) never appear in
+  // list responses — they stay resolvable by exact id via `getOrgItem`.
+  const listed = data.filter((row) => !isUnlisted(asRecord(row.draftManifest)));
+
+  return listed.map((row) => {
     const m = parseDraftManifest(row.draftManifest);
     return {
       id: row.id,
