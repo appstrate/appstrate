@@ -1,0 +1,32 @@
+{
+  "name": "@appstrate/module-observability",
+  "version": "0.0.0",
+  "description": "Appstrate module — OpenTelemetry telemetry provider (traces + metrics via OTLP/HTTP). Opt-in: append `@appstrate/module-observability` to MODULES to enable.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": null,
+  "module": null,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/"
+  },
+  "dependencies": {
+    "@appstrate/afps-runtime": "workspace:*",
+    "@appstrate/core": "workspace:*",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/context-async-hooks": "^2.8.0",
+    "@opentelemetry/core": "^2.8.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.219.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.219.0",
+    "@opentelemetry/resources": "^2.7.1",
+    "@opentelemetry/sdk-metrics": "^2.7.1",
+    "@opentelemetry/sdk-trace-base": "^2.7.1",
+    "@opentelemetry/semantic-conventions": "^1.41.1"
+  },
+  "peerDependencies": {
+    "hono": "^4.12.9"
+  }
+}

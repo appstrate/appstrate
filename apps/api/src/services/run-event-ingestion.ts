@@ -32,7 +32,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
-import { runWithSpan, recordRunDuration, recordRunTerminal } from "../observability/index.ts";
+import { runWithSpan, recordRunDuration, recordRunTerminal } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";

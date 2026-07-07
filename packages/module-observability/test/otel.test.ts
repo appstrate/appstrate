@@ -35,7 +35,7 @@ import {
   setQueueDepthProvider,
   _resetObservabilityForTesting,
   _forceFlushForTesting,
-} from "../../src/observability/otel.ts";
+} from "../src/otel.ts";
 
 function findMetric(rms: ResourceMetrics[], name: string) {
   for (const rm of rms) {

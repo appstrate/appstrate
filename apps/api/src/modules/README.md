@@ -187,6 +187,24 @@ Each `OrchestratorRegistration` (`@appstrate/core/platform-types`) declares:
 
 A duplicate id across modules/core is a fatal boot error (never silently shadowed). `RUN_ADAPTER` is an open string in the env schema — the registry validates it at first resolution; an unknown id is fatal with the registered list and a `MODULES` hint. Heavy prerequisite checks (binaries, kernels, /dev/kvm) belong in the orchestrator's `initialize()`, NOT in module `init()`: a loaded module whose backend is not the selected `RUN_ADAPTER` must not fail boot.
 
+## Telemetry provider
+
+Core instruments its seams through the provider-agnostic façade
+`@appstrate/core/telemetry` — a true no-op until a module installs a provider
+via `installTelemetryProvider()`. The opt-in workspace module
+`@appstrate/module-observability` (`packages/module-observability/`) is the
+reference implementation: it installs the OpenTelemetry provider at `init()`
+and contributes the HTTP SERVER-span middleware through the provider's
+`httpMiddleware` slot (delegated per request by core's global
+`apps/api/src/middleware/telemetry.ts`); it owns no tables and no routes.
+Flush stays core-driven — `shutdownTelemetry()` is called from
+`apps/api/src/lib/shutdown.ts`, so the module declares no `shutdown()` hook.
+
+Modules that need the platform's TRUST_PROXY-honoring client-IP resolution use
+`services.http.clientIp(c)` from `PlatformServices` instead of importing from
+`apps/api` — that is how the observability middleware tags `client.address`.
+Full design: `docs/architecture/OBSERVABILITY.md`.
+
 ## Hooks and events
 
 - **Hooks** (`callHook`, first-match-wins): `beforeRun`, `afterRun`, `beforeSignup`. The first module that provides a hook is called, subsequent modules are skipped. `beforeRun` gates a run, `afterRun` returns a metadata patch persisted on the final run record, `beforeSignup` gates signup.

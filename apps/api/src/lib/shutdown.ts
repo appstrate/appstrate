@@ -17,7 +17,7 @@ import { shutdownPairingCleanupWorker } from "../services/model-providers/pairin
 import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { stopUploadGc } from "../services/uploads.ts";
-import { shutdownObservability } from "../observability/index.ts";
+import { shutdownTelemetry } from "@appstrate/core/telemetry";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
@@ -77,7 +77,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     // the DB/Redis teardown below races the event loop to exit. Keep this
     // ordering: flush last among the telemetry-producing teardown steps, but
     // before the connection close + `process.exit(0)`.
-    await shutdownObservability();
+    await shutdownTelemetry();
 
     logger.info("Closing database and infrastructure connections...");
     await shutdownInfra();

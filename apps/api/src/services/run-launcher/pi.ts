@@ -43,11 +43,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 import { uploadRunBundle, deleteRunWorkspace } from "../run-workspace-storage.ts";
-import {
-  runWithSpan,
-  currentTraceparent,
-  recordContainerSpawn,
-} from "../../observability/index.ts";
+import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrate/core/telemetry";
 
 import { getEnv } from "@appstrate/env";
 import { getModelProvider } from "../model-providers/registry.ts";

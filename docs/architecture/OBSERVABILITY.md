@@ -3,18 +3,35 @@
 Production observability for the platform API, built on **OpenTelemetry** with
 **OTLP/HTTP** export. Addresses issue #616 item 1.
 
-> **Disabled by default.** With no collector configured the OTel bootstrap is a
-> complete no-op — zero per-request/per-run overhead and zero behavior change
-> when disabled. The heavy SDK packages are dynamically imported only on the
-> enabled path, so a disabled boot loads only the `@opentelemetry/api` no-op.
-> OSS / self-hosted deployments that don't run a collector pay nothing.
+> **Disabled by default — twice over.** The OTel implementation lives in the
+> opt-in workspace module `@appstrate/module-observability`
+> (`packages/module-observability/`), not in the core API. Without the module
+> in `MODULES`, core's provider-agnostic telemetry façade is itself the no-op —
+> zero SDK code is loaded (the 9 `@opentelemetry/*` deps belong to the module's
+> `package.json`, not `apps/api`). With the module loaded but no collector
+> configured, the bootstrap is still a complete no-op — zero per-request/per-run
+> overhead and zero behavior change; the heavy SDK packages are dynamically
+> imported only on the enabled path. OSS / self-hosted deployments that don't
+> run a collector pay nothing.
 
 ## Enabling
 
-Telemetry turns on when **either** is true:
+Telemetry is a **two-step, layered opt-in**:
 
-- `OTEL_EXPORTER_OTLP_ENDPOINT` is set (the common case), or
-- `OTEL_ENABLED=true` (uses the OTLP default endpoint `http://localhost:4318`).
+1. **Load the module** — append `@appstrate/module-observability` to `MODULES`
+   (it is NOT in the default set — same opt-in posture as
+   `@appstrate/module-codex` / `@appstrate/module-claude-code`).
+2. **Point it at a collector** — telemetry turns on when **either** is true:
+   - `OTEL_EXPORTER_OTLP_ENDPOINT` is set (the common case), or
+   - `OTEL_ENABLED=true` (uses the OTLP default endpoint `http://localhost:4318`).
+
+Both steps are required. With the module loaded but no OTel env, everything
+stays a no-op; without the module, the env vars are inert.
+
+> **Migration note.** Deployments that enabled telemetry before the module
+> split (env vars alone used to be sufficient) MUST add
+> `@appstrate/module-observability` to `MODULES` — otherwise telemetry
+> silently stays off.
 
 | Variable                      | Default         | Notes                                                            |
 | ----------------------------- | --------------- | ---------------------------------------------------------------- |
@@ -22,6 +39,12 @@ Telemetry turns on when **either** is true:
 | `OTEL_ENABLED`                | `false`         | Force-enable without an explicit endpoint.                       |
 | `OTEL_SERVICE_NAME`           | `appstrate-api` | `service.name` resource attribute.                               |
 | `OTEL_TRUST_INCOMING_TRACE`   | `false`         | Trust inbound `traceparent` for span parenting (security — §C3). |
+
+The four `OTEL_*` vars above are **module-owned**: they are read directly from
+`process.env` by the module (`packages/module-observability/src/env.ts`) with
+the platform's usual parse semantics (`"true"`/`"1"` case-insensitive for
+booleans; an empty endpoint counts as unset) — they are no longer part of the
+`@appstrate/env` Zod schema, and are annotated as module vars in `docs/ENV.md`.
 
 The metric export cadence is fixed at 60s (no custom knob).
 
@@ -55,16 +78,41 @@ self-hosting compose file (`docker-compose.yml`, `examples/self-hosting/*.yml`):
 ```
 
 So setting any of them in your `.env` is enough — Compose substitutes the host
-value into the container, and an unset var falls back to the Zod schema default
-(bare passthrough, no YAML default to duplicate). Running the API directly on
-the host (`bun run dev`) reads `.env` natively, no wiring needed.
+value into the container, and an unset var is simply absent (bare passthrough,
+no YAML default to duplicate — the module applies its own defaults). Don't
+forget step 1: the container's `MODULES` must include
+`@appstrate/module-observability` too. Running the API directly on the host
+(`bun run dev`) reads `.env` natively, no wiring needed.
 
 ## Architecture
 
-- **Bootstrap**: `apps/api/src/observability/` — `initObservability()` is
-  `await`ed once in `apps/api/src/index.ts` before the server starts (so the
-  lazily-imported SDK is wired before the first request), and is defensive: a
-  misconfiguration disables telemetry rather than crashing boot.
+### Façade / provider split
+
+Core never speaks OTel. Every instrumented seam goes through the
+provider-agnostic façade `@appstrate/core/telemetry`
+(`packages/core/src/telemetry.ts`) — `runWithSpan`, `currentTraceparent`, the
+metric recorders, `telemetryHttpMiddleware`, `shutdownTelemetry` — which is a
+true no-op until a provider is installed via `installTelemetryProvider()`. The
+module installs the OTel adapter (`packages/module-observability/src/provider.ts`)
+at `init()`. Core keeps exactly two thin generic points: a global `app.use("*")`
+delegator (`apps/api/src/middleware/telemetry.ts`) that resolves the provider's
+`httpMiddleware` slot per request (pure pass-through when none is installed),
+and the core-driven flush — `shutdownTelemetry()` at the invariant flush point
+in `apps/api/src/lib/shutdown.ts` (the module declares no `shutdown()` hook).
+This keeps OTel vocabulary, SDK code, and dependencies entirely out of core
+while the instrumentation points, span/metric semantics, and shutdown ordering
+stay where they always were.
+
+- **Bootstrap**: `packages/module-observability/src/otel.ts` — run at module
+  `init()` during boot, before the server starts (so the lazily-imported SDK is
+  wired before the first request), and defensive: a misconfiguration disables
+  telemetry rather than crashing boot.
+- **SERVER-span middleware**: lives in
+  `packages/module-observability/src/middleware.ts`, contributed through the
+  provider's `httpMiddleware` slot. It tags `client.address` via
+  `services.http.clientIp(c)` — the platform's TRUST_PROXY-honoring client-IP
+  resolver, injected through `PlatformServices` so the module never imports
+  from `apps/api`.
 - **Single AsyncLocalStorage**: spans do **not** fork a second trace store. The
   `runWithSpan` helper bridges the active OTel span's `SpanContext` into the
   existing logger trace context (`packages/core/src/logger.ts`), so **logs and
@@ -81,19 +129,20 @@ the host (`bun run dev`) reads `.env` natively, no wiring needed.
   otherwise falls back to the in-process SERVER span (`currentTraceparent()`).
   So with trust off the run spans stay in **this** process's trace rather than an
   unverified caller-supplied one.
-- **Shutdown**: spans + metrics are force-flushed during graceful shutdown
-  (`apps/api/src/lib/shutdown.ts`).
+- **Shutdown**: spans + metrics are force-flushed during graceful shutdown —
+  core-driven via the façade's `shutdownTelemetry()` at the same flush site as
+  before (`apps/api/src/lib/shutdown.ts`).
 
 ## What's instrumented
 
 ### Spans
 
-| Span                      | Where                                        | Notes                                                                                                                                                                       |
-| ------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<METHOD> <route>`        | `observability()` middleware (HTTP `SERVER`) | Named with the matched route template (`http.route`), resolved AFTER the chain runs. Parented from inbound `traceparent` only when `OTEL_TRUST_INCOMING_TRACE` is on (§C3). |
-| `appstrate.run.execute`   | `run-launcher/execute-background.ts`         | Run pipeline; parented from the launching trace.                                                                                                                            |
-| `appstrate.run.container` | `run-launcher/pi.ts`                         | Container boundary/sidecar/agent/wait lifecycle. Forwards itself as the container's parent.                                                                                 |
-| `appstrate.run.finalize`  | `run-event-ingestion.ts` (`finalizeRun`)     | CAS-guarded terminal convergence.                                                                                                                                           |
+| Span                      | Where                                                                           | Notes                                                                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<METHOD> <route>`        | module `httpMiddleware` (HTTP `SERVER`), delegated by `middleware/telemetry.ts` | Named with the matched route template (`http.route`), resolved AFTER the chain runs. Parented from inbound `traceparent` only when `OTEL_TRUST_INCOMING_TRACE` is on (§C3). |
+| `appstrate.run.execute`   | `run-launcher/execute-background.ts`                                            | Run pipeline; parented from the launching trace.                                                                                                                            |
+| `appstrate.run.container` | `run-launcher/pi.ts`                                                            | Container boundary/sidecar/agent/wait lifecycle. Forwards itself as the container's parent.                                                                                 |
+| `appstrate.run.finalize`  | `run-event-ingestion.ts` (`finalizeRun`)                                        | CAS-guarded terminal convergence.                                                                                                                                           |
 
 SERVER spans carry the OTel HTTP semconv request attributes:
 `http.request.method`, `url.path`, `url.scheme` (required), `server.address`

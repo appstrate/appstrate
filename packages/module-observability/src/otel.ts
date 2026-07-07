@@ -49,13 +49,12 @@ import type {
 } from "@opentelemetry/sdk-trace-base";
 import type { MeterProvider, MetricReader } from "@opentelemetry/sdk-metrics";
 
-import { runWithTraceContext } from "@appstrate/core/logger";
+import { runWithTraceContext, type Logger } from "@appstrate/core/logger";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parseTraceparent, formatTraceparent } from "@appstrate/afps-runtime/transport";
-import { getEnv } from "@appstrate/env";
-import { logger } from "../lib/logger.ts";
+import { readOtelEnv } from "./env.ts";
 
-const INSTRUMENTATION_SCOPE = "@appstrate/api";
+const INSTRUMENTATION_SCOPE = "@appstrate/module-observability";
 
 // ─── Module state (undefined / false until enabled) ──────────────
 let enabled = false;
@@ -74,9 +73,10 @@ let processAnomaly: Counter | undefined;
 
 /**
  * Pull provider for the scheduler queue-depth observable gauge. The scheduler
- * registers its BullMQ counts source here at boot; the gauge (created on
- * enable) reads it lazily on each metric collection. Stored unconditionally
- * so registration order vs. {@link initObservability} doesn't matter.
+ * registers its BullMQ counts source (via the core telemetry façade); the
+ * gauge (created on enable) reads it lazily on each metric collection. Stored
+ * unconditionally so registration order vs. {@link initObservability} doesn't
+ * matter.
  */
 let queueDepthProvider: (() => number | Promise<number> | null | undefined) | null = null;
 
@@ -89,13 +89,16 @@ export interface InitObservabilityOptions {
   spanExporter?: SpanExporter;
   /** Inject a metric reader (tests use an in-memory reader). */
   metricReader?: MetricReader;
+  /** Boot logger (module init passes `ctx.services.logger`). Silent when absent (tests). */
+  logger?: Logger;
 }
 
 /**
  * Initialize OpenTelemetry. Idempotent and defensive: a misconfiguration can
  * never crash boot — on any error we log and continue with observability
- * disabled. Must be `await`ed once at process start, before the server begins
- * serving, so span/metric context is available on the first request.
+ * disabled. Must be `await`ed once from the module's `init()`, which runs
+ * before the server accepts its first request, so span/metric context is
+ * available on the first request.
  *
  * Async because the heavy SDK packages are dynamically imported only on the
  * enabled path — a disabled boot never loads or parses them.
@@ -103,9 +106,8 @@ export interface InitObservabilityOptions {
 export async function initObservability(opts: InitObservabilityOptions = {}): Promise<void> {
   if (initialized) return;
 
-  const env = getEnv();
-  const isEnabled =
-    opts.enabled ?? (env.OTEL_ENABLED || env.OTEL_EXPORTER_OTLP_ENDPOINT !== undefined);
+  const env = readOtelEnv();
+  const isEnabled = opts.enabled ?? env.enabled;
 
   if (!isEnabled) {
     // True no-op mode. Mark initialized so repeat calls stay cheap; leave
@@ -139,7 +141,7 @@ export async function initObservability(opts: InitObservabilityOptions = {}): Pr
       import("@opentelemetry/exporter-metrics-otlp-http"),
     ]);
 
-    const resource = resourceFromAttributes({ [ATTR_SERVICE_NAME]: env.OTEL_SERVICE_NAME });
+    const resource = resourceFromAttributes({ [ATTR_SERVICE_NAME]: env.serviceName });
 
     // Tracing — batch in production, simple (synchronous) when a test
     // injects its own exporter so finished spans are observable immediately.
@@ -174,15 +176,15 @@ export async function initObservability(opts: InitObservabilityOptions = {}): Pr
 
     enabled = true;
     initialized = true;
-    logger.info("OpenTelemetry observability enabled", {
-      service: env.OTEL_SERVICE_NAME,
-      endpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "otlp-default",
+    opts.logger?.info("OpenTelemetry observability enabled", {
+      service: env.serviceName,
+      endpoint: env.endpoint ?? "otlp-default",
     });
   } catch (err) {
     // Never let telemetry wiring take down the process. Disable and move on.
     enabled = false;
     initialized = true;
-    logger.error("OpenTelemetry init failed — continuing without observability", {
+    opts.logger?.error("OpenTelemetry init failed — continuing without observability", {
       error: getErrorMessage(err),
     });
   }
@@ -269,7 +271,7 @@ export function isObservabilityEnabled(): boolean {
 /**
  * Register the scheduler's queue-depth source for the observable gauge.
  * No-op-friendly: the value is stored regardless of enabled-state, so the
- * scheduler can call this without first checking whether OTel is on.
+ * façade can replay it without first checking whether OTel is on.
  */
 export function setQueueDepthProvider(
   provider: () => number | Promise<number> | null | undefined,
