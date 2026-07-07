@@ -118,6 +118,32 @@ function resolveStartMessage(context: ExecutionContext): string {
   return runInputToText(context.input) || "Begin the task according to your instructions.";
 }
 
+/**
+ * Best-effort parse of the agent's final text message as a JSON object —
+ * the fallback structured-deliverable source when the SDK's
+ * `result.structured_output` is absent (issue #833: the model wrote a
+ * schema-conforming JSON final message instead of calling the CLI's
+ * `StructuredOutput` tool). Tolerates a single markdown code fence around
+ * the object. Returns `undefined` when the text is not a lone JSON object —
+ * the caller then leaves the run output-less and platform-side validation
+ * reports the miss.
+ */
+export function parseFinalJsonObject(text: string | null): Record<string, unknown> | undefined {
+  if (!text) return undefined;
+  let candidate = text.trim();
+  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n\s*```$/.exec(candidate);
+  if (fenced?.[1]) candidate = fenced[1].trim();
+  if (!candidate.startsWith("{")) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(candidate);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class ClaudeAgentRunner implements Runner {
   readonly name = "claude-agent-runner";
 
@@ -357,17 +383,31 @@ export class ClaudeAgentRunner implements Runner {
 
     // Native structured deliverable → one `output.emitted` so the reducer sets
     // RunResult.output (no `output` runtime tool is involved on this path).
+    // Primary source is the SDK's `result.structured_output` (the model called
+    // the CLI-injected `StructuredOutput` tool). Fallback (issue #833): when a
+    // SUCCESSFUL schema-declaring run ends without it — the model wrote the
+    // JSON deliverable as its final text message instead of calling the tool —
+    // parse that final message. A non-JSON final message yields nothing and
+    // platform-side output validation reports the miss; a wrong-shape object
+    // fails the same validation, so the fallback can only rescue runs, never
+    // mask a genuine failure.
     // Best-effort emit, like the final drain above: `emit` pushes onto `events`
     // BEFORE awaiting the sink, so `reduceEvents` + the finalize POST already
     // carry the output; a dead sink here must not throw out and flip an
     // otherwise-succeeded run to failed (a truly dead sink surfaces at finalize).
-    if (terminal?.structuredOutput !== undefined) {
+    const structuredOutput =
+      terminal?.structuredOutput !== undefined
+        ? terminal.structuredOutput
+        : this.opts.outputSchema && terminal?.status === "success"
+          ? parseFinalJsonObject(mapper.lastAssistantText())
+          : undefined;
+    if (structuredOutput !== undefined) {
       try {
         await emit({
           type: "output.emitted",
           timestamp: now(),
           runId,
-          data: terminal.structuredOutput,
+          data: structuredOutput,
         });
       } catch {
         /* swallowed: run outcome decided elsewhere */
@@ -375,6 +415,11 @@ export class ClaudeAgentRunner implements Runner {
     }
 
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
+    // This engine delivers structured output natively (`StructuredOutput` /
+    // final-message fallback above) — never via an `output` runtime tool.
+    // Finalize reads this to phrase output-validation failures in terms of
+    // the mechanism the agent actually had (issue #833).
+    result.outputMode = "native";
     if (terminal) {
       result.status = terminal.status;
       if (terminal.error) result.error = terminal.error;

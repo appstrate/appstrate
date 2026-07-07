@@ -102,12 +102,14 @@ export interface PlatformPromptOptions {
    *
    * - `"tool"` — the Pi engine hosts an `output` runtime tool; the prompt
    *   mandates one terminal `output` call.
-   * - `"native"` — the Claude Agent SDK engine has NO `output` tool; the
-   *   deliverable is captured natively (`outputFormat: json_schema` →
-   *   `structured_output`), so the prompt instructs the agent to end with
-   *   a final JSON message instead of a tool call. Rendering the tool
-   *   mandate here would send the agent hunting for a tool that does not
-   *   exist (issue #824).
+   * - `"native"` — the Claude Agent SDK engine has NO MCP `output` tool;
+   *   the deliverable is captured via the SDK's `outputFormat: json_schema`,
+   *   which on the current CLI injects a client-side `StructuredOutput`
+   *   tool — the ONLY channel that populates `result.structured_output`
+   *   (a schema-conforming final text message is NOT captured, issue #833).
+   *   The prompt therefore mandates one terminal `StructuredOutput` call.
+   *   Rendering the `output` tool mandate instead would send the agent
+   *   hunting for a tool that does not exist (issue #824).
    */
   outputMode?: "tool" | "native";
 
@@ -389,17 +391,22 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   if (opts.outputSchema && Object.keys(opts.outputSchema).length > 0) {
     sections.push("## Output Format\n");
     if ((opts.outputMode ?? "tool") === "native") {
-      // Native delivery (Claude Agent SDK): there is NO `output` tool on
-      // this engine — the platform captures the run's structured output
-      // from the agent's final message. Mandating a tool call here sends
-      // the agent hunting for a tool that does not exist (issue #824).
+      // Native delivery (Claude Agent SDK): the deliverable goes through the
+      // CLI-injected `StructuredOutput` tool — the ONLY channel the SDK
+      // captures into `result.structured_output` (a schema-conforming final
+      // text message is NOT captured, issue #833). There is still no MCP
+      // `output` tool on this engine; mandating one sends the agent hunting
+      // for a tool that does not exist (issue #824), and forbidding tool
+      // delivery outright makes the agent skip `StructuredOutput` too (#833).
       sections.push(
-        "Your FINAL message MUST be the run's deliverable: a single JSON " +
-          "object that satisfies the JSON Schema below, with ALL required " +
-          "fields present. There is NO `output` tool on this runtime — do " +
-          "not try to call one; the platform captures your final message " +
-          "natively. Finish all other work first, then end the run with " +
-          "the JSON deliverable alone — no prose before or after it.\n",
+        "The runtime provides a `StructuredOutput` tool for the run's " +
+          "deliverable. You MUST call `StructuredOutput` **exactly once**, as " +
+          "your FINAL action, with a payload that satisfies the JSON Schema " +
+          "below — provide ALL required fields in that single call. Do not " +
+          "look for an `output` tool (it does not exist on this runtime); " +
+          "`StructuredOutput` is how the platform captures the run's " +
+          "structured output. Finish all other work first, then call it — " +
+          "do not plan any message or step after it.\n",
       );
     } else {
       sections.push(

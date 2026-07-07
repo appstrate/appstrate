@@ -139,6 +139,7 @@ function assistantErrorMessage(error: SdkAssistantMessage["error"]): string | un
 export class SdkRunEventMapper {
   private readonly liveUsage = zeroTokenUsage();
   private terminalState: SdkTerminal | null = null;
+  private lastText: string | null = null;
 
   constructor(
     private readonly runId: string,
@@ -174,6 +175,17 @@ export class SdkRunEventMapper {
     return { ...this.liveUsage };
   }
 
+  /**
+   * Last non-empty assistant text seen on the stream — the run's final
+   * message once the stream has ended. Fallback source for the structured
+   * deliverable when the SDK's `result.structured_output` is absent (the
+   * model wrote the JSON as text instead of calling `StructuredOutput`,
+   * issue #833). `null` until an assistant turn produces text.
+   */
+  lastAssistantText(): string | null {
+    return this.lastText;
+  }
+
   private mapAssistant(msg: SdkAssistantMessage): RunEvent[] {
     const events: RunEvent[] = [];
     const base = { runId: this.runId, timestamp: this.now() };
@@ -191,7 +203,10 @@ export class SdkRunEventMapper {
       .map((b) => b.text ?? "")
       .join("\n")
       .trim();
-    if (text) events.push(buildProgress(base, text));
+    if (text) {
+      this.lastText = text;
+      events.push(buildProgress(base, text));
+    }
 
     for (const b of blocks) {
       if (b.type !== "tool_use") continue;

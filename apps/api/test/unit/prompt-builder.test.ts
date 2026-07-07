@@ -572,16 +572,18 @@ describe("buildEnrichedPrompt — Output Format is engine-aware", () => {
     expect(prompt).toContain("call the `output` tool");
   });
 
-  it("claude engine instructs a final JSON message — never a nonexistent `output` tool", async () => {
-    // The claude runner hosts log/note/pin/report only; the deliverable is
-    // native via SDK `outputFormat` → `structured_output`. The tool-call
+  it("claude engine mandates one terminal `StructuredOutput` call — never a nonexistent `output` tool", async () => {
+    // The claude runner hosts log/note/pin/report only; the deliverable goes
+    // through the SDK's `outputFormat`, i.e. the CLI-injected
+    // `StructuredOutput` tool — the ONLY channel captured into
+    // `result.structured_output` (issue #833). The `output` tool-call
     // mandate would send the agent hunting for a tool that does not exist
     // and the run never completes (issue #824).
     const prompt = await buildEnrichedPrompt(baseContext({ schemas: { output: outputSchema } }), {
       engine: "claude",
     });
     expect(prompt).toContain("## Output Format");
-    expect(prompt).toContain("FINAL message MUST be the run's deliverable");
+    expect(prompt).toContain("call `StructuredOutput` **exactly once**");
     expect(prompt).not.toContain("call the `output` tool");
   });
 

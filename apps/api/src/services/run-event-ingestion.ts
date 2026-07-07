@@ -319,11 +319,21 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     );
     if (!validation.valid) {
       status = "failed";
+      // The never-emitted wording must name the mechanism the engine
+      // actually had (issue #833): `result.outputMode === "native"` (Claude
+      // Agent SDK) has no `output` tool — its deliverable goes through the
+      // SDK's `StructuredOutput` channel. Absent outputMode means "tool"
+      // (the historical default; older runners never set it).
       errorMessage = outputEmitted
         ? `Output validation failed: ${validation.errors.join("; ")}`
-        : "Agent finished without calling the required `output` tool. This agent " +
-          "declares an output schema, so it must call `output` exactly once before " +
-          `finishing with all required fields (missing: ${validation.errors.join("; ")}).`;
+        : result.outputMode === "native"
+          ? "Agent finished without delivering the required structured output. " +
+            "This agent declares an output schema, so it must call `StructuredOutput` " +
+            "exactly once before finishing with all required fields " +
+            `(missing: ${validation.errors.join("; ")}).`
+          : "Agent finished without calling the required `output` tool. This agent " +
+            "declares an output schema, so it must call `output` exactly once before " +
+            `finishing with all required fields (missing: ${validation.errors.join("; ")}).`;
       outputValidationErrors = validation.errors;
     }
   }

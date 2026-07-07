@@ -341,6 +341,11 @@ export class PiRunner implements Runner {
     // instead of having the platform reconstruct it from the `run_logs`
     // adapter-error trail post-hoc (issue: run_fd977eb6).
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
+    // This engine delivers structured output via the `output` runtime tool.
+    // Explicit (though it matches the absent-field default) so both runners
+    // state their delivery mechanism — finalize phrases output-validation
+    // failures from it (issue #833).
+    result.outputMode = "tool";
     const terminalError = bridgeRef.current?.getTerminalError();
     if (terminalError) {
       result.status = "failed";
