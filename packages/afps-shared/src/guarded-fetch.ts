@@ -96,9 +96,14 @@ export async function guardedFetch(
 
   let method = (init?.method ?? "GET").toUpperCase();
   let body = init?.body;
+  // Mutable header set for the chain. On a CROSS-ORIGIN redirect we drop the
+  // credential headers (browser behaviour) so a `302 → other-host` cannot
+  // forward the caller's `Authorization`/`Cookie` to a different origin — even
+  // when that origin is a legitimate public host the SSRF host-check allows.
+  const headers = new Headers(init?.headers ?? {});
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
-    const res = await fetch(current, { ...init, method, body, redirect: "manual" });
+    const res = await fetch(current, { ...init, method, body, headers, redirect: "manual" });
 
     // `fetch` reports opaqueredirect / 3xx: follow manually so each hop is guarded.
     const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
@@ -112,6 +117,10 @@ export async function guardedFetch(
     const next = stripUserInfoAndFragment(new URL(location, current));
     assertHttp(next);
     await checkHost(next, opts);
+
+    if (next.origin !== current.origin) {
+      for (const h of ["authorization", "cookie", "proxy-authorization"]) headers.delete(h);
+    }
 
     // Standard redirect method/body rewriting: 303 (and 301/302 for POST per
     // browser convention) → GET with no body; 307/308 preserve method + body.

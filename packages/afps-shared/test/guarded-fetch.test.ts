@@ -94,6 +94,41 @@ describe("guardedFetch — SSRF", () => {
     expect(await res.text()).toBe("final-body");
   });
 
+  it("drops Authorization/Cookie on a cross-origin redirect but keeps them same-origin", async () => {
+    const seen: Array<{ auth: string | null }> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, reqInit?: RequestInit) => {
+      const auth = new Headers(reqInit?.headers ?? {}).get("authorization");
+      seen.push({ auth });
+      if (seen.length === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://first.example/same" },
+        });
+      }
+      if (seen.length === 2) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://other.example/final" },
+        });
+      }
+      return new Response("done", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await guardedFetch(
+      "https://first.example/start",
+      { headers: { Authorization: "Bearer secret" } },
+      {
+        resolve: resolverFor({
+          "first.example": ["203.0.113.1"],
+          "other.example": ["203.0.113.2"],
+        }),
+      },
+    );
+    expect(seen[0]!.auth).toBe("Bearer secret"); // initial request
+    expect(seen[1]!.auth).toBe("Bearer secret"); // same-origin hop keeps it
+    expect(seen[2]!.auth).toBeNull(); // cross-origin hop dropped it
+  });
+
   it("stops after maxRedirects", async () => {
     globalThis.fetch = (async () =>
       new Response(null, {
