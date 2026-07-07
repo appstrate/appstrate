@@ -564,6 +564,10 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("## Output Format");
       expect(out).toContain("call `StructuredOutput` **exactly once**");
       expect(out).toContain("does not exist on this runtime");
+      // Version-drift escape hatch: a CLI without the injected tool degrades
+      // to the lone-JSON final message the runner's fallback parser captures.
+      expect(out).toContain("If no `StructuredOutput` tool is available");
+      expect(out).toContain("JSON deliverable alone");
       expect(out).not.toContain("call the `output` tool");
       expect(out).not.toContain("output({})");
       // Schema surfaces stay identical across modes.

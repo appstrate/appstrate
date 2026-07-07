@@ -398,6 +398,10 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       // `output` tool on this engine; mandating one sends the agent hunting
       // for a tool that does not exist (issue #824), and forbidding tool
       // delivery outright makes the agent skip `StructuredOutput` too (#833).
+      // The last sentence is the version-drift escape hatch: if the CLI ever
+      // stops injecting a tool by that name, the model degrades to the lone-
+      // JSON final message the runner's fallback parser captures — and it
+      // shapes that message parseably (no surrounding prose).
       sections.push(
         "The runtime provides a `StructuredOutput` tool for the run's " +
           "deliverable. You MUST call `StructuredOutput` **exactly once**, as " +
@@ -406,7 +410,9 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
           "look for an `output` tool (it does not exist on this runtime); " +
           "`StructuredOutput` is how the platform captures the run's " +
           "structured output. Finish all other work first, then call it — " +
-          "do not plan any message or step after it.\n",
+          "do not plan any message or step after it. If no `StructuredOutput` " +
+          "tool is available, end the run with the JSON deliverable alone as " +
+          "your FINAL message — no prose before or after it.\n",
       );
     } else {
       sections.push(

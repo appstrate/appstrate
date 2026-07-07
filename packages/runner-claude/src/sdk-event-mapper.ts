@@ -72,6 +72,8 @@ export interface SdkAssistantMessage {
   message?: { content?: SdkContentBlock[] | unknown; usage?: TokenUsage };
   /** Per-turn assistant error (e.g. mid-loop provider failure the agent may recover from). */
   error?: { message?: string } | string;
+  /** Set on subagent/sidechain turns (SDK `Task` tool) — not the run's own thread. */
+  parent_tool_use_id?: string | null;
 }
 export interface SdkUserMessage {
   type: "user";
@@ -176,11 +178,14 @@ export class SdkRunEventMapper {
   }
 
   /**
-   * Last non-empty assistant text seen on the stream — the run's final
-   * message once the stream has ended. Fallback source for the structured
-   * deliverable when the SDK's `result.structured_output` is absent (the
-   * model wrote the JSON as text instead of calling `StructuredOutput`,
-   * issue #833). `null` until an assistant turn produces text.
+   * Text of the FINAL main-thread assistant message once the stream has
+   * ended — fallback source for the structured deliverable when the SDK's
+   * `result.structured_output` is absent (the model wrote the JSON as text
+   * instead of calling `StructuredOutput`, issue #833). Every main-thread
+   * assistant message resets the slot — a later tool_use-only turn clears
+   * stale text, so a mid-run draft can never be promoted to the run's
+   * deliverable — and subagent/sidechain turns never count. `null` when the
+   * final assistant message carried no text.
    */
   lastAssistantText(): string | null {
     return this.lastText;
@@ -197,16 +202,24 @@ export class SdkRunEventMapper {
     const errMessage = assistantErrorMessage(msg.error);
     if (errMessage) events.push(buildError(base, errMessage));
 
-    const blocks = asContentBlocks(msg.message?.content);
-    const text = blocks
-      .filter((b): b is SdkTextBlock => b.type === "text")
-      .map((b) => b.text ?? "")
-      .join("\n")
-      .trim();
-    if (text) {
-      this.lastText = text;
-      events.push(buildProgress(base, text));
-    }
+    const content = msg.message?.content;
+    const blocks = asContentBlocks(content);
+    // Plain-string content is a legal API shape; treat it as one text block
+    // so neither the progress stream nor the final-message fallback goes
+    // blind on it.
+    const text = (
+      typeof content === "string"
+        ? content
+        : blocks
+            .filter((b): b is SdkTextBlock => b.type === "text")
+            .map((b) => b.text ?? "")
+            .join("\n")
+    ).trim();
+    // Final-message tracking (see lastAssistantText): reset on EVERY
+    // main-thread assistant message — including text-less tool_use-only
+    // turns — and ignore subagent/sidechain turns entirely.
+    if (msg.parent_tool_use_id == null) this.lastText = text || null;
+    if (text) events.push(buildProgress(base, text));
 
     for (const b of blocks) {
       if (b.type !== "tool_use") continue;

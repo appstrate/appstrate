@@ -45,6 +45,7 @@ import {
 } from "@appstrate/afps-runtime/runner";
 import { buildClaudeSdkEnv, CLAUDE_SDK_HARDENING } from "./claude-binary.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { SdkRunEventMapper, type SdkRunMessage } from "./sdk-event-mapper.ts";
 
@@ -123,22 +124,27 @@ function resolveStartMessage(context: ExecutionContext): string {
  * the fallback structured-deliverable source when the SDK's
  * `result.structured_output` is absent (issue #833: the model wrote a
  * schema-conforming JSON final message instead of calling the CLI's
- * `StructuredOutput` tool). Tolerates a single markdown code fence around
- * the object. Returns `undefined` when the text is not a lone JSON object —
- * the caller then leaves the run output-less and platform-side validation
- * reports the miss.
+ * `StructuredOutput` tool). Tolerates a single wrapping markdown code fence
+ * (any info tag, any casing, closing fence on the JSON's own line or not).
+ * Returns `undefined` when the text is not a lone JSON object — the caller
+ * then leaves the run output-less and platform-side validation reports the
+ * miss.
  */
 export function parseFinalJsonObject(text: string | null): Record<string, unknown> | undefined {
   if (!text) return undefined;
   let candidate = text.trim();
-  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n\s*```$/.exec(candidate);
-  if (fenced?.[1]) candidate = fenced[1].trim();
+  // Fence stripping by index math, not a regex — a lazy/greedy fence regex
+  // backtracks superlinearly on a large message that opens a fence and never
+  // closes it, and misses common variants (```JSON, closing ``` glued to the
+  // JSON) that this handles for free.
+  if (candidate.startsWith("```") && candidate.endsWith("```")) {
+    const open = candidate.indexOf("\n");
+    const close = candidate.lastIndexOf("```");
+    if (open !== -1 && open < close) candidate = candidate.slice(open + 1, close).trim();
+  }
   if (!candidate.startsWith("{")) return undefined;
   try {
-    const parsed: unknown = JSON.parse(candidate);
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined;
+    return asRecordOrNull(JSON.parse(candidate)) ?? undefined;
   } catch {
     return undefined;
   }
@@ -395,12 +401,17 @@ export class ClaudeAgentRunner implements Runner {
     // BEFORE awaiting the sink, so `reduceEvents` + the finalize POST already
     // carry the output; a dead sink here must not throw out and flip an
     // otherwise-succeeded run to failed (a truly dead sink surfaces at finalize).
-    const structuredOutput =
-      terminal?.structuredOutput !== undefined
-        ? terminal.structuredOutput
-        : this.opts.outputSchema && terminal?.status === "success"
-          ? parseFinalJsonObject(mapper.lastAssistantText())
-          : undefined;
+    // `?? undefined`: a null SDK value means "not delivered" (the schema
+    // mandates an object), so it must not suppress the fallback nor emit a
+    // null deliverable.
+    let structuredOutput = terminal?.structuredOutput ?? undefined;
+    if (
+      structuredOutput === undefined &&
+      this.opts.outputSchema &&
+      terminal?.status === "success"
+    ) {
+      structuredOutput = parseFinalJsonObject(mapper.lastAssistantText());
+    }
     if (structuredOutput !== undefined) {
       try {
         await emit({
