@@ -36,6 +36,12 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.modelApiKey).toBeUndefined();
     expect(env.outputSchemaRaw).toBeUndefined();
     expect(env.timeoutSeconds).toBeUndefined();
+    expect(env.mcpToolTimeoutMs).toBeUndefined();
+  });
+
+  it("parses APPSTRATE_MCP_TOOL_TIMEOUT_MS into env.mcpToolTimeoutMs (#779)", () => {
+    const env = parseRuntimeEnv({ ...VALID, APPSTRATE_MCP_TOOL_TIMEOUT_MS: "120000" });
+    expect(env.mcpToolTimeoutMs).toBe(120_000);
   });
 
   it("parses AGENT_TIMEOUT_SECONDS into env.timeoutSeconds", () => {

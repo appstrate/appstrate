@@ -76,6 +76,15 @@ export interface RuntimeEnv {
    * container pulls exceed the default. See issue #406.
    */
   mcpConnectDeadlineMs: number;
+  /**
+   * Optional per-call MCP tool timeout for the agent→sidecar client
+   * (#779 annex). Third-party integration servers doing a cold OAuth
+   * refresh on their first tool call can legitimately outlive the MCP
+   * SDK default; the same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` operator knob
+   * is honoured sidecar-side, so both legs share one budget. Absent →
+   * `undefined` → SDK default.
+   */
+  mcpToolTimeoutMs?: number;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -307,6 +316,14 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     0,
     issues,
   );
+  // Optional (#779 annex): per-call MCP tool timeout for the agent→sidecar
+  // client. Same 0-means-absent convention as AGENT_TIMEOUT_SECONDS.
+  const mcpToolTimeoutMs = parsePositiveInt(
+    "APPSTRATE_MCP_TOOL_TIMEOUT_MS",
+    source.APPSTRATE_MCP_TOOL_TIMEOUT_MS,
+    0,
+    issues,
+  );
 
   if (issues.length > 0) throw new RuntimeEnvError(issues);
 
@@ -329,6 +346,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     heartbeatIntervalMs,
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
     mcpConnectDeadlineMs,
+    ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     outputSchemaRaw: source.OUTPUT_SCHEMA || undefined,
     traceparent: source.TRACEPARENT || undefined,
   };
