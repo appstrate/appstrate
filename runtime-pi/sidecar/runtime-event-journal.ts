@@ -77,13 +77,20 @@ export class RuntimeEventJournal {
   after(cursor: number): JournalBatch {
     const events: JournalEvent[] = [];
     let highest = cursor;
-    for (const entry of this.entries) {
-      if (entry.seq > cursor) {
-        events.push(entry.event);
-        if (entry.seq > highest) highest = entry.seq;
-      }
+    if (this.entries.length === 0) {
+      return { events, cursor: highest, firstSeq: this.next };
     }
-    const firstSeq = this.entries.length > 0 ? this.entries[0]!.seq : this.next;
+    const firstSeq = this.entries[0]!.seq;
+    // Sequences are contiguous and monotonic: `append` always adds +1 and
+    // eviction only shifts from the front, so `entries[i].seq === firstSeq + i`.
+    // That lets us jump straight to the first not-yet-drained entry instead of
+    // scanning the whole (up to 10k-entry) buffer on every poll.
+    const startIndex = Math.max(0, cursor - firstSeq + 1);
+    for (let i = startIndex; i < this.entries.length; i += 1) {
+      const entry = this.entries[i]!;
+      events.push(entry.event);
+      if (entry.seq > highest) highest = entry.seq;
+    }
     return { events, cursor: highest, firstSeq };
   }
 }

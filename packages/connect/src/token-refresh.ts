@@ -25,6 +25,13 @@ export interface RefreshContext {
   tokenEndpointAuthMethod?: OAuthTokenAuthMethod;
   scopeSeparator?: string;
   tokenContentType?: OAuthTokenContentType;
+  /**
+   * Injectable egress fetch. Defaults to the SSRF-guarded `oauthEgressFetch`.
+   * Tests inject a stub here rather than patching the global `fetch` — the
+   * guarded default resolves DNS, which would (correctly) fail-close on
+   * non-resolvable test hostnames.
+   */
+  fetchImpl?: typeof fetch;
 }
 
 /**
@@ -113,7 +120,8 @@ export async function performRefreshTokenExchange(
     // SSRF-guarded: this POST carries refresh_token + client_secret. A blocked
     // host throws SsrfBlockedError (caught below → `transient`; the message
     // carries only the guard's host/reason, never the secret body).
-    response = await oauthEgressFetch(ctx.tokenEndpoint, {
+    const doFetch = ctx.fetchImpl ?? oauthEgressFetch;
+    response = await doFetch(ctx.tokenEndpoint, {
       method: "POST",
       headers: buildTokenHeaders(
         tokenAuthMethod,

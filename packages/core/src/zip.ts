@@ -268,6 +268,10 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
     files = unzipArtifact(zipBuffer, { maxDecompressedBytes: MAX_DECOMPRESSED });
   } catch (err) {
     if (err instanceof DecompressionLimitError) {
+      // A resource-exhaustion verdict → ZIP_BOMB; a structural one → ZIP_INVALID.
+      if (err.reason === "corrupt-archive") {
+        throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact");
+      }
       throw new PackageZipError("ZIP_BOMB", "Decompressed size exceeds limit");
     }
     throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact");

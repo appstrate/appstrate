@@ -43,10 +43,13 @@ export function idempotency() {
     }
 
     const orgId = c.get("orgId");
+    // Scope the key to the application too, so one org's `Idempotency-Key`
+    // cannot replay a cached response across two different applications.
+    const applicationId = c.get("applicationId");
     const rawBody = await c.req.text();
     const bodyHash = computeBodyHash(rawBody);
 
-    const lockResult = await acquireIdempotencyLock(orgId, key, bodyHash);
+    const lockResult = await acquireIdempotencyLock(orgId, applicationId, key, bodyHash);
 
     if (lockResult.status === "body_mismatch") {
       throw new ApiError({
@@ -97,7 +100,7 @@ export function idempotency() {
       // Thrown errors don't produce a c.res — they go through errorHandler which builds
       // a new Response. We can't cache that here, so releasing is the safe choice.
       try {
-        await releaseIdempotencyLock(orgId, key);
+        await releaseIdempotencyLock(orgId, applicationId, key);
       } catch {
         // Best-effort release — lock will expire via TTL (24h) if release fails
       }
@@ -109,7 +112,7 @@ export function idempotency() {
 
     // Only cache 2xx and 4xx (deterministic). 5xx = release lock for retry.
     if (statusCode >= 500) {
-      await releaseIdempotencyLock(orgId, key);
+      await releaseIdempotencyLock(orgId, applicationId, key);
       return;
     }
 
@@ -121,7 +124,7 @@ export function idempotency() {
       resHeaders[k] = v;
     });
 
-    await storeIdempotencyResult(orgId, key, {
+    await storeIdempotencyResult(orgId, applicationId, key, {
       statusCode,
       headers: resHeaders,
       body: resBody,

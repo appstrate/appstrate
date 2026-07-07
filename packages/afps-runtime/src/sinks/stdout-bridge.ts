@@ -235,8 +235,31 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
   // buffer below handles split JSON envelopes; this handles split UTF-8.
   const decoder = new TextDecoder("utf-8", { fatal: false });
 
-  stdout.write = ((chunk: string | Uint8Array, ..._rest: unknown[]): boolean => {
-    const text = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
+  stdout.write = ((
+    chunk: string | Uint8Array,
+    encodingOrCb?: BufferEncoding | ((err?: Error | null) => void),
+    cb?: (err?: Error | null) => void,
+  ): boolean => {
+    // Node's contract is `write(chunk[, encoding][, callback])` — the second
+    // arg is either the encoding or the completion callback.
+    const encoding: BufferEncoding | undefined =
+      typeof encodingOrCb === "string" ? encodingOrCb : undefined;
+    const callback = typeof encodingOrCb === "function" ? encodingOrCb : cb;
+
+    // Decode to text, honoring an explicit string encoding. For a string
+    // chunk a non-UTF-8 encoding (base64/hex/latin1) means the string is NOT
+    // plain text — recover the real bytes, then read them as UTF-8 for line
+    // parsing. Byte chunks stream-decode as before (split UTF-8 tolerated).
+    let text: string;
+    if (typeof chunk === "string") {
+      text =
+        encoding && encoding !== "utf8" && encoding !== "utf-8"
+          ? Buffer.from(chunk, encoding).toString("utf8")
+          : chunk;
+    } else {
+      text = decoder.decode(chunk, { stream: true });
+    }
+
     partial += text;
     const lines = partial.split("\n");
     partial = lines.pop() ?? "";
@@ -245,6 +268,19 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
         (originalWrite as (...a: unknown[]) => boolean)(line + "\n");
       }
     }
+    // Flush a non-newline-terminated remainder that cannot be the start of a
+    // canonical JSON event line — otherwise plain text without a trailing
+    // newline (prompts, progress bars, an unterminated final line) is
+    // buffered indefinitely and never reaches the terminal. A remainder
+    // starting with `{` is held back in case it's a JSON envelope split
+    // across writes (mirrors `dispatchLine`'s cheap reject).
+    if (partial.length > 0 && !partial.trimStart().startsWith("{")) {
+      (originalWrite as (...a: unknown[]) => boolean)(partial);
+      partial = "";
+    }
+    // Honor the write-completion callback — callers that await drain via it
+    // would otherwise hang.
+    if (callback) callback();
     return true;
   }) as typeof stdout.write;
 

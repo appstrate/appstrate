@@ -27,8 +27,8 @@ export const chatSessions = pgTable(
     // a reloaded client to the live stream by this id; a stale/orphaned id (no
     // live producer in the store) is treated as "no active stream" (204).
     activeStreamId: text("active_stream_id"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("idx_chat_sessions_org_user").on(table.orgId, table.userId)],
 );
@@ -52,7 +52,7 @@ export const chatMessages = pgTable(
     parentId: text("parent_id"),
     format: text("format").notNull(),
     content: jsonb("content").notNull(),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [unique("uq_chat_messages_session_message").on(table.sessionId, table.messageId)],
 );

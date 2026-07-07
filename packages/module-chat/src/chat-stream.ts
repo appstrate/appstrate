@@ -328,9 +328,21 @@ export async function handleChatStream(
   // the user turn and mark the in-flight stream now, just before generation.
   let userMessageId: string | undefined;
   if (sessionId && lastMessage?.id) {
-    userMessageId = await persistUserMessage(sessionId, lastMessage);
-    // Mark the in-flight stream so a mid-inference reload can reconnect to it.
-    await setActiveStream(sessionId, streamId);
+    try {
+      userMessageId = await persistUserMessage(sessionId, lastMessage);
+      // Mark the in-flight stream so a mid-inference reload can reconnect to it.
+      await setActiveStream(sessionId, streamId);
+    } catch (err) {
+      // The MCP session was opened during the preamble (ai-sdk path) but
+      // generation has not started, so neither `finalize` (teardown via
+      // onSettled) nor `failCleanup` (defined below) owns it yet. If the user
+      // -message persist or the active-stream marker throws here, the session
+      // would leak per failed turn. Close it on this error path before
+      // rethrowing. Credential headers are untouched — this is purely the
+      // leak-on-error cleanup.
+      await closeMcp();
+      throw err;
+    }
   }
 
   // Generation abort is DECOUPLED from the request connection: a client
@@ -356,7 +368,7 @@ export async function handleChatStream(
         unregisterStopController(streamId);
         // Fire-and-forget teardown — swallow rejections so a failed DB update or
         // MCP close can't surface as an unhandled rejection.
-        if (sessionId) void clearActiveStream(sessionId).catch(() => {});
+        if (sessionId) void clearActiveStream(sessionId, streamId).catch(() => {});
         void closeMcp();
       },
     });
@@ -367,7 +379,7 @@ export async function handleChatStream(
   // "generating" with a dead stream id), and close MCP.
   const failCleanup = async () => {
     unregisterStopController(streamId);
-    if (sessionId) await clearActiveStream(sessionId).catch(() => {});
+    if (sessionId) await clearActiveStream(sessionId, streamId).catch(() => {});
     await closeMcp();
   };
 

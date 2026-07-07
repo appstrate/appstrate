@@ -403,16 +403,16 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
         : storedCookies.join("; ");
     }
 
-    // For the FormData body shape, drop any caller-supplied
-    // multipart Content-Type so Bun's fetch generates the right
-    // `boundary=…` token itself — supplying a stale boundary would
-    // produce a wire-broken request.
+    // For the FormData body shape, drop ANY caller-supplied Content-Type so
+    // Bun's fetch generates the `multipart/form-data; boundary=…` header (with
+    // a boundary that matches the bytes it serialises) itself. `fetch` only
+    // sets that header when the caller left Content-Type unset — so a stale
+    // `multipart/...; boundary=old` OR any unrelated Content-Type (e.g.
+    // `application/json`) would both survive and desync from the actual body,
+    // producing a wire-broken request upstream.
     if (body.kind === "formData") {
       for (const key of Object.keys(resolvedHeaders)) {
-        if (
-          key.toLowerCase() === "content-type" &&
-          /^multipart\//i.test(resolvedHeaders[key] ?? "")
-        ) {
+        if (key.toLowerCase() === "content-type") {
           delete resolvedHeaders[key];
         }
       }

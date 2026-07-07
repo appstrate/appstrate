@@ -43,11 +43,18 @@ export async function forkPackage(
   if (!parsed) return { code: "NOT_FOUND" };
 
   // Read the package row directly — `packages.type` already holds the type,
-  // so there's no need to probe each CONFIG_BY_TYPE candidate. The lookup is
-  // org-agnostic by design: system packages (orgId=null) are legitimately
-  // forkable and carry no per-org access control here.
+  // so there's no need to probe each CONFIG_BY_TYPE candidate.
   const raw = await getPackageById(sourcePackageId);
   if (!raw) return { code: "NOT_FOUND" };
+
+  // Visibility gate. `getPackageById` is deliberately org-agnostic (it also
+  // backs cross-org import-collision checks), so fork must apply its own scope:
+  // a package may be forked only when it is a SYSTEM package (`orgId === null`,
+  // legitimately shared) or one THIS org already owns. Without this, a caller
+  // could fork — and thereby read the full manifest + published ZIP bytes of —
+  // another org's PRIVATE package. A foreign-org package is reported as
+  // NOT_FOUND so the fork surface never leaks its existence.
+  if (raw.orgId !== null && raw.orgId !== orgId) return { code: "NOT_FOUND" };
   const cfg = CONFIG_BY_TYPE[raw.type as PackageType];
   if (!cfg) return { code: "UNKNOWN_TYPE", type: raw.type };
 

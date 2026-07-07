@@ -23,12 +23,52 @@
  * failed" and "couldn't run at all".
  */
 
-import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import type { BunCompatProbeResult } from "./types.ts";
+
+/**
+ * Environment variables forwarded to the spawned (third-party) MCP server
+ * during the probe. Deliberately a minimal system allowlist: the probe
+ * runs untrusted vendored code, so forwarding the full `process.env` would
+ * leak platform secrets (credential-encryption keys, DATABASE_URL,
+ * provider tokens, session secrets) into it during the handshake. Only the
+ * variables a well-behaved runtime needs to locate binaries and its own
+ * cache/temp are passed through.
+ */
+const PROBE_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TERM",
+  "TZ",
+  // Windows essentials — bun/node resolve these to find the shell + profile.
+  "SystemRoot",
+  "SYSTEMROOT",
+  "PATHEXT",
+  "COMSPEC",
+  "WINDIR",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+] as const;
+
+/** Copy only the allowlisted, non-secret system vars from `process.env`. */
+function buildProbeEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of PROBE_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
 
 export interface BunProbeOptions {
   /** Hard wall-clock budget. Default 10000 ms. */
@@ -83,107 +123,128 @@ async function runProbe(
   timeoutMs: number,
   startedAt: number,
 ): Promise<BunCompatProbeResult> {
-  return new Promise<BunCompatProbeResult>((resolve) => {
-    let settled = false;
-    const settle = (r: BunCompatProbeResult) => {
-      if (settled) return;
-      settled = true;
-      try {
-        if (proc.exitCode === null && !proc.killed) proc.kill("SIGKILL");
-      } catch {
-        // ignore
-      }
-      resolve({ ...r, durationMs: Math.round(performance.now() - startedAt) });
-    };
-
-    let proc: ReturnType<typeof spawn>;
-    try {
-      proc = spawn(bunPath, [entryAbs], {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env },
-      });
-    } catch (err) {
-      settle({
-        ok: false,
-        reason: `failed to spawn bun: ${err instanceof Error ? err.message : String(err)}`,
-      });
-      return;
-    }
-
-    const stderrChunks: Buffer[] = [];
-    proc.stderr?.on("data", (c: Buffer) => stderrChunks.push(c));
-    proc.on("error", (err) => {
-      settle({ ok: false, reason: `spawn error: ${err.message}` });
-    });
-    proc.on("exit", (code) => {
-      if (settled) return;
-      const stderr = Buffer.concat(stderrChunks).toString("utf8").slice(0, 500);
-      settle({
-        ok: false,
-        reason: `server exited (code ${code}) before completing MCP handshake. stderr: ${stderr}`,
-      });
-    });
-
-    const timer = setTimeout(() => {
-      settle({ ok: false, reason: `probe timed out after ${timeoutMs}ms` });
-    }, timeoutMs);
-    timer.unref();
-
-    // MCP stdio JSON-RPC framing: one JSON object per line on
-    // stdout. We pipeline `initialize` then `tools/list` and resolve
-    // on the second response.
-    const buffer: Buffer[] = [];
-    let toolCount: number | undefined;
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      buffer.push(chunk);
-      const all = Buffer.concat(buffer).toString("utf8");
-      const lines = all.split(/\r?\n/);
-      // Keep the trailing partial line in the buffer.
-      const trailing = lines.pop();
-      buffer.length = 0;
-      if (trailing && trailing.length > 0) buffer.push(Buffer.from(trailing, "utf8"));
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        let msg: { id?: number | string; result?: { tools?: unknown[] } };
-        try {
-          msg = JSON.parse(trimmed) as typeof msg;
-        } catch {
-          continue;
-        }
-        if (msg.id === 1 && msg.result) {
-          // initialize succeeded — fire tools/list.
-          const listReq = {
-            jsonrpc: "2.0",
-            id: 2,
-            method: "tools/list",
-            params: {},
-          };
-          proc.stdin?.write(JSON.stringify(listReq) + "\n");
-        }
-        if (msg.id === 2 && msg.result) {
-          const tools = Array.isArray(msg.result.tools) ? msg.result.tools : [];
-          toolCount = tools.length;
-          const toolNames = tools
-            .map((t) => (t as { name?: unknown }).name)
-            .filter((n): n is string => typeof n === "string");
-          clearTimeout(timer);
-          settle({ ok: true, toolCount, toolNames });
-        }
-      }
-    });
-
-    // Send the initialize request.
-    const initReq = {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "afps-bundle-probe", version: "0.0.0" },
-      },
-    };
-    proc.stdin?.write(JSON.stringify(initReq) + "\n");
+  const withDuration = (r: BunCompatProbeResult): BunCompatProbeResult => ({
+    ...r,
+    durationMs: Math.round(performance.now() - startedAt),
   });
+
+  let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
+  try {
+    proc = Bun.spawn([bunPath, entryAbs], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      // SECURITY: never forward the full process.env to third-party MCP
+      // code — pass only a minimal, non-secret system allowlist.
+      env: buildProbeEnv(),
+    });
+  } catch (err) {
+    return withDuration({
+      ok: false,
+      reason: `failed to spawn bun: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+
+  const writeLine = (obj: unknown): void => {
+    try {
+      proc.stdin.write(JSON.stringify(obj) + "\n");
+      proc.stdin.flush();
+    } catch {
+      // Broken pipe — the stdout-scan/exit path surfaces the failure.
+    }
+  };
+
+  const killProc = (): void => {
+    try {
+      if (proc.exitCode === null && !proc.killed) proc.kill();
+    } catch {
+      // ignore
+    }
+  };
+
+  // Drain stderr concurrently for diagnostics on the failure path.
+  const stderrText = new Response(proc.stderr).text().catch(() => "");
+
+  // MCP stdio JSON-RPC framing: one JSON object per line on stdout. Scan
+  // line-by-line — on the `initialize` reply fire `tools/list`, resolve on
+  // the `tools/list` reply. Written so it never rejects: any stream error
+  // (e.g. the process being killed on timeout) falls through to the
+  // exit-based failure summary.
+  const scan = async (): Promise<BunCompatProbeResult> => {
+    const reader = proc.stdout.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    let buffer = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        // Keep the trailing partial line in the buffer.
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          let msg: { id?: number | string; result?: { tools?: unknown[] } };
+          try {
+            msg = JSON.parse(trimmed) as typeof msg;
+          } catch {
+            continue;
+          }
+          if (msg.id === 1 && msg.result) {
+            // initialize succeeded — fire tools/list.
+            writeLine({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+          }
+          if (msg.id === 2 && msg.result) {
+            const tools = Array.isArray(msg.result.tools) ? msg.result.tools : [];
+            const toolNames = tools
+              .map((t) => (t as { name?: unknown }).name)
+              .filter((n): n is string => typeof n === "string");
+            return { ok: true, toolCount: tools.length, toolNames };
+          }
+        }
+      }
+    } catch {
+      // Stream errored (process killed mid-read) — fall through below.
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // ignore — reader may already be released
+      }
+    }
+    const code = await proc.exited;
+    const stderr = (await stderrText).slice(0, 500);
+    return {
+      ok: false,
+      reason: `server exited (code ${code}) before completing MCP handshake. stderr: ${stderr}`,
+    };
+  };
+
+  const timeout = new Promise<BunCompatProbeResult>((resolve) => {
+    const timer = setTimeout(
+      () => resolve({ ok: false, reason: `probe timed out after ${timeoutMs}ms` }),
+      timeoutMs,
+    );
+    timer.unref?.();
+  });
+
+  // Send the initialize request, then race the handshake scan against the
+  // hard wall-clock timeout.
+  writeLine({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "afps-bundle-probe", version: "0.0.0" },
+    },
+  });
+
+  try {
+    return withDuration(await Promise.race([scan(), timeout]));
+  } finally {
+    killProc();
+  }
 }

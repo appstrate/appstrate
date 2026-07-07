@@ -179,38 +179,76 @@ export function useGlobalRunSync() {
     const controller = new AbortController();
     const broad = createBroadInvalidator(() => qcRef.current);
 
-    (async () => {
-      try {
-        const res = await fetch(
-          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(applicationId)}&verbose=true`,
-          {
-            credentials: "include",
-            signal: controller.signal,
+    // Bounded exponential backoff. A non-OK response (e.g. the endpoint is
+    // briefly unavailable during a redeploy) or a stream that simply ends
+    // used to leave the cache stale forever; we now reconnect so live run
+    // updates resume once the endpoint is back. Still fetch + ReadableStream
+    // (NOT EventSource) so Safari can't run its own uncontrolled reconnect.
+    const BASE_DELAY_MS = 1000;
+    const MAX_DELAY_MS = 30_000;
+    let attempt = 0;
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        controller.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            resolve();
           },
+          { once: true },
         );
-        if (!res.ok || !res.body) return;
+      });
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
+    // One connection attempt. Returns when the stream ends or errors; throws
+    // only for a non-OK response (handled by the reconnect loop).
+    const connectOnce = async () => {
+      const res = await fetch(
+        `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(applicationId)}&verbose=true`,
+        {
+          credentials: "include",
+          signal: controller.signal,
+        },
+      );
+      if (!res.ok || !res.body) {
+        throw new Error(`realtime stream unavailable (${res.status})`);
+      }
+      // Connected — reset the backoff so the next drop starts from BASE again.
+      attempt = 0;
 
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
 
-          const { frames, buffer } = parseSseFrames(decoder.decode(value, { stream: true }), buf);
-          buf = buffer;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-          for (const { event, data } of frames) {
-            if (event === "run_update" && data) {
-              handleSSEMessage(qcRef.current, broad, orgId, applicationId, data);
-            } else if (event === "connection_update" && data) {
-              handleConnectionUpdate(qcRef.current);
-            }
+        const { frames, buffer } = parseSseFrames(decoder.decode(value, { stream: true }), buf);
+        buf = buffer;
+
+        for (const { event, data } of frames) {
+          if (event === "run_update" && data) {
+            handleSSEMessage(qcRef.current, broad, orgId, applicationId, data);
+          } else if (event === "connection_update" && data) {
+            handleConnectionUpdate(qcRef.current);
           }
         }
-      } catch {
-        // Connection failed or aborted — no auto-reconnect
+      }
+    };
+
+    (async () => {
+      while (!controller.signal.aborted) {
+        try {
+          await connectOnce();
+        } catch {
+          // Failed to connect — fall through to the backoff below.
+        }
+        if (controller.signal.aborted) break;
+        const delay = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
+        attempt++;
+        await sleep(delay);
       }
     })();
 

@@ -88,5 +88,9 @@ export async function loadHistory(
   if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
   const body = (await res.json()) as { messages?: StoredMessage[] };
-  return (body.messages ?? []).map((e) => ({ id: e.id, ...e.content }) as UIMessage);
+  // Spread `content` FIRST, then apply the authoritative row `id` — the id
+  // lives in `message_id` and `content` is stored without it, but if a stored
+  // payload ever carried a stray `id` key, a trailing spread would clobber the
+  // real id. Ordering id last makes the row id win.
+  return (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage);
 }

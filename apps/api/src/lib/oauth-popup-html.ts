@@ -25,6 +25,18 @@
  */
 
 import { escapeHtml } from "@appstrate/core/html";
+import { getEnv } from "@appstrate/env";
+
+/**
+ * Target origin for the `postMessage` to `window.opener`. Scoping the message
+ * to the platform's own origin — instead of the wildcard `"*"` — stops any
+ * unrelated page that happened to open `auth_url` from reading the `state` +
+ * `packageId` the callback broadcasts. The opener is always the dashboard SPA
+ * served from `APP_URL`, so its origin is the correct (and only) audience.
+ */
+function appOrigin(): string {
+  return new URL(getEnv().APP_URL).origin;
+}
 
 /** Channel name shared with the chat auth card (`packages/module-chat`). */
 export const INTEGRATION_BROADCAST_CHANNEL = "appstrate_integration";
@@ -57,10 +69,11 @@ function jsonForScript(value: unknown): string {
 
 function page(payload: Record<string, unknown>, body: string, closeDelayMs: number): string {
   const data = jsonForScript({ type: INTEGRATION_MESSAGE_TYPE, ...payload });
+  const targetOrigin = JSON.stringify(appOrigin());
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Appstrate</title><style>body{font-family:system-ui,-apple-system,sans-serif;display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;background:#0b0b0c;color:#e5e5e5}main{text-align:center;padding:2rem;max-width:28rem}.ok{color:#4ade80}.err{color:#f87171}p{line-height:1.5}</style></head><body><main>${body}</main><script>
 (function(){
   var detail = ${data};
-  try { if (window.opener) window.opener.postMessage(detail, "*"); } catch (e) {}
+  try { if (window.opener) window.opener.postMessage(detail, ${targetOrigin}); } catch (e) {}
   try { var bc = new BroadcastChannel(${JSON.stringify(INTEGRATION_BROADCAST_CHANNEL)}); bc.postMessage(detail); bc.close(); } catch (e) {}
   setTimeout(function(){ try { window.close(); } catch (e) {} }, ${closeDelayMs});
 })();

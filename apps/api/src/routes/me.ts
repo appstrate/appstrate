@@ -11,17 +11,28 @@
  *
  * The `/api/me/*` namespace solves that — these routes:
  *   - skip `requireOrgContext` so the caller doesn't need `X-Org-Id` upfront
- *     (`/api/me/orgs` is the prerequisite to setting it; `/api/me/models`
- *     uses the org already pinned by the strategy or `X-Org-Id`),
+ *     (`/api/me/orgs` is the prerequisite to setting it; org-scoped reads
+ *     use the org already pinned by the strategy or `X-Org-Id`; the pin and
+ *     context routes below opt back into app context via `requireAppContext`),
  *   - accept every auth method that represents a single user (cookie session,
  *     API key, OAuth2 instance/dashboard/end-user JWTs),
  *   - return only the data the caller is entitled to (API key sees its
  *     bound org, OIDC end-user sees their application's owning org,
- *     dashboard user sees every org they're a member of).
+ *     dashboard user sees every org they're a member of); write/delete
+ *     routes additionally enforce per-row owner (`userId`/`endUserId`)
+ *     scoping in the service layer, not org membership.
  *
- * Scope intentionally tight: only the two reads above. Adding a new field
- * to `/api/me/*` requires its own named route — we are NOT going to grow
- * a catch-all user-profile endpoint here.
+ * Surface (each an explicitly named route — this namespace is NOT a
+ * catch-all user-profile endpoint; adding a capability means adding a
+ * named route here):
+ *   - GET    /orgs                      — orgs the caller belongs to
+ *   - GET    /models                    — models available in the active org
+ *   - GET    /connections               — the caller's integration connections
+ *   - DELETE /connections/:connectionId — destructive global credential delete
+ *   - GET    /integration-pins          — member-self pins for an agent
+ *   - PUT    /integration-pins          — upsert a member-self pin
+ *   - DELETE /integration-pins          — clear a member-self pin
+ *   - GET    /context                   — the caller's working context (get_me)
  */
 
 import { Hono } from "hono";

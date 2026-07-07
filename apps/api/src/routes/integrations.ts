@@ -58,7 +58,7 @@ import {
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { getActor } from "../lib/actor.ts";
+import { getActor, type Actor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
 import { updateInstalledPackage } from "../services/application-packages.ts";
@@ -222,6 +222,30 @@ async function assertConnectionCreationAllowed(
       title: "Connection Blocked by Admin",
       detail: `Creation of personal connections to '${integrationId}' is disabled by the organization admin. Use the shared connection instead.`,
     });
+  }
+}
+
+/**
+ * Guard a client-supplied reconnect target (`connection_id`) against IDOR: the
+ * connect flows honor an arbitrary connection id to renew a credential in
+ * place, so before that id is trusted we must confirm it is a connection the
+ * caller actually owns in THIS application. Without this a caller could pass
+ * another actor's (or another app's) connection id and overwrite its
+ * credentials through the single-writer persist path. A miss surfaces as a
+ * plain 404 so cross-scope existence is never disclosed.
+ */
+async function assertConnectionBelongsToActor(
+  connectionId: string,
+  applicationId: string,
+  actor: Actor,
+): Promise<void> {
+  const owner = await loadConnectionOwnership(connectionId);
+  const ownedByActor =
+    owner !== null &&
+    owner.applicationId === applicationId &&
+    (actor.type === "user" ? owner.userId === actor.id : owner.endUserId === actor.id);
+  if (!ownedByActor) {
+    throw notFound("Connection not found");
   }
 }
 
@@ -566,6 +590,12 @@ export function createIntegrationsRouter() {
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
       const body = parseBody(importConnectionSchema, await c.req.json());
+      // A reconnect target must be the caller's own connection in this app —
+      // otherwise the credential write below would overwrite an arbitrary
+      // (possibly another actor's) connection (IDOR).
+      if (body.connection_id) {
+        await assertConnectionBelongsToActor(body.connection_id, scope.applicationId, actor);
+      }
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
         if (auth.type === "oauth2") {
@@ -614,6 +644,11 @@ export function createIntegrationsRouter() {
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
       const body = parseBody(connectOAuthSchema, await c.req.json().catch(() => ({})));
+      // Same reconnect-target IDOR guard as connect/fields: the connection_id is
+      // carried into the OAuth state and honored at callback-time write.
+      if (body.connection_id) {
+        await assertConnectionBelongsToActor(body.connection_id, scope.applicationId, actor);
+      }
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
       if (auth.type !== "oauth2") {
@@ -687,6 +722,11 @@ export function createIntegrationsRouter() {
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
       const body = parseBody(connectSessionSchema, await c.req.json().catch(() => ({})));
+      // Same reconnect-target IDOR guard as connect/fields: the connection_id is
+      // minted into the hosted-connect capability token and honored at write.
+      if (body.connection_id) {
+        await assertConnectionBelongsToActor(body.connection_id, scope.applicationId, actor);
+      }
       // Validate the auth exists (404/409 surfaced now, not after the redirect).
       await readIntegrationAuth(scope, packageId, authKey);
       const { connectUrl, expiresAt } = buildConnectUrl({

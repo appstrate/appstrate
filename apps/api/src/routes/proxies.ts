@@ -117,7 +117,7 @@ export function createProxiesRouter() {
   });
 
   // POST /api/proxies/:id/test — test proxy connection
-  router.post("/:id/test", rateLimit(5), async (c) => {
+  router.post("/:id/test", requirePermission("proxies", "read"), rateLimit(5), async (c) => {
     const orgId = c.get("orgId");
     const proxyId = c.req.param("id")!;
     try {
@@ -127,6 +127,9 @@ export function createProxiesRouter() {
       }
       return c.json(result);
     } catch (err) {
+      // A deliberate client error (e.g. notFound above) must surface as itself,
+      // not be masked as a 500 by the catch-all.
+      if (err instanceof ApiError) throw err;
       logger.error("Proxy test failed", {
         proxyId,
         error: getErrorMessage(err),

@@ -472,9 +472,7 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    const result = await withFetch(stubFetch, () =>
-      handleIntegrationOAuthCallback(store, "AUTH_CODE", state),
-    );
+    const result = await handleIntegrationOAuthCallback(store, "AUTH_CODE", state, stubFetch);
 
     expect(captured).not.toBeNull();
     expect(captured!.url).toBe("https://idp/token");
@@ -521,7 +519,7 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    await withFetch(stub, () => handleIntegrationOAuthCallback(store, "CODE", state));
+    await handleIntegrationOAuthCallback(store, "CODE", state, stub);
     const authHeader = captured!.headers["Authorization"] ?? captured!.headers["authorization"];
     expect(authHeader?.startsWith("Basic ")).toBe(true);
     // Basic auth carries credentials in the header, not the body.
@@ -547,7 +545,7 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    await withFetch(stub, () => handleIntegrationOAuthCallback(store, "CODE", state));
+    await handleIntegrationOAuthCallback(store, "CODE", state, stub);
     const authHeader = captured!.headers["Authorization"] ?? captured!.headers["authorization"];
     expect(authHeader).toBeUndefined();
     const params = new URLSearchParams(captured!.body);
@@ -575,7 +573,7 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    await withFetch(stub, () => handleIntegrationOAuthCallback(store, "CODE", state));
+    await handleIntegrationOAuthCallback(store, "CODE", state, stub);
     expect(authHeader?.startsWith("Basic ")).toBe(true);
   });
 
@@ -590,7 +588,7 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    await withFetch(stub, () => handleIntegrationOAuthCallback(store, "CODE", state));
+    await handleIntegrationOAuthCallback(store, "CODE", state, stub);
     expect(new URLSearchParams(body).get("resource")).toBe("https://api.example.com");
   });
 
@@ -603,13 +601,11 @@ describe("handleIntegrationOAuthCallback", () => {
       })) as unknown as typeof fetch;
 
     let err: unknown = null;
-    await withFetch(stub, async () => {
-      try {
-        await handleIntegrationOAuthCallback(store, "CODE", state);
-      } catch (e) {
-        err = e;
-      }
-    });
+    try {
+      await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+    } catch (e) {
+      err = e;
+    }
     expect(err).toBeInstanceOf(OAuthCallbackError);
     expect((err as OAuthCallbackError).kind).toBe("revoked");
     expect(await store.get(state)).toBeNull();
@@ -624,13 +620,11 @@ describe("handleIntegrationOAuthCallback", () => {
       })) as unknown as typeof fetch;
 
     let err: unknown = null;
-    await withFetch(stub, async () => {
-      try {
-        await handleIntegrationOAuthCallback(store, "CODE", state);
-      } catch (e) {
-        err = e;
-      }
-    });
+    try {
+      await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+    } catch (e) {
+      err = e;
+    }
     expect(err).toBeInstanceOf(OAuthCallbackError);
     expect((err as OAuthCallbackError).kind).toBe("transient");
     // State preserved on transient — operator may retry.
@@ -688,9 +682,7 @@ describe("handleIntegrationOAuthCallback", () => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       )) as unknown as typeof fetch;
 
-    const result = await withFetch(stub, () =>
-      handleIntegrationOAuthCallback(store, "CODE", state),
-    );
+    const result = await handleIntegrationOAuthCallback(store, "CODE", state, stub);
     expect(result.scopesGranted).toEqual(["openid", "email"]);
     expect(result.scopeShortfall).toEqual(["profile"]);
   });
@@ -739,9 +731,7 @@ describe("integration OAuth clientRef round-trip", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as unknown as typeof fetch;
-    const result = await withFetch(stub, () =>
-      handleIntegrationOAuthCallback(store, "CODE", state),
-    );
+    const result = await handleIntegrationOAuthCallback(store, "CODE", state, stub);
     expect(result.clientRef).toBe("a3f9c1b2-0000-4000-8000-000000000001");
   });
 
@@ -752,9 +742,7 @@ describe("integration OAuth clientRef round-trip", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as unknown as typeof fetch;
-    const result = await withFetch(stub, () =>
-      handleIntegrationOAuthCallback(store, "CODE", state),
-    );
+    const result = await handleIntegrationOAuthCallback(store, "CODE", state, stub);
     expect(result.clientRef).toBeUndefined();
   });
 });

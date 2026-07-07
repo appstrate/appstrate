@@ -42,6 +42,32 @@ stdin.on("data", (chunk) => {
 });
 `;
 
+// Reports, via tool names, whether a secret env var leaked into the child
+// and whether PATH (allowlisted) made it through.
+const LEAK_PROBE_SCRIPT = `#!/usr/bin/env bun
+const stdin = process.stdin;
+const stdout = process.stdout;
+let buf = "";
+stdin.setEncoding("utf8");
+stdin.on("data", (chunk) => {
+  buf += chunk;
+  let nl;
+  while ((nl = buf.indexOf("\\n")) !== -1) {
+    const line = buf.slice(0, nl);
+    buf = buf.slice(nl + 1);
+    if (!line.trim()) continue;
+    const msg = JSON.parse(line);
+    if (msg.method === "initialize") {
+      stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: {} } }) + "\\n");
+    } else if (msg.method === "tools/list") {
+      const leaked = process.env.SECRET_SHOULD_NOT_LEAK ? "leaked" : "clean";
+      const hasPath = process.env.PATH ? "path" : "nopath";
+      stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { tools: [{ name: leaked }, { name: hasPath }] } }) + "\\n");
+    }
+  }
+});
+`;
+
 const CRASH_SCRIPT = `#!/usr/bin/env bun
 process.stderr.write("simulated startup crash\\n");
 process.exit(7);
@@ -83,6 +109,24 @@ describe("probeBunCompat", () => {
     expect(result.ok).toBe(false);
     expect(result.reason ?? "").toMatch(/timed out|timeout/);
   }, 8000);
+
+  it("does not forward secret process.env vars to the spawned server", async () => {
+    process.env.SECRET_SHOULD_NOT_LEAK = "super-secret-value";
+    try {
+      const result = await probeBunCompat(
+        { "server/index.ts": ENC.encode(LEAK_PROBE_SCRIPT) },
+        "./server/index.ts",
+        { timeoutMs: 8000 },
+      );
+      expect(result.ok).toBe(true);
+      // The secret must NOT reach the child; PATH (allowlisted) must.
+      expect(result.toolNames).toContain("clean");
+      expect(result.toolNames).not.toContain("leaked");
+      expect(result.toolNames).toContain("path");
+    } finally {
+      delete process.env.SECRET_SHOULD_NOT_LEAK;
+    }
+  }, 15_000);
 
   it("fails (cleanly) when bun is not on PATH", async () => {
     const result = await probeBunCompat(

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { parsePackageZip } from "./zip.ts";
 import { parseScopedName, buildPackageId } from "./naming.ts";
 import type { PackageType } from "./validation.ts";
-import { getErrorMessage } from "./errors";
+import { getErrorMessage } from "./errors.ts";
 
 /** A parsed system package loaded from an AFPS file on disk. */
 export interface SystemPackageEntry {

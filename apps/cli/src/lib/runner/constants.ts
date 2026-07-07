@@ -39,6 +39,16 @@ export const RUNNER_ETC_DIR = "/etc/appstrate-runner";
 export const RUNNER_ENV_PATH = "/etc/appstrate-runner/env";
 
 /**
+ * Env var used to hand the pairing token to an elevated `runner install`
+ * WITHOUT putting it on the command line. The same-host firecracker install
+ * spawns `sudo --preserve-env=APPSTRATE_RUNNER_TOKEN …` so the secret rides
+ * the (owner/root-only) process environment instead of the world-readable
+ * argv that `ps aux` exposes. `resolveInstallConfig` reads it as a fallback
+ * to `--token`.
+ */
+export const RUNNER_TOKEN_ENV = "APPSTRATE_RUNNER_TOKEN";
+
+/**
  * Default state root. Kernel, rootfs, per-run dirs and the pinned
  * firecracker binary all live under here so one `ReadWritePaths=` in the
  * unit grants the daemon exactly the writable surface it needs and nothing

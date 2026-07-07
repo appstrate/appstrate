@@ -79,6 +79,13 @@ export interface ResolveOAuthEndpointsInput {
   authorizationEndpoint?: string;
   /** Explicit token endpoint — wins over discovery when present. */
   tokenEndpoint?: string;
+  /**
+   * Injectable egress fetch for the discovery probes. Defaults to the
+   * SSRF-guarded `oauthEgressFetch`. Tests inject a stub here rather than
+   * patching the global `fetch` — the guarded default resolves DNS, which
+   * would (correctly) fail-close on non-resolvable test hostnames.
+   */
+  fetchImpl?: typeof fetch;
 }
 
 /** Strip a single trailing slash so well-known suffixes join cleanly. */
@@ -210,7 +217,7 @@ export async function resolveOAuthEndpoints(
   let discoveredTokenEndpoint: string | undefined;
 
   for (const url of candidates) {
-    const doc = await fetchDiscoveryDocument(url);
+    const doc = await fetchDiscoveryDocument(url, input.fetchImpl);
     if (!doc) continue;
     // AFPS §7.3 line 803: validate that the document's `issuer` matches the
     // configured issuer string. Reject + try the next probe on mismatch.
@@ -331,7 +338,10 @@ interface DiscoveryDocument {
 }
 
 /** Best-effort fetch + parse of a discovery document. Returns `null` on any failure. */
-async function fetchDiscoveryDocument(url: string): Promise<DiscoveryDocument | null> {
+async function fetchDiscoveryDocument(
+  url: string,
+  fetchImpl?: typeof fetch,
+): Promise<DiscoveryDocument | null> {
   // SSRF-guarded, matching the now-guarded token exchange to the same host.
   // The probe host comes from the manifest-author-controlled `issuer`; a host
   // resolving to a private/link-local/metadata address makes `oauthEgressFetch`
@@ -340,7 +350,8 @@ async function fetchDiscoveryDocument(url: string): Promise<DiscoveryDocument | 
   // that legitimately run an internal IdP opt that host into the SSRF bypass via
   // `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS`.
   try {
-    const res = await oauthEgressFetch(url, {
+    const doFetch = fetchImpl ?? oauthEgressFetch;
+    const res = await doFetch(url, {
       method: "GET",
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(10_000),

@@ -95,6 +95,16 @@ export interface RunWireDto {
   runner_kind: string | null;
   agent_scope: string | null;
   agent_name: string | null;
+  // CASING: `runOrigin`/`contextSnapshot` are NOT in the documented universal
+  // carve-out (id/*Id/createdAt/runNumber/…), so docs/CASING_CONVENTIONS.md
+  // would nominally call for snake_case (`run_origin`/`context_snapshot`).
+  // They are kept camelCase as a deliberate, known module carve-out: the wire
+  // contract already emits camelCase across all three surfaces in lockstep —
+  // the runtime mapper (services/state/runs.ts `toRunWireDto`), the OpenAPI
+  // spec (openapi/schemas.ts + baseline.json), and the SPA consumers
+  // (run-detail.tsx, run-row.tsx, api/schema.d.ts). Renaming here without
+  // re-cutting the spec + regenerating the client would break the contract, so
+  // this field name is intentionally left as-is.
   runOrigin: string | null;
   contextSnapshot: unknown;
   modelCredentialId: string | null;

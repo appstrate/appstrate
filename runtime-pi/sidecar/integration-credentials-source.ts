@@ -42,7 +42,7 @@ import type {
   IntegrationCredentialsWire,
   ResolvedAuthCredentials,
 } from "@appstrate/connect/integration-credentials";
-import type { MitmCredentialSource } from "./integration-mitm-listener.ts";
+import type { ActiveConnectInputs, MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { logger } from "./logger.ts";
 
 /**
@@ -177,12 +177,29 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    * a re-login) would be injected over, and its same-named header stripped
    * from, the login tool's own request — clobbering the fresh login. Dependency
    * auths (different keys) keep their plans and stay injectable during login.
+   *
+   * `authorizedUris` is the acquiring auth's URL envelope; it is surfaced back
+   * through {@link activeInputs} so the MITM listener binds substitution to
+   * authorized targets only (the transient secret must never reach an
+   * off-allowlist host).
+   *
+   * Windows are keyed by `acquiringAuthKey`, so concurrent re-logins (two auths
+   * on one integration re-authenticating at once) each retain their own window
+   * + plan-suppression — one login can't clobber the other's.
    */
-  setActiveInputs(bag: Record<string, string>, acquiringAuthKey?: string): void;
-  /** Close the substitution window. Idempotent. */
-  clearActiveInputs(): void;
-  /** The active transient-input bag, or `null` when the window is closed. */
-  activeInputs(): Record<string, string> | null;
+  setActiveInputs(
+    bag: Record<string, string>,
+    acquiringAuthKey?: string,
+    authorizedUris?: readonly string[],
+  ): void;
+  /**
+   * Close a substitution window. Pass the `acquiringAuthKey` used to open it to
+   * close only that window (so a concurrent re-login's window survives); pass
+   * nothing to close ALL windows. Idempotent.
+   */
+  clearActiveInputs(acquiringAuthKey?: string): void;
+  /** The merged active transient-input window, or `null` when none is open. */
+  activeInputs(): ActiveConnectInputs | null;
   /**
    * connect.tool mid-run re-login (P3) — register a per-authKey re-login
    * closure plus the upstream status codes that should trigger it. After this
@@ -272,14 +289,24 @@ export function createIntegrationCredentialsSource(
   const fetchFn = options.fetchFn ?? fetch;
   const minRefreshIntervalMs = options.minRefreshIntervalMs ?? 5_000;
   let payload = options.initialPayload;
-  // Transient-input substitution window (connect-login P1). Default null
-  // (closed) — the MITM listener behaves byte-identically to today unless
-  // a connect-login is actively in flight.
-  let activeInputBag: Record<string, string> | null = null;
-  // While a connect-login is in flight, the auth being (re-)acquired is not yet
-  // injectable — its delivery plan is suppressed from `deliveryPlans()` so the
-  // login tool's own headers (cookie jar) reach upstream untouched.
-  let acquiringAuthKey: string | null = null;
+  // Transient-input substitution windows (connect-login P1). Empty by default —
+  // the MITM listener behaves byte-identically to today unless a connect-login
+  // is actively in flight. Keyed by the acquiring authKey so concurrent
+  // re-logins each retain their OWN window + delivery-plan suppression: a scalar
+  // `acquiringAuthKey` let a second login clobber the first's suppression,
+  // re-exposing a stale session mid-login (spurious 401). While a window is
+  // open, the auth being (re-)acquired is not yet injectable — its delivery plan
+  // is suppressed from `deliveryPlans()` so the login tool's own headers (cookie
+  // jar) reach upstream untouched.
+  interface ActiveWindow {
+    bag: Record<string, string>;
+    authorizedUris: readonly string[];
+  }
+  const activeWindows = new Map<string, ActiveWindow>();
+  // Synthetic key for a window opened without an acquiring authKey (defensive —
+  // production connect-login always passes one). NUL-prefixed so it can never
+  // collide with a real authKey or a delivery-plan key.
+  let anonWindowSeq = 0;
   // Last successful refresh per authKey (or "*" for full-payload refreshes).
   const lastRefreshAt = new Map<string, number>();
   // Coalesce concurrent refreshes for the same authKey.
@@ -296,14 +323,17 @@ export function createIntegrationCredentialsSource(
   });
 
   const deliveryPlans = () => {
-    // Suppress the in-flight acquired auth's plan so the login tool's own
+    // Suppress EVERY in-flight acquired auth's plan so the login tool's own
     // headers (cookie jar) survive the MITM and a stale prior session is not
-    // injected during a re-login.
-    if (acquiringAuthKey && acquiringAuthKey in payload.deliveryPlans) {
-      const { [acquiringAuthKey]: _suppressed, ...rest } = payload.deliveryPlans;
-      return rest;
+    // injected during a re-login. Concurrent re-logins each suppress their own
+    // authKey's plan (a scalar acquiringAuthKey used to let a second login
+    // clobber the first's suppression — the P3 fix).
+    if (activeWindows.size === 0) return payload.deliveryPlans;
+    const rest: Record<string, HttpDeliveryPlan> = {};
+    for (const [key, plan] of Object.entries(payload.deliveryPlans)) {
+      if (!activeWindows.has(key)) rest[key] = plan;
     }
-    return payload.deliveryPlans;
+    return rest;
   };
 
   const refreshOnUnauthorized = async (authKey: string): Promise<boolean> => {
@@ -463,15 +493,35 @@ export function createIntegrationCredentialsSource(
     refreshOnUnauthorized,
     snapshot: () => payload,
     setSessionOutputs,
-    setActiveInputs: (bag: Record<string, string>, acquiring?: string) => {
-      activeInputBag = bag;
-      acquiringAuthKey = acquiring ?? null;
+    setActiveInputs: (
+      bag: Record<string, string>,
+      acquiring?: string,
+      authorizedUris?: readonly string[],
+    ) => {
+      // Production connect-login always passes an acquiring authKey; the anon
+      // key is a defensive fallback so a keyless window still opens/closes
+      // cleanly (only reachable via clear-all).
+      const key = acquiring ?? `\0anon${anonWindowSeq++}`;
+      activeWindows.set(key, { bag, authorizedUris: authorizedUris ?? [] });
     },
-    clearActiveInputs: () => {
-      activeInputBag = null;
-      acquiringAuthKey = null;
+    clearActiveInputs: (acquiring?: string) => {
+      if (acquiring === undefined) activeWindows.clear();
+      else activeWindows.delete(acquiring);
     },
-    activeInputs: () => activeInputBag,
+    activeInputs: (): ActiveConnectInputs | null => {
+      if (activeWindows.size === 0) return null;
+      // Merge every open window. Concurrent re-logins are rare and their key
+      // spaces don't overlap in practice; on a collision last-writer wins, and
+      // the authorizedUris union keeps substitution bound to any acquiring
+      // auth's declared envelope.
+      const inputs: Record<string, string> = {};
+      const uris = new Set<string>();
+      for (const win of activeWindows.values()) {
+        Object.assign(inputs, win.bag);
+        for (const u of win.authorizedUris) uris.add(u);
+      }
+      return { inputs, authorizedUris: [...uris] };
+    },
     setReloginHandler: (authKey, handler, reauthStatuses) => {
       reloginHandlers.set(authKey, {
         handler,

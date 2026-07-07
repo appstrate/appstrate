@@ -386,7 +386,15 @@ export function createAgentsRouter() {
       const actorTypeParam = c.req.query("actor_type");
       const actorIdParam = c.req.query("actor_id");
 
-      const scope = scopeFromQueryParams(actorTypeParam, actorIdParam) ?? undefined;
+      // Same actor-override guard the GET path applies: only admins/owners may
+      // target another actor's rows (or omit the scope to bulk-wipe every
+      // actor). A member — even one holding `persistence:delete` — is narrowed
+      // to their own actor scope, so they cannot delete another actor's
+      // memories/checkpoints by supplying an arbitrary actor_type / actor_id.
+      const callerScope = scopeFromActor(getActor(c));
+      const isAdmin = c.get("orgRole") === "admin" || c.get("orgRole") === "owner";
+      const scopeOverride = isAdmin ? scopeFromQueryParams(actorTypeParam, actorIdParam) : null;
+      const scope = isAdmin ? (scopeOverride ?? undefined) : callerScope;
 
       let memoriesDeleted = 0;
       let checkpointDeleted = false;

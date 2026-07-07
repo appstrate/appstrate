@@ -9,8 +9,9 @@ export interface UnsavedBlocker {
   reset: () => void;
 }
 
-// Capture the real pushState once at module load, before any patching.
+// Capture the real push/replaceState once at module load, before any patching.
 const originalPushState = history.pushState.bind(history);
+const originalReplaceState = history.replaceState.bind(history);
 
 /**
  * Blocks all in-app navigation (Link, navigate(), pushState, popstate, tab close)
@@ -37,27 +38,36 @@ export function useUnsavedChanges(isDirty: boolean) {
     skipRef.current = false;
   }, [isDirty]);
 
-  // ── Monkey-patch history.pushState ─────────────────────────────────
+  // ── Monkey-patch history.push/replaceState ─────────────────────────
+  // Both are patched: `navigate(path, { replace: true })` (and the router's
+  // redirect/replace flows) go through replaceState, which the old
+  // push-only patch let slip through, silently discarding unsaved edits.
   useEffect(() => {
     if (!isDirty) return;
 
-    history.pushState = (data: unknown, unused: string, url?: string | URL | null) => {
-      if (skipRef.current || !dirtyRef.current) {
-        originalPushState(data, unused, url);
-        return;
-      }
-      const target = url ? new URL(url.toString(), window.location.origin).pathname : null;
-      if (target && target !== location.pathname) {
-        pendingPath.current = target;
-        setBlocked(true);
-        return; // navigation blocked
-      }
-      // Same pathname (hash/search change only) — let through.
-      originalPushState(data, unused, url);
-    };
+    const patch =
+      (original: typeof history.pushState) =>
+      (data: unknown, unused: string, url?: string | URL | null) => {
+        if (skipRef.current || !dirtyRef.current) {
+          original(data, unused, url);
+          return;
+        }
+        const target = url ? new URL(url.toString(), window.location.origin).pathname : null;
+        if (target && target !== location.pathname) {
+          pendingPath.current = target;
+          setBlocked(true);
+          return; // navigation blocked
+        }
+        // Same pathname (hash/search change only) — let through.
+        original(data, unused, url);
+      };
+
+    history.pushState = patch(originalPushState);
+    history.replaceState = patch(originalReplaceState);
 
     return () => {
       history.pushState = originalPushState;
+      history.replaceState = originalReplaceState;
     };
   }, [isDirty, location.pathname]);
 
@@ -82,6 +92,10 @@ export function useUnsavedChanges(isDirty: boolean) {
     if (!isDirty) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
+      // Legacy browsers (and some Chromium versions) only raise the native
+      // "leave site?" prompt when `returnValue` is set, so preventDefault
+      // alone is not enough to guarantee the confirmation dialog.
+      e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);

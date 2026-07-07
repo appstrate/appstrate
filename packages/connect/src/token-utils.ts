@@ -99,6 +99,29 @@ export interface TokenErrorClassification {
 }
 
 /**
+ * Redact a provider-supplied OAuth2 `error_description` before it can flow
+ * into an `Error.message` a logger or UI might surface.
+ *
+ * RFC 6749 §5.2 `error_description` is free text, but several IdPs echo the
+ * rejected authorization code / refresh token back inside it — and both the
+ * initial-exchange and refresh paths concatenate this field into the thrown
+ * error's `message`. This strips long unbroken credential-like runs (≥20 chars
+ * of the token / JWT / base64url / hex alphabet) to `[redacted]` and caps the
+ * overall length. The full untouched body stays available on the typed `body`
+ * field of the thrown error for authorized diagnostics — only the
+ * human-readable summary carried in the message is sanitized here.
+ */
+const CREDENTIAL_LIKE_RUN = /[A-Za-z0-9._~+/=-]{20,}/g;
+const MAX_ERROR_DESCRIPTION_LEN = 200;
+
+export function redactErrorDescription(description: string): string {
+  const stripped = description.replace(CREDENTIAL_LIKE_RUN, "[redacted]");
+  return stripped.length > MAX_ERROR_DESCRIPTION_LEN
+    ? `${stripped.slice(0, MAX_ERROR_DESCRIPTION_LEN)}…`
+    : stripped;
+}
+
+/**
  * Classify an HTTP error response from an OAuth2 token endpoint.
  *
  * @param status - HTTP status code of the response
@@ -114,8 +137,13 @@ export function parseTokenErrorResponse(status: number, body: string): TokenErro
       return { kind: "transient" };
     }
     const error = typeof parsed.error === "string" ? parsed.error : undefined;
+    // Redact at the source so both consumers (token-exchange.ts,
+    // token-refresh.ts) that fold this into `Error.message` get the sanitized
+    // value; the raw body remains on the error's typed `body` field.
     const errorDescription =
-      typeof parsed.error_description === "string" ? parsed.error_description : undefined;
+      typeof parsed.error_description === "string"
+        ? redactErrorDescription(parsed.error_description)
+        : undefined;
     if (error === "invalid_grant") {
       return { kind: "revoked", error, errorDescription };
     }

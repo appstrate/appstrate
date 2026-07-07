@@ -54,6 +54,7 @@ export interface OAuthTokenCacheDeps {
 export class OAuthTokenCache {
   private readonly cache = new Map<string, CachedToken>();
   private readonly inflight = new Map<string, Promise<CachedToken>>();
+  private readonly inflightRefresh = new Map<string, Promise<CachedToken>>();
   private readonly fetchFn: typeof fetch;
 
   constructor(private readonly deps: OAuthTokenCacheDeps) {
@@ -95,9 +96,12 @@ export class OAuthTokenCache {
    * replace the cached entry. Used by the 401-retry path.
    */
   async forceRefresh(credentialId: string): Promise<CachedToken> {
-    // Coalesce with any in-flight read so that a refresh during a fetch
-    // doesn't double-call the platform.
-    const existing = this.inflight.get(credentialId);
+    // A refresh is triggered by an upstream 401 — the token an in-flight READ
+    // is resolving is exactly the (rejected) token that caused the 401, so we
+    // must NOT join `inflight`: doing so would replay the dead token instead of
+    // fetching a new one. Coalesce only with another in-flight *refresh* so a
+    // burst of 401s still yields a single platform round-trip.
+    const existing = this.inflightRefresh.get(credentialId);
     if (existing) return existing;
 
     const promise = this.callRefresh(credentialId)
@@ -107,9 +111,9 @@ export class OAuthTokenCache {
         return entry;
       })
       .finally(() => {
-        this.inflight.delete(credentialId);
+        this.inflightRefresh.delete(credentialId);
       });
-    this.inflight.set(credentialId, promise);
+    this.inflightRefresh.set(credentialId, promise);
     return promise;
   }
 

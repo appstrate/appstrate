@@ -73,14 +73,33 @@ export function EndUsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<EndUserInfo | null>(null);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
+  // Pages loaded before the current cursor. "Load more" appends the current
+  // page here and advances the cursor, so the list accumulates across pages
+  // instead of the newest page replacing the previous one.
+  const [loadedPages, setLoadedPages] = useState<EndUserInfo[]>([]);
 
   const { data, isLoading, error } = useEndUsers({
     limit: 25,
     startingAfter: cursor,
   });
 
-  const endUsers = useMemo(() => data?.data ?? [], [data?.data]);
+  const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
   const hasMore = data?.hasMore ?? false;
+
+  // Merge accumulated pages with the current one, deduping by id (the current
+  // page briefly overlaps the accumulator between "Load more" and the next
+  // fetch settling).
+  const endUsers = useMemo(() => {
+    const seen = new Set<string>();
+    const out: EndUserInfo[] = [];
+    for (const u of [...loadedPages, ...currentPage]) {
+      if (!seen.has(u.id)) {
+        seen.add(u.id);
+        out.push(u);
+      }
+    }
+    return out;
+  }, [loadedPages, currentPage]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return endUsers;
@@ -203,8 +222,11 @@ export function EndUsersPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  const last = endUsers[endUsers.length - 1];
-                  if (last) setCursor(last.id);
+                  const last = currentPage[currentPage.length - 1];
+                  if (last) {
+                    setLoadedPages((prev) => [...prev, ...currentPage]);
+                    setCursor(last.id);
+                  }
                 }}
                 className="mt-2"
               >

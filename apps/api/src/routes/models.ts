@@ -519,6 +519,9 @@ export function createModelsRouter() {
       }
       return c.json(result);
     } catch (err) {
+      // A deliberate client error (e.g. notFound above) must surface as itself,
+      // not be masked as a 500 by the catch-all.
+      if (err instanceof ApiError) throw err;
       logger.error("Model test failed", {
         modelId,
         error: getErrorMessage(err),

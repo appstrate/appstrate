@@ -65,6 +65,16 @@ const DEFAULT_RECORD_POLL_EVERY_N_TICKS = 4;
 const DEDUP_WINDOW_SIZE = 1024;
 /** Retry attempts for transient 5xx on the trigger POST + record poll. */
 const TRANSIENT_RETRY_DELAYS_MS = [500, 1_500];
+/**
+ * Bail out of the tail after this many CONSECUTIVE record-poll failures.
+ * `fetchRunRecord` throws on any non-2xx (incl. 5xx) or network error; the
+ * poll loop swallows those and retries so a blip doesn't abort a live run —
+ * but a PERSISTENT failure (server down, run row deleted, auth revoked) would
+ * otherwise spin the loop forever because it can never observe a terminal
+ * status. The counter resets on every successful fetch. At the default
+ * cadence (~6s between record polls) 20 failures ≈ 2min before giving up.
+ */
+const MAX_CONSECUTIVE_RECORD_POLL_FAILURES = 20;
 
 // `RunStatus` and `TerminalRunStatus` are imported from `@appstrate/shared-types`
 // (themselves derived from the Drizzle pgEnum in `packages/db`) — single source
@@ -313,6 +323,7 @@ export async function runRemote(
   const allLogs: RemoteRunLog[] = [];
   let lastLogId = 0;
   let tick = 0;
+  let consecutiveRecordFailures = 0;
 
   while (true) {
     // Logs first — high-frequency, bounded by the cursor.
@@ -336,8 +347,23 @@ export async function runRemote(
     if (tick % recordPollEveryNTicks === 0) {
       try {
         const record = await fetchRunRecord(opts, runId, { fetchImpl, requestTimeoutMs });
+        consecutiveRecordFailures = 0;
         if (TERMINAL_RUN_STATUSES.has(record.status)) break;
       } catch (err) {
+        consecutiveRecordFailures++;
+        // Bound the retries so a persistent failure can't hang the CLI
+        // forever — a terminal status would never be observed otherwise.
+        if (consecutiveRecordFailures >= MAX_CONSECUTIVE_RECORD_POLL_FAILURES) {
+          const status = err instanceof RemoteRunError ? err.status : undefined;
+          throw new RemoteRunError(
+            `Gave up tailing run ${runId}: the run record could not be fetched after ` +
+              `${consecutiveRecordFailures} consecutive attempts (last error: ${getErrorMessage(err)}).`,
+            {
+              ...(status !== undefined ? { status } : {}),
+              hint: `The run may still be executing on ${opts.instance}; check it in the dashboard or retry \`appstrate run\`.`,
+            },
+          );
+        }
         if (!opts.json) {
           const msg = getErrorMessage(err);
           writeStderr(`warn: run record refresh failed (will retry): ${msg}\n`);
@@ -455,10 +481,16 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
   if (opts.proxyId != null) body.proxyId = opts.proxyId;
 
   const headers = platformHeaders(opts, { "Content-Type": "application/json" });
-  if (opts.idempotencyKey) headers.set("Idempotency-Key", opts.idempotencyKey);
+  // ALWAYS attach an Idempotency-Key before the retry loop. Prefer the
+  // caller's stable per-invocation key; when absent, mint a UUID that is
+  // stable across THIS trigger's retries. Without a key a transient-5xx retry
+  // could spawn a duplicate run if the first attempt actually landed
+  // server-side; with it the server replays the cached response instead.
+  const idempotencyKey = opts.idempotencyKey ?? `cli_${crypto.randomUUID()}`;
+  headers.set("Idempotency-Key", idempotencyKey);
 
-  // Retry on transient 5xx (502/503/504). The Idempotency-Key (set above
-  // when provided) makes the retry safe — a partially-completed first
+  // Retry on transient 5xx (502/503/504). The Idempotency-Key (always set
+  // above) makes the retry safe — a partially-completed first
   // attempt that landed on the server replays the cached response on the
   // next try rather than spawning a duplicate run. We don't retry 4xx
   // (auth, not-found, validation), 408 (request timeout — surface to user),

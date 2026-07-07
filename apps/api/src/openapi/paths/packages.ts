@@ -91,6 +91,12 @@ export const packagesPaths = {
           },
           content: {
             "application/json": {
+              // CASING: this import-result envelope is snake_case throughout
+              // (`root_package_id`, `root_version`, `imported[].version_id`),
+              // matching the runtime serializer. `version_id`/`root_package_id`
+              // therefore DIVERGE from the universal *Id camelCase carve-out used
+              // by request-body `packageId` — a documented, intentional
+              // divergence kept because spec==runtime is the hard invariant.
               schema: {
                 type: "object",
                 required: [
@@ -1061,6 +1067,7 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
           content: {
@@ -1629,6 +1636,7 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
           content: {

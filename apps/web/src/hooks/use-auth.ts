@@ -5,6 +5,8 @@ import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore } from "../stores/auth-store";
+import { orgStore } from "../stores/org-store";
+import { appStore } from "../stores/app-store";
 import i18n from "../i18n";
 import type { UserProfile } from "@appstrate/shared-types";
 
@@ -28,8 +30,18 @@ async function fetchProfile(): Promise<UserProfile | null> {
   }
 }
 
-function clearAuth() {
+/**
+ * Centralized session teardown. Resets the auth store AND the org/app scope
+ * stores (clearing their persisted localStorage ids) so a subsequent login
+ * can never carry over a stale `X-Org-Id` / `X-Application-Id` header from
+ * the previous user — the scoping-header builder reads straight off these
+ * stores, so leaving them set would leak the old scope onto the first
+ * requests after re-login.
+ */
+function clearSession() {
   authStore.setState({ user: null, profile: null, loading: false });
+  orgStore.getState().setId(null);
+  appStore.getState().setId(null);
 }
 
 function setAuthenticatedUser(
@@ -49,7 +61,7 @@ async function syncAuth() {
     const profile = await fetchProfile();
     if (!profile) {
       await authClient.signOut().catch(() => {});
-      clearAuth();
+      clearSession();
       return;
     }
     setAuthenticatedUser(result.data.user, profile);
@@ -69,10 +81,10 @@ async function syncAuth() {
     // cold session-less load — acceptable for the recovery guarantee.
     await authClient.signOut().catch(() => {
       // Best-effort: a failing signOut (network blip, already-cleared
-      // cookie) must not strand the user. `clearAuth` below still resets
-      // the SPA store so the login flow restarts cleanly.
+      // cookie) must not strand the user. `clearSession` below still resets
+      // the SPA stores so the login flow restarts cleanly.
     });
-    clearAuth();
+    clearSession();
   }
 }
 
@@ -81,7 +93,7 @@ function initAuth() {
   if (initialized) return;
   initialized = true;
   syncAuth().catch(() => {
-    clearAuth();
+    clearSession();
   });
 }
 
@@ -197,7 +209,7 @@ export function useAuth() {
     if (oidcConfig) {
       // Navigate to the server-side logout endpoint FIRST — it clears the
       // BA session cookie and redirects back to /login. Do NOT call
-      // clearAuth() before this: setting user=null triggers a React
+      // clearSession() before this: setting user=null triggers a React
       // re-render that navigates to /login (via the catch-all route),
       // which starts a new OIDC login flow before the browser can follow
       // the logout redirect — effectively re-logging the user in.
@@ -205,7 +217,7 @@ export function useAuth() {
       startOidcLogout(redirectTo);
     } else {
       await authClient.signOut();
-      clearAuth();
+      clearSession();
     }
   }, []);
 

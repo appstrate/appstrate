@@ -9,7 +9,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { applyConnectInputSubstitution } from "../integration-mitm-listener.ts";
+import {
+  applyConnectInputSubstitution,
+  type ActiveConnectInputs,
+} from "../integration-mitm-listener.ts";
 import { runConnectLogin } from "../connect-login.ts";
 import {
   coerceExpiresAtToEpochMs,
@@ -112,14 +115,14 @@ interface CallToolCapture {
 function makeFakeHost(
   namespace: string,
   cannedResult: { content: Array<{ type: string; text: string }> },
-  observeActiveInputs?: () => Record<string, string> | null,
+  observeActiveInputs?: () => ActiveConnectInputs | null,
 ): {
   host: { getUpstreamClient(ns: string): unknown };
   capture: CallToolCapture;
-  activeDuringCall: { value: Record<string, string> | null };
+  activeDuringCall: { value: ActiveConnectInputs | null };
 } {
   const capture: CallToolCapture = { args: { name: "", arguments: undefined } };
-  const activeDuringCall = { value: null as Record<string, string> | null };
+  const activeDuringCall = { value: null as ActiveConnectInputs | null };
   const client = {
     callTool(args: { name: string; arguments?: Record<string, unknown> }) {
       capture.args = args;
@@ -165,8 +168,12 @@ describe("runConnectLogin", () => {
       deliveryHttp: DELIVERY_HTTP,
     });
 
-    // Window was open during the call …
-    expect(activeDuringCall.value).toEqual({ password: "s3cret" });
+    // Window was open during the call … and now carries the authorized-URI
+    // envelope so the MITM listener can bind substitution to those targets.
+    expect(activeDuringCall.value).toEqual({
+      inputs: { password: "s3cret" },
+      authorizedUris: ["https://api.example.com/**"],
+    });
     // … and is closed afterwards.
     expect(source.activeInputs()).toBeNull();
 
@@ -376,7 +383,7 @@ describe("IntegrationCredentialsSource active-input window", () => {
     const source = makeSource();
     expect(source.activeInputs()).toBeNull();
     source.setActiveInputs({ password: "p" });
-    expect(source.activeInputs()).toEqual({ password: "p" });
+    expect(source.activeInputs()).toEqual({ inputs: { password: "p" }, authorizedUris: [] });
     source.clearActiveInputs();
     expect(source.activeInputs()).toBeNull();
   });

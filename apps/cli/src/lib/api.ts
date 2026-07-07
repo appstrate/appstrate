@@ -272,7 +272,11 @@ export async function apiFetchRaw(
       Authorization: `Bearer ${bearer}`,
       "User-Agent": CLI_USER_AGENT,
     };
-    if (!headers["Content-Type"] && init.body) {
+    // Case-insensitive probe: a caller passing a lowercase `content-type`
+    // header would otherwise slip past a bare `headers["Content-Type"]`
+    // lookup and we'd add a SECOND, conflicting content-type entry.
+    const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === "content-type");
+    if (!hasContentType && init.body) {
       headers["Content-Type"] = "application/json";
     }
     if (profile.orgId) headers["X-Org-Id"] = profile.orgId;

@@ -29,7 +29,16 @@ export function useOAuthClients(level?: "org" | "application") {
     { params: { header: scope.header } },
     {
       enabled: isOrg ? scope.enabled : scope.enabled && !!applicationId,
-      select: (e) => (level ? e.data.filter((c) => c.level === level) : e.data),
+      select: (e) => {
+        if (!level) return e.data;
+        const byLevel = e.data.filter((c) => c.level === level);
+        // Application-level clients are org-wide on the wire — scope them to
+        // the currently-selected application so the tab never shows clients
+        // that belong to a sibling app in the same org.
+        return level === "application"
+          ? byLevel.filter((c) => c.referencedApplicationId === applicationId)
+          : byLevel;
+      },
     },
   );
 }

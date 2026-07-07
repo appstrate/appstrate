@@ -56,7 +56,7 @@ import {
   runCommand,
 } from "../lib/install/os.ts";
 import { generateRunnerToken } from "../lib/runner/config-files.ts";
-import { RUNNER_DEFAULT_PORT } from "../lib/runner/constants.ts";
+import { RUNNER_DEFAULT_PORT, RUNNER_TOKEN_ENV } from "../lib/runner/constants.ts";
 import {
   detectInstallMode,
   inferInstalledTier,
@@ -1322,7 +1322,10 @@ export function resolveCliInvocation(
   execPath: string = process.execPath,
   argv: string[] = process.argv,
 ): string[] {
-  const base = (execPath.split("/").pop() ?? execPath).toLowerCase();
+  // Split on BOTH separators: a Windows `execPath` (`C:\…\bun.exe`) uses
+  // backslashes, so a `/`-only split would keep the whole path as the
+  // basename and the runtime branches below would never match.
+  const base = (execPath.split(/[/\\]/).pop() ?? execPath).toLowerCase();
   if (base === "bun" || base === "node" || base === "bun.exe" || base === "node.exe") {
     const script = argv[1];
     return script ? [execPath, script] : [execPath];
@@ -1423,7 +1426,29 @@ export async function runSameHostRunnerInstall(
     "Installing the Firecracker runner daemon on this host — sudo is required, " +
       "you may be prompted for your password.",
   );
-  const res = await run("sudo", args);
+  // Hand the pairing token to the elevated child through the environment,
+  // NOT argv: a `--token <secret>` on the sudo command line is visible to any
+  // user via `ps aux`. We set APPSTRATE_RUNNER_TOKEN on our own process env
+  // (runCommand inherits it) and tell sudo to preserve it across the
+  // privilege boundary; `resolveInstallConfig` reads it as a --token fallback.
+  const spawnArgs = [
+    `--preserve-env=${RUNNER_TOKEN_ENV}`,
+    ...cliInvocation,
+    "runner",
+    "install",
+    "--platform-url",
+    rb.platformUrl,
+    "--yes",
+  ];
+  const prevToken = process.env[RUNNER_TOKEN_ENV];
+  process.env[RUNNER_TOKEN_ENV] = rb.token;
+  let res: { ok: boolean; exitCode: number };
+  try {
+    res = await run("sudo", spawnArgs);
+  } finally {
+    if (prevToken === undefined) delete process.env[RUNNER_TOKEN_ENV];
+    else process.env[RUNNER_TOKEN_ENV] = prevToken;
+  }
   if (!res.ok) {
     logWarn(
       `The runner daemon install did not complete (exit ${res.exitCode}). The platform is ` +
@@ -1594,9 +1619,11 @@ async function installDockerTier(
   },
 ): Promise<void> {
   const runBackend = opts.runBackend;
-  // Firecracker `.env` keys (RUN_ADAPTER/MODULES/FIRECRACKER_RUNNER_*). On
-  // upgrade these flow through `mergeEnv` like every other secret (existing
-  // wins), so re-running install never rotates the runner token.
+  // Firecracker `.env` keys (RUN_ADAPTER/MODULES/FIRECRACKER_RUNNER_*).
+  // FIRECRACKER_RUNNER_URL/_TOKEN are re-applied AFTER `mergeEnv` on upgrade
+  // (see below) — the same-host `runner install` step re-pairs the daemon
+  // with `runBackend.token`, so letting the OLD platform token win the merge
+  // would leave platform and daemon paired on different secrets.
   const runBackendEnv: RunBackendEnv =
     runBackend.adapter === "firecracker"
       ? { adapter: "firecracker", runnerUrl: runBackend.runnerUrl, runnerToken: runBackend.token }
@@ -1696,7 +1723,20 @@ async function installDockerTier(
         opts.bootstrap,
         runBackendEnv,
       );
-      const envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
+      let envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
+      // Firecracker pairing token/URL must track the CURRENT install, not the
+      // preserved one: `runSameHostRunnerInstall` below (and the remote
+      // one-liner) re-pair the daemon with `runBackend.token`. Let the fresh
+      // runner keys win so the platform side agrees with the daemon it just
+      // paired — otherwise `mergeEnv` keeps the OLD token and every request to
+      // the daemon 401s ("token does not match").
+      if (mode === "upgrade" && runBackend.adapter === "firecracker") {
+        envVars = {
+          ...envVars,
+          FIRECRACKER_RUNNER_URL: runBackend.runnerUrl,
+          FIRECRACKER_RUNNER_TOKEN: runBackend.token,
+        };
+      }
       await writeComposeEnv(dir, renderEnvFile(envVars));
       writeSpinner.stop(
         mode === "upgrade"

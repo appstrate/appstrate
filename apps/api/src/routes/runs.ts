@@ -35,7 +35,7 @@ import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
-import { triggerInlineRun, type InlineRunBody } from "../services/inline-run.ts";
+import { triggerInlineRun } from "../services/inline-run.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { getEnv } from "@appstrate/env";
@@ -44,6 +44,24 @@ import { currentTraceparent } from "../observability/index.ts";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import { readJsonBody } from "../lib/request-body.ts";
+
+/**
+ * Wire-shape guard for the inline-run body (`POST /runs/inline` +
+ * `/inline/validate`). Mirrors the `InlineRunBody` TS type: every field
+ * is optional and the semantic validation (manifest/config/input/AJV) happens
+ * downstream in the preflight — this schema only rejects a malformed body or a
+ * grossly wrong-typed field (e.g. `input: "foo"`) with a 400 instead of letting
+ * it cast through and surface later as a 500.
+ */
+const inlineRunBodySchema = z.object({
+  manifest: z.unknown().optional(),
+  prompt: z.unknown().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
+  modelId: z.string().nullable().optional(),
+  proxyId: z.string().nullable().optional(),
+});
 
 /**
  * Resolve the traceparent to seed the run-execution trace tree with, honoring
@@ -471,7 +489,7 @@ export function createRunsRouter() {
       const applicationId = c.get("applicationId");
       const actor = getActor(c);
 
-      const body = await c.req.json<InlineRunBody>();
+      const body = await readJsonBody(c, inlineRunBodySchema);
 
       const { runId, packageId } = await triggerInlineRun({
         orgId,
@@ -528,7 +546,7 @@ export function createRunsRouter() {
       const orgId = c.get("orgId");
       const applicationId = c.get("applicationId");
       const actor = getActor(c);
-      const body = await c.req.json<InlineRunBody>();
+      const body = await readJsonBody(c, inlineRunBodySchema);
 
       await runInlinePreflight({ orgId, applicationId, actor, body, mode: "accumulate" });
 

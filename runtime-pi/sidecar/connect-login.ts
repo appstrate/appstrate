@@ -84,7 +84,10 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
   // auth's (possibly stale) delivery plan for the duration, so the login tool's
   // own headers — e.g. a cookie jar carried across the login redirect chain —
   // reach upstream untouched and a re-login isn't clobbered by the dead session.
-  opts.source.setActiveInputs(opts.inputs, opts.authKey);
+  // The `authorizedUris` envelope binds substitution to the login's declared
+  // targets — the transient secret is only ever substituted for a request whose
+  // URL matches one of them, never leaked to an off-allowlist host (P2-1).
+  opts.source.setActiveInputs(opts.inputs, opts.authKey, opts.authorizedUris);
   try {
     const client = opts.host.getUpstreamClient(opts.namespace);
     if (!client) {
@@ -167,9 +170,11 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
       ...(parsed.scopesGranted ? { scopesGranted: parsed.scopesGranted } : {}),
     };
   } finally {
-    // Close the substitution window unconditionally — the secret-injection
-    // window must not stay open past this primitive even on error.
-    opts.source.clearActiveInputs();
+    // Close ONLY this login's substitution window unconditionally — the
+    // secret-injection window must not stay open past this primitive even on
+    // error. Scoping to `authKey` leaves a concurrent re-login's window intact
+    // (a clear-all would reopen the other login to a spurious 401 — P3).
+    opts.source.clearActiveInputs(opts.authKey);
   }
 }
 
@@ -180,7 +185,20 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
  */
 function parseLoginToolResult(result: {
   content?: Array<{ type: string; text?: string }>;
+  isError?: boolean;
 }): LoginToolResult {
+  // Honor the tool-level error flag. An `isError: true` CallToolResult is a
+  // failure signal, NOT a session payload — parsing its content as login
+  // outputs would either throw an opaque JSON error or, worse, mis-capture an
+  // error body as a "session". Surface the tool's own text as the failure.
+  if (result.isError) {
+    const errFirst = result.content?.[0];
+    const detail =
+      errFirst && errFirst.type === "text" && typeof errFirst.text === "string"
+        ? errFirst.text
+        : "";
+    throw new Error(`connect-login: login tool reported an error${detail ? `: ${detail}` : ""}`);
+  }
   const first = result.content?.[0];
   if (!first || first.type !== "text" || typeof first.text !== "string") {
     throw new Error("connect-login: login tool result missing a text content block");

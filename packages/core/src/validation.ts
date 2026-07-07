@@ -422,8 +422,11 @@ export function extractSkillMeta(content: string): {
   }
 
   const fm = fmMatch[1]!;
-  const nameMatch = fm.match(/name:[ \t]*(.+)/);
-  const descMatch = fm.match(/description:[ \t]*(.+)/);
+  // Anchor to the start of a line (`^` + `m` flag) so a longer key that
+  // ends in the target token (e.g. `displayname:` / `x-description:`) does
+  // not shadow the real top-level `name:` / `description:` field.
+  const nameMatch = fm.match(/^name:[ \t]*(.+)/m);
+  const descMatch = fm.match(/^description:[ \t]*(.+)/m);
 
   const name = nameMatch ? stripQuotes(nameMatch[1]!) : "";
   const description = descMatch ? stripQuotes(descMatch[1]!) : "";

@@ -11,6 +11,13 @@ import { BundleError } from "./errors.ts";
 import type { BundleLimits } from "./limits.ts";
 
 const INVALID_SEGMENT = /[\0]/;
+/**
+ * Characters that must never appear in an entry name because they are
+ * delimiters in the signature RECORD (one `path,sha256,bytes` line per
+ * entry). A comma or CR/LF in a filename could forge or split a RECORD
+ * line (line-injection), desynchronising the integrity manifest.
+ */
+const RECORD_DELIMITER = /[\r\n,]/;
 
 export interface SanitizeOptions {
   limits: BundleLimits;
@@ -42,6 +49,12 @@ export function sanitizeEntries(
     }
     if (INVALID_SEGMENT.test(key)) {
       throw new BundleError("ARCHIVE_INVALID", `${ctx}: null byte in path: ${key}`);
+    }
+    if (RECORD_DELIMITER.test(key)) {
+      throw new BundleError(
+        "ARCHIVE_INVALID",
+        `${ctx}: comma or newline in path not allowed: ${key}`,
+      );
     }
     const segments = key.split("/");
     if (segments.some((s) => s === "" || s === "." || s === "..")) {

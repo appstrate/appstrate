@@ -241,19 +241,25 @@ export class SubprocessTransport implements Transport {
     stream: ReadableStream<Uint8Array>,
     onChunk: (chunk: string) => void,
   ): Promise<void> {
-    const decoder = new TextDecoder("utf-8", { fatal: false });
+    // Strict UTF-8 (`fatal: true`): an invalid byte sequence throws instead of
+    // being silently substituted with U+FFFD. A non-fatal decoder would let a
+    // malformed/hostile server stream feed replacement characters straight into
+    // the JSON-RPC line parser; strict decoding surfaces it as a transport
+    // error and tears the subprocess down (the "strict UTF-8" guarantee in the
+    // header comment).
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     const reader = stream.getReader();
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         if (value && value.length > 0) {
-          onChunk(decoder.decode(value, { stream: true }));
+          if (!this.decodeInto(decoder, value, onChunk)) return;
         }
       }
-      // Final flush in case the stream ended mid-codepoint.
-      const tail = decoder.decode();
-      if (tail.length > 0) onChunk(tail);
+      // Final flush — a stream that ended mid-codepoint is truncated UTF-8, so
+      // the fatal decoder throws here too (caught and surfaced by decodeInto).
+      this.decodeInto(decoder, undefined, onChunk);
     } catch {
       // Reader was cancelled or the subprocess crashed mid-stream;
       // the onExit handler is the source of truth for closure.
@@ -266,23 +272,67 @@ export class SubprocessTransport implements Transport {
     }
   }
 
+  /**
+   * Decode one chunk (or flush, when `value` is undefined) with the strict
+   * decoder. On an invalid-UTF-8 throw, surface a transport error and close —
+   * returning `false` so the read loop stops. Returns `true` on success.
+   */
+  private decodeInto(
+    decoder: TextDecoder,
+    value: Uint8Array | undefined,
+    onChunk: (chunk: string) => void,
+  ): boolean {
+    let text: string;
+    try {
+      text = value ? decoder.decode(value, { stream: true }) : decoder.decode();
+    } catch (err) {
+      this.onerror?.(
+        new SubprocessTransportError(
+          `invalid UTF-8 in subprocess output — ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+      void this.close();
+      return false;
+    }
+    if (text.length > 0) onChunk(text);
+    return true;
+  }
+
   private handleStdout(chunk: string): void {
     this.stdoutBuffer += chunk;
+    // The cap is a UTF-8 BYTE budget; `String.length` counts UTF-16 code
+    // units, so measuring `.length` lets a line of multibyte characters carry
+    // up to ~4× the intended bytes past the guard. Measure bytes on both the
+    // extracted complete line and the un-terminated residual.
+    const lineCap = this.options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES;
     while (true) {
       const newlineIdx = this.stdoutBuffer.indexOf("\n");
       if (newlineIdx === -1) break;
       const line = this.stdoutBuffer.slice(0, newlineIdx);
       this.stdoutBuffer = this.stdoutBuffer.slice(newlineIdx + 1);
+      // A fully-newline-terminated giant line was previously dispatched without
+      // any byte check (only the trailing buffer was guarded) — a real bypass.
+      // Drop and report any line over the byte cap before it reaches JSON.parse.
+      if (this.byteLength(line) > lineCap) {
+        this.onerror?.(
+          new SubprocessTransportError(`stdout line exceeds ${lineCap} bytes — dropped`),
+        );
+        continue;
+      }
       this.dispatchLine(line);
     }
     // Per-line size guard — refuse half-line buffers above the cap.
-    const lineCap = this.options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES;
-    if (this.stdoutBuffer.length > lineCap) {
+    if (this.byteLength(this.stdoutBuffer) > lineCap) {
       this.stdoutBuffer = "";
       this.onerror?.(
         new SubprocessTransportError(`stdout line exceeds ${lineCap} bytes — buffer reset`),
       );
     }
+  }
+
+  /** UTF-8 byte length of a string (line/buffer caps are byte budgets). */
+  private byteLength(value: string): number {
+    return new TextEncoder().encode(value).byteLength;
   }
 
   private dispatchLine(line: string): void {

@@ -149,4 +149,22 @@ describe("matchesAuthorizedUriSpec", () => {
     expect(matchesAuthorizedUriSpec(pat, "https://eu.acme.com/v1/users/42")).toBe(true);
     expect(matchesAuthorizedUriSpec(pat, "https://evil.com/x.acme.com/y")).toBe(false);
   });
+
+  it("host `**` does not cross the authority boundary into the path", () => {
+    const pat = "https://**.example.com/**";
+    // Legitimate host matches.
+    expect(matchesAuthorizedUriSpec(pat, "https://api.example.com/x")).toBe(true);
+    expect(matchesAuthorizedUriSpec(pat, "https://a.b.example.com/x/y")).toBe(true);
+    // Authority-boundary bypass: the real host is evil.com; the pattern
+    // must NOT let a path segment masquerade as the host.
+    expect(matchesAuthorizedUriSpec(pat, "https://evil.com/x/.example.com/y")).toBe(false);
+    expect(matchesAuthorizedUriSpec(pat, "https://evil.com/.example.com/y")).toBe(false);
+  });
+
+  it("host `**` alone matches any host but never the path portion", () => {
+    const pat = "https://**/health";
+    expect(matchesAuthorizedUriSpec(pat, "https://api.acme.com/health")).toBe(true);
+    // `**` in the host cannot swallow the `/` that ends the authority.
+    expect(matchesAuthorizedUriSpec(pat, "https://api.acme.com/v1/health")).toBe(false);
+  });
 });

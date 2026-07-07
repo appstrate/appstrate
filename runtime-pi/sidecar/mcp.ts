@@ -84,10 +84,19 @@ import { logger } from "./logger.ts";
  */
 function decodeStrictBase64(s: string): Uint8Array | "invalid" {
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s)) return "invalid";
+  // Canonical RFC 4648 §4 encoding is padded to a multiple of 4 chars. A
+  // length ≡ 1 (mod 4) is impossible, and any other non-multiple-of-4 length
+  // is a truncated / non-canonical (unpadded) encoding — reject it rather than
+  // let `Buffer.from` silently accept it and decode a different byte count.
+  if (s.length % 4 !== 0) return "invalid";
   try {
     const buf = Buffer.from(s, "base64");
     const u8 = new Uint8Array(buf.byteLength);
     u8.set(buf);
+    // `Buffer.from` also tolerates non-canonical trailing bits (e.g. "AB==",
+    // whose discarded bits are non-zero). Require the decode to round-trip to
+    // the exact input so only canonical base64 is accepted.
+    if (buf.toString("base64") !== s) return "invalid";
     return u8;
   } catch {
     return "invalid";
@@ -1043,7 +1052,11 @@ function buildSidecarTools(options: MountMcpOptions): {
         };
       }
 
-      const method = args.method ?? "GET";
+      // Normalise the method to upper-case. The descriptor enum is upper-case
+      // and every downstream check (`method === "GET"`, upstream preflight)
+      // compares against upper-case literals — a caller-supplied `"get"` /
+      // `"post"` must not slip past the GET/HEAD body guard on a case mismatch.
+      const method = (typeof args.method === "string" ? args.method : "GET").toUpperCase();
 
       // Refuse `body` on GET/HEAD explicitly rather than silently
       // dropping it. A model that supplies a body genuinely expects it

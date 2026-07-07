@@ -29,6 +29,7 @@ import {
   RUNNER_UNIT_PATH,
   RUNNER_DATA_DIR,
   RUNNER_DEFAULT_PORT,
+  RUNNER_TOKEN_ENV,
   FIRECRACKER_VERSION,
   resolveRunnerArch,
   runnerDataPaths,
@@ -202,8 +203,11 @@ export async function resolveInstallConfig(
   }
   platformUrl = parsedPlatformUrl.url;
 
-  // Token: flag > existing env file > freshly generated (printed once).
-  let token = opts.token?.trim();
+  // Token: flag > APPSTRATE_RUNNER_TOKEN env > existing env file > freshly
+  // generated (printed once). The env-var channel lets the same-host
+  // firecracker installer hand us the pairing token off-argv (so it never
+  // shows up in `ps aux`); see RUNNER_TOKEN_ENV.
+  let token = opts.token?.trim() || process.env[RUNNER_TOKEN_ENV]?.trim();
   let tokenSource: TokenSource = "flag";
   if (!token) {
     const existing = await d.fs.readFile(RUNNER_ENV_PATH);

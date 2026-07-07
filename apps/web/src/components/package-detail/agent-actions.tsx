@@ -153,15 +153,16 @@ export function AgentActions({
         isPending={runAgent.isPending}
         onSubmit={({ input, version, overrides, dependencyOverrides }) => {
           // Map the modal payload onto the run API body. `version` rides the
-          // `?version=` query (defaults to `draft`, like plain "Lancer"); the
-          // proxy "none" sentinel (`__none__`) becomes the server's `"none"`.
+          // `?version=` query (defaults to `draft`, like plain "Lancer"). The
+          // overrides panel already emits the server's wire values (a proxy
+          // pick of "none" means no proxy), so the value passes through as-is.
           const proxy = overrides.proxy_id_override;
           runAgent.mutate(
             {
               ...(Object.keys(input).length > 0 ? { input } : {}),
               version,
               ...(overrides.model_id_override ? { modelId: overrides.model_id_override } : {}),
-              ...(proxy ? { proxyId: proxy === "__none__" ? "none" : proxy } : {}),
+              ...(proxy ? { proxyId: proxy } : {}),
               ...(overrides.config_override ? { config: overrides.config_override } : {}),
               ...(overrides.connection_overrides
                 ? { connectionOverrides: overrides.connection_overrides }

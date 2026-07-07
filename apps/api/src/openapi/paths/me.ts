@@ -463,6 +463,12 @@ export const mePaths = {
                       properties: {
                         package_id: { type: "string" },
                         status: { type: "string" },
+                        // CASING: `run_number` is snake_case here, diverging from
+                        // the universal `runNumber` carve-out used by the Run
+                        // schema. This is a distinct, prompt-oriented projection
+                        // (`services/state/runs.ts:listRecentForActor`) that emits
+                        // snake_case keys; spec matches that runtime output
+                        // (spec==runtime invariant). Documented divergence.
                         run_number: { type: ["integer", "null"] },
                         started_at: { type: ["string", "null"], format: "date-time" },
                         error: {

@@ -73,12 +73,32 @@ import {
   HOP_BY_HOP_HEADERS,
   substituteVars,
   findUnresolvedPlaceholders,
+  matchesAuthorizedUriSpec,
 } from "@appstrate/connect/proxy-primitives";
 import type { CertMinter } from "./integration-cert-minter.ts";
 
 // ─────────────────────────────────────────────
 // Public types
 // ─────────────────────────────────────────────
+
+/**
+ * The active connect-login transient-input window, as surfaced by
+ * {@link MitmCredentialSource.activeInputs}. Carries BOTH the `{{key}}`
+ * substitution bag AND the acquiring auth's `authorizedUris` envelope so the
+ * listener can bind the substitution to authorized targets only — the
+ * transient login secret must NEVER be substituted into a request bound for an
+ * off-allowlist host (exfiltration to an arbitrary origin the login tool
+ * chose).
+ */
+export interface ActiveConnectInputs {
+  /** Transient `{{key}}` → value substitutions (the raw login secret). */
+  inputs: Record<string, string>;
+  /**
+   * Authorized-URI specs the acquiring auth declared. Substitution fires ONLY
+   * for a target matching one of these (via {@link matchesAuthorizedUriSpec}).
+   */
+  authorizedUris: readonly string[];
+}
 
 export interface MitmCredentialSource {
   current(): IntegrationCredentialsPayload;
@@ -114,8 +134,12 @@ export interface MitmCredentialSource {
    * (so the integration's login tool delivers the user's transient login
    * secret proxy-side, never as tool input). Optional — sources that don't
    * implement it behave exactly as before.
+   *
+   * The returned window carries the acquiring auth's `authorizedUris` so the
+   * listener binds substitution to authorized targets only (see
+   * {@link ActiveConnectInputs}).
    */
-  activeInputs?(): Record<string, string> | null;
+  activeInputs?(): ActiveConnectInputs | null;
 }
 
 export interface CreateMitmListenerOptions {
@@ -652,6 +676,19 @@ export function applyConnectInputSubstitution(
   return { url, bodyText, headers };
 }
 
+/**
+ * True when `url` matches at least one of the acquiring auth's authorized-URI
+ * specs — the guard that binds transient-secret substitution to authorized
+ * targets. Empty allowlist matches nothing (fail-closed): a connect-login must
+ * declare the login endpoint in its auth's URL envelope.
+ */
+function targetWithinAuthorizedUris(url: string, authorizedUris: readonly string[]): boolean {
+  for (const spec of authorizedUris) {
+    if (matchesAuthorizedUriSpec(spec, url)) return true;
+  }
+  return false;
+}
+
 // ─────────────────────────────────────────────
 // Inner-request handler — Bun.serve fetch callback
 // ─────────────────────────────────────────────
@@ -703,8 +740,16 @@ async function handleInnerRequest(
   // request that will actually be forwarded. Fail-closed: an unresolved
   // placeholder refuses the request rather than forwarding a
   // half-substituted literal upstream.
-  const inputs = credentials.activeInputs?.() ?? null;
-  if (inputs) {
+  //
+  // SECURITY (bind to authorizedUris): the transient secret is substituted
+  // ONLY when the request targets one of the acquiring auth's authorized URIs.
+  // Without this bound, an untrusted login tool could aim a `{{secret}}`
+  // request at an arbitrary host and exfiltrate the secret off-target. A
+  // request to an off-allowlist host is forwarded WITHOUT substitution (any
+  // `{{...}}` literal it carries stays a literal — a placeholder name, never
+  // the secret value).
+  const active = credentials.activeInputs?.() ?? null;
+  if (active && targetWithinAuthorizedUris(targetUrl, active.authorizedUris)) {
     const inboundHeaders: Record<string, string> = {};
     req.headers.forEach((v, k) => {
       inboundHeaders[k] = v;
@@ -712,7 +757,7 @@ async function handleInnerRequest(
     const bodyText = body.byteLength > 0 ? body.toString("utf-8") : null;
     const result = applyConnectInputSubstitution(
       { url: targetUrl, bodyText, headers: inboundHeaders },
-      inputs,
+      active.inputs,
     );
     if ("failed" in result) {
       emit({ kind: "request-refused", url: targetUrl, reason: "unresolved login placeholder" });

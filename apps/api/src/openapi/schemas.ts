@@ -110,6 +110,20 @@ export const schemas = {
     // The installedPackageSelect projection emits every field unconditionally
     // (config is the raw JSONB column; package_type/package_source come from
     // the join). `object` is spec-only (not on the InstalledPackage type).
+    //
+    // CASING: this object deliberately mixes cases and the spec matches the
+    // runtime serializer (`services/application-packages.ts:installedPackageSelect`)
+    // field-for-field — spec==runtime is the hard invariant, so do NOT "normalize".
+    //   - `packageId`/`modelId`/`proxyId`/`updatedAt` are camelCase per the
+    //     universal *Id / timestamp carve-out (docs/CASING_CONVENTIONS.md).
+    //   - `version_id`/`installed_at` are snake_case: the projection aliases them
+    //     that way, so they DIVERGE from the *Id / timestamp carve-out. Documented
+    //     module carve-out — the write path (`updatePackageSchema`,
+    //     `PUT .../packages/{scope}/{name}` body) uses the same `version_id` key,
+    //     so read and write stay symmetric. A client that sends `versionId`
+    //     (camel, per the carve-out expectation) has its version pin silently
+    //     dropped by the Zod body schema — the divergence is load-bearing and
+    //     intentional here, not an accident.
     required: [
       "packageId",
       "config",
@@ -609,7 +623,10 @@ export const schemas = {
           cache_creation_input_tokens: { type: "integer", minimum: 0 },
           cache_read_input_tokens: { type: "integer", minimum: 0 },
         },
-        additionalProperties: false,
+        // Stored verbatim from the runner's JSONB — a runner may emit provider-
+        // specific extra keys beyond the four documented above. additionalProperties
+        // stays `true` so those pass-through keys don't fail spec==runtime validation.
+        additionalProperties: true,
       },
       started_at: { type: ["string", "null"], format: "date-time" },
       completed_at: { type: ["string", "null"], format: "date-time" },
@@ -647,7 +664,8 @@ export const schemas = {
       },
       metadata: {
         type: ["object", "null"],
-        description: "Additional metadata (e.g. creditsUsed in cloud mode)",
+        description:
+          "Additional module-supplied metadata (e.g. usage-metering fields written by an optional module). Free-form; core does not define billing-specific keys.",
         additionalProperties: true,
       },
       config: {
@@ -723,6 +741,12 @@ export const schemas = {
         description:
           "Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display.",
       },
+      // CASING: `runOrigin`/`contextSnapshot` are camelCase on the wire even
+      // though they are neither *Id nor timestamp fields (the general rule would
+      // make them `run_origin`/`context_snapshot`). This is a documented module
+      // carve-out: the run serializer (`services/state/runs.ts`) emits the camel
+      // keys verbatim from the Drizzle model, so the spec matches the runtime
+      // (spec==runtime invariant). Do not rename without changing the serializer.
       runOrigin: {
         type: ["string", "null"],
         enum: ["platform", "remote", null],
@@ -1292,23 +1316,8 @@ export const schemas = {
       errors: {
         type: "array",
         description:
-          "Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors).",
-        items: {
-          type: "object",
-          required: ["field", "code", "title", "message"],
-          properties: {
-            field: { type: "string" },
-            code: { type: "string" },
-            title: { type: "string" },
-            message: { type: "string" },
-            candidate_connection_ids: { type: "array", items: { type: "string" } },
-            connection_id: { type: "string" },
-            missing_scopes: { type: "array", items: { type: "string" } },
-            owned_by_actor: { type: "boolean" },
-            required_auth_key: { type: "string" },
-            available_auth_keys: { type: "array", items: { type: "string" } },
-          },
-        },
+          "Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors). Shares the single ResolutionFieldError component so the shape can't drift from the 412 error items.",
+        items: { $ref: "#/components/schemas/ResolutionFieldError" },
       },
       integrations: {
         type: "array",

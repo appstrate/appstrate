@@ -71,6 +71,16 @@ export async function initRealtime(): Promise<void> {
         if (sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.id) continue;
         if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
+        // Actor gate: an end-user subscription (endUserId set) receives ONLY
+        // its own runs — org+application scope alone would leak every other
+        // end-user's runs on a non-pinned SSE. Dashboard members / API keys
+        // (endUserId undefined) legitimately see every run in the app, so they
+        // keep the org/app gate above. The `run_update` NOTIFY payload carries
+        // `end_user_id` (packages/db/src/notify.ts), so the match is exact.
+        // Mirrors the `connection_update` channel's actor filter below.
+        if (sub.filter.endUserId !== undefined && raw.end_user_id !== sub.filter.endUserId) {
+          continue;
+        }
         sub.send({ event: "run_update", data: parsed.data });
       }
     } catch (err) {
@@ -95,6 +105,15 @@ export async function initRealtime(): Promise<void> {
         if (sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
         if (!sub.filter.isAdmin && raw.level === "debug") continue;
+        // Actor gate: the `run_log_insert` NOTIFY payload carries no
+        // `end_user_id` (packages/db/src/notify.ts — notify_run_log_insert()
+        // emits only org/app/run scope), so an end-user subscription cannot be
+        // proven to own this log row. Skip rather than leak another end-user's
+        // logs (same "skip rather than leak" posture as `connection_update`).
+        // Dashboard members / API keys (endUserId undefined) are unaffected.
+        // Per-end-user log streaming would need `end_user_id` added to the
+        // trigger payload (a DB migration — see the report).
+        if (sub.filter.endUserId !== undefined) continue;
         sub.send({ event: "run_log", data: parsed.data });
       }
     } catch (err) {
@@ -126,6 +145,14 @@ export async function initRealtime(): Promise<void> {
         if (sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
         if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
+        // Actor gate: the `run_metric` NOTIFY payload carries no `end_user_id`
+        // (packages/db/src/notify.ts — RunMetricNotifyPayload has org/app/run/
+        // package scope only), so an end-user subscription cannot be proven to
+        // own this metric row. Skip rather than leak another end-user's cost /
+        // token metrics. Dashboard members / API keys (endUserId undefined) are
+        // unaffected. Per-end-user metric streaming would need `end_user_id`
+        // added to the broadcast payload (a DB migration — see the report).
+        if (sub.filter.endUserId !== undefined) continue;
         sub.send({ event: "run_metric", data: parsed.data });
       }
     } catch (err) {

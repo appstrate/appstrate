@@ -4,14 +4,15 @@ import { describe, it, expect } from "bun:test";
 import { performRefreshTokenExchange, RefreshError } from "../src/token-refresh.ts";
 import type { RefreshContext } from "../src/token-refresh.ts";
 
-// The SUT calls the global `fetch`; patch it for the duration of one call,
-// mirroring integration-oauth.test.ts's withFetch seam.
-function withFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
-  const orig = globalThis.fetch;
-  globalThis.fetch = impl;
-  return fn().finally(() => {
-    globalThis.fetch = orig;
-  });
+// The SUT egress is SSRF-guarded (`oauthEgressFetch` does real DNS), so tests
+// inject a stub via `ctx.fetchImpl` rather than patching the global `fetch` —
+// a non-resolvable test hostname would (correctly) fail-close otherwise.
+function withStub<T>(
+  impl: typeof fetch,
+  ctxBase: RefreshContext,
+  fn: (ctx: RefreshContext) => Promise<T>,
+): Promise<T> {
+  return fn({ ...ctxBase, fetchImpl: impl });
 }
 
 const ctx: RefreshContext = {
@@ -27,13 +28,11 @@ function responding(makeResponse: () => Response | Promise<Response>): typeof fe
 
 async function captureError(stub: typeof fetch): Promise<unknown> {
   let err: unknown = null;
-  await withFetch(stub, async () => {
-    try {
-      await performRefreshTokenExchange(ctx, "rt_abc", { label: "refresh" });
-    } catch (e) {
-      err = e;
-    }
-  });
+  try {
+    await performRefreshTokenExchange({ ...ctx, fetchImpl: stub }, "rt_abc", { label: "refresh" });
+  } catch (e) {
+    err = e;
+  }
   return err;
 }
 
@@ -51,7 +50,7 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
       clientSecret: "my-client-secret",
       // tokenEndpointAuthMethod intentionally omitted
     };
-    await withFetch(
+    await withStub(
       (async (_url, init) => {
         capturedHeaders = new Headers(init?.headers as HeadersInit);
         capturedBody = init?.body as string;
@@ -60,7 +59,8 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
           headers: { "Content-Type": "application/json" },
         });
       }) as unknown as typeof fetch,
-      () => performRefreshTokenExchange(ctxWithoutMethod, "rt_abc", { label: "refresh" }),
+      ctxWithoutMethod,
+      (ctx) => performRefreshTokenExchange(ctx, "rt_abc", { label: "refresh" }),
     );
     // Authorization: Basic <base64(client_id:client_secret)>
     expect(capturedHeaders?.get("Authorization")).toMatch(/^Basic /);
@@ -78,7 +78,7 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
       clientSecret: "", // public clients carry no secret
       tokenEndpointAuthMethod: "none",
     };
-    await withFetch(
+    await withStub(
       (async (_url, init) => {
         capturedHeaders = new Headers(init?.headers as HeadersInit);
         capturedBody = init?.body as string;
@@ -87,7 +87,8 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
           headers: { "Content-Type": "application/json" },
         });
       }) as unknown as typeof fetch,
-      () => performRefreshTokenExchange(ctxNone, "rt_abc", { label: "refresh" }),
+      ctxNone,
+      (ctx) => performRefreshTokenExchange(ctx, "rt_abc", { label: "refresh" }),
     );
     // No Authorization header — public clients don't carry credentials in headers.
     expect(capturedHeaders?.get("Authorization")).toBeNull();
@@ -109,7 +110,7 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
       clientSecret: "my-client-secret",
       tokenEndpointAuthMethod: "client_secret_post",
     };
-    await withFetch(
+    await withStub(
       (async (_url, init) => {
         capturedHeaders = new Headers(init?.headers as HeadersInit);
         capturedBody = init?.body as string;
@@ -118,7 +119,8 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
           headers: { "Content-Type": "application/json" },
         });
       }) as unknown as typeof fetch,
-      () => performRefreshTokenExchange(ctxPost, "rt_abc", { label: "refresh" }),
+      ctxPost,
+      (ctx) => performRefreshTokenExchange(ctx, "rt_abc", { label: "refresh" }),
     );
     expect(capturedHeaders?.get("Authorization")).toBeNull();
     expect(capturedBody).toContain("client_id=my-client-id");

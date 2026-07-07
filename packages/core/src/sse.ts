@@ -13,6 +13,14 @@
  * `data:` payloads are joined with `"\n"` per spec.
  */
 
+/**
+ * Upper bound on a single unterminated frame retained in the parser
+ * buffer. A stream that never emits a frame separator (blank line) would
+ * otherwise grow the buffer without limit (memory-exhaustion vector). 1 MiB
+ * is well beyond any legitimate SSE frame the platform emits.
+ */
+const MAX_SSE_FRAME_BYTES = 1024 * 1024;
+
 /** A parsed SSE frame: its `event:` name and concatenated `data:` payload. */
 export interface SseFrame {
   /** `event:` field value; `""` when the frame carries none. */
@@ -24,17 +32,28 @@ export interface SseFrame {
 /**
  * Incremental SSE frame parser for `fetch` + `ReadableStream` readers.
  * Given a freshly-decoded `chunk` and the `buffer` left over from the
- * previous read, it splits on the `\n\n` frame separator, parses complete
- * frames, and returns the new leftover buffer (an incomplete trailing
- * frame, if any). Pass the returned `buffer` back in on the next chunk.
+ * previous read, it splits on the blank-line frame separator (`\n\n` or the
+ * CRLF form `\r\n\r\n`), parses complete frames, and returns the new
+ * leftover buffer (an incomplete trailing frame, if any). Pass the returned
+ * `buffer` back in on the next chunk.
+ *
+ * Throws when a single unterminated frame exceeds
+ * {@link MAX_SSE_FRAME_BYTES} — a defensive bound against a stream that
+ * never emits a frame separator growing the buffer without limit.
  */
 export function parseSseFrames(
   chunk: string,
   buffer: string,
 ): { frames: SseFrame[]; buffer: string } {
   const combined = buffer + chunk;
-  const parts = combined.split("\n\n");
+  // Split on the blank-line separator in either LF (`\n\n`) or CRLF
+  // (`\r\n\r\n`) form so CRLF streams frame identically to LF streams.
+  const parts = combined.split(/\r?\n\r?\n/);
   const rest = parts.pop()!;
+
+  if (rest.length > MAX_SSE_FRAME_BYTES) {
+    throw new Error(`parseSseFrames: unterminated SSE frame exceeds ${MAX_SSE_FRAME_BYTES} bytes`);
+  }
 
   const frames: SseFrame[] = [];
   for (const part of parts) {

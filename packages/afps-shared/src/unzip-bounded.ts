@@ -67,6 +67,16 @@ export function unzipBounded(
   limits: BoundedUnzipLimits,
 ): Record<string, Uint8Array> {
   const { maxDecompressedBytes, maxFileBytes, maxFiles } = limits;
+
+  // Streaming `Unzip` scans for local-file-header signatures and silently
+  // yields nothing on a buffer that isn't a ZIP — so guard the archive magic
+  // up front. Every ZIP begins with "PK" (0x50 0x4b): a local file header
+  // (PK\x03\x04) or, for an empty archive, the end-of-central-directory
+  // (PK\x05\x06). Anything else is corrupt/non-ZIP and must fail loudly.
+  if (artifact.length < 4 || artifact[0] !== 0x50 || artifact[1] !== 0x4b) {
+    throw new DecompressionLimitError("corrupt-archive", "not a ZIP archive");
+  }
+
   const out: Record<string, Uint8Array> = {};
   let total = 0;
   let fileCount = 0;
