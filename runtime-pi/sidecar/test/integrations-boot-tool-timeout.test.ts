@@ -41,6 +41,22 @@ describe("scrubStderrLine (#779)", () => {
     expect(scrubStderrLine("key ghp_ABCdef123456789")).toContain("[redacted-key]");
   });
 
+  it("redacts separator-less AWS access-key ids and dotted Google OAuth tokens", () => {
+    // AKIA keys have NO separator after the prefix; ya29 tokens use a dot —
+    // both would escape the `[-_]`-anchored family regex without their own
+    // literal shapes.
+    expect(scrubStderrLine("aws error for key AKIAIOSFODNN7EXAMPLE")).not.toContain(
+      "AKIAIOSFODNN7EXAMPLE",
+    );
+    expect(scrubStderrLine("got ya29.a0AfH6SMBx-abc_123")).not.toContain("ya29.a0AfH6SMBx");
+  });
+
+  it("does not redact prose words starting with a key prefix", () => {
+    expect(scrubStderrLine("found skeletons in pkgroots directory")).toBe(
+      "found skeletons in pkgroots directory",
+    );
+  });
+
   it("redacts key=value credential shapes", () => {
     const out = scrubStderrLine("refresh_token=1//0abcDEF-xyz other stuff");
     expect(out).not.toContain("1//0abcDEF-xyz");

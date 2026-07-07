@@ -482,6 +482,7 @@ export async function connectRemoteHttpIntegration(
   // branches share the same per-request Bearer + 401-retry closure
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
+  const toolTimeoutMs = toolTimeoutMsFromEnv();
   const client =
     transport === "sse"
       ? await createSseClient(serverUrl, { fetch: customFetch, clientInfo })
@@ -489,9 +490,7 @@ export async function connectRemoteHttpIntegration(
           fetch: customFetch,
           clientInfo,
           retry: { deadlineMs: 30_000 },
-          ...(toolTimeoutMsFromEnv() !== undefined
-            ? { defaultTimeoutMs: toolTimeoutMsFromEnv() }
-            : {}),
+          ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
         });
   return { client, authKey };
 }
@@ -664,15 +663,23 @@ const STDERR_LINE_MAX_CHARS = 500;
  * credentials.
  */
 export function scrubStderrLine(line: string): string {
-  return line
-    .slice(0, STDERR_LINE_MAX_CHARS)
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
-    .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, "[redacted-jwt]")
-    .replace(/\b(sk|pk|ghp|gho|ghs|xox[baprs]|AKIA|ya29)[-_][A-Za-z0-9._-]{6,}/g, "[redacted-key]")
-    .replace(
-      /\b(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)(["'\s:=]+)[^\s"',&]+/gi,
-      "$1$2[redacted]",
-    );
+  return (
+    line
+      .slice(0, STDERR_LINE_MAX_CHARS)
+      .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+      .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, "[redacted-jwt]")
+      // Separator-prefixed families (`sk-…`, `ghp_…`, `xoxb-…`) keep the
+      // mandatory `-`/`_` so prose words starting with `sk`/`pk` survive;
+      // AWS access-key ids (`AKIA` + 16 upper-alnum, no separator) and Google
+      // OAuth tokens (`ya29.` + dot) get their own literal shapes.
+      .replace(/\b(sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9._-]{6,}/g, "[redacted-key]")
+      .replace(/\bAKIA[A-Z0-9]{12,}/g, "[redacted-key]")
+      .replace(/\bya29\.[A-Za-z0-9._-]{6,}/g, "[redacted-key]")
+      .replace(
+        /\b(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)(["'\s:=]+)[^\s"',&]+/gi,
+        "$1$2[redacted]",
+      )
+  );
 }
 
 /**

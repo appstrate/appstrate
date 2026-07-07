@@ -362,6 +362,13 @@ interface TransparentEgressInfra {
  * bind, older daemon — is logged and swallowed: transparent egress is an
  * interop layer, not a security boundary, so degrading to the CONNECT
  * proxy contract is always safe.
+ *
+ * The splicers use the default DNS resolver for their resolve-and-pin
+ * floor — deliberately NOT `bundleFetchOpts.resolveHostFn`, which is a
+ * test-injection seam (always `undefined` in production; see the
+ * `bootIntegrations` call in server.ts) and isn't threaded through the
+ * adapter interface. If a production resolver override ever lands,
+ * revisit so both egress planes resolve identically.
  */
 async function setupTransparentEgress(runNetwork: string): Promise<TransparentEgressInfra | null> {
   const handles: Array<{ close(): Promise<void> }> = [];
