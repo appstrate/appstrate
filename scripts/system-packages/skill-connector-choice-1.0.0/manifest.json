@@ -1,0 +1,12 @@
+{
+  "name": "@appstrate/connector-choice",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.2",
+  "display_name": "Choix du connecteur",
+  "description": "Choisir le bon connecteur pour brancher un service à un agent. Charge ce skill quand il faut connecter un nouvel outil (Gmail, Slack, Notion, ClickUp, HubSpot…) et qu'il existe plusieurs variantes. Règle : préférer la variante MCP distante (id en -mcp, un clic) à la variante API (qui force souvent à enregistrer une app dev avec client id/secret). Donne la cascade de décision et le garde-fou « ne jamais coller un secret dans le chat ».",
+  "license": "Apache-2.0",
+  "_meta": {
+    "dev.appstrate/visibility": { "level": "unlisted" }
+  }
+}

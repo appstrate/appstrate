@@ -58,6 +58,7 @@ import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createApplicationsRouter } from "../../src/routes/applications.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
+import { createLibraryRouter } from "../../src/routes/library.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "../../src/routes/uploads.ts";
@@ -253,6 +254,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api", runsRouter);
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());
+  app.route("/api/library", createLibraryRouter());
   app.route("/api/end-users", createEndUsersRouter());
   // FS direct-upload sink MUST register BEFORE /api/uploads — more specific
   // path first. Mirrors production wiring in `apps/api/src/index.ts`.

@@ -43,6 +43,7 @@ import { logger } from "../../lib/logger.ts";
 import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { registerProtectedResourceFamily } from "../../lib/protected-resources.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
+import { buildAssistantSkillsSection } from "../../services/assistant-skills.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
@@ -122,10 +123,15 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  * surface grows without editing this text. describe_operation (or
  * search_operations' best_match) remains the source of truth for input schemas.
  */
-function buildServerInstructions(
+export function buildServerInstructions(
   permissions?: ReadonlySet<string>,
   contextInjected = false,
 ): string {
+  // Assistant skills (unlisted system skills) — indexed BEFORE the operation
+  // index so the section survives `applyOperationIndexPolicy`, which trims
+  // everything from the operation-index heading onward for providers without a
+  // prompt cache. "" when none are loaded.
+  const assistantSkills = buildAssistantSkillsSection();
   // A `contextInjected` caller (the chat module) already injects the get_me
   // payload into its own system prompt and we drop the get_me tool for it, so
   // pushing "call get_me first" would point the model at a tool that isn't
@@ -151,7 +157,7 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 - Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this application but not yet connected, then (3) one that is neither. \`GET /api/integrations\` lists every integration with an \`active\` flag (activated for this app) and \`block_user_connections\`; use it to tell tiers 2 and 3 apart. Do not silently activate or connect an integration the caller did not ask for — surface that it would be needed and let them decide.
 - Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" inline run: \`run_and_wait\` already runs the same readiness preflight and returns a 400 without consuming credits when the manifest cannot run. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\` (or if you intentionally call \`validateInlineRun\` only to iterate/check readiness without launching), that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …). For each such error you MUST start its connect flow (do not just describe it): CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationConnect"\`, \`path_params: { packageId: "<id>", authKey: "<key>" }\` (the auth key is in \`manifest.auths\` of the integration row from \`GET /api/integrations\`). This op is auth-type-agnostic — it works for every auth (oauth2, api_key, basic, mtls, custom), so you never inspect the auth type yourself. If the error carries a \`connection_id\`, also pass \`body: { connection_id: "<that id>" }\` so the existing connection is reconnected/upgraded in place instead of duplicated. This tool call is what renders the one-click connect button (from its result); without it there is NO button, so never claim a button will appear unless you just made this exact call this turn. After the call, the client renders the connect button on its own from your tool result — your text must NOT duplicate it: do NOT paste the returned \`connect_url\`, do NOT describe the button or tell the caller where to click, do NOT restate the connection request. End your turn with ONE short sentence saying you'll continue once the integration is connected — do NOT poll, loop, wait, or run in the same turn. On a later turn, call \`run_and_wait\` again (or \`validateInlineRun\` if you are only checking readiness); when readiness passes, proceed with the run. (Non-interactive clients with no button can open the returned \`connect_url\`.)
 
-${OPERATION_INDEX_HEADING}
+${assistantSkills ? `${assistantSkills}\n\n` : ""}${OPERATION_INDEX_HEADING}
 ${buildOperationIndex(permissions)}`;
 }
 

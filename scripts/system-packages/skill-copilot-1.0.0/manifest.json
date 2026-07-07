@@ -1,0 +1,12 @@
+{
+  "name": "@appstrate/copilot",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.2",
+  "display_name": "Copilote de création d'agents",
+  "description": "Accompagne l'utilisateur pour concevoir et mettre en place une automatisation (agent ou run inline) à partir de son contexte. Charge ce skill dès que l'intention est de créer/automatiser/déléguer quelque chose, gagner du temps, « faire des agents », ou quand l'utilisateur ne sait pas par où commencer ou vient de connecter des outils. Prends le contrôle : ancre l'entretien sur le rôle + les outils utilisés, puis PROPOSE des automatisations concrètes (ne demande jamais « quelle tâche vous prend du temps »). Pas pour seulement lancer/inspecter un agent existant.",
+  "license": "Apache-2.0",
+  "_meta": {
+    "dev.appstrate/visibility": { "level": "unlisted" }
+  }
+}

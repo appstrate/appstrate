@@ -1,0 +1,12 @@
+{
+  "name": "@appstrate/web-search",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.2",
+  "display_name": "Recherche web (run inline)",
+  "description": "Chercher ou lire le web en lançant un run inline (le chat n'a pas d'accès web direct — le runtime est sandboxé). Charge ce skill dès qu'il faut une recherche web (requête en langage naturel) ou lire une/des URLs. Détecte au runtime les fournisseurs de recherche connectés (Brave, Firecrawl, Tavily, Exa, SerpAPI) et les utilise ; sinon retombe sur @default/web-fetch (GET d'URLs publiques, sans credential), ou propose d'en connecter un. Donne le manifest inline, l'input et l'output structuré de chaque branche.",
+  "license": "Apache-2.0",
+  "_meta": {
+    "dev.appstrate/visibility": { "level": "unlisted" }
+  }
+}
