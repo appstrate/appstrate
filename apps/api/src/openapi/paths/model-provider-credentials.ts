@@ -49,6 +49,16 @@ export const modelProviderCredentialsPaths = {
                       // Only `providerId` is guaranteed: this registry list
                       // supports the `?fields=` projection (projectFields forces
                       // `providerId`, drops every other key on request).
+                      // CASING: these provider fields (`providerId`,
+                      // `displayName`, `iconUrl`, `docsUrl`, `apiShape`,
+                      // `defaultBaseUrl`, `baseUrlOverridable`, `authMode`,
+                      // `featured`) and the nested model fields (`contextWindow`,
+                      // `maxTokens`, `cacheRead`, `cacheWrite`) are camelCase on
+                      // the wire, diverging from the snake_case wire default.
+                      // This is an in-code vendored registry (module-supplied
+                      // `ModelProviderDef`) serialized verbatim; the spec matches
+                      // that runtime output (spec==runtime). Intentional — do NOT
+                      // rename to snake_case.
                       required: ["providerId"],
                       properties: {
                         providerId: { type: "string" },

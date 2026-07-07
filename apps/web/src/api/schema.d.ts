@@ -1608,7 +1608,10 @@ export interface paths {
          * @description The cross-agent governance baseline: one default connection per (application, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.
          */
         get: operations["getIntegrationOrgDefault"];
-        /** Set the org-wide default connection for this integration (admin) */
+        /**
+         * Set the org-wide default connection for this integration (admin)
+         * @description Upsert the single (application, integration) default. Keyed per-integration, NOT per-auth: this overwrites the one existing default wholesale (atomic onConflictDoUpdate on [applicationId, integrationId]). Selecting a connection of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the chosen connection's auth (derived).
+         */
         put: operations["upsertIntegrationOrgDefault"];
         post?: never;
         /** Remove the org-wide default connection (admin) */
@@ -6746,6 +6749,8 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     deleteAgentRuns: {
@@ -6783,6 +6788,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             /** @description Running runs exist */
             409: {
                 headers: {
@@ -9843,15 +9849,6 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description HTML error page (token missing/invalid/used) — see 4xx detail. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
             /** @description Redirect to the provider OAuth screen or the hosted form. */
             302: {
                 headers: {
@@ -10737,6 +10734,7 @@ export interface operations {
                         integration_package_id: string;
                         /** Format: uuid */
                         connection_id: string;
+                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
                         auth_key: string;
                         enforce: boolean;
                         /** Format: date-time */
@@ -10796,6 +10794,7 @@ export interface operations {
                         integration_package_id: string;
                         /** Format: uuid */
                         connection_id: string;
+                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
                         auth_key: string;
                         enforce: boolean;
                         /** Format: date-time */
