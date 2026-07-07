@@ -40,8 +40,47 @@ export async function calculateCodeChallenge(verifier: string): Promise<string> 
   return base64url(new Uint8Array(digest));
 }
 
-export function generateState(): string {
-  return base64url(crypto.getRandomValues(new Uint8Array(16)));
+/**
+ * OAuth `state` — CSRF nonce + post-login redirect carrier.
+ *
+ * The state is a base64url-encoded JSON payload `{ n, r? }`: `n` is a random
+ * nonce (the CSRF property), `r` the optional post-login redirect path. The
+ * authorize endpoint echoes `state` verbatim, so `r` survives server-side
+ * detours that a new browsing context cannot: the email-verification flow
+ * (`POST /api/oauth/register` with SMTP → "check your email" → link opens in
+ * a NEW tab/device where `sessionStorage` is empty) resumes the OAuth flow
+ * via the pinned `callbackURL` and still lands on `/auth/callback` with this
+ * state — the only surviving carrier of where the user was headed.
+ */
+export function generateState(redirectTo?: string): string {
+  const payload: { n: string; r?: string } = {
+    n: base64url(crypto.getRandomValues(new Uint8Array(16))),
+  };
+  if (redirectTo) payload.r = redirectTo;
+  return base64url(new TextEncoder().encode(JSON.stringify(payload)));
+}
+
+/**
+ * Extract the post-login redirect from an echoed `state` parameter.
+ *
+ * Returns `undefined` for anything that is not a same-origin relative path —
+ * malformed base64/JSON (including legacy opaque random states), absolute
+ * URLs, and protocol-relative `//host` forms — so a crafted callback URL can
+ * never turn this into an open redirect.
+ */
+export function decodeStateRedirect(state: string): string | undefined {
+  try {
+    const b64 = state.replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const r = (parsed as Record<string, unknown>).r;
+    if (typeof r !== "string") return undefined;
+    if (!r.startsWith("/") || r.startsWith("//") || r.includes("\\")) return undefined;
+    return r;
+  } catch {
+    return undefined;
+  }
 }
 
 const OIDC_STATE_KEY = "appstrate_oidc_state";
@@ -64,7 +103,7 @@ async function initPkceFlow(
   redirectTo: string | undefined,
   loginHint?: string,
 ): Promise<URLSearchParams> {
-  const state = generateState();
+  const state = generateState(redirectTo);
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await calculateCodeChallenge(codeVerifier);
 
@@ -137,10 +176,27 @@ export async function startOidcSignup(redirectTo?: string, loginHint?: string): 
 /**
  * Handle the callback from the OIDC authorize endpoint.
  *
- * Validates the state, exchanges the code for tokens (to properly complete
+ * Same-context flow (the common case): validates the state against the
+ * `sessionStorage` copy, exchanges the code for tokens (to properly complete
  * the OIDC flow and prevent the code from being replayed), and returns the
  * post-login redirect path. The tokens themselves are discarded — the real
  * auth is the Better Auth session cookie set during login.
+ *
+ * Cross-context resume: the email-verification flow pauses the OAuth dance
+ * ("check your email") and resumes it via the link in the email — which
+ * opens in a NEW tab or device where `sessionStorage` is empty (it is
+ * per-tab). There is then no stored state to compare and no PKCE verifier to
+ * exchange with, but neither is needed: Better Auth's
+ * `autoSignInAfterVerification` already set the session cookie, and the SPA
+ * discards the tokens anyway. So when NO state was ever stored in this
+ * context we skip the exchange and recover the redirect from the echoed
+ * `state` payload. The caller MUST validate the session afterwards
+ * (`refreshAuth()` in `auth-callback.tsx` throws when no session exists) —
+ * that session check is what authenticates this path. A crafted callback URL
+ * gains nothing here: the attacker-supplied code is never exchanged, and the
+ * decoded redirect is constrained to a same-origin relative path.
+ *
+ * A PRESENT-but-different stored state remains a hard failure (CSRF guard).
  */
 export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
   const config = getOidcConfig();
@@ -165,6 +221,14 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
   sessionStorage.removeItem(OIDC_STATE_KEY);
   sessionStorage.removeItem(OIDC_VERIFIER_KEY);
   sessionStorage.removeItem(OIDC_REDIRECT_KEY);
+
+  if (storedState === null) {
+    // Cross-context resume (see the function doc): nothing was ever stored
+    // in this tab, so there is no verifier to exchange with. Skip the token
+    // exchange — the BA session cookie is the real auth, and the caller
+    // validates it right after. The unexchanged code simply expires.
+    return { redirectTo: decodeStateRedirect(state) ?? "/" };
+  }
 
   if (state !== storedState) {
     throw new Error("State mismatch — possible CSRF attack");
