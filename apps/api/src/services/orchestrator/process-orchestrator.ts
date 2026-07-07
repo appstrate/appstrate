@@ -117,11 +117,61 @@ interface PendingSpec {
   env: Record<string, string>;
 }
 
-/** Build a clean env Record from process.env (filters out undefined values). */
+/**
+ * Names of system env vars a spawned workload legitimately needs to execute
+ * (binary resolution, locale, tmp dir). Everything else in the platform's
+ * `process.env` — `CONNECTION_ENCRYPTION_KEY`, `BETTER_AUTH_SECRET`,
+ * `DATABASE_URL`, `REDIS_URL`, S3/AWS creds, … — is a platform secret that must
+ * NOT be inherited by the (untrusted, in the case of AFPS agents) subprocess.
+ * This mirrors the Docker path, which passes ONLY `spec.env`. Allowlist, never
+ * denylist: a new secret env var added later stays excluded by default.
+ */
+const SYSTEM_ENV_ALLOWLIST = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TERM",
+  "LANG",
+  "LANGUAGE",
+  "TZ",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "PWD",
+  "HOSTNAME",
+]);
+
+/** Prefixes of system/runtime env vars that are safe to inherit (locale + Bun). */
+const SYSTEM_ENV_PREFIXES = ["LC_", "BUN_", "XDG_"];
+
+/**
+ * Full `process.env` (undefined values dropped). Used ONLY for the trusted
+ * sidecar spawn — the sidecar is the credential-isolating proxy, not untrusted
+ * agent code. The untrusted agent workload uses {@link systemBaselineEnv}.
+ */
 function cleanProcessEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) env[k] = v;
+  }
+  return env;
+}
+
+/**
+ * Build a NON-SECRET system env baseline from `process.env`. Only names on the
+ * allowlist (or carrying a safe prefix) survive; platform secrets are dropped.
+ * The workload's real configuration arrives via `spec.env`, exactly like the
+ * Docker orchestrator.
+ */
+function systemBaselineEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    if (SYSTEM_ENV_ALLOWLIST.has(k) || SYSTEM_ENV_PREFIXES.some((p) => k.startsWith(p))) {
+      env[k] = v;
+    }
   }
   return env;
 }
@@ -370,7 +420,13 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // Sidecar-relative URLs (SIDECAR_URL, MODEL_BASE_URL, HTTP(S)_PROXY,
     // NO_PROXY) arrive in spec.env — pi.ts builds them from the boundary's
     // sidecarEndpoints, so this orchestrator no longer patches them in.
-    const env: Record<string, string> = { ...cleanProcessEnv(), ...spec.env };
+    //
+    // SECURITY (§6.2): the workload — an AFPS *agent* runs untrusted code here —
+    // gets only a NON-SECRET system baseline plus its explicit spec.env, so it
+    // never inherits platform secrets (`CONNECTION_ENCRYPTION_KEY`,
+    // `BETTER_AUTH_SECRET`, `DATABASE_URL`, …) the way a full `process.env`
+    // spread would. This matches the Docker path, which passes only spec.env.
+    const env: Record<string, string> = { ...systemBaselineEnv(), ...spec.env };
     env.WORKSPACE_DIR = resolve(workDir);
 
     this.pendingSpecs.set(id, { entrypoint: AGENT_ENTRY, workDir, env });
