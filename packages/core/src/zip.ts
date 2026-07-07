@@ -12,8 +12,15 @@ import {
   type McpServerManifest,
 } from "./validation.ts";
 import { checkCompanionFiles, companionFilesFromRecord } from "./companion-files.ts";
+import {
+  unzipBounded,
+  DecompressionLimitError,
+  type BoundedUnzipLimits,
+} from "@appstrate/afps-shared/unzip-bounded";
 
 export type { Zippable };
+export { unzipBounded, DecompressionLimitError };
+export type { BoundedUnzipLimits };
 
 /**
  * Fixed modification time stamped on every ZIP entry. fflate defaults each

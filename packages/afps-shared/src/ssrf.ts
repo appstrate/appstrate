@@ -88,6 +88,23 @@ export function isBlockedHost(hostname: string): boolean {
     if (mappedDot) {
       return isBlockedHost(mappedDot[1]!);
     }
+
+    // IPv4-compatible IPv6 (deprecated but still routed by some stacks): the
+    // low 32 bits embed an IPv4 with NO `::ffff:` prefix — ::7f00:1 = 127.0.0.1,
+    // ::a9fe:a9fe = 169.254.169.254. Without this branch these slip past the
+    // IPv4 blocklist entirely. (`::ffff:H:L` mapped form is matched above and
+    // won't collide — it carries three hextets, not two.)
+    const compatHex = h.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (compatHex) {
+      const high = parseInt(compatHex[1]!, 16);
+      const low = parseInt(compatHex[2]!, 16);
+      const ipv4 = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+      return isBlockedHost(ipv4);
+    }
+    const compatDot = h.match(/^::(\d+\.\d+\.\d+\.\d+)$/);
+    if (compatDot) {
+      return isBlockedHost(compatDot[1]!);
+    }
   }
 
   return false;

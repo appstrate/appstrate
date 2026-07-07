@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, or, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers, packages } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
-import { actorFilter, actorMatch, type Actor } from "../../lib/actor.ts";
+import { actorMatch, actorScopeFilter, type Actor } from "../../lib/actor.ts";
 import { listRunsWithFilter } from "./runs.ts";
 import type { AppScope } from "../../lib/scope.ts";
 
@@ -328,18 +328,6 @@ export async function listNotifications(
 // Unrelated to notifications, but the handler shares this module. The
 // "my runs" view keeps the original actor-or-org-visible semantics.
 
-function actorOwnershipFilter(actor: Actor): SQL {
-  return actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId });
-}
-
-/**
- * Filter: actor-owned OR org-visible runs (no dashboard user) — covers
- * self-triggered runs, schedule-triggered runs, and end-user runs.
- */
-function actorOrOrgFilter(actor: Actor): SQL {
-  return or(actorOwnershipFilter(actor), isNull(runs.userId))!;
-}
-
 export async function listUserRuns(
   scope: AppScope,
   actor: Actor,
@@ -350,7 +338,10 @@ export async function listUserRuns(
     scopedWhere(runs, {
       orgId: scope.orgId,
       applicationId: scope.applicationId,
-      extra: [actorOrOrgFilter(actor)],
+      // Dashboard members see own + org-visible (schedule/system) runs;
+      // end-users see ONLY their own — see actorScopeFilter. Previously an
+      // unconditional isNull(userId) branch leaked every end-user's runs.
+      extra: [actorScopeFilter(actor, { userId: runs.userId, endUserId: runs.endUserId })],
     })!,
     limit,
     offset,

@@ -44,9 +44,12 @@
     "./ssrf": "./src/ssrf.ts",
     "./token-usage": "./src/token-usage.ts",
     "./ssrf-dns": "./src/ssrf-dns.ts",
+    "./guarded-fetch": "./src/guarded-fetch.ts",
+    "./unzip-bounded": "./src/unzip-bounded.ts",
     "./backoff": "./src/backoff.ts"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "semver": "^7.8.4"
   },
   "devDependencies": {

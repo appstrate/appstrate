@@ -398,6 +398,15 @@ export function createRunsRouter() {
       throw notFound("Run not found");
     }
 
+    // End-user boundary: `runs:cancel` is an OIDC-grantable end-user scope, but
+    // an end-user must only cancel their OWN runs — mirror the ownership guard
+    // the read paths (`GET /runs/:id`, `/logs`) apply. Scope alone (org+app) is
+    // not enough here.
+    const endUser = c.get("endUser");
+    if (endUser && run.endUserId !== endUser.id) {
+      throw notFound("Run not found");
+    }
+
     // Verify cancellable
     if (run.status !== "pending" && run.status !== "running") {
       throw conflict("not_cancellable", "This run cannot be cancelled");
