@@ -32,7 +32,8 @@ import {
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeOnHeaders,
 } from "@appstrate/connect";
-import { isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { checkEgressHost } from "../../lib/egress-host-guard.ts";
 import type { Actor } from "../../lib/actor.ts";
 import {
   resolveIntegrationProxyCredentials,
@@ -254,7 +255,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // + re-check the final target host before we fetch, matching the sidecar's
   // stronger guard (runtime-pi/sidecar/credential-proxy.ts). Fail closed with the
   // same authorization error.
-  const targetHostCheck = await resolveAndCheckHost(new URL(target).hostname);
+  const targetHostCheck = await checkEgressHost(new URL(target).hostname);
   if (targetHostCheck.blocked) {
     throw new ProxyAuthorizationError(`Target ${target} resolves to a blocked network range`);
   }

@@ -160,7 +160,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       name: "Stage Three",
       scope: "openid runs:read",
     });
-    const res = await app.request(`/api/end-users/${endUserId}`, {
+    const res = await app.request(`/api/runs`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Application-Id": applicationId,
@@ -272,7 +272,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       end_user_id: endUserId,
       application_id: applicationId,
     });
-    const res = await app.request(`/api/end-users/${endUserId}`, {
+    const res = await app.request(`/api/runs`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Application-Id": applicationId,
@@ -363,7 +363,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
 
     // Token should work while client is active.
-    const goodRes = await app.request(`/api/end-users/${endUserId}`, {
+    const goodRes = await app.request(`/api/runs`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Application-Id": applicationId,

@@ -27,7 +27,8 @@ import { parseProxyRequest } from "./helpers.ts";
 import { forwardMeteredResponse } from "./metering.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { checkEgressHost } from "../../lib/egress-host-guard.ts";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 
@@ -179,7 +180,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // address slips through it. Resolve + re-check the host before we ever fetch;
   // fail closed with the same caller-facing error (the reason and backing
   // endpoint stay server-log-only — never leaked to the caller).
-  const upstreamHostCheck = await resolveAndCheckHost(new URL(upstreamUrl).hostname);
+  const upstreamHostCheck = await checkEgressHost(new URL(upstreamUrl).hostname);
   if (upstreamHostCheck.blocked) {
     logger.error("llm-proxy: refused blocked upstream (SSRF DNS)", {
       presetId,

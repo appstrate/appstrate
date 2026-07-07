@@ -57,20 +57,18 @@ describe("auth social provider config — emailVerified override", () => {
     _rebuildAuthForTesting();
   });
 
-  it("github provider is configured with mapProfileToUser → emailVerified: true", async () => {
+  it("github provider does NOT force emailVerified (pre-account-takeover guard)", async () => {
+    // SECURITY (P2-1): GitHub lets a user attach an UNVERIFIED email, so we must
+    // NOT blanket-force `emailVerified: true` — that let an attacker link a
+    // victim's unverified email onto a GitHub account and take over. GitHub is
+    // configured WITHOUT a `mapProfileToUser` override so Better Auth's genuine
+    // per-email `/user/emails` verified flag decides linking. (Google keeps the
+    // override because its OIDC `email_verified` claim is authoritative.)
     const options = (getAuth() as { options: { socialProviders?: Record<string, unknown> } })
       .options;
-    const github = options.socialProviders?.github as
-      | {
-          mapProfileToUser?: (
-            profile: unknown,
-          ) => { emailVerified?: boolean } | Promise<{ emailVerified?: boolean }>;
-        }
-      | undefined;
+    const github = options.socialProviders?.github as { mapProfileToUser?: unknown } | undefined;
     expect(github).toBeDefined();
-    expect(typeof github?.mapProfileToUser).toBe("function");
-    const result = await github!.mapProfileToUser!({});
-    expect(result.emailVerified).toBe(true);
+    expect(github?.mapProfileToUser).toBeUndefined();
   });
 
   it("google provider is configured with mapProfileToUser → emailVerified: true", async () => {

@@ -30,6 +30,7 @@ import {
   decryptCredentialsToStringMap,
   decryptCredentialInputsToStringMap,
   resolveAfpsHttpDelivery,
+  isAllowedInternalIdpHost,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import { getApiCallConfigs, resolveEffectiveToolSelection } from "@appstrate/core/integration";
@@ -296,11 +297,18 @@ async function resolveOne(
         `remote-source integration '${integrationId}' declares a non-https source.remote.url; only https:// is allowed for remote MCP servers`,
       );
     }
-    const remoteHostCheck = await resolveAndCheckHost(parsedRemote.hostname);
-    if (remoteHostCheck.blocked) {
-      throw new Error(
-        `remote-source integration '${integrationId}' source.remote.url host '${parsedRemote.hostname}' is blocked by the SSRF guard (${remoteHostCheck.reason})`,
-      );
+    // The operator internal-host allowlist exempts a host the operator has
+    // explicitly declared trusted (same `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS`
+    // list that lets a self-hosted internal IdP be reached) — a self-hosted
+    // deployment may legitimately run a remote MCP server on a private address.
+    // Unset in production by default, so every host stays fully guarded.
+    if (!isAllowedInternalIdpHost(parsedRemote.hostname)) {
+      const remoteHostCheck = await resolveAndCheckHost(parsedRemote.hostname);
+      if (remoteHostCheck.blocked) {
+        throw new Error(
+          `remote-source integration '${integrationId}' source.remote.url host '${parsedRemote.hostname}' is blocked by the SSRF guard (${remoteHostCheck.reason})`,
+        );
+      }
     }
     // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`. The
     // manifest schema enforces the enum + `required`; we forward the

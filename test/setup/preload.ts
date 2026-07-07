@@ -83,6 +83,17 @@ process.env.REMOTE_RUN_BUFFER_FLUSH_MS = process.env.REMOTE_RUN_BUFFER_FLUSH_MS 
 // the NOTIFY path doesn't deliver; 50ms keeps the hold-then-release semantics
 // intact while removing the dead wait.
 process.env.RUN_WAIT_POLL_INTERVAL_MS = process.env.RUN_WAIT_POLL_INTERVAL_MS ?? "50";
+// The OAuth egress + remote-integration SSRF guards now resolve DNS and fail
+// closed. The integration suite points token/refresh endpoints at non-resolvable
+// test hosts (`auth.example.test`) and real loopback `Bun.serve` instances
+// (`127.0.0.1`/`localhost`), and the remote-spawn tests use `mcp.example.com` —
+// all benign fixtures that the guard would (correctly, in prod) block. Reuse the
+// operator internal-host allowlist to exempt exactly those fixture hosts for the
+// test run; production leaves it unset so every host stays guarded. NEVER set
+// these hosts in production.
+process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS =
+  process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS ??
+  "auth.example.test,127.0.0.1,localhost,mcp.example.com,api.openai.test,api.anthropic.test,api.mistral.test,api.example.com,intranet.corp,mcp-norefresh.example,mcp-refresh.example";
 
 if (TIER0) {
   // tier0: clear DATABASE_URL / REDIS_URL / S3_* (Bun auto-loads them from the

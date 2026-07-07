@@ -1676,6 +1676,18 @@ function compileAuthorizedUriPattern(pattern: string): string {
   const scheme = schemeMatch[0];
   const afterScheme = pattern.slice(scheme.length);
   const slashIdx = afterScheme.indexOf("/");
+  // `https://**` with NO path is the explicit "any host, any path" catch-all
+  // (historical behaviour, relied on by the SSRF-gate branch tests). It carries
+  // no literal host suffix, so there is nothing for an attacker to smuggle past
+  // (the authority-confusion attack needs a fixed suffix like `.example.com`
+  // AFTER the `**`), and any actual internal host it admits is still refused
+  // downstream by the SSRF gate. So compile the bare form as a full `.*`.
+  // Anything WITH a path (`https://**/health`) keeps the authority
+  // boundary-contained: `**` in the host is `[^/]*` and cannot swallow the `/`
+  // that ends the authority.
+  if (slashIdx === -1 && afterScheme === "**") {
+    return escapeUriLiteral(scheme) + ".*";
+  }
   const authority = slashIdx === -1 ? afterScheme : afterScheme.slice(0, slashIdx);
   const rest = slashIdx === -1 ? "" : afterScheme.slice(slashIdx);
   return (
