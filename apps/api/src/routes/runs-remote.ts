@@ -40,6 +40,7 @@ import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateConfig, validateInput } from "../services/schema.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
+import { assertApplicationInScope } from "../services/applications.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -150,11 +151,15 @@ export function createRunsRemoteRouter() {
 
       const orgId = c.get("orgId");
       const actor = getActor(c);
-      // The caller binds the run to one of their applications — the header-
-      // derived `c.get("applicationId")` cannot be trusted for a public
-      // write surface, so the body value takes precedence and is re-checked
-      // downstream against app membership by the ownership guard.
+      // The caller binds the run to one of their applications. The body value
+      // is authoritative for this write surface, but it MUST be proven to
+      // belong to the caller's org BEFORE any credential-bearing resolution
+      // runs against it — otherwise a principal in org A could name an
+      // application owned by org B and receive org B's decrypted connection
+      // credentials. Assert org membership up front (404 on mismatch); every
+      // downstream resolver keys on this applicationId.
       const applicationId = body.applicationId;
+      await assertApplicationInScope({ orgId, applicationId });
 
       const src = body.source;
 
@@ -385,7 +390,9 @@ export function createRunsRemoteRouter() {
       const newExpiresAt = new Date(Date.now() + ttl * 1000);
 
       // Update only open sinks (not closed, not already expired) owned by
-      // the caller's org. Mismatched ownership or closed sink → 404, which
+      // the caller's org AND application. Filtering on `applicationId` too
+      // stops an app-A principal from extending an app-B run's sink within
+      // the same org. Mismatched ownership or closed sink → 404, which
       // avoids leaking whether a run exists across tenancies.
       const orgId = c.get("orgId");
       // Bumping `last_heartbeat_at` alongside `sink_expires_at` turns
@@ -401,6 +408,7 @@ export function createRunsRemoteRouter() {
           and(
             eq(runs.id, runId),
             eq(runs.orgId, orgId),
+            eq(runs.applicationId, c.get("applicationId")),
             sql`sink_closed_at IS NULL`,
             sql`sink_expires_at IS NOT NULL`,
           ),

@@ -126,12 +126,16 @@ export const sidecarLaunchSpecSchema = z.looseObject({
  * Safe run-identifier charset. A runId reaches the daemon filesystem
  * verbatim — `join(FIRECRACKER_DATA_DIR, runId)` at boundary creation and
  * `<console-archive>/<runId>.log` at teardown — so a crafted value
- * (`../foo`, `/etc`, an embedded NUL) could escape the run tree. Restrict
- * it to the characters a real platform run id uses. Single source: reused
- * by the boundary-creation ingress AND the console `:id` guard
+ * (`../foo`, `/etc`, an embedded NUL) could escape the run tree. A real
+ * platform run id is `run_<uuidv4>` (`apps/api/src/routes/runs.ts` mints
+ * `run_${crypto.randomUUID()}`), so the id must START with an alphanumeric
+ * and thereafter hold ONLY alphanumerics, `_` and `-`. Crucially this admits
+ * NO `.` (no `..` parent traversal) and no `/`/`\` path separator, defeating
+ * directory escape while still matching every legitimate id. Single source:
+ * reused by the boundary-creation ingress AND the console `:id` guard
  * ({@link CONSOLE_ID_RE}).
  */
-export const RUN_ID_RE = /^[A-Za-z0-9_.-]+$/;
+export const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,127}$/;
 
 export const createBoundaryBodySchema = z.object({
   runId: z.string().min(1).regex(RUN_ID_RE, "runId contains unsafe characters"),

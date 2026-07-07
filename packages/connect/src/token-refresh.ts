@@ -10,6 +10,7 @@ import {
   type ParsedTokenResponse,
 } from "./token-utils.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { oauthEgressFetch } from "./oauth-egress.ts";
 
 export interface RefreshContext {
   /**
@@ -109,7 +110,10 @@ export async function performRefreshTokenExchange(
 
   let response: Response;
   try {
-    response = await fetch(ctx.tokenEndpoint, {
+    // SSRF-guarded: this POST carries refresh_token + client_secret. A blocked
+    // host throws SsrfBlockedError (caught below → `transient`; the message
+    // carries only the guard's host/reason, never the secret body).
+    response = await oauthEgressFetch(ctx.tokenEndpoint, {
       method: "POST",
       headers: buildTokenHeaders(
         tokenAuthMethod,

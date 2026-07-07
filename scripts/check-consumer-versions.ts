@@ -90,9 +90,18 @@ async function main(): Promise<void> {
       try {
         pkg = await fetchPackageJson(consumer.repo, path);
       } catch (err) {
-        console.warn(
-          `  ! ${consumer.repo}/${path} — fetch failed (${err instanceof Error ? err.message : String(err)})`,
-        );
+        // Fail closed: a fetch error (403/rate-limit/outage) means we could
+        // NOT verify this consumer. Under `fail` policy that is a blocking
+        // failure — otherwise a transient GitHub error would let core publish
+        // without ever checking its consumers. `warn`/`off` may still bypass.
+        const detail = err instanceof Error ? err.message : String(err);
+        if (POLICY === "fail") {
+          console.error(`  ✗ ${consumer.repo}/${path} — fetch failed, cannot verify (${detail})`);
+          failures++;
+        } else {
+          console.warn(`  ! ${consumer.repo}/${path} — fetch failed (${detail})`);
+          warnings++;
+        }
         continue;
       }
       if (!pkg) {

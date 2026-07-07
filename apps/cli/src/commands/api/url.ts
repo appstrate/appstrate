@@ -23,18 +23,16 @@ export class HostMismatchError extends Error {
 
 export function buildUrl(instance: string, path: string, queryPairs: string[]): string {
   const instanceOrigin = new URL(instance).origin;
-  let u: URL;
-  // Detect absolute URLs (scheme://…) and validate the origin before
-  // letting `new URL(path, instance)` silently swallow them — without
-  // this guard an agent pasting `appstrate api https://evil/x` would
-  // send the keyring-backed bearer to a foreign host.
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) {
-    u = new URL(path);
-    if (u.origin !== instanceOrigin) {
-      throw new HostMismatchError(instanceOrigin, u.origin);
-    }
-  } else {
-    u = new URL(path, instance);
+  // Resolve the target against the instance base, then ALWAYS validate the
+  // origin. Absolute URLs (`https://evil/x`), protocol-relative (`//evil/x`),
+  // and backslash forms (`\\evil\x`, which WHATWG normalizes to `//evil/x`)
+  // all resolve to a foreign origin here — gating the check behind a
+  // scheme regex let those latter two slip through and leak the
+  // keyring-backed bearer to a foreign host. Relative paths (`/api/…`)
+  // resolve to the instance origin and pass.
+  const u = new URL(path, instance);
+  if (u.origin !== instanceOrigin) {
+    throw new HostMismatchError(instanceOrigin, u.origin);
   }
   for (const raw of queryPairs) {
     const eq = raw.indexOf("=");

@@ -489,6 +489,12 @@ const envSchema = z
     // Outbound proxy
     PROXY_URL: z.string().optional(),
 
+    // OAuth internal-IdP SSRF allowlist (opt-in). Comma-separated hostnames the
+    // operator explicitly trusts on a private address — secret-bearing OAuth
+    // egress (token exchange/refresh, issuer discovery) bypasses the SSRF guard
+    // for these hosts so self-hosted deployments can reach an internal IdP.
+    OAUTH_ALLOWED_INTERNAL_IDP_HOSTS: z.string().optional(),
+
     // Run token signing (optional — if unset, run tokens are unsigned).
     //
     // Comma-separated keyring for online rotation (single value = keyring of

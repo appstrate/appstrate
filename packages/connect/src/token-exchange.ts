@@ -14,6 +14,7 @@
  */
 
 import { OAuthCallbackError } from "./oauth.ts";
+import { oauthEgressFetch } from "./oauth-egress.ts";
 import {
   buildTokenBody,
   buildTokenHeaders,
@@ -119,7 +120,10 @@ export async function exchangeAuthorizationCode(
 
   let response: Response;
   try {
-    response = await fetch(input.tokenEndpoint, {
+    // SSRF-guarded: this POST carries client_secret. A blocked host throws
+    // SsrfBlockedError (caught below and surfaced as a `transient` failure —
+    // the classification summary in the message, never the secret body).
+    response = await oauthEgressFetch(input.tokenEndpoint, {
       method: "POST",
       headers: buildTokenHeaders(
         // "none" maps to "no auth header" — buildTokenHeaders treats

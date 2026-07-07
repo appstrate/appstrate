@@ -32,6 +32,13 @@ export type ChatEnv = {
     orgRole?: string;
     orgName?: string;
     orgSlug?: string;
+    /**
+     * Caller's resolved RBAC permission set (from the platform auth pipeline).
+     * Forwarded into the scoped platform-MCP bearer the subscription engine
+     * hands its external binary, so the meta-tools authorize with exactly the
+     * caller's own permissions — no amplification.
+     */
+    permissions?: Set<string>;
   };
 };
 

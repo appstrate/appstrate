@@ -336,6 +336,36 @@ async function materializeFileMountsInContainer(
   return hostTempFiles;
 }
 
+/**
+ * Write integration credentials to a private, 0600 `docker --env-file` on the
+ * host, returning the file path plus its containing temp dir (for cleanup).
+ *
+ * Why a file rather than `-e KEY=VALUE`: command-line args are world-readable
+ * via `/proc/<pid>/cmdline`, so passing secrets on the docker CLI's argv leaks
+ * the plaintext to any local process for the duration of `docker create`. An
+ * env-file keeps the values off argv; the caller reads it once (create bakes
+ * the env into the container config) and deletes it immediately after.
+ *
+ * The file uses docker's `KEY=VALUE`-per-line format. Values are written
+ * verbatim; docker parses each line up to the first newline, so a credential
+ * value must not itself contain a newline (integration credentials are tokens/
+ * keys — single-line by construction). Created with mode 0600 (+ explicit
+ * chmod, defeating a permissive umask) so only the sidecar uid can read it.
+ */
+async function writeSecretEnvFile(
+  env: Record<string, string>,
+): Promise<{ path: string; dir: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "appstrate-env-"));
+  const path = join(dir, "integration.env");
+  const body = Object.entries(env)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+  await writeFile(path, body, { mode: 0o600 });
+  // Explicit chmod in case the process umask stripped bits at create time.
+  await chmod(path, 0o600);
+  return { path, dir };
+}
+
 export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   const containerIds: string[] = [];
   /** Per-spawn host temp directories holding decoded fileMounts bytes. */
@@ -373,17 +403,22 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
       const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
 
+      // Only NON-secret routing env rides `-e` on the command line. The
+      // integration credentials (`spec.spawnEnv`) are delivered via a 0600
+      // `--env-file` instead — see `writeSecretEnvFile` and the create call
+      // below. Passing them as `-e KEY=VALUE` would expose the plaintext in
+      // the docker CLI's argv (`/proc/<pid>/cmdline`, world-readable) for the
+      // create's lifetime.
       const envFlags: string[] = [];
-      for (const [k, v] of Object.entries(spec.spawnEnv)) {
-        envFlags.push("-e", `${k}=${v}`);
-      }
       if (egress) {
         // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
+        // The proxy URL is `http://sidecar:<port>` (non-secret routing info).
         for (const [k, v] of Object.entries(buildProxyEnvBlock(egress.proxyUrl))) {
           envFlags.push("-e", `${k}=${v}`);
         }
         // CA trust ONLY for a TLS-terminating MITM listener; a plain CONNECT
         // egress listener has a null caCertHostPath → no CA env, no cert mint.
+        // The CA env values are container file paths (non-secret).
         if (egress.caCertHostPath !== null) {
           for (const [k, v] of Object.entries(buildCaEnvBlock(CA_CONTAINER_PATH))) {
             envFlags.push("-e", `${k}=${v}`);
@@ -439,27 +474,49 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
 
       const networkFlags: string[] = runNetwork ? ["--network", runNetwork] : [];
 
-      const containerId = await dockerExec([
-        "create",
-        "--rm",
-        "-i",
-        "--name",
-        containerName,
-        "--security-opt",
-        "no-new-privileges",
-        "--cap-drop",
-        "ALL",
-        "--memory",
-        "256m",
-        "--pids-limit",
-        "128",
-        ...networkFlags,
-        ...volumeFlags,
-        ...labelFlags,
-        ...envFlags,
-        plan.image,
-        plan.containerEntry,
-      ]);
+      // Deliver integration credentials off-argv via a 0600 env-file. `docker
+      // create` reads the file synchronously and bakes the values into the
+      // container config, so we can (and do) delete it immediately after —
+      // minimising how long the decrypted secrets sit on the host fs. The
+      // container sees exactly the same env vars as before.
+      const envFileFlags: string[] = [];
+      let secretEnvDir: string | null = null;
+      if (Object.keys(spec.spawnEnv).length > 0) {
+        const written = await writeSecretEnvFile(spec.spawnEnv);
+        secretEnvDir = written.dir;
+        envFileFlags.push("--env-file", written.path);
+      }
+
+      let containerId: string;
+      try {
+        containerId = await dockerExec([
+          "create",
+          "--rm",
+          "-i",
+          "--name",
+          containerName,
+          "--security-opt",
+          "no-new-privileges",
+          "--cap-drop",
+          "ALL",
+          "--memory",
+          "256m",
+          "--pids-limit",
+          "128",
+          ...networkFlags,
+          ...volumeFlags,
+          ...labelFlags,
+          ...envFileFlags,
+          ...envFlags,
+          plan.image,
+          plan.containerEntry,
+        ]);
+      } finally {
+        // Wipe the decrypted-secret env-file whether create succeeded or not.
+        if (secretEnvDir) {
+          await rm(secretEnvDir, { recursive: true, force: true }).catch(() => {});
+        }
+      }
       containerIds.push(containerId);
 
       // docker cp <src>/. <id>:/<dst>/  — the trailing `/.` semantics
@@ -491,9 +548,10 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       const transport = new SubprocessTransport({
         command: "docker",
         args: ["start", "-ai", containerId],
-        // `env` is NOT passed to the docker CLI — credentials are baked
-        // into the container at create-time via `-e`. The CLI only needs
-        // PATH/HOME/DOCKER_HOST to find the daemon socket.
+        // `env` is NOT passed to the docker CLI — credentials were baked
+        // into the container at create-time via the (now-deleted) 0600
+        // `--env-file`. The CLI only needs PATH/HOME/DOCKER_HOST to find
+        // the daemon socket.
         envPassthrough: ["PATH", "HOME", "DOCKER_HOST"],
         onStderrLine,
       });

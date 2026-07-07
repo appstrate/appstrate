@@ -33,7 +33,9 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join, normalize } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { unzipSync } from "fflate";
+
+import { guardedFetch } from "@appstrate/core/ssrf";
+import { unzipBounded } from "@appstrate/core/zip";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -279,7 +281,16 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
   // to a path-safe slug. The directory is private to this run anyway.
   const safe = namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   const root = await mkdtemp(join(tmpdir(), `afps-integ-${safe}-`));
-  const files = unzipSync(bytes);
+  // Memory-bounded streaming unzip: a hostile/oversized bundle can't OOM the
+  // sidecar (decompression-bomb floor). Caps chosen for a realistic mcp-server
+  // bundle (multi-MB code + deps) with generous headroom: 200 MiB total across
+  // at most 10k entries. `unzipBounded` throws `DecompressionLimitError` on a
+  // budget breach; it excludes directory entries but does NOT sanitize paths —
+  // the per-entry zip-slip guard below is preserved verbatim.
+  const files = unzipBounded(bytes, {
+    maxDecompressedBytes: 200 * 1024 * 1024,
+    maxFiles: 10_000,
+  });
   for (const [rel, contents] of Object.entries(files)) {
     if (rel.endsWith("/")) continue;
     const relPosix = rel.split("\\").join("/");
@@ -462,7 +473,16 @@ export async function connectRemoteHttpIntegration(
         const headers = new Headers(init?.headers);
         const h = readHeader();
         if (h) headers.set(h.name, h.value);
-        return fetch(input, { ...init, headers });
+        // SSRF-guard the egress: `guardedFetch` does per-hop DNS re-checking,
+        // manual redirect following, and strips userinfo — throwing
+        // `SsrfBlockedError` on private/loopback/link-local hosts. This is the
+        // only unguarded sidecar egress path (the MITM/CONNECT listeners already
+        // resolve+check). `guardedFetch` accepts `string | URL`; the MCP
+        // transports always call with a URL/string target (headers/body ride in
+        // `init`), so a stray `Request` is normalised to its URL for the type.
+        const target: string | URL =
+          typeof input === "string" || input instanceof URL ? input : input.url;
+        return guardedFetch(target, { ...init, headers });
       };
       let res = await send();
       if (res.status === 401 && source.refreshOnUnauthorized) {

@@ -82,6 +82,10 @@ export function unzipBounded(
     const chunks: Uint8Array[] = [];
     let fileSize = 0;
     file.ondata = (err, chunk, final) => {
+      // Once a limit/corruption verdict is set, fflate may still invoke this
+      // callback again within the same push (as it unwinds the inflate) — never
+      // overwrite the first verdict; just re-throw it so the reason is stable.
+      if (caught) throw caught;
       if (err) {
         caught = new DecompressionLimitError("corrupt-archive", err.message);
         throw caught;

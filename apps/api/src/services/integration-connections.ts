@@ -39,7 +39,7 @@ import {
   DynamicClientRegistrationError,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { guardedFetch, isBlockedUrl } from "@appstrate/core/ssrf";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -1086,8 +1086,16 @@ export function usesAutoProvisionedClient(
  * remote-MCP discovery chain probes manifest- and *server*-derived URLs (RFC
  * 9728 well-known + the `WWW-Authenticate` challenge's `resource_metadata`,
  * then RFC 8414 metadata), so each GET must be guarded — not just the
- * registration POST. Mirrors the per-request `isBlockedUrl` posture used for
- * the userinfo fetch and the credential proxy. `discoverProtectedResourceMetadata`
+ * registration POST.
+ *
+ * Delegates to the shared {@link guardedFetch} primitive, which does per-hop
+ * DNS resolution + blocklist checks and follows redirects MANUALLY (each hop
+ * re-checked), strips userinfo/fragment, and rejects non-http(s) schemes. This
+ * is strictly stronger than the previous literal-only `isBlockedUrl` + raw
+ * `fetch` posture, which resolved no DNS (a public host with an A record
+ * pointing at `169.254.169.254`/RFC1918 sailed through) and left `redirect`
+ * unpinned (Bun follows 3xx by default, so a `302` to a private host was
+ * followed unchecked — SSRF + DNS-rebind). `discoverProtectedResourceMetadata`
  * is best-effort (swallows fetch errors → returns `null`), so a blocked URL
  * cleanly degrades to "discovery failed" rather than throwing.
  */
@@ -1096,10 +1104,7 @@ const ssrfGuardedFetch = (async (
   init?: Parameters<typeof fetch>[1],
 ) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (isBlockedUrl(url)) {
-    throw new Error(`SSRF guard: refusing to fetch blocked URL ${url}`);
-  }
-  return fetch(input, init);
+  return guardedFetch(url, init, { logger });
   // `preconnect` is never invoked by the discovery helpers; cast to satisfy the
   // `typeof fetch` shape Bun's lib declares.
 }) as typeof fetch;

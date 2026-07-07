@@ -55,7 +55,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
-import { randomBytes } from "node:crypto";
 import { dirname, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { getFirecrackerEnv, jailUidRange } from "./runner/host-env.ts";
@@ -901,8 +900,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // (join(dataDir, runId) below, <archive>/<runId>.log at teardown).
     if (!RUN_ID_RE.test(runId)) {
       throw new Error(
-        `Firecracker orchestrator: runId "${runId}" has characters outside the ` +
-          `safe set [A-Za-z0-9_.-] — refusing (it reaches the filesystem verbatim)`,
+        `Firecracker orchestrator: runId "${runId}" is outside the safe ` +
+          `run-identifier charset — refusing (it reaches the filesystem verbatim)`,
       );
     }
     // One boundary per runId, ever-live. Checked here and reserved below in
@@ -941,7 +940,16 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       const runDir = join(resolve(fcEnv.FIRECRACKER_DATA_DIR), runId);
       await mkdir(runDir, { recursive: true, mode: 0o700 });
 
-      const subnet = this.allocator.allocate();
+      // allocate() can throw (subnet pool exhausted) AFTER the mkdir above —
+      // reclaim the just-created runDir so a failed admission leaves nothing
+      // on disk (the inner try below only covers post-allocate failures).
+      let subnet: RunSubnet;
+      try {
+        subnet = this.allocator.allocate();
+      } catch (err) {
+        await rm(runDir, { recursive: true, force: true }).catch(() => {});
+        throw err;
+      }
       let jail: JailPaths | undefined;
       try {
         // Compute the jail layout BEFORE the TAP exists: computeJailPaths
@@ -1378,7 +1386,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       );
     }
 
-    vm.exitNonce = randomBytes(16).toString("hex");
+    vm.exitNonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+      b.toString(16).padStart(2, "0"),
+    ).join("");
     // Remote-platform mode: the guest firewall's sink-POST allow and the
     // supervisor's platform endpoint must target the override, not the
     // host lo alias (which nothing listens on in that topology).
@@ -2240,6 +2250,16 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    * against a run-identifier charset by the route.
    */
   async readConsole(id: string, tailBytes: number): Promise<string | null> {
+    // Defense in depth: the daemon route guards `:id` with CONSOLE_ID_RE, but
+    // the smoke harness drives this engine directly and `id` reaches the
+    // filesystem verbatim (join(archiveDir, `${id}.log`) below). Re-validate
+    // against the same run-identifier charset — mirror createIsolationBoundary.
+    if (!RUN_ID_RE.test(id)) {
+      throw new Error(
+        `Firecracker orchestrator: console runId "${id}" is outside the safe ` +
+          `run-identifier charset — refusing (it reaches the filesystem verbatim)`,
+      );
+    }
     const bytes = Math.min(Math.max(tailBytes, 1), CONSOLE_MAX_TAIL_BYTES);
     const vm = this.vms.get(id);
     if (vm) {

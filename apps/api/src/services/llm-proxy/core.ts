@@ -27,7 +27,7 @@ import { parseProxyRequest } from "./helpers.ts";
 import { forwardMeteredResponse } from "./metering.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 
@@ -172,6 +172,20 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     logger.error("llm-proxy: refused blocked upstream (SSRF)", { presetId, upstreamUrl });
     // The resolved base URL is the real backing endpoint — server-log-only
     // (logged above); the caller-facing message must not embed it.
+    throw invalidRequest(`Model "${presetId}" resolves to a blocked address — refusing to proxy.`);
+  }
+  // DNS-rebind-safe gate: the literal check above is string-only, so a public
+  // hostname whose A/AAAA record resolves to a private/loopback/link-local
+  // address slips through it. Resolve + re-check the host before we ever fetch;
+  // fail closed with the same caller-facing error (the reason and backing
+  // endpoint stay server-log-only — never leaked to the caller).
+  const upstreamHostCheck = await resolveAndCheckHost(new URL(upstreamUrl).hostname);
+  if (upstreamHostCheck.blocked) {
+    logger.error("llm-proxy: refused blocked upstream (SSRF DNS)", {
+      presetId,
+      upstreamUrl,
+      reason: upstreamHostCheck.reason,
+    });
     throw invalidRequest(`Model "${presetId}" resolves to a blocked address — refusing to proxy.`);
   }
 

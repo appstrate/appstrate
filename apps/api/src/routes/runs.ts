@@ -26,7 +26,8 @@ import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { getOrchestrator } from "../services/orchestrator/index.ts";
+import { stopWorkloadAndWait } from "../services/stop-workload.ts";
+import { logger } from "../lib/logger.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import type { IntegrationManifestCache } from "../services/integration-service.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
@@ -412,15 +413,17 @@ export function createRunsRouter() {
       throw conflict("not_cancellable", "This run cannot be cancelled");
     }
 
-    // Abort in-flight fetch calls + stop the container BEFORE synthesising
-    // the terminal so the runner stops emitting metric events and the
-    // sidecar can be reclaimed promptly. `finalizeRun` then drains any
-    // events that landed before this point, computes the authoritative
-    // cost from `llm_usage`, and writes the terminal state under CAS.
+    // Abort in-flight fetch calls + stop the workload and WAIT (bounded) for
+    // the stop to ack BEFORE synthesising the terminal. Closing the sink /
+    // writing the terminal while the workload still runs with live credentials
+    // is a credential-exposure window; awaiting the stop closes it in the
+    // common case. On a wedged runtime the helper times out and returns false,
+    // and we still force-finalize (liveness) rather than leave the run stuck.
     abortRun(runId);
-    getOrchestrator()
-      .stopByRunId(runId)
-      .catch(() => {});
+    const stopped = await stopWorkloadAndWait(runId);
+    if (!stopped) {
+      logger.warn("run cancel: workload stop unacknowledged, force-finalizing", { runId });
+    }
 
     await synthesiseFinalize(runId, {
       status: "cancelled",

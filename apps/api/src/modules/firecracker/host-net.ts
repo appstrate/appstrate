@@ -300,8 +300,10 @@ export async function teardownHostNetwork(exec: HostExec): Promise<void> {
  * guest's (or any foreign) source IP. Legitimate traffic always passes —
  * the guest's only valid source is its /30 address, which is directly
  * connected on this interface (this includes replies to the platform's
- * loopback alias). Effective rp_filter is max(conf.all, conf.<iface>), so
- * the per-interface strict setting holds regardless of the host default.
+ * loopback alias). Effective rp_filter is max(conf.all, conf.<iface>) — a
+ * loose host default (conf.all.rp_filter=2) would OVERRIDE the per-interface
+ * strict value, so we pin BOTH `conf.all` and `conf.<iface>` to strict (1)
+ * when bringing the TAP up (see createTap).
  */
 export async function createTap(
   exec: HostExec,
@@ -326,6 +328,11 @@ export async function createTap(
     ].join("\n") + "\n";
   try {
     await exec.run(["ip", "-batch", "-"], { stdin: batch });
+    // The kernel uses max(conf.all.rp_filter, conf.<iface>.rp_filter) as the
+    // effective value, so a loose host default (all.rp_filter=2) would defeat
+    // the per-interface strict setting below. Pin conf.all to strict (1) too
+    // so anti-spoofing holds regardless of the host's global default.
+    await exec.run(["sysctl", "-qw", "net.ipv4.conf.all.rp_filter=1"]);
     await exec.run(["sysctl", "-qw", `net.ipv4.conf.${subnet.tapDevice}.rp_filter=1`]);
   } catch (err) {
     // Half-created TAP would leak until the next boot sweep — reclaim now

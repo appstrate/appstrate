@@ -48,6 +48,7 @@ import {
   type McpServerManifest,
 } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
+import { resolveAndCheckHost } from "@appstrate/core/ssrf";
 
 import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { logger } from "../lib/logger.ts";
@@ -271,6 +272,35 @@ async function resolveOne(
     if (!remote) {
       logger.warn("remote-source integration missing remote.url; skipping", { integrationId });
       return null;
+    }
+    // P0-2 — SSRF floor on the manifest-supplied remote MCP URL. The sidecar
+    // opens a credential-bearing Streamable HTTP / SSE client against this URL,
+    // so validate it here (install/boot resolution) before it reaches the wire:
+    //   - require https:// — no plaintext egress for an authenticated MCP client
+    //     (no dev carve-out exists in this resolver; https-only).
+    //   - reject any host that resolves to a private / loopback / link-local /
+    //     cloud-metadata address (DNS-rebind-safe check, fails closed).
+    // A malformed / non-https / blocked URL throws a clear error; the caller
+    // (`resolveIntegrationSpawns`) turns it into a logged per-integration skip,
+    // so the run never spawns an unguarded outbound MCP client.
+    let parsedRemote: URL;
+    try {
+      parsedRemote = new URL(remote.url);
+    } catch {
+      throw new Error(
+        `remote-source integration '${integrationId}' declares an invalid source.remote.url`,
+      );
+    }
+    if (parsedRemote.protocol !== "https:") {
+      throw new Error(
+        `remote-source integration '${integrationId}' declares a non-https source.remote.url; only https:// is allowed for remote MCP servers`,
+      );
+    }
+    const remoteHostCheck = await resolveAndCheckHost(parsedRemote.hostname);
+    if (remoteHostCheck.blocked) {
+      throw new Error(
+        `remote-source integration '${integrationId}' source.remote.url host '${parsedRemote.hostname}' is blocked by the SSRF guard (${remoteHostCheck.reason})`,
+      );
     }
     // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`. The
     // manifest schema enforces the enum + `required`; we forward the

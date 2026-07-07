@@ -120,4 +120,10 @@ export function applySpecToSidecarEnv(
   if (spec.connectLoginSpec) {
     target.CONNECT_LOGIN_JSON = JSON.stringify(spec.connectLoginSpec);
   }
+  // P4 — result-channel key. The sidecar encrypts the captured credential
+  // bundle with this AES-256 key before emitting the APPSTRATE_CONNECT_RESULT
+  // sentinel, keeping plaintext credentials off the captured stdout stream.
+  if (spec.connectResultKey) {
+    target.CONNECT_RESULT_KEY = spec.connectResultKey;
+  }
 }

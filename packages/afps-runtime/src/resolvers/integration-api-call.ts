@@ -510,6 +510,24 @@ export interface RemoteAppstrateIntegrationResolverOptions {
  * the resolved connection's `authorized_uris` and injects the configured
  * header, identically across every `{ns}__api_call` surface.
  */
+/**
+ * Reserved Appstrate transport headers (lowercased). These are imposed by the
+ * platform to route and authenticate the credential-proxy call. Agent-supplied
+ * `req.headers` must NEVER override them — HTTP header names are
+ * case-insensitive, so the comparison is done on lowercased names — otherwise a
+ * tool call could redirect the credential proxy to a different target /
+ * integration or spoof the caller identity.
+ */
+const RESERVED_TRANSPORT_HEADERS: ReadonlySet<string> = new Set([
+  "authorization",
+  "x-application-id",
+  "x-org-id",
+  "x-session-id",
+  "x-integration-id",
+  "x-target",
+  "appstrate-user",
+]);
+
 export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallResolver {
   private readonly instance: string;
   private readonly apiKey: string;
@@ -564,7 +582,16 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
         allowStreaming: true,
         workspace: ctx.workspace,
       });
+      // Apply the agent-supplied headers FIRST, with any reserved transport
+      // header stripped (case-insensitively), then set the platform-controlled
+      // headers LAST so they always win and cannot be overridden by a tool call.
+      const sanitizedAgentHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(req.headers ?? {})) {
+        if (RESERVED_TRANSPORT_HEADERS.has(key.toLowerCase())) continue;
+        sanitizedAgentHeaders[key] = value;
+      }
       const baseHeaders: Record<string, string> = {
+        ...sanitizedAgentHeaders,
         Authorization: `Bearer ${this.apiKey}`,
         "X-Application-Id": this.applicationId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
@@ -573,7 +600,6 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
         "X-Target": req.target,
         ...(this.endUserId ? { "Appstrate-User": this.endUserId } : {}),
         ...this.extraHeaders,
-        ...(req.headers ?? {}),
       };
 
       const wantsFile = typeof req.responseMode?.toFile === "string";

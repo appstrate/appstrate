@@ -89,7 +89,7 @@ export function createEndUsersRouter() {
   );
 
   // GET /api/end-users — list end-users in the application (cursor-based pagination)
-  router.get("/", rateLimit(300), async (c) => {
+  router.get("/", rateLimit(300), requirePermission("end-users", "read"), async (c) => {
     const scope = getAppScope(c);
     const limit = c.req.query("limit") ? Number(c.req.query("limit")) : undefined;
     const startingAfter = c.req.query("startingAfter");
@@ -123,7 +123,7 @@ export function createEndUsersRouter() {
   });
 
   // GET /api/end-users/:id — get a single end-user
-  router.get("/:id", rateLimit(300), async (c) => {
+  router.get("/:id", rateLimit(300), requirePermission("end-users", "read"), async (c) => {
     const scope = getAppScope(c);
     const endUserId = c.req.param("id")!;
     const result = await getEndUser(scope, endUserId);

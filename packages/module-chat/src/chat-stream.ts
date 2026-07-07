@@ -32,7 +32,7 @@ import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
 import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
-import { mintLoopbackToken } from "./loopback-auth.ts";
+import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { buildTranscriptPrompt } from "./transcript.ts";
 import { SYSTEM_PROMPT, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
@@ -242,11 +242,6 @@ export async function handleChatStream(
   const chatEngine = deps.chatEngine(chosen.providerId ?? "");
   const isSubscription = Boolean(chatEngine);
 
-  // Platform MCP wiring shared by both engines: the meta-tools live at
-  // /api/mcp/o/:org and run with the caller's own credentials (RBAC fidelity).
-  const mcpHeaders: Record<string, string> = { ...headers };
-  if (applicationId) mcpHeaders["x-application-id"] = applicationId;
-
   // ── Preamble phase B (parallel) ──────────────────────────────────────────
   // The caller-context block (both paths) and the platform MCP probe (ai-sdk
   // path only) are independent — run them together.
@@ -385,6 +380,33 @@ export async function handleChatStream(
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
       { ttlMs: ENGINE_LOOPBACK_TTL_MS },
     );
+    // The EXTERNAL subscription binary opens its OWN connection to the platform
+    // MCP (`/api/mcp/o/:org`), and its run-and-wait bridge hits platform run
+    // routes with these same headers. It must NEVER receive the caller's raw
+    // cookie/Authorization — those are reusable well beyond chat scope and
+    // across every platform route. Hand it a short-lived, process-local bearer
+    // that (a) carries EXACTLY the caller's already-resolved permissions, so the
+    // meta-tools authorize with full RBAC fidelity and zero amplification, and
+    // (b) does NOT grant first-party-loopback, so it can't be replayed against
+    // the subscription LLM gateway. Only the org/app scoping headers ride with
+    // it — no cookie, no raw Authorization. The TTL spans the whole turn (the
+    // binary bakes the header once and may reconnect between steps).
+    const mcpToken = mintMcpLoopbackToken(
+      {
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        orgId,
+        orgRole,
+        permissions: [...(c.get("permissions") ?? [])],
+      },
+      { ttlMs: ENGINE_LOOPBACK_TTL_MS },
+    );
+    const mcpHeaders: Record<string, string> = {
+      Authorization: `Bearer ${mcpToken}`,
+      "x-org-id": orgId,
+    };
+    if (applicationId) mcpHeaders["x-application-id"] = applicationId;
     try {
       return await finalize(
         chatEngine.handler({

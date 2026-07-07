@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeAll } from "bun:test";
+import { createCipheriv, randomBytes } from "node:crypto";
 import { _resetCacheForTesting } from "@appstrate/env";
 import {
   registerOrchestrator,
@@ -70,6 +71,19 @@ const fakeMcpResolver: McpServerResolver = async () => ({
   server: { type: "python", entry_point: "./server.py" },
 });
 
+/**
+ * Mirror of the sidecar's result-channel encryption
+ * (`runtime-pi/sidecar/server.ts`): AES-256-GCM, wire =
+ * base64(iv‖authTag‖ciphertext). Lets the tests build the ciphertext the
+ * launcher's `parseConnectResult` decrypts.
+ */
+function encryptConnectResult(bundle: unknown, key: Buffer): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(bundle), "utf8"), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64");
+}
+
 function execution(): ConnectToolExecution {
   return {
     scope: { orgId: "o", applicationId: "a" },
@@ -94,10 +108,18 @@ interface MockCalls {
 
 /**
  * Build a mock orchestrator that yields `stdoutLines` and exits with
- * `exitCode`. When `hang` is true, `waitForExit` never resolves (drives the
- * timeout path) until `stopWorkload` is called.
+ * `exitCode`. When `resultBundle` is set, the mock captures the
+ * `connectResultKey` the launcher passes to `createSidecar` and emits a REAL
+ * encrypted `APPSTRATE_CONNECT_RESULT:` sentinel for it (exercising the
+ * encrypt→decrypt round-trip). When `hang` is true, `waitForExit` never
+ * resolves (drives the timeout path) until `stopWorkload` is called.
  */
-function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang?: boolean }): {
+function mockOrchestrator(opts: {
+  stdoutLines?: string[];
+  resultBundle?: unknown;
+  exitCode?: number;
+  hang?: boolean;
+}): {
   orch: RunOrchestrator;
   calls: MockCalls;
 } {
@@ -109,6 +131,7 @@ function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang
     removedBoundaries: 0,
   };
   let stopped = false;
+  let capturedResultKey: Buffer | undefined;
 
   const orch: Partial<RunOrchestrator> = {
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
@@ -131,6 +154,9 @@ function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang
       spec: SidecarLaunchSpec,
     ): Promise<WorkloadHandle> {
       calls.sidecarSpecs.push(spec);
+      if (spec.connectResultKey) {
+        capturedResultKey = Buffer.from(spec.connectResultKey, "base64");
+      }
       return { id: `sc-${runId}`, runId, role: "sidecar" };
     },
     async startWorkload(): Promise<void> {
@@ -161,7 +187,12 @@ function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang
       return opts.exitCode ?? 0;
     },
     async *streamLogs(): AsyncGenerator<string> {
-      for (const line of opts.stdoutLines) yield line;
+      // Emit the encrypted result sentinel keyed by the launcher-supplied
+      // connectResultKey (captured in createSidecar) so the round-trip is real.
+      if (opts.resultBundle !== undefined && capturedResultKey) {
+        yield `APPSTRATE_CONNECT_RESULT:${encryptConnectResult(opts.resultBundle, capturedResultKey)}`;
+      }
+      for (const line of opts.stdoutLines ?? []) yield line;
     },
   };
 
@@ -223,29 +254,48 @@ describe("buildConnectLoginSpec", () => {
 });
 
 describe("parseConnectResult", () => {
-  it("parses the result sentinel into a CredentialBundle", () => {
+  const KEY = randomBytes(32);
+
+  it("decrypts the result sentinel into a CredentialBundle", () => {
     const bundle = { outputs: { session_token: "sess-1" }, expiresAt: null };
-    const out = parseConnectResult([
-      "boot log",
-      `APPSTRATE_CONNECT_RESULT:${JSON.stringify(bundle)}`,
-    ]);
+    const out = parseConnectResult(
+      ["boot log", `APPSTRATE_CONNECT_RESULT:${encryptConnectResult(bundle, KEY)}`],
+      KEY,
+    );
     expect(out.outputs.session_token).toBe("sess-1");
   });
 
   it("throws on the error sentinel", () => {
-    expect(() => parseConnectResult(["APPSTRATE_CONNECT_ERROR:login tool 500"])).toThrow(
+    expect(() => parseConnectResult(["APPSTRATE_CONNECT_ERROR:login tool 500"], KEY)).toThrow(
       /connect-run failed: login tool 500/,
     );
   });
 
   it("throws when no sentinel was emitted", () => {
-    expect(() => parseConnectResult(["just boot logs", "more logs"])).toThrow(
+    expect(() => parseConnectResult(["just boot logs", "more logs"], KEY)).toThrow(
       /without emitting a result/,
     );
   });
 
-  it("throws on invalid JSON in the result sentinel", () => {
-    expect(() => parseConnectResult(["APPSTRATE_CONNECT_RESULT:{not json}"])).toThrow(
+  it("throws when the result sentinel cannot be decrypted (wrong key)", () => {
+    const bundle = { outputs: { session_token: "sess-1" }, expiresAt: null };
+    const line = `APPSTRATE_CONNECT_RESULT:${encryptConnectResult(bundle, KEY)}`;
+    expect(() => parseConnectResult([line], randomBytes(32))).toThrow(/could not be decrypted/);
+  });
+
+  it("throws on invalid ciphertext framing", () => {
+    expect(() => parseConnectResult(["APPSTRATE_CONNECT_RESULT:not-base64-payload"], KEY)).toThrow(
+      /could not be decrypted/,
+    );
+  });
+
+  it("throws on valid ciphertext wrapping invalid JSON", () => {
+    // Encrypt a non-JSON plaintext under the right key: decrypt succeeds, JSON.parse fails.
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", KEY, iv);
+    const ct = Buffer.concat([cipher.update("{not json}", "utf8"), cipher.final()]);
+    const payload = Buffer.concat([iv, cipher.getAuthTag(), ct]).toString("base64");
+    expect(() => parseConnectResult([`APPSTRATE_CONNECT_RESULT:${payload}`], KEY)).toThrow(
       /invalid JSON/,
     );
   });
@@ -255,7 +305,7 @@ describe("createConnectRunExecutor.run", () => {
   it("builds the spec, launches a connect-mode sidecar, and returns the bundle", async () => {
     const bundle = { outputs: { session_token: "sess-1" }, expiresAt: null };
     const { orch, calls } = mockOrchestrator({
-      stdoutLines: [`APPSTRATE_CONNECT_RESULT:${JSON.stringify(bundle)}`],
+      resultBundle: bundle,
       exitCode: 0,
     });
     const executor = createConnectRunExecutor({
@@ -266,6 +316,8 @@ describe("createConnectRunExecutor.run", () => {
     const result = await executor.run(execution());
 
     expect(result.outputs.session_token).toBe("sess-1");
+    // The launch spec carries a 32-byte (base64) result-channel key.
+    expect(Buffer.from(calls.sidecarSpecs[0]!.connectResultKey!, "base64").length).toBe(32);
     // One boundary + one sidecar, started once.
     expect(calls.createdBoundaries.length).toBe(1);
     expect(calls.sidecarSpecs.length).toBe(1);

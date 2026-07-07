@@ -111,6 +111,20 @@ export interface SidecarLaunchSpec {
    * is the decrypted login secret) and never logged.
    */
   connectLoginSpec?: IntegrationSpawnSpec;
+  /**
+   * P4 — connect-run result-channel key. Set only alongside
+   * {@link connectLoginSpec}. A base64-encoded 32-byte AES-256 key the
+   * launcher generates per connect-run and hands the sidecar (as the
+   * `CONNECT_RESULT_KEY` env var) so the sidecar can encrypt the captured
+   * credential bundle before writing it to its `APPSTRATE_CONNECT_RESULT:`
+   * sentinel line. The sidecar's stdout is captured by the orchestrator (Docker
+   * logging driver → log collection in prod); encrypting the bundle keeps the
+   * plaintext credential off that surface. The launcher retains the key
+   * in-memory and decrypts the sentinel — the key itself is never serialized to
+   * the bundle, logged, or persisted. Same trust channel as `connectLoginSpec`
+   * (both ride sidecar-spawn env). Omitted for non-connect runs.
+   */
+  connectResultKey?: string;
 }
 
 /**

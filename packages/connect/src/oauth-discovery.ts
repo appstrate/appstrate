@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { oauthEgressFetch } from "./oauth-egress.ts";
+
 /**
  * Discovery-first OAuth endpoint resolution (RFC 8414 / OIDC Discovery 1.0).
  *
@@ -330,13 +332,15 @@ interface DiscoveryDocument {
 
 /** Best-effort fetch + parse of a discovery document. Returns `null` on any failure. */
 async function fetchDiscoveryDocument(url: string): Promise<DiscoveryDocument | null> {
-  // NB: deliberately NOT SSRF-guarded. The probe host comes from the
-  // manifest-author-controlled `issuer` (not agent input), the token EXCHANGE
-  // that follows POSTs to the same host unguarded, and self-hosted deployments
-  // legitimately run an internal IdP on a private address — blocking private
-  // targets here would break those without closing the (publish-time) hole.
+  // SSRF-guarded, matching the now-guarded token exchange to the same host.
+  // The probe host comes from the manifest-author-controlled `issuer`; a host
+  // resolving to a private/link-local/metadata address makes `oauthEgressFetch`
+  // throw `SsrfBlockedError`, which the catch below turns into the same
+  // best-effort `null` as any other discovery failure. Self-hosted deployments
+  // that legitimately run an internal IdP opt that host into the SSRF bypass via
+  // `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS`.
   try {
-    const res = await fetch(url, {
+    const res = await oauthEgressFetch(url, {
       method: "GET",
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(10_000),

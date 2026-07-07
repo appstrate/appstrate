@@ -20,7 +20,7 @@
  *   bun run scripts/build-system-packages.ts           # build archives
  *   bun run scripts/build-system-packages.ts --check   # validate only (no write)
  */
-import { readdir, readFile, stat, writeFile, unlink } from "node:fs/promises";
+import { readdir, readFile, lstat, stat, writeFile, unlink } from "node:fs/promises";
 import { join, posix, relative, sep } from "node:path";
 import { validateManifest } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
@@ -28,9 +28,14 @@ import { computeIntegrity } from "@appstrate/core/integrity";
 
 /**
  * Recursively collect every regular file under `root` into the zip
- * entry map, keyed by POSIX-style relative path. Symlinks are followed
- * via `stat` (not `lstat`); subdirectories named `node_modules` are
- * skipped — they should never be bundled into a system package.
+ * entry map, keyed by POSIX-style relative path. Entries are probed with
+ * `lstat` (NOT `stat`) so symlinks are detected rather than followed:
+ * a symlink could otherwise dereference a sensitive file (e.g. an
+ * absolute link to /etc/shadow or an escape via `../`) and embed its
+ * contents into the published AFPS archive. We refuse symlinks outright
+ * — system packages are plain file trees and never legitimately need
+ * one. Subdirectories named `node_modules` are skipped — they should
+ * never be bundled into a system package.
  */
 async function collectZipEntries(root: string): Promise<Record<string, Uint8Array>> {
   const entries: Record<string, Uint8Array> = {};
@@ -39,7 +44,14 @@ async function collectZipEntries(root: string): Promise<Record<string, Uint8Arra
     for (const name of names) {
       if (name === "node_modules" || name.startsWith(".")) continue;
       const full = join(dir, name);
-      const st = await stat(full);
+      const st = await lstat(full);
+      if (st.isSymbolicLink()) {
+        throw new Error(
+          `Refusing to bundle symlink into a system package: ${relative(root, full)} — ` +
+            `symlinks can smuggle files from outside the source tree into the archive. ` +
+            `Replace it with a real file.`,
+        );
+      }
       if (st.isDirectory()) {
         await walk(full);
       } else if (st.isFile()) {

@@ -86,5 +86,6 @@ describe("applySpecToSidecarEnv", () => {
     expect(env.INTEGRATIONS_TO_SPAWN_JSON).toBeUndefined();
     expect(env.OUTPUT_SCHEMA).toBeUndefined();
     expect(env.CONNECT_LOGIN_JSON).toBeUndefined();
+    expect(env.CONNECT_RESULT_KEY).toBeUndefined();
   });
 });

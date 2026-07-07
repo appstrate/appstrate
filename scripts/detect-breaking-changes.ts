@@ -143,6 +143,24 @@ function getProperties(schema: Spec | undefined, spec: Spec): Record<string, Spe
     }
     return merged;
   }
+  // `oneOf`/`anyOf` unions: union the properties across every branch so a
+  // field that exists in the current spec (in any branch) is visible to the
+  // removed-field diff. This is an over-approximation of the "guaranteed"
+  // property set — a field present in only one branch is not always present —
+  // but it means dropping a field from all branches is still detected as a
+  // removal instead of being silently invisible. Own `properties` (a union
+  // can also carry shared top-level props) merge on top.
+  const union = (Array.isArray(s.oneOf) && s.oneOf) || (Array.isArray(s.anyOf) && s.anyOf);
+  if (union) {
+    let merged: Record<string, Spec> = {};
+    for (const member of union as Spec[]) {
+      merged = { ...merged, ...getProperties(member, spec) };
+    }
+    if (typeof s.properties === "object" && s.properties !== null) {
+      merged = { ...merged, ...(s.properties as Record<string, Spec>) };
+    }
+    return merged;
+  }
   if (typeof s.properties !== "object" || s.properties === null) return {};
   return s.properties as Record<string, Spec>;
 }

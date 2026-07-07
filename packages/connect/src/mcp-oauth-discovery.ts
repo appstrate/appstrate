@@ -32,6 +32,8 @@
  * the existing "register an OAuth client" error).
  */
 
+import { guardedFetch } from "@appstrate/core/ssrf";
+
 /** Validated subset of an RFC 9728 protected-resource metadata document. */
 export interface ProtectedResourceMetadata {
   /** Canonical resource identifier (RFC 8707 `resource` indicator). */
@@ -50,11 +52,43 @@ export interface DiscoverProtectedResourceInput {
    * `WWW-Authenticate` challenge). Tried first when present.
    */
   resourceMetadataUrl?: string;
-  /** Testing seam — defaults to global `fetch`. */
+  /**
+   * Testing seam — defaults to the SSRF-guarded {@link guardedFetch} (per-hop
+   * DNS + blocklist, manual redirects, non-http(s) rejection). All metadata /
+   * challenge URLs here come from attacker-influencable input (the manifest's
+   * `source.remote.url` and the `WWW-Authenticate` challenge the server
+   * returns), so the default MUST be guarded — never raw global `fetch`.
+   */
   fetchImpl?: typeof fetch;
 }
 
 const FETCH_TIMEOUT_MS = 10_000;
+
+/** True for `http:`/`https:` URLs only — rejects `file:`, `gopher:`, etc. */
+function isHttpUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * RFC 9728 §3.3: the `resource` value in a protected-resource metadata document
+ * MUST identify the resource server the client is talking to. Validate that its
+ * origin matches the MCP server URL we discovered it for — otherwise a hostile
+ * (or misconfigured) metadata document could bind the token's audience to an
+ * unrelated resource. Compared by origin (scheme+host+port) to tolerate path /
+ * trailing-slash differences in the canonical identifier.
+ */
+function metadataResourceMatchesOrigin(resource: string, resourceServerUrl: string): boolean {
+  try {
+    return new URL(resource).origin === new URL(resourceServerUrl).origin;
+  } catch {
+    return false;
+  }
+}
 
 /** Strip a single trailing slash so well-known suffixes join cleanly. */
 function trimTrailingSlash(url: string): string {
@@ -127,6 +161,10 @@ async function fetchResourceMetadata(
   url: string,
   fetchImpl: typeof fetch,
 ): Promise<ProtectedResourceMetadata | null> {
+  // Reject non-http(s) metadata URLs up front (the challenge / well-known value
+  // is attacker-influencable). `guardedFetch` also rejects them, but failing
+  // here keeps the guarantee independent of the injected `fetchImpl`.
+  if (!isHttpUrl(url)) return null;
   try {
     const res = await fetchImpl(url, {
       method: "GET",
@@ -149,17 +187,28 @@ async function fetchResourceMetadata(
 export async function discoverProtectedResourceMetadata(
   input: DiscoverProtectedResourceInput,
 ): Promise<ProtectedResourceMetadata | null> {
-  const fetchImpl = input.fetchImpl ?? fetch;
+  // Default MUST be the SSRF-guarded fetch, never raw global `fetch`: every URL
+  // fetched below is attacker-influencable.
+  const fetchImpl = input.fetchImpl ?? (guardedFetch as unknown as typeof fetch);
+
+  // The resource server URL must be http(s); a bogus scheme cannot yield valid
+  // metadata and must not reach the network layer.
+  if (!isHttpUrl(input.resourceServerUrl)) return null;
+
+  // Any resolved document is only accepted when its RFC 8707 `resource`
+  // identifier matches the MCP server's origin (RFC 9728 §3.3).
+  const accept = (md: ProtectedResourceMetadata | null): ProtectedResourceMetadata | null =>
+    md && metadataResourceMatchesOrigin(md.resource, input.resourceServerUrl) ? md : null;
 
   // 1. Explicit metadata URL (authoritative).
   if (input.resourceMetadataUrl) {
-    const md = await fetchResourceMetadata(input.resourceMetadataUrl, fetchImpl);
+    const md = accept(await fetchResourceMetadata(input.resourceMetadataUrl, fetchImpl));
     if (md) return md;
   }
 
   // 2. RFC 9728 §3 well-known probes.
   for (const url of buildProtectedResourceProbes(input.resourceServerUrl)) {
-    const md = await fetchResourceMetadata(url, fetchImpl);
+    const md = accept(await fetchResourceMetadata(url, fetchImpl));
     if (md) return md;
   }
 
@@ -175,7 +224,7 @@ export async function discoverProtectedResourceMetadata(
     if (challenge) {
       const metadataUrl = parseResourceMetadataChallenge(challenge);
       if (metadataUrl) {
-        const md = await fetchResourceMetadata(metadataUrl, fetchImpl);
+        const md = accept(await fetchResourceMetadata(metadataUrl, fetchImpl));
         if (md) return md;
       }
     }

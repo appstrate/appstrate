@@ -7,7 +7,7 @@ import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { logger } from "../lib/logger.ts";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
 import {
   mergeSystemAndDb,
@@ -268,6 +268,20 @@ export async function testProxyConnection(orgId: string, proxyId: string): Promi
   }
 
   if (isBlockedUrl(proxy.url)) {
+    return {
+      ok: false,
+      latency: 0,
+      error: "BLOCKED_URL",
+      message: "URL targets a blocked network",
+    };
+  }
+  // DNS-rebind-safe gate: the proxy URL is the upstream target host, and the
+  // literal check above is string-only — a public hostname that resolves to a
+  // private/loopback/link-local address slips through it. Resolve + re-check
+  // before we route a request through the proxy; fail closed with the same
+  // BLOCKED_URL result (the resolution reason is never surfaced).
+  const proxyHostCheck = await resolveAndCheckHost(new URL(proxy.url).hostname);
+  if (proxyHostCheck.blocked) {
     return {
       ok: false,
       latency: 0,

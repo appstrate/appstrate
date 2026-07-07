@@ -16,7 +16,7 @@
  * for dep resolution and one set of tests.
  */
 
-import { unzipSync } from "fflate";
+import { unzipBounded, DecompressionLimitError } from "@appstrate/afps-shared/unzip-bounded";
 import { BundleError } from "./errors.ts";
 import { parseAfpsManifestBytes } from "./parse-manifest.ts";
 import { sanitizeEntries, stripWrapperPrefix, sumSizes } from "./archive-utils.ts";
@@ -242,10 +242,22 @@ export function extractRootFromAfps(
     );
   }
 
+  // Memory-bounded inflate: the decompressed-total / per-file / file-count
+  // caps are enforced mid-inflate (aborts before the offending bytes
+  // accumulate), so this — not the post-hoc `sumSizes` / entry-count checks
+  // below — is the primary OOM boundary. See
+  // `@appstrate/afps-shared/unzip-bounded`.
   let raw: Record<string, Uint8Array>;
   try {
-    raw = unzipSync(archive);
+    raw = unzipBounded(archive, {
+      maxDecompressedBytes: limits.maxDecompressedBytes,
+      maxFileBytes: limits.maxFileBytes,
+      maxFiles: limits.maxFiles,
+    });
   } catch (err) {
+    if (err instanceof DecompressionLimitError) {
+      throw decompressionLimitToBundleError(err, ".afps archive");
+    }
     throw new BundleError(
       "ARCHIVE_INVALID",
       `failed to decompress .afps archive: ${err instanceof Error ? err.message : String(err)}`,
@@ -352,4 +364,27 @@ function extractDependencies(manifest: AfpsManifest, depTypes: DepRequest["type"
     }
   }
   return out;
+}
+
+/**
+ * Map a mid-inflate {@link DecompressionLimitError} onto the {@link BundleError}
+ * shape this builder already throws. A `corrupt-archive` reason surfaces as
+ * `ARCHIVE_INVALID` (matching the previous decompress-failure branch); the
+ * three resource-budget reasons surface as `LIMITS_EXCEEDED` with a `field`
+ * mirroring the post-hoc checks they replace.
+ */
+function decompressionLimitToBundleError(
+  err: DecompressionLimitError,
+  context: string,
+): BundleError {
+  if (err.reason === "corrupt-archive") {
+    return new BundleError("ARCHIVE_INVALID", `failed to decompress ${context}: ${err.message}`);
+  }
+  const field =
+    err.reason === "too-many-files"
+      ? "files"
+      : err.reason === "file-too-large"
+        ? "fileBytes"
+        : "decompressedBytes";
+  return new BundleError("LIMITS_EXCEEDED", err.message, { field });
 }
