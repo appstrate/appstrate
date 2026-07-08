@@ -43,6 +43,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createPublicKey, verify as ed25519Verify } from "node:crypto";
 import { z } from "zod";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { normalizeVersion, stripVersionPrefix } from "@appstrate/core/semver";
 import type { Logger } from "@appstrate/core/logger";
 import { logger as defaultLogger } from "./logger.ts";
 
@@ -111,7 +112,7 @@ export const MANIFEST_SIGNATURE_ASSET_NAME = "firecracker-artifacts-manifest.jso
 export const ARTIFACTS_SIGNING_PUBKEY = "__FIRECRACKER_ARTIFACTS_ED25519_PUBKEY__";
 
 /**
- * Absolute ceiling on the DECLARED uncompressed rootfs size (P3 hardening).
+ * Absolute ceiling on the DECLARED uncompressed rootfs size.
  * The manifest is signature-verified, so `entry.rootfs.size` is trusted input
  * from the release-key holder — but a compromised key (or a corrupt release)
  * could declare an absurd size to OOM the daemon at boot. Reject anything above
@@ -285,8 +286,7 @@ export function resolveArch(nodeArch: string = process.arch): GuestArch {
 function assetUrl(baseUrl: string, version: string | undefined, asset: string): string {
   const base = baseUrl.replace(/\/+$/, "");
   if (version) {
-    const tag = version.startsWith("v") ? version : `v${version}`;
-    return `${base}/download/${tag}/${asset}`;
+    return `${base}/download/v${stripVersionPrefix(version)}/${asset}`;
   }
   return `${base}/latest/download/${asset}`;
 }
@@ -443,33 +443,27 @@ export async function ensureGuestArtifacts(
   const markerPath = join(dirname(config.rootfsPath), VERSION_MARKER_NAME);
   const installed = await readMarker(fs, markerPath);
 
-  // The skip fast-path (and the keep-existing network-failure fallback
-  // below) require the on-disk install to speak THIS daemon's guest
-  // protocol. A daemon upgraded in place next to a stale rootfs must
-  // re-download — a protocol-N-1 supervisor booting under a protocol-N
-  // daemon fails in confusing, run-level ways (e.g. it ignores
-  // `credentials.source: "mmds"` and comes up with no credentials).
-  // No marker at all (pre-marker install, hand-copied files) counts as
-  // unverifiable, not as compatible.
-  const installedProtocolOk = installed?.guestProtocol === GUEST_PROTOCOL_VERSION;
+  // An on-disk install is TRUSTED only when its marker records THIS daemon's
+  // guest protocol AND that it was signature-verified (`signed: true`). Both
+  // the skip fast-path and the keep-existing network-failure fallback below
+  // gate on this. A stale-protocol supervisor fails in confusing, run-level
+  // ways (e.g. it ignores `credentials.source: "mmds"` and boots with no
+  // credentials); a marker without `signed: true` (pre-signing daemon,
+  // hand-copied files, or no marker at all) was never signature-attested. Both
+  // count as untrusted → re-download, running the signature gate before trust.
+  const installedTrusted =
+    installed?.guestProtocol === GUEST_PROTOCOL_VERSION && installed?.signed === true;
 
-  // The skip fast-path also requires the install to have been signature-
-  // verified (`signed: true` on the marker). A marker lacking it — hosts
-  // installed by a pre-signing daemon, or hand-copied files — is treated like
-  // a missing/unverifiable marker: not eligible to skip, so it forces one
-  // re-download that runs the signature gate before it is trusted.
-  const installedSignedOk = installed?.signed === true;
-
-  // Skip: artifacts present, protocol verified, signature-covered, and either
-  // no version pinned or the marker already matches the pinned version.
-  // Compare tag-normalized (strip a leading `v` on either side) — the marker
-  // records the manifest's v-stripped version while operators legitimately pin
-  // "v1.2.3" (host-env documents that form), and a raw string compare would
-  // silently re-download the full kernel+rootfs on every boot.
+  // Skip: artifacts present, install trusted, and either no version pinned or
+  // the marker already matches the pinned version.
+  // Compare tag-normalized (strip a leading `v` and build metadata on either
+  // side) — the marker records the manifest's version while operators
+  // legitimately pin "v1.2.3" (host-env documents that form), and a raw string
+  // compare would silently re-download the full kernel+rootfs on every boot.
   const versionMatches =
     !config.version ||
-    (installed != null && installed.version.replace(/^v/, "") === config.version.replace(/^v/, ""));
-  if (present && installedProtocolOk && installedSignedOk && versionMatches) {
+    (installed != null && normalizeVersion(installed.version) === normalizeVersion(config.version));
+  if (present && installedTrusted && versionMatches) {
     log.info("Firecracker artifacts: present, skipping download", {
       arch,
       installedVersion: installed.version,
@@ -499,14 +493,13 @@ export async function ensureGuestArtifacts(
     if (err instanceof FatalArtifactsError) {
       throw err;
     }
-    // Network/transient failure with artifacts already on disk: keep them
-    // — but ONLY when the installed protocol is verified compatible AND the
-    // install was signature-verified. A stale-protocol install must never be
-    // "kept" through a download failure, and neither must a never-attested
-    // one (pre-signing marker): otherwise a transient — or attacker-induced —
-    // fetch failure boots unverified artifacts on every boot, bypassing the
-    // signed-marker gate the skip path enforces.
-    if (present && installedProtocolOk && installedSignedOk) {
+    // Network/transient failure with artifacts already on disk: keep them, but
+    // ONLY when the install is trusted (protocol-compatible AND signature-
+    // verified). Keeping a stale-protocol or never-attested install through a
+    // download failure would boot unverified artifacts on every boot — a
+    // transient (or attacker-induced) fetch failure bypassing the signed-marker
+    // gate the skip path enforces.
+    if (present && installedTrusted) {
       log.warn("Firecracker artifacts: download failed, using existing on-disk artifacts", {
         error: getErrorMessage(err),
         kernelPath: config.kernelPath,
@@ -519,7 +512,7 @@ export async function ensureGuestArtifacts(
     // fetch: the daemon cannot run VMs.
     const unusableReason = !present
       ? "missing"
-      : !installedProtocolOk
+      : installed?.guestProtocol !== GUEST_PROTOCOL_VERSION
         ? `installed at an incompatible guest protocol (daemon speaks ${GUEST_PROTOCOL_VERSION})`
         : "installed without signature verification (pre-signing or hand-copied install)";
     throw new Error(
@@ -580,11 +573,11 @@ async function downloadAndInstall(ctx: InstallCtx): Promise<void> {
   //    tag currently points at, so without this an attacker who can place an
   //    OLDER but validly-signed manifest under the pinned tag's URL could roll
   //    the daemon back to superseded artifacts. Compare tag-normalized (strip a
-  //    leading `v` on either side). Not applied to the unpinned `latest` path —
-  //    there is no expected version to bind against there.
+  //    leading `v` and build metadata on either side). Not applied to the
+  //    unpinned `latest` path — there is no expected version to bind against there.
   if (version) {
-    const pinned = version.replace(/^v/, "");
-    const declared = manifest.version.replace(/^v/, "");
+    const pinned = normalizeVersion(version);
+    const declared = normalizeVersion(manifest.version);
     if (pinned !== declared) {
       throw new FatalArtifactsError(
         `guest-artifact version mismatch: pinned FIRECRACKER_ARTIFACTS_VERSION ` +
@@ -637,7 +630,7 @@ async function downloadAndInstall(ctx: InstallCtx): Promise<void> {
         `manifest declares ${entry.rootfs.compressed_size}`,
     );
   }
-  // Decompression cap (P3): the manifest is signature-verified, so
+  // Decompression cap: the manifest is signature-verified, so
   // `entry.rootfs.size` is trusted — but a compromised key or corrupt release
   // could declare an absurd uncompressed size to OOM the daemon at boot.
   // Reject anything above the absolute ceiling BEFORE decompressing.
@@ -729,8 +722,8 @@ interface InstalledMarker {
   guestProtocol: number | undefined;
   /**
    * True only when this install was written after signature verification.
-   * Absent/false on markers written by a pre-signing daemon (or hand-copied),
-   * which the skip fast-path treats as unverifiable → forces a re-download.
+   * Absent on markers written by a pre-signing daemon (or hand-copied), which
+   * the skip fast-path treats as unverifiable → forces a re-download.
    */
   signed: boolean;
 }
@@ -743,7 +736,8 @@ async function readMarker(fs: ArtifactsFs, markerPath: string): Promise<Installe
       .object({
         version: z.string(),
         guest_protocol: z.number().int().optional(),
-        signed: z.boolean().optional(),
+        // Only ever WRITTEN as `true`; absent on pre-signing/hand-copied markers.
+        signed: z.literal(true).optional(),
       })
       .safeParse(JSON.parse(text));
     if (!parsed.success) return null;

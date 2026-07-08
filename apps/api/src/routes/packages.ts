@@ -75,7 +75,6 @@ import {
   notFound,
   conflict,
   internalError,
-  parseBody,
   validationFailed,
   type ValidationFieldError,
 } from "../lib/errors.ts";
@@ -1375,11 +1374,9 @@ export function createPackagesRouter() {
     const user = c.get("user");
 
     // A missing/empty body is fine (auto-name), but a present-and-invalid
-    // `name` must now surface as a 400 — `forkSchema` no longer `.catch({})`s
-    // the error away, and `parseBody` turns the Zod failure into invalidRequest
-    // rather than an uncaught ZodError (500).
-    const rawBody = await c.req.json().catch(() => ({}));
-    const parsed = parseBody(forkSchema, rawBody);
+    // `name` must surface as a 400 — `allowEmpty` maps an empty body to `{}`
+    // while still 400ing on malformed JSON or a bad-shape `name`.
+    const parsed = await readJsonBody(c, forkSchema, { allowEmpty: true });
     const customName = parsed.name;
 
     const result = await forkPackage(orgId, orgSlug, packageId, user.id, customName);

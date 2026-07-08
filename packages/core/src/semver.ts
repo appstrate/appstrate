@@ -10,6 +10,29 @@ import semver from "semver";
 import { resolveVersionString } from "@appstrate/afps-shared/semver-resolve";
 export { resolveVersionString };
 
+/**
+ * Strip a single leading `v`/`V` from a version tag. GitHub release tags are
+ * `vX.Y.Z`; internal/wire versions are `X.Y.Z`. Only the prefix is touched —
+ * prerelease and build metadata are left intact, so use this when the value is
+ * going back into a tag-shaped URL (`download/v<tag>/…`), NOT for comparison.
+ */
+export function stripVersionPrefix(tag: string): string {
+  return tag.replace(/^[vV]/, "");
+}
+
+/**
+ * Normalize a version tag for COMPARISON: trim, strip a single leading `v`/`V`,
+ * and drop build metadata (`+…`, which SemVer 2.0 §10 says MUST be ignored when
+ * determining precedence). Two tags that differ only by a `v` prefix or build
+ * metadata normalize to the same string, so cross-component equality checks stay
+ * consistent — e.g. a version marker written by one component compares equal to
+ * a pin passed to another. Use this (not {@link stripVersionPrefix}) whenever the
+ * result feeds an equality/ordering check.
+ */
+export function normalizeVersion(tag: string): string {
+  return stripVersionPrefix(tag.trim()).split("+", 1)[0]!;
+}
+
 /** Check whether `v` is a valid semver version string. */
 export function isValidVersion(v: string): boolean {
   return semver.valid(v) !== null;

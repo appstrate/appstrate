@@ -47,7 +47,7 @@ import {
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, internalError, notFound, parseBody } from "../lib/errors.ts";
+import { ApiError, invalidRequest, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
@@ -644,7 +644,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
-      const body = parseBody(connectOAuthSchema, await c.req.json().catch(() => ({})));
+      const body = await readJsonBody(c, connectOAuthSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // carried into the OAuth state and honored at callback-time write.
       if (body.connection_id) {
@@ -722,7 +722,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
-      const body = parseBody(connectSessionSchema, await c.req.json().catch(() => ({})));
+      const body = await readJsonBody(c, connectSessionSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // minted into the hosted-connect capability token and honored at write.
       if (body.connection_id) {
@@ -860,7 +860,7 @@ export function createIntegrationsRouter() {
     }
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
-    const body = parseBody(connectSubmitSchema, await c.req.json().catch(() => ({})));
+    const body = await readJsonBody(c, connectSubmitSchema, { allowEmpty: true });
     try {
       const { auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
       if (auth.type === "oauth2") {

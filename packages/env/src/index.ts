@@ -449,11 +449,20 @@ const envSchema = z
     // Outbound proxy
     PROXY_URL: z.string().optional(),
 
-    // OAuth internal-IdP SSRF allowlist (opt-in). Comma-separated hostnames the
-    // operator explicitly trusts on a private address — secret-bearing OAuth
-    // egress (token exchange/refresh, issuer discovery) bypasses the SSRF guard
-    // for these hosts so self-hosted deployments can reach an internal IdP.
-    OAUTH_ALLOWED_INTERNAL_IDP_HOSTS: z.string().optional(),
+    // Internal-host SSRF allowlist (opt-in). Comma-separated hostnames the
+    // operator explicitly trusts on a private address — every platform egress
+    // site that consults it (OAuth token exchange/refresh/discovery, LLM
+    // upstreams, org proxies, model tests, credential-proxy targets, remote MCP
+    // servers, and the sidecar's own gates) skips ONLY the host blocklist for
+    // these hosts so self-hosted deployments can reach internal upstreams.
+    //
+    // Accepts the legacy `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` name as an alias
+    // (the var outgrew its OAuth-only origin): the new name wins when both are
+    // set, the old name is honoured only here at the env-parse boundary.
+    EGRESS_ALLOW_INTERNAL_HOSTS: z.preprocess(
+      (v) => (v === undefined ? process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS || undefined : v),
+      z.string().optional(),
+    ),
 
     // Run token signing (optional — if unset, run tokens are unsigned).
     //

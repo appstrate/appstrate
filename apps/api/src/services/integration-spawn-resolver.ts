@@ -30,7 +30,6 @@ import {
   decryptCredentialsToStringMap,
   decryptCredentialInputsToStringMap,
   resolveAfpsHttpDelivery,
-  isAllowedInternalIdpHost,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import { getApiCallConfigs, resolveEffectiveToolSelection } from "@appstrate/core/integration";
@@ -51,7 +50,7 @@ import {
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
 import { BundleError } from "@appstrate/afps-runtime/bundle";
-import { checkEgressHost } from "../lib/egress-host-guard.ts";
+import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
@@ -277,49 +276,29 @@ async function resolveOne(
     // P0-2 — SSRF floor on the manifest-supplied remote MCP URL. The sidecar
     // opens a credential-bearing Streamable HTTP / SSE client against this URL,
     // so validate it here (install/boot resolution) before it reaches the wire.
-    // Two-tier policy:
-    //   - untrusted host (the default): require https:// — no plaintext egress
-    //     for an authenticated MCP client — AND pass the DNS-aware SSRF gate
-    //     (rejects any host resolving to a private / loopback / link-local /
-    //     cloud-metadata address; DNS-rebind-safe, fails closed).
-    //   - operator-trusted internal host (`OAUTH_ALLOWED_INTERNAL_IDP_HOSTS`):
-    //     http or https allowed (LAN services routinely lack TLS) and the
-    //     blocklist is skipped — the operator explicitly vouched for the host.
-    //     Unset in production by default, so every host stays fully guarded.
-    // A malformed / wrong-scheme / blocked URL throws a clear error; the caller
-    // (`resolveIntegrationSpawns`) turns it into a logged per-integration skip,
-    // so the run never spawns an unguarded outbound MCP client.
-    let parsedRemote: URL;
-    try {
-      parsedRemote = new URL(remote.url);
-    } catch {
-      throw new Error(
-        `remote-source integration '${integrationId}' declares an invalid source.remote.url`,
-      );
-    }
-    // Scheme floor per tier — kept local (it's the only per-branch divergence):
-    // an operator-trusted internal host may use plain http, everything else
-    // must be https. Non-http(s) schemes (file:, gopher:, …) never pass.
-    if (isAllowedInternalIdpHost(parsedRemote.hostname)) {
-      if (parsedRemote.protocol !== "https:" && parsedRemote.protocol !== "http:") {
+    // Route it through the canonical egress guard with the remote-MCP scheme
+    // tier (`requireHttpsForUntrustedHost`): an operator-trusted internal host
+    // may use plain http (LAN services routinely lack TLS), every other host
+    // must be https AND pass the DNS-aware SSRF gate (private / loopback /
+    // link-local / cloud-metadata → blocked; DNS-rebind-safe, fails closed) —
+    // one shared decision site, so this resolver can't drift from the other
+    // egress paths. A malformed / wrong-scheme / blocked URL throws a clear
+    // error; the caller (`resolveIntegrationSpawns`) turns it into a logged
+    // per-integration skip, so the run never spawns an unguarded MCP client.
+    const egress = await checkEgressUrl(remote.url, { requireHttpsForUntrustedHost: true });
+    if (!egress.ok) {
+      if (egress.reason === "invalid-url") {
         throw new Error(
-          `remote-source integration '${integrationId}' declares a non-http(s) source.remote.url scheme`,
+          `remote-source integration '${integrationId}' declares an invalid source.remote.url`,
         );
       }
-    } else if (parsedRemote.protocol !== "https:") {
+      if (egress.reason === "blocked-scheme") {
+        throw new Error(
+          `remote-source integration '${integrationId}' declares a disallowed source.remote.url scheme (only https://, or http:// for an operator-trusted internal host)`,
+        );
+      }
       throw new Error(
-        `remote-source integration '${integrationId}' declares a non-https source.remote.url; only https:// is allowed for remote MCP servers`,
-      );
-    }
-    // Block/allow decision goes through the centralized egress guard
-    // (`checkEgressHost`): operator-trusted hosts short-circuit to allowed,
-    // every other host is DNS-resolved and checked against the
-    // private/loopback/link-local/metadata blocklist — one shared decision
-    // site, so this resolver can't drift from the other egress paths.
-    const remoteHostCheck = await checkEgressHost(parsedRemote.hostname);
-    if (remoteHostCheck.blocked) {
-      throw new Error(
-        `remote-source integration '${integrationId}' source.remote.url host '${parsedRemote.hostname}' is blocked by the SSRF guard (${remoteHostCheck.reason})`,
+        `remote-source integration '${integrationId}' source.remote.url host '${egress.hostname}' is blocked by the SSRF guard (${egress.detail})`,
       );
     }
     // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`. The

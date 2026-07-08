@@ -23,6 +23,12 @@ import { dirname, join } from "node:path";
 import { runCommand, type CommandResult } from "./install/os.ts";
 import { CLI_USER_AGENT, CLI_VERSION, DEV_CLI_VERSION } from "./version.ts";
 import { streamDownload, type ProgressFn } from "./download.ts";
+import { normalizeVersion, stripVersionPrefix } from "@appstrate/core/semver";
+
+// Re-exported so `normalizeVersion` stays importable from this module (its
+// historical public surface); the canonical `v`/build-stripping implementation
+// now lives in `@appstrate/core/semver`.
+export { normalizeVersion };
 
 /** Pubkey baked into the curl bootstrap (`scripts/bootstrap.sh`). Same key signs every release. */
 export const APPSTRATE_MINISIGN_PUBKEY = "RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e";
@@ -110,7 +116,7 @@ export function releaseUrls(version: string, info: PlatformInfo): ReleaseUrls {
   const base =
     version === "latest"
       ? `${RELEASE_URL_BASE}/latest/download`
-      : `${RELEASE_URL_BASE}/download/v${version.replace(/^v/, "")}`;
+      : `${RELEASE_URL_BASE}/download/v${stripVersionPrefix(version)}`;
   const asset = assetName(info);
   return {
     binary: `${base}/${asset}`,
@@ -181,8 +187,9 @@ export function parseChecksumLine(content: string, asset: string): string {
  */
 export function compareSemver(a: string, b: string): number {
   const split = (v: string): { numeric: [number, number, number]; pre: string[] } => {
-    // Drop build metadata (§10).
-    const trimmed = v.replace(/^v/, "").split("+", 1)[0]!;
+    // Strip the `v` prefix and drop build metadata (§10) via the canonical
+    // normalizer so precedence is computed on the same shape everywhere.
+    const trimmed = normalizeVersion(v);
     const [core, ...preParts] = trimmed.split("-");
     const segments = (core ?? "").split(".").map((s) => Number.parseInt(s, 10) || 0);
     const preJoined = preParts.join("-");
@@ -230,11 +237,6 @@ export function compareSemver(a: string, b: string): number {
   if (A.pre.length < B.pre.length) return -1;
   if (A.pre.length > B.pre.length) return 1;
   return 0;
-}
-
-/** Strip a leading `v` from a tag name. GitHub tags are `vX.Y.Z`; the CLI carries `X.Y.Z`. */
-export function normalizeVersion(raw: string): string {
-  return raw.replace(/^v/, "").trim();
 }
 
 export interface SelfUpdateDeps {

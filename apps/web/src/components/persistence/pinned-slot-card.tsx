@@ -6,6 +6,7 @@ import { ChevronDown, Pin, Trash2, Copy, Check } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import type { PersistenceActorType } from "@appstrate/shared-types";
 import { formatDateField } from "../../lib/markdown";
+import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 import { ActorBadge } from "./actor-badge";
 
 const CHECKPOINT_KEY = "checkpoint";
@@ -54,22 +55,13 @@ export function PinnedSlotCard({ slot, onDelete, isDeleting }: PinnedSlotCardPro
   const [expanded, setExpanded] = useState(shouldDefaultExpand);
   const showToggle = !shouldDefaultExpand;
 
-  const [copied, setCopied] = useState(false);
+  // Shared hook guards `navigator.clipboard` (undefined in insecure contexts)
+  // and only flips `copied` on a real success, so we never signal a copy that
+  // didn't happen.
+  const { copied, copy } = useCopyToClipboard(1500);
   const onCopy = () => {
     const text = isString ? (slot.content as string) : JSON.stringify(slot.content, null, 2);
-    // clipboard.writeText can reject (permission denied, insecure context,
-    // unfocused document). Only flip the "copied" affordance on success so we
-    // never signal a copy that didn't happen.
-    navigator.clipboard.writeText(text).then(
-      () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      },
-      () => {
-        // Best-effort: swallow the rejection — nothing was copied, so leave
-        // the button in its idle state rather than surfacing a hard error.
-      },
-    );
+    void copy(text);
   };
 
   return (

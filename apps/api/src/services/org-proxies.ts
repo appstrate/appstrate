@@ -7,7 +7,7 @@ import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { logger } from "../lib/logger.ts";
-import { checkEgressHost, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
+import { checkEgressUrl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
 import {
   mergeSystemAndDb,
@@ -269,21 +269,12 @@ export async function testProxyConnection(orgId: string, proxyId: string): Promi
     return { ok: false, latency: 0, error: "PROXY_NOT_FOUND", message: "Proxy not found" };
   }
 
-  if (isBlockedEgressUrl(proxy.url)) {
-    return {
-      ok: false,
-      latency: 0,
-      error: "BLOCKED_URL",
-      message: "URL targets a blocked network",
-    };
-  }
-  // DNS-rebind-safe gate: the proxy URL is the upstream target host, and the
-  // literal check above is string-only — a public hostname that resolves to a
-  // private/loopback/link-local address slips through it. Resolve + re-check
-  // before we route a request through the proxy; fail closed with the same
-  // BLOCKED_URL result (the resolution reason is never surfaced).
-  const proxyHostCheck = await checkEgressHost(new URL(proxy.url).hostname);
-  if (proxyHostCheck.blocked) {
+  // Canonical egress guard (parse + scheme floor + allowlist-aware literal +
+  // DNS-rebind host gate) before we route a request through the proxy: a public
+  // hostname resolving to a private/loopback/link-local address is refused,
+  // fail-closed, with the same BLOCKED_URL result (the reason is never surfaced).
+  const egress = await checkEgressUrl(proxy.url);
+  if (!egress.ok) {
     return {
       ok: false,
       latency: 0,
