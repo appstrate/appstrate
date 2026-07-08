@@ -31,6 +31,7 @@ import {
   resolveAppUrl,
   assertLoopbackPortMatches,
   printBootstrapFollowup,
+  postInstallBrowserUrl,
   resolveRunBackend,
   readRawRunAdapter,
   assertRunAdapterCompatibleWithTier,
@@ -1017,6 +1018,32 @@ describe("printBootstrapFollowup (issue #228) — post-install action", () => {
     );
     expect(cap.calls[0]!.message).toContain("http://appstrate.acme.com/register");
     expect(cap.calls[0]!.message).not.toContain("localhost");
+  });
+});
+
+describe("postInstallBrowserUrl — post-install browser deep-link", () => {
+  it("opens /register for a named-owner install (email pre-filled server-side)", () => {
+    expect(
+      postInstallBrowserUrl("http://localhost:3000", { bootstrapOwnerEmail: "admin@acme.com" }),
+    ).toBe("http://localhost:3000/register");
+  });
+
+  it("opens /register for an open-mode install (no email, no token)", () => {
+    expect(postInstallBrowserUrl("http://localhost:3000", {})).toBe(
+      "http://localhost:3000/register",
+    );
+  });
+
+  it("keeps the root landing for a bootstrap-token install (claim flow at /claim)", () => {
+    expect(postInstallBrowserUrl("http://localhost:3000", { bootstrapToken: "tok_abc123" })).toBe(
+      "http://localhost:3000",
+    );
+  });
+
+  it("respects the localUrl argument verbatim (alternate ports)", () => {
+    expect(postInstallBrowserUrl("http://localhost:3001", {})).toBe(
+      "http://localhost:3001/register",
+    );
   });
 });
 

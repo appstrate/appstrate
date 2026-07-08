@@ -169,6 +169,26 @@ function writeToTty(line: string): void {
 }
 
 /**
+ * Post-install browser deep-link. A fresh install has no session and no
+ * account yet, so the first thing the operator needs is the signup form —
+ * open `/register` directly instead of the bare root (which only bounces
+ * there after an extra redirect). One carve-out: the **bootstrap token**
+ * flow (unattended closed install) claims ownership at `/claim` by pasting
+ * the printed token, NOT at `/register`, so it keeps the root landing and
+ * the follow-up note points the operator at `/claim`.
+ *
+ * `localUrl` (not `appUrl`) because the browser runs on the install host
+ * and must hit the local bind port; a remote `appUrl` is unreachable until
+ * the operator wires their reverse proxy. The named-owner email is already
+ * pre-filled + locked server-side (app config), so no query param is
+ * needed on the URL.
+ */
+export function postInstallBrowserUrl(localUrl: string, bootstrap: BootstrapOverrides): string {
+  if (bootstrap.bootstrapToken) return localUrl;
+  return `${localUrl}/register`;
+}
+
+/**
  * Print the closed-mode follow-up note. Two flavors:
  *   - **Named owner** (#228, `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`) — the
  *     dashboard pre-fills + locks the email field, the operator just
@@ -195,7 +215,7 @@ export function printBootstrapFollowup(
   const email = bootstrap.bootstrapOwnerEmail;
   if (email) {
     note(
-      `Open  ${appUrl}/register\nSign up as  ${email}  (the form is pre-filled and locked)\nPick any password — the org "${bootstrap.bootstrapOrgName ?? "Default"}" is created automatically.`,
+      `Opened  ${appUrl}/register  in your browser.\nSign up as  ${email}  (the form is pre-filled and locked)\nPick any password — the org "${bootstrap.bootstrapOrgName ?? "Default"}" is created automatically.`,
       "Next: create your owner account",
     );
     return;
@@ -1473,7 +1493,7 @@ async function installTier0(
   const { pid } = await spawnDevServer(dir, localUrl);
   devSpinner.stop(`Dev server running (pid ${pid})`);
 
-  await openBrowser(localUrl);
+  await openBrowser(postInstallBrowserUrl(localUrl, opts.bootstrap));
   printBootstrapFollowup(appUrl, opts.bootstrap);
   outro(`Appstrate is running at ${appUrl} (pid ${pid}).\nKill it with \`kill ${pid}\` when done.`);
 }
@@ -1765,7 +1785,7 @@ async function installDockerTier(
     );
   }
 
-  await openBrowser(localUrl);
+  await openBrowser(postInstallBrowserUrl(localUrl, opts.bootstrap));
   // Remote deployment: the installer wired APP_URL / TRUSTED_ORIGINS /
   // TRUST_PROXY, but provisioning the reverse proxy (TLS, forwarding
   // the public domain to the host port) is the operator's job — say so
