@@ -24,11 +24,21 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-/** Bind + immediately stop a unix listener — Bun leaves the node behind,
- *  which is exactly the crashed-daemon stale-socket scenario. */
-function createStaleSocket(path: string): void {
+/**
+ * Bind a unix listener so a REAL socket node exists at `path`, run `fn`
+ * against it, then stop the listener. The listener is kept open for the
+ * duration on purpose: whether `stop()` unlinks the node varies across
+ * Bun versions, and the guard under test only inspects the NODE TYPE —
+ * unlinking a path out from under a bound fd is exactly what the daemon
+ * does to a crashed predecessor's leftover.
+ */
+async function withSocketNode(path: string, fn: () => Promise<void>): Promise<void> {
   const listener = Bun.listen({ unix: path, socket: { data() {} } });
-  listener.stop(true);
+  try {
+    await fn();
+  } finally {
+    listener.stop(true);
+  }
 }
 
 describe("removeStaleSocket", () => {
@@ -36,12 +46,13 @@ describe("removeStaleSocket", () => {
     await expect(removeStaleSocket(join(dir, "missing.sock"))).resolves.toBeUndefined();
   });
 
-  it("unlinks a stale socket node so a fresh bind can succeed", async () => {
+  it("unlinks a socket node so a fresh bind can succeed", async () => {
     const path = join(dir, "stale.sock");
-    createStaleSocket(path);
-    expect(existsSync(path)).toBe(true);
-    await removeStaleSocket(path);
-    expect(existsSync(path)).toBe(false);
+    await withSocketNode(path, async () => {
+      expect(existsSync(path)).toBe(true);
+      await removeStaleSocket(path);
+      expect(existsSync(path)).toBe(false);
+    });
   });
 
   it("REFUSES to delete a regular file (misconfigured env) and leaves it intact", async () => {
@@ -62,9 +73,10 @@ describe("removeStaleSocket", () => {
 describe("unlinkSocketIfPresent", () => {
   it("removes a socket node", async () => {
     const path = join(dir, "shutdown.sock");
-    createStaleSocket(path);
-    await unlinkSocketIfPresent(path);
-    expect(existsSync(path)).toBe(false);
+    await withSocketNode(path, async () => {
+      await unlinkSocketIfPresent(path);
+      expect(existsSync(path)).toBe(false);
+    });
   });
 
   it("leaves a non-socket node alone and never throws", async () => {
