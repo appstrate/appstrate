@@ -79,7 +79,6 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
         placeholder={t("editor.metaNamePlaceholder")}
         description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
       />
-      {isEdit && <input type="hidden" value={value.id} />}
       <FormField
         id="meta-scope"
         label={t("editor.metaScope")}

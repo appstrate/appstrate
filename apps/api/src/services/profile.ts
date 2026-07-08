@@ -20,13 +20,19 @@ import { profiles, user as userTable } from "@appstrate/db/schema";
 
 /**
  * Write a trimmed display name to BOTH `profiles.displayName` and the
- * Better Auth-owned `user.name`, keeping the two in sync. The two updates run
- * concurrently and both stamp `updatedAt`.
+ * Better Auth-owned `user.name`, keeping the two in sync. Wrapped in a single
+ * transaction so the mirror is all-or-nothing: if the second update fails the
+ * first rolls back, and the two tables never diverge (the previous
+ * `Promise.all` of two independent statements could leave `profiles` updated
+ * while `user.name` stayed stale on a partial failure). Both stamp `updatedAt`.
  */
 export async function setDisplayName(userId: string, displayName: string): Promise<void> {
   const now = new Date();
-  await Promise.all([
-    db.update(profiles).set({ displayName, updatedAt: now }).where(eq(profiles.id, userId)),
-    db.update(userTable).set({ name: displayName, updatedAt: now }).where(eq(userTable.id, userId)),
-  ]);
+  await db.transaction(async (tx) => {
+    await tx.update(profiles).set({ displayName, updatedAt: now }).where(eq(profiles.id, userId));
+    await tx
+      .update(userTable)
+      .set({ name: displayName, updatedAt: now })
+      .where(eq(userTable.id, userId));
+  });
 }

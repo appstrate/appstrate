@@ -19,8 +19,12 @@
 
 import { getEnv } from "@appstrate/env";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { initiateIntegrationOAuth, resolveOAuthEndpoints } from "@appstrate/connect";
+import {
+  initiateIntegrationOAuth,
+  resolveOAuthEndpoints,
+  oauthEgressFetch,
+  SsrfBlockedError,
+} from "@appstrate/connect";
 import { invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
@@ -190,18 +194,15 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       }
     }
     const userinfoUrl = manifestUserinfo ?? discoveredUserinfo;
-    if (userinfoUrl && isBlockedUrl(userinfoUrl)) {
-      // SSRF guard: `userinfoUrl` is manifest-declared and fetched with the
-      // user's access token. Refuse loopback / RFC1918 / link-local / metadata
-      // targets so a malicious manifest can't exfiltrate the token to internal
-      // infra. Parity with the login engine's per-request guard.
-      logger.warn("Integration userinfo URL blocked by SSRF guard", {
-        packageId: result.packageId,
-        authKey: result.authKey,
-      });
-    } else if (userinfoUrl) {
+    if (userinfoUrl) {
       try {
-        const res = await fetch(userinfoUrl, {
+        // SSRF-guarded: `userinfoUrl` is manifest-declared and fetched with the
+        // user's access token. `oauthEgressFetch` does per-hop DNS + blocklist
+        // and refuses loopback / RFC1918 / link-local / metadata targets
+        // (throwing SsrfBlockedError, caught below) so a malicious manifest
+        // can't exfiltrate the token to internal infra — unless the operator
+        // opted the host into OAUTH_ALLOWED_INTERNAL_IDP_HOSTS.
+        const res = await oauthEgressFetch(userinfoUrl, {
           headers: {
             Authorization: `Bearer ${result.accessToken}`,
             Accept: "application/json",
@@ -223,11 +224,20 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
           });
         }
       } catch (err) {
-        logger.warn("Integration userinfo fetch failed", {
-          packageId: result.packageId,
-          authKey: result.authKey,
-          err: String(err),
-        });
+        if (err instanceof SsrfBlockedError) {
+          // Best-effort: a blocked userinfo host skips enrichment (accountId
+          // falls back to the manifest chain). Never log the access token.
+          logger.warn("Integration userinfo URL blocked by SSRF guard", {
+            packageId: result.packageId,
+            authKey: result.authKey,
+          });
+        } else {
+          logger.warn("Integration userinfo fetch failed", {
+            packageId: result.packageId,
+            authKey: result.authKey,
+            err: String(err),
+          });
+        }
       }
     }
 

@@ -402,8 +402,19 @@ export async function diffTool(
 ): Promise<{ output: string; truncated: boolean }> {
   const cwd = resolveInWorkspace(ctx.workspaceRoot, args.repo);
   const res = await runGit(["diff", ...(args.staged ? ["--staged"] : [])], { cwd });
-  if (res.stdout.length > DIFF_TRUNCATE_BYTES) {
-    return { output: res.stdout.slice(0, DIFF_TRUNCATE_BYTES), truncated: true };
+  // DIFF_TRUNCATE_BYTES is a byte budget — measure/slice in UTF-8 bytes, not
+  // in `String.length` (UTF-16 code units). Diffs routinely contain
+  // multi-byte content (non-ASCII source, emoji), where the two counts
+  // diverge and a code-unit slice would either over- or under-truncate.
+  const bytes = Buffer.byteLength(res.stdout, "utf8");
+  if (bytes > DIFF_TRUNCATE_BYTES) {
+    // Slice the encoded bytes, then decode — `toString` drops any partial
+    // trailing multi-byte sequence at the cut point rather than emitting a
+    // broken code unit.
+    const output = Buffer.from(res.stdout, "utf8")
+      .subarray(0, DIFF_TRUNCATE_BYTES)
+      .toString("utf8");
+    return { output, truncated: true };
   }
   return { output: res.stdout, truncated: false };
 }
@@ -459,13 +470,18 @@ export async function commitTool(
     // alone would let `../other-repo/...` slip through — the resolved
     // path is inside the workspace but outside this repo's working
     // tree).
+    const safePaths: string[] = [];
     for (const p of args.paths) {
       const abs = resolveInWorkspace(cwd, p);
       if (abs !== cwd && !abs.startsWith(cwd + sep)) {
         throw new Error(`commit path resolves outside repo: ${p}`);
       }
+      // Hand git the SAME normalized absolute path we validated — passing the
+      // raw `p` would let `git add` re-resolve a different string (e.g. a
+      // symlinked or `.`-laden path), defeating the containment check above.
+      safePaths.push(abs);
     }
-    await runGit(["add", "--", ...args.paths], { cwd });
+    await runGit(["add", "--", ...safePaths], { cwd });
   } else {
     await runGit(["add", "-A"], { cwd });
   }

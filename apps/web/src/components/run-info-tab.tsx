@@ -57,7 +57,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
       <div className={cn("grid gap-4", !run.package_ephemeral && "sm:grid-cols-2")}>
         {!run.package_ephemeral && (
           <InfoCard
-            label="Version"
+            label={t("run.infoVersion")}
             value={
               <span className={cn("font-mono", run.version_ref === "draft" && "italic")}>
                 {/* version_ref is unambiguous (#636): a concrete semver when the
@@ -185,7 +185,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
 
       {/* Metadata */}
       {metadata && Object.keys(metadata).length > 0 && (
-        <SectionCard title="Metadata">
+        <SectionCard title={t("run.infoMetadata")}>
           <JsonView data={metadata} />
         </SectionCard>
       )}

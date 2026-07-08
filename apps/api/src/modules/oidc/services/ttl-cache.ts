@@ -42,12 +42,25 @@ export interface TtlCache<V> {
 export function createTtlCache<V>(channel: string): TtlCache<V> {
   const map = new Map<string, Entry<V>>();
 
+  // Per-key invalidation epoch. Bumped on EVERY eviction — the local
+  // `delete()` and the cross-instance pub/sub subscriber alike. `getOrLoad`
+  // snapshots a key's epoch before awaiting its (async) loader and refuses to
+  // cache the result if the epoch moved while the load was in flight. Without
+  // this, an invalidation that arrives DURING a cold-cache load is lost: the
+  // loader (which may have read the pre-update row) resolves afterwards and
+  // `set()`s a stale value that then lives for the full TTL.
+  const epochs = new Map<string, number>();
+  const bumpEpoch = (key: string): void => {
+    epochs.set(key, (epochs.get(key) ?? 0) + 1);
+  };
+
   void (async () => {
     try {
       const pubsub = await getPubSub();
       await pubsub.subscribe(channel, (message) => {
         if (!message) return;
         map.delete(message);
+        bumpEpoch(message);
       });
     } catch (err) {
       logger.warn("oidc per-app cache: pub/sub subscribe failed, running single-instance", {
@@ -73,6 +86,7 @@ export function createTtlCache<V>(channel: string): TtlCache<V> {
     },
     async delete(key) {
       map.delete(key);
+      bumpEpoch(key);
       try {
         const pubsub = await getPubSub();
         await pubsub.publish(channel, key);
@@ -87,8 +101,16 @@ export function createTtlCache<V>(channel: string): TtlCache<V> {
     async getOrLoad(key, loader) {
       const cached = cache.get(key);
       if (cached !== undefined) return cached;
+      // Snapshot the key's invalidation epoch BEFORE the async load.
+      const epochAtStart = epochs.get(key) ?? 0;
       const value = await loader();
-      cache.set(key, value);
+      // If an invalidation landed while the loader was in flight, the loaded
+      // value may predate that change — return it to THIS caller but do not
+      // cache it, so the next read re-loads fresh. (No await between the check
+      // and set(), so this is atomic against further invalidations.)
+      if ((epochs.get(key) ?? 0) === epochAtStart) {
+        cache.set(key, value);
+      }
       return value;
     },
     clearForTesting() {
@@ -96,6 +118,7 @@ export function createTtlCache<V>(channel: string): TtlCache<V> {
         throw new Error("clearForTesting is test-only");
       }
       map.clear();
+      epochs.clear();
     },
   };
 

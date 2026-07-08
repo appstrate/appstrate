@@ -127,13 +127,23 @@ export function commandExists(cmd: string): boolean {
  */
 export async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
+  // Cap each individual request so a server that accepts the connection but
+  // never responds can't hang the whole poll past the deadline — without a
+  // per-request timeout a single stuck `fetch` never returns and the
+  // `Date.now() < deadline` guard below is never re-evaluated.
+  const perRequestTimeoutMs = Math.min(5_000, Math.max(1_000, timeoutMs));
   while (Date.now() < deadline) {
     try {
-      let res = await fetch(url, { method: "HEAD" });
-      if (res.status === 405) res = await fetch(url, { method: "GET" });
+      let res = await fetch(url, {
+        method: "HEAD",
+        signal: AbortSignal.timeout(perRequestTimeoutMs),
+      });
+      if (res.status === 405) {
+        res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(perRequestTimeoutMs) });
+      }
       if (res.ok || (res.status >= 300 && res.status < 400)) return true;
     } catch {
-      // Connection refused / DNS / etc — keep polling.
+      // Connection refused / DNS / per-request timeout / etc — keep polling.
     }
     await delay(1000);
   }

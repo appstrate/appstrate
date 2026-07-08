@@ -43,7 +43,8 @@ import {
   runConfigOverrideSchema,
   runLogDataSchema,
 } from "../../lib/jsonb-schemas.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { getPlatformRunLimits } from "../run-limits.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 import type {
@@ -265,8 +266,15 @@ function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
 
 // --- Runs ---
 
-async function nextRunNumber(scope: AppScope, packageId: string): Promise<number> {
-  const [maxRow] = await db
+/** An open Drizzle transaction handle (same query surface as `db`). */
+type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function nextRunNumber(
+  executor: Db | DbTx,
+  scope: AppScope,
+  packageId: string,
+): Promise<number> {
+  const [maxRow] = await executor
     .select({ maxNum: max(runs.runNumber) })
     .from(runs)
     .where(
@@ -277,6 +285,74 @@ async function nextRunNumber(scope: AppScope, packageId: string): Promise<number
       }),
     );
   return (maxRow?.maxNum ?? 0) + 1;
+}
+
+/**
+ * Serialize `run_number` allocation per (org, application, package) with a
+ * transaction-scoped Postgres advisory lock. Without it, two concurrent runs
+ * of the same package both `SELECT max(run_number)+1`, read the same value and
+ * insert colliding numbers (READ COMMITTED lets neither see the other's
+ * uncommitted row). The lock forces the second max+insert to wait for the
+ * first to commit, so it observes the freshly inserted row. Released
+ * automatically at transaction end.
+ */
+async function acquireRunNumberLock(tx: DbTx, scope: AppScope, packageId: string): Promise<void> {
+  const lockKey = `run_number:${scope.orgId ?? ""}:${scope.applicationId ?? ""}:${packageId}`;
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+}
+
+/**
+ * Advisory-lock key serializing per-org run admission. Single-sourced so
+ * every party that must serialize against admission (`enforceOrgConcurrencyCap`
+ * below, `deleteOrganization`) derives the exact same key.
+ */
+export function orgRunConcurrencyLockKey(orgId: string): string {
+  return `run_concurrency:${orgId}`;
+}
+
+/**
+ * Atomic per-org concurrency reservation. The shared preflight gate
+ * (`run-preflight-gates.ts`) does a fast count-based pre-check that rejects
+ * most over-cap launches BEFORE the ~1.75s pipeline work, but that check is
+ * not atomic: two launches can both read `count < cap` in the window between
+ * the gate and the run INSERT (~1.75s later) and overshoot the cap.
+ *
+ * This runs inside `createRun`'s transaction, immediately before the INSERT,
+ * under a per-org transaction-scoped advisory lock — so the count and the
+ * insert are atomic w.r.t. other concurrent admissions for the same org. The
+ * lock serializes admission per org; the cap therefore holds exactly. Throws a
+ * 429 `org_run_concurrency_exceeded` (same code the gate surfaces) when at cap.
+ *
+ * A no-op when the run-limits registry is not initialized (e.g. an isolated
+ * unit test that never booted it) — there is no cap to enforce.
+ */
+async function enforceOrgConcurrencyCap(tx: DbTx, scope: AppScope): Promise<void> {
+  let cap: number;
+  try {
+    cap = getPlatformRunLimits().max_concurrent_per_org;
+  } catch {
+    return;
+  }
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId ?? "")})::bigint)`,
+  );
+  const [row] = await tx
+    .select({ active: count() })
+    .from(runs)
+    .where(
+      scopedWhere(runs, {
+        orgId: scope.orgId,
+        extra: [inArray(runs.status, [...activeRunStatusValues])],
+      }),
+    );
+  if ((row?.active ?? 0) >= cap) {
+    throw new ApiError({
+      status: 429,
+      code: "org_run_concurrency_exceeded",
+      title: "Org Run Concurrency Exceeded",
+      detail: `Organization concurrent run limit reached (${cap}). Wait for in-flight runs to complete.`,
+    });
+  }
 }
 
 interface CreateRunParams {
@@ -375,51 +451,58 @@ interface CreateRunParams {
 
 export async function createRun(scope: AppScope, params: CreateRunParams): Promise<void> {
   const { id, packageId, actor, input } = params;
-  const runNumber = await nextRunNumber(scope, packageId);
 
-  await db.insert(runs).values({
-    id,
-    packageId,
-    userId: actor?.type === "user" ? actor.id : null,
-    endUserId: actor?.type === "end_user" ? actor.id : null,
-    orgId: scope.orgId,
-    status: "pending",
-    input,
-    startedAt: new Date(),
-    scheduleId: params.scheduleId,
-    versionLabel: params.versionLabel,
-    versionRef: params.versionRef ?? "draft",
-    proxyLabel: params.proxyLabel,
-    modelLabel: params.modelLabel,
-    modelSource: params.modelSource,
-    applicationId: scope.applicationId,
-    apiKeyId: params.apiKeyId,
-    runNumber,
-    agentScope: params.agentScope ?? null,
-    agentName: params.agentName ?? null,
-    config: parseRunConfig(params.config),
-    configOverride: parseRunConfigOverride(params.configOverride),
-    ...(params.dependencyOverrides !== undefined
-      ? { dependencyOverrides: params.dependencyOverrides }
-      : {}),
-    runOrigin: params.runOrigin ?? "platform",
-    ...(params.sinkSecretEncrypted !== undefined
-      ? { sinkSecretEncrypted: params.sinkSecretEncrypted }
-      : {}),
-    ...(params.sinkExpiresAt !== undefined ? { sinkExpiresAt: params.sinkExpiresAt } : {}),
-    ...(params.contextSnapshot !== undefined ? { contextSnapshot: params.contextSnapshot } : {}),
-    runnerName: params.runnerName ?? null,
-    runnerKind: params.runnerKind ?? null,
-    modelCredentialId: params.modelCredentialId ?? null,
-    ...(params.connectionOverrides !== undefined
-      ? { connectionOverrides: params.connectionOverrides }
-      : {}),
-    ...(params.resolvedConnections !== undefined
-      ? { resolvedConnections: params.resolvedConnections }
-      : {}),
-    ...(params.resolvedIntegrationVersions !== undefined
-      ? { resolvedIntegrationVersions: params.resolvedIntegrationVersions }
-      : {}),
+  await db.transaction(async (tx) => {
+    // Order matters: acquire the per-org concurrency lock before the per-package
+    // run_number lock (consistent lock ordering across callers → no deadlock).
+    await enforceOrgConcurrencyCap(tx, scope);
+    await acquireRunNumberLock(tx, scope, packageId);
+    const runNumber = await nextRunNumber(tx, scope, packageId);
+
+    await tx.insert(runs).values({
+      id,
+      packageId,
+      userId: actor?.type === "user" ? actor.id : null,
+      endUserId: actor?.type === "end_user" ? actor.id : null,
+      orgId: scope.orgId,
+      status: "pending",
+      input,
+      startedAt: new Date(),
+      scheduleId: params.scheduleId,
+      versionLabel: params.versionLabel,
+      versionRef: params.versionRef ?? "draft",
+      proxyLabel: params.proxyLabel,
+      modelLabel: params.modelLabel,
+      modelSource: params.modelSource,
+      applicationId: scope.applicationId,
+      apiKeyId: params.apiKeyId,
+      runNumber,
+      agentScope: params.agentScope ?? null,
+      agentName: params.agentName ?? null,
+      config: parseRunConfig(params.config),
+      configOverride: parseRunConfigOverride(params.configOverride),
+      ...(params.dependencyOverrides !== undefined
+        ? { dependencyOverrides: params.dependencyOverrides }
+        : {}),
+      runOrigin: params.runOrigin ?? "platform",
+      ...(params.sinkSecretEncrypted !== undefined
+        ? { sinkSecretEncrypted: params.sinkSecretEncrypted }
+        : {}),
+      ...(params.sinkExpiresAt !== undefined ? { sinkExpiresAt: params.sinkExpiresAt } : {}),
+      ...(params.contextSnapshot !== undefined ? { contextSnapshot: params.contextSnapshot } : {}),
+      runnerName: params.runnerName ?? null,
+      runnerKind: params.runnerKind ?? null,
+      modelCredentialId: params.modelCredentialId ?? null,
+      ...(params.connectionOverrides !== undefined
+        ? { connectionOverrides: params.connectionOverrides }
+        : {}),
+      ...(params.resolvedConnections !== undefined
+        ? { resolvedConnections: params.resolvedConnections }
+        : {}),
+      ...(params.resolvedIntegrationVersions !== undefined
+        ? { resolvedIntegrationVersions: params.resolvedIntegrationVersions }
+        : {}),
+    });
   });
 }
 
@@ -436,26 +519,30 @@ export async function createFailedRun(
   scheduleId?: string,
   agentDenorm?: { scope?: string | null; name?: string | null },
 ): Promise<void> {
-  const runNumber = await nextRunNumber(scope, packageId);
   const now = new Date();
 
-  await db.insert(runs).values({
-    id,
-    packageId,
-    userId: actor?.type === "user" ? actor.id : null,
-    endUserId: actor?.type === "end_user" ? actor.id : null,
-    orgId: scope.orgId,
-    applicationId: scope.applicationId,
-    status: "failed",
-    input: null,
-    error,
-    startedAt: now,
-    completedAt: now,
-    duration: 0,
-    scheduleId,
-    runNumber,
-    agentScope: agentDenorm?.scope ?? null,
-    agentName: agentDenorm?.name ?? null,
+  await db.transaction(async (tx) => {
+    await acquireRunNumberLock(tx, scope, packageId);
+    const runNumber = await nextRunNumber(tx, scope, packageId);
+
+    await tx.insert(runs).values({
+      id,
+      packageId,
+      userId: actor?.type === "user" ? actor.id : null,
+      endUserId: actor?.type === "end_user" ? actor.id : null,
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
+      status: "failed",
+      input: null,
+      error,
+      startedAt: now,
+      completedAt: now,
+      duration: 0,
+      scheduleId,
+      runNumber,
+      agentScope: agentDenorm?.scope ?? null,
+      agentName: agentDenorm?.name ?? null,
+    });
   });
 }
 

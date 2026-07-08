@@ -90,6 +90,17 @@ function syntheticAliasErrorResponse(
 const MAX_RETAINED_USAGE_FRAMES = 64;
 
 /**
+ * Upper bound on the partial-frame buffer held by {@link tapSseUsage} between
+ * SSE delimiters. A malformed / adversarial upstream that never emits the
+ * `\n\n` frame delimiter would otherwise accumulate the whole response into a
+ * single unbounded string (memory-exhaustion DoS, one per in-flight stream).
+ * Usage frames are a few hundred bytes; 1 MB is orders of magnitude of
+ * headroom, so exceeding it means the pending fragment is not a usage frame
+ * and can be safely discarded.
+ */
+const MAX_TAP_BUFFER_BYTES = 1_000_000;
+
+/**
  * Tap a teed SSE stream and extract usage WITHOUT retaining the full response
  * (accumulating every frame would be O(response) memory per in-flight
  * stream). Frames are parsed as delimited; only frames that individually
@@ -127,6 +138,10 @@ export async function tapSseUsage(
         considerFrame(buffer.slice(0, idx));
         buffer = buffer.slice(idx + 2);
       }
+      // Bound the pending partial-frame buffer: a stream with no frame
+      // delimiter must not grow the buffer without limit. A usage frame is
+      // tiny, so an over-cap fragment is non-usage data — drop it.
+      if (buffer.length > MAX_TAP_BUFFER_BYTES) buffer = "";
     }
     if (buffer.trim().length > 0) considerFrame(buffer);
   } catch (err) {
@@ -441,6 +456,12 @@ export async function forwardMeteredResponse(
       status: upstream.status,
       headers,
       body: clientBody,
+    }).catch((err) => {
+      // Best-effort cache write — a failure must never reject unhandled or
+      // affect the response already being returned to the client.
+      logger.warn("llm-proxy: response cache write failed", {
+        error: getErrorMessage(err),
+      });
     });
     headers.set("x-llm-proxy-cache-status", "MISS");
   }

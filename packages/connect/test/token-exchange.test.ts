@@ -5,17 +5,9 @@ import { exchangeAuthorizationCode } from "../src/token-exchange.ts";
 import { OAuthCallbackError } from "../src/oauth.ts";
 import type { OAuthStateRecord, OAuthStateStore } from "../src/types.ts";
 
-// Mirrors integration-oauth.test.ts: patch global fetch for the duration of
-// a single call, restore afterwards. The SUT calls the global `fetch`, so
-// this is the established injection seam — no production change needed.
-function withFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
-  const orig = globalThis.fetch;
-  globalThis.fetch = impl;
-  return fn().finally(() => {
-    globalThis.fetch = orig;
-  });
-}
-
+// The SUT egress is SSRF-guarded (`oauthEgressFetch` does real DNS), so tests
+// inject a stub via `input.fetchImpl` rather than patching the global `fetch` —
+// a non-resolvable test hostname would (correctly) fail-close otherwise.
 function memoryStore(): OAuthStateStore & { _data: Map<string, OAuthStateRecord> } {
   const data = new Map<string, OAuthStateRecord>();
   return {
@@ -89,10 +81,8 @@ describe("exchangeAuthorizationCode — client auth method", () => {
   it("client_secret_post sends the secret in the body", async () => {
     const store = memoryStore();
     const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
-    await withFetch(stub, () =>
-      exchangeAuthorizationCode(
-        baseInput(store, { tokenEndpointAuthMethod: "client_secret_post" }),
-      ),
+    await exchangeAuthorizationCode(
+      baseInput(store, { tokenEndpointAuthMethod: "client_secret_post", fetchImpl: stub }),
     );
     const params = new URLSearchParams(captured.value!.body);
     expect(params.get("client_id")).toBe("client-id");
@@ -105,10 +95,8 @@ describe("exchangeAuthorizationCode — client auth method", () => {
   it("client_secret_basic sends Authorization: Basic and omits the body secret", async () => {
     const store = memoryStore();
     const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
-    await withFetch(stub, () =>
-      exchangeAuthorizationCode(
-        baseInput(store, { tokenEndpointAuthMethod: "client_secret_basic" }),
-      ),
+    await exchangeAuthorizationCode(
+      baseInput(store, { tokenEndpointAuthMethod: "client_secret_basic", fetchImpl: stub }),
     );
     const authHeader =
       captured.value!.headers["Authorization"] ?? captured.value!.headers["authorization"];
@@ -123,10 +111,8 @@ describe("exchangeAuthorizationCode — client auth method", () => {
   it("tokenEndpointAuthMethod=none (public client) omits the secret entirely", async () => {
     const store = memoryStore();
     const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
-    await withFetch(stub, () =>
-      exchangeAuthorizationCode(
-        baseInput(store, { tokenEndpointAuthMethod: "none", clientSecret: "" }),
-      ),
+    await exchangeAuthorizationCode(
+      baseInput(store, { tokenEndpointAuthMethod: "none", clientSecret: "", fetchImpl: stub }),
     );
     const authHeader =
       captured.value!.headers["Authorization"] ?? captured.value!.headers["authorization"];
@@ -145,13 +131,11 @@ describe("exchangeAuthorizationCode — error classification", () => {
     const { fetch: stub } = recordingFetch(jsonResponse({ error: "invalid_grant" }, 400));
 
     let err: unknown = null;
-    await withFetch(stub, async () => {
-      try {
-        await exchangeAuthorizationCode(baseInput(store));
-      } catch (e) {
-        err = e;
-      }
-    });
+    try {
+      await exchangeAuthorizationCode(baseInput(store, { fetchImpl: stub }));
+    } catch (e) {
+      err = e;
+    }
     expect(err).toBeInstanceOf(OAuthCallbackError);
     const e = err as OAuthCallbackError;
     expect(e.kind).toBe("revoked");
@@ -168,13 +152,11 @@ describe("exchangeAuthorizationCode — error classification", () => {
     }) as unknown as typeof fetch;
 
     let err: unknown = null;
-    await withFetch(stub, async () => {
-      try {
-        await exchangeAuthorizationCode(baseInput(store));
-      } catch (e) {
-        err = e;
-      }
-    });
+    try {
+      await exchangeAuthorizationCode(baseInput(store, { fetchImpl: stub }));
+    } catch (e) {
+      err = e;
+    }
     expect(err).toBeInstanceOf(OAuthCallbackError);
     expect((err as OAuthCallbackError).kind).toBe("transient");
   });
@@ -189,13 +171,11 @@ describe("exchangeAuthorizationCode — error classification", () => {
     );
 
     let err: unknown = null;
-    await withFetch(stub, async () => {
-      try {
-        await exchangeAuthorizationCode(baseInput(store));
-      } catch (e) {
-        err = e;
-      }
-    });
+    try {
+      await exchangeAuthorizationCode(baseInput(store, { fetchImpl: stub }));
+    } catch (e) {
+      err = e;
+    }
     expect(err).toBeInstanceOf(OAuthCallbackError);
     expect((err as OAuthCallbackError).kind).toBe("transient");
     expect((err as OAuthCallbackError).message).toContain("non-JSON");
@@ -209,13 +189,11 @@ describe("exchangeAuthorizationCode — error classification", () => {
     );
 
     let err: unknown = null;
-    await withFetch(stub, async () => {
-      try {
-        await exchangeAuthorizationCode(baseInput(store));
-      } catch (e) {
-        err = e;
-      }
-    });
+    try {
+      await exchangeAuthorizationCode(baseInput(store, { fetchImpl: stub }));
+    } catch (e) {
+      err = e;
+    }
     expect(err).toBeInstanceOf(OAuthCallbackError);
     // The marker may live on the typed `body` field for diagnostics, but
     // must never be in the human-facing message a generic catcher logs.

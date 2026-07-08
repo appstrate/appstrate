@@ -41,7 +41,7 @@ import { buildLlmProxyPrincipal } from "./types.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { checkEgressHost } from "../../lib/egress-host-guard.ts";
 import {
   anthropicAuthErrorResponse,
   applyClaudeOauthGatewayHeaders,
@@ -196,8 +196,36 @@ export async function handleClaudeCodeSdkGateway(
   // Defense-in-depth: the claude-code provider pins baseUrl to api.anthropic.com
   // (baseUrlOverridable:false), so this is a no-op today — but it stops the
   // gateway becoming an SSRF hole if that flag is ever flipped, instead of the
-  // protection silently depending on a provider def in another repo.
-  if (isBlockedUrl(resolved.baseUrl)) {
+  // protection silently depending on a provider def in another repo. Fail
+  // closed: a malformed base URL or a non-http(s) scheme (file:, gopher:, …)
+  // is refused before the host check; then the DNS-aware gate (resolves +
+  // re-checks) stops a rebinding host slipping past a literal check.
+  let upstreamBase: URL;
+  try {
+    upstreamBase = new URL(resolved.baseUrl);
+  } catch {
+    // The resolved base URL is the real backing endpoint — server-log-only;
+    // the caller-facing message must not embed it.
+    logger.error("claude-code-sdk gateway: refused malformed upstream base URL", {
+      presetId,
+      baseUrl: resolved.baseUrl,
+    });
+    throw invalidRequest(
+      `Model preset "${presetId}" resolves to a blocked address — refusing to proxy.`,
+    );
+  }
+  if (upstreamBase.protocol !== "https:" && upstreamBase.protocol !== "http:") {
+    // Server-log-only for the same reason as above.
+    logger.error("claude-code-sdk gateway: refused non-http(s) upstream scheme", {
+      presetId,
+      baseUrl: resolved.baseUrl,
+    });
+    throw invalidRequest(
+      `Model preset "${presetId}" resolves to a blocked address — refusing to proxy.`,
+    );
+  }
+  const egressCheck = await checkEgressHost(upstreamBase.hostname);
+  if (egressCheck.blocked) {
     // The resolved base URL is the real backing endpoint — server-log-only;
     // the caller-facing message must not embed it.
     logger.error("claude-code-sdk gateway: refused blocked upstream (SSRF)", {

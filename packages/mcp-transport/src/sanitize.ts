@@ -114,20 +114,34 @@ export function sanitiseTextField(value: unknown, maxBytes: number): string | un
 }
 
 /**
+ * Max nesting depth walked when sanitising a schema. A hostile server could
+ * otherwise send a pathologically deep object (`{a:{a:{a:…}}}`) to overflow
+ * the stack before any size accounting runs. Legitimate JSON Schemas are
+ * shallow; anything past this cap is treated as opaque and left un-recursed —
+ * the serialised-size cap in {@link sanitiseToolDescriptor} still bounds the
+ * total bytes that reach the agent, so an un-walked deep subtree cannot smuggle
+ * an oversized payload through.
+ */
+const MAX_SCHEMA_DEPTH = 64;
+
+/**
  * Recursively sanitise every `description` field inside a JSON Schema
  * `properties` block. Used to defeat Full-Schema Poisoning where the
- * payload hides inside nested `properties.x.description`.
+ * payload hides inside nested `properties.x.description`. Bounded by
+ * {@link MAX_SCHEMA_DEPTH} so a maliciously deep schema cannot exhaust the
+ * call stack.
  */
-function sanitiseSchemaDescriptions(schema: unknown): unknown {
+function sanitiseSchemaDescriptions(schema: unknown, depth = 0): unknown {
   if (!schema || typeof schema !== "object") return schema;
-  if (Array.isArray(schema)) return schema.map((s) => sanitiseSchemaDescriptions(s));
+  if (depth >= MAX_SCHEMA_DEPTH) return schema;
+  if (Array.isArray(schema)) return schema.map((s) => sanitiseSchemaDescriptions(s, depth + 1));
 
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema)) {
     if (key === "description" && typeof value === "string") {
       out[key] = sanitiseTextField(value, MAX_PARAMETER_DESCRIPTION_BYTES);
     } else if (typeof value === "object" && value !== null) {
-      out[key] = sanitiseSchemaDescriptions(value);
+      out[key] = sanitiseSchemaDescriptions(value, depth + 1);
     } else {
       out[key] = value;
     }
@@ -149,7 +163,10 @@ export function sanitiseToolDescriptor(tool: Tool): Tool | null {
   const description = sanitiseTextField(tool.description, MAX_TOOL_DESCRIPTION_BYTES);
   const inputSchema = sanitiseSchemaDescriptions(tool.inputSchema) as Tool["inputSchema"];
   const serialised = JSON.stringify(inputSchema);
-  if (serialised.length > MAX_SCHEMA_SERIALISED_BYTES) return null;
+  // Measure the UTF-8 byte length — `String.length` counts UTF-16 code units,
+  // so a schema of multibyte characters could carry up to ~4× the intended
+  // byte budget past this cap.
+  if (new TextEncoder().encode(serialised).byteLength > MAX_SCHEMA_SERIALISED_BYTES) return null;
   const out: Tool = {
     ...tool,
     inputSchema,

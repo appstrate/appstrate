@@ -16,7 +16,8 @@ import {
   updateEndUser,
   deleteEndUser,
 } from "../services/end-users.ts";
-import { invalidRequest, parseBody } from "../lib/errors.ts";
+import { invalidRequest } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -66,8 +67,7 @@ export function createEndUsersRouter() {
     requirePermission("end-users", "write"),
     async (c) => {
       const scope = getAppScope(c);
-      const body = await c.req.json();
-      const data = parseBody(createEndUserSchema, body);
+      const data = await readJsonBody(c, createEndUserSchema);
 
       const created = await createEndUser(scope, {
         name: data.name ?? undefined,
@@ -89,7 +89,7 @@ export function createEndUsersRouter() {
   );
 
   // GET /api/end-users — list end-users in the application (cursor-based pagination)
-  router.get("/", rateLimit(300), async (c) => {
+  router.get("/", rateLimit(300), requirePermission("end-users", "read"), async (c) => {
     const scope = getAppScope(c);
     const limit = c.req.query("limit") ? Number(c.req.query("limit")) : undefined;
     const startingAfter = c.req.query("startingAfter");
@@ -123,7 +123,7 @@ export function createEndUsersRouter() {
   });
 
   // GET /api/end-users/:id — get a single end-user
-  router.get("/:id", rateLimit(300), async (c) => {
+  router.get("/:id", rateLimit(300), requirePermission("end-users", "read"), async (c) => {
     const scope = getAppScope(c);
     const endUserId = c.req.param("id")!;
     const result = await getEndUser(scope, endUserId);
@@ -135,8 +135,7 @@ export function createEndUsersRouter() {
     const scope = getAppScope(c);
     const endUserId = c.req.param("id")!;
 
-    const body = await c.req.json();
-    const data = parseBody(updateEndUserSchema, body);
+    const data = await readJsonBody(c, updateEndUserSchema);
     const result = await updateEndUser(scope, endUserId, {
       name: data.name ?? undefined,
       email: data.email ?? undefined,

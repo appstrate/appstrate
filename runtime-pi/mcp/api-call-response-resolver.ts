@@ -31,8 +31,9 @@
  * status while Pi is the runtime.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, lstat, realpath, open } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { dirname, resolve, sep } from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
 import { spillResourcesToWorkspace, type RuntimeEventEmitter } from "@appstrate/runner-pi";
 import { readUpstreamMeta } from "./upstream-meta.ts";
@@ -94,8 +95,12 @@ async function extractBodyBytes(
       chunks.push(enc.encode(block.text));
     } else if (block.type === "resource_link" && typeof block.uri === "string") {
       const c = (await readResource(block.uri)).contents?.[0];
-      if (c?.text != null) chunks.push(enc.encode(c.text));
-      else if (c?.blob != null) chunks.push(decodeBase64(c.blob));
+      // Prefer the base64 `blob` (byte-exact) over `text`: a non-UTF-8 /
+      // binary body round-tripped through `TextEncoder` would corrupt bytes
+      // (invalid sequences replaced with U+FFFD). Only fall back to `text`
+      // when the resource carries no blob (genuine text resource).
+      if (c?.blob != null) chunks.push(decodeBase64(c.blob));
+      else if (c?.text != null) chunks.push(enc.encode(c.text));
     }
   }
   const total = chunks.reduce((n, c) => n + c.byteLength, 0);
@@ -106,6 +111,63 @@ async function extractBodyBytes(
     off += c.byteLength;
   }
   return out;
+}
+
+/**
+ * Write `bytes` to `abs` while refusing any symlink escape.
+ *
+ * `resolveSafePath` confines the *logical* path to the workspace root, but a
+ * symlink at (or above) the resolved target can still redirect the actual
+ * write outside the sandbox — `writeFile` follows symlinks. Two floors close
+ * that hole:
+ *
+ *   1. After creating the parent, `realpath` it and confirm the resolved path
+ *      is still inside the workspace root. This catches a symlinked
+ *      intermediate directory (e.g. `/workspace/out -> /etc`) that
+ *      `resolveSafePath` accepted on its logical name.
+ *   2. Open the final path with `O_NOFOLLOW`, so the open fails with `ELOOP`
+ *      when the final component is itself a symlink — closing the TOCTOU
+ *      window between the check and the write. An `lstat` pre-check gives a
+ *      clearer error for the common already-exists case.
+ */
+async function writeBodyConfined(workspace: string, abs: string, bytes: Uint8Array): Promise<void> {
+  const root = resolve(workspace);
+  const rootPrefix = root.endsWith(sep) ? root : root + sep;
+  const parent = dirname(abs);
+  await mkdir(parent, { recursive: true });
+
+  // Floor 1 — the parent dir must not resolve (through any symlink) outside
+  // the workspace. `realpath` follows every link in the chain.
+  const realParent = await realpath(parent);
+  if (realParent !== root && !realParent.startsWith(rootPrefix)) {
+    throw new Error(
+      "api_call responseMode.toFile: refusing to write — target directory escapes the workspace via a symlink",
+    );
+  }
+
+  // Floor 2a — refuse a pre-existing symlink at the final path. `lstat` does
+  // not follow the link, so a symlinked target is caught before we open it.
+  try {
+    const st = await lstat(abs);
+    if (st.isSymbolicLink()) {
+      throw new Error("api_call responseMode.toFile: refusing to write — target path is a symlink");
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+
+  // Floor 2b — `O_NOFOLLOW` fails with ELOOP if the final path component is a
+  // symlink, closing the TOCTOU gap between the lstat above and the write.
+  const handle = await open(
+    abs,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
+    0o644,
+  );
+  try {
+    await handle.writeFile(bytes);
+  } finally {
+    await handle.close();
+  }
 }
 
 /**
@@ -122,8 +184,7 @@ export async function shapeApiCallResponse(
   if (opts.toFile) {
     const bytes = await extractBodyBytes(result, opts.readResource);
     const abs = await resolveSafePath(opts.workspace, opts.toFile);
-    await mkdir(dirname(abs), { recursive: true });
-    await writeFile(abs, bytes);
+    await writeBodyConfined(opts.workspace, abs, bytes);
     const descriptor = {
       kind: "file" as const,
       path: opts.toFile,

@@ -20,10 +20,9 @@ export async function applyCorePGliteMigrations(
   pgClient?: PGlite,
 ): Promise<void> {
   const { join } = await import("node:path");
-  const { readFileSync, existsSync } = await import("node:fs");
 
   const journalPath = join(migrationsDir, "meta/_journal.json");
-  if (!existsSync(journalPath)) {
+  if (!(await Bun.file(journalPath).exists())) {
     logger.warn("No core migration journal found, skipping PGlite migrations");
     return;
   }
@@ -38,7 +37,7 @@ export async function applyCorePGliteMigrations(
     )
   `);
 
-  const journal = JSON.parse(readFileSync(journalPath, "utf-8")) as {
+  const journal = JSON.parse(await Bun.file(journalPath).text()) as {
     entries: { idx: number; tag: string }[];
   };
 
@@ -50,12 +49,12 @@ export async function applyCorePGliteMigrations(
     if (applied.has(entry.tag)) continue;
 
     const sqlFile = join(migrationsDir, `${entry.tag}.sql`);
-    if (!existsSync(sqlFile)) {
+    if (!(await Bun.file(sqlFile).exists())) {
       logger.warn("Core migration file not found, skipping", { tag: entry.tag });
       continue;
     }
 
-    const content = readFileSync(sqlFile, "utf-8");
+    const content = await Bun.file(sqlFile).text();
     await pg.exec(content.replaceAll("--> statement-breakpoint", ""));
     await pg.query('INSERT INTO "__drizzle_migrations" (hash) VALUES ($1)', [entry.tag]);
     count++;

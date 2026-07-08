@@ -7,7 +7,8 @@ import { db } from "@appstrate/db/client";
 import { profiles, user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
-import { forbidden, internalError, notFound, parseBody } from "../lib/errors.ts";
+import { forbidden, internalError, notFound } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -71,9 +72,8 @@ profileRouter.patch("/profile", async (c) => {
     throw forbidden("API keys cannot modify the dashboard user profile");
   }
   const user = c.get("user");
-  const body = await c.req.json();
 
-  const data = parseBody(profileUpdateSchema, body);
+  const data = await readJsonBody(c, profileUpdateSchema);
 
   const { language, displayName } = data;
 
@@ -108,8 +108,7 @@ profileRouter.patch("/profile", async (c) => {
 // POST /api/profiles/batch — batch lookup display names by user IDs (scoped to org members)
 profileRouter.post("/profiles/batch", async (c) => {
   const orgId = c.get("orgId");
-  const body = await c.req.json();
-  const data = parseBody(batchLookupSchema, body);
+  const data = await readJsonBody(c, batchLookupSchema);
   const ids = data.ids.filter(Boolean);
   if (ids.length === 0) return c.json(listResponse([]));
 

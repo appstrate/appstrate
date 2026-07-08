@@ -23,7 +23,13 @@ import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 
 const INHERIT = "__inherit__";
-const NONE = "__none__";
+// Wire value the server recognizes as "no proxy" (distinct from INHERIT =
+// "use the org default"). Emitting it verbatim — rather than an internal
+// `__none__` sentinel each caller has to translate — means both the run
+// launcher and the schedule form send the right value, so a scheduled run
+// with "None" selected is no longer silently routed through the org-default
+// proxy.
+const NONE = "none";
 
 export interface RunOverridesValue {
   /** Override delta — deep-merged with persisted config on the server. */

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type { components } from "../api/client";
 
 type TestResult = components["schemas"]["TestResult"];
@@ -21,6 +22,7 @@ interface TestMutation {
 }
 
 export function useConnectionTest(mutation: TestMutation) {
+  const { t } = useTranslation("common");
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestResult | null>>({});
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -55,7 +57,7 @@ export function useConnectionTest(mutation: TestMutation) {
         onError: () => {
           setTestResults((prev) => ({
             ...prev,
-            [id]: { ok: false, latency: 0, error: "INTERNAL_ERROR", message: "Test failed" },
+            [id]: { ok: false, latency: 0, error: "INTERNAL_ERROR", message: t("test.failed") },
           }));
           setTestingId(null);
           scheduleClear(id);

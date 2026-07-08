@@ -25,7 +25,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
  */
 type WebhookRow = InferSelectModel<typeof webhooks>;
 type WebhookDeliveryRow = InferSelectModel<typeof webhookDeliveries>;
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
@@ -368,7 +368,8 @@ export async function updateWebhook(
 
   if (params.url) validateWebhookUrl(params.url);
 
-  const updates = buildUpdateSet(params);
+  // Keys of `updateWebhookSchema` (routes.ts).
+  const updates = buildUpdateSet(params, ["url", "events", "packageId", "payloadMode", "enabled"]);
 
   const [updated] = await db
     .update(webhooks)
@@ -507,11 +508,16 @@ export function buildEventEnvelope(params: {
     delete execObj.input;
   }
 
-  // Truncate: if data exceeds 256KB, strip result
-  const dataJson = JSON.stringify(execObj);
-  if (dataJson.length > MAX_PAYLOAD_SIZE && execObj.result) {
+  // Truncate: if the envelope exceeds MAX_PAYLOAD_SIZE, strip the largest
+  // optional fields — `result` first, then `input` (a large run input can
+  // blow the payload just as easily). Both remain recoverable via the API.
+  if (JSON.stringify(execObj).length > MAX_PAYLOAD_SIZE && execObj.result) {
     delete execObj.result;
     execObj.resultTruncated = true;
+  }
+  if (JSON.stringify(execObj).length > MAX_PAYLOAD_SIZE && execObj.input) {
+    delete execObj.input;
+    execObj.inputTruncated = true;
   }
 
   return {
@@ -654,6 +660,38 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   const start = Date.now();
   let statusCode: number | undefined;
   let errorMessage: string | undefined;
+
+  // SSRF at DELIVERY time. `validateWebhookUrl` runs only at create/update with
+  // the literal `isBlockedUrl` (no DNS) — a hostname whose A record points at
+  // 169.254.169.254 / RFC1918 passes it and then resolves to the internal
+  // address here. Re-resolve + block on EVERY delivery (fail closed). Webhooks
+  // are HTTPS-only (validateWebhookUrl), so we cannot pin the connection to
+  // `pinnedAddress` without breaking TLS SNI/cert validation; the residual
+  // re-resolve TOCTOU is the same documented, accepted window as every other
+  // `fetch`-delegating guard (see ssrf-dns.ts). `redirect: "manual"` below
+  // still prevents redirect-based rebind.
+  const hostCheck = await resolveAndCheckHost(new URL(wh.url).hostname);
+  if (hostCheck.blocked) {
+    logger.warn("Webhook delivery blocked by SSRF guard", {
+      webhookId,
+      eventId,
+      attempt,
+      reason: hostCheck.reason,
+    });
+    await db.insert(webhookDeliveries).values({
+      webhookId,
+      eventId,
+      eventType,
+      status: "failed",
+      statusCode: null,
+      latency: 0,
+      attempt,
+      error: `Delivery target resolves to a blocked address (${hostCheck.reason})`,
+    });
+    throw new PermanentJobError(
+      `Delivery target resolves to a blocked address (${hostCheck.reason})`,
+    );
+  }
 
   try {
     const controller = new AbortController();

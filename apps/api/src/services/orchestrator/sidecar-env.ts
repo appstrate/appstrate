@@ -63,6 +63,18 @@ export function buildBaseSidecarEnv(params: BaseSidecarEnvParams): Record<string
     PLATFORM_API_URL: params.platformApiUrl,
     WORKSPACE_HANDLE_JSON: JSON.stringify(params.workspace),
   };
+  // Forward the operator's internal-egress allowlist to the sidecar. The
+  // sidecar's own SSRF gates (LLM baseUrl, remote-MCP fetch) are otherwise
+  // strictly literal/fail-closed with no env access to the platform
+  // allowlist — a host the platform-side checks just exempted (internal
+  // model endpoint, allowlisted remote MCP server) would be re-blocked
+  // in-run. Empty/unset ⇒ nothing exempted (secure default).
+  // Raw process.env read, NOT getEnv(): buildBaseSidecarEnv also runs
+  // inside the standalone firecracker runner daemon, which does not carry
+  // the platform's required env vars (BETTER_AUTH_SECRET, …) — getEnv()'s
+  // fail-fast validation would crash sidecar creation there.
+  const egressAllowHosts = process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS;
+  if (egressAllowHosts) env.APPSTRATE_EGRESS_ALLOW_HOSTS = egressAllowHosts;
   applySpecToSidecarEnv(params.spec, env);
   return env;
 }
@@ -119,5 +131,11 @@ export function applySpecToSidecarEnv(
   // against this single integration and exits (no agent /mcp server).
   if (spec.connectLoginSpec) {
     target.CONNECT_LOGIN_JSON = JSON.stringify(spec.connectLoginSpec);
+  }
+  // P4 — result-channel key. The sidecar encrypts the captured credential
+  // bundle with this AES-256 key before emitting the APPSTRATE_CONNECT_RESULT
+  // sentinel, keeping plaintext credentials off the captured stdout stream.
+  if (spec.connectResultKey) {
+    target.CONNECT_RESULT_KEY = spec.connectResultKey;
   }
 }

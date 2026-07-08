@@ -73,6 +73,8 @@
   "validation.passwordMismatch": "Passwords do not match",
   "validation.slugFormat": "Lowercase letters, numbers and hyphens only",
   "validation.emailFormat": "Invalid email address",
+  "validation.urlFormat": "Invalid URL",
+  "test.failed": "Test failed",
   "viewManifest": "View manifest",
   "dashboard.welcome": "Welcome, {{name}} \ud83d\udc4b",
   "notifications.ariaLabel": "Notifications",

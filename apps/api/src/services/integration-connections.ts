@@ -39,7 +39,7 @@ import {
   DynamicClientRegistrationError,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { guardedFetch, isBlockedUrl } from "@appstrate/core/ssrf";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -1086,8 +1086,16 @@ export function usesAutoProvisionedClient(
  * remote-MCP discovery chain probes manifest- and *server*-derived URLs (RFC
  * 9728 well-known + the `WWW-Authenticate` challenge's `resource_metadata`,
  * then RFC 8414 metadata), so each GET must be guarded — not just the
- * registration POST. Mirrors the per-request `isBlockedUrl` posture used for
- * the userinfo fetch and the credential proxy. `discoverProtectedResourceMetadata`
+ * registration POST.
+ *
+ * Delegates to the shared {@link guardedFetch} primitive, which does per-hop
+ * DNS resolution + blocklist checks and follows redirects MANUALLY (each hop
+ * re-checked), strips userinfo/fragment, and rejects non-http(s) schemes. This
+ * is strictly stronger than the previous literal-only `isBlockedUrl` + raw
+ * `fetch` posture, which resolved no DNS (a public host with an A record
+ * pointing at `169.254.169.254`/RFC1918 sailed through) and left `redirect`
+ * unpinned (Bun follows 3xx by default, so a `302` to a private host was
+ * followed unchecked — SSRF + DNS-rebind). `discoverProtectedResourceMetadata`
  * is best-effort (swallows fetch errors → returns `null`), so a blocked URL
  * cleanly degrades to "discovery failed" rather than throwing.
  */
@@ -1096,10 +1104,7 @@ const ssrfGuardedFetch = (async (
   init?: Parameters<typeof fetch>[1],
 ) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (isBlockedUrl(url)) {
-    throw new Error(`SSRF guard: refusing to fetch blocked URL ${url}`);
-  }
-  return fetch(input, init);
+  return guardedFetch(url, init, { logger });
   // `preconnect` is never invoked by the discovery helpers; cast to satisfy the
   // `typeof fetch` shape Bun's lib declares.
 }) as typeof fetch;
@@ -1278,17 +1283,44 @@ export async function ensureIntegrationOAuthClient(
         : {}),
       ...(dcrAuthMethod ? { tokenEndpointAuthMethod: dcrAuthMethod } : {}),
     });
-    const client = await createIntegrationOAuthClient(
-      scope,
-      packageId,
-      authKey,
-      {
-        clientId: registration.clientId,
-        clientSecret: registration.clientSecret ?? "",
-        redirectUri,
-      },
-      { autoProvisioned: true },
-    );
+    let client: IntegrationOAuthClientWithSecret;
+    try {
+      client = await createIntegrationOAuthClient(
+        scope,
+        packageId,
+        authKey,
+        {
+          clientId: registration.clientId,
+          clientSecret: registration.clientSecret ?? "",
+          redirectUri,
+        },
+        { autoProvisioned: true },
+      );
+    } catch (insertErr) {
+      // Concurrent auto-DCR: a parallel Connect for the same (app, package,
+      // authKey) registered its client between our `racedClient` re-check above
+      // and this insert. The partial unique `idx_ioc_one_auto` rejects the
+      // second auto-provisioned row (Postgres 23505) — catch it and re-select
+      // the winner instead of surfacing a 500. Our own upstream registration is
+      // abandoned (harmless: an unused DCR client), the connection proceeds on
+      // the winning client.
+      if (
+        insertErr instanceof Error &&
+        "code" in insertErr &&
+        (insertErr as { code: string }).code === "23505"
+      ) {
+        const winner = await getAutoProvisionedClient(scope, packageId, authKey);
+        if (winner) {
+          logger.info("auto-DCR: lost registration race, reusing concurrently-registered client", {
+            packageId,
+            authKey,
+            clientId: winner.client_id,
+          });
+          return { ...resolved, customClients: [winner] };
+        }
+      }
+      throw insertErr;
+    }
     logger.info("auto-DCR: registered OAuth client", {
       packageId,
       authKey,
@@ -1665,6 +1697,12 @@ export async function persistCredentialBundle(
     if (!input.packageId || !input.authKey || input.accountId === undefined) {
       throw new Error("persistCredentialBundle(insert): packageId, authKey, accountId required");
     }
+    // Capture the narrowed (non-undefined) values in locals: TypeScript does
+    // not carry the guard's narrowing into the transaction closure below, so
+    // `input.packageId` etc. would widen back to `string | undefined` there.
+    const insertPackageId = input.packageId;
+    const insertAuthKey = input.authKey;
+    const insertAccountId = input.accountId;
     // No mono-auth-per-actor gate: an actor may hold N connections across any
     // mix of declared auths (OAuth + PAT + custom). The runtime picks exactly
     // one per run via the resolver cascade; the member picker disambiguates
@@ -1683,28 +1721,41 @@ export async function persistCredentialBundle(
     const labelValue: string | SQL =
       identityLabel ??
       input.labelHint ??
-      sql<string>`'Connexion ' || ((SELECT COUNT(*) FROM integration_connections WHERE application_id = ${target.scope.applicationId} AND integration_package_id = ${input.packageId} AND ${ownerFilter}) + 1)`;
-    const inserted = await db
-      .insert(integrationConnections)
-      .values({
-        integrationId: input.packageId,
-        authKey: input.authKey,
-        accountId: input.accountId,
-        applicationId: target.scope.applicationId,
-        userId,
-        endUserId,
-        credentialsEncrypted: ciphertext,
-        identityClaims: input.identityClaims ?? {},
-        scopesGranted: input.scopesGranted ?? [],
-        needsReconnection: input.needsReconnection ?? false,
-        clientRef: input.clientRef ?? null,
-        expiresAt: input.expiresAt ?? null,
-        label: labelValue,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
-    const row = inserted[0];
+      sql<string>`'Connexion ' || ((SELECT COUNT(*) FROM integration_connections WHERE application_id = ${target.scope.applicationId} AND integration_package_id = ${insertPackageId} AND ${ownerFilter}) + 1)`;
+    // Serialize the COUNT(*)-derived "Connexion N" numbering per
+    // (app, integration, owner) with a transaction-scoped advisory lock: two
+    // concurrent first-time connects for the same actor would otherwise both
+    // read the same COUNT (READ COMMITTED — neither sees the other's
+    // uncommitted row) and mint duplicate "Connexion 2" labels. Under the lock
+    // the second insert waits for the first to commit, so its subquery counts
+    // the freshly-inserted row and numbers monotonically. Identity/labelHint
+    // labels don't need it but the lock is cheap and keeps one code path.
+    const ownerKey = userId ?? endUserId ?? "";
+    const labelLockKey = `ic_label:${target.scope.applicationId}:${insertPackageId}:${ownerKey}`;
+    const row = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${labelLockKey})::bigint)`);
+      const inserted = await tx
+        .insert(integrationConnections)
+        .values({
+          integrationId: insertPackageId,
+          authKey: insertAuthKey,
+          accountId: insertAccountId,
+          applicationId: target.scope.applicationId,
+          userId,
+          endUserId,
+          credentialsEncrypted: ciphertext,
+          identityClaims: input.identityClaims ?? {},
+          scopesGranted: input.scopesGranted ?? [],
+          needsReconnection: input.needsReconnection ?? false,
+          clientRef: input.clientRef ?? null,
+          expiresAt: input.expiresAt ?? null,
+          label: labelValue,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+      return inserted[0];
+    });
     if (!row) {
       throw new Error("persistCredentialBundle: insert returned no row");
     }
@@ -1755,21 +1806,38 @@ export async function persistCredentialBundle(
     // agents under the assumption it's account A) to a different account is a
     // data-integrity and access surprise. Only enforced between two real
     // identities; "default" (identity-less) never blocks an upgrade.
-    if (input.accountId !== undefined && input.accountId !== "default") {
-      const [existing] = await db
-        .select({ accountId: integrationConnections.accountId })
-        .from(integrationConnections)
-        .where(ownerScope)
-        .limit(1);
-      if (existing && existing.accountId !== "default" && existing.accountId !== input.accountId) {
-        throw conflict(
-          "identity_mismatch",
-          `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
-        );
+    //
+    // The read (identity check) and the write must be atomic: performed as two
+    // separate statements, a concurrent update could change `accountId` between
+    // them and slip a different-account clobber past the guard. Do both in one
+    // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
+    // is pinned for the duration.
+    const row = await db.transaction(async (tx) => {
+      if (input.accountId !== undefined && input.accountId !== "default") {
+        const [existing] = await tx
+          .select({ accountId: integrationConnections.accountId })
+          .from(integrationConnections)
+          .where(ownerScope)
+          .limit(1)
+          .for("update");
+        if (
+          existing &&
+          existing.accountId !== "default" &&
+          existing.accountId !== input.accountId
+        ) {
+          throw conflict(
+            "identity_mismatch",
+            `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
+          );
+        }
       }
-    }
-    const updated = await db.update(integrationConnections).set(set).where(ownerScope).returning();
-    const row = updated[0];
+      const updated = await tx
+        .update(integrationConnections)
+        .set(set)
+        .where(ownerScope)
+        .returning();
+      return updated[0];
+    });
     if (!row) {
       throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);
     }
@@ -2042,6 +2110,18 @@ export async function deleteIntegrationConnection(
   connectionId: string,
   actor: Actor,
 ): Promise<void> {
+  // Confirm the target application belongs to the caller's org before touching
+  // any connection — same escalation guard the other connection mutations run.
+  // Without it a caller could pass an application id from another org and the
+  // WHERE (id + applicationId + owner) would silently match zero rows and 404,
+  // masking the cross-org attempt instead of rejecting it up front.
+  //
+  // The `/me/connections` path is actor-scoped and deliberately carries NO org
+  // context (empty `scope.orgId`); there the actor-ownership predicate below is
+  // the authoritative boundary, and running the app∈org check would 500 on an
+  // `org_id = ''` lookup. So the escalation guard applies only to app-scoped
+  // callers (those that resolved an org). See docs: /me routes skip org context.
+  if (scope.orgId) await assertApplicationInScope(scope);
   const ownerPredicate = actorFilter(actor, integrationConnections);
   const deleted = await db
     .delete(integrationConnections)

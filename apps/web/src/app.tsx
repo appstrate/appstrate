@@ -224,11 +224,25 @@ const ORG_GATE_BYPASS = ["/welcome", "/onboarding", "/invite", "/auth/callback"]
  * email. Anything malformed silently falls through to the default
  * post-login destination (`/`).
  */
+/**
+ * Accept only same-origin relative paths. Rejects protocol-relative and
+ * absolute-scheme values — including the backslash bypass (`/\evil.com`,
+ * `/\/evil.com`), which browsers normalize to `//evil.com`. Backslashes are
+ * folded to forward slashes before the protocol-relative test, mirroring the
+ * OIDC redirect sanitizer, so a crafted `returnTo` in an attacker-controlled
+ * email cannot become an open redirect.
+ */
+function sanitizeReturnTo(raw: string | null): string | undefined {
+  if (!raw || !raw.startsWith("/")) return undefined;
+  const normalized = raw.replace(/\\/g, "/");
+  // Protocol-relative (`//host`) after backslash normalization → reject.
+  if (normalized.startsWith("//")) return undefined;
+  return raw;
+}
+
 function AuthLoginReturnToBridge() {
   const [params] = useSearchParams();
-  const raw = params.get("returnTo");
-  let from: string | undefined;
-  if (raw && raw.startsWith("/") && !raw.startsWith("//")) from = raw;
+  const from = sanitizeReturnTo(params.get("returnTo"));
   return <Navigate to="/login" replace state={from ? { from } : undefined} />;
 }
 

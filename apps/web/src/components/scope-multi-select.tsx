@@ -57,7 +57,11 @@ export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSe
   const [open, setOpen] = useState(false);
   const groups = useMemo(() => buildGroups(available, selected), [available, selected]);
 
-  const allSelected = selected.length === available.length;
+  // Compare by value, not by count: a length check falsely reports "all
+  // selected" when `selected` carries a stale/duplicate scope absent from
+  // `available` (same length, different contents).
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const allSelected = available.length > 0 && available.every((s) => selectedSet.has(s));
   const noneSelected = selected.length === 0;
 
   const toggle = (scope: string) => {

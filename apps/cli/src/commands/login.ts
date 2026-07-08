@@ -36,7 +36,13 @@ import {
   exitWithError,
 } from "../lib/ui.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { readConfig, resolveProfileName, setProfile, updateProfile } from "../lib/config.ts";
+import {
+  readConfig,
+  resolveProfileName,
+  setProfile,
+  updateProfile,
+  getProfile,
+} from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
@@ -280,6 +286,23 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
  * Writes the pinned `orgId` back onto `config.toml` in place. The caller
  * has already persisted the rest of the profile via `setProfile()`.
  */
+/**
+ * Pin `orgId` on the profile, clearing any previously pinned `applicationId`
+ * when the org actually changes. An `applicationId` is only meaningful inside
+ * its owning org, so a re-login that switches orgs (`--org <other>`, picker
+ * choosing a different org, `--create-org`) must not leave the OLD org's app
+ * pinned — the app-pin cascade (`pinAppOnProfile`) re-populates it immediately
+ * afterward for the new org. Same-org re-logins keep the preserved app pin.
+ */
+async function pinOrgResettingStaleApp(profileName: string, orgId: string): Promise<void> {
+  const existing = await getProfile(profileName);
+  const orgChanged = existing?.orgId !== undefined && existing.orgId !== orgId;
+  await updateProfile(profileName, {
+    orgId,
+    ...(orgChanged ? { applicationId: undefined } : {}),
+  });
+}
+
 async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise<Org | null> {
   const deps = { ...defaultDeps, ...(opts.deps ?? {}) };
 
@@ -290,7 +313,7 @@ async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise
   // they want a fresh org. Don't second-guess them with a prompt.
   if (opts.createOrg !== undefined) {
     const created = await createOrg(profileName, { name: opts.createOrg });
-    await updateProfile(profileName, { orgId: created.id });
+    await pinOrgResettingStaleApp(profileName, created.id);
     return created;
   }
 
@@ -307,13 +330,13 @@ async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise
   // `--org <id-or-slug>` — explicit non-interactive selection.
   if (opts.org !== undefined) {
     const match = resolveOrgRef(orgs, opts.org);
-    await updateProfile(profileName, { orgId: match.id });
+    await pinOrgResettingStaleApp(profileName, match.id);
     return match;
   }
 
   if (orgs.length === 1) {
     const only = orgs[0]!;
-    await updateProfile(profileName, { orgId: only.id });
+    await pinOrgResettingStaleApp(profileName, only.id);
     return only;
   }
 
@@ -321,14 +344,14 @@ async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise
     const input = await deps.promptCreateOrg();
     if (!input) return null;
     const created = await createOrg(profileName, input);
-    await updateProfile(profileName, { orgId: created.id });
+    await pinOrgResettingStaleApp(profileName, created.id);
     return created;
   }
 
   // ≥2 orgs — delegate the (possibly non-TTY) decision to the picker.
   const chosen = await deps.pickOrg(orgs);
   if (!chosen) return null;
-  await updateProfile(profileName, { orgId: chosen.id });
+  await pinOrgResettingStaleApp(profileName, chosen.id);
   return chosen;
 }
 

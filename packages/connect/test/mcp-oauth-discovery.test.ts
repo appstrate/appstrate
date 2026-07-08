@@ -99,7 +99,14 @@ describe("discoverProtectedResourceMetadata", () => {
           },
         });
       }
-      if (url === "https://mcp.x.com/meta") return jsonResponse(valid);
+      // RFC 9728 §3.3: metadata `resource` must match the resource server's
+      // origin (mcp.x.com here) — a cross-origin `resource` is rejected.
+      if (url === "https://mcp.x.com/meta") {
+        return jsonResponse({
+          resource: "https://mcp.x.com",
+          authorization_servers: ["https://as.mcp.x.com"],
+        });
+      }
       return new Response("nope", { status: 404 });
     }) as unknown as typeof fetch;
 
@@ -108,7 +115,32 @@ describe("discoverProtectedResourceMetadata", () => {
       fetchImpl,
     });
     expect(md).not.toBeNull();
-    expect(md!.resource).toBe("https://mcp.clickup.com");
+    expect(md!.resource).toBe("https://mcp.x.com");
+  });
+
+  it("rejects metadata whose resource origin differs from the resource server (RFC 9728 §3.3)", async () => {
+    // A hostile/misconfigured document that binds the token audience to an
+    // unrelated origin must not be accepted, even when otherwise well-formed.
+    const fetchImpl = (async () => jsonResponse(valid)) as unknown as typeof fetch;
+    const md = await discoverProtectedResourceMetadata({
+      resourceServerUrl: "https://mcp.evil.example/mcp",
+      fetchImpl,
+    });
+    expect(md).toBeNull();
+  });
+
+  it("rejects a non-http(s) resource server URL", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return jsonResponse(valid);
+    }) as unknown as typeof fetch;
+    const md = await discoverProtectedResourceMetadata({
+      resourceServerUrl: "file:///etc/passwd",
+      fetchImpl,
+    });
+    expect(md).toBeNull();
+    expect(calls).toBe(0);
   });
 
   it("rejects metadata without authorization_servers", async () => {

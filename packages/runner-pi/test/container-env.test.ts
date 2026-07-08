@@ -86,14 +86,18 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_API_KEY).toBe("sk-ant-placeholder");
   });
 
-  it("uses the raw apiKey as placeholder when none is provided", () => {
-    const env = buildRuntimePiEnv({
-      model: { ...model, apiKey: "sk-test" },
-      agentPrompt: "p",
-      ...sidecar,
-      sidecarProxyLlmUrl: "http://sidecar:8080/llm",
-    });
-    expect(env.MODEL_API_KEY).toBe("sk-test");
+  // P1-12: on the sidecar-proxied path the real provider key must NEVER reach
+  // the agent container. A missing apiKeyPlaceholder used to silently fall back
+  // to the raw apiKey (`apiKeyPlaceholder ?? apiKey`) — now it fails closed.
+  it("throws when sidecar-proxied and apiKey has no placeholder (P1-12)", () => {
+    expect(() =>
+      buildRuntimePiEnv({
+        model: { ...model, apiKey: "sk-test" }, // no apiKeyPlaceholder
+        agentPrompt: "p",
+        ...sidecar,
+        sidecarProxyLlmUrl: "http://sidecar:8080/llm",
+      }),
+    ).toThrow(/apiKeyPlaceholder is required/);
   });
 
   // Regression: #741 — a no-sidecar run (static API key, no integrations/proxy)
@@ -128,7 +132,15 @@ describe("buildRuntimePiEnv", () => {
 
   it("prefers the sidecar proxy URL over the model baseUrl when both could apply", () => {
     const env = buildRuntimePiEnv({
-      model: { ...model, baseUrl: "https://api.deepseek.com/v1", apiKey: "sk-x" },
+      // apiKeyPlaceholder present: sidecar-proxied traffic must carry the
+      // placeholder, not the raw key (P1-12) — supply it so this URL-precedence
+      // case doesn't trip the fail-closed guard.
+      model: {
+        ...model,
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: "sk-x",
+        apiKeyPlaceholder: "ph",
+      },
       agentPrompt: "p",
       sidecarProxyLlmUrl: "http://sidecar:8080/llm",
       noSidecar: true,

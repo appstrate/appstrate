@@ -326,25 +326,32 @@ export const BA_OAUTH_CALLBACK_PATH = "/callback/:id";
 
 /**
  * Decide whether a `databaseHooks.user.create.before` invocation should
- * auto-verify the user's email. BA populates `emailVerified` from the
- * provider's `email_verified` claim, which some providers omit or return
- * as `false` — trapping brand-new users behind the verification screen
- * even though the OAuth provider already asserted ownership. We override
- * that whenever the user creation is running under BA's OAuth callback
- * endpoint, which means a trusted social provider produced the row.
+ * auto-verify the user's email.
+ *
+ * SECURITY: this must ONLY confirm verification the provider actually
+ * asserted — never grant it unconditionally. BA already computes
+ * `user.emailVerified` from the provider's real signal (Google's
+ * `email_verified` id_token claim; GitHub's `/user/emails` verified flag).
+ * We therefore auto-verify only when BOTH the request ran under BA's OAuth
+ * callback endpoint AND the provider asserted the email is verified
+ * (`providerAssertsVerified`). Blanket-verifying every OAuth callback let
+ * an attacker link an UNVERIFIED GitHub email onto a victim's account
+ * (pre-account-takeover), so the provider assertion is load-bearing.
  *
  * Returns `{ data: { emailVerified: true } }` (the shape BA's
- * `createWithHooks` merges into the row about to be inserted) when the
- * context path matches, `undefined` otherwise — falling through to the
- * default BA behavior for email/password, magic-link, and seed paths.
+ * `createWithHooks` merges into the row about to be inserted) when both
+ * conditions hold, `undefined` otherwise — falling through to BA's own
+ * `emailVerified` value for OAuth (which stays `false` for an unverified
+ * provider email) and for email/password, magic-link, and seed paths.
  *
  * Exported for unit testing; the `databaseHooks.user.create.before` hook
  * inside `buildAuth()` is the only production caller.
  */
 export function shouldAutoVerifyEmailOnCreate(
   context: { path?: string } | null | undefined,
+  providerAssertsVerified: boolean,
 ): { data: { emailVerified: true } } | undefined {
-  if (context?.path === BA_OAUTH_CALLBACK_PATH) {
+  if (context?.path === BA_OAUTH_CALLBACK_PATH && providerAssertsVerified) {
     return { data: { emailVerified: true } };
   }
   return undefined;
@@ -366,7 +373,14 @@ function buildBasePlugins(
             // and cloud's free-tier hook applies its own gate. Outside an OIDC
             // flow, magic-link signup is as open as email/password signup.
             disableSignUp: false,
-            expiresIn: 7 * 24 * 60 * 60, // 7 days — matches invitation expiry
+            // Short-lived login link. A magic-link is a bearer credential: a
+            // 7-day window let an attacker who later gained read access to the
+            // recipient's inbox (forwarded mail, shared/compromised mailbox,
+            // mail-archive breach) replay the link and take over the account.
+            // 15 minutes is enough for a human to click through immediately
+            // while closing the replay window. `allowedAttempts` still lets
+            // email prefetchers hit the URL without burning the token early.
+            expiresIn: 15 * 60, // 15 minutes
             allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
             sendMagicLink: async ({ email, url: rawUrl }) => {
               try {
@@ -491,16 +505,23 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
       get clientSecret() {
         return getSocialOverride()?.google?.clientSecret ?? env.GOOGLE_CLIENT_SECRET ?? "";
       },
-      // Treat the email as verified for every social signup. Rationale:
-      // a successful OAuth round-trip with Google/GitHub already proves
-      // the user controls that provider account, which is the security
-      // guarantee a second verification email would provide. Without
-      // this override, BA's `link-account.mjs` falls back to checking
-      // the provider's `emailVerified` flag — GitHub's `/user/emails`
-      // returns `false` when the OAuth App lacks the `user:email`
-      // scope grant on a pre-existing authorization, triggering a
-      // spurious verification email on a user who literally just
-      // logged in via the provider. See `sendOnSignUp: true` above.
+      // Google asserts `email_verified` in its OIDC id_token and BA maps it
+      // onto `user.emailVerified` (see `@better-auth/core` google provider).
+      // Google never issues a token for an email the user hasn't proven
+      // ownership of, so treating a successful Google round-trip as
+      // verified is safe. We keep the explicit override only for Google.
+      //
+      // SECURITY: we do NOT do the same for GitHub. GitHub lets a user add
+      // an UNVERIFIED email to their account, and BA already computes the
+      // real per-email verified flag from `/user/emails`
+      // (`emails.find(e => e.email === profile.email)?.verified ?? false`).
+      // Blanket-setting `emailVerified: true` there clobbered that real
+      // signal and opened a pre-account-takeover: an attacker adds the
+      // victim's email (unverified) to a GitHub account, signs in, and —
+      // because the email is (falsely) "verified" — BA account-links it to
+      // the victim's existing user (trusted provider + matching email),
+      // handing the attacker the account. Leaving GitHub without an
+      // override lets BA's genuine verified flag decide linking.
       mapProfileToUser: () => ({ emailVerified: true }),
     },
     github: {
@@ -510,7 +531,9 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
       get clientSecret() {
         return getSocialOverride()?.github?.clientSecret ?? env.GITHUB_CLIENT_SECRET ?? "";
       },
-      mapProfileToUser: () => ({ emailVerified: true }),
+      // No `mapProfileToUser` override on purpose — see the GitHub note above.
+      // BA sets `emailVerified` from GitHub's real `/user/emails` verified
+      // flag; forcing it true here would defeat the takeover guard.
     },
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
@@ -547,7 +570,15 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
         ) {
           return;
         }
-        logger[level](message, args.length > 0 ? { args } : undefined);
+        // BA emits levels our pino logger doesn't implement as methods
+        // (e.g. "success") — indexing `logger[level]` with one of those
+        // would call `undefined(...)` and throw. Map anything outside the
+        // pino method set to "info" so the bridge is always safe.
+        const method =
+          level === "debug" || level === "info" || level === "warn" || level === "error"
+            ? level
+            : "info";
+        logger[method](message, args.length > 0 ? { args } : undefined);
       },
     },
 
@@ -813,14 +844,22 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
                 ? await _realmResolver(headers)
                 : "platform";
             // Auto-verify ONLY when a trusted social provider produced the row
-            // (the BA OAuth callback path). A pending invitation is deliberately
-            // NOT a verification signal: it is matched on email alone, so
-            // granting `emailVerified` here would let anyone mint a verified
-            // account for any unclaimed address (create org → self-invite that
-            // email → sign up) AND would defeat the OIDC end-user adopter's
-            // `emailVerified === true` takeover guard. Invited users verify
-            // their inbox through the normal flow, like everyone else.
-            const autoVerify = shouldAutoVerifyEmailOnCreate(ctx);
+            // (the BA OAuth callback path) AND the provider itself asserted the
+            // email is verified. BA has already set `user.emailVerified` from
+            // the provider's real signal (Google `email_verified` claim /
+            // GitHub `/user/emails` verified flag), so we pass that through as
+            // the gate — we never upgrade an unverified provider email to
+            // verified (which would enable GitHub-unverified-email account
+            // takeover). A pending invitation is likewise NOT a verification
+            // signal: it is matched on email alone, so granting `emailVerified`
+            // here would let anyone mint a verified account for any unclaimed
+            // address (create org → self-invite that email → sign up) AND would
+            // defeat the OIDC end-user adopter's `emailVerified === true`
+            // takeover guard. Invited users verify their inbox through the
+            // normal flow, like everyone else.
+            const providerAssertsVerified =
+              (user as { emailVerified?: boolean }).emailVerified === true;
+            const autoVerify = shouldAutoVerifyEmailOnCreate(ctx, providerAssertsVerified);
             const data: Record<string, unknown> = { realm };
             if (autoVerify) data.emailVerified = true;
             return { data };

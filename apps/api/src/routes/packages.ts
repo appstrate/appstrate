@@ -51,6 +51,7 @@ import {
   deletePackageVersion,
 } from "../services/package-versions.ts";
 import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
@@ -114,11 +115,29 @@ export const githubImportSchema = z.object({
   url: z.url("Missing 'url' field"),
 });
 
-export const forkSchema = z
-  .object({
-    name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
-  })
-  .catch({});
+export const forkSchema = z.object({
+  name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
+});
+
+/**
+ * JSON-body create/update payloads for the manifest-driven package types
+ * (agent). `manifest` is validated structurally here (must be an object) and
+ * then deeply by `validateManifest`. Bodies with wrong-typed `content` /
+ * `source_code` (e.g. `content: 1`) are now rejected as a 400 instead of
+ * blowing up downstream as a 500.
+ */
+export const packageJsonCreateSchema = z.object({
+  manifest: z.record(z.string(), z.unknown()),
+  content: z.string().optional(),
+  source_code: z.string().optional(),
+});
+
+export const packageJsonUpdateSchema = z.object({
+  manifest: z.record(z.string(), z.unknown()).optional(),
+  content: z.string().optional(),
+  source_code: z.string().optional(),
+  lock_version: z.number().optional(),
+});
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
@@ -153,6 +172,16 @@ interface ParsedUpload {
   /** User-specified version from JSON body (propagated to manifest default). */
   version?: string;
 }
+
+/** JSON body shape for the non-multipart package upload branch. */
+const jsonUploadSchema = z.object({
+  id: z.string().min(1),
+  content: z.string().min(1),
+  manifest: z.record(z.string(), z.unknown()).optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  version: z.string().optional(),
+});
 
 /**
  * Parse a package item upload from a Hono context (multipart ZIP or JSON body).
@@ -235,18 +264,7 @@ async function parsePackageUpload(
   }
 
   // JSON body
-  const body = await c.req.json<{
-    id: string;
-    content: string;
-    manifest?: Record<string, unknown>;
-    name?: string;
-    description?: string;
-    version?: string;
-  }>();
-
-  if (!body.id || !body.content) {
-    throw invalidRequest("id and content are required");
-  }
+  const body = await readJsonBody(c, jsonUploadSchema);
 
   if (!SLUG_REGEX.test(body.id)) {
     throw invalidRequest("Invalid id (kebab-case slug required)", "id");
@@ -451,11 +469,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // JSON body create path: { manifest, content?, source? }
     if (rcfg.jsonBodyCreate) {
-      const body = await c.req.json<{
-        manifest: Record<string, unknown>;
-        content?: string;
-        source_code?: string;
-      }>();
+      const body = await readJsonBody(c, packageJsonCreateSchema);
 
       const manifest = body.manifest;
       const content = body.content ?? "";
@@ -525,12 +539,22 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         });
       }
 
-      await createOrgItem(
-        orgId,
-        { id: packageId, content, createdBy: user.id },
-        rcfg.cfg,
-        validatedManifest as Record<string, unknown>,
-      );
+      try {
+        await createOrgItem(
+          orgId,
+          { id: packageId, content, createdBy: user.id },
+          rcfg.cfg,
+          validatedManifest as Record<string, unknown>,
+        );
+      } catch (err) {
+        // The pre-check above narrows the common case, but a concurrent create
+        // can still lose the race — map the persistence-layer collision to 409
+        // instead of a 500 (mirrors the ZIP/skill create path below).
+        if (err instanceof PackageAlreadyExistsError) {
+          throw conflict("name_collision", err.message);
+        }
+        throw err;
+      }
 
       // After-create hook (optional per-type post-create side-effect)
       if (rcfg.afterCreate) {
@@ -804,12 +828,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${label} '${itemId}' not found`);
     }
 
-    const body = await c.req.json<{
-      manifest?: Record<string, unknown>;
-      content?: string;
-      source_code?: string;
-      lock_version?: number;
-    }>();
+    const body = await readJsonBody(c, packageJsonUpdateSchema);
 
     if (body.lock_version == null || typeof body.lock_version !== "number") {
       throw invalidRequest("lock_version (integer) is required for updates", "lock_version");
@@ -1104,16 +1123,22 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     if (!manifestResult.valid) {
       throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
     }
+    // Same integration-scope subset gate the create/update paths apply — a
+    // draft must not be frozen into an immutable version with an
+    // `integrations_configuration` selection outside the integration catalog.
+    await assertAgentIntegrationScopesValid(
+      manifestResult.manifest as Record<string, unknown>,
+      orgId,
+    );
 
-    // Parse optional version override from request body
+    // Parse optional version override from request body. The body itself is
+    // optional (OpenAPI `requestBody.required: false` — the SPA omits it
+    // entirely when no override is chosen), so only read it when present;
+    // a present-but-malformed body is a 400, not a silent no-override.
     let versionOverride: string | undefined;
-    try {
-      const body = await c.req.json();
-      if (body?.version && typeof body.version === "string") {
-        versionOverride = body.version;
-      }
-    } catch {
-      // No body or invalid JSON — proceed without override
+    if (c.req.raw.body !== null) {
+      const body = await readJsonBody(c, z.object({ version: z.string().min(1).optional() }));
+      versionOverride = body.version;
     }
 
     const result = await createVersionFromDraft({
@@ -1349,8 +1374,12 @@ export function createPackagesRouter() {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
+    // A missing/empty body is fine (auto-name), but a present-and-invalid
+    // `name` must now surface as a 400 — `forkSchema` no longer `.catch({})`s
+    // the error away, and `parseBody` turns the Zod failure into invalidRequest
+    // rather than an uncaught ZodError (500).
     const rawBody = await c.req.json().catch(() => ({}));
-    const parsed = forkSchema.parse(rawBody);
+    const parsed = parseBody(forkSchema, rawBody);
     const customName = parsed.name;
 
     const result = await forkPackage(orgId, orgSlug, packageId, user.id, customName);
@@ -1714,7 +1743,12 @@ export function createPackagesRouter() {
 
   // POST /api/packages/import — import any package type from ZIP
   router.post("/import", rateLimit(10), requirePermission("agents", "write"), async (c) => {
-    const formData = await c.req.formData();
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      throw invalidRequest("Request must be multipart/form-data with a file field", "file");
+    }
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
       throw invalidRequest("No file provided");
@@ -1733,8 +1767,7 @@ export function createPackagesRouter() {
 
   // POST /api/packages/import-github — import a package from a GitHub URL
   router.post("/import-github", rateLimit(10), requirePermission("agents", "write"), async (c) => {
-    const body = await c.req.json();
-    const data = parseBody(githubImportSchema, body, "url");
+    const data = await readJsonBody(c, githubImportSchema, "url");
 
     let zipBytes: Uint8Array;
     try {

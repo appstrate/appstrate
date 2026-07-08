@@ -3,7 +3,8 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { forbidden, unauthorized, parseBody } from "../lib/errors.ts";
+import { forbidden, unauthorized } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { setDisplayName } from "../services/profile.ts";
 
 export const welcomeSetupSchema = z.object({
@@ -25,8 +26,7 @@ router.post("/welcome/setup", async (c) => {
     throw unauthorized("Not authenticated");
   }
 
-  const body = await c.req.json();
-  const data = parseBody(welcomeSetupSchema, body);
+  const data = await readJsonBody(c, welcomeSetupSchema);
 
   // Update display name if provided
   if (data.displayName?.trim()) {

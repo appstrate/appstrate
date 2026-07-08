@@ -4,7 +4,7 @@ import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
 import {
   createOrgItem,
-  updateOrgItem,
+  reinstallOrgItem,
   getOrgItem,
   type CreateItemInput,
 } from "./package-items/crud.ts";
@@ -23,13 +23,16 @@ async function upsertItem(
 ): Promise<void> {
   const existing = await getOrgItem(orgId, packageId, cfg);
   if (existing && existing.lock_version != null) {
-    // Re-install: update existing package
-    await updateOrgItem(
-      orgId,
-      packageId,
-      { manifest, content: item.content },
-      existing.lock_version,
-    );
+    // Re-install: overwrite the existing package. `reinstallOrgItem` re-reads
+    // the current lock_version and retries on a concurrent bump (last-writer-
+    // wins), so the install is never silently dropped on an optimistic-lock
+    // mismatch — the previous `updateOrgItem(existing.lock_version)` ignored a
+    // null return and no-op'd when another writer touched the row first. A null
+    // here means the row vanished mid-reinstall → fall back to insert.
+    const updated = await reinstallOrgItem(orgId, packageId, { manifest, content: item.content });
+    if (!updated) {
+      await createOrgItem(orgId, item, cfg, manifest);
+    }
   } else {
     await createOrgItem(orgId, item, cfg, manifest);
   }

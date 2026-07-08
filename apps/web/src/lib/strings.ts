@@ -3,6 +3,14 @@
 export { toSlug } from "@appstrate/core/naming";
 
 /**
+ * Credential schema keys must be underscore-based to satisfy the sidecar
+ * substitution contract (lowercase letters, digits and underscores; must
+ * start with a letter). Shared canonical pattern — used both to validate
+ * user input and as the invariant guaranteed by {@link toCredentialKey}.
+ */
+export const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
+
+/**
  * NFD-normalize, strip diacritics, and lowercase a string. Shared scaffold for
  * the slug- and credential-key derivatives below — each layer adds its own
  * character class and trim rules on top of this base.

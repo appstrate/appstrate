@@ -15,6 +15,11 @@ export type { CredentialEnvelope } from "./encryption.ts";
 // OAuth2 token-exchange error type (shared by token-exchange.ts + integration OAuth)
 export { OAuthCallbackError } from "./oauth.ts";
 
+// SSRF-guarded OAuth egress (token exchange/refresh, issuer discovery, userinfo)
+// with an opt-in internal-IdP allowlist. Shared by connect's token helpers and
+// apps/api's OAuth2 strategy so every secret-bearing OAuth request is fail-closed.
+export { oauthEgressFetch, isAllowedInternalIdpHost, SsrfBlockedError } from "./oauth-egress.ts";
+
 // Token refresh
 export { RefreshError, performRefreshTokenExchange } from "./token-refresh.ts";
 export type { RefreshExchangeResult } from "./token-refresh.ts";

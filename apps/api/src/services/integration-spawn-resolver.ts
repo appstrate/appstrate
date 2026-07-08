@@ -30,6 +30,7 @@ import {
   decryptCredentialsToStringMap,
   decryptCredentialInputsToStringMap,
   resolveAfpsHttpDelivery,
+  isAllowedInternalIdpHost,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import { getApiCallConfigs, resolveEffectiveToolSelection } from "@appstrate/core/integration";
@@ -50,6 +51,7 @@ import {
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
 import { BundleError } from "@appstrate/afps-runtime/bundle";
+import { checkEgressHost } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
@@ -271,6 +273,54 @@ async function resolveOne(
     if (!remote) {
       logger.warn("remote-source integration missing remote.url; skipping", { integrationId });
       return null;
+    }
+    // P0-2 — SSRF floor on the manifest-supplied remote MCP URL. The sidecar
+    // opens a credential-bearing Streamable HTTP / SSE client against this URL,
+    // so validate it here (install/boot resolution) before it reaches the wire.
+    // Two-tier policy:
+    //   - untrusted host (the default): require https:// — no plaintext egress
+    //     for an authenticated MCP client — AND pass the DNS-aware SSRF gate
+    //     (rejects any host resolving to a private / loopback / link-local /
+    //     cloud-metadata address; DNS-rebind-safe, fails closed).
+    //   - operator-trusted internal host (`OAUTH_ALLOWED_INTERNAL_IDP_HOSTS`):
+    //     http or https allowed (LAN services routinely lack TLS) and the
+    //     blocklist is skipped — the operator explicitly vouched for the host.
+    //     Unset in production by default, so every host stays fully guarded.
+    // A malformed / wrong-scheme / blocked URL throws a clear error; the caller
+    // (`resolveIntegrationSpawns`) turns it into a logged per-integration skip,
+    // so the run never spawns an unguarded outbound MCP client.
+    let parsedRemote: URL;
+    try {
+      parsedRemote = new URL(remote.url);
+    } catch {
+      throw new Error(
+        `remote-source integration '${integrationId}' declares an invalid source.remote.url`,
+      );
+    }
+    // Scheme floor per tier — kept local (it's the only per-branch divergence):
+    // an operator-trusted internal host may use plain http, everything else
+    // must be https. Non-http(s) schemes (file:, gopher:, …) never pass.
+    if (isAllowedInternalIdpHost(parsedRemote.hostname)) {
+      if (parsedRemote.protocol !== "https:" && parsedRemote.protocol !== "http:") {
+        throw new Error(
+          `remote-source integration '${integrationId}' declares a non-http(s) source.remote.url scheme`,
+        );
+      }
+    } else if (parsedRemote.protocol !== "https:") {
+      throw new Error(
+        `remote-source integration '${integrationId}' declares a non-https source.remote.url; only https:// is allowed for remote MCP servers`,
+      );
+    }
+    // Block/allow decision goes through the centralized egress guard
+    // (`checkEgressHost`): operator-trusted hosts short-circuit to allowed,
+    // every other host is DNS-resolved and checked against the
+    // private/loopback/link-local/metadata blocklist — one shared decision
+    // site, so this resolver can't drift from the other egress paths.
+    const remoteHostCheck = await checkEgressHost(parsedRemote.hostname);
+    if (remoteHostCheck.blocked) {
+      throw new Error(
+        `remote-source integration '${integrationId}' source.remote.url host '${parsedRemote.hostname}' is blocked by the SSRF guard (${remoteHostCheck.reason})`,
+      );
     }
     // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`. The
     // manifest schema enforces the enum + `required`; we forward the
@@ -514,9 +564,11 @@ async function resolveOne(
 /**
  * Render the optional `workspaceMount` field on the spawn spec from
  * the referenced mcp-server's `_meta["dev.appstrate/workspace"]`. The
- * core parser throws on malformed entries; we surface that as a
- * skipped integration with a structured log so the run boot reports
- * the misconfig without aborting the entire run.
+ * core parser throws on malformed entries; that error propagates (with
+ * integration context) so a bad manifest fails fast at run kickoff —
+ * matching the caller's contract — rather than producing a silently
+ * degraded spawn (runner with no workspace mount) the operator can't
+ * diagnose.
  */
 function resolveWorkspaceMount(
   integrationId: string,
@@ -526,15 +578,11 @@ function resolveWorkspaceMount(
   try {
     mount = getMcpServerWorkspaceMount(mcpServer);
   } catch (err) {
-    logger.warn(
-      "mcp-server _meta.workspace is malformed; integration will spawn without workspace mount",
-      {
-        integrationId,
-        mcpServer: (mcpServer as { name?: string }).name,
-        error: err instanceof Error ? err.message : String(err),
-      },
+    throw new Error(
+      `Integration '${integrationId}': mcp-server _meta.workspace is malformed — ${
+        err instanceof Error ? err.message : String(err)
+      }`,
     );
-    return {};
   }
   if (!mount) return {};
   return { workspaceMount: { mount: mount.mount, access: mount.access } };

@@ -312,6 +312,13 @@ export async function handleIntegrationOAuthCallback(
   store: OAuthStateStore,
   code: string,
   state: string,
+  /**
+   * Injectable egress fetch, threaded into the token exchange. Defaults to the
+   * SSRF-guarded `oauthEgressFetch`. Tests inject a stub here rather than
+   * patching the global `fetch` — the guarded default resolves DNS, which
+   * would (correctly) fail-close on non-resolvable test hostnames.
+   */
+  fetchImpl?: typeof fetch,
 ): Promise<IntegrationOAuthCallbackResult> {
   const stateRow = await store.get(state);
   if (!stateRow) {
@@ -351,6 +358,7 @@ export async function handleIntegrationOAuthCallback(
     errorLabel: sentinel,
     state,
     store,
+    ...(fetchImpl ? { fetchImpl } : {}),
   });
   await store.delete(state);
 

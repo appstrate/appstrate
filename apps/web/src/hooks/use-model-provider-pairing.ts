@@ -47,9 +47,11 @@ export function useModelProviderPairingStatus(id: string | null, options: { enab
     {
       enabled: options.enabled && !!id,
       refetchInterval: (q) => {
-        // Row reaped server-side after its TTL — stop, don't spin on 404/410.
-        const errStatus = (q.state.error as { status?: number } | null)?.status;
-        if (errStatus === 404 || errStatus === 410) return false;
+        // Any errored request is terminal for the poll: the TTL reap surfaces
+        // as 404/410, but auth/permission/server failures (401/403/5xx, or a
+        // network error with no status) are equally non-recoverable here —
+        // keep spinning only while the request is succeeding and pending.
+        if (q.state.error) return false;
         const data = q.state.data;
         if (!data) return 2500;
         if (data.status === "pending") return 2500;

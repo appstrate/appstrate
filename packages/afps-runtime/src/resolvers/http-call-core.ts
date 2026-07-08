@@ -240,7 +240,9 @@ export const apiCallRequestSchema = z.object({
   method: z
     .enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
     .describe("HTTP method for the upstream request"),
-  target: z.string().describe("Absolute URL of the upstream endpoint"),
+  target: z
+    .url({ protocol: /^https?$/, error: "target must be an absolute http(s) URL" })
+    .describe("Absolute URL of the upstream endpoint"),
   headers: z
     .record(z.string(), z.string())
     .optional()
@@ -953,6 +955,17 @@ async function buildMultipartBytes(
         );
       }
       totalSize += stat.size;
+      // Enforce the cap from the stat size BEFORE reading — otherwise a
+      // multi-gigabyte file is slurped fully into memory and only then
+      // rejected. `stat.size` is authoritative for a regular file (symlink
+      // escape already rejected by resolveSafeFile).
+      if (totalSize > MAX_REQUEST_BODY_SIZE) {
+        throw new ResolverError(
+          "RESOLVER_BODY_TOO_LARGE",
+          `Multipart body exceeds ${MAX_REQUEST_BODY_SIZE} bytes`,
+          { max: MAX_REQUEST_BODY_SIZE },
+        );
+      }
       const fileBytes = await fs.readFile(absPath);
       const blob = new Blob([fileBytes], {
         type: part.contentType ?? "application/octet-stream",
@@ -1262,14 +1275,18 @@ async function writeStreamToFile(
   // us race each `reader.read()` against the abort so a hanging upstream
   // doesn't block the event loop indefinitely.
   let rejectOnAbort: ((reason: unknown) => void) | undefined;
+  // Keep a stable handler reference so the `finally` block can actually
+  // detach it. `{ once: true }` removes it only when the signal fires; on
+  // the normal-completion path the listener would otherwise stay attached
+  // to a long-lived signal (leak) — and `removeEventListener` with a fresh
+  // closure removes nothing.
+  let abortHandler: (() => void) | undefined;
   const abortPromise: Promise<never> | null = signal
     ? new Promise<never>((_resolve, reject) => {
         rejectOnAbort = reject;
-        signal.addEventListener(
-          "abort",
-          () => reject(signal.reason instanceof Error ? signal.reason : new Error("aborted")),
-          { once: true },
-        );
+        abortHandler = () =>
+          reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
+        signal.addEventListener("abort", abortHandler, { once: true });
       })
     : null;
 
@@ -1343,7 +1360,7 @@ async function writeStreamToFile(
     } catch {
       /* ignore — reader may already be released or closed */
     }
-    options.signal?.removeEventListener("abort", () => {});
+    if (abortHandler) signal?.removeEventListener("abort", abortHandler);
     try {
       await handle.close();
     } catch {
@@ -1611,17 +1628,71 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
  * AFPS-spec URL allowlist matcher:
  *   - literal URLs (no wildcards)   → exact equality
  *   - `*`  (single path segment)    → regex `[^/]*`
- *   - `**` (any substring)          → regex `.*`
+ *   - `**` (any substring)          → regex `.*` in the PATH,
+ *                                     `[^/]*` in the AUTHORITY
  *
- * All regex metacharacters in the pattern are escaped so pattern
- * authors cannot accidentally inject a regex.
+ * All regex metacharacters in the pattern are escaped so pattern authors
+ * cannot accidentally inject a regex.
+ *
+ * SECURITY — authority-boundary containment: neither wildcard may cross the
+ * `scheme://host` authority boundary. If `**` compiled to `.*` everywhere,
+ * a host wildcard like `https://**.example.com/**` would match
+ * `https://evil.com/x/.example.com/y` (the `.*` swallows `evil.com/x` —
+ * including the `/` that ends the authority — so the attacker controls the
+ * real host). The pattern is therefore split at the first `/` after the
+ * scheme: within the authority both `*` and `**` compile to `[^/]*` (an
+ * authority never contains a slash), so a host wildcard only ever matches
+ * within the host component; only a `**` in the path expands to `.*`.
  */
 export function matchesAuthorizedUriSpec(pattern: string, target: string): boolean {
-  const parsedPattern = pattern
-    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "§§DOUBLESTAR§§")
-    .replace(/\*/g, "[^/]*")
-    .replace(/§§DOUBLESTAR§§/g, ".*");
-  const regex = new RegExp("^" + parsedPattern + "$");
+  const regex = new RegExp("^" + compileAuthorizedUriPattern(pattern) + "$");
   return regex.test(target);
+}
+
+/** Escape regex metacharacters, leaving the `*` wildcard chars intact. */
+function escapeUriLiteral(part: string): string {
+  return part.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Compile one URL component to a regex fragment. `crossSlash` controls
+ * whether a `**` may span `/` (true for the path, false for the authority).
+ * `*` never crosses a slash in either component.
+ */
+function compileUriComponent(part: string, crossSlash: boolean): string {
+  const doubleStar = crossSlash ? ".*" : "[^/]*";
+  // Match `**` before `*` (alternation is ordered + `**` is longer) so a
+  // double-star is never mis-expanded as two single-stars.
+  return escapeUriLiteral(part).replace(/\*\*|\*/g, (m) => (m === "**" ? doubleStar : "[^/]*"));
+}
+
+function compileAuthorizedUriPattern(pattern: string): string {
+  const schemeMatch = pattern.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//);
+  if (!schemeMatch) {
+    // No `scheme://authority` prefix — compile the whole pattern as a path
+    // (preserves the historical `**` → `.*` behavior for opaque targets).
+    return compileUriComponent(pattern, true);
+  }
+  const scheme = schemeMatch[0];
+  const afterScheme = pattern.slice(scheme.length);
+  const slashIdx = afterScheme.indexOf("/");
+  // `https://**` with NO path is the explicit "any host, any path" catch-all
+  // (historical behaviour, relied on by the SSRF-gate branch tests). It carries
+  // no literal host suffix, so there is nothing for an attacker to smuggle past
+  // (the authority-confusion attack needs a fixed suffix like `.example.com`
+  // AFTER the `**`), and any actual internal host it admits is still refused
+  // downstream by the SSRF gate. So compile the bare form as a full `.*`.
+  // Anything WITH a path (`https://**/health`) keeps the authority
+  // boundary-contained: `**` in the host is `[^/]*` and cannot swallow the `/`
+  // that ends the authority.
+  if (slashIdx === -1 && afterScheme === "**") {
+    return escapeUriLiteral(scheme) + ".*";
+  }
+  const authority = slashIdx === -1 ? afterScheme : afterScheme.slice(0, slashIdx);
+  const rest = slashIdx === -1 ? "" : afterScheme.slice(slashIdx);
+  return (
+    escapeUriLiteral(scheme) +
+    compileUriComponent(authority, false) +
+    compileUriComponent(rest, true)
+  );
 }

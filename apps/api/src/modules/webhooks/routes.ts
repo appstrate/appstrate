@@ -34,6 +34,7 @@ import {
   webhookEventSchema,
 } from "./service.ts";
 import { parseBody, forbidden, invalidRequest } from "../../lib/errors.ts";
+import { readJsonBody } from "../../lib/request-body.ts";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { getOrgScope, type AppScope, type OrgScope } from "../../lib/scope.ts";
 
@@ -108,8 +109,7 @@ export function createWebhooksRouter() {
     requireModulePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const body = await c.req.json();
-      const data = parseBody(createWebhookSchema, body);
+      const data = await readJsonBody(c, createWebhookSchema);
 
       // API keys cannot create org-level webhooks (would span foreign apps)
       // and cannot create app-level webhooks targeting another application.
@@ -203,8 +203,7 @@ export function createWebhooksRouter() {
     rateLimit(10),
     requireModulePermission("webhooks", "write"),
     async (c) => {
-      const body = await c.req.json();
-      const data = parseBody(updateWebhookSchema, body);
+      const data = await readJsonBody(c, updateWebhookSchema);
 
       const result = await updateWebhook(webhookScope(c), c.req.param("id")!, data);
       await recordAuditFromContext(c, {
@@ -287,7 +286,10 @@ export function createWebhooksRouter() {
     rateLimit(300),
     requireModulePermission("webhooks", "read"),
     async (c) => {
-      const limit = c.req.query("limit") ? Number(c.req.query("limit")) : 20;
+      // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
+      // would otherwise reach the query and 500. Out-of-range / unparseable
+      // falls back to 20.
+      const limit = z.coerce.number().int().min(1).max(100).catch(20).parse(c.req.query("limit"));
       const result = await listDeliveries(webhookScope(c), c.req.param("id")!, limit);
       return c.json(listResponse(result));
     },

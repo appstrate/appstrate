@@ -3,8 +3,15 @@
 /**
  * Idempotency key storage — backed by KeyValueCache adapter.
  *
- * Pattern: Stripe `Idempotency-Key` header. Cache key format: `idem:{orgId}:{key}`.
+ * Pattern: Stripe `Idempotency-Key` header. Cache key format:
+ * `idem:{orgId}:{applicationId}:{key}`.
  * TTL: 24 hours. Body hash SHA-256 for conflict detection.
+ *
+ * The application id is part of the key so the SAME `Idempotency-Key` used by
+ * two different applications in one org never collides — without it, app A's
+ * cached response could replay to app B (same org + key + body). Org-scoped
+ * routes with no application context pass `undefined`, which maps to a stable
+ * `_org` segment so they share one namespace among themselves.
  */
 
 import { getCache } from "../infra/index.ts";
@@ -33,8 +40,8 @@ type LockResult =
 const TTL = 86_400; // 24 hours
 const MAX_CACHED_BODY = 1_048_576; // 1 MB
 
-function cacheKey(orgId: string, key: string): string {
-  return `idem:${orgId}:${key}`;
+function cacheKey(orgId: string, applicationId: string | undefined, key: string): string {
+  return `idem:${orgId}:${applicationId ?? "_org"}:${key}`;
 }
 
 export function computeBodyHash(body: string): string {
@@ -49,10 +56,11 @@ export function computeBodyHash(body: string): string {
 
 export async function acquireIdempotencyLock(
   orgId: string,
+  applicationId: string | undefined,
   key: string,
   bodyHash: string,
 ): Promise<LockResult> {
-  const ck = cacheKey(orgId, key);
+  const ck = cacheKey(orgId, applicationId, key);
   const processingValue = JSON.stringify({ status: "processing", bodyHash });
   const cache = await getCache();
 
@@ -86,21 +94,26 @@ export async function acquireIdempotencyLock(
 
 export async function storeIdempotencyResult(
   orgId: string,
+  applicationId: string | undefined,
   key: string,
   result: CachedResult,
 ): Promise<void> {
   // Don't cache oversized responses
   if (result.body.length > MAX_CACHED_BODY) {
-    await releaseIdempotencyLock(orgId, key);
+    await releaseIdempotencyLock(orgId, applicationId, key);
     return;
   }
 
-  const ck = cacheKey(orgId, key);
+  const ck = cacheKey(orgId, applicationId, key);
   const value = JSON.stringify(result);
 
   await (await getCache()).set(ck, value, { ttlSeconds: TTL });
 }
 
-export async function releaseIdempotencyLock(orgId: string, key: string): Promise<void> {
-  await (await getCache()).del(cacheKey(orgId, key));
+export async function releaseIdempotencyLock(
+  orgId: string,
+  applicationId: string | undefined,
+  key: string,
+): Promise<void> {
+  await (await getCache()).del(cacheKey(orgId, applicationId, key));
 }

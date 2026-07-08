@@ -53,6 +53,12 @@
 
 set -euo pipefail
 
+# Bounded curl options shared by every download below. Without connect/overall
+# timeouts a stalled TLS handshake or a hung mirror can wedge cloud-init / CI
+# forever; the bounded retry smooths transient blips. Word-split intentionally
+# at each call site (unquoted "$CURL_OPTS").
+CURL_OPTS="-fsSL --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 2"
+
 # The entire script body is wrapped in `_appstrate_bootstrap` and only
 # invoked at the very end of the file. `curl -fsSL … | bash` reads the
 # script over a streaming TCP connection; if the connection drops
@@ -520,7 +526,7 @@ _appstrate_bootstrap() {
   # ─── Download + verify ──────────────────────────────────────────────────────
 
   log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
-  curl -fsSL "$URL" -o "$TMPDIR/$ASSET"
+  curl $CURL_OPTS "$URL" -o "$TMPDIR/$ASSET"
 
   if [ "${APPSTRATE_SKIP_VERIFY:-0}" = "1" ]; then
     # Hard-gate the skip on CI=true. The flag exists ONLY for CI debug
@@ -628,8 +634,8 @@ _appstrate_bootstrap() {
     fi
 
     log "Fetching release checksums + signature"
-    curl -fsSL "$CHECKSUMS_URL" -o "$TMPDIR/checksums.txt"
-    curl -fsSL "$CHECKSUMS_SIG_URL" -o "$TMPDIR/checksums.txt.minisig"
+    curl $CURL_OPTS "$CHECKSUMS_URL" -o "$TMPDIR/checksums.txt"
+    curl $CURL_OPTS "$CHECKSUMS_SIG_URL" -o "$TMPDIR/checksums.txt.minisig"
 
     log "Verifying signature against Appstrate release key"
     if ! minisign -Vm "$TMPDIR/checksums.txt" -P "$APPSTRATE_MINISIGN_PUBKEY" >/dev/null; then

@@ -5,6 +5,7 @@ import {
   CHAT_LOOPBACK_AUTH_METHOD,
   chatLoopbackStrategy,
   mintLoopbackToken,
+  mintMcpLoopbackToken,
 } from "../src/loopback-auth.ts";
 
 const claims = {
@@ -35,6 +36,43 @@ describe("mintLoopbackToken + chatLoopbackStrategy round-trip", () => {
       headers: authHeaders(mintLoopbackToken(claims)),
     } as never);
     expect(res!.permissions).toEqual(["llm-proxy:call", "models:read"]);
+  });
+
+  it("the inference bearer grants the first-party-loopback capability", async () => {
+    const res = await chatLoopbackStrategy.authenticate({
+      headers: authHeaders(mintLoopbackToken(claims)),
+    } as never);
+    expect(res!.firstPartyLoopback).toBe(true);
+  });
+});
+
+describe("mintMcpLoopbackToken (subscription-engine platform-MCP bearer)", () => {
+  const callerPermissions = ["mcp:read", "agents:read", "runs:write"];
+
+  it("resolves back to EXACTLY the caller's forwarded permission set (RBAC fidelity, no amplification)", async () => {
+    const token = mintMcpLoopbackToken({ ...claims, permissions: callerPermissions });
+    const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+    expect(res).not.toBeNull();
+    expect(res!.permissions).toEqual(callerPermissions);
+    expect(res!.user).toEqual({ id: "u_1", email: "a@b.c", name: "Ada" });
+    expect(res!.orgId).toBe("org_1");
+  });
+
+  it("does NOT grant first-party-loopback — the MCP bearer can never reach the subscription LLM gateway", async () => {
+    const token = mintMcpLoopbackToken({ ...claims, permissions: callerPermissions });
+    const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+    // Falsy (unset or false) so `if (resolution.firstPartyLoopback)` in the
+    // auth pipeline never stamps the capability for this token.
+    expect(res!.firstPartyLoopback).not.toBe(true);
+  });
+
+  it("an expired MCP bearer is refused", async () => {
+    const token = mintMcpLoopbackToken(
+      { ...claims, permissions: callerPermissions },
+      { ttlMs: -1 },
+    );
+    const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+    expect(res).toBeNull();
   });
 });
 

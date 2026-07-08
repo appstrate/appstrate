@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import type { Column, SQL } from "drizzle-orm";
 import type { Actor } from "@appstrate/connect";
 
@@ -54,4 +54,24 @@ export function actorFilter(actor: Actor, cols: { userId: Column; endUserId: Col
  */
 export function actorMatch(actor: Actor, cols: { typeCol: Column; idCol: Column }): SQL {
   return and(eq(cols.typeCol, actor.type), eq(cols.idCol, actor.id))!;
+}
+
+/**
+ * WHERE clause for "my runs"-style list/visibility views that must respect the
+ * actor boundary. Dashboard members (`type: "user"`) see their own rows PLUS
+ * org-visible rows with no dashboard owner (schedule/system-triggered, where
+ * `userId IS NULL`). End-users (`type: "end_user"`) see ONLY their own rows —
+ * they must never observe another end-user's or a system-triggered row.
+ *
+ * The `isNull(userId)` branch is therefore gated to the `user` actor: for an
+ * `end_user` actor it collapses to strict ownership, because every
+ * end-user-triggered row is written with `userId NULL` (see {@link actorInsert})
+ * — so an unconditional `isNull(userId)` would match every other end-user's and
+ * every system row. This is the single canonical helper for that semantic; do
+ * not re-derive the `or(ownership, isNull(userId))` pattern inline.
+ */
+export function actorScopeFilter(actor: Actor, cols: { userId: Column; endUserId: Column }): SQL {
+  const ownership = actorFilter(actor, cols);
+  if (actor.type === "end_user") return ownership;
+  return or(ownership, isNull(cols.userId))!;
 }

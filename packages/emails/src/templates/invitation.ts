@@ -35,7 +35,7 @@ export function renderInvitationEmail(props: EmailPropsMap["invitation"]): Rende
   const subject = interpolate(s.subject, { orgName }).replace(/[\r\n]/g, "");
 
   const html = `<p>${interpolate(s.body, vars)}</p>
-<p>${s.cta} <a href="${inviteUrl}">${escapeHtml(inviteUrl)}</a></p>
+<p>${s.cta} <a href="${escapeHtml(inviteUrl)}">${escapeHtml(inviteUrl)}</a></p>
 <p>${s.footer}</p>`;
 
   return { subject, html };

@@ -70,6 +70,26 @@ async function lastMessageId(sessionId: string): Promise<string | null> {
   return row?.messageId ?? null;
 }
 
+/**
+ * Deterministic message id for a UIMessage that arrives without one. Derived
+ * from (sessionId, parentId, content) so it is:
+ *   - STABLE across retries of the same finalize — a retried assistant persist
+ *     produces the same id, so the upsert dedupes on the conflict target
+ *     instead of inserting a fresh row every attempt (duplicate messages).
+ *   - DISTINCT across turns — a different parent/content hashes differently,
+ *     preserving the earlier fix where an empty id collided across turns.
+ */
+async function deterministicMessageId(
+  sessionId: string,
+  parentId: string | null,
+  content: unknown,
+): Promise<string> {
+  const material = `${sessionId}\u0000${parentId ?? ""}\u0000${JSON.stringify(content)}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  return `gen_${hex.slice(0, 32)}`;
+}
+
 async function upsertMessage(
   sessionId: string,
   message: UIMessage,
@@ -78,10 +98,12 @@ async function upsertMessage(
   // The row is keyed by (sessionId, messageId). The assistant UIMessage parsed
   // from the stream can arrive WITHOUT an id (the engine's start chunk may omit
   // `messageId`); an empty id would collide across turns and silently overwrite
-  // an earlier message (e.g. the OAuth-card turn vanishing after a resume).
-  // Mint a stable unique id whenever one is missing.
-  const messageId = message.id || crypto.randomUUID();
+  // an earlier message (e.g. the OAuth-card turn vanishing after a resume). A
+  // *random* fallback id would instead break idempotency — a retried finalize
+  // would mint a new id each attempt and insert a duplicate row — so derive a
+  // stable, content-addressed id when one is missing.
   const content = toContent(message) as typeof chatMessages.$inferInsert.content;
+  const messageId = message.id || (await deterministicMessageId(sessionId, parentId, content));
   await db
     .insert(chatMessages)
     .values({

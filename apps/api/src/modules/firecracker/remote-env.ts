@@ -30,13 +30,19 @@ const remoteEnvSchema = z.object({
   // Transport-security gate (SEC-2): the wire carries the bearer token
   // plus per-run credentials (MODEL_API_KEY, APPSTRATE_SINK_SECRET,
   // CONNECT_LOGIN_JSON), so plaintext http:// to a NON-loopback daemon is
-  // an on-path capture + replay exposure. Default: loud boot warning.
-  // `=1`/`true` upgrades the warning to a hard refusal — set it on any
-  // split-host deployment once TLS (reverse proxy) is in front.
+  // an on-path capture + replay exposure. SECURE BY DEFAULT: a non-loopback
+  // http:// runner URL is REFUSED at boot. The only escape is an explicit
+  // `=0`/`false` — set it for a trusted private link (VPN, WireGuard, same
+  // rack) where TLS is not yet terminated. Loopback http:// is always
+  // allowed; https:// is always allowed.
   FIRECRACKER_RUNNER_TLS_REQUIRED: z
     .string()
     .optional()
-    .transform((v) => v === "1" || v?.toLowerCase() === "true"),
+    .transform((v) => {
+      if (v === undefined) return true; // secure by default
+      const normalized = v.toLowerCase();
+      return !(normalized === "0" || normalized === "false");
+    }),
 });
 
 export type RemoteRunnerEnv = z.infer<typeof remoteEnvSchema>;
@@ -48,7 +54,8 @@ const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
  * Enforce the plaintext-transport policy on the runner URL. Pure —
  * exported for unit tests; getRemoteEnv() applies it with the module
  * logger. `https://` and loopback `http://` always pass; non-loopback
- * `http://` warns (default) or throws (`tlsRequired`).
+ * `http://` is REFUSED by default (`tlsRequired`) and only downgraded to a
+ * loud warning when the escape (`FIRECRACKER_RUNNER_TLS_REQUIRED=0`) is set.
  */
 export function assertRunnerTransportSecurity(
   runnerUrl: string,
@@ -63,14 +70,18 @@ export function assertRunnerTransportSecurity(
     `the platform↔daemon wire carries the bearer token AND per-run credentials ` +
     `(model API keys, sink secrets, connect logins). Anyone on the network path can ` +
     `capture and replay them. Put TLS in front of the daemon (reverse proxy) and use ` +
-    `https://, or keep platform and daemon on the same host / a trusted private link. ` +
-    `Set FIRECRACKER_RUNNER_TLS_REQUIRED=1 to turn this warning into a hard refusal.`;
+    `https://, or keep platform and daemon on the same host / a trusted private link.`;
   if (tlsRequired) {
     throw new Error(
-      `FIRECRACKER_RUNNER_TLS_REQUIRED=1 refuses a plaintext non-loopback runner URL: ${message}`,
+      `Refusing a plaintext non-loopback Firecracker runner URL: ${message} ` +
+        `This is fail-closed by default; set FIRECRACKER_RUNNER_TLS_REQUIRED=0 ONLY for a ` +
+        `trusted private link where you accept the plaintext exposure.`,
     );
   }
-  warn(message);
+  warn(
+    `${message} FIRECRACKER_RUNNER_TLS_REQUIRED=0 is set, so this is a warning, not a refusal — ` +
+      `proceeding over plaintext.`,
+  );
 }
 
 let cached: RemoteRunnerEnv | undefined;

@@ -4,7 +4,18 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import resourcesToBackend from "i18next-resources-to-backend";
 
-const savedLng = localStorage.getItem("i18nextLng");
+// Accessing localStorage throws when storage is blocked (sandboxed iframe,
+// Safari private mode, cookies-disabled). Guard it so a blocked store can
+// never crash the SPA bootstrap — we just fall back to the default language.
+function readSavedLng(): string | null {
+  try {
+    return localStorage.getItem("i18nextLng");
+  } catch {
+    return null;
+  }
+}
+
+const savedLng = readSavedLng();
 
 /**
  * Locale bundles are loaded on demand: only the active language's namespaces
@@ -27,9 +38,14 @@ export const i18nReady = i18n
     interpolation: { escapeValue: false },
   });
 
-// Persist language choice to localStorage for next visit
+// Persist language choice to localStorage for next visit (best-effort — a
+// blocked store must not throw out of the languageChanged handler).
 i18n.on("languageChanged", (lng) => {
-  localStorage.setItem("i18nextLng", lng);
+  try {
+    localStorage.setItem("i18nextLng", lng);
+  } catch {
+    // Storage blocked — language just won't persist across reloads.
+  }
 });
 
 export default i18n;

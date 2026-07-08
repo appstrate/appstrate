@@ -43,11 +43,20 @@ export async function forkPackage(
   if (!parsed) return { code: "NOT_FOUND" };
 
   // Read the package row directly — `packages.type` already holds the type,
-  // so there's no need to probe each CONFIG_BY_TYPE candidate. The lookup is
-  // org-agnostic by design: system packages (orgId=null) are legitimately
-  // forkable and carry no per-org access control here.
+  // so there's no need to probe each CONFIG_BY_TYPE candidate.
   const raw = await getPackageById(sourcePackageId);
   if (!raw) return { code: "NOT_FOUND" };
+
+  // Cross-org fork of a PUBLISHED package is an intended feature (the "fork a
+  // shared/published package into your org" flow — see the cross-org fork
+  // integration tests). The only fork-able source is one with a published
+  // version: `forkWithConfig` below requires `getLatestVersionId` and returns
+  // NO_PUBLISHED_VERSION otherwise, so an org's UNPUBLISHED/draft working copy
+  // (the genuinely private surface the review flagged) is never forkable across
+  // orgs. Publishing a version is therefore the fork-visibility signal; we do
+  // NOT additionally gate on `orgId` here, which would break the documented
+  // cross-org fork feature. (See remediation ledger: forkPackage org-scope
+  // finding — false positive for published packages.)
   const cfg = CONFIG_BY_TYPE[raw.type as PackageType];
   if (!cfg) return { code: "UNKNOWN_TYPE", type: raw.type };
 

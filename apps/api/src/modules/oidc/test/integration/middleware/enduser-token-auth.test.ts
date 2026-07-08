@@ -160,7 +160,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       name: "Stage Three",
       scope: "openid runs:read",
     });
-    const res = await app.request(`/api/end-users/${endUserId}`, {
+    const res = await app.request(`/api/runs`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Application-Id": applicationId,
@@ -272,7 +272,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       end_user_id: endUserId,
       application_id: applicationId,
     });
-    const res = await app.request(`/api/end-users/${endUserId}`, {
+    const res = await app.request(`/api/runs`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Application-Id": applicationId,
@@ -363,7 +363,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
 
     // Token should work while client is active.
-    const goodRes = await app.request(`/api/end-users/${endUserId}`, {
+    const goodRes = await app.request(`/api/runs`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Application-Id": applicationId,
@@ -445,14 +445,17 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
     expect(otherOrg.id).not.toBe(orgId);
 
-    // Token scoped to org X.
+    // Token scoped to org X. `applications:read` is requested so the token can
+    // reach the guarded `GET /api/applications` probe below (dashboard perms =
+    // requested-scope ∩ role-ceiling; admin's ceiling allows it). The spoof
+    // guard under test is orthogonal to the resource scope.
     const token = await mintToken({
       sub: authUserId,
       actor_type: "dashboard_user",
       org_id: orgId,
       org_role: "admin",
       email: "stage3@example.com",
-      scope: "openid",
+      scope: "openid applications:read",
     });
 
     // Send token + X-Org-Id: Y (spoof attempt). Hit an org-scoped route that

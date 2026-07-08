@@ -38,7 +38,7 @@
  * `rotateClientSecret` — subsequent reads never expose them.
  */
 
-import { eq, or, inArray, asc } from "drizzle-orm";
+import { eq, or, inArray, asc, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
@@ -220,10 +220,39 @@ export async function hashSecret(plaintext: string): Promise<string> {
 // replicas. That is acceptable — the worst-case window is one TTL, and the
 // mutation path is already rare compared to the read path it protects.
 const CLIENT_CACHE_TTL_MS = 30_000;
+// Hard ceiling on distinct cached entries. Because `getClientCached` also
+// caches `null` for UNKNOWN clientIds (to soak up repeated probes), an
+// attacker spraying random client_ids at any OIDC-authenticated endpoint
+// would otherwise grow this Map without bound — a slow memory-exhaustion
+// vector. Expired entries also linger until their key is re-read, so size
+// never self-corrects without an explicit sweep. The cap + sweep below keep
+// the Map bounded regardless of probe volume.
+const CLIENT_CACHE_MAX_ENTRIES = 10_000;
 const clientCache = new Map<string, { record: OAuthClientRecord | null; expiresAt: number }>();
 
 function cacheInvalidate(clientId: string): void {
   clientCache.delete(clientId);
+}
+
+/**
+ * Keep `clientCache` under `CLIENT_CACHE_MAX_ENTRIES`. Runs only when the map
+ * is at capacity, so it is amortized-cheap on the hot path. First drops every
+ * expired entry; if live entries alone still breach the cap, evicts oldest by
+ * insertion order (Map iteration is insertion-ordered) until back under budget.
+ */
+function evictClientCacheIfNeeded(now: number): void {
+  if (clientCache.size < CLIENT_CACHE_MAX_ENTRIES) return;
+  for (const [key, entry] of clientCache) {
+    if (entry.expiresAt <= now) clientCache.delete(key);
+  }
+  if (clientCache.size >= CLIENT_CACHE_MAX_ENTRIES) {
+    const overflow = clientCache.size - CLIENT_CACHE_MAX_ENTRIES + 1;
+    let removed = 0;
+    for (const key of clientCache.keys()) {
+      clientCache.delete(key);
+      if (++removed >= overflow) break;
+    }
+  }
 }
 
 /**
@@ -236,6 +265,7 @@ export async function getClientCached(clientId: string): Promise<OAuthClientReco
   const cached = clientCache.get(clientId);
   if (cached && cached.expiresAt > now) return cached.record;
   const record = await getClient(clientId);
+  evictClientCacheIfNeeded(now);
   clientCache.set(clientId, { record, expiresAt: now + CLIENT_CACHE_TTL_MS });
   return record;
 }
@@ -703,95 +733,108 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
   // ever tighten its rules.
   assertValidRedirectUris(expectedRedirectUris);
 
-  const [existing] = await db
-    .select({
-      clientId: oauthClient.clientId,
-      redirectUris: oauthClient.redirectUris,
-      postLogoutRedirectUris: oauthClient.postLogoutRedirectUris,
-      public: oauthClient.public,
-      tokenEndpointAuthMethod: oauthClient.tokenEndpointAuthMethod,
-      clientSecret: oauthClient.clientSecret,
-    })
-    .from(oauthClient)
-    .where(eq(oauthClient.level, "instance"))
-    .orderBy(asc(oauthClient.createdAt))
-    .limit(1);
+  // Race-safety: the check-then-insert below is not atomic on its own. On a
+  // multi-replica boot two processes both SELECT (no instance client), both
+  // fall through, and both INSERT — leaving DUPLICATE platform clients (each
+  // with a distinct random `client_id`, so no natural unique key catches it,
+  // and the schema is owned by core so we cannot add a partial unique index
+  // from here). Serialize the whole check-reconcile-insert under a DB-global
+  // transaction-scoped advisory lock (same primitive core migrations and run
+  // concurrency use, PGlite-compatible). The second replica blocks on the
+  // lock, then observes the row the first inserted and reconciles/returns it.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('oidc:instance-client')::bigint)`);
 
-  if (existing) {
-    const storedPostLogout = existing.postLogoutRedirectUris ?? [];
-    const redirectDrift = !sameStringSet(existing.redirectUris, expectedRedirectUris);
-    const postLogoutDrift = !sameStringSet(storedPostLogout, expectedPostLogoutRedirectUris);
-    const authMethodDrift =
-      existing.public !== true ||
-      existing.tokenEndpointAuthMethod !== "none" ||
-      existing.clientSecret !== null;
+    const [existing] = await tx
+      .select({
+        clientId: oauthClient.clientId,
+        redirectUris: oauthClient.redirectUris,
+        postLogoutRedirectUris: oauthClient.postLogoutRedirectUris,
+        public: oauthClient.public,
+        tokenEndpointAuthMethod: oauthClient.tokenEndpointAuthMethod,
+        clientSecret: oauthClient.clientSecret,
+      })
+      .from(oauthClient)
+      .where(eq(oauthClient.level, "instance"))
+      .orderBy(asc(oauthClient.createdAt))
+      .limit(1);
 
-    if (redirectDrift || postLogoutDrift || authMethodDrift) {
-      await db
-        .update(oauthClient)
-        .set({
-          redirectUris: expectedRedirectUris,
-          postLogoutRedirectUris: expectedPostLogoutRedirectUris,
-          ...(authMethodDrift
-            ? {
-                public: true,
-                tokenEndpointAuthMethod: "none" as const,
-                clientSecret: null,
-              }
-            : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(oauthClient.clientId, existing.clientId));
-      cacheInvalidate(existing.clientId);
-      logger.warn("OIDC platform client reconciled to match APP_URL and public-client contract", {
-        module: "oidc",
-        clientId: existing.clientId,
-        appUrl: normalizedAppUrl,
-        redirectUrisFrom: existing.redirectUris,
-        redirectUrisTo: expectedRedirectUris,
-        postLogoutRedirectUrisFrom: storedPostLogout,
-        postLogoutRedirectUrisTo: expectedPostLogoutRedirectUris,
-        publicFrom: existing.public,
-        publicTo: authMethodDrift ? true : existing.public,
-        tokenEndpointAuthMethodFrom: existing.tokenEndpointAuthMethod,
-        tokenEndpointAuthMethodTo: authMethodDrift ? "none" : existing.tokenEndpointAuthMethod,
-        clientSecretCleared: authMethodDrift && existing.clientSecret !== null,
-      });
+    if (existing) {
+      const storedPostLogout = existing.postLogoutRedirectUris ?? [];
+      const redirectDrift = !sameStringSet(existing.redirectUris, expectedRedirectUris);
+      const postLogoutDrift = !sameStringSet(storedPostLogout, expectedPostLogoutRedirectUris);
+      const authMethodDrift =
+        existing.public !== true ||
+        existing.tokenEndpointAuthMethod !== "none" ||
+        existing.clientSecret !== null;
+
+      if (redirectDrift || postLogoutDrift || authMethodDrift) {
+        await tx
+          .update(oauthClient)
+          .set({
+            redirectUris: expectedRedirectUris,
+            postLogoutRedirectUris: expectedPostLogoutRedirectUris,
+            ...(authMethodDrift
+              ? {
+                  public: true,
+                  tokenEndpointAuthMethod: "none" as const,
+                  clientSecret: null,
+                }
+              : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(oauthClient.clientId, existing.clientId));
+        cacheInvalidate(existing.clientId);
+        logger.warn("OIDC platform client reconciled to match APP_URL and public-client contract", {
+          module: "oidc",
+          clientId: existing.clientId,
+          appUrl: normalizedAppUrl,
+          redirectUrisFrom: existing.redirectUris,
+          redirectUrisTo: expectedRedirectUris,
+          postLogoutRedirectUrisFrom: storedPostLogout,
+          postLogoutRedirectUrisTo: expectedPostLogoutRedirectUris,
+          publicFrom: existing.public,
+          publicTo: authMethodDrift ? true : existing.public,
+          tokenEndpointAuthMethodFrom: existing.tokenEndpointAuthMethod,
+          tokenEndpointAuthMethodTo: authMethodDrift ? "none" : existing.tokenEndpointAuthMethod,
+          clientSecretCleared: authMethodDrift && existing.clientSecret !== null,
+        });
+      }
+      return existing.clientId;
     }
-    return existing.clientId;
-  }
 
-  const id = prefixedId("oac");
-  const clientId = `oauth_${randomSecret().slice(0, 24)}`;
-  const now = new Date();
-  const metadata = { level: "instance" as const, clientId };
+    const id = prefixedId("oac");
+    const clientId = `oauth_${randomSecret().slice(0, 24)}`;
+    const now = new Date();
+    const metadata = { level: "instance" as const, clientId };
 
-  await db.insert(oauthClient).values({
-    id,
-    clientId,
-    clientSecret: null,
-    name: "Appstrate Platform",
-    redirectUris: expectedRedirectUris,
-    postLogoutRedirectUris: expectedPostLogoutRedirectUris,
-    scopes: ["openid", "profile", "email", "offline_access"],
-    level: "instance",
-    referencedOrgId: null,
-    referencedApplicationId: null,
-    metadata: JSON.stringify(metadata),
-    skipConsent: true,
-    allowSignup: true,
-    signupRole: "member",
-    disabled: false,
-    type: "web",
-    public: true,
-    tokenEndpointAuthMethod: "none",
-    grantTypes: ["authorization_code", "refresh_token"],
-    responseTypes: ["code"],
-    requirePKCE: true,
-    createdAt: now,
-    updatedAt: now,
+    await tx.insert(oauthClient).values({
+      id,
+      clientId,
+      clientSecret: null,
+      name: "Appstrate Platform",
+      redirectUris: expectedRedirectUris,
+      postLogoutRedirectUris: expectedPostLogoutRedirectUris,
+      scopes: ["openid", "profile", "email", "offline_access"],
+      level: "instance",
+      referencedOrgId: null,
+      referencedApplicationId: null,
+      metadata: JSON.stringify(metadata),
+      skipConsent: true,
+      allowSignup: true,
+      signupRole: "member",
+      disabled: false,
+      type: "web",
+      public: true,
+      tokenEndpointAuthMethod: "none",
+      grantTypes: ["authorization_code", "refresh_token"],
+      responseTypes: ["code"],
+      requirePKCE: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return clientId;
   });
-  return clientId;
 }
 
 // ─── Env-provisioned instance clients ─────────────────────────────────────────

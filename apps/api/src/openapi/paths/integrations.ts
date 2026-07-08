@@ -47,6 +47,15 @@ const agentPackageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
+// The org default is keyed by (application, integration) ONLY — a single row
+// per integration, NOT one per (integration, auth_key). The unique index in
+// `integrationOrgDefaults` and the `onConflictDoUpdate` in
+// `integration-org-defaults-service.ts:upsertOrgDefault` both target
+// [applicationId, integrationId], so PUT overwrites the one existing default
+// wholesale. `auth_key` below is a DERIVED read-only projection of the chosen
+// connection's own auth (joined from `integration_connections` at read time) —
+// it does NOT partition the default. Picking a connection of a different auth
+// type replaces the single default; it does not create a second, per-auth one.
 const integrationOrgDefaultSchema = {
   type: "object",
   required: [
@@ -60,7 +69,11 @@ const integrationOrgDefaultSchema = {
   properties: {
     integration_package_id: { type: "string" },
     connection_id: { type: "string", format: "uuid" },
-    auth_key: { type: "string" },
+    auth_key: {
+      type: "string",
+      description:
+        "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses.",
+    },
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -82,6 +95,13 @@ const integrationSummarySchema = {
   },
 } as const;
 
+// CASING: this connection wire shape mixes camelCase and snake_case by policy,
+// not by oversight. `id`, `packageId`, `expiresAt`, `createdAt`, `updatedAt`
+// are the universal DB-convention carve-outs (camelCase everywhere per
+// docs/CASING_CONVENTIONS.md); every other field (`auth_key`, `account_id`,
+// `identity_claims`, `scopes_granted`, `needs_reconnection`, `owner_type`,
+// `owner_id`, `shared_with_org`, `client_ref`) is snake_case wire. Matches the
+// serializer output (spec==runtime) — do NOT normalize either way.
 const integrationConnectionSchema = {
   type: "object",
   required: [
@@ -875,13 +895,22 @@ export const integrationsPaths = {
         },
       ],
       responses: {
-        "200": {
-          description: "HTML error page (token missing/invalid/used) — see 4xx detail.",
-          content: { "text/html": { schema: { type: "string" } } },
-        },
+        // No 2xx: the handler either 302-redirects on success (valid token →
+        // provider OAuth screen or hosted form) or renders an HTML error page
+        // with the matching 4xx status. It never returns 200 — the previous
+        // `200 "HTML error page (token missing/invalid/used)"` entry duplicated
+        // the 400/410 error conditions (routes/integrations.ts:/connect/start
+        // returns c.html(popupHtmlError(...), 400|410)), so each condition now
+        // maps to exactly one status.
         "302": { description: "Redirect to the provider OAuth screen or the hosted form." },
         "400": { description: "Missing token (HTML error page)." },
         "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
+        "500": {
+          description: "Integration cannot be connected / unexpected failure (HTML error page).",
+        },
+        "502": {
+          description: "Upstream provider failed to start the connection (HTML error page).",
+        },
       },
     },
   },
@@ -1266,6 +1295,12 @@ export const integrationsPaths = {
       operationId: "upsertIntegrationOrgDefault",
       tags: ["Integrations"],
       summary: "Set the org-wide default connection for this integration (admin)",
+      description:
+        "Upsert the single (application, integration) default. Keyed per-integration, " +
+        "NOT per-auth: this overwrites the one existing default wholesale (atomic " +
+        "onConflictDoUpdate on [applicationId, integrationId]). Selecting a connection " +
+        "of a different auth type replaces the current default rather than adding a " +
+        "second one. The response `auth_key` reflects the chosen connection's auth (derived).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

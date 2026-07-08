@@ -44,7 +44,7 @@ import { db, isEmbeddedDb } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { finalizeRun, getRunSinkContext } from "./run-event-ingestion.ts";
-import { getOrchestrator } from "./orchestrator/index.ts";
+import { stopWorkloadAndWait } from "./stop-workload.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -215,18 +215,19 @@ async function finalizeStalledRun(runId: string, stallThresholdSeconds: number):
     message: `Runner stopped reporting — no heartbeat for ${stallThresholdSeconds}s. The runner process may have crashed or lost network connectivity.`,
   };
 
-  // Stop the workload too — a stalled runner is not necessarily dead
-  // (a remote microVM that lost its event path keeps executing and
-  // billing). Fire-and-forget, mirroring the cancel route: the finalize
-  // must never block on a wedged daemon or container runtime.
-  getOrchestrator()
-    .stopByRunId(runId)
-    .catch((err) => {
-      logger.warn("run watchdog could not stop the stalled run's workload", {
-        runId,
-        error: getErrorMessage(err),
-      });
+  // Stop the workload and WAIT (bounded) for the stop to ack before
+  // finalizing — a stalled runner is not necessarily dead (a remote microVM
+  // that lost its event path keeps executing and billing with live
+  // credentials). Awaiting the stop closes the credential-exposure window in
+  // the common case; on a wedged daemon the helper times out and returns
+  // false, and we force-finalize anyway (the finalize must never block
+  // indefinitely on a wedged runtime).
+  const stopped = await stopWorkloadAndWait(runId);
+  if (!stopped) {
+    logger.warn("run watchdog: stalled run's workload stop unacknowledged, force-finalizing", {
+      runId,
     });
+  }
 
   await finalizeRun({ run, result });
 }

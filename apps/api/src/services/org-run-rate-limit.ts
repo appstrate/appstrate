@@ -32,9 +32,18 @@ let limiter: RateLimiterAbstract | null = null;
 let currentCap = -1;
 
 async function getLimiter(cap: number): Promise<RateLimiterAbstract> {
-  if (!limiter || cap !== currentCap) {
+  if (!limiter) {
     const factory = await getRateLimiterFactory();
     limiter = factory.create(cap, 60, "rl:org-run:");
+    currentCap = cap;
+  } else if (cap !== currentCap) {
+    // Cap changed (e.g. a config reload). DON'T recreate the limiter —
+    // recreating installs a fresh in-memory store, dropping every org's
+    // in-flight token count, which hands all orgs a full new burst allowance
+    // (and, on the Redis backend, orphans the previous keyPrefix state).
+    // `RateLimiterAbstract` exposes a `points` setter that mutates the cap in
+    // place while preserving the existing per-key counters.
+    limiter.points = cap;
     currentCap = cap;
   }
   return limiter;

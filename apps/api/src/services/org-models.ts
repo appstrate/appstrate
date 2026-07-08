@@ -9,7 +9,7 @@ import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { notFound } from "../lib/errors.ts";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { checkEgressHost, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
@@ -171,7 +171,18 @@ export async function listOrgModels(
       const creds = opts?.metadataOnly
         ? await loadCredentialMetadata(r.credentialId, orgId)
         : await loadInferenceCredentials(orgId, r.credentialId);
-      if (creds) credByRow.set(r.id, creds);
+      if (!creds) return;
+      // `metadataOnly` skips the decrypt, so it cannot see the OAuth blob's
+      // `needsReconnection` flag — a dead OAuth credential would otherwise
+      // leak into the model picker as a selectable (but unusable) model.
+      // Route OAuth rows through the decrypt gate (`loadInferenceCredentials`
+      // returns null for dead credentials), matching the default listing.
+      // api-key credentials can never be "dead", so they skip this probe.
+      if (opts?.metadataOnly && getModelProvider(creds.providerId)?.authMode === "oauth2") {
+        const live = await loadInferenceCredentials(orgId, r.credentialId);
+        if (!live) return;
+      }
+      credByRow.set(r.id, creds);
     }),
   );
   const reachableRows = rows.filter((r) => credByRow.has(r.id));
@@ -332,7 +343,19 @@ export async function updateOrgModel(
     throw new Error("Cannot modify built-in model");
   }
 
-  const updates = buildUpdateSet(data);
+  // Keys of `updateModelSchema` (routes/models.ts).
+  const updates = buildUpdateSet(data, [
+    "label",
+    "modelId",
+    "credentialId",
+    "enabled",
+    "input",
+    "contextWindow",
+    "maxTokens",
+    "reasoning",
+    "cost",
+    "aliased",
+  ]);
 
   await db
     .update(orgModels)
@@ -839,7 +862,20 @@ export async function testModelConfig(config: {
       : { ok: false, latency: 0, error: result.error, message: result.message };
   }
 
-  if (isBlockedUrl(config.baseUrl)) {
+  if (isBlockedEgressUrl(config.baseUrl)) {
+    return {
+      ok: false,
+      latency: 0,
+      error: "BLOCKED_URL",
+      message: "URL targets a blocked network",
+    };
+  }
+  // DNS-rebind-safe gate: the literal check above is string-only, so a public
+  // hostname that resolves to a private/loopback/link-local address slips
+  // through it. Resolve + re-check before the test fetch; fail closed with the
+  // same BLOCKED_URL result (the resolution reason is never surfaced).
+  const hostCheck = await checkEgressHost(new URL(config.baseUrl).hostname);
+  if (hostCheck.blocked) {
     return {
       ok: false,
       latency: 0,

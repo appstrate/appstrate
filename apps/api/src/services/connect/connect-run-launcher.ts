@@ -14,9 +14,9 @@
  *   3. launches a STRIPPED sidecar (isolation boundary + sidecar, NO agent
  *      container) in connect mode via {@link RunOrchestrator.createSidecar}
  *      with `connectLoginSpec` set,
- *   4. captures the sidecar's stdout, parses the `APPSTRATE_CONNECT_RESULT:` /
- *      `APPSTRATE_CONNECT_ERROR:` sentinel into a {@link CredentialBundle} (or a
- *      thrown error),
+ *   4. captures the sidecar's stdout, decrypts the `APPSTRATE_CONNECT_RESULT:`
+ *      sentinel (or reads the plaintext `APPSTRATE_CONNECT_ERROR:` sentinel)
+ *      into a {@link CredentialBundle} (or a thrown error),
  *   5. tears down (sidecar + boundary) in a `finally`, exactly like
  *      `runPlatformContainer`'s cleanup order — even on error / timeout.
  *
@@ -28,11 +28,16 @@
  * Security: the login secret travels in `connectLogin.inputs` inside
  * `CONNECT_LOGIN_JSON` (same trust level as `spawnEnv`) and is substituted
  * proxy-side by the sidecar's MITM — never handed to tool code, never logged.
- * The bundle returns on the sidecar's sentinel stdout line, which the parser
- * below extracts without logging the values.
+ * The captured bundle returns on the sidecar's sentinel stdout line, which the
+ * orchestrator captures (Docker logging driver → log collection in prod). To
+ * keep the plaintext credential off that surface, the sidecar encrypts the
+ * bundle with a per-connect-run ephemeral AES-256-GCM key this launcher
+ * generates and hands it via `CONNECT_RESULT_KEY` (same env trust channel as
+ * `CONNECT_LOGIN_JSON`). The launcher retains the key in-memory and decrypts
+ * the sentinel below — plaintext bundle bytes never touch stdout/stderr/logs.
  */
 
-import { randomBytes } from "node:crypto";
+import { createDecipheriv, randomBytes } from "node:crypto";
 
 import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
@@ -220,19 +225,49 @@ export async function buildConnectLoginSpec(
 }
 
 /**
- * Parse the connect-run sidecar's stdout for the result sentinel. Returns the
- * {@link CredentialBundle} on `APPSTRATE_CONNECT_RESULT:`, throws on
- * `APPSTRATE_CONNECT_ERROR:` (carrying the sidecar's message) or when neither
- * sentinel was emitted (sidecar died before producing a result).
+ * Decrypt a connect-run result payload. The wire format written by the sidecar
+ * (`runtime-pi/sidecar/server.ts`) is base64(iv‖authTag‖ciphertext) under
+ * AES-256-GCM keyed by the per-connect-run ephemeral `resultKey`. Any failure
+ * (malformed base64, truncated payload, auth-tag mismatch, wrong key) throws —
+ * the caller maps it onto a structured "could not decrypt" strategy error.
  */
-export function parseConnectResult(lines: readonly string[]): CredentialBundle {
+function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
+  const buf = Buffer.from(payloadB64, "base64");
+  // 12-byte GCM iv + 16-byte auth tag = 28-byte minimum framing.
+  if (buf.length < 28) {
+    throw new Error("connect-run: result payload too short to contain iv + auth tag");
+  }
+  const iv = buf.subarray(0, 12);
+  const authTag = buf.subarray(12, 28);
+  const ciphertext = buf.subarray(28);
+  const decipher = createDecipheriv("aes-256-gcm", resultKey, iv);
+  decipher.setAuthTag(authTag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+}
+
+/**
+ * Parse the connect-run sidecar's stdout for the result sentinel. Returns the
+ * {@link CredentialBundle} on `APPSTRATE_CONNECT_RESULT:` (decrypting its
+ * ciphertext payload with `resultKey`), throws on `APPSTRATE_CONNECT_ERROR:`
+ * (carrying the sidecar's plaintext message) or when neither sentinel was
+ * emitted (sidecar died before producing a result).
+ */
+export function parseConnectResult(lines: readonly string[], resultKey: Buffer): CredentialBundle {
   // Scan from the end — the sentinel is the last meaningful line the sidecar
   // writes before exiting.
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
     const resultIdx = line.indexOf(RESULT_SENTINEL);
     if (resultIdx !== -1) {
-      const json = line.slice(resultIdx + RESULT_SENTINEL.length).trim();
+      const payload = line.slice(resultIdx + RESULT_SENTINEL.length).trim();
+      let json: string;
+      try {
+        json = decryptConnectResult(payload, resultKey);
+      } catch {
+        // Never surface the raw payload / crypto detail — a decrypt failure is
+        // opaque by design (wrong key, tampered log line, truncated capture).
+        throw new Error("connect-run: result sentinel could not be decrypted");
+      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(json);
@@ -277,6 +312,12 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     const orch = this.orchestrator ?? getOrchestrator();
     const connectId = `connect_${randomBytes(12).toString("hex")}`;
     const runToken = signRunToken(connectId);
+    // Per-connect-run ephemeral key for the result channel. The sidecar
+    // encrypts the captured credential bundle with it (AES-256-GCM) before
+    // writing the APPSTRATE_CONNECT_RESULT sentinel, so the plaintext credential
+    // never lands on the orchestrator-captured stdout stream. Held only in this
+    // stack frame; never logged, serialized, or persisted.
+    const resultKey = randomBytes(32);
 
     const spec = await buildConnectLoginSpec(execution, this.resolveMcpServer);
 
@@ -293,9 +334,11 @@ class ConnectRunExecutor implements ConnectToolExecutor {
         // so `createSidecar` grants the Docker socket the runner spawn needs.
         integrations: [spec],
         connectLoginSpec: spec,
+        // → CONNECT_RESULT_KEY: the sidecar encrypts its result sentinel with this.
+        connectResultKey: resultKey.toString("base64"),
       });
 
-      const bundle = await this.captureBundle(orch, sidecar);
+      const bundle = await this.captureBundle(orch, sidecar, resultKey);
       logger.info("connect-run completed", {
         connectId,
         integrationId: execution.integrationId,
@@ -331,6 +374,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
   private async captureBundle(
     orch: RunOrchestrator,
     sidecar: WorkloadHandle,
+    resultKey: Buffer,
   ): Promise<CredentialBundle> {
     await orch.startWorkload(sidecar);
 
@@ -365,7 +409,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       }
       // Parse regardless of exit code: on a non-zero exit the sidecar emits
       // the ERROR sentinel before exiting 1, which carries the real cause.
-      return parseConnectResult(lines);
+      return parseConnectResult(lines, resultKey);
     } finally {
       clearTimeout(timer);
       logAbort.abort();

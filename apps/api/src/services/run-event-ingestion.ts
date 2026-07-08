@@ -121,6 +121,8 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       orgId: runs.orgId,
       applicationId: runs.applicationId,
       packageId: runs.packageId,
+      agentScope: runs.agentScope,
+      agentName: runs.agentName,
       runOrigin: runs.runOrigin,
       sinkSecretEncrypted: runs.sinkSecretEncrypted,
       sinkExpiresAt: runs.sinkExpiresAt,
@@ -135,7 +137,22 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
 
   if (!row) return null;
   if (row.sinkSecretEncrypted === null) return null;
-  return row as RunSinkContext;
+
+  // `runs.package_id` is `ON DELETE SET NULL` (schema/runs.ts) — deleting the
+  // source agent mid-run nulls the column while the run survives for
+  // observability/billing. `RunSinkContext.packageId` is typed as a non-null
+  // string, so a raw `row as RunSinkContext` cast would smuggle a runtime null
+  // past every finalize consumer (getPackage, memory/pinned persistence,
+  // afterRun / onRunStatusChange hook params) — silently skipping finalization
+  // side-effects for a deleted-agent run. Recover the agent's `@scope/name`
+  // from the INSERT-time snapshot (stamped precisely for this deleted-agent
+  // case) so finalize still runs with a stable identity; fall back to a neutral
+  // sentinel only when even the snapshot is absent (pre-snapshot legacy rows).
+  const { agentScope, agentName, ...rest } = row;
+  const packageId =
+    rest.packageId ??
+    (agentScope && agentName ? `@${agentScope}/${agentName}` : "@deleted/unknown");
+  return { ...rest, packageId } as RunSinkContext;
 }
 
 // `assertSinkOpen` and `verifyRunSignatureHeaders` live in
@@ -692,10 +709,18 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //    notification fan-out so the multi-row INSERT can never sit between the
   //    CAS close and the broadcast — the broadcast is what updates the UI and
   //    fires webhooks, so it must not wait on bell bookkeeping.
+  // Merge error + result into ONE `extra` object. Two separate conditional
+  // spreads of `extra` would make the second clobber the first (last spread
+  // wins), silently dropping the error payload whenever a run carries both an
+  // error message and a persisted result (e.g. a runner that reported a
+  // deliverable and still stamped a terminal error) — subscribers/webhooks
+  // would then never see the failure reason.
+  const broadcastExtra: Record<string, unknown> = {};
+  if (errorMessage) broadcastExtra.error = errorMessage;
+  if (resultToPersist && status === "success") broadcastExtra.result = resultToPersist;
   const broadcastParams: RunStatusChangeParams = {
     ...hookParams,
-    ...(errorMessage ? { extra: { error: errorMessage } } : {}),
-    ...(resultToPersist && status === "success" ? { extra: { result: resultToPersist } } : {}),
+    ...(Object.keys(broadcastExtra).length > 0 ? { extra: broadcastExtra } : {}),
   };
   void emitEvent("onRunStatusChange", broadcastParams);
 
@@ -877,15 +902,17 @@ function llmUnreachableMessage(run: RunSinkContext): string {
 // ---------------------------------------------------------------------------
 
 function envelopeToRunEvent(envelope: CloudEventEnvelope, runId: string): RunEvent {
-  // The envelope's `data` field carries the event's non-metadata properties.
-  // Rehydrate by merging with the envelope-provided metadata (runId, type,
-  // timestamp). `toolCallId` may or may not be present in data — we copy it
-  // through untouched.
+  // The envelope's `data` field carries the event's non-metadata properties
+  // (`toolCallId` etc. — copied through untouched). Spread it FIRST so the
+  // trusted envelope metadata (`type`, `runId`, `timestamp`) is applied LAST
+  // and always wins: `data` is runner-controlled and must never be able to
+  // override the authenticated `runId` (server-supplied), the CloudEvent
+  // `type` (the dispatch discriminant), or the envelope `time`.
   return {
+    ...envelope.data,
     type: envelope.type,
     runId,
     timestamp: Date.parse(envelope.time),
-    ...envelope.data,
   } as RunEvent;
 }
 

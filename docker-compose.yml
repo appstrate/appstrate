@@ -125,12 +125,12 @@ services:
   # Without this, the first execution would block on a slow image pull.
   # These containers exit immediately after pulling.
   appstrate-pi:
-    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.36}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-sidecar:
-    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.36}
     entrypoint: ["true"]
     restart: "no"
 
@@ -139,32 +139,94 @@ services:
   # Pre-pulled so the first integration boot doesn't block on — or fail at —
   # an on-demand pull.
   appstrate-mcp-runner-node:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.36}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-python:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.36}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-bun:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.36}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-uv:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.36}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-binary:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.36}
     entrypoint: ["true"]
     restart: "no"
 
+  # ── Docker socket proxy (PARTIAL hardening — commented by default) ─────────
+  #
+  # Fronts the Docker socket with a filtering reverse proxy so the platform
+  # container never touches `/var/run/docker.sock` directly. Only THIS service
+  # mounts the socket (still `:ro`, but it is the only process that can reach
+  # the daemon), and it rejects (403) every API verb group not explicitly
+  # enabled below.
+  #
+  # IMPORTANT — this does NOT contain a platform compromise to "just the
+  # whitelisted verbs". The proxy filters by API GROUP/VERB only; it does NOT
+  # inspect request bodies. With CONTAINERS=1 + POST=1 (which the platform
+  # needs to create run containers), a compromised platform can still
+  # `POST /containers/create` with `HostConfig.Privileged: true` plus a host
+  # bind mount (e.g. `/:/host`) and start it — regaining full root on the host.
+  # What the proxy DOES buy you is blocking the host-level / cluster / exec
+  # surface (INFO/AUTH/SECRETS/SWARM/SERVICES/EXEC/… stay default-deny), which
+  # narrows the reachable API — but container-create is itself a host-root
+  # primitive, so treat this as defense-in-depth, not a security boundary.
+  # A real boundary needs an authorization plugin that filters create payloads,
+  # or a rootless/VM-isolated daemon (see RUN_ADAPTER=firecracker).
+  #
+  # Pinned by digest (tecnativa/docker-socket-proxy:0.3.0). Verbs enabled match
+  # what the platform actually uses: create/start/stop/inspect/logs containers,
+  # pull images, and manage the per-run isolated networks/volumes it provisions
+  # (see the run architecture in CLAUDE.md). Tighten further if your deployment
+  # doesn't need a given group.
+  #
+  # To enable:
+  #   1. Uncomment this service.
+  #   2. On the `appstrate` service: remove the `/var/run/docker.sock` volume
+  #      mount and the `DOCKER_SOCKET=/var/run/docker.sock` env line, then add
+  #      `- DOCKER_HOST=tcp://appstrate-docker-proxy:2375` and a
+  #      `appstrate-docker-proxy: { condition: service_started }` entry under
+  #      `depends_on`.
+  #
+  # RESIDUAL: the proxy speaks the Docker API over TCP (:2375, on the internal
+  # `appstrate-data` network — never publish it). The platform's Docker client
+  # in this image talks to a UNIX socket path (`DOCKER_SOCKET`); a `tcp://`
+  # `DOCKER_HOST` is only honoured by a platform build whose client supports it.
+  # Verify your image supports TCP `DOCKER_HOST` before switching, otherwise
+  # runs will fail to reach the daemon. Until then the direct mount is the
+  # working default.
+  #
+  # appstrate-docker-proxy:
+  #   image: tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+  #   networks:
+  #     - appstrate-data
+  #   restart: unless-stopped
+  #   mem_limit: 64m
+  #   environment:
+  #     # Whitelisted API groups (1 = allow GET). POST=1 is what actually
+  #     # permits create/start/stop/pull; without it the proxy is read-only.
+  #     - CONTAINERS=1
+  #     - IMAGES=1
+  #     - NETWORKS=1
+  #     - VOLUMES=1
+  #     - POST=1
+  #     # Everything else stays at the proxy's default-deny (INFO/AUTH/SECRETS/
+  #     # SWARM/SERVICES/… = 0), so host-level and cluster verbs are refused.
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+
   appstrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.36}
     networks:
       - appstrate-data
       - appstrate-public
@@ -203,16 +265,16 @@ services:
       # from the effective container hostname. Forwarding `${PLATFORM_API_URL:-}`
       # injects an empty string, which bypasses the auto-detection path.
       # Set it only if you need to point sidecars at a different host.
-      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
-      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
+      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.36}
       # Runner images forwarded to the sidecar (SIDECAR_OPERATOR_ENV_KEYS) so
       # it spawns integration runners from GHCR instead of bare `:latest` tags
       # (which the daemon would try — and fail — to pull from Docker Hub).
-      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-latest}
-      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-latest}
-      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-latest}
-      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-latest}
-      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-latest}
+      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.36}
       # ── System config (JSON arrays) ──
       - SYSTEM_PROVIDER_KEYS=${SYSTEM_PROVIDER_KEYS:-[]}
       - SYSTEM_PROXIES=${SYSTEM_PROXIES:-[]}
@@ -288,6 +350,17 @@ services:
       - OTEL_EXPORTER_OTLP_HEADERS
       - OTEL_EXPORTER_OTLP_PROTOCOL
     volumes:
+      # SECURITY: the `:ro` suffix makes only the SOCKET FILE read-only — it
+      # does NOT make the Docker API read-only. A process with this mount can
+      # still POST to the API (create/start privileged containers, bind-mount
+      # `/` from the host, etc.), so a compromised platform container is
+      # effectively root on the Docker host. There is no compose-only way to
+      # restrict the API surface — the only real mitigation is to front the
+      # socket with a filtering proxy that whitelists the verbs the platform
+      # needs. See the commented `appstrate-docker-proxy` service below and the
+      # switch instructions there. This direct mount remains the default only
+      # because the switch requires a platform build whose Docker client can
+      # target a TCP `DOCKER_HOST` (see residual note on the proxy service).
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]

@@ -1,7 +1,7 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-import { unzipSync, zipSync, type Zippable } from "fflate";
+import { zipSync, type Zippable } from "fflate";
 import {
   validateManifest,
   type Manifest,
@@ -12,8 +12,15 @@ import {
   type McpServerManifest,
 } from "./validation.ts";
 import { checkCompanionFiles, companionFilesFromRecord } from "./companion-files.ts";
+import {
+  unzipBounded,
+  DecompressionLimitError,
+  type BoundedUnzipLimits,
+} from "@appstrate/afps-shared/unzip-bounded";
 
 export type { Zippable };
+export { unzipBounded, DecompressionLimitError };
+export type { BoundedUnzipLimits };
 
 /**
  * Fixed modification time stamped on every ZIP entry. fflate defaults each
@@ -72,19 +79,39 @@ export function zipArtifact(
   return zipSync(sorted, { level, mtime: DETERMINISTIC_MTIME });
 }
 
+/** Default decompressed budget for `unzipArtifact` when a caller passes none. */
+const DEFAULT_MAX_DECOMPRESSED = 200 * 1024 * 1024; // 200 MB
+const DEFAULT_MAX_FILES = 10_000;
+
 /**
  * Decompress a ZIP artifact and return sanitized file entries.
  * Filters out path traversal attempts, absolute paths, null bytes, backslashes,
  * __MACOSX metadata, and directory entries.
+ *
+ * Decompression is STREAMING and memory-bounded (see `unzipBounded`): the
+ * cumulative decompressed budget is enforced mid-inflate, so a zip bomb aborts
+ * before it can materialize — unlike the previous `unzipSync` + post-hoc sum,
+ * which allocated the whole archive first.
+ *
  * @param artifact - The ZIP file as a Uint8Array
+ * @param opts.maxDecompressedBytes - cumulative decompressed cap (default 200 MB)
+ * @param opts.maxFiles - entry-count cap (default 10 000)
  * @returns Map of sanitized file paths to their content
+ * @throws DecompressionLimitError when a budget is crossed
  * @throws Error if the ZIP cannot be decompressed
  */
-export function unzipArtifact(artifact: Uint8Array): Record<string, Uint8Array> {
+export function unzipArtifact(
+  artifact: Uint8Array,
+  opts?: { maxDecompressedBytes?: number; maxFiles?: number },
+): Record<string, Uint8Array> {
   let rawFiles: Record<string, Uint8Array>;
   try {
-    rawFiles = unzipSync(artifact);
-  } catch {
+    rawFiles = unzipBounded(artifact, {
+      maxDecompressedBytes: opts?.maxDecompressedBytes ?? DEFAULT_MAX_DECOMPRESSED,
+      maxFiles: opts?.maxFiles ?? DEFAULT_MAX_FILES,
+    });
+  } catch (err) {
+    if (err instanceof DecompressionLimitError) throw err; // surface bomb/limit verbatim
     throw new Error("Failed to decompress ZIP artifact");
   }
 
@@ -233,21 +260,21 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
     );
   }
 
+  // Zip bomb protection is now enforced DURING decompression (streaming budget)
+  // rather than after full materialization — a bomb aborts mid-inflate.
+  const MAX_DECOMPRESSED = 50 * 1024 * 1024; // 50 MB
   let files: Record<string, Uint8Array>;
   try {
-    files = unzipArtifact(zipBuffer);
-  } catch {
+    files = unzipArtifact(zipBuffer, { maxDecompressedBytes: MAX_DECOMPRESSED });
+  } catch (err) {
+    if (err instanceof DecompressionLimitError) {
+      // A resource-exhaustion verdict → ZIP_BOMB; a structural one → ZIP_INVALID.
+      if (err.reason === "corrupt-archive") {
+        throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact");
+      }
+      throw new PackageZipError("ZIP_BOMB", "Decompressed size exceeds limit");
+    }
     throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact");
-  }
-
-  // Zip bomb protection: check total decompressed size
-  const MAX_DECOMPRESSED = 50 * 1024 * 1024; // 50 MB
-  const totalSize = Object.values(files).reduce((sum, buf) => sum + buf.length, 0);
-  if (totalSize > MAX_DECOMPRESSED) {
-    throw new PackageZipError(
-      "ZIP_BOMB",
-      `Decompressed size (${(totalSize / 1024 / 1024).toFixed(1)} MB) exceeds limit`,
-    );
   }
 
   // Strip single wrapper folder if present (e.g. ZIPs from macOS Finder)

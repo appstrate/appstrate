@@ -792,6 +792,14 @@ for (const entry of zodSchemaRegistry) {
       );
     }
 
+    // String/length/format/enum constraint checks below are UNIDIRECTIONAL by
+    // design: they flag a constraint present in Zod but missing (or differing)
+    // in OpenAPI, not the reverse (OpenAPI-only constraint). Zod is the runtime
+    // source of truth, so a Zod constraint absent from the spec is the drift
+    // that misleads consumers; the spec legitimately carries descriptive
+    // constraints Zod does not enforce. KNOWN LIMITATION: OpenAPI-only
+    // constraints therefore go unreported here — tightening to bidirectional
+    // would require reconciling that pre-existing hand-authored drift first.
     // String constraints — maxLength (check anyOf variants for Zod nullable types)
     const zodMaxLen =
       zodProp.maxLength ??
@@ -919,6 +927,17 @@ const ROUTE_VERB_PATTERN = ROUTE_VERBS.join("|");
  * locating its opening `{` after `name(...)` and brace-counting forward.
  * Returns the source slice between the matching braces (exclusive), or null
  * if the function isn't found.
+ *
+ * The forward scan skips string / template / line- / block-comment content
+ * (same handling as `extractCallText`) so a `{`/`}` inside a string or comment
+ * cannot throw off the depth count and truncate the body — which would hide
+ * the `router.METHOD(...)` registrations that live past the miscounted brace.
+ *
+ * KNOWN LIMITATION: regex literals (e.g. `/\}/`) are NOT tokenized — a brace
+ * inside a regex literal can still miscount. Distinguishing a regex literal
+ * from a division operator needs a real tokenizer (JS grammar is
+ * context-sensitive here); that is out of scope for this static gate. In
+ * practice the scanned route-registration functions contain no such literals.
  */
 function extractFunctionBody(src: string, fnName: string): string | null {
   const sigPattern = new RegExp(`(?:export\\s+)?function\\s+${fnName}\\s*\\(`, "g");
@@ -927,9 +946,48 @@ function extractFunctionBody(src: string, fnName: string): string | null {
   const openIdx = src.indexOf("{", sig.index + sig[0].length);
   if (openIdx === -1) return null;
   let depth = 1;
+  let inStr: string | null = null;
+  let inLine = false;
+  let inBlock = false;
   let i = openIdx + 1;
   while (i < src.length && depth > 0) {
     const ch = src[i];
+    const next = src[i + 1];
+    if (inLine) {
+      if (ch === "\n") inLine = false;
+      i++;
+      continue;
+    }
+    if (inBlock) {
+      if (ch === "*" && next === "/") {
+        inBlock = false;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (inStr) {
+      if (ch === "\\")
+        i++; // skip escaped char
+      else if (ch === inStr) inStr = null;
+      i++;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLine = true;
+      i += 2;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlock = true;
+      i += 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inStr = ch;
+      i++;
+      continue;
+    }
     if (ch === "{") depth++;
     else if (ch === "}") depth--;
     i++;

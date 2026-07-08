@@ -37,6 +37,13 @@ function compileCached(schema: JSONSchemaObject): ReturnType<typeof ajv.compile>
   if (!validate) {
     try {
       validate = ajv.compile(schema);
+    } catch (err) {
+      // Surface a clear, typed error instead of leaking AJV's raw throw
+      // (which can be a bare string or a low-level "schema is invalid"
+      // object) to callers on hot paths.
+      throw new Error(
+        `Failed to compile config JSON schema: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       // `ajv.compile` registers the schema object (and its `$id`, when
       // present) in the instance's internal reference-keyed registry.
@@ -126,6 +133,12 @@ export function validateConfig(
  *
  * Pure: never mutates either argument; always returns a new object.
  */
+// Keys that must never be written by a merge — assigning them (especially
+// from a `JSON.parse`d override, where `__proto__` is an own enumerable
+// property) would pollute `Object.prototype` / the object's prototype
+// chain. Skipped on both the read and write sides of the merge.
+const PROTO_POLLUTION_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 export function deepMergeConfig(
   base: Record<string, unknown>,
   override: Record<string, unknown> | undefined,
@@ -134,6 +147,7 @@ export function deepMergeConfig(
   const out: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(override)) {
     if (value === undefined) continue;
+    if (PROTO_POLLUTION_KEYS.has(key)) continue;
     const baseValue = out[key];
     if (isPlainObject(value) && isPlainObject(baseValue)) {
       out[key] = deepMergeConfig(baseValue, value);

@@ -33,7 +33,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join, normalize } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { unzipSync } from "fflate";
+
+import { guardedFetch } from "@appstrate/core/ssrf";
+import { isOperatorTrustedEgressHost } from "./ssrf.ts";
+import { unzipBounded } from "@appstrate/core/zip";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -279,7 +282,16 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
   // to a path-safe slug. The directory is private to this run anyway.
   const safe = namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   const root = await mkdtemp(join(tmpdir(), `afps-integ-${safe}-`));
-  const files = unzipSync(bytes);
+  // Memory-bounded streaming unzip: a hostile/oversized bundle can't OOM the
+  // sidecar (decompression-bomb floor). Caps chosen for a realistic mcp-server
+  // bundle (multi-MB code + deps) with generous headroom: 200 MiB total across
+  // at most 10k entries. `unzipBounded` throws `DecompressionLimitError` on a
+  // budget breach; it excludes directory entries but does NOT sanitize paths —
+  // the per-entry zip-slip guard below is preserved verbatim.
+  const files = unzipBounded(bytes, {
+    maxDecompressedBytes: 200 * 1024 * 1024,
+    maxFiles: 10_000,
+  });
   for (const [rel, contents] of Object.entries(files)) {
     if (rel.endsWith("/")) continue;
     const relPosix = rel.split("\\").join("/");
@@ -345,6 +357,15 @@ export interface ConnectRemoteHttpDeps {
       clientInfo: { name: string; version: string };
     },
   ) => Promise<AppstrateMcpClient>;
+  /**
+   * Optional DNS resolver forwarded to the SSRF guard (`guardedFetch`'s
+   * `resolve` option) — same seam as `credential-proxy.ts`'s
+   * `deps.resolveHost`. Tests inject a resolver returning a public address
+   * so fixture hostnames pass the guard without real DNS; production
+   * callers omit it (system resolver). The guard itself ALWAYS runs —
+   * injecting a transport factory does NOT disable it.
+   */
+  resolveHost?: HostResolver;
 }
 
 /**
@@ -452,6 +473,20 @@ export async function connectRemoteHttpIntegration(
     return { name: plan.headerName, value: `${plan.headerPrefix}${plan.value}` };
   };
 
+  // SSRF-guard the egress — ALWAYS (P0-2): `guardedFetch` does per-hop DNS
+  // re-checking, manual redirect following, drops credential headers on
+  // cross-origin redirects and strips userinfo — throwing `SsrfBlockedError`
+  // on private/loopback/link-local hosts. This is the only otherwise-
+  // unguarded sidecar egress path (the MITM/CONNECT listeners already
+  // resolve+check). The guard sits INSIDE the credential closure so the
+  // Bearer is injected exactly once on the original request and
+  // `guardedFetch` owns the redirect hops (re-injecting per hop would leak
+  // the credential cross-origin). Tests never disable the guard — they
+  // inject `deps.resolveHost` (a resolver returning a public address for
+  // fixture hostnames) so the guard code on this path is identical for
+  // every caller; `guardedFetch` reads the live global `fetch`, which the
+  // tests stub.
+
   // `typeof fetch` (Bun) carries a static `preconnect` member alongside the
   // call signature. The MCP transport's `fetch?: typeof fetch` option demands
   // the full shape, so forward the real `preconnect` rather than casting it
@@ -462,7 +497,24 @@ export async function connectRemoteHttpIntegration(
         const headers = new Headers(init?.headers);
         const h = readHeader();
         if (h) headers.set(h.name, h.value);
-        return fetch(input, { ...init, headers });
+        // `guardedFetch` accepts `string | URL`; the MCP transports always
+        // call with a URL/string target (headers/body ride in `init`), so a
+        // stray `Request` is normalised to its URL for the type.
+        const target: string | URL =
+          typeof input === "string" || input instanceof URL ? input : input.url;
+        // Operator-trusted internal hosts (APPSTRATE_EGRESS_ALLOW_HOSTS, injected
+        // by the platform) skip only the host blocklist — without this, a remote
+        // MCP server the platform-side spawn validation just allowed (internal
+        // host explicitly allowlisted by the operator) would be re-blocked here
+        // and fail opaquely in-run. Redirect discipline still applies.
+        return guardedFetch(
+          target,
+          { ...init, headers },
+          {
+            allowHost: isOperatorTrustedEgressHost,
+            ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
+          },
+        );
       };
       let res = await send();
       if (res.status === 401 && source.refreshOnUnauthorized) {
@@ -908,6 +960,10 @@ async function spawnAndConnectLocalIntegration(params: {
     }));
   }
   const connectPromise = client.connect(spawnedIntegration.transport);
+  // If the timeout wins the race, `connectPromise` is orphaned and may reject
+  // later (once the hung transport finally errors) — attach a no-op catch so
+  // that late rejection never surfaces as an unhandledRejection.
+  connectPromise.catch(() => {});
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => reject(new Error("MCP connect timeout (30s)")), 30_000);
@@ -915,6 +971,13 @@ async function spawnAndConnectLocalIntegration(params: {
   });
   try {
     await Promise.race([connectPromise, timeoutPromise]);
+  } catch (err) {
+    // Connect failed or timed out: reclaim the just-spawned runtime by closing
+    // its transport (the adapter's subprocess/container exits with it) so a
+    // hung MCP server doesn't leak a runtime for the whole run. Best-effort —
+    // the original error is what the caller must see.
+    await spawnedIntegration.transport.close().catch(() => {});
+    throw err;
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }

@@ -398,6 +398,11 @@ export class TokenBudget {
 
   /** Internal: actually mutate the consumed counter (saturating). */
   private commit(tokens: number): void {
+    // Guard against NaN / non-finite / non-positive input. `tryReserve` passes
+    // the estimator's output straight through, so a bad estimate (NaN) would
+    // otherwise poison `consumed` permanently (`Math.min(x, NaN) === NaN`),
+    // wedging every subsequent budget decision. Ignore it instead.
+    if (!Number.isFinite(tokens) || tokens <= 0) return;
     this.consumed = Math.min(this.runBudgetTokens, this.consumed + Math.ceil(tokens));
   }
 

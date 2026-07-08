@@ -53,12 +53,20 @@ export function isBlockedHost(hostname: string): boolean {
   if (ipv4Match) {
     const a = parseInt(ipv4Match[1]!, 10);
     const b = parseInt(ipv4Match[2]!, 10);
+    const c = parseInt(ipv4Match[3]!, 10);
     if (a === 0) return true; // 0.0.0.0/8
     if (a === 10) return true; // 10.0.0.0/8
     if (a === 127) return true; // 127.0.0.0/8 (full loopback range)
     if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
     if (a === 192 && b === 168) return true; // 192.168.0.0/16
     if (a === 169 && b === 254) return true; // 169.254.0.0/16 (link-local)
+    // 100.64.0.0/10 — RFC 6598 shared/CGN space. Alibaba & Tencent Cloud expose
+    // instance metadata at 100.100.100.200, and K8s/CGN route internal traffic
+    // here; without this the whole cloud-metadata SSRF class stays open.
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 (benchmark)
+    if (a === 192 && b === 0 && c === 0) return true; // 192.0.0.0/24 (IETF protocol assignments)
+    if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved + 255.255.255.255
     return false;
   }
 
@@ -88,13 +96,37 @@ export function isBlockedHost(hostname: string): boolean {
     if (mappedDot) {
       return isBlockedHost(mappedDot[1]!);
     }
+
+    // IPv4-compatible IPv6 (deprecated but still routed by some stacks): the
+    // low 32 bits embed an IPv4 with NO `::ffff:` prefix — ::7f00:1 = 127.0.0.1,
+    // ::a9fe:a9fe = 169.254.169.254. Without this branch these slip past the
+    // IPv4 blocklist entirely. (`::ffff:H:L` mapped form is matched above and
+    // won't collide — it carries three hextets, not two.)
+    const compatHex = h.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (compatHex) {
+      const high = parseInt(compatHex[1]!, 16);
+      const low = parseInt(compatHex[2]!, 16);
+      const ipv4 = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+      return isBlockedHost(ipv4);
+    }
+    const compatDot = h.match(/^::(\d+\.\d+\.\d+\.\d+)$/);
+    if (compatDot) {
+      return isBlockedHost(compatDot[1]!);
+    }
   }
 
   return false;
 }
 
-/** Block requests to private/internal networks. Prevents SSRF to cloud metadata, localhost, etc. */
-export function isBlockedUrl(url: string): boolean {
+/**
+ * Block requests to private/internal networks. Prevents SSRF to cloud
+ * metadata, localhost, etc. `allowHost` (optional) exempts an
+ * operator-trusted hostname from the HOST blocklist only — malformed URLs
+ * and non-http(s) schemes stay fail-closed regardless, so every
+ * allowlist-aware consumer (platform egress sites, sidecar gates) shares
+ * this one parse/scheme/blocklist body instead of re-implementing it.
+ */
+export function isBlockedUrl(url: string, allowHost?: (host: string) => boolean): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -106,5 +138,6 @@ export function isBlockedUrl(url: string): boolean {
     return true;
   }
 
+  if (allowHost?.(parsed.hostname)) return false;
   return isBlockedHost(parsed.hostname);
 }

@@ -263,6 +263,12 @@ export const runsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        // requireAgent() 404s when the agent is not visible in the caller's
+        // org+application scope; the org/app-context middleware 403s on an
+        // org/app mismatch (org-context.ts / app-context.ts). Both are
+        // reachable on this app-scoped read.
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
@@ -301,6 +307,9 @@ export const runsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        // requireAgent() 404s when the agent is not visible in the caller's
+        // org+application scope (guards.ts:requireAgent → agent_not_found).
+        "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Running runs exist",
           content: {

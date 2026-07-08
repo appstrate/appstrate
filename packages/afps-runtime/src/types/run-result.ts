@@ -18,7 +18,8 @@ export type LogLevel = "info" | "warn" | "error";
  *
  * - `memory.added` events append to `memories`
  * - `pinned.set` events upsert by `key` into `pinned` (last-write-wins per key)
- * - `output.emitted` events deep-merge into `output` (JSON merge-patch)
+ * - `output.emitted` events replace `output` wholesale (last-write-wins;
+ *   the reducer assigns `result.output = event.data`, it does NOT merge)
  * - `log.written` events append to `logs`
  *
  * Passed to {@link EventSink.finalize} when the run ends.

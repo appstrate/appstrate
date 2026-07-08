@@ -67,6 +67,15 @@ export const notificationsPaths = {
           },
           content: {
             "application/json": {
+              // CASING / envelope: this list intentionally does NOT use the
+              // standard `{ object: "list", data, hasMore }` envelope. It is a
+              // keyset (cursor) list paged via the `Link: rel="next"` header, so
+              // there is no `object` discriminator and the flag is snake_case
+              // `has_more` (matching the runtime serializer in
+              // `services/state/notifications.ts:listNotifications`, consumed by
+              // `routes/notifications.ts` → `setCursorLinkHeader`). Spec==runtime
+              // is the hard invariant; documented divergence, not to be
+              // "normalized" to the offset-list envelope.
               schema: {
                 type: "object",
                 required: ["data", "has_more"],
@@ -83,7 +92,7 @@ export const notificationsPaths = {
                   {
                     id: "550e8400-e29b-41d4-a716-446655440000",
                     type: "run_completed",
-                    run_id: "exec_cm4jkl012",
+                    run_id: "run_cm4jkl012",
                     payload: { agent_id: "@acme/email-sorter", status: "success" },
                     read_at: null,
                     created_at: "2026-01-15T10:31:12Z",

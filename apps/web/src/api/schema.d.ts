@@ -1608,7 +1608,10 @@ export interface paths {
          * @description The cross-agent governance baseline: one default connection per (application, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.
          */
         get: operations["getIntegrationOrgDefault"];
-        /** Set the org-wide default connection for this integration (admin) */
+        /**
+         * Set the org-wide default connection for this integration (admin)
+         * @description Upsert the single (application, integration) default. Keyed per-integration, NOT per-auth: this overwrites the one existing default wholesale (atomic onConflictDoUpdate on [applicationId, integrationId]). Selecting a connection of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the chosen connection's auth (derived).
+         */
         put: operations["upsertIntegrationOrgDefault"];
         post?: never;
         /** Remove the org-wide default connection (admin) */
@@ -4416,19 +4419,8 @@ export interface components {
         AgentConnectionReadiness: {
             /** @description True iff POST /api/agents/{scope}/{name}/run would reject with 412. */
             blocks_run: boolean;
-            /** @description Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors). */
-            errors: {
-                field: string;
-                code: string;
-                title: string;
-                message: string;
-                candidate_connection_ids?: string[];
-                connection_id?: string;
-                missing_scopes?: string[];
-                owned_by_actor?: boolean;
-                required_auth_key?: string;
-                available_auth_keys?: string[];
-            }[];
+            /** @description Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors). Shares the single ResolutionFieldError component so the shape can't drift from the 412 error items. */
+            errors: components["schemas"]["ResolutionFieldError"][];
             integrations: {
                 integration_id: string;
                 /** @description True iff this integration is one of the run-blocking `errors`. */
@@ -5280,12 +5272,14 @@ export interface components {
             } | null;
             error: string | null;
             /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB. */
-            token_usage: {
+            token_usage: ({
                 input_tokens?: number;
                 output_tokens?: number;
                 cache_creation_input_tokens?: number;
                 cache_read_input_tokens?: number;
-            } | null;
+            } & {
+                [key: string]: unknown;
+            }) | null;
             /** Format: date-time */
             started_at: string | null;
             /** Format: date-time */
@@ -5311,7 +5305,7 @@ export interface components {
             apiKeyId: string | null;
             /** @description Application ID (app_ prefix) that owns this run */
             applicationId: string;
-            /** @description Additional metadata (e.g. creditsUsed in cloud mode) */
+            /** @description Additional module-supplied metadata (e.g. usage-metering fields written by an optional module). Free-form; core does not define billing-specific keys. */
             metadata: {
                 [key: string]: unknown;
             } | null;
@@ -6755,6 +6749,8 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     deleteAgentRuns: {
@@ -6792,6 +6788,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             /** @description Running runs exist */
             409: {
                 headers: {
@@ -9852,15 +9849,6 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description HTML error page (token missing/invalid/used) — see 4xx detail. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
-                };
-            };
             /** @description Redirect to the provider OAuth screen or the hosted form. */
             302: {
                 headers: {
@@ -9877,6 +9865,20 @@ export interface operations {
             };
             /** @description Invalid, expired, or already-used token (HTML error page). */
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Integration cannot be connected / unexpected failure (HTML error page). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Upstream provider failed to start the connection (HTML error page). */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10746,6 +10748,7 @@ export interface operations {
                         integration_package_id: string;
                         /** Format: uuid */
                         connection_id: string;
+                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
                         auth_key: string;
                         enforce: boolean;
                         /** Format: date-time */
@@ -10805,6 +10808,7 @@ export interface operations {
                         integration_package_id: string;
                         /** Format: uuid */
                         connection_id: string;
+                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
                         auth_key: string;
                         enforce: boolean;
                         /** Format: date-time */
@@ -11280,8 +11284,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                    "text/event-stream": unknown;
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
                 };
             };
             /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
@@ -11350,8 +11356,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                    "text/event-stream": unknown;
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
                 };
             };
             /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
@@ -11420,8 +11428,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                    "text/event-stream": unknown;
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
                 };
             };
             /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
@@ -13043,7 +13053,7 @@ export interface operations {
                      *         {
                      *           "id": "550e8400-e29b-41d4-a716-446655440000",
                      *           "type": "run_completed",
-                     *           "run_id": "exec_cm4jkl012",
+                     *           "run_id": "run_cm4jkl012",
                      *           "payload": {
                      *             "agent_id": "@acme/email-sorter",
                      *             "status": "success"
@@ -14372,6 +14382,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             /** @description Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`. */
             409: {
                 headers: {
@@ -14503,6 +14514,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             /** @description Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`. */
             409: {
                 headers: {

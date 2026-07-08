@@ -48,6 +48,7 @@ import {
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, invalidRequest, internalError, notFound, parseBody } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
   parseListPagination,
@@ -58,7 +59,7 @@ import {
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { getActor } from "../lib/actor.ts";
+import { getActor, type Actor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
 import { updateInstalledPackage } from "../services/application-packages.ts";
@@ -222,6 +223,30 @@ async function assertConnectionCreationAllowed(
       title: "Connection Blocked by Admin",
       detail: `Creation of personal connections to '${integrationId}' is disabled by the organization admin. Use the shared connection instead.`,
     });
+  }
+}
+
+/**
+ * Guard a client-supplied reconnect target (`connection_id`) against IDOR: the
+ * connect flows honor an arbitrary connection id to renew a credential in
+ * place, so before that id is trusted we must confirm it is a connection the
+ * caller actually owns in THIS application. Without this a caller could pass
+ * another actor's (or another app's) connection id and overwrite its
+ * credentials through the single-writer persist path. A miss surfaces as a
+ * plain 404 so cross-scope existence is never disclosed.
+ */
+async function assertConnectionBelongsToActor(
+  connectionId: string,
+  applicationId: string,
+  actor: Actor,
+): Promise<void> {
+  const owner = await loadConnectionOwnership(connectionId);
+  const ownedByActor =
+    owner !== null &&
+    owner.applicationId === applicationId &&
+    (actor.type === "user" ? owner.userId === actor.id : owner.endUserId === actor.id);
+  if (!ownedByActor) {
+    throw notFound("Connection not found");
   }
 }
 
@@ -446,7 +471,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
-      const body = parseBody(setDefaultClientSchema, await c.req.json());
+      const body = await readJsonBody(c, setDefaultClientSchema);
       await setDefaultIntegrationClient(scope, packageId, authKey, body.client_ref);
       await recordAuditFromContext(c, {
         action: "integration.default_client.set",
@@ -469,7 +494,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
-      const body = parseBody(oauthClientSchema, await c.req.json());
+      const body = await readJsonBody(c, oauthClientSchema);
       // Reject a manual client on an auto-provisioned (remote MCP) auth. Its
       // token endpoint only accepts a DCR/CIMD-acquired public client, so a
       // hand-entered client_id points at the wrong OAuth server and, once
@@ -509,7 +534,7 @@ export function createIntegrationsRouter() {
         throw notFound(`OAuth client '${clientId}' not found`);
       }
       const scope = getAppScope(c);
-      const body = parseBody(oauthClientSchema, await c.req.json());
+      const body = await readJsonBody(c, oauthClientSchema);
       const client = await updateIntegrationOAuthClient(scope, clientId, {
         clientId: body.client_id,
         clientSecret: body.client_secret,
@@ -565,7 +590,13 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
-      const body = parseBody(importConnectionSchema, await c.req.json());
+      const body = await readJsonBody(c, importConnectionSchema);
+      // A reconnect target must be the caller's own connection in this app —
+      // otherwise the credential write below would overwrite an arbitrary
+      // (possibly another actor's) connection (IDOR).
+      if (body.connection_id) {
+        await assertConnectionBelongsToActor(body.connection_id, scope.applicationId, actor);
+      }
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
         if (auth.type === "oauth2") {
@@ -614,6 +645,11 @@ export function createIntegrationsRouter() {
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
       const body = parseBody(connectOAuthSchema, await c.req.json().catch(() => ({})));
+      // Same reconnect-target IDOR guard as connect/fields: the connection_id is
+      // carried into the OAuth state and honored at callback-time write.
+      if (body.connection_id) {
+        await assertConnectionBelongsToActor(body.connection_id, scope.applicationId, actor);
+      }
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
       if (auth.type !== "oauth2") {
@@ -687,6 +723,11 @@ export function createIntegrationsRouter() {
       const actor = getActor(c);
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
       const body = parseBody(connectSessionSchema, await c.req.json().catch(() => ({})));
+      // Same reconnect-target IDOR guard as connect/fields: the connection_id is
+      // minted into the hosted-connect capability token and honored at write.
+      if (body.connection_id) {
+        await assertConnectionBelongsToActor(body.connection_id, scope.applicationId, actor);
+      }
       // Validate the auth exists (404/409 surfaced now, not after the redirect).
       await readIntegrationAuth(scope, packageId, authKey);
       const { connectUrl, expiresAt } = buildConnectUrl({
@@ -881,7 +922,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
-      const body = parseBody(updateSettingsSchema, await c.req.json());
+      const body = await readJsonBody(c, updateSettingsSchema);
       const result = await setBlockUserConnections(scope, packageId, body.block_user_connections);
       await recordAuditFromContext(c, {
         action: "integration.block_user_connections.updated",
@@ -932,7 +973,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getAppScope(c);
-      const body = parseBody(setPinSchema, await c.req.json());
+      const body = await readJsonBody(c, setPinSchema);
       const userId = c.get("user")?.id ?? null;
       const pin = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
@@ -996,7 +1037,7 @@ export function createIntegrationsRouter() {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
-      const body = parseBody(setOrgDefaultSchema, await c.req.json());
+      const body = await readJsonBody(c, setOrgDefaultSchema);
       const userId = c.get("user")?.id ?? null;
       const def = await upsertOrgDefault(scope, packageId, {
         connectionId: body.connection_id,
@@ -1066,7 +1107,7 @@ export function createIntegrationsRouter() {
           detail: "Only the connection owner or an org admin can update this connection",
         });
       }
-      const body = parseBody(updateConnectionSchema, await c.req.json());
+      const body = await readJsonBody(c, updateConnectionSchema);
       if (body.shared_with_org !== undefined && !isOwner) {
         throw new ApiError({
           status: 403,

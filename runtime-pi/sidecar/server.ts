@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { createCipheriv, randomBytes } from "node:crypto";
+
 import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig, ModelSwap } from "./helpers.ts";
@@ -133,20 +135,45 @@ const config = {
 // line, and exits. The agent-facing `/mcp` server is never started.
 //
 // Result protocol (stdout, one line):
-//   APPSTRATE_CONNECT_RESULT:<json>   — JSON = the CredentialBundle (exit 0)
+//   APPSTRATE_CONNECT_RESULT:<b64>    — AES-256-GCM ciphertext of the
+//                                       CredentialBundle JSON (exit 0)
 //   APPSTRATE_CONNECT_ERROR:<message> — failure (exit 1)
-// The bundle values are NEVER logged anywhere else — that line is the
-// transport. The platform's connect-run launcher parses this from the
-// container's stdout.
+//
+// SECURITY: the captured bundle is a plaintext credential (token / cookie /
+// API key / custom secret). The sidecar's stdout is captured by the
+// orchestrator — in prod, the Docker logging driver → Coolify / log
+// collection — so the bundle must NEVER appear there in the clear. We encrypt
+// it with a per-connect-run ephemeral key the launcher generated and handed us
+// via `CONNECT_RESULT_KEY` (same trust channel as `CONNECT_LOGIN_JSON`, which
+// already carries the login secret). Only the ciphertext lands on the sentinel
+// line; the launcher holds the key and decrypts. The wire payload is
+// base64(iv‖authTag‖ciphertext). Error messages are NOT secrets and stay
+// plaintext so a boot failure is diagnosable from logs.
 if (process.env.CONNECT_LOGIN_JSON) {
   const platformApiUrl = process.env.PLATFORM_API_URL || "http://localhost:3000";
   const runToken = process.env.RUN_TOKEN || "";
+  const resultKeyB64 = process.env.CONNECT_RESULT_KEY || "";
   try {
+    // Fail closed: without the ephemeral key we cannot emit the bundle without
+    // leaking it, so refuse rather than fall back to a plaintext sentinel.
+    if (!resultKeyB64) {
+      throw new Error("connect-run: CONNECT_RESULT_KEY missing — refusing to emit bundle");
+    }
+    const resultKey = Buffer.from(resultKeyB64, "base64");
+    if (resultKey.length !== 32) {
+      throw new Error("connect-run: CONNECT_RESULT_KEY must decode to 32 bytes (AES-256 key)");
+    }
     const spec = JSON.parse(process.env.CONNECT_LOGIN_JSON) as IntegrationSpawnSpec;
     const bundle = await runConnectOnce(spec, { platformApiUrl, runToken });
-    // Sentinel line — the bundle is the transport, written directly to
-    // stdout (NOT via the JSON logger, which would log the secret values).
-    process.stdout.write(`APPSTRATE_CONNECT_RESULT:${JSON.stringify(bundle)}\n`);
+    // Encrypt the bundle JSON — plaintext credentials never reach stdout.
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", resultKey, iv);
+    const ciphertext = Buffer.concat([
+      cipher.update(JSON.stringify(bundle), "utf8"),
+      cipher.final(),
+    ]);
+    const payload = Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64");
+    process.stdout.write(`APPSTRATE_CONNECT_RESULT:${payload}\n`);
     process.exit(0);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -135,11 +135,36 @@ export async function listEndUsers(
     );
     if (term) conditions.push(term);
   }
+  // Keyset pagination must use the SAME tuple the result set is ordered by —
+  // `(createdAt DESC, id DESC)` below. Filtering on `id` alone while sorting by
+  // `createdAt` makes the cursor boundary disagree with the sort order, so pages
+  // skip or duplicate rows. Resolve the cursor's `createdAt` and compare the full
+  // `(createdAt, id)` tuple lexicographically. A cursor id that no longer exists
+  // (deleted between page loads) drops its clause — the page just starts at the
+  // head rather than 500-ing.
   if (params.startingAfter) {
-    conditions.push(lt(endUsers.id, params.startingAfter));
+    const cursor = await getEndUserCursor(scope, params.startingAfter);
+    if (cursor) {
+      // Next page (older rows), DESC order: (createdAt, id) < (cursor.createdAt, cursor.id).
+      conditions.push(
+        or(
+          lt(endUsers.createdAt, cursor.createdAt),
+          and(eq(endUsers.createdAt, cursor.createdAt), lt(endUsers.id, cursor.id)),
+        )!,
+      );
+    }
   }
   if (params.endingBefore) {
-    conditions.push(gt(endUsers.id, params.endingBefore));
+    const cursor = await getEndUserCursor(scope, params.endingBefore);
+    if (cursor) {
+      // Previous page (newer rows), DESC order: (createdAt, id) > (cursor.createdAt, cursor.id).
+      conditions.push(
+        or(
+          gt(endUsers.createdAt, cursor.createdAt),
+          and(eq(endUsers.createdAt, cursor.createdAt), gt(endUsers.id, cursor.id)),
+        )!,
+      );
+    }
   }
 
   const rows = await db
@@ -222,7 +247,9 @@ export async function updateEndUser(
 
   // Build update set — merge metadata (Stripe pattern)
   const { metadata, ...rest } = params;
-  const updates = buildUpdateSet(rest);
+  // Keys of `updateEndUserSchema` (routes/end-users.ts) minus `metadata`,
+  // which is merged with the current value below.
+  const updates = buildUpdateSet(rest, ["name", "email", "externalId"]);
   if (metadata !== undefined) {
     const [current] = await db
       .select({ metadata: endUsers.metadata })
@@ -302,6 +329,30 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Resolve a keyset cursor (an end-user id) to its `(createdAt, id)` tuple,
+ * scoped to the app for tenant safety. Returns `null` when the id is unknown
+ * in this scope, so the caller can drop the boundary clause instead of paging
+ * against a phantom cursor.
+ */
+async function getEndUserCursor(
+  scope: AppScope,
+  id: string,
+): Promise<{ createdAt: Date; id: string } | null> {
+  const [row] = await db
+    .select({ createdAt: endUsers.createdAt, id: endUsers.id })
+    .from(endUsers)
+    .where(
+      and(
+        eq(endUsers.id, id),
+        eq(endUsers.orgId, scope.orgId),
+        eq(endUsers.applicationId, scope.applicationId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
 
 export async function findByExternalId(
   applicationId: string,

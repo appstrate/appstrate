@@ -41,16 +41,22 @@ _appstrate_runner_bootstrap() {
       ;;
   esac
 
-  # ─── Root is required (writes /etc, /usr/local/bin, systemd) ──────────────
-  # Re-exec under sudo when available so `curl … | bash` "just works" for a
-  # non-root operator, matching the platform installer's sudo posture.
+  # ─── Privilege model ──────────────────────────────────────────────────────
+  # Download + verification run UNPRIVILEGED (as the invoking operator) so root
+  # never executes an unverified downloaded artifact. Only the final steps that
+  # genuinely need it — writing the verified binary onto PATH and handing off to
+  # `appstrate runner install` (which writes /etc + systemd) — are elevated via
+  # sudo. This keeps the `curl … | bash` trust chain minisign-anchored: the
+  # bytes root runs are the bytes we already verified below. We therefore do NOT
+  # re-exec the whole (piped, unverified) shell function as root.
+  SUDO=""
   if [ "$(id -u)" != "0" ]; then
     if command -v sudo >/dev/null 2>&1; then
-      echo "→ runner install needs root — re-running under sudo" >&2
-      exec sudo -E bash -c "$(declare -f _appstrate_runner_bootstrap); _appstrate_runner_bootstrap \"\$@\"" _ "$@"
+      SUDO="sudo -E"
+    else
+      echo "The runner installer must run as root. Re-run with sudo." >&2
+      exit 1
     fi
-    echo "The runner installer must run as root. Re-run with sudo." >&2
-    exit 1
   fi
 
   _DEFAULT_VERSION="__APPSTRATE_VERSION__"
@@ -116,14 +122,16 @@ _appstrate_runner_bootstrap() {
     log "Integrity + provenance verified"
   fi
 
-  mkdir -p "$BIN_DIR"
-  install -m 0755 "$TMPDIR/$ASSET" "$DEST"
+  # Only now do we elevate — to install the already-verified binary and to run
+  # the CLI that writes /etc + systemd. $SUDO is empty when already root.
+  $SUDO mkdir -p "$BIN_DIR"
+  $SUDO install -m 0755 "$TMPDIR/$ASSET" "$DEST"
   log "Installed CLI → $DEST"
 
   # Hand off to the CLI. Exec by absolute path (never a shadowed `appstrate`
   # earlier on PATH) so the verified binary is the one that runs.
   log "Launching \`appstrate runner install\`"
-  exec "$DEST" runner install "$@"
+  exec $SUDO "$DEST" runner install "$@"
 }
 
 _appstrate_runner_bootstrap "$@"

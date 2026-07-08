@@ -56,7 +56,7 @@ import {
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { substituteVars } from "./template-vars.ts";
+import { substituteVars, referencesField } from "./template-vars.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -220,6 +220,42 @@ export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
   return `${meta.namespace}__${meta.toolName}`;
 }
 
+/**
+ * Reserved Appstrate transport / credential headers (lowercased). The remote
+ * resolver imposes these to route and authenticate the credential-proxy call;
+ * the local resolver injects the integration's credential header itself. In
+ * either case an agent-supplied `req.headers` entry must NEVER override them —
+ * HTTP header names are case-insensitive, so the comparison is done on
+ * lowercased names — otherwise a tool call could redirect the call to a
+ * different target / integration, spoof the caller identity, or pre-seed the
+ * credential header the resolver is about to set. Platform-imposed values are
+ * always applied last so they win.
+ */
+const RESERVED_TRANSPORT_HEADERS: ReadonlySet<string> = new Set([
+  "authorization",
+  "x-application-id",
+  "x-org-id",
+  "x-session-id",
+  "x-integration-id",
+  "x-target",
+  "appstrate-user",
+]);
+
+/**
+ * True when `input` references at least one declared credential field via a
+ * `{{field}}` placeholder. Used by the local resolver to detect a
+ * credential-bearing call (the agent embedded the secret into the URL / a
+ * header) so it can refuse to honour `allow_all_uris` and instead gate the
+ * dispatch on the auth's `authorized_uris` allowlist — preventing secret
+ * exfiltration to an arbitrary off-allowlist host.
+ */
+function referencesCredentialField(
+  input: string,
+  fields: Readonly<Record<string, string>>,
+): boolean {
+  return referencesField(input, fields);
+}
+
 // ─────────────────────────────────────────────
 // Resolver contract
 // ─────────────────────────────────────────────
@@ -345,15 +381,63 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
   ): ApiCallFn {
     return async (req, ctx) => {
       const fields = entry.fields;
+
+      // Detect credential exfiltration via `{{field}}` substitution: when the
+      // agent embeds a decrypted credential field into the target URL or a
+      // header, that call must NOT be allowed to reach an off-allowlist host
+      // (see `allowAllUris` below). This is distinct from the credential
+      // header the resolver injects itself — that one is protected on
+      // cross-origin redirect hops by the shared engine's credential-strip,
+      // and allow_all_uris integrations legitimately send it to the
+      // agent-chosen first hop.
+      let substitutesCredential = referencesCredentialField(req.target, fields);
+      // A `{{field}}` credential reference in the request BODY is the same
+      // exfiltration channel as one in the URL/headers — only a string body is
+      // substituted (`transformString` below runs on strings only; multipart /
+      // fromFile / fromBytes parts are never `{{}}`-substituted), so that is the
+      // one shape to scan.
+      if (typeof req.body === "string" && referencesCredentialField(req.body, fields)) {
+        substitutesCredential = true;
+      }
       const target = substituteVars(req.target, fields);
-      const headers = { ...(req.headers ?? {}) };
-      for (const [key, value] of Object.entries(headers)) {
+
+      // Strip agent overrides of reserved transport / credential headers
+      // (case-insensitive) BEFORE substitution + injection, so a tool call
+      // can neither spoof platform-imposed identity headers nor pre-seed the
+      // credential header the resolver is about to set. Platform-injected
+      // values are applied last (in `injectCredential`) and always win.
+      const headers: Record<string, string> = {};
+      for (const [key, value] of Object.entries(req.headers ?? {})) {
+        if (RESERVED_TRANSPORT_HEADERS.has(key.toLowerCase())) continue;
+        if (referencesCredentialField(value, fields)) substitutesCredential = true;
         headers[key] = substituteVars(value, fields);
       }
       // Inject the credential header locally and capture its name so the
       // shared engine's redirect-follower knows which header to strip on
       // an out-of-boundary cross-origin hop.
       const injectedCredentialHeader = injectCredential(headers, meta, entry);
+
+      // A call that substitutes a credential field into the agent-controlled
+      // URL / headers / body MUST respect the auth's `authorized_uris`
+      // allowlist — `allow_all_uris` is not honoured for it, so the secret
+      // can't be exfiltrated to an arbitrary off-allowlist host.
+      const allowAllUris = meta.allowAllUris && !substitutesCredential;
+
+      // When allow_all_uris was the integration's ONLY permission (no
+      // authorized_uris allowlist exists), downgrading the flag alone is not
+      // enough: the engine's preflight would fall back to the internal-host
+      // SSRF net and still let the call proceed to any PUBLIC host with the
+      // credential embedded. Refuse outright instead — same semantics as the
+      // sidecar's credential-proxy 403 for this exact case.
+      // (`allowAllUris` is already false whenever `substitutesCredential` is
+      // true — see its definition above — so only the allowlist matters here.)
+      if (substitutesCredential && meta.authorizedUris.length === 0) {
+        throw new ResolverError(
+          "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
+          `Integration ${meta.name}: the call substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
+          { integration: meta.name },
+        );
+      }
 
       const resolvedBody = await resolveBodyForFetch(req.body, {
         allowFromFile: true,
@@ -385,7 +469,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           init,
           fetchFn: this.fetchImpl,
           authorizedUris: meta.authorizedUris,
-          allowAllUris: meta.allowAllUris,
+          allowAllUris,
           injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
           integrationId: meta.name,
           resolveHost: this.resolveHost,
@@ -564,7 +648,16 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
         allowStreaming: true,
         workspace: ctx.workspace,
       });
+      // Apply the agent-supplied headers FIRST, with any reserved transport
+      // header stripped (case-insensitively), then set the platform-controlled
+      // headers LAST so they always win and cannot be overridden by a tool call.
+      const sanitizedAgentHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(req.headers ?? {})) {
+        if (RESERVED_TRANSPORT_HEADERS.has(key.toLowerCase())) continue;
+        sanitizedAgentHeaders[key] = value;
+      }
       const baseHeaders: Record<string, string> = {
+        ...sanitizedAgentHeaders,
         Authorization: `Bearer ${this.apiKey}`,
         "X-Application-Id": this.applicationId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
@@ -573,7 +666,6 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
         "X-Target": req.target,
         ...(this.endUserId ? { "Appstrate-User": this.endUserId } : {}),
         ...this.extraHeaders,
-        ...(req.headers ?? {}),
       };
 
       const wantsFile = typeof req.responseMode?.toFile === "string";

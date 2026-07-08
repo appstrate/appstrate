@@ -2,6 +2,7 @@
 
 import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
+import { getCache } from "../infra/index.ts";
 import { eq, asc, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { schedules, endUsers } from "@appstrate/db/schema";
@@ -156,6 +157,42 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
   await (await getQueue()).removeScheduler(scheduleId);
 }
 
+/**
+ * Same-instance in-flight guard: the set of schedule-fire occurrence keys this
+ * process is currently executing. Prevents a second concurrent delivery of the
+ * SAME occurrence on this instance from double-triggering (belt-and-suspenders
+ * with the cross-instance {@link claimScheduleFire} marker below).
+ */
+const inFlightFires = new Set<string>();
+
+/** How long a fire-claim marker lives — must outlive the job's retry window. */
+const FIRE_CLAIM_TTL_SECONDS = 3600;
+
+/**
+ * Claim a schedule-fire occurrence exactly once across instances/restarts.
+ * `fireKey` is `(scheduleId, fireAt)` — the BullMQ repeatable `job.id` encodes
+ * the fire timestamp, so two deliveries (or a retry) of the same occurrence
+ * share it. Returns `true` when THIS call won the claim (SET NX succeeded),
+ * `false` when the occurrence was already fired. On a cache error we fail OPEN
+ * (return `true`) — losing at-most-once dedup is preferable to silently
+ * dropping a scheduled run.
+ */
+async function claimScheduleFire(fireKey: string): Promise<boolean> {
+  try {
+    const cache = await getCache();
+    return await cache.set(`schedule-fired:${fireKey}`, "1", {
+      nx: true,
+      ttlSeconds: FIRE_CLAIM_TTL_SECONDS,
+    });
+  } catch (err) {
+    logger.warn("Schedule fire-claim cache error, proceeding without dedup", {
+      fireKey,
+      error: getErrorMessage(err),
+    });
+    return true;
+  }
+}
+
 /** Process a scheduled job. */
 async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> {
   const {
@@ -173,29 +210,59 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     dependencyOverrides,
   } = job.data;
 
-  await triggerScheduledRun(scheduleId, packageId, actor, orgId, applicationId, input, {
-    configOverride,
-    modelIdOverride,
-    proxyIdOverride,
-    versionOverride,
-    connectionOverrides,
-    dependencyOverrides,
-  });
+  // Idempotency key for this fire occurrence: (scheduleId, fireAt). The
+  // repeatable job.id encodes the scheduled fire time, so duplicate deliveries
+  // and BullMQ retries of the same occurrence collapse to one key.
+  const fireKey = `${scheduleId}:${job.id}`;
 
-  // Update schedule timestamps
-  const schedule = await getSchedule(scheduleId, { orgId, applicationId });
-  const nextRun = schedule
-    ? computeNextRun(schedule.cron_expression, schedule.timezone ?? "UTC")
-    : null;
+  if (inFlightFires.has(fireKey)) {
+    logger.warn("Schedule fire already in-flight on this instance, skipping duplicate", {
+      scheduleId,
+      jobId: job.id,
+    });
+    return;
+  }
+  inFlightFires.add(fireKey);
+  try {
+    // Cross-instance / cross-restart guard: claim the occurrence exactly once.
+    // A duplicate delivery or a retry after the run was already triggered must
+    // NOT create a second run (triggerScheduledRun swallows its own errors, so
+    // a later failure in this handler would otherwise re-fire on retry).
+    const claimed = await claimScheduleFire(fireKey);
+    if (!claimed) {
+      logger.warn("Schedule fire already claimed, skipping duplicate", {
+        scheduleId,
+        jobId: job.id,
+      });
+      return;
+    }
 
-  await db
-    .update(schedules)
-    .set({
-      lastRunAt: new Date(),
-      nextRunAt: nextRun ?? null,
-      updatedAt: new Date(),
-    })
-    .where(eq(schedules.id, scheduleId));
+    await triggerScheduledRun(scheduleId, packageId, actor, orgId, applicationId, input, {
+      configOverride,
+      modelIdOverride,
+      proxyIdOverride,
+      versionOverride,
+      connectionOverrides,
+      dependencyOverrides,
+    });
+
+    // Update schedule timestamps
+    const schedule = await getSchedule(scheduleId, { orgId, applicationId });
+    const nextRun = schedule
+      ? computeNextRun(schedule.cron_expression, schedule.timezone ?? "UTC")
+      : null;
+
+    await db
+      .update(schedules)
+      .set({
+        lastRunAt: new Date(),
+        nextRunAt: nextRun ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schedules.id, scheduleId));
+  } finally {
+    inFlightFires.delete(fireKey);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -227,20 +294,37 @@ export async function initScheduleWorker(): Promise<void> {
   const rows = await db.select().from(schedules).where(eq(schedules.enabled, true));
 
   let synced = 0;
+  let failed = 0;
   for (const row of rows) {
-    if (!(await packageExists(row.packageId))) {
-      logger.warn("Schedule references missing package, skipping", {
+    // Isolate per-row failures: a single actor-less / malformed schedule row
+    // (e.g. `upsertScheduleJob` throwing on a null actor, or a `packageExists`
+    // DB hiccup) must NOT abort the whole boot sync and leave every OTHER
+    // schedule unregistered. Log and skip the bad row, keep syncing the rest.
+    try {
+      if (!(await packageExists(row.packageId))) {
+        logger.warn("Schedule references missing package, skipping", {
+          scheduleId: row.id,
+          packageId: row.packageId,
+        });
+        continue;
+      }
+      await upsertScheduleJob(row);
+      synced++;
+    } catch (err) {
+      failed++;
+      logger.error("Failed to sync schedule at boot, skipping", {
         scheduleId: row.id,
         packageId: row.packageId,
+        error: getErrorMessage(err),
       });
-      continue;
     }
-    await upsertScheduleJob(row);
-    synced++;
   }
 
-  if (synced > 0) {
-    logger.info("Schedule worker initialized", { schedulersSynced: synced });
+  if (synced > 0 || failed > 0) {
+    logger.info("Schedule worker initialized", {
+      schedulersSynced: synced,
+      schedulersFailed: failed,
+    });
   }
 }
 

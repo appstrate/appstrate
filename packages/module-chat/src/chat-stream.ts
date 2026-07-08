@@ -32,7 +32,7 @@ import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
 import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
-import { mintLoopbackToken } from "./loopback-auth.ts";
+import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { buildTranscriptPrompt } from "./transcript.ts";
 import { SYSTEM_PROMPT, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
@@ -242,11 +242,6 @@ export async function handleChatStream(
   const chatEngine = deps.chatEngine(chosen.providerId ?? "");
   const isSubscription = Boolean(chatEngine);
 
-  // Platform MCP wiring shared by both engines: the meta-tools live at
-  // /api/mcp/o/:org and run with the caller's own credentials (RBAC fidelity).
-  const mcpHeaders: Record<string, string> = { ...headers };
-  if (applicationId) mcpHeaders["x-application-id"] = applicationId;
-
   // ── Preamble phase B (parallel) ──────────────────────────────────────────
   // The caller-context block (both paths) and the platform MCP probe (ai-sdk
   // path only) are independent — run them together.
@@ -333,9 +328,21 @@ export async function handleChatStream(
   // the user turn and mark the in-flight stream now, just before generation.
   let userMessageId: string | undefined;
   if (sessionId && lastMessage?.id) {
-    userMessageId = await persistUserMessage(sessionId, lastMessage);
-    // Mark the in-flight stream so a mid-inference reload can reconnect to it.
-    await setActiveStream(sessionId, streamId);
+    try {
+      userMessageId = await persistUserMessage(sessionId, lastMessage);
+      // Mark the in-flight stream so a mid-inference reload can reconnect to it.
+      await setActiveStream(sessionId, streamId);
+    } catch (err) {
+      // The MCP session was opened during the preamble (ai-sdk path) but
+      // generation has not started, so neither `finalize` (teardown via
+      // onSettled) nor `failCleanup` (defined below) owns it yet. If the user
+      // -message persist or the active-stream marker throws here, the session
+      // would leak per failed turn. Close it on this error path before
+      // rethrowing. Credential headers are untouched — this is purely the
+      // leak-on-error cleanup.
+      await closeMcp();
+      throw err;
+    }
   }
 
   // Generation abort is DECOUPLED from the request connection: a client
@@ -361,7 +368,7 @@ export async function handleChatStream(
         unregisterStopController(streamId);
         // Fire-and-forget teardown — swallow rejections so a failed DB update or
         // MCP close can't surface as an unhandled rejection.
-        if (sessionId) void clearActiveStream(sessionId).catch(() => {});
+        if (sessionId) void clearActiveStream(sessionId, streamId).catch(() => {});
         void closeMcp();
       },
     });
@@ -372,7 +379,7 @@ export async function handleChatStream(
   // "generating" with a dead stream id), and close MCP.
   const failCleanup = async () => {
     unregisterStopController(streamId);
-    if (sessionId) await clearActiveStream(sessionId).catch(() => {});
+    if (sessionId) await clearActiveStream(sessionId, streamId).catch(() => {});
     await closeMcp();
   };
 
@@ -385,6 +392,33 @@ export async function handleChatStream(
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
       { ttlMs: ENGINE_LOOPBACK_TTL_MS },
     );
+    // The EXTERNAL subscription binary opens its OWN connection to the platform
+    // MCP (`/api/mcp/o/:org`), and its run-and-wait bridge hits platform run
+    // routes with these same headers. It must NEVER receive the caller's raw
+    // cookie/Authorization — those are reusable well beyond chat scope and
+    // across every platform route. Hand it a short-lived, process-local bearer
+    // that (a) carries EXACTLY the caller's already-resolved permissions, so the
+    // meta-tools authorize with full RBAC fidelity and zero amplification, and
+    // (b) does NOT grant first-party-loopback, so it can't be replayed against
+    // the subscription LLM gateway. Only the org/app scoping headers ride with
+    // it — no cookie, no raw Authorization. The TTL spans the whole turn (the
+    // binary bakes the header once and may reconnect between steps).
+    const mcpToken = mintMcpLoopbackToken(
+      {
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        orgId,
+        orgRole,
+        permissions: [...(c.get("permissions") ?? [])],
+      },
+      { ttlMs: ENGINE_LOOPBACK_TTL_MS },
+    );
+    const mcpHeaders: Record<string, string> = {
+      Authorization: `Bearer ${mcpToken}`,
+      "x-org-id": orgId,
+    };
+    if (applicationId) mcpHeaders["x-application-id"] = applicationId;
     try {
       return await finalize(
         chatEngine.handler({

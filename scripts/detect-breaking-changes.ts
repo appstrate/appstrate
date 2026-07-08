@@ -143,11 +143,29 @@ function getProperties(schema: Spec | undefined, spec: Spec): Record<string, Spe
     }
     return merged;
   }
+  // `oneOf`/`anyOf` unions: union the properties across every branch so a
+  // field that exists in the current spec (in any branch) is visible to the
+  // removed-field diff. This is an over-approximation of the "guaranteed"
+  // property set — a field present in only one branch is not always present —
+  // but it means dropping a field from all branches is still detected as a
+  // removal instead of being silently invisible. Own `properties` (a union
+  // can also carry shared top-level props) merge on top.
+  const union = (Array.isArray(s.oneOf) && s.oneOf) || (Array.isArray(s.anyOf) && s.anyOf);
+  if (union) {
+    let merged: Record<string, Spec> = {};
+    for (const member of union as Spec[]) {
+      merged = { ...merged, ...getProperties(member, spec) };
+    }
+    if (typeof s.properties === "object" && s.properties !== null) {
+      merged = { ...merged, ...(s.properties as Record<string, Spec>) };
+    }
+    return merged;
+  }
   if (typeof s.properties !== "object" || s.properties === null) return {};
   return s.properties as Record<string, Spec>;
 }
 
-/** Get required fields from a schema (resolving $ref and flattening `allOf`). */
+/** Get required fields from a schema (resolving $ref and flattening `allOf`/`oneOf`/`anyOf`). */
 function getRequired(schema: Spec | undefined, spec: Spec): Set<string> {
   if (!schema) return new Set();
   const s = deref(schema, spec);
@@ -155,6 +173,22 @@ function getRequired(schema: Spec | undefined, spec: Spec): Set<string> {
   if (Array.isArray(s.allOf)) {
     const required = new Set<string>();
     for (const member of s.allOf as Spec[]) {
+      for (const key of getRequired(member, spec)) required.add(key);
+    }
+    if (Array.isArray(s.required)) for (const key of s.required as string[]) required.add(key);
+    return required;
+  }
+  // `oneOf`/`anyOf` unions: mirror `getProperties` and union the required sets
+  // across every branch — a field required in ANY branch is reported as
+  // required for the union. This is the conservative choice for the
+  // breaking-change gate: adding a required field to even one branch breaks the
+  // clients that hit that branch, so unioning catches MORE breaking changes
+  // (fewer false negatives) than intersecting would. Own top-level `required`
+  // (a union can also carry shared required props) merges on top.
+  const union = (Array.isArray(s.oneOf) && s.oneOf) || (Array.isArray(s.anyOf) && s.anyOf);
+  if (union) {
+    const required = new Set<string>();
+    for (const member of union as Spec[]) {
       for (const key of getRequired(member, spec)) required.add(key);
     }
     if (Array.isArray(s.required)) for (const key of s.required as string[]) required.add(key);

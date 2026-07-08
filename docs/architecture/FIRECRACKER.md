@@ -375,29 +375,61 @@ A released daemon does **not** build artifacts on the host. At boot, BEFORE
 
 1. **Skip** when the files already exist and — if `FIRECRACKER_ARTIFACTS_VERSION`
    is pinned — the on-disk version marker matches. Otherwise:
-2. **Download** `firecracker-artifacts-manifest.json`, `vmlinux-<arch>`, and
-   `rootfs-<arch>.ext4.zst` from this repo's GitHub Releases (`latest`, or
-   `download/v<version>` when pinned).
-3. **Verify** SHA256 after download; **decompress** the rootfs with Bun's
-   native zstd (`Bun.zstdDecompressSync` — no external `zstd` binary, no extra
-   dependency) and verify the DECOMPRESSED digest against the manifest.
+2. **Download** `firecracker-artifacts-manifest.json` + its detached
+   `firecracker-artifacts-manifest.json.sig` from this repo's GitHub Releases
+   (`latest`, or `download/v<version>` when pinned) and **verify the manifest
+   signature** (Ed25519, base64 raw 64-byte signature over the exact manifest
+   bytes) against a **source-pinned public key** BEFORE trusting any hash
+   inside it. The manifest is the root of trust for the guest hashes — an
+   attacker who could swap the manifest asset alongside a malicious rootfs
+   would otherwise boot a guest that receives MMDS credentials.
+3. **Download** `vmlinux-<arch>` and `rootfs-<arch>.ext4.zst`; **verify**
+   their SHA256 against the now-trusted manifest. The rootfs is decompressed
+   with Bun's native zstd (`Bun.zstdDecompressSync` — no external `zstd`
+   binary, no extra dependency) and the DECOMPRESSED digest + exact size are
+   checked (plus a compressed-size check and a 4 GiB uncompressed ceiling
+   against decompression bombs).
 4. **Install atomically** (tmp write + rename) into the engine's paths and
    write a version marker.
 
 Failure policy: a network failure with artifacts already present → **warning**,
 boot continues on the existing files; missing artifacts + failed download →
-**fatal** (actionable message). A **guest-protocol mismatch** (manifest
-`guest_protocol` ≠ daemon `GUEST_PROTOCOL_VERSION`, exported from
-`runner/artifacts.ts`) or a **checksum mismatch** is ALWAYS fatal — the daemon
-never boots artifacts it cannot drive, nor a corrupt/tampered asset. The
-`guest_protocol` couples the daemon engine (config drive, exit-marker protocol,
-rootfs layout) to the artifacts; its bump rules are documented beside the
-constant.
+**fatal** (actionable message). ALWAYS fatal, even with working artifacts on
+disk: a **guest-protocol mismatch** (manifest `guest_protocol` ≠ daemon
+`GUEST_PROTOCOL_VERSION`, exported from `runner/artifacts.ts`), a **checksum
+mismatch**, a **missing `.sig` asset** (a release that ships an unsigned
+manifest is refused — no fallback), an **invalid manifest signature**
+(tampered manifest or wrong key), or an **unprovisioned signing key** (the
+pinned constant is still the build placeholder — a dev/source build; set
+`FIRECRACKER_ARTIFACTS_PUBKEY` or use `FIRECRACKER_ARTIFACTS_LOCAL=1`). The
+daemon never boots artifacts it cannot drive, nor a corrupt/tampered/
+unauthenticated asset. The `guest_protocol` couples the daemon engine (config
+drive, exit-marker protocol, rootfs layout) to the artifacts; its bump rules
+are documented beside the constant.
+
+**Manifest signing & key provisioning**: the private key is the
+`FIRECRACKER_MANIFEST_SIGNING_KEY` GitHub Actions secret (base64 raw 32-byte
+Ed25519 seed; generate with `bun scripts/sign-firecracker-manifest.ts
+--generate`). The release workflow signs the merged manifest with it
+(`scripts/sign-firecracker-manifest.ts`, self-verifying) and uploads the
+`.sig` asset, and — in the same workflow, from the same secret — derives the
+public key (base64 raw 32 bytes) and bakes it over the
+`__FIRECRACKER_ARTIFACTS_ED25519_PUBKEY__` placeholder
+(`ARTIFACTS_SIGNING_PUBKEY` in `runner/artifacts.ts`) before the daemon
+binary is compiled and before the `appstrate` Docker image (which ships
+`apps/api` source) is built. All three steps fail closed when the secret is
+absent or the placeholder has drifted — a mixed signed/unsigned release is
+worse than a failed one. Resolution order daemon-side: injected deps override
+(tests) → `FIRECRACKER_ARTIFACTS_PUBKEY` env (bring-your-own-artifacts hosts
+signing their own manifest; `appstrate runner install` passes it through to
+the daemon env file when set in the CLI's environment, and preserves it
+across re-installs) → the compile-time pinned constant. The key is never
+fetched from the network.
 
 Publication: the `firecracker-artifacts` job in `.github/workflows/release.yml`
 (matrix `{x86_64, aarch64}`, native runners) reuses `build-kernel.sh` /
 `build-rootfs.sh`, zstd-compresses the rootfs, and attaches the assets + the
-combined manifest to each `v*` GitHub Release.
+combined manifest + its Ed25519 signature to each `v*` GitHub Release.
 
 **Dev**: iterate on `guest/` with `bun run firecracker:build`, then set
 `FIRECRACKER_ARTIFACTS_LOCAL=1` to skip the resolver entirely.

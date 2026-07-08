@@ -63,6 +63,29 @@ describe("deepMergeConfig", () => {
     expect(base).toEqual({ a: { b: 1 } });
     expect(override).toEqual({ a: { c: 2 } });
   });
+
+  it("ignores prototype-pollution keys from a JSON.parse'd override", () => {
+    // `JSON.parse` makes `__proto__` an OWN enumerable property, so
+    // Object.entries iterates it — the merge must skip it (and the other
+    // dangerous keys) rather than write through to the prototype.
+    const malicious = JSON.parse('{"__proto__": {"polluted": true}, "safe": 1}') as Record<
+      string,
+      unknown
+    >;
+    const merged = deepMergeConfig({}, malicious);
+    expect(merged.safe).toBe(1);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("ignores constructor / prototype keys in the override", () => {
+    const merged = deepMergeConfig(
+      { keep: 1 },
+      { constructor: { evil: 1 }, prototype: { evil: 1 }, keep: 2 },
+    );
+    expect(merged).toEqual({ keep: 2 });
+    expect((Object.prototype as Record<string, unknown>).evil).toBeUndefined();
+  });
 });
 
 describe("validateConfig", () => {

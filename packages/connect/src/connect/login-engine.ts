@@ -58,7 +58,8 @@ import {
   matchesAuthorizedUriSpec,
 } from "../proxy-primitives.ts";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
+import { isAllowedInternalIdpHost } from "../oauth-egress.ts";
 
 export interface LoginLimits {
   // Per-request timeout. Maps to the manifest field `connect.limits.request_timeout_ms`.
@@ -144,6 +145,8 @@ export interface LoginContext {
   authorizedUris: string[] | null;
   allowAllUris: boolean;
   fetchImpl?: typeof fetch;
+  /** Injectable DNS resolver for the SSRF host check (tests). Prod omits it. */
+  resolveHost?: HostResolver;
   now?: () => number;
 }
 
@@ -407,14 +410,33 @@ function parseSetCookie(headers: Headers, name: string): string | undefined {
 }
 
 async function readBoundedText(res: Response, maxBytes: number): Promise<string> {
-  const buf = await res.arrayBuffer();
-  if (buf.byteLength > maxBytes) {
-    throw new LoginError(
-      `response body ${buf.byteLength}B exceeds limit ${maxBytes}B`,
-      "response_too_large",
-    );
+  // Enforce the cap WHILE streaming rather than buffering the whole body via
+  // `arrayBuffer()` first — a hostile/oversized upstream response must not be
+  // fully materialised in memory before the limit is checked. We abort as soon
+  // as the cumulative byte count crosses `maxBytes` (holding at most one extra
+  // chunk beyond the limit).
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new LoginError(`response body exceeds limit ${maxBytes}B`, "response_too_large");
+    }
+    chunks.push(value);
   }
-  return new TextDecoder().decode(buf);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
 }
 
 /** A `{$credential.<field>}` template referencing exactly one output field. */
@@ -618,7 +640,19 @@ function applyOutput(
       return v === undefined ? undefined : stringifyValue(v);
     }
     case "regex": {
-      const re = new RegExp(out.pattern);
+      // `out.pattern` is manifest-authored — a malformed pattern makes the
+      // RegExp ctor throw a raw SyntaxError. Wrap it into a typed LoginError
+      // so the failure surfaces as an "invalid_config" rather than an
+      // unhandled internal error.
+      let re: RegExp;
+      try {
+        re = new RegExp(out.pattern);
+      } catch (err) {
+        throw new LoginError(
+          `'${name}' invalid regex pattern: ${err instanceof Error ? err.message : String(err)}`,
+          "invalid_config",
+        );
+      }
       const m = re.exec(bodyText);
       if (!m) return undefined;
       return m[out.group ?? 1] ?? undefined;
@@ -676,18 +710,43 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
 
   // URL gate. This engine runs in the platform process (not the
   // credential-isolating sidecar), so the request URL is a manifest-authored
-  // SSRF surface. Two mutually-exclusive controls:
-  //   - allowlist present (`!allowAllUris`): the `authorizedUris` patterns are
-  //     the author's explicit, auditable trust boundary — honor them verbatim
-  //     (a self-hosted integration may legitimately scope to a LAN host).
-  //   - `allowAllUris` (no allowlist): there is no author-declared boundary, so
-  //     fall back to the SSRF blocklist to refuse loopback/RFC1918/link-local/
-  //     cloud-metadata targets the platform could otherwise be steered to.
-  if (ctx.allowAllUris) {
-    if (isBlockedUrl(url)) {
+  // SSRF surface. The SSRF blocklist ALWAYS applies — an `authorizedUris`
+  // allowlist may only *narrow* the reachable surface, never widen it past the
+  // loopback/RFC1918/link-local/cloud-metadata blocklist. (A manifest that
+  // allowlists an internal host must not be able to steer the platform there.)
+  //
+  // Exception: a host the OPERATOR has explicitly declared trusted via
+  // `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` (a self-hosted deployment whose login
+  // endpoint legitimately lives on a private address). Unset in production by
+  // default, so every internal host stays blocked there.
+  let loginUrl: URL;
+  try {
+    loginUrl = new URL(url);
+  } catch {
+    throw new LoginError("url targets a blocked/internal address", "url_not_allowed");
+  }
+  // Scheme floor: only http(s) may leave the engine. The literal `isBlockedUrl`
+  // gate this check replaced also rejected non-http(s) schemes; the DNS-aware
+  // host check below is host-only, so keep the floor explicit — an `ftp:` /
+  // `file:` / `gopher:` URL must fail here, not later as a generic fetch error.
+  if (loginUrl.protocol !== "https:" && loginUrl.protocol !== "http:") {
+    throw new LoginError("url targets a blocked/internal address", "url_not_allowed");
+  }
+  const loginHost = loginUrl.hostname;
+  // DNS-aware check (resolves the host, blocks if ANY resolved address is
+  // private/link-local/loopback/metadata) — the literal `isBlockedUrl` used
+  // before was string-only, so `evil.example.com → 169.254.169.254` (DNS
+  // rebind) sailed through on this credential-bearing path. Matches the OAuth
+  // egress paths. Operator-trusted internal hosts opt out.
+  if (!isAllowedInternalIdpHost(loginHost)) {
+    const hostCheck = await resolveAndCheckHost(loginHost, { resolve: ctx.resolveHost });
+    if (hostCheck.blocked) {
       throw new LoginError("url targets a blocked/internal address", "url_not_allowed");
     }
-  } else {
+  }
+  // When an allowlist is present (`!allowAllUris`), the URL must additionally
+  // match one of the author's explicit, auditable `authorizedUris` patterns.
+  if (!ctx.allowAllUris) {
     const allowed = (ctx.authorizedUris ?? []).some((spec) => matchesAuthorizedUriSpec(spec, url));
     if (!allowed) {
       throw new LoginError("url not in authorizedUris allowlist", "url_not_allowed");

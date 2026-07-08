@@ -52,7 +52,11 @@ export async function runOpenssl(
   } catch (err) {
     throw makeError("OPENSSL_NOT_FOUND", `failed to spawn '${bin}': ${(err as Error).message}`);
   }
-  const stderrText = await collectStream(proc.stderr);
+  // Drain BOTH pipes concurrently. `stdout` is "pipe" but the callers write
+  // their PEM output to `-out <file>`, so we don't need its bytes — but an
+  // unread pipe can fill its kernel buffer and block `openssl` mid-write,
+  // deadlocking against our `await proc.exited`. Drain (and discard) it.
+  const [stderrText] = await Promise.all([collectStream(proc.stderr), collectStream(proc.stdout)]);
   const code = await proc.exited;
   if (code !== 0) {
     throw makeError(

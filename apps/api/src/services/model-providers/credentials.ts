@@ -424,46 +424,70 @@ async function updateOAuthBlob(
   mutate: (existing: OAuthBlob) => OAuthBlob,
   extraColumns?: Partial<typeof modelProviderCredentials.$inferInsert>,
 ): Promise<void> {
-  const [row] = await db
-    .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
-    .from(modelProviderCredentials)
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId,
-        extra: [eq(modelProviderCredentials.id, id)],
-      }),
-    )
-    .limit(1);
-  if (!row) return;
-  const existing = decryptBlob(row.credentialsEncrypted);
-  if (existing?.kind !== "oauth") return;
+  // Optimistic concurrency (compare-and-swap). The read-modify-write below is
+  // NOT atomic on its own: a refresh (rotating tokens) and a dead-marking
+  // (`markCredentialNeedsReconnection`) can interleave so the last writer
+  // clobbers the other's change — e.g. a refresh re-encrypts the stale blob it
+  // read and silently un-marks a concurrently-set `needsReconnection`. We guard
+  // the UPDATE on the exact ciphertext we based the mutation on: because the
+  // envelope uses a random GCM IV, every write produces a DISTINCT ciphertext,
+  // so a racing writer's value makes our WHERE match zero rows. On a 0-row
+  // outcome we re-read and re-apply the mutation against the fresh blob.
+  const MAX_CAS_ATTEMPTS = 5;
+  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    const [row] = await db
+      .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
+      .from(modelProviderCredentials)
+      .where(
+        scopedWhere(modelProviderCredentials, {
+          orgId,
+          extra: [eq(modelProviderCredentials.id, id)],
+        }),
+      )
+      .limit(1);
+    if (!row) return;
+    const existing = decryptBlob(row.credentialsEncrypted);
+    if (existing?.kind !== "oauth") return;
 
-  const next = mutate(existing);
-  const set: Record<string, unknown> = {
-    ...extraColumns,
-    credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
-    updatedAt: new Date(),
-  };
-  // Keep the denormalized cache in lockstep with the blob — the refresh worker
-  // scan filters on this column to skip the per-row decrypt. Only write it when
-  // the mutation actually changed the expiry.
-  if (next.expiresAt !== existing.expiresAt) {
-    set.expiresAt = next.expiresAt !== null ? new Date(next.expiresAt) : null;
+    const next = mutate(existing);
+    const set: Record<string, unknown> = {
+      ...extraColumns,
+      credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
+      updatedAt: new Date(),
+    };
+    // Keep the denormalized cache in lockstep with the blob — the refresh worker
+    // scan filters on this column to skip the per-row decrypt. Only write it when
+    // the mutation actually changed the expiry.
+    if (next.expiresAt !== existing.expiresAt) {
+      set.expiresAt = next.expiresAt !== null ? new Date(next.expiresAt) : null;
+    }
+
+    const updated = await db
+      .update(modelProviderCredentials)
+      .set(set)
+      .where(
+        scopedWhere(modelProviderCredentials, {
+          orgId,
+          extra: [
+            eq(modelProviderCredentials.id, id),
+            // CAS token: only write if the blob is still the one we read.
+            eq(modelProviderCredentials.credentialsEncrypted, row.credentialsEncrypted),
+          ],
+        }),
+      )
+      .returning({ id: modelProviderCredentials.id });
+
+    if (updated.length > 0) {
+      // Chokepoint for every OAuth blob write (token refresh + needsReconnection):
+      // bust the resolved-model cache so a rotated token or a freshly-dead credential
+      // stops being served immediately, not after the TTL.
+      clearResolvedModelCache();
+      return;
+    }
+    // Lost the CAS race (a concurrent writer rotated the ciphertext) — re-read
+    // and re-apply against the fresh blob.
   }
-
-  await db
-    .update(modelProviderCredentials)
-    .set(set)
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId,
-        extra: [eq(modelProviderCredentials.id, id)],
-      }),
-    );
-  // Chokepoint for every OAuth blob write (token refresh + needsReconnection):
-  // bust the resolved-model cache so a rotated token or a freshly-dead credential
-  // stops being served immediately, not after the TTL.
-  clearResolvedModelCache();
+  logger.warn("updateOAuthBlob: exhausted CAS retries under contention", { id });
 }
 
 export async function updateOAuthCredentialTokens(

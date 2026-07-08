@@ -2,4 +2,11 @@ ALTER TABLE "package_schedules" DROP CONSTRAINT "package_schedules_at_most_one_a
 ALTER TABLE "runs" ADD COLUMN "version_ref" text DEFAULT 'draft' NOT NULL;--> statement-breakpoint
 UPDATE "runs" SET "version_ref" = CASE WHEN "version_dirty" THEN 'draft' ELSE COALESCE("version_label", 'draft') END;--> statement-breakpoint
 ALTER TABLE "runs" DROP COLUMN "version_dirty";--> statement-breakpoint
+-- Exactly-one-actor CHECK. This runs a validating scan against existing
+-- `package_schedules` rows; a pre-existing actor-less row (both user_id and
+-- end_user_id NULL) would make the ADD CONSTRAINT abort. This repo has no
+-- production data, so on any fresh/empty DB the scan sees zero rows and the
+-- constraint is added cleanly. If actor-less rows are ever introduced before
+-- this migration runs, backfill/delete them (or add the constraint NOT VALID
+-- then VALIDATE) BEFORE applying this statement.
 ALTER TABLE "package_schedules" ADD CONSTRAINT "package_schedules_exactly_one_actor" CHECK ((user_id IS NOT NULL) <> (end_user_id IS NOT NULL));

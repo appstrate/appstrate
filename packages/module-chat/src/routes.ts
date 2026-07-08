@@ -30,6 +30,9 @@ import { getResumableContext } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
+/** Page size for the session list — one row past this is fetched to derive `hasMore`. */
+const SESSIONS_PAGE_SIZE = 100;
+
 export const createSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),
 });
@@ -107,13 +110,18 @@ export function createChatRouter(deps: ChatPlatformDeps) {
 
   // GET /api/chat/sessions — list the caller's sessions in the current org
   router.get("/api/chat/sessions", requireModulePermission("chat", "read"), async (c) => {
+    // Fetch one past the page so `hasMore` reflects reality: previously it was
+    // hardcoded `false`, so a caller with more than a page of sessions had no
+    // signal that older conversations existed beyond the window.
     const rows = await db
       .select()
       .from(chatSessions)
       .where(and(eq(chatSessions.orgId, c.get("orgId")), eq(chatSessions.userId, c.get("user").id)))
       .orderBy(desc(chatSessions.updatedAt))
-      .limit(100);
-    return c.json({ object: "list", data: rows.map(toSessionDto), hasMore: false });
+      .limit(SESSIONS_PAGE_SIZE + 1);
+    const hasMore = rows.length > SESSIONS_PAGE_SIZE;
+    const page = hasMore ? rows.slice(0, SESSIONS_PAGE_SIZE) : rows;
+    return c.json({ object: "list", data: page.map(toSessionDto), hasMore });
   });
 
   // POST /api/chat/sessions — start a new conversation

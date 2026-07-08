@@ -27,7 +27,8 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { invalidRequest, notFound, ApiError } from "../lib/errors.ts";
+import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { getActor } from "../lib/actor.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
@@ -40,6 +41,7 @@ import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateConfig, validateInput } from "../services/schema.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
+import { assertApplicationInScope } from "../services/applications.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -142,19 +144,33 @@ export function createRunsRemoteRouter() {
     idempotency(),
     requirePermission("agents", "run"),
     async (c) => {
-      const parsed = CreateRemoteRunBodySchema.safeParse(await c.req.json());
-      if (!parsed.success) {
-        throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid request body");
-      }
-      const body = parsed.data;
+      const body = await readJsonBody(c, CreateRemoteRunBodySchema);
 
       const orgId = c.get("orgId");
       const actor = getActor(c);
-      // The caller binds the run to one of their applications — the header-
-      // derived `c.get("applicationId")` cannot be trusted for a public
-      // write surface, so the body value takes precedence and is re-checked
-      // downstream against app membership by the ownership guard.
+      // The caller binds the run to one of their applications. The body value
+      // is authoritative for this write surface, but it MUST be proven to
+      // belong to the caller's org BEFORE any credential-bearing resolution
+      // runs against it — otherwise a principal in org A could name an
+      // application owned by org B and receive org B's decrypted connection
+      // credentials. Assert org membership up front (404 on mismatch); every
+      // downstream resolver keys on this applicationId.
       const applicationId = body.applicationId;
+      // The caller's authenticated application context (`c.get("applicationId")`,
+      // resolved by `requireAppContext` from a credential pin — API key, OIDC
+      // bearer, any module auth strategy — or the X-Application-Id header) is
+      // the app-scope boundary for this write. The org-scope assertion below
+      // only proves app∈org, so without this check a credential pinned to app
+      // A could name a sibling app B in the body and escape its app scope (the
+      // path-param `apiKeyAppScopeGuard` doesn't cover the body). Enforced for
+      // EVERY auth method — gating on `authMethod === "api_key"` would leave
+      // the same escape open to any module strategy that pins an application
+      // (e.g. oauth2-end-user bearers).
+      const pinnedAppId = c.get("applicationId");
+      if (pinnedAppId && applicationId !== pinnedAppId) {
+        throw forbidden("Caller's application scope does not include this application");
+      }
+      await assertApplicationInScope({ orgId, applicationId });
 
       const src = body.source;
 
@@ -375,17 +391,16 @@ export function createRunsRemoteRouter() {
       const runId = c.req.param("runId");
       if (!runId) throw invalidRequest("runId path parameter is required", "runId");
 
-      const parsed = ExtendSinkBodySchema.safeParse(await c.req.json());
-      if (!parsed.success) {
-        throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid request body");
-      }
+      const body = await readJsonBody(c, ExtendSinkBodySchema);
 
       const env = getEnv();
-      const ttl = Math.min(parsed.data.ttl_seconds, env.REMOTE_RUN_SINK_MAX_TTL_SECONDS);
+      const ttl = Math.min(body.ttl_seconds, env.REMOTE_RUN_SINK_MAX_TTL_SECONDS);
       const newExpiresAt = new Date(Date.now() + ttl * 1000);
 
       // Update only open sinks (not closed, not already expired) owned by
-      // the caller's org. Mismatched ownership or closed sink → 404, which
+      // the caller's org AND application. Filtering on `applicationId` too
+      // stops an app-A principal from extending an app-B run's sink within
+      // the same org. Mismatched ownership or closed sink → 404, which
       // avoids leaking whether a run exists across tenancies.
       const orgId = c.get("orgId");
       // Bumping `last_heartbeat_at` alongside `sink_expires_at` turns
@@ -401,6 +416,7 @@ export function createRunsRemoteRouter() {
           and(
             eq(runs.id, runId),
             eq(runs.orgId, orgId),
+            eq(runs.applicationId, c.get("applicationId")),
             sql`sink_closed_at IS NULL`,
             sql`sink_expires_at IS NOT NULL`,
           ),

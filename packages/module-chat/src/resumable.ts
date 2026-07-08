@@ -22,7 +22,7 @@
  * store resolves to "no active stream".
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
 import {
@@ -80,7 +80,18 @@ export async function setActiveStream(sessionId: string, streamId: string): Prom
     .where(eq(chatSessions.id, sessionId));
 }
 
-/** Clear the in-flight marker once a turn finalizes (or fails). */
-export async function clearActiveStream(sessionId: string): Promise<void> {
-  await db.update(chatSessions).set({ activeStreamId: null }).where(eq(chatSessions.id, sessionId));
+/**
+ * Clear the in-flight marker once a turn finalizes (or fails) — but ONLY when
+ * it still points at THIS turn's stream. If a concurrent (newer) turn on the
+ * same session has already overwritten `active_stream_id` with its own id via
+ * `setActiveStream`, an unconditional clear would wipe the newer turn's marker
+ * and leave its still-live stream unreconnectable (a reloaded client's resume
+ * GET would 204). The `activeStreamId = streamId` guard makes the clear a no-op
+ * in that race.
+ */
+export async function clearActiveStream(sessionId: string, streamId: string): Promise<void> {
+  await db
+    .update(chatSessions)
+    .set({ activeStreamId: null })
+    .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.activeStreamId, streamId)));
 }

@@ -166,14 +166,26 @@ export function mergeSystemAndDb<SystemDef, DbRow extends { id: string }, Out>(
 /**
  * Build a Drizzle-compatible update set from a partial data object.
  *
- * Always includes `updatedAt: new Date()`. Only keys whose value is
- * not `undefined` are included — allowing callers to pass the raw
- * request body without filtering.
+ * Always includes `updatedAt: new Date()`. Keys whose value is `undefined`
+ * are skipped.
+ *
+ * `allowedKeys` — the explicit set of columns the caller may update — is
+ * mandatory so a caller cannot mass-assign tenant/immutable columns by
+ * handing the raw request body straight through (e.g. `{ name, orgId }`
+ * silently rewriting `orgId` cross-tenant). List exactly the keys of the
+ * route's Zod update schema; never include `id`/`orgId`/`applicationId`/
+ * `createdAt`.
  */
-export function buildUpdateSet(data: Record<string, unknown>): Record<string, unknown> {
+export function buildUpdateSet(
+  data: Record<string, unknown>,
+  allowedKeys: readonly string[],
+): Record<string, unknown> {
+  const allow = new Set(allowedKeys);
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   for (const [key, value] of Object.entries(data)) {
-    if (value !== undefined) updates[key] = value;
+    if (value === undefined) continue;
+    if (!allow.has(key)) continue;
+    updates[key] = value;
   }
   return updates;
 }

@@ -19,9 +19,17 @@ interface Props {
   endUser: EndUserInfo | null;
 }
 
+type MetadataValue = string | number | boolean | null;
+
 interface MetadataEntry {
   key: string;
   value: string;
+  /**
+   * Original typed value for entries loaded from the server. Preserved so
+   * an untouched number/boolean/null round-trips as its own type instead of
+   * being stringified (`30` must not become `"30"`). Absent for new rows.
+   */
+  original?: MetadataValue;
 }
 
 function metadataToEntries(metadata: Record<string, unknown> | null): MetadataEntry[] {
@@ -29,14 +37,43 @@ function metadataToEntries(metadata: Record<string, unknown> | null): MetadataEn
   return Object.entries(metadata).map(([key, value]) => ({
     key,
     value: typeof value === "string" ? value : JSON.stringify(value),
+    original: isMetadataValue(value) ? value : undefined,
   }));
 }
 
-function entriesToMetadata(entries: MetadataEntry[]): Record<string, string> {
-  const result: Record<string, string> = {};
+function isMetadataValue(value: unknown): value is MetadataValue {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+/**
+ * Resolve an entry back to its wire value. New rows and originally-string
+ * values keep the raw text; a non-string original returns verbatim when
+ * untouched, and re-parses to a scalar when edited (falling back to the raw
+ * string when the edit is not valid JSON or is not a scalar).
+ */
+function coerceEntryValue(entry: MetadataEntry): MetadataValue {
+  if (entry.original === undefined || typeof entry.original === "string") {
+    return entry.value;
+  }
+  if (JSON.stringify(entry.original) === entry.value) return entry.original;
+  try {
+    const parsed: unknown = JSON.parse(entry.value);
+    return isMetadataValue(parsed) ? parsed : entry.value;
+  } catch {
+    return entry.value;
+  }
+}
+
+function entriesToMetadata(entries: MetadataEntry[]): Record<string, MetadataValue> {
+  const result: Record<string, MetadataValue> = {};
   for (const entry of entries) {
     const k = entry.key.trim();
-    if (k) result[k] = entry.value;
+    if (k) result[k] = coerceEntryValue(entry);
   }
   return result;
 }

@@ -5,7 +5,8 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { apiKeyAppScopeGuard } from "../middleware/guards.ts";
-import { ApiError, forbidden, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, internalError } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { listResponse } from "../lib/list-response.ts";
 import {
@@ -76,7 +77,7 @@ export function createApplicationsRouter() {
   router.use("/:applicationId/*", apiKeyAppScopeGuard);
 
   // GET /api/applications — list applications for the org
-  router.get("/", async (c) => {
+  router.get("/", requirePermission("applications", "read"), async (c) => {
     const orgId = c.get("orgId");
     const apps = await listApplications(orgId);
     const authMethod = c.get("authMethod");
@@ -94,8 +95,7 @@ export function createApplicationsRouter() {
     }
     const orgId = c.get("orgId");
     const user = c.get("user");
-    const body = await c.req.json();
-    const data = parseBody(createApplicationSchema, body);
+    const data = await readJsonBody(c, createApplicationSchema);
 
     if (data.settings?.allowedRedirectDomains) {
       const validationError = validateDomainList(data.settings.allowedRedirectDomains);
@@ -121,9 +121,9 @@ export function createApplicationsRouter() {
   });
 
   // GET /api/applications/:id — get application detail
-  router.get("/:id", async (c) => {
+  router.get("/:id", requirePermission("applications", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.req.param("id");
+    const applicationId = c.req.param("id")!;
 
     try {
       const app = await getApplication(orgId, applicationId);
@@ -142,8 +142,7 @@ export function createApplicationsRouter() {
   router.patch("/:id", requirePermission("applications", "write"), async (c) => {
     const orgId = c.get("orgId");
     const applicationId = c.req.param("id")!;
-    const body = await c.req.json();
-    const data = parseBody(updateApplicationSchema, body);
+    const data = await readJsonBody(c, updateApplicationSchema);
 
     if (data.settings?.allowedRedirectDomains) {
       const validationError = validateDomainList(data.settings.allowedRedirectDomains);
@@ -218,8 +217,7 @@ export function createApplicationsRouter() {
     const orgId = c.get("orgId");
     const applicationId = c.req.param("applicationId")!;
 
-    const body = await c.req.json();
-    const data = parseBody(installPackageSchema, body);
+    const data = await readJsonBody(c, installPackageSchema);
 
     await installPackage({ orgId, applicationId: applicationId }, data.packageId, data.config);
     const row = await getInstalledPackage({ orgId, applicationId: applicationId }, data.packageId);
@@ -252,8 +250,7 @@ export function createApplicationsRouter() {
       const orgId = c.get("orgId");
       const scope = { orgId, applicationId: applicationId };
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      const body = await c.req.json();
-      const data = parseBody(updatePackageSchema, body);
+      const data = await readJsonBody(c, updatePackageSchema);
 
       const { version_id, ...rest } = data;
       await updateInstalledPackage(scope, packageId, { ...rest, versionId: version_id });

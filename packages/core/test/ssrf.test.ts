@@ -45,10 +45,28 @@ describe("isBlockedHost", () => {
     expect(isBlockedHost("0.0.0.0")).toBe(true);
   });
 
+  it("blocks 100.64.0.0/10 (CGN + Alibaba/Tencent cloud metadata)", () => {
+    expect(isBlockedHost("100.100.100.200")).toBe(true); // Alibaba/Tencent metadata
+    expect(isBlockedHost("100.64.0.1")).toBe(true);
+    expect(isBlockedHost("100.127.255.255")).toBe(true);
+    expect(isBlockedHost("100.63.255.255")).toBe(false); // just below the range
+    expect(isBlockedHost("100.128.0.0")).toBe(false); // just above the range
+  });
+
+  it("blocks reserved / benchmark / multicast ranges", () => {
+    expect(isBlockedHost("198.18.0.1")).toBe(true); // 198.18.0.0/15 benchmark
+    expect(isBlockedHost("192.0.0.1")).toBe(true); // 192.0.0.0/24 IETF protocol
+    expect(isBlockedHost("224.0.0.1")).toBe(true); // multicast
+    expect(isBlockedHost("240.0.0.1")).toBe(true); // reserved
+    expect(isBlockedHost("255.255.255.255")).toBe(true); // broadcast
+  });
+
   it("allows public IPs", () => {
     expect(isBlockedHost("8.8.8.8")).toBe(false);
     expect(isBlockedHost("172.15.0.1")).toBe(false);
     expect(isBlockedHost("172.32.0.1")).toBe(false);
+    expect(isBlockedHost("100.63.0.1")).toBe(false);
+    expect(isBlockedHost("101.0.0.1")).toBe(false);
   });
 
   it("allows public hostnames", () => {

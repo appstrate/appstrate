@@ -29,7 +29,26 @@ const CONSUMERS: Consumer[] = [
 ];
 
 const DEPENDENCY_NAME = "@appstrate/core";
-const POLICY = (process.env.CONSUMER_DRIFT_POLICY ?? "fail") as "warn" | "fail" | "off";
+
+type DriftPolicy = "warn" | "fail" | "off";
+const VALID_POLICIES: readonly DriftPolicy[] = ["warn", "fail", "off"];
+
+/**
+ * Resolve the drift policy from the environment. An unset value defaults to the
+ * strictest (`fail`). An *unrecognized* value (typo, wrong case like `FAIL`)
+ * must NOT silently disable blocking — fall back to `fail` with a warning so a
+ * misconfigured env can never fail open.
+ */
+function resolvePolicy(raw: string | undefined): DriftPolicy {
+  if (raw === undefined) return "fail";
+  if ((VALID_POLICIES as readonly string[]).includes(raw)) return raw as DriftPolicy;
+  console.warn(
+    `Unrecognized CONSUMER_DRIFT_POLICY="${raw}" — expected one of ${VALID_POLICIES.join("|")}. Defaulting to "fail".`,
+  );
+  return "fail";
+}
+
+const POLICY = resolvePolicy(process.env.CONSUMER_DRIFT_POLICY);
 
 function parseSemver(v: string): [number, number, number] | null {
   const cleaned = v.replace(/^[\^~>=<\s]+/, "").trim();
@@ -90,9 +109,18 @@ async function main(): Promise<void> {
       try {
         pkg = await fetchPackageJson(consumer.repo, path);
       } catch (err) {
-        console.warn(
-          `  ! ${consumer.repo}/${path} — fetch failed (${err instanceof Error ? err.message : String(err)})`,
-        );
+        // Fail closed: a fetch error (403/rate-limit/outage) means we could
+        // NOT verify this consumer. Under `fail` policy that is a blocking
+        // failure — otherwise a transient GitHub error would let core publish
+        // without ever checking its consumers. `warn`/`off` may still bypass.
+        const detail = err instanceof Error ? err.message : String(err);
+        if (POLICY === "fail") {
+          console.error(`  ✗ ${consumer.repo}/${path} — fetch failed, cannot verify (${detail})`);
+          failures++;
+        } else {
+          console.warn(`  ! ${consumer.repo}/${path} — fetch failed (${detail})`);
+          warnings++;
+        }
         continue;
       }
       if (!pkg) {

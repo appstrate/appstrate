@@ -11,15 +11,16 @@
  * `fetch` shape, including `preconnect`).
  */
 
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { guardedFetch } from "@appstrate/core/ssrf";
 
 export const ssrfGuardedFetch = (async (
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
 ): Promise<Response> => {
-  const url = typeof input === "string" || input instanceof URL ? input.toString() : input.url;
-  if (isBlockedUrl(url)) {
-    throw new Error(`SSRF guard: refusing to fetch blocked URL ${url}`);
-  }
-  return fetch(input, init);
+  // Delegate to the shared per-hop DNS-guarded fetch. Unlike the old literal-only
+  // `isBlockedUrl` screen (initial URL only, no DNS), `guardedFetch` resolves +
+  // blocklist-checks the initial host AND every redirect target (manual
+  // redirects), closing both the DNS-rebind and the redirect-to-internal bypass.
+  const url = typeof input === "string" || input instanceof URL ? input : input.url;
+  return guardedFetch(url, init);
 }) as typeof fetch;

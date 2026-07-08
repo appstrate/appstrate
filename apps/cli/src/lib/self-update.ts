@@ -343,7 +343,11 @@ export async function resolveTargetVersion(
 ): Promise<string> {
   if (requested) {
     const v = normalizeVersion(requested);
-    if (!/^\d+\.\d+\.\d+/.test(v)) {
+    // Anchored at BOTH ends: `v` is interpolated straight into the release
+    // download URL (`releaseUrls`), so an unanchored match would let a value
+    // like `1.2.3/../../evil` or `1.2.3 rm -rf` through and steer the URL.
+    // Allow an optional semver prerelease/build suffix (e.g. `1.2.3-beta.1`).
+    if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(v)) {
       throw new Error(`Invalid version: "${requested}". Expected semver like 1.2.3 or v1.2.3.`);
     }
     return v;

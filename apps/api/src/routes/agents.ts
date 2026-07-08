@@ -30,7 +30,8 @@ import { getActor } from "../lib/actor.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
-import { ApiError, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { ApiError, invalidRequest, notFound } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
@@ -120,7 +121,7 @@ export function createAgentsRouter() {
     async (c) => {
       const agent = c.get("package");
 
-      const body = await c.req.json<Record<string, unknown>>();
+      const body = await readJsonBody(c, z.record(z.string(), z.unknown()));
       const schema = agent.manifest.config?.schema ?? { type: "object" as const, properties: {} };
 
       // Validate config with AJV
@@ -186,8 +187,7 @@ export function createAgentsRouter() {
     async (c) => {
       const agent = c.get("package");
       const scope = getAppScope(c);
-      const body = await c.req.json();
-      const data = parseBody(proxyIdSchema, body);
+      const data = await readJsonBody(c, proxyIdSchema);
 
       await updateInstalledPackage(scope, agent.id, { proxyId: data.proxyId });
 
@@ -222,8 +222,7 @@ export function createAgentsRouter() {
     async (c) => {
       const agent = c.get("package");
       const scope = getAppScope(c);
-      const body = await c.req.json();
-      const data = parseBody(modelIdSchema, body);
+      const data = await readJsonBody(c, modelIdSchema);
 
       await updateInstalledPackage(scope, agent.id, { modelId: data.modelId });
 
@@ -386,7 +385,15 @@ export function createAgentsRouter() {
       const actorTypeParam = c.req.query("actor_type");
       const actorIdParam = c.req.query("actor_id");
 
-      const scope = scopeFromQueryParams(actorTypeParam, actorIdParam) ?? undefined;
+      // Same actor-override guard the GET path applies: only admins/owners may
+      // target another actor's rows (or omit the scope to bulk-wipe every
+      // actor). A member — even one holding `persistence:delete` — is narrowed
+      // to their own actor scope, so they cannot delete another actor's
+      // memories/checkpoints by supplying an arbitrary actor_type / actor_id.
+      const callerScope = scopeFromActor(getActor(c));
+      const isAdmin = c.get("orgRole") === "admin" || c.get("orgRole") === "owner";
+      const scopeOverride = isAdmin ? scopeFromQueryParams(actorTypeParam, actorIdParam) : null;
+      const scope = isAdmin ? (scopeOverride ?? undefined) : callerScope;
 
       let memoriesDeleted = 0;
       let checkpointDeleted = false;

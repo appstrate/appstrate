@@ -26,7 +26,8 @@ import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { getOrchestrator } from "../services/orchestrator/index.ts";
+import { stopWorkloadAndWait } from "../services/stop-workload.ts";
+import { logger } from "../lib/logger.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import type { IntegrationManifestCache } from "../services/integration-service.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
@@ -34,7 +35,7 @@ import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
-import { triggerInlineRun, type InlineRunBody } from "../services/inline-run.ts";
+import { triggerInlineRun } from "../services/inline-run.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -42,6 +43,24 @@ import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/cor
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import { readJsonBody } from "../lib/request-body.ts";
+
+/**
+ * Wire-shape guard for the inline-run body (`POST /runs/inline` +
+ * `/inline/validate`). Mirrors the `InlineRunBody` TS type: every field
+ * is optional and the semantic validation (manifest/config/input/AJV) happens
+ * downstream in the preflight — this schema only rejects a malformed body or a
+ * grossly wrong-typed field (e.g. `input: "foo"`) with a 400 instead of letting
+ * it cast through and surface later as a 500.
+ */
+const inlineRunBodySchema = z.object({
+  manifest: z.unknown().optional(),
+  prompt: z.unknown().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
+  modelId: z.string().nullable().optional(),
+  proxyId: z.string().nullable().optional(),
+});
 
 /**
  * Resolve the traceparent to seed the run-execution trace tree with, honoring
@@ -399,20 +418,31 @@ export function createRunsRouter() {
       throw notFound("Run not found");
     }
 
+    // End-user boundary: `runs:cancel` is an OIDC-grantable end-user scope, but
+    // an end-user must only cancel their OWN runs — mirror the ownership guard
+    // the read paths (`GET /runs/:id`, `/logs`) apply. Scope alone (org+app) is
+    // not enough here.
+    const endUser = c.get("endUser");
+    if (endUser && run.endUserId !== endUser.id) {
+      throw notFound("Run not found");
+    }
+
     // Verify cancellable
     if (run.status !== "pending" && run.status !== "running") {
       throw conflict("not_cancellable", "This run cannot be cancelled");
     }
 
-    // Abort in-flight fetch calls + stop the container BEFORE synthesising
-    // the terminal so the runner stops emitting metric events and the
-    // sidecar can be reclaimed promptly. `finalizeRun` then drains any
-    // events that landed before this point, computes the authoritative
-    // cost from `llm_usage`, and writes the terminal state under CAS.
+    // Abort in-flight fetch calls + stop the workload and WAIT (bounded) for
+    // the stop to ack BEFORE synthesising the terminal. Closing the sink /
+    // writing the terminal while the workload still runs with live credentials
+    // is a credential-exposure window; awaiting the stop closes it in the
+    // common case. On a wedged runtime the helper times out and returns false,
+    // and we still force-finalize (liveness) rather than leave the run stuck.
     abortRun(runId);
-    getOrchestrator()
-      .stopByRunId(runId)
-      .catch(() => {});
+    const stopped = await stopWorkloadAndWait(runId);
+    if (!stopped) {
+      logger.warn("run cancel: workload stop unacknowledged, force-finalizing", { runId });
+    }
 
     await synthesiseFinalize(runId, {
       status: "cancelled",
@@ -460,7 +490,7 @@ export function createRunsRouter() {
       const applicationId = c.get("applicationId");
       const actor = getActor(c);
 
-      const body = await c.req.json<InlineRunBody>();
+      const body = await readJsonBody(c, inlineRunBodySchema);
 
       const { runId, packageId } = await triggerInlineRun({
         orgId,
@@ -517,7 +547,7 @@ export function createRunsRouter() {
       const orgId = c.get("orgId");
       const applicationId = c.get("applicationId");
       const actor = getActor(c);
-      const body = await c.req.json<InlineRunBody>();
+      const body = await readJsonBody(c, inlineRunBodySchema);
 
       await runInlinePreflight({ orgId, applicationId, actor, body, mode: "accumulate" });
 

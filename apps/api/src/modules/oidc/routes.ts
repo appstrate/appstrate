@@ -22,7 +22,8 @@ import type { AppEnv } from "../../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
 import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
-import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
+import { notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
+import { readJsonBody } from "../../lib/request-body.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
@@ -447,8 +448,7 @@ export function createOidcRouter() {
     requireModulePermission("oauth-clients", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const body = await c.req.json();
-      const data = parseBody(createOAuthClientSchema, body);
+      const data = await readJsonBody(c, createOAuthClientSchema);
 
       requireAdminForFirstParty(c, data.isFirstParty);
 
@@ -533,8 +533,7 @@ export function createOidcRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;
-      const body = await c.req.json();
-      const data = parseBody(updateOAuthClientSchema, body);
+      const data = await readJsonBody(c, updateOAuthClientSchema);
       const owning = await getClientOwningOrg(clientId);
       if (!owning || owning !== orgId) throw notFound("OAuth client not found");
 
@@ -640,8 +639,7 @@ export function createOidcRouter() {
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
-      const body = await c.req.json();
-      const data = parseBody(smtpConfigUpsertSchema, body);
+      const data = await readJsonBody(c, smtpConfigUpsertSchema);
       // SSRF: block configurations that would make Appstrate bounce
       // email traffic off internal metadata endpoints / loopback relays.
       if (isBlockedHost(data.host)) {
@@ -672,8 +670,7 @@ export function createOidcRouter() {
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
-      const body = await c.req.json();
-      const data = parseBody(smtpConfigTestSchema, body);
+      const data = await readJsonBody(c, smtpConfigTestSchema);
       try {
         const result = await sendTestEmail(applicationId, data.to);
         return c.json({ ok: true, messageId: result.messageId });
@@ -727,8 +724,7 @@ export function createOidcRouter() {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
       const provider = parseProvider(c.req.param("provider")!);
-      const body = await c.req.json();
-      const data = parseBody(socialProviderUpsertSchema, body);
+      const data = await readJsonBody(c, socialProviderUpsertSchema);
       const saved = await upsertSocialProvider(applicationId, provider, data);
       return c.json(saved);
     },
@@ -1249,42 +1245,37 @@ export function createOidcRouter() {
       );
     }
 
-    let cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
+    const cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
 
-    // Application-level client without per-app SMTP → no tenant-owned transport
-    // to deliver a verification email. We auto-verify and re-sign-in so the
-    // subsequent /authorize redirect mints a token transparently. No tenant
-    // email is ever sent via the platform's instance SMTP.
+    // Application-level client with no per-app SMTP, but instance SMTP IS
+    // configured → Better Auth wired `requireEmailVerification=true` +
+    // `sendOnSignUp=true` at boot, so the `signUpEmail` call above already
+    // dispatched a verification email via the instance transport and withheld
+    // the session (cookieCount === 0).
     //
-    // The `isInstanceSmtpEnabled()` guard is a behavioural precondition, not a
-    // fallback: when instance SMTP is configured, Better Auth wires
-    // `requireEmailVerification=true` and `sendOnSignUp=true` at boot, so the
-    // signUp call above blocks session issuance (cookieCount === 0) pending an
-    // email that will never arrive for this tenant. When instance SMTP is
-    // absent those BA flags are off, signUp already returns a session, and
-    // this branch is unnecessary.
+    // SECURITY: we must NOT force `emailVerified=true` here. Setting it with no
+    // possession proof marks a globally-verified Better Auth identity that the
+    // signup never proved it controls — enabling identity squat (social-login
+    // auto-link by verified email, `adoptEndUserByEmail` end-user takeover,
+    // etc.). Only a real, delivered-and-confirmed verification may flip that
+    // flag; leave it false. The verification email was genuinely sent, so
+    // surface the same branded "check your email" interstitial as the per-app
+    // SMTP path below — the link resumes the OAuth flow via the pinned
+    // `callbackURL`.
     if (
       ctx.client.level === "application" &&
       !ctx.features.smtp &&
       cookieCount === 0 &&
       isInstanceSmtpEnabled()
     ) {
-      await db.update(user).set({ emailVerified: true }).where(eq(user.email, email));
-      try {
-        const reSignIn = (await authApi.signInEmail({
-          body: { email, password } as { email: string; password: string },
-          headers: c.req.raw.headers,
-          asResponse: true,
-        })) as Response;
-        if (reSignIn.ok) {
-          cookieCount = forwardOAuthSessionCookies(c, reSignIn, ctx.client.isFirstParty);
-        }
-      } catch (err) {
-        logger.warn("oidc: auto-verify re-signin failed", {
-          error: getErrorMessage(err),
-          email,
-        });
-      }
+      logger.info("oidc: registration pending email verification (instance SMTP)", { email });
+      clearPendingClientCookie(c);
+      const sentPage = renderVerifyEmailSentPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        email,
+      });
+      return c.html(sentPage.value);
     }
 
     // Org-level clients: provision the `organization_members` row now so

@@ -118,6 +118,14 @@ export async function fetchGithubDirectory(url: string): Promise<Uint8Array> {
   // Download all files via raw.githubusercontent.com (no API rate limit)
   const files: Record<string, Uint8Array> = {};
 
+  // The pre-flight caps above trust the tree's declared `blob.size`, which the
+  // GitHub API may omit (undefined → counted as 0). Enforce the real limits on
+  // the ACTUAL downloaded bytes so a missing/understated size can't bypass
+  // them. `downloadedTotal` is accumulated synchronously between awaits (JS is
+  // single-threaded) so the running-total check is race-free across the
+  // parallel downloads.
+  let downloadedTotal = 0;
+
   const downloads = blobs.map(async (blob) => {
     if (blob.size && blob.size > MAX_FILE_SIZE) {
       throw new GithubImportError(
@@ -137,6 +145,20 @@ export async function fetchGithubDirectory(url: string): Promise<Uint8Array> {
     }
 
     const data = new Uint8Array(await res.arrayBuffer());
+
+    if (data.length > MAX_FILE_SIZE) {
+      throw new GithubImportError(
+        "FILE_TOO_LARGE",
+        `File '${blob.path}' is too large (${Math.round(data.length / 1024)}KB, max ${MAX_FILE_SIZE / 1024}KB)`,
+      );
+    }
+    downloadedTotal += data.length;
+    if (downloadedTotal > MAX_TOTAL_SIZE) {
+      throw new GithubImportError(
+        "TOO_LARGE",
+        `Total size too large (max ${MAX_TOTAL_SIZE / 1024}KB)`,
+      );
+    }
 
     // Relativize path: remove the prefix to keep the folder structure relative
     const relativePath = prefix ? blob.path.slice(prefix.length) : blob.path;

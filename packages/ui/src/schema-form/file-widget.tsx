@@ -90,6 +90,35 @@ export function FileWidget(props: WidgetProps) {
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Digest of the externally-supplied value's URIs — the authoritative content
+  // of the field, independent of our richer local rows.
+  const valueSignature = useMemo(
+    () =>
+      attachmentsFromValue(value)
+        .map((a) => a.uri)
+        .join(" "),
+    [value],
+  );
+  // Re-sync the display when the external value changes out from under us — a
+  // form reset that clears formData, or a host programmatically setting a new
+  // value. Without this the local `attachments` state (seeded once at mount)
+  // diverges from formData and keeps showing stale files. When the URI set
+  // still matches our local rows we keep them (they carry the name/size the
+  // upload captured, which a bare `upload://` URI can't recover). After our own
+  // `commit` the signatures already match, so this is a no-op there and never
+  // clobbers an in-progress edit.
+  // Implemented as the React-blessed "adjust state during render on prop
+  // change" pattern (store the last-seen signature, reconcile inline) rather
+  // than a setState-in-effect — the latter triggers a cascading extra render
+  // and is banned by the React Compiler lint.
+  const [syncedSignature, setSyncedSignature] = useState(valueSignature);
+  if (syncedSignature !== valueSignature) {
+    setSyncedSignature(valueSignature);
+    setAttachments((prev) =>
+      prev.map((a) => a.uri).join(" ") === valueSignature ? prev : attachmentsFromValue(value),
+    );
+  }
+
   const multiple = schema.type === "array" || (options?.multiple as boolean | undefined) === true;
   const accept = (options?.accept as string | undefined) ?? undefined;
   const maxSize = options?.maxSize as number | undefined;
@@ -134,8 +163,8 @@ export function FileWidget(props: WidgetProps) {
       abortRef.current?.abort();
       const ctrl = new AbortController();
       abortRef.current = ctrl;
+      const uploaded: Attachment[] = [];
       try {
-        const uploaded: Attachment[] = [];
         for (const f of incoming) {
           const uri = await upload(f, ctrl.signal);
           uploaded.push({ uri, name: f.name, size: f.size });
@@ -144,6 +173,11 @@ export function FileWidget(props: WidgetProps) {
         commit(next);
       } catch (e) {
         if ((e as { name?: string }).name === "AbortError") return;
+        // Preserve the files that uploaded successfully before this one failed:
+        // discarding a whole multi-file batch on a single late failure would
+        // force the user to re-add everything. Single-file mode keeps only one
+        // file, so there is nothing partial to salvage there.
+        if (multiple && uploaded.length > 0) commit([...attachments, ...uploaded]);
         setError(getErrorMessage(e));
       } finally {
         setUploading(false);

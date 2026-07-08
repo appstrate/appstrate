@@ -338,7 +338,7 @@ export function PreferencesConnectionsPage() {
           {t("connections.myConnections")}
         </div>
         <span className="text-muted-foreground text-xs">
-          {t("connections.total_connections", { count: totalConnections })}
+          {t("connections.totalConnections", { count: totalConnections })}
         </span>
       </div>
 

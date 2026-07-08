@@ -9,12 +9,11 @@ beforeEach(() => {
   __clearOAuthDiscoveryCache();
 });
 
-function withFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
-  const orig = globalThis.fetch;
-  globalThis.fetch = impl;
-  return fn().finally(() => {
-    globalThis.fetch = orig;
-  });
+// The SUT egress is SSRF-guarded (`oauthEgressFetch` does real DNS), so tests
+// inject a stub via the resolver's `fetchImpl` option rather than patching the
+// global `fetch` — a non-resolvable test hostname would fail-close otherwise.
+function withFetch<T>(impl: typeof fetch, fn: (fetchImpl: typeof fetch) => Promise<T>): Promise<T> {
+  return fn(impl);
 }
 
 function jsonResponse(obj: unknown, status = 200): Response {
@@ -36,8 +35,9 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           authorization_endpoint: "https://disco/authorize",
           token_endpoint: "https://disco/token",
         })) as unknown as typeof fetch,
-      () =>
+      (fetchImpl) =>
         resolveOAuthEndpoints({
+          fetchImpl,
           issuer: "https://idp.example.com",
           authorizationEndpoint: "https://idp.example.com/authorize",
           tokenEndpoint: "https://idp.example.com/token",
@@ -54,7 +54,8 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
         called = true;
         return jsonResponse({});
       }) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ authorizationEndpoint: "https://idp/authorize" }),
+      (fetchImpl) =>
+        resolveOAuthEndpoints({ fetchImpl, authorizationEndpoint: "https://idp/authorize" }),
     );
     expect(called).toBe(false);
     expect(result.authorizationEndpoint).toBe("https://idp/authorize");
@@ -72,7 +73,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://idp.example.com/oauth/token",
         });
       }) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     // First probe per AFPS §7.3 is RFC 8414 path-insertion.
     expect(seen[0]).toBe("https://idp.example.com/.well-known/oauth-authorization-server");
@@ -89,7 +90,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://mcp.example.com/token",
           grant_types_supported: ["authorization_code", "refresh_token"],
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://mcp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://mcp.example.com" }),
     );
     expect(result.grantTypesSupported).toEqual(["authorization_code", "refresh_token"]);
   });
@@ -103,7 +104,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://mcp.example.com/token",
           // no grant_types_supported field
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://mcp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://mcp.example.com" }),
     );
     expect(result.grantTypesSupported).toBeUndefined();
   });
@@ -119,7 +120,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://idp/token",
         });
       }) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com/" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com/" }),
     );
     expect(seen[0]).toBe("https://idp.example.com/.well-known/oauth-authorization-server");
   });
@@ -139,7 +140,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://idp/oidc/token",
         });
       }) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(seen).toEqual([
       "https://idp.example.com/.well-known/oauth-authorization-server",
@@ -157,8 +158,9 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           authorization_endpoint: "https://disco/authorize",
           token_endpoint: "https://disco/token",
         })) as unknown as typeof fetch,
-      () =>
+      (fetchImpl) =>
         resolveOAuthEndpoints({
+          fetchImpl,
           issuer: "https://idp.example.com",
           authorizationEndpoint: "https://manual/authorize",
         }),
@@ -177,7 +179,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://idp/token",
           code_challenge_methods_supported: ["S256", "plain"],
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.codeChallengeMethodsSupported).toEqual(["S256", "plain"]);
   });
@@ -190,7 +192,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           authorization_endpoint: "https://idp/authorize",
           token_endpoint: "https://idp/token",
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.codeChallengeMethodsSupported).toBeUndefined();
   });
@@ -204,7 +206,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://idp/token",
           code_challenge_methods_supported: [1, 2, 3],
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.codeChallengeMethodsSupported).toBeUndefined();
   });
@@ -218,7 +220,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://idp/token",
           userinfo_endpoint: "https://idp.example.com/userinfo",
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.userinfoEndpoint).toBe("https://idp.example.com/userinfo");
   });
@@ -231,7 +233,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           authorization_endpoint: "https://idp/authorize",
           token_endpoint: "https://idp/token",
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.userinfoEndpoint).toBeUndefined();
   });
@@ -245,7 +247,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://idp/token",
           userinfo_endpoint: 42,
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.userinfoEndpoint).toBeUndefined();
   });
@@ -259,7 +261,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           token_endpoint: "https://idp/token",
           userinfo_endpoint: "not a url",
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.userinfoEndpoint).toBeUndefined();
   });
@@ -281,7 +283,8 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
         }
         return new Response("not found", { status: 404 });
       }) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://auth.example.com/realms/foo" }),
+      (fetchImpl) =>
+        resolveOAuthEndpoints({ fetchImpl, issuer: "https://auth.example.com/realms/foo" }),
     );
     expect(seen).toEqual([
       "https://auth.example.com/.well-known/oauth-authorization-server/realms/foo",
@@ -319,7 +322,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
         }
         return new Response("not found", { status: 404 });
       }) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://accounts.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://accounts.example.com" }),
     );
     // Both probes were attempted (first rejected on issuer mismatch).
     expect(seen[0]).toBe("https://accounts.example.com/.well-known/oauth-authorization-server");
@@ -334,8 +337,9 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
       (async () => {
         throw new TypeError("ConnectionRefused");
       }) as unknown as typeof fetch,
-      () =>
+      (fetchImpl) =>
         resolveOAuthEndpoints({
+          fetchImpl,
           issuer: "https://idp.example.com",
           tokenEndpoint: "https://manual/token",
         }),
@@ -361,8 +365,9 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           userinfo_endpoint: "https://idp.example.com/userinfo",
           code_challenge_methods_supported: ["S256"],
         })) as unknown as typeof fetch,
-      () =>
+      (fetchImpl) =>
         resolveOAuthEndpoints({
+          fetchImpl,
           issuer: "https://idp.example.com",
           authorizationEndpoint: "https://manual/authorize",
           tokenEndpoint: "https://manual/token",
@@ -381,8 +386,9 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
       (async () => {
         throw new TypeError("ConnectionRefused");
       }) as unknown as typeof fetch,
-      () =>
+      (fetchImpl) =>
         resolveOAuthEndpoints({
+          fetchImpl,
           issuer: "https://idp.example.com",
           authorizationEndpoint: "https://manual/authorize",
           tokenEndpoint: "https://manual/token",
@@ -412,10 +418,10 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           code_challenge_methods_supported: ["S256"],
         });
       }) as unknown as typeof fetch,
-      async () => {
-        const r1 = await resolveOAuthEndpoints({ issuer: "https://idp.example.com" });
+      async (fetchImpl) => {
+        const r1 = await resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" });
         secondCallStarted = true;
-        const r2 = await resolveOAuthEndpoints({ issuer: "https://idp.example.com" });
+        const r2 = await resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" });
         expect(r1.userinfoEndpoint).toBe("https://idp.example.com/userinfo");
         expect(r2.userinfoEndpoint).toBe("https://idp.example.com/userinfo");
       },
@@ -440,11 +446,11 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
               authorization_endpoint: "https://idp.example.com/oauth/authorize",
               token_endpoint: "https://idp.example.com/oauth/token",
             })) as unknown as typeof fetch,
-      async () => {
-        const r1 = await resolveOAuthEndpoints({ issuer: "https://idp.example.com" });
+      async (fetchImpl) => {
+        const r1 = await resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" });
         expect(r1.tokenEndpoint).toBeUndefined(); // discovery failed, nothing cached
         phase = "ok";
-        const r2 = await resolveOAuthEndpoints({ issuer: "https://idp.example.com" });
+        const r2 = await resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" });
         expect(r2.tokenEndpoint).toBe("https://idp.example.com/oauth/token"); // re-discovered
       },
     );
@@ -462,7 +468,7 @@ describe("resolveOAuthEndpoints — registration_endpoint projection (RFC 7591)"
           registration_endpoint: "https://mcp.example.com/oauth/register",
           code_challenge_methods_supported: ["S256"],
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://mcp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://mcp.example.com" }),
     );
     expect(result.registrationEndpoint).toBe("https://mcp.example.com/oauth/register");
     expect(result.authorizationEndpoint).toBe("https://mcp.example.com/oauth/authorize");
@@ -476,7 +482,7 @@ describe("resolveOAuthEndpoints — registration_endpoint projection (RFC 7591)"
           authorization_endpoint: "https://idp.example.com/authorize",
           token_endpoint: "https://idp.example.com/token",
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.registrationEndpoint).toBeUndefined();
   });
@@ -490,7 +496,7 @@ describe("resolveOAuthEndpoints — registration_endpoint projection (RFC 7591)"
           token_endpoint: "https://idp.example.com/token",
           registration_endpoint: "not a url",
         })) as unknown as typeof fetch,
-      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+      (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.registrationEndpoint).toBeUndefined();
   });

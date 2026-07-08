@@ -181,6 +181,24 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.MODEL_BASE_URL = model.baseUrl;
   }
   if (model.apiKey) {
+    // Fail closed on the sidecar-proxied path. When LLM traffic is routed
+    // through the sidecar LLM proxy (`sidecarProxyLlmUrl` is set), the sidecar
+    // injects the real credential upstream and the container must only ever
+    // see the placeholder — the raw key must never cross the isolation
+    // boundary the sidecar exists to protect. A caller that forgets the
+    // placeholder here would silently leak the real provider key into the
+    // agent container, so we throw rather than fall back to `model.apiKey`.
+    if (opts.sidecarProxyLlmUrl && !model.apiKeyPlaceholder) {
+      throw new Error(
+        "buildRuntimePiEnv: model.apiKeyPlaceholder is required when LLM traffic " +
+          "is sidecar-proxied (sidecarProxyLlmUrl is set) — refusing to place the " +
+          "real provider API key inside the agent container. Supply the placeholder, " +
+          "or route the run without the sidecar LLM proxy for a static direct key.",
+      );
+    }
+    // The raw-key fallback is only reachable on the direct (non-proxied) path,
+    // where the agent talks to the provider itself and legitimately needs the
+    // real credential.
     const placeholder = model.apiKeyPlaceholder ?? model.apiKey;
     env.MODEL_API_KEY = placeholder;
   }

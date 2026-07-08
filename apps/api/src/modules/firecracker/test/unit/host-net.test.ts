@@ -261,6 +261,10 @@ describe("createTap / deleteTap", () => {
     await createTap(exec, subnet);
     expect(calls.map((c) => c.cmd.join(" "))).toEqual([
       "ip -batch -",
+      // Effective rp_filter is max(conf.all, conf.<iface>) — a loose host
+      // default (all=2) would override the per-interface strict value, so
+      // conf.all is pinned strict (1) alongside the TAP.
+      "sysctl -qw net.ipv4.conf.all.rp_filter=1",
       // L3 anti-spoofing: the kernel drops guest packets whose source
       // doesn't route back through this TAP (another guest's IP, any
       // foreign IP).

@@ -17,6 +17,7 @@ import {
 import { and, eq, inArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
+import { orgRunConcurrencyLockKey } from "./state/runs.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -46,23 +47,30 @@ export async function createOrganization(
   slug: string,
   userId: string,
 ): Promise<OrgResult> {
-  const [org] = await db
-    .insert(organizations)
-    .values({
-      name,
-      slug,
-      createdBy: userId,
-      orgSettings: { api_version: CURRENT_API_VERSION },
-    })
-    .returning();
+  // Org + owner-membership are one unit: a partial write (org row created but
+  // membership insert failing) would leave an orphan org nobody can access.
+  // Wrap both statements in a transaction so they commit or roll back together.
+  const org = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(organizations)
+      .values({
+        name,
+        slug,
+        createdBy: userId,
+        orgSettings: { api_version: CURRENT_API_VERSION },
+      })
+      .returning();
 
-  if (!org) throw new Error("Failed to create organization");
+    if (!created) throw new Error("Failed to create organization");
 
-  // Add creator as owner
-  await db.insert(organizationMembers).values({
-    orgId: org.id,
-    userId,
-    role: "owner",
+    // Add creator as owner.
+    await tx.insert(organizationMembers).values({
+      orgId: created.id,
+      userId,
+      role: "owner",
+    });
+
+    return created;
   });
 
   return toOrgResult(org);
@@ -284,18 +292,32 @@ export async function updateMemberRole(
 }
 
 export async function deleteOrganization(orgId: string): Promise<void> {
-  // Check for running runs
-  const runningResult = await db
-    .select({ runningCount: count() })
-    .from(runs)
-    .where(scopedWhere(runs, { orgId, extra: [inArray(runs.status, ["pending", "running"])] }));
-
-  if ((runningResult[0]?.runningCount ?? 0) > 0) {
-    throw new Error("Cannot delete organization: runs are in progress");
-  }
-
-  // Delete in FK-safe order within a transaction
+  // Delete in FK-safe order within a transaction. The in-progress-runs check
+  // lives INSIDE the transaction (was previously a separate read before it):
+  // outside, a run could transition pending/running in the window between the
+  // check and the delete (TOCTOU), so we'd cascade-delete a live run's rows.
+  // Doing the count in the same transaction as the deletes — which take row
+  // locks on the runs being removed — closes that window.
   await db.transaction(async (tx) => {
+    // Serialize against concurrent run admission. `createRun` acquires this
+    // same per-org advisory lock before its count + INSERT. Taking it here
+    // means a run admitted after our snapshot below cannot commit until this
+    // transaction finishes — closing the TOCTOU window where a run that
+    // started after the count but before the delete would be cascade-deleted
+    // mid-flight. Released automatically at transaction end.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(orgId)})::bigint)`,
+    );
+
+    const runningResult = await tx
+      .select({ runningCount: count() })
+      .from(runs)
+      .where(scopedWhere(runs, { orgId, extra: [inArray(runs.status, ["pending", "running"])] }));
+
+    if ((runningResult[0]?.runningCount ?? 0) > 0) {
+      throw new Error("Cannot delete organization: runs are in progress");
+    }
+
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)
     await tx.delete(runLogs).where(eq(runLogs.orgId, orgId));
     await tx.delete(runs).where(eq(runs.orgId, orgId));

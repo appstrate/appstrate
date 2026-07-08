@@ -6,17 +6,20 @@
  * routes.ts wiring guarantees:
  *
  *   1. `level=application` clients without a per-app `application_smtp_configs`
- *      row get email features **disabled** (no fallback to env SMTP). Signup
- *      auto-verifies + signs-in (no interstitial, no mail). Magic-link and
+ *      row get NO per-app email transport (no fallback to env SMTP for tenant
+ *      mail). With instance SMTP on, signup renders the "check your email"
+ *      interstitial and leaves `user.emailVerified=false` — it is NEVER
+ *      auto-verified (that was an identity-squat hole). Magic-link and
  *      forgot-password return 404.
  *   2. `level=application` clients WITH a per-app config route every mail
  *      through the per-app transport (verified via the resolver spy). Signup
  *      renders the interstitial and leaves `user.emailVerified=false`.
  *
  * Env SMTP is enabled for the whole suite (via `enableSmtpForSuite`) so the
- * auto-verify branch is actually exercised — the branch is gated on
+ * no-per-app-SMTP branch is actually exercised — it is gated on
  * `isInstanceSmtpEnabled()` to guarantee BA's `requireEmailVerification:
- * true` path is the one being bypassed (not the trivial SMTP-off path).
+ * true` path (session withheld pending verification) is the one being
+ * handled, not the trivial SMTP-off path.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -124,7 +127,15 @@ describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
 
   // ─── Signup ────────────────────────────────────────────────────────────────
 
-  it("signup (no per-app SMTP): auto-verifies, redirects to authorize, sends zero mail", async () => {
+  it("signup (no per-app SMTP, instance SMTP on): renders interstitial, leaves user UNVERIFIED, sends zero per-app mail", async () => {
+    // SECURITY (identity squat): an app-level client with no per-app SMTP must
+    // NOT be auto-verified. Instance SMTP is on for this suite, so Better
+    // Auth's `requireEmailVerification` withholds the session AND its
+    // `sendOnSignUp` dispatches a verification email via the instance
+    // transport. We surface the "check your email" interstitial and leave
+    // `emailVerified=false` — only the delivered-and-confirmed link may flip
+    // it. (Previously this path force-set `emailVerified=true` with zero
+    // possession proof, letting an attacker squat any identity.)
     const { clientId } = await setupAppClient({ smtp: false });
     const qs = `?client_id=${encodeURIComponent(clientId)}&state=s`;
     const getRes = await app.request(`/api/oauth/register${qs}`);
@@ -136,16 +147,21 @@ describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: cookie },
       body: `_csrf=${csrfToken}&name=X&email=${encodeURIComponent(email)}&password=TestPassword123!`,
     });
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location") ?? "").toContain("/api/auth/oauth2/authorize");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("Vérifiez votre email");
 
     const [row] = await db
       .select({ emailVerified: userTable.emailVerified })
       .from(userTable)
       .where(eq(userTable.email, email))
       .limit(1);
-    expect(row?.emailVerified).toBe(true);
-    // No mail should ever leave — neither per-app nor instance.
+    // Must stay false — no possession proof was ever provided.
+    expect(row?.emailVerified).toBe(false);
+    // No PER-APP mail leaves (there is no per-app transport). BA's own
+    // instance-transport verification email is not routed through the per-app
+    // resolver, so the per-app spy legitimately observes zero sends.
     expect(mails.length).toBe(0);
   });
 

@@ -49,8 +49,12 @@ const baseResponses = {
       },
     },
     content: {
-      "application/json": {},
-      "text/event-stream": {},
+      // Upstream provider response forwarded verbatim — an arbitrary
+      // provider-shaped JSON object (OpenAI/Anthropic/Mistral). Permissive
+      // passthrough schema so verify-openapi's "every 2xx JSON declares a
+      // schema" gate is satisfied without over-constraining the proxied body.
+      "application/json": { schema: { type: "object", additionalProperties: true } },
+      "text/event-stream": { schema: { type: "string" } },
     },
   },
   "400": {

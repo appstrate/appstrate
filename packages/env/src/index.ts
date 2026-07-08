@@ -12,6 +12,27 @@ const boolEnv = (defaultValue: "true" | "false") =>
     .default(defaultValue)
     .transform((s) => s.toLowerCase() === "true" || s === "1");
 
+// JSON-from-string env transform: parses a JSON-valued env var, failing fast
+// at boot with a clear Zod issue (path = the variable name) instead of a raw
+// `SyntaxError` bubbling out of `getEnv()`. Empty string == unset (compose's
+// `${VAR:-}` pattern) → falls back to the schema default so the parse always
+// has valid JSON to work with. Callers pin the parsed shape via the type
+// argument (the value is still validated loosely here; strict shape checks
+// happen downstream in the API layer where each var is consumed).
+const jsonEnv = <T>(defaultValue: string) =>
+  z
+    .string()
+    .default(defaultValue)
+    .transform((s, ctx): T => {
+      const raw = s === "" ? defaultValue : s;
+      try {
+        return JSON.parse(raw) as T;
+      } catch {
+        ctx.addIssue({ code: "custom", message: "must be valid JSON" });
+        return z.NEVER;
+      }
+    });
+
 // ─── Schema ──────────────────────────────────────────────────
 //
 // MAINTAINER NOTE: this Zod schema is the single source of truth for env
@@ -178,14 +199,8 @@ const envSchema = z
         }
       })
       .pipe(z.record(z.string(), z.string())),
-    SYSTEM_PROXIES: z
-      .string()
-      .default("[]")
-      .transform((s) => JSON.parse(s) as unknown[]),
-    SYSTEM_PROVIDER_KEYS: z
-      .string()
-      .default("[]")
-      .transform((s) => JSON.parse(s) as unknown[]),
+    SYSTEM_PROXIES: jsonEnv<unknown[]>("[]"),
+    SYSTEM_PROVIDER_KEYS: jsonEnv<unknown[]>("[]"),
     // System-level integrations offered by the deployment out of the box.
     // Membership = the "auto-active" policy (on by default until an org opts
     // out). Each entry MAY ship one or more shared OAuth clients
@@ -198,51 +213,33 @@ const envSchema = z
     // boot. Mirrors SYSTEM_PROVIDER_KEYS. An org that registers its own per-app
     // client (BYO-app) overrides the system client; the minting client is
     // pinned per connection so refresh resolves the right credentials.
-    SYSTEM_INTEGRATIONS: z
-      .string()
-      .default("[]")
-      .transform((s) => JSON.parse(s) as unknown[]),
+    SYSTEM_INTEGRATIONS: jsonEnv<unknown[]>("[]"),
 
     // OIDC instance clients — declarative provisioning of satellite OAuth
     // clients (admin dashboards, second-party web apps). Parsed loosely
     // here; the oidc module applies a strict Zod schema at boot. See
     // `apps/api/src/modules/oidc/services/instance-client-sync.ts`.
-    OIDC_INSTANCE_CLIENTS: z
-      .string()
-      .default("[]")
-      .transform((s) => JSON.parse(s) as unknown[]),
+    OIDC_INSTANCE_CLIENTS: jsonEnv<unknown[]>("[]"),
 
     // Platform-wide run limits (applied to EVERY run — classic + inline).
     // Empty object means defaults apply. Validated strictly inside the API
     // layer (apps/api/src/services/run-limits.ts); defaults are designed to
     // be non-breaking for existing deployments.
-    PLATFORM_RUN_LIMITS: z
-      .string()
-      .default("{}")
-      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+    PLATFORM_RUN_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // Inline-run specific limits (caps on manifest size, skills/tools count,
     // authorized URIs, retention). See docs/specs/INLINE_RUNS.md §6.
-    INLINE_RUN_LIMITS: z
-      .string()
-      .default("{}")
-      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+    INLINE_RUN_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // LLM proxy limits — caps on `/api/llm-proxy/*` (per-call rate, body size).
     // Empty object means defaults apply. Validated strictly at boot via
     // `apps/api/src/services/proxy-limits.ts`; unknown keys fail-fast.
-    LLM_PROXY_LIMITS: z
-      .string()
-      .default("{}")
-      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+    LLM_PROXY_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // Credential proxy limits — caps on `/api/credential-proxy/proxy`
     // (per-call rate, request/response body size, cookie-jar TTL). Same
     // strict-Zod validation as LLM_PROXY_LIMITS.
-    CREDENTIAL_PROXY_LIMITS: z
-      .string()
-      .default("{}")
-      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+    CREDENTIAL_PROXY_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // Unified runner protocol — governs the event-ingestion surface shared
     // by platform containers and remote CLIs. See
@@ -256,10 +253,7 @@ const envSchema = z
     REMOTE_RUN_SINK_MAX_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
     // Per-run event-route rate limit. Parsed at route-build time, changes
     // require a reboot. Empty object means defaults apply.
-    REMOTE_RUN_EVENT_LIMITS: z
-      .string()
-      .default("{}")
-      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+    REMOTE_RUN_EVENT_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
     // Redis dedup window for webhook-id replay detection. MUST exceed the
     // Standard Webhooks timestamp tolerance (5 min) so a replayed event
     // cannot slip through after its cache entry expires.
@@ -455,6 +449,12 @@ const envSchema = z
     // Outbound proxy
     PROXY_URL: z.string().optional(),
 
+    // OAuth internal-IdP SSRF allowlist (opt-in). Comma-separated hostnames the
+    // operator explicitly trusts on a private address — secret-bearing OAuth
+    // egress (token exchange/refresh, issuer discovery) bypasses the SSRF guard
+    // for these hosts so self-hosted deployments can reach an internal IdP.
+    OAUTH_ALLOWED_INTERNAL_IDP_HOSTS: z.string().optional(),
+
     // Run token signing (optional — if unset, run tokens are unsigned).
     //
     // Comma-separated keyring for online rotation (single value = keyring of
@@ -485,10 +485,7 @@ const envSchema = z
     //   [{ "keyId": "...", "publicKey": "<base64>", "comment": "..." }]
     // Bundles signed by a key not in this list (directly or via chain) are
     // rejected when AFPS_SIGNATURE_POLICY=required.
-    AFPS_TRUST_ROOT: z
-      .string()
-      .default("[]")
-      .transform((s) => JSON.parse(s) as unknown[]),
+    AFPS_TRUST_ROOT: jsonEnv<unknown[]>("[]"),
     // AFPS_SIGNATURE_POLICY — how to treat bundle signatures at load:
     //   - "off"      (default) — no verification, unsigned bundles accepted
     //   - "warn"     — verify if signed; log warnings on unsigned/invalid

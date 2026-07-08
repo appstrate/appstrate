@@ -130,6 +130,8 @@
   "run.tabPrompt": "Prompt",
   "run.emptyUsage": "No usage data",
   "run.infoTrigger": "Triggered by",
+  "run.infoVersion": "Version",
+  "run.infoMetadata": "Metadata",
   "run.infoInput": "Input",
   "run.infoConfig": "Configuration",
   "run.infoExecution": "Execution",

@@ -23,7 +23,7 @@
 import { mkdir, writeFile, access, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { commandExists, runCommand, waitForHttp } from "./os.ts";
 
 /** Known location of the user-local Bun install produced by the upstream installer. */
@@ -185,6 +185,30 @@ export async function writeEnvFile(dir: string, envFileBody: string): Promise<vo
  * control returns to the terminal — the user stops it with Ctrl-C
  * on the returned process, or by killing it via the printed PID.
  */
+/**
+ * Best-effort reap of the detached dev-server child on the failure path.
+ * Because it was spawned `detached: true`, it leads its own process group —
+ * signalling `-pid` targets the whole group (the `bun run dev` supervisor
+ * plus any workers it forked). Falls back to a direct `child.kill()` and
+ * swallows ESRCH/EPERM: the child may already be gone, and a failed reap
+ * must never mask the real "did not become healthy" error we're about to throw.
+ */
+function killDevServer(child: ChildProcess): void {
+  try {
+    if (typeof child.pid === "number") {
+      process.kill(-child.pid, "SIGTERM");
+    } else {
+      child.kill("SIGTERM");
+    }
+  } catch {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // already exited / no permission — nothing more we can do.
+    }
+  }
+}
+
 export async function spawnDevServer(
   dir: string,
   appUrl: string,
@@ -208,11 +232,17 @@ export async function spawnDevServer(
 
   const ok = await waitForHttp(appUrl, timeoutMs);
   if (!ok) {
+    // Reap the detached child before bailing — `detached: true` puts it in
+    // its own process group, so without this the (unref'd) `bun run dev`
+    // keeps running orphaned after we throw, holding the port and
+    // confusing the next install attempt.
+    killDevServer(child);
     throw new Error(
       `Dev server did not become healthy within ${Math.round(timeoutMs / 1000)}s — check the install dir for logs or run \`bun run dev\` manually.`,
     );
   }
   if (!child.pid) {
+    killDevServer(child);
     throw new Error("Dev server was launched but the child process reported no PID.");
   }
   return { pid: child.pid };

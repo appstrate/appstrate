@@ -15,7 +15,8 @@ import { isValidCron } from "../lib/cron.ts";
 import { validateInput } from "../services/schema.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { ApiError, invalidRequest, notFound, parseBody, validationFailed } from "../lib/errors.ts";
+import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
 import { getAppScope, type AppScope } from "../lib/scope.ts";
@@ -156,8 +157,7 @@ export function createSchedulesRouter() {
     async (c) => {
       const agent = c.get("package");
 
-      const body = await c.req.json();
-      const data = parseBody(createScheduleSchema, body);
+      const data = await readJsonBody(c, createScheduleSchema);
 
       // Block scheduling for agents with file inputs
       const inputSchema = agent.manifest.input?.schema;
@@ -242,8 +242,7 @@ export function createSchedulesRouter() {
       throw notFound(`Schedule '${id}' not found`);
     }
 
-    const body = await c.req.json();
-    const data = parseBody(updateScheduleSchema, body);
+    const data = await readJsonBody(c, updateScheduleSchema);
 
     // Validate cron expression if provided
     if (data.cron_expression && !isValidCron(data.cron_expression)) {

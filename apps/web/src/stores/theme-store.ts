@@ -26,13 +26,36 @@ function resolve(theme: Theme): "dark" | "light" {
   return theme === "system" ? getSystemTheme() : theme;
 }
 
-const stored = (localStorage.getItem(STORAGE_KEY) as Theme) || "system";
+const THEMES: readonly Theme[] = ["dark", "light", "system"];
+
+/** Coerce an untrusted localStorage value into a valid Theme, defaulting to "system". */
+function parseStoredTheme(value: string | null): Theme {
+  return value && (THEMES as readonly string[]).includes(value) ? (value as Theme) : "system";
+}
+
+// Accessing localStorage throws when storage is blocked (sandboxed iframe,
+// Safari private mode, cookies-disabled). Guard it so a blocked store can
+// never crash the SPA bootstrap — we just fall back to the default theme.
+function readStoredTheme(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+const stored = parseStoredTheme(readStoredTheme());
 
 export const useTheme = create<ThemeState>()((set) => ({
   theme: stored,
   resolvedTheme: resolve(stored),
   setTheme: (theme) => {
-    localStorage.setItem(STORAGE_KEY, theme);
+    // Persist best-effort — a blocked store must not throw out of setTheme.
+    try {
+      localStorage.setItem(STORAGE_KEY, theme);
+    } catch {
+      // Storage blocked — theme just won't persist across reloads.
+    }
     const resolvedTheme = resolve(theme);
     applyTheme(resolvedTheme);
     set({ theme, resolvedTheme });

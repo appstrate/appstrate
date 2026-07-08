@@ -31,8 +31,29 @@ export function substituteVars(
   opts?: { keepUnresolved?: boolean },
 ): string {
   const keep = opts?.keepUnresolved === true;
-  return input.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) => {
+  return input.replace(VAR_PLACEHOLDER, (match, key: string) => {
     if (key in fields) return fields[key]!;
     return keep ? match : "";
   });
+}
+
+/**
+ * Canonical `{{ key }}` placeholder grammar — single source for every scanner
+ * and substituter in this module. `String.replace` and `String.matchAll` are
+ * both safe with a shared `g`-flag regex (`replace` ignores `lastIndex`;
+ * `matchAll` clones the regex), so the constant carries no statefulness.
+ */
+const VAR_PLACEHOLDER = /\{\{\s*(\w+)\s*\}\}/g;
+
+/**
+ * True when `input` contains at least one `{{key}}` placeholder whose key
+ * exists in `fields`. Used by the credential-exfil guard in
+ * {@link ./integration-api-call.ts} to detect calls that substitute a
+ * credential field into an agent-controlled URL / header / body.
+ */
+export function referencesField(input: string, fields: Readonly<Record<string, unknown>>): boolean {
+  for (const match of input.matchAll(VAR_PLACEHOLDER)) {
+    if (match[1]! in fields) return true;
+  }
+  return false;
 }

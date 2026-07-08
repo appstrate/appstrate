@@ -23,3 +23,5 @@
 export { isBlockedHost, isBlockedUrl } from "@appstrate/afps-shared/ssrf";
 export { resolveAndCheckHost } from "@appstrate/afps-shared/ssrf-dns";
 export type { HostResolver, ResolvedHostCheck } from "@appstrate/afps-shared/ssrf-dns";
+export { guardedFetch, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
+export type { GuardedFetchOptions } from "@appstrate/afps-shared/guarded-fetch";

@@ -304,6 +304,11 @@ export interface RedirectFollowOptions {
   allowAllUris?: boolean;
   /** Optional logger for per-hop refusals. Defaults to a no-op. */
   logger?: RedirectLogger;
+  /**
+   * DNS resolver for the per-hop SSRF rebind check — injectable for tests.
+   * Production callers omit it (system resolver via `node:dns`).
+   */
+  resolveHost?: HostResolver;
 }
 
 /**
@@ -397,6 +402,22 @@ export async function fetchFollowingRedirectsCapturingCookies(
     // internal targets or off-allowlist hosts without these guards.
     if (isBlockedUrl(nextUrl)) {
       logger.warn("Redirect refused (SSRF blocklist)", {
+        integrationId,
+        hop,
+        host: redactHost(nextUrl),
+      });
+      throw new RedirectBlockedError("ssrf", nextUrl);
+    }
+    // The literal `isBlockedUrl` above only sees the redirect target's
+    // spelled-out host — a `302 → rebind.attacker.com` whose A record is
+    // 169.254.169.254 sails through it. Resolve every A/AAAA record for the
+    // hop host and refuse if ANY lands in a blocked range (fail closed on
+    // resolution failure), mirroring the initial-target `refuseSsrfUrl` gate.
+    const hopHostCheck = await resolveAndCheckHost(new URL(nextUrl).hostname, {
+      resolve: opts.resolveHost,
+    });
+    if (hopHostCheck.blocked) {
+      logger.warn("Redirect refused (SSRF DNS-rebind)", {
         integrationId,
         hop,
         host: redactHost(nextUrl),
@@ -533,6 +554,7 @@ export async function guardedFetch(
     injectedCredentialHeader: opts.injectedCredentialHeader ?? null,
     authorizedUris: opts.authorizedUris ?? undefined,
     allowAllUris: opts.allowAllUris,
+    ...(opts.resolveHost ? { resolveHost: opts.resolveHost } : {}),
     ...(opts.logger ? { logger: opts.logger } : {}),
   });
 }

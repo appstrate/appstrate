@@ -37,9 +37,9 @@ import {
   invalidRequest,
   notFound,
   internalError,
-  parseBody,
   systemEntityForbidden,
 } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createModelSchema = z
@@ -156,8 +156,7 @@ export function createModelsRouter() {
   router.post("/", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
-    const body = await c.req.json();
-    const data = parseBody(createModelSchema, body);
+    const data = await readJsonBody(c, createModelSchema);
 
     try {
       const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost, aliased } =
@@ -259,8 +258,7 @@ export function createModelsRouter() {
   router.post("/seed", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
-    const body = await c.req.json();
-    const data = parseBody(seedModelsSchema, body);
+    const data = await readJsonBody(c, seedModelsSchema);
 
     // Same constraint as POST /api/models — seeding a built-in credential
     // would FK-fail the org_models insert. Block early with an actionable
@@ -340,8 +338,7 @@ export function createModelsRouter() {
   // MUST be registered before PUT /:id
   router.put("/default", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json();
-    const data = parseBody(setDefaultSchema, body);
+    const data = await readJsonBody(c, setDefaultSchema);
 
     try {
       await setDefaultModel(orgId, data.modelId);
@@ -466,8 +463,7 @@ export function createModelsRouter() {
   // MUST be registered before /:id/test
   router.post("/test", rateLimit(5), requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json();
-    const data = parseBody(testInlineSchema, body);
+    const data = await readJsonBody(c, testInlineSchema);
 
     // Resolve the provider via the credential's providerId — the registry
     // owns apiShape and the default baseUrl. The user-supplied apiKey (if
@@ -519,6 +515,9 @@ export function createModelsRouter() {
       }
       return c.json(result);
     } catch (err) {
+      // A deliberate client error (e.g. notFound above) must surface as itself,
+      // not be masked as a 500 by the catch-all.
+      if (err instanceof ApiError) throw err;
       logger.error("Model test failed", {
         modelId,
         error: getErrorMessage(err),
@@ -531,8 +530,7 @@ export function createModelsRouter() {
   router.put("/:id", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
-    const body = await c.req.json();
-    const data = parseBody(updateModelSchema, body);
+    const data = await readJsonBody(c, updateModelSchema);
 
     if (isSystemModel(modelId)) {
       throw systemEntityForbidden("model", modelId);

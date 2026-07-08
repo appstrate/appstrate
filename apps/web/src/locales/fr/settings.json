@@ -352,6 +352,7 @@
   "connections.noConnections": "Aucune connexion active.",
   "connections.noConnectionsHint": "Connectez un service depuis les intégrations ci-dessous.",
   "connections.connectionCount": "{{count}} connexion(s)",
+  "connections.totalConnections": "{{count}} connexion(s) au total",
   "connections.deleteConfirm": "Supprimer la connexion {{name}} ({{account}}) ?",
   "connections.deleteConfirmImpact_one": "Cette connexion est utilisée par {{count}} agent dans l'application — supprimer la rendra indisponible pour eux.",
   "connections.deleteConfirmImpact_other": "Cette connexion est utilisée par {{count}} agents dans l'application — supprimer la rendra indisponible pour eux.",
