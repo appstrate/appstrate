@@ -7,7 +7,7 @@ One hardware-isolated [Firecracker](https://firecracker-microvm.github.io/) micr
 Platform side (the container) reads only these four variables:
 
 ```sh
-MODULES=oidc,webhooks,mcp,core-providers,firecracker   # add "firecracker"
+MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker   # add "firecracker"
 RUN_ADAPTER=firecracker
 FIRECRACKER_RUNNER_URL=http://<runner-host>:3100
 FIRECRACKER_RUNNER_TOKEN=<shared secret, >=16 chars>

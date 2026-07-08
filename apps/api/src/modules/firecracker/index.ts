@@ -14,7 +14,7 @@
  *   platform container ──HTTP──▶ appstrate-runner daemon ──▶ microVMs
  *
  * Activation:
- *     MODULES=oidc,webhooks,mcp,core-providers,firecracker
+ *     MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker
  *     RUN_ADAPTER=firecracker
  *     FIRECRACKER_RUNNER_URL=...   (http(s) address of the daemon)
  *     FIRECRACKER_RUNNER_TOKEN=... (shared bearer secret, >= 16 chars)

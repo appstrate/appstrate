@@ -13,7 +13,7 @@ The platform core has zero knowledge of Codex — provider id, OAuth client, wir
 Append the specifier to your `MODULES` env var:
 
 ```
-MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-codex
+MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,@appstrate/module-codex
 ```
 
 The platform resolves it via dynamic import — workspace resolution finds it locally during development; in production it must be installed (it ships as a workspace package and is bundled by the build).

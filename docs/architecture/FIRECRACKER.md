@@ -26,7 +26,7 @@ Zero footprint when absent: no env vars read, no backend registered.
 
 ```sh
 # Platform (container)
-MODULES=oidc,webhooks,mcp,core-providers,firecracker
+MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker
 RUN_ADAPTER=firecracker
 FIRECRACKER_RUNNER_URL=http://<runner-host>:3100
 FIRECRACKER_RUNNER_TOKEN=<shared secret, >=16 chars>
@@ -141,7 +141,7 @@ across upgrades by `mergeEnv` like every other secret):
 
 ```sh
 RUN_ADAPTER=firecracker
-MODULES=oidc,webhooks,mcp,core-providers,firecracker
+MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker
 FIRECRACKER_RUNNER_URL=http://<runner-ip>:3100
 FIRECRACKER_RUNNER_TOKEN=<minted or --runner-token>
 ```

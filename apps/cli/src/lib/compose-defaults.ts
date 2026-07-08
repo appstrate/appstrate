@@ -55,7 +55,7 @@ export const CODE_DEFAULTS: Record<string, string> = {
   OTEL_ENABLED: "false",
   OTEL_SERVICE_NAME: "appstrate-api",
   OTEL_TRUST_INCOMING_TRACE: "false",
-  MODULES: "oidc,webhooks,mcp,core-providers",
+  MODULES: "oidc,webhooks,mcp,core-providers,@appstrate/module-chat",
   OAUTH_REFRESH_WORKER_ENABLED: "false",
   INTEGRATION_REFRESH_MAX_FAILURES: "5",
   INTEGRATION_REFRESH_GRACE_SECONDS: "3600",

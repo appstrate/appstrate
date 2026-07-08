@@ -16,7 +16,7 @@ into the façade.
 
 ```sh
 # 1. Load the module (not in the MODULES default set)
-MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-observability
+MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,@appstrate/module-observability
 
 # 2. Enable export — either is sufficient
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318

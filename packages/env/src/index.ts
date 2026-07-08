@@ -346,7 +346,7 @@ const envSchema = z
     // `MODULES=none` boots with zero modules (the only sentinel — `""`
     // coalesces to unset, i.e. the default set, per the compose `${VAR:-}`
     // pattern).
-    MODULES: z.string().default("oidc,webhooks,mcp,core-providers"),
+    MODULES: z.string().default("oidc,webhooks,mcp,core-providers,@appstrate/module-chat"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),

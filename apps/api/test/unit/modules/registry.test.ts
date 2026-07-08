@@ -24,7 +24,13 @@ describe("getModuleRegistry", () => {
 
   it("returns the default OSS modules when MODULES is unset (subscription modules opt-in)", () => {
     setModulesEnv(undefined);
-    expect(getModuleRegistry()).toEqual(["oidc", "webhooks", "mcp", "core-providers"]);
+    expect(getModuleRegistry()).toEqual([
+      "oidc",
+      "webhooks",
+      "mcp",
+      "core-providers",
+      "@appstrate/module-chat",
+    ]);
   });
 
   it("treats the empty string as unset (env getter coalesces — default set)", () => {
