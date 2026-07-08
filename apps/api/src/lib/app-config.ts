@@ -3,6 +3,7 @@
 import { getEnv } from "@appstrate/env";
 import { applyModuleFeatures } from "./modules/module-loader.ts";
 import { isBootstrapTokenPending } from "./bootstrap-token.ts";
+import { getVersionInfo } from "./version.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
 // Platform config — computed once at boot, injected into SPA HTML.
@@ -47,6 +48,7 @@ export function buildAppConfig(): AppConfig {
       : {}),
     ...(bootstrapEmail ? { bootstrapOwnerEmail: bootstrapEmail } : {}),
     trustedOrigins: env.TRUSTED_ORIGINS,
+    version: getVersionInfo(),
   };
 }
 

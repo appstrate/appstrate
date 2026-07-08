@@ -17,6 +17,14 @@ export const healthPaths = {
                 type: "object",
                 properties: {
                   status: { type: "string", enum: ["healthy", "degraded", "unhealthy"] },
+                  version: {
+                    type: "object",
+                    properties: {
+                      app: { type: "string" },
+                      commit: { type: "string" },
+                    },
+                    required: ["app"],
+                  },
                   uptime_ms: { type: "number" },
                   checks: {
                     type: "object",
@@ -40,6 +48,7 @@ export const healthPaths = {
               },
               example: {
                 status: "healthy",
+                version: { app: "v1.0.0-beta.38", commit: "5bbe1d9" },
                 uptime_ms: 3600000,
                 checks: {
                   database: { status: "healthy", latency_ms: 2.3 },

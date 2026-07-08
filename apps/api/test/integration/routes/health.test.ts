@@ -52,6 +52,19 @@ describe("GET /health", () => {
     expect(body.uptime_ms).toBeGreaterThanOrEqual(0);
   });
 
+  it("includes deployed build identity under version", async () => {
+    const res = await app.request("/health");
+    const body = (await res.json()) as any;
+
+    expect(body).toHaveProperty("version");
+    expect(typeof body.version.app).toBe("string");
+    expect(body.version.app.length).toBeGreaterThan(0);
+    // commit is optional (absent on source runs without GIT_SHA)
+    if (body.version.commit !== undefined) {
+      expect(typeof body.version.commit).toBe("string");
+    }
+  });
+
   it("checks object contains database and agents sub-checks", async () => {
     const res = await app.request("/health");
     const body = (await res.json()) as any;

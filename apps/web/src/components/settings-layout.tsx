@@ -5,6 +5,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { SidebarNavLink } from "./sidebar-nav-link";
+import { AppVersion } from "./app-version";
 import { useSidebarStore } from "../stores/sidebar-store";
 import {
   Sidebar,
@@ -103,6 +104,9 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
               </SidebarMenu>
             </SidebarGroup>
           ))}
+          <div className="mt-auto px-4 py-3">
+            <AppVersion />
+          </div>
         </SidebarContent>
       </Sidebar>
 

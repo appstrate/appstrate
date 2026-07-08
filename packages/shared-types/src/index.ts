@@ -207,6 +207,15 @@ export interface AppConfig {
    */
   bootstrapOwnerEmail?: string;
   trustedOrigins: string[];
+  /**
+   * Deployed build identity (APP_VERSION / GIT_SHA stamped into the image at
+   * build time). Surfaced so the SPA can show which build is live. Absent on
+   * source/dev runs → the UI falls back to "dev".
+   */
+  version?: {
+    app: string;
+    commit?: string;
+  };
 }
 
 // --- Package Types ---
