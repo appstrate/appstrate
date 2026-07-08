@@ -2,11 +2,12 @@
 
 /**
  * Unit tests for the platform-side remote-runner env (remote-env.ts):
- * the SEC-2 transport-security gate. The platform↔daemon wire carries the
- * bearer token plus per-run credentials, so plaintext http:// to a
- * NON-loopback daemon warns loudly by default and becomes a hard refusal
- * when FIRECRACKER_RUNNER_TLS_REQUIRED=1. Loopback http:// and https://
- * always pass.
+ * the SEC-2 transport-security gate (P1-5, fail-closed). The
+ * platform↔daemon wire carries the bearer token plus per-run credentials,
+ * so plaintext http:// to a NON-loopback daemon is REFUSED by default —
+ * the only escape is an explicit FIRECRACKER_RUNNER_TLS_REQUIRED=0
+ * (trusted private link), which downgrades the refusal to a loud warning.
+ * Loopback http:// and https:// always pass.
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
@@ -80,11 +81,23 @@ describe("getRemoteEnv transport gate (end-to-end)", () => {
     expect(() => getRemoteEnv()).toThrow(/FIRECRACKER_RUNNER_TLS_REQUIRED/);
   });
 
-  it("parses (warn-only) when FIRECRACKER_RUNNER_TLS_REQUIRED is unset", () => {
+  it("refuses a plaintext non-loopback URL when FIRECRACKER_RUNNER_TLS_REQUIRED is unset (secure by default)", () => {
     setEnv("http://10.0.0.5:3100");
+    expect(() => getRemoteEnv()).toThrow(/FIRECRACKER_RUNNER_TLS_REQUIRED/);
+  });
+
+  it("parses (warn-only) when FIRECRACKER_RUNNER_TLS_REQUIRED=0 is set explicitly", () => {
+    setEnv("http://10.0.0.5:3100", "0");
     const env = getRemoteEnv();
     expect(env.FIRECRACKER_RUNNER_URL).toBe("http://10.0.0.5:3100");
     expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBe(false);
+  });
+
+  it("parses loopback http:// without the escape hatch (always allowed)", () => {
+    setEnv("http://127.0.0.1:3100");
+    const env = getRemoteEnv();
+    expect(env.FIRECRACKER_RUNNER_URL).toBe("http://127.0.0.1:3100");
+    expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBe(true);
   });
 
   it("accepts an https URL with FIRECRACKER_RUNNER_TLS_REQUIRED=1", () => {

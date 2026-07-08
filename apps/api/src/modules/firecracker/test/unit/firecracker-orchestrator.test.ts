@@ -110,8 +110,11 @@ describe("runId charset guard", () => {
   it("rejects a runId that reaches outside the safe filesystem charset", async () => {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec);
-    for (const bad of ["../escape", "a/b", "run 1", "run\0x"]) {
-      await expect(orch.createIsolationBoundary(bad)).rejects.toThrow(/safe set/);
+    // Dots are rejected too (RUN_ID_RE admits no `.` — kills `..` traversal).
+    for (const bad of ["../escape", "a/b", "run 1", "run\0x", "run.1"]) {
+      await expect(orch.createIsolationBoundary(bad)).rejects.toThrow(
+        /safe run-identifier charset/,
+      );
     }
     // Nothing was allocated for the rejected runs.
     expect(reservedIndexes(orch).size).toBe(0);

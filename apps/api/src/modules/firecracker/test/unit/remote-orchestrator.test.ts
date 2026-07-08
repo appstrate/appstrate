@@ -19,7 +19,10 @@ import {
 } from "../../runner/protocol.ts";
 import type { IsolationBoundary, WorkloadHandle } from "@appstrate/core/platform-types";
 
-const BASE_URL = "http://runner.test:8811";
+// Loopback on purpose: the P1-5 transport gate refuses plaintext http://
+// to a NON-loopback daemon at env parse time; these tests exercise the
+// protocol wire shapes, not the gate (covered by remote-env.test.ts).
+const BASE_URL = "http://127.0.0.1:8811";
 const TOKEN = "unit-test-token-0123456789";
 const ENV_KEYS = ["FIRECRACKER_RUNNER_URL", "FIRECRACKER_RUNNER_TOKEN"] as const;
 

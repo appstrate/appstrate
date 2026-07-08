@@ -403,16 +403,22 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
         : storedCookies.join("; ");
     }
 
-    // For the FormData body shape, drop ANY caller-supplied Content-Type so
-    // Bun's fetch generates the `multipart/form-data; boundary=…` header (with
-    // a boundary that matches the bytes it serialises) itself. `fetch` only
-    // sets that header when the caller left Content-Type unset — so a stale
-    // `multipart/...; boundary=old` OR any unrelated Content-Type (e.g.
-    // `application/json`) would both survive and desync from the actual body,
-    // producing a wire-broken request upstream.
+    // For the FormData body shape, drop a caller-supplied *multipart*
+    // Content-Type (matched case-insensitively on the header NAME) so Bun's
+    // fetch generates the `multipart/form-data; boundary=…` header itself —
+    // a stale `boundary=old` token would desync from the bytes fetch
+    // serialises and produce a wire-broken request upstream. The strip is
+    // deliberately scoped to `multipart/*` VALUES only: a non-multipart
+    // Content-Type (e.g. `application/json`) passes through untouched —
+    // fetch's Request construction overrides it for the FormData body
+    // anyway, and stripping it here would silently rewrite headers the
+    // caller explicitly set (contract pinned by multipart.test.ts).
     if (body.kind === "formData") {
       for (const key of Object.keys(resolvedHeaders)) {
-        if (key.toLowerCase() === "content-type") {
+        if (
+          key.toLowerCase() === "content-type" &&
+          /^multipart\//i.test(resolvedHeaders[key] ?? "")
+        ) {
           delete resolvedHeaders[key];
         }
       }
@@ -456,6 +462,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       injectedCredentialHeader: activeCreds.credentialHeaderName?.toLowerCase() ?? null,
       authorizedUris: creds.authorizedUris ?? undefined,
       allowAllUris: creds.allowAllUris,
+      // Thread the injected DNS resolver into the per-hop SSRF rebind
+      // check — same resolver the initial-target gate uses. Without it
+      // the follower falls back to the system resolver, which diverges
+      // from the sidecar's configured resolution (and fails closed on
+      // every hop in tests).
+      ...(deps.resolveHost ? { resolveHost: deps.resolveHost } : {}),
       // Preserve the sidecar's structured per-hop refusal logging.
       logger,
     });

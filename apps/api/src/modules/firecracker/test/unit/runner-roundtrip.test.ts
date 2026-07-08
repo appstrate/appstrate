@@ -99,7 +99,10 @@ describe("runner protocol round-trip (real client ↔ real server)", () => {
   const savedToken = process.env.FIRECRACKER_RUNNER_TOKEN;
 
   beforeEach(() => {
-    process.env.FIRECRACKER_RUNNER_URL = "http://10.0.0.5:3100";
+    // Loopback on purpose: the P1-5 transport gate refuses plaintext
+    // http:// to a non-loopback daemon; the round-trip never leaves the
+    // process anyway (fetchFn is the Hono app).
+    process.env.FIRECRACKER_RUNNER_URL = "http://127.0.0.1:3100";
     process.env.FIRECRACKER_RUNNER_TOKEN = TOKEN;
     _resetRemoteEnvCacheForTesting();
   });

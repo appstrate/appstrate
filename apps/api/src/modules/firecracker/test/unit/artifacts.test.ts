@@ -7,9 +7,15 @@
  * filesystem, a scripted fetch, and a stub zstd decompressor — so the
  * download / verify / atomic-install / skip logic is exercised with no
  * network, no real disk, and no `mock.module()` (a hard repo rule).
+ *
+ * The manifest is signature-gated (P1-4): every release scenario signs its
+ * manifest with an in-test Ed25519 keypair and injects the matching public
+ * key through the `manifestPublicKey` deps seam — the real verification
+ * code path runs on every download, with real crypto, never disabled.
  */
 
 import { describe, it, expect } from "bun:test";
+import { generateKeyPairSync, sign as ed25519Sign } from "node:crypto";
 import {
   ensureGuestArtifacts,
   FatalArtifactsError,
@@ -25,6 +31,24 @@ const BASE_URL = "https://example.test/releases";
 
 function sha256(bytes: Uint8Array): string {
   return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+}
+
+// ---------------------------------------------------------------------------
+// Manifest signing fixtures (P1-4 — the manifest is the root of trust)
+// ---------------------------------------------------------------------------
+
+const SIGNING_KEYPAIR = generateKeyPairSync("ed25519");
+/** Base64 raw 32-byte public key, the format the resolver expects. */
+const PUBKEY_B64 = Buffer.from(
+  SIGNING_KEYPAIR.publicKey.export({ format: "jwk" }).x as string,
+  "base64url",
+).toString("base64");
+
+const WRONG_KEYPAIR = generateKeyPairSync("ed25519");
+
+/** Detached base64 Ed25519 signature over the manifest's exact JSON bytes. */
+function signManifest(manifest: unknown, privateKey = SIGNING_KEYPAIR.privateKey): string {
+  return ed25519Sign(null, Buffer.from(JSON.stringify(manifest)), privateKey).toString("base64");
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +105,8 @@ interface FakeAsset {
   status?: number;
   bytes?: Uint8Array;
   json?: unknown;
+  /** Lazily computed body — evaluated at fetch time (e.g. a signature over a manifest a test mutates after scenario()). */
+  text?: () => string;
 }
 
 function makeFetch(assets: Record<string, FakeAsset>): {
@@ -95,6 +121,7 @@ function makeFetch(assets: Record<string, FakeAsset>): {
     const asset = assets[name];
     if (!asset) return new Response("not found", { status: 404 });
     if (asset.status && asset.status >= 400) return new Response("error", { status: asset.status });
+    if (asset.text !== undefined) return new Response(asset.text(), { status: 200 });
     if (asset.json !== undefined) return new Response(JSON.stringify(asset.json), { status: 200 });
     return new Response(asset.bytes ?? new Uint8Array(), { status: 200 });
   }) as unknown as typeof fetch;
@@ -132,11 +159,17 @@ function scenario(overrides: { guestProtocol?: number; arch?: string; version?: 
     },
   };
 
-  const { fetchFn, calls } = makeFetch({
+  // Manifest AND signature are computed lazily at fetch time over the same
+  // object, so a test that corrupts the manifest after scenario() still gets
+  // a VALID signature over the corrupted bytes — exercising the checksum
+  // gate, not the signature gate.
+  const assets: Record<string, FakeAsset> = {
     "firecracker-artifacts-manifest.json": { json: manifest },
+    "firecracker-artifacts-manifest.json.sig": { text: () => signManifest(manifest) },
     [`vmlinux-${arch}`]: { bytes: kernelBytes },
     [`rootfs-${arch}.ext4.zst`]: { bytes: rootfsCompressed },
-  });
+  };
+  const { fetchFn, calls } = makeFetch(assets);
 
   return {
     arch,
@@ -145,6 +178,7 @@ function scenario(overrides: { guestProtocol?: number; arch?: string; version?: 
     rootfsPlain,
     rootfsCompressed,
     manifest,
+    assets,
     fetchFn,
     calls,
     decompressZstd: () => rootfsPlain,
@@ -173,7 +207,13 @@ describe("ensureGuestArtifacts — install", () => {
 
     await ensureGuestArtifacts(
       { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+      {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      },
     );
 
     expect(files.get(KERNEL_PATH)).toEqual(s.kernelBytes);
@@ -193,6 +233,7 @@ describe("ensureGuestArtifacts — install", () => {
         fs: fsA.fs,
         decompressZstd: unpinned.decompressZstd,
         arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
       },
     );
     expect(unpinned.calls[0]).toBe(
@@ -214,6 +255,7 @@ describe("ensureGuestArtifacts — install", () => {
         fs: fsB.fs,
         decompressZstd: pinned.decompressZstd,
         arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
       },
     );
     expect(pinned.calls[0]).toBe(`${BASE_URL}/download/v1.2.3/firecracker-artifacts-manifest.json`);
@@ -225,7 +267,13 @@ describe("ensureGuestArtifacts — install", () => {
 
     await ensureGuestArtifacts(
       { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+      {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      },
     );
 
     // The kernel is written to a `.tmp-*` sibling and only then renamed
@@ -254,7 +302,13 @@ describe("ensureGuestArtifacts — checksum verification", () => {
     await expect(
       ensureGuestArtifacts(
         { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-        { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+        {
+          fetchFn: s.fetchFn,
+          fs,
+          decompressZstd: s.decompressZstd,
+          arch: "x86_64",
+          manifestPublicKey: PUBKEY_B64,
+        },
       ),
     ).rejects.toThrow(FatalArtifactsError);
     // Nothing installed on a checksum failure.
@@ -270,7 +324,13 @@ describe("ensureGuestArtifacts — checksum verification", () => {
       ensureGuestArtifacts(
         { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
         // decompressor returns unexpected bytes → sha mismatch
-        { fetchFn: s.fetchFn, fs, decompressZstd: () => new Uint8Array([0, 0, 0]), arch: "x86_64" },
+        {
+          fetchFn: s.fetchFn,
+          fs,
+          decompressZstd: () => new Uint8Array([0, 0, 0]),
+          arch: "x86_64",
+          manifestPublicKey: PUBKEY_B64,
+        },
       ),
     ).rejects.toThrow(FatalArtifactsError);
   });
@@ -290,7 +350,13 @@ describe("ensureGuestArtifacts — skip when present", () => {
 
     await ensureGuestArtifacts(
       { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+      {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      },
     );
 
     expect(s.calls).toHaveLength(0);
@@ -315,7 +381,13 @@ describe("ensureGuestArtifacts — skip when present", () => {
         version: "1.2.3",
         local: false,
       },
-      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+      {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      },
     );
 
     expect(s.calls).toHaveLength(0);
@@ -338,7 +410,13 @@ describe("ensureGuestArtifacts — skip when present", () => {
 
     await ensureGuestArtifacts(
       { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+      {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      },
     );
 
     expect(s.calls.length).toBeGreaterThan(0);
@@ -357,7 +435,13 @@ describe("ensureGuestArtifacts — skip when present", () => {
 
     await ensureGuestArtifacts(
       { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+      {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      },
     );
 
     expect(s.calls.length).toBeGreaterThan(0);
@@ -382,7 +466,13 @@ describe("ensureGuestArtifacts — skip when present", () => {
         version: "2.0.0",
         local: false,
       },
-      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+      {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      },
     );
 
     expect(s.calls.length).toBeGreaterThan(0);
@@ -398,7 +488,13 @@ describe("ensureGuestArtifacts — LOCAL opt-out", () => {
 
     await ensureGuestArtifacts(
       { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: true },
-      { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+      {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      },
     );
 
     expect(s.calls).toHaveLength(0);
@@ -414,7 +510,13 @@ describe("ensureGuestArtifacts — protocol mismatch", () => {
     await expect(
       ensureGuestArtifacts(
         { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-        { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+        {
+          fetchFn: s.fetchFn,
+          fs,
+          decompressZstd: s.decompressZstd,
+          arch: "x86_64",
+          manifestPublicKey: PUBKEY_B64,
+        },
       ),
     ).rejects.toThrow(FatalArtifactsError);
     expect(files.has(KERNEL_PATH)).toBe(false);
@@ -436,7 +538,13 @@ describe("ensureGuestArtifacts — protocol mismatch", () => {
           version: "9.9.9",
           local: false,
         },
-        { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "x86_64" },
+        {
+          fetchFn: s.fetchFn,
+          fs,
+          decompressZstd: s.decompressZstd,
+          arch: "x86_64",
+          manifestPublicKey: PUBKEY_B64,
+        },
       ),
     ).rejects.toThrow(/guest-protocol mismatch/);
   });
@@ -450,9 +558,116 @@ describe("ensureGuestArtifacts — arch not published", () => {
     await expect(
       ensureGuestArtifacts(
         { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-        { fetchFn: s.fetchFn, fs, decompressZstd: s.decompressZstd, arch: "aarch64" },
+        {
+          fetchFn: s.fetchFn,
+          fs,
+          decompressZstd: s.decompressZstd,
+          arch: "aarch64",
+          manifestPublicKey: PUBKEY_B64,
+        },
       ),
     ).rejects.toThrow(FatalArtifactsError);
+  });
+});
+
+describe("ensureGuestArtifacts — manifest signature gate (P1-4)", () => {
+  const CONFIG = {
+    kernelPath: KERNEL_PATH,
+    rootfsPath: ROOTFS_PATH,
+    baseUrl: BASE_URL,
+    local: false,
+  };
+
+  it("is fatal when the release publishes no signature asset — even with usable artifacts on disk", async () => {
+    const s = scenario();
+    delete s.assets["firecracker-artifacts-manifest.json.sig"];
+    // Protocol-compatible artifacts present: the keep-existing network
+    // fallback must NOT swallow an unsigned release.
+    const { fs } = makeFs({
+      [KERNEL_PATH]: new Uint8Array([1]),
+      [ROOTFS_PATH]: new Uint8Array([2]),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION,
+      }),
+    });
+
+    await expect(
+      ensureGuestArtifacts(
+        { ...CONFIG, version: "5.0.0" },
+        {
+          fetchFn: s.fetchFn,
+          fs,
+          decompressZstd: s.decompressZstd,
+          arch: "x86_64",
+          manifestPublicKey: PUBKEY_B64,
+        },
+      ),
+    ).rejects.toThrow(/refusing to.*trust an unsigned/);
+  });
+
+  it("is fatal when the signature does not verify against the pinned key (tampered manifest)", async () => {
+    const s = scenario();
+    s.assets["firecracker-artifacts-manifest.json.sig"] = {
+      text: () => signManifest(s.manifest, WRONG_KEYPAIR.privateKey),
+    };
+    const { fs, files } = makeFs();
+
+    await expect(
+      ensureGuestArtifacts(CONFIG, {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      }),
+    ).rejects.toThrow(/manifest signature is invalid/);
+    // Nothing installed from an unverified manifest.
+    expect(files.has(KERNEL_PATH)).toBe(false);
+    expect(files.has(ROOTFS_PATH)).toBe(false);
+  });
+
+  it("is fatal when no signing key is provisioned (placeholder constant, no override)", async () => {
+    const savedPubkey = process.env.FIRECRACKER_ARTIFACTS_PUBKEY;
+    delete process.env.FIRECRACKER_ARTIFACTS_PUBKEY;
+    try {
+      const s = scenario();
+      const { fs } = makeFs();
+
+      await expect(
+        ensureGuestArtifacts(CONFIG, {
+          fetchFn: s.fetchFn,
+          fs,
+          decompressZstd: s.decompressZstd,
+          arch: "x86_64",
+          // no manifestPublicKey: falls through env → pinned placeholder
+        }),
+      ).rejects.toThrow(/signing key is not provisioned/);
+    } finally {
+      if (savedPubkey === undefined) delete process.env.FIRECRACKER_ARTIFACTS_PUBKEY;
+      else process.env.FIRECRACKER_ARTIFACTS_PUBKEY = savedPubkey;
+    }
+  });
+
+  it("resolves the key from FIRECRACKER_ARTIFACTS_PUBKEY when no deps override is given", async () => {
+    const savedPubkey = process.env.FIRECRACKER_ARTIFACTS_PUBKEY;
+    process.env.FIRECRACKER_ARTIFACTS_PUBKEY = PUBKEY_B64;
+    try {
+      const s = scenario();
+      const { fs, files } = makeFs();
+
+      await ensureGuestArtifacts(CONFIG, {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+      });
+
+      expect(files.get(KERNEL_PATH)).toEqual(s.kernelBytes);
+    } finally {
+      if (savedPubkey === undefined) delete process.env.FIRECRACKER_ARTIFACTS_PUBKEY;
+      else process.env.FIRECRACKER_ARTIFACTS_PUBKEY = savedPubkey;
+    }
   });
 });
 
@@ -477,7 +692,7 @@ describe("ensureGuestArtifacts — network failure policy", () => {
           version: "5.0.0",
           local: false,
         },
-        { fetchFn: throwingFetch, fs, arch: "x86_64" },
+        { fetchFn: throwingFetch, fs, arch: "x86_64", manifestPublicKey: PUBKEY_B64 },
       ),
     ).resolves.toBeUndefined();
   });
@@ -498,7 +713,7 @@ describe("ensureGuestArtifacts — network failure policy", () => {
     await expect(
       ensureGuestArtifacts(
         { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-        { fetchFn: throwingFetch, fs, arch: "x86_64" },
+        { fetchFn: throwingFetch, fs, arch: "x86_64", manifestPublicKey: PUBKEY_B64 },
       ),
     ).rejects.toThrow(/incompatible guest protocol.*could not be downloaded/);
   });
@@ -509,7 +724,7 @@ describe("ensureGuestArtifacts — network failure policy", () => {
     await expect(
       ensureGuestArtifacts(
         { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
-        { fetchFn: throwingFetch, fs, arch: "x86_64" },
+        { fetchFn: throwingFetch, fs, arch: "x86_64", manifestPublicKey: PUBKEY_B64 },
       ),
     ).rejects.toThrow(/missing and could not be downloaded/);
   });
