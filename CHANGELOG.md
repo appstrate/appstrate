@@ -8,6 +8,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Opt-in observability module (#847)** — OpenTelemetry moves out of core
+  behind the `@appstrate/core/telemetry` façade into a workspace module
+  `@appstrate/module-observability`. Core ships zero OTel footprint; add the
+  module to `MODULES` and set `OTEL_ENABLED` to activate tracing/metrics.
+
+### Fixed
+
+- **Claude-engine native structured output (#849)** — a run whose agent
+  declares an `output.schema` now captures the Claude engine's native
+  structured output into `RunResult.output` (previously only populated via
+  the `output` runtime tool).
+- **Transparent egress for `delivery.env` integrations (#850, #779)** — the
+  sidecar no longer drops egress for integrations that inject credentials via
+  `delivery.env`; the per-run proxy path is applied transparently.
+- **OIDC cross-context PKCE resume (#852)** — the end-user OAuth flow survives
+  a cross-context resume (invite-signup state mismatch) instead of failing the
+  PKCE exchange.
+
+### Security
+
+- **Full-codebase security review remediation (#855, #863)** — 9 P0 + 15 P1 +
+  12 systemic findings closed (SSRF `guarded-fetch` + bounded unzip hardening
+  in `@appstrate/afps-shared`, among others), followed by a DRY/KISS/YAGNI
+  audit-follow-up pass.
+
+### CLI
+
+- **Runner download progress + `runner uninstall` (#845)** — the CLI streams
+  the daemon binary download with progress and adds a `runner uninstall`
+  command.
+
+### Documentation
+
+- **Firecracker execution backend (#844)** — surfaced across the user-facing
+  docs.
+
+### Changed
+
+- CI action bumps: `docker/setup-buildx-action` 4.1.0→4.2.0 (#857),
+  `actions/cache/restore` 4.2.4→6.1.0 (#858),
+  `github/codeql-action/upload-sarif` 4.36.2→4.36.3 (#859),
+  `actions/github-script` 7.0.1→9.0.0 (#861).
+
+<!-- prior unreleased entries -->
+
+### Added
+
 - **Proxy-upload mode for S3 storage (#829)** — with `S3_PUBLIC_ENDPOINT`
   unset, upload URLs are now signed against `APP_URL`
   (`PUT /api/uploads/_content`) and the platform streams the body to the
