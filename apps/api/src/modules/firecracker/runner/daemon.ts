@@ -26,12 +26,13 @@
  * health with the guest→platform reachability facts.
  */
 
-import { chmod, mkdir, unlink } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { FirecrackerOrchestrator } from "../orchestrator.ts";
 import { createHostExec } from "../host-net.ts";
 import { getFirecrackerEnv } from "./host-env.ts";
 import { getRunnerEnv, resolveListenConfig } from "./env.ts";
+import { removeStaleSocket, unlinkSocketIfPresent } from "./socket-file.ts";
 import { createRunnerApp } from "./server.ts";
 import { ensureGuestArtifacts } from "./artifacts.ts";
 import { warmHostPageCache } from "./readahead.ts";
@@ -166,10 +167,12 @@ if (listen.kind === "unix") {
     );
   }
   // The socket's directory may not exist on a fresh host (/run subdirs
-  // are tmpfs, gone after reboot); a stale socket FILE from a crashed
-  // daemon must be unlinked too — Bun.serve refuses to bind over one.
+  // are tmpfs, gone after reboot); a stale socket from a crashed daemon
+  // must be removed too — Bun.serve refuses to bind over one. The removal
+  // is type-guarded (socket-only): a root daemon must never delete a
+  // non-socket node a misconfigured env points at.
   await mkdir(dirname(listen.socketPath), { recursive: true });
-  await unlink(listen.socketPath).catch(() => {});
+  await removeStaleSocket(listen.socketPath);
 }
 
 // idleTimeout: 0 disables Bun's idle timeout entirely on BOTH branches:
@@ -177,19 +180,31 @@ if (listen.kind === "unix") {
 // whole run — either would be severed by the 10s default. (@types/bun
 // only declares idleTimeout on the TCP options branch, but the runtime
 // honors it per-connection regardless of transport — hence the cast.)
-const server =
-  listen.kind === "unix"
-    ? Bun.serve({
-        unix: listen.socketPath,
-        fetch: app.fetch,
-        idleTimeout: 0,
-      } as unknown as Parameters<typeof Bun.serve>[0])
-    : Bun.serve({
-        hostname: listen.host,
-        port: listen.port,
-        fetch: app.fetch,
-        idleTimeout: 0,
-      });
+//
+// The unix bind runs under a tightened umask (0177 → socket created 0600)
+// so there is no window between bind and the chmod below where the node is
+// wider than the configured mode. Restored right after — the daemon
+// creates other files later (run state, artifacts) with normal modes.
+let server: ReturnType<typeof Bun.serve>;
+if (listen.kind === "unix") {
+  const previousUmask = process.umask(0o177);
+  try {
+    server = Bun.serve({
+      unix: listen.socketPath,
+      fetch: app.fetch,
+      idleTimeout: 0,
+    } as unknown as Parameters<typeof Bun.serve>[0]);
+  } finally {
+    process.umask(previousUmask);
+  }
+} else {
+  server = Bun.serve({
+    hostname: listen.host,
+    port: listen.port,
+    fetch: app.fetch,
+    idleTimeout: 0,
+  });
+}
 
 if (listen.kind === "unix") {
   // chmod AFTER bind (the node only exists then). Default 0660 —
@@ -215,10 +230,11 @@ async function shutdown(signal: string): Promise<void> {
   // order would let the platform start a run into a dying daemon.
   server.stop();
   // Best-effort socket cleanup — a leftover node would force the NEXT
-  // boot through the stale-socket unlink path anyway, but tidying here
-  // keeps `ls` honest. Never throws (shutdown must reach exit(0)).
+  // boot through the stale-socket removal path anyway, but tidying here
+  // keeps `ls` honest. Type-guarded + never throws (shutdown must reach
+  // exit(0)).
   if (listen.kind === "unix") {
-    await unlink(listen.socketPath).catch(() => {});
+    await unlinkSocketIfPresent(listen.socketPath);
   }
   try {
     await orchestrator.shutdown();

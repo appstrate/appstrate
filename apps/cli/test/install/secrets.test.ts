@@ -305,6 +305,26 @@ describe("generateEnvForTier — Firecracker backend (#819)", () => {
     expect(env.MODULES).toBe("oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker");
     expect(env.FIRECRACKER_RUNNER_URL).toBe("http://10.0.0.5:3100");
     expect(env.FIRECRACKER_RUNNER_TOKEN).toBe("tok-abcdef1234567890");
+    // TCP transport — the compose socket-dir mount keeps its harmless default.
+    expect(env.APPSTRATE_RUNNER_SOCKET_DIR).toBeUndefined();
+  });
+
+  it("points the compose socket-dir mount at the daemon's dir for a unix:// runner URL", () => {
+    const env = generateEnvForTier(
+      3,
+      "http://localhost:3000",
+      {},
+      {},
+      {
+        adapter: "firecracker",
+        runnerUrl: "unix:///run/appstrate-runner/runner.sock",
+        runnerToken: "tok-abcdef1234567890",
+      },
+    );
+    expect(env.FIRECRACKER_RUNNER_URL).toBe("unix:///run/appstrate-runner/runner.sock");
+    // Without this key the compose mount falls back to an empty local dir
+    // and the platform would dial a socket that never appears.
+    expect(env.APPSTRATE_RUNNER_SOCKET_DIR).toBe("/run/appstrate-runner");
   });
 
   it("never emits firecracker keys on Tier 0 (option is Docker-tier only)", () => {

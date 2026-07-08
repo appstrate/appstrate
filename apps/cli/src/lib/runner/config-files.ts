@@ -239,7 +239,7 @@ export function parseRunnerEnvFile(text: string): Record<string, string> {
  *                                makes /run read-only, so the daemon could
  *                                not bind its socket there. For the canonical
  *                                /run/appstrate-runner location we let systemd
- *                                own the dir (created 0770 at start).
+ *                                own the dir (created 0771 at start).
  *                                RuntimeDirectoryPreserve=yes is REQUIRED:
  *                                the platform container bind-mounts this dir,
  *                                and a bind mount pins the directory INODE —
@@ -255,10 +255,10 @@ export function parseRunnerEnvFile(text: string): Record<string, string> {
 export function renderRunnerUnit(config: RunnerConfig): string {
   // UDS transport: the socket's parent dir must be writable under
   // ProtectSystem=strict. The canonical /run/appstrate-runner location gets
-  // the systemd RuntimeDirectory treatment (create 0770, PRESERVED across
+  // the systemd RuntimeDirectory treatment (create 0771, PRESERVED across
   // restarts — see the doc-comment: the platform container's bind mount pins
-  // the dir inode); any other parent is the operator's own dir — just carve
-  // it writable.
+  // the dir inode); any other parent is the operator's own dir — pre-create
+  // it (privileged ExecStartPre) and carve it writable.
   const socketDirLines: string[] = [];
   if (config.socketPath) {
     const socketDir = dirname(config.socketPath);
@@ -267,13 +267,19 @@ export function renderRunnerUnit(config: RunnerConfig): string {
         "# UDS transport: systemd owns the socket dir (strict /run is read-only).",
         "# Preserve=yes: the platform container bind-mounts this dir — recreating",
         "# it on restart would strand the container on the old directory inode.",
+        "# Mode 0771 (o=x, not o=rwx): a rootless / userns-remapped platform",
+        "# container needs TRAVERSAL to reach the socket; the socket's own mode",
+        "# (FIRECRACKER_RUNNER_SOCKET_MODE) + the bearer token stay the gates.",
         `RuntimeDirectory=${RUNNER_RUNTIME_DIR.replace(/^\/run\//, "")}`,
-        "RuntimeDirectoryMode=0770",
+        "RuntimeDirectoryMode=0771",
         "RuntimeDirectoryPreserve=yes",
       );
     } else {
       socketDirLines.push(
-        "# UDS transport: custom socket dir carved writable (strict FS otherwise).",
+        "# UDS transport: custom socket dir — pre-created OUTSIDE the sandbox",
+        "# (`+` prefix; ReadWritePaths on a missing dir is a no-op and the daemon",
+        "# cannot mkdir a parent under ProtectSystem=strict), then carved writable.",
+        `ExecStartPre=+/bin/mkdir -p ${socketDir}`,
         `ReadWritePaths=${socketDir}`,
       );
     }

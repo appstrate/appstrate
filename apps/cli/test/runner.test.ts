@@ -440,12 +440,15 @@ describe("renderRunnerUnit", () => {
   it("UDS at the canonical /run location: systemd owns the socket dir (RuntimeDirectory)", () => {
     const unit = renderRunnerUnit({ ...config, socketPath: RUNNER_DEFAULT_SOCKET_PATH });
     // ProtectSystem=strict makes /run read-only — RuntimeDirectory is what
-    // lets the daemon bind its socket there (created 0770). Preserve=yes is
-    // load-bearing: the platform container bind-mounts the dir, and a
-    // remove+recreate on daemon restart would strand the container on the
-    // orphaned directory inode (new socket invisible until container restart).
+    // lets the daemon bind its socket there. Mode 0771 (not 0770): a
+    // rootless / userns-remapped platform container needs o=x TRAVERSAL to
+    // reach the socket — the socket mode + bearer token stay the gates.
+    // Preserve=yes is load-bearing: the platform container bind-mounts the
+    // dir, and a remove+recreate on daemon restart would strand the
+    // container on the orphaned directory inode (new socket invisible
+    // until container restart).
     expect(unit).toContain("RuntimeDirectory=appstrate-runner");
-    expect(unit).toContain("RuntimeDirectoryMode=0770");
+    expect(unit).toContain("RuntimeDirectoryMode=0771");
     expect(unit).toContain("RuntimeDirectoryPreserve=yes");
     expect(unit).not.toContain("ReadWritePaths=/run/appstrate-runner");
     // The rest of the hardening posture is untouched.
@@ -453,8 +456,12 @@ describe("renderRunnerUnit", () => {
     expect(unit).toContain(`ReadWritePaths=${config.dataDir}`);
   });
 
-  it("UDS at a custom parent dir: carves it writable via ReadWritePaths instead", () => {
+  it("UDS at a custom parent dir: pre-creates it (privileged) and carves it writable", () => {
     const unit = renderRunnerUnit({ ...config, socketPath: "/srv/sockets/runner.sock" });
+    // ReadWritePaths on a missing dir is a no-op and the sandboxed daemon
+    // cannot mkdir it under ProtectSystem=strict — the `+` ExecStartPre is
+    // what guarantees the dir exists on a fresh host.
+    expect(unit).toContain("ExecStartPre=+/bin/mkdir -p /srv/sockets");
     expect(unit).toContain("ReadWritePaths=/srv/sockets");
     expect(unit).not.toContain("RuntimeDirectory=");
     expect(unit).not.toContain("RuntimeDirectoryMode=");

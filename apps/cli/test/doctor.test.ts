@@ -643,6 +643,46 @@ describe("defaultProbeFirecracker — unix:// runner URL (UDS transport, #868)",
     expect(health.status).toBe("unauthorized");
     expect(health.detail).toBe("HTTP 401");
   });
+
+  it("refuses the two-slash unix typo instead of probing the wrong socket", async () => {
+    // unix://var/run/x.sock parses "var" as a hostname — probing
+    // /run/x.sock would contradict the platform's boot refusal of the
+    // same URL. No fetch must happen.
+    const { calls, fetchImpl } = capturingFetch(200);
+    const health = await defaultProbeFirecracker(
+      "unix://var/run/x.sock",
+      "tok-abcdef1234567890",
+      fetchImpl,
+    );
+    expect(health.status).toBe("unreachable");
+    expect(health.detail).toContain("THREE slashes");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("keeps a unix:// URL verbatim — no trailing-slash strip on a socket path", async () => {
+    const { calls, fetchImpl } = capturingFetch(200);
+    await defaultProbeFirecracker(
+      // A trailing slash on a unix path names a DIFFERENT node — the
+      // http(s)-only normalization must not touch it.
+      "unix:///run/appstrate-runner/runner.sock/",
+      "tok-abcdef1234567890",
+      fetchImpl,
+    );
+    expect(calls[0]!.init?.unix).toBe("/run/appstrate-runner/runner.sock/");
+  });
+
+  it("appends a sudo hint when the socket probe fails with EACCES (rootless doctor)", async () => {
+    const fetchImpl = (async () => {
+      throw new Error("EACCES: permission denied, connect");
+    }) as unknown as typeof fetch;
+    const health = await defaultProbeFirecracker(
+      "unix:///run/appstrate-runner/runner.sock",
+      "tok-abcdef1234567890",
+      fetchImpl,
+    );
+    expect(health.status).toBe("unreachable");
+    expect(health.detail).toContain("re-run with sudo");
+  });
 });
 
 describe("internal info payload", () => {

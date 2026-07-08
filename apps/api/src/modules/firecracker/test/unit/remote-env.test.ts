@@ -65,6 +65,20 @@ describe("parseRunnerTransport", () => {
     expect(() => parseRunnerTransport("unix://")).toThrow(/absolute socket path/);
   });
 
+  it("decodes a percent-encoded socket path (URL pathname is encoded)", () => {
+    // "/run/my dir/runner.sock" round-trips through URL as "%20" — the
+    // path we dial must be byte-identical to the filesystem node.
+    expect(parseRunnerTransport("unix:///run/my%20dir/runner.sock")).toEqual({
+      kind: "unix",
+      socketPath: "/run/my dir/runner.sock",
+    });
+  });
+
+  it("rejects a unix:// URL carrying a query or fragment (silently dropped otherwise)", () => {
+    expect(() => parseRunnerTransport("unix:///run/x.sock?foo=1")).toThrow(/bare socket path/);
+    expect(() => parseRunnerTransport("unix:///run/x.sock#frag")).toThrow(/bare socket path/);
+  });
+
   it("rejects unsupported protocols with the accepted alternatives", () => {
     expect(() => parseRunnerTransport("ftp://runner:3100")).toThrow(/http\(s\)/);
   });

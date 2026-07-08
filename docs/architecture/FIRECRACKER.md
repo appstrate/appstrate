@@ -75,14 +75,20 @@ security decision. Decision matrix:
   (`appstrate runner install --socket …`; the systemd unit uses
   `RuntimeDirectory=appstrate-runner` for the canonical
   `/run/appstrate-runner/runner.sock` path). A containerized platform
-  reaches it through a bind-mount of the socket directory
-  (`/run/appstrate-runner:/run/appstrate-runner` in the
-  `examples/self-hosting` compose templates). Socket permissions default
-  to `0660 root:root` — sufficient for the stock platform image, whose
-  container process runs as root; a rootless / userns-remapped platform
-  container needs `FIRECRACKER_RUNNER_SOCKET_MODE=0666` on the daemon
-  (the bearer token is still enforced on every request, so the wider
-  mode grants transport reachability, not auth). This replaces the old
+  reaches it through a bind-mount of the socket directory: the
+  `examples/self-hosting` compose templates mount
+  `${APPSTRATE_RUNNER_SOCKET_DIR:-./data/appstrate-runner}` at
+  `/run/appstrate-runner` — the firecracker installer sets
+  `APPSTRATE_RUNNER_SOCKET_DIR=/run/appstrate-runner` in the platform
+  `.env`; without it the mount falls back to a harmless empty local dir
+  (so non-Firecracker installs never touch host `/run`, which Docker
+  Desktop's default file sharing does not cover). Socket permissions
+  default to `0660 root:root` — sufficient for the stock platform image,
+  whose container process runs as root; a rootless / userns-remapped
+  platform container needs `FIRECRACKER_RUNNER_SOCKET_MODE=0666` on the
+  daemon (the socket dir is created `0771`, so any uid can traverse it;
+  the bearer token is still enforced on every request, so the wider mode
+  grants transport reachability, not auth). This replaces the old
   co-located workaround of pointing the containerized platform at the
   host LAN IP over plaintext `http://`, which the boot guard refuses.
 - **Split host (separate KVM box) — `https://` behind a TLS reverse
@@ -197,9 +203,10 @@ The main install itself stays **rootless** — it never sudo's. Two topologies:
   detects the host LAN IPv4 (confirm/override interactively, or `--host-ip` —
   guests still reach the platform over the network, so
   `FIRECRACKER_RUNNER_PLATFORM_URL` needs it), mints a runner token, writes
-  `FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock` into the
-  platform `.env` (UDS transport — the compose templates bind-mount
-  `/run/appstrate-runner` into the platform container), brings up the
+  `FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock` plus
+  `APPSTRATE_RUNNER_SOCKET_DIR=/run/appstrate-runner` into the platform
+  `.env` (UDS transport — the compose templates bind-mount the socket dir
+  into the platform container from that variable), brings up the
   platform, and _then_ runs
   `sudo appstrate runner install --socket /run/appstrate-runner/runner.sock --platform-url http://<host-ip>:<port> --token <token> --yes`
   as a subprocess (sudo prompts on the same TTY). If that step fails — or the

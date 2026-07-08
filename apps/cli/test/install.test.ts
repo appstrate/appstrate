@@ -1190,24 +1190,65 @@ describe("resolveRunBackend — non-interactive firecracker validation matrix", 
     ).rejects.toThrow(/IPv4 literal/);
   });
 
-  it("rejects a non-IPv4 --runner-url", async () => {
-    await expect(
-      resolveRunBackend(
-        {
-          runAdapter: "firecracker",
-          runnerUrl: "http://runner.local:3100",
-          runnerToken: "x".repeat(16),
-          appPort: 3000,
-          nonInteractive: true,
-        },
-        {},
-      ),
-    ).rejects.toThrow(/must be http\(s\):\/\/<IPv4>/);
+  it("accepts an https hostname --runner-url (TLS reverse proxy) with no warning", async () => {
+    // The runner URL never reaches a guest, so the guests-need-IPv4 rule
+    // does not apply — a split-host daemon normally sits behind a TLS
+    // reverse proxy, which means a DNS name.
+    const warnings: string[] = [];
+    const cfg = await resolveRunBackend(
+      {
+        runAdapter: "firecracker",
+        runnerUrl: "https://runner.example.com:3100",
+        runnerToken: "x".repeat(16),
+        appPort: 3000,
+        nonInteractive: true,
+      },
+      { warn: (m) => warnings.push(m), detectLanIpv4: () => "10.0.0.5" },
+    );
+    expect(cfg.adapter).toBe("firecracker");
+    expect(cfg.adapter === "firecracker" && cfg.runnerUrl).toBe("https://runner.example.com:3100");
+    expect(warnings).toEqual([]);
   });
 
-  it("rejects an out-of-range-octet --runner-url (shared IPv4 validator)", async () => {
-    // The old `IPV4_URL_RE` regex accepted these dotted-quad-shaped hosts;
-    // the shared parseIpv4HttpUrl (like the daemon) range-checks each octet.
+  it("warns loudly on a plaintext http:// --runner-url to a non-loopback host", async () => {
+    // The platform refuses this URL at boot (fail-closed) — the installer
+    // must say so at write time, with the exact remediation, instead of
+    // letting the operator discover a crash-looping platform later.
+    const warnings: string[] = [];
+    const cfg = await resolveRunBackend(
+      {
+        runAdapter: "firecracker",
+        runnerUrl: "http://10.0.0.9:3100",
+        runnerToken: "x".repeat(16),
+        appPort: 3000,
+        nonInteractive: true,
+      },
+      { warn: (m) => warnings.push(m), detectLanIpv4: () => "10.0.0.5" },
+    );
+    expect(cfg.adapter === "firecracker" && cfg.runnerUrl).toBe("http://10.0.0.9:3100");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("REFUSES this at boot");
+    expect(warnings[0]).toContain("FIRECRACKER_RUNNER_TLS_REQUIRED=0");
+  });
+
+  it("does not warn on a loopback http:// --runner-url (gate exempts loopback)", async () => {
+    const warnings: string[] = [];
+    await resolveRunBackend(
+      {
+        runAdapter: "firecracker",
+        runnerUrl: "http://127.0.0.1:3100",
+        runnerToken: "x".repeat(16),
+        appPort: 3000,
+        nonInteractive: true,
+      },
+      { warn: (m) => warnings.push(m), detectLanIpv4: () => "10.0.0.5" },
+    );
+    expect(warnings).toEqual([]);
+  });
+
+  it("rejects an out-of-range-octet --runner-url (dotted-quad shape, bad octets)", async () => {
+    // "300.0.0.1" would pass as a plausible hostname but never resolves —
+    // a dotted-quad-shaped host must still be a VALID IPv4.
     for (const runnerUrl of ["http://300.0.0.1:3100", "http://256.256.256.256:3000"]) {
       await expect(
         resolveRunBackend(
@@ -1220,8 +1261,23 @@ describe("resolveRunBackend — non-interactive firecracker validation matrix", 
           },
           {},
         ),
-      ).rejects.toThrow(/must be http\(s\):\/\/<IPv4>/);
+      ).rejects.toThrow(/must be http\(s\):\/\/<host>/);
     }
+  });
+
+  it("rejects a non-http(s) --runner-url", async () => {
+    await expect(
+      resolveRunBackend(
+        {
+          runAdapter: "firecracker",
+          runnerUrl: "ftp://runner.example.com:3100",
+          runnerToken: "x".repeat(16),
+          appPort: 3000,
+          nonInteractive: true,
+        },
+        {},
+      ),
+    ).rejects.toThrow(/must be http\(s\):\/\/<host>/);
   });
 });
 

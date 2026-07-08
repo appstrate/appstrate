@@ -306,6 +306,16 @@ export function generateEnvForTier(
     env.MODULES = FIRECRACKER_MODULES;
     if (runBackend.runnerUrl) env.FIRECRACKER_RUNNER_URL = runBackend.runnerUrl;
     if (runBackend.runnerToken) env.FIRECRACKER_RUNNER_TOKEN = runBackend.runnerToken;
+    // UDS transport: the compose templates mount
+    // ${APPSTRATE_RUNNER_SOCKET_DIR:-./data/appstrate-runner} at
+    // /run/appstrate-runner in the platform container. Point the host side
+    // at the daemon's real socket dir — without this key the mount falls
+    // back to an empty local dir and the platform would dial a socket that
+    // never appears.
+    if (runBackend.runnerUrl?.startsWith("unix://")) {
+      const socketPath = runBackend.runnerUrl.slice("unix://".length);
+      env.APPSTRATE_RUNNER_SOCKET_DIR = socketPath.slice(0, socketPath.lastIndexOf("/")) || "/";
+    }
   }
 
   return env;

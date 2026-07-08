@@ -547,7 +547,8 @@ function printPostInstall(config: RunnerConfig, source: TokenSource, healthy: bo
         ``,
         `Unix socket transport — no network port exposed, no firewall rule needed.`,
         `The platform container must bind-mount ${dirname(config.socketPath)} to dial`,
-        `the socket (the shipped compose templates include it).`,
+        `the socket (set APPSTRATE_RUNNER_SOCKET_DIR=${dirname(config.socketPath)} in the`,
+        `platform .env — the shipped compose templates mount it from that variable).`,
       ]
     : [
         `  FIRECRACKER_RUNNER_URL=http://<this-host>:${config.port}`,

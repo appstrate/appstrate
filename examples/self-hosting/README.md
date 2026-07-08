@@ -349,9 +349,11 @@ To run agents in microVMs instead of Docker containers, pass
 the runner-daemon install on this host (`--host-ip <ipv4>`) or prints the
 one-liner to run on a remote KVM host (`--runner-url` + `--runner-token`). On
 the same-host topology the daemon binds a Unix domain socket and the installer
-sets `FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock` — the
-compose templates bind-mount `/run/appstrate-runner` into the platform
-container so the socket is reachable from inside it. A remote daemon stays on
+sets `FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock` plus
+`APPSTRATE_RUNNER_SOCKET_DIR=/run/appstrate-runner` — the compose templates
+bind-mount the socket dir into the platform container from that variable
+(unset, it falls back to a harmless empty local dir, so non-Firecracker
+installs never mount host `/run`). A remote daemon stays on
 TCP: use `https://` behind a TLS reverse proxy (plaintext `http://` to a
 non-loopback host is refused at boot). See
 [`../../docs/architecture/FIRECRACKER.md`](../../docs/architecture/FIRECRACKER.md)

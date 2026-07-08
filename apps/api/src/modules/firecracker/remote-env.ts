@@ -55,7 +55,19 @@ export function parseRunnerTransport(rawUrl: string): RunnerTransport {
           `unix:///run/appstrate-runner/runner.sock (you wrote ${rawUrl})`,
       );
     }
-    return { kind: "unix", socketPath: parsed.pathname };
+    // A `?query` or `#fragment` has no meaning for a filesystem node — URL
+    // parsing would silently drop it from `pathname` and we would dial a
+    // DIFFERENT path than the operator wrote. Refuse, same policy as the
+    // two-slash typo above.
+    if (parsed.search !== "" || parsed.hash !== "") {
+      throw new Error(
+        `unix:// runner URL must be a bare socket path — remove the ` +
+          `"${parsed.search || parsed.hash}" suffix (you wrote ${rawUrl})`,
+      );
+    }
+    // `pathname` is percent-ENCODED (a space is "%20") — decode so the path
+    // we dial is byte-identical to the filesystem node the operator meant.
+    return { kind: "unix", socketPath: decodeURIComponent(parsed.pathname) };
   }
   if (parsed.protocol === "http:" || parsed.protocol === "https:") {
     return { kind: "tcp", url: rawUrl.replace(/\/+$/, "") };

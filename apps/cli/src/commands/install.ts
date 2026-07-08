@@ -52,7 +52,6 @@ import {
   describeProcessOnPort,
   detectLanIpv4,
   isIpv4,
-  parseIpv4HttpUrl,
   runCommand,
 } from "../lib/install/os.ts";
 import { generateRunnerToken } from "../lib/runner/config-files.ts";
@@ -994,11 +993,12 @@ export type RunBackendConfig =
       adapter: "firecracker";
       /**
        * FIRECRACKER_RUNNER_URL written to the platform `.env`. Remote:
-       * `http://<runner-ip>:3100` (TCP). Same-host: `unix://<socket path>` —
-       * the platform container dials the daemon's unix socket through a
-       * bind-mount of /run/appstrate-runner (shipped compose templates
-       * include it), so no port, no plaintext network wire, and the
-       * fail-closed non-loopback-http guard never applies.
+       * `http(s)://<runner-host>:3100` (TCP). Same-host: `unix://<socket
+       * path>` — the platform container dials the daemon's unix socket
+       * through a bind-mount of /run/appstrate-runner (the compose templates
+       * mount it from the installer-written APPSTRATE_RUNNER_SOCKET_DIR), so
+       * no port, no plaintext network wire, and the fail-closed
+       * non-loopback-http guard never applies.
        */
       runnerUrl: string;
       /** Shared bearer token between platform and daemon. */
@@ -1044,6 +1044,57 @@ export interface RunBackendResolverDeps {
   askText?: typeof askText;
   detectLanIpv4?: () => string | null;
   generateToken?: () => string;
+  /** Loud-warning sink — injectable so tests can assert the plaintext warning. */
+  warn?: (message: string) => void;
+}
+
+/** Loopback hosts the platform's plaintext-transport gate exempts. */
+const LOOPBACK_RUNNER_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * Validate a remote runner URL: `http(s)://<host>[:port]`, where host may
+ * be a HOSTNAME (the platform→daemon leg runs on the host network with
+ * normal DNS — an https:// reverse proxy usually sits behind a name) or an
+ * IPv4 literal. A dotted-quad that is NOT a valid IPv4 (`300.0.0.1`) is
+ * still rejected — it would never resolve, and the old IPv4-only validator
+ * caught exactly that typo. Only `--platform-url` stays IPv4-only (guests
+ * have no DNS); the runner URL never reaches a guest.
+ */
+function parseRunnerHttpUrl(raw: string): { url: string; protocol: string; host: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  const host = parsed.hostname;
+  if (host === "") return null;
+  if (/^\d+(\.\d+){3}$/.test(host) && !isIpv4(host)) return null;
+  return { url: raw.replace(/\/+$/, ""), protocol: parsed.protocol, host };
+}
+
+/**
+ * The platform refuses a plaintext `http://` runner URL to a non-loopback
+ * host at boot (fail-closed, see the firecracker module's
+ * assertRunnerTransportSecurity). The installer cannot know whether the
+ * operator plans the `FIRECRACKER_RUNNER_TLS_REQUIRED=0` escape hatch
+ * (VPN/WireGuard link), so it warns loudly instead of refusing — but the
+ * warning carries the exact remediation so the boot refusal is never a
+ * surprise.
+ */
+function warnIfPlaintextRunnerUrl(
+  parsed: { url: string; protocol: string; host: string },
+  warn: (message: string) => void,
+): void {
+  if (parsed.protocol !== "http:" || LOOPBACK_RUNNER_HOSTNAMES.has(parsed.host)) return;
+  warn(
+    `FIRECRACKER_RUNNER_URL=${parsed.url} is plaintext http:// to a non-loopback host — ` +
+      `the platform REFUSES this at boot (the wire carries run credentials). Use ` +
+      `https:// behind a TLS reverse proxy, or — only for a link already encrypted at a ` +
+      `lower layer (VPN/WireGuard) — set FIRECRACKER_RUNNER_TLS_REQUIRED=0 in the ` +
+      `platform .env.`,
+  );
 }
 
 /** Resolve + validate the runner token (flag > freshly minted). */
@@ -1115,6 +1166,7 @@ export async function resolveRunBackend(
   const promptText = deps.askText ?? askText;
   const detectIp = deps.detectLanIpv4 ?? detectLanIpv4;
   const mintToken = deps.generateToken ?? generateRunnerToken;
+  const warn = deps.warn ?? ((message: string) => clack.log.warn(message));
   const { appPort, nonInteractive } = inputs;
 
   // 1. Which adapter? Flag > env > prompt (interactive) > docker.
@@ -1232,28 +1284,42 @@ export async function resolveRunBackend(
   }
 
   // topology === "remote"
-  // Runner daemon URL: flag (full URL) > interactive prompt for the KVM host IP.
+  // Runner daemon URL: flag (full URL) > interactive prompt (full URL, or a
+  // bare IPv4 kept for muscle memory). Hostnames are ACCEPTED — a split-host
+  // daemon should sit behind an https:// reverse proxy, which usually means
+  // a DNS name; the guests-need-IPv4 rule applies to --platform-url only.
   let runnerUrl = inputs.runnerUrl?.trim();
   if (runnerUrl) {
-    // One shared validator with `runner install --platform-url`: it rejects a
-    // non-IPv4 host AND out-of-range octets (`300.0.0.1`, `256.256.256.256`),
-    // so a bogus literal fails here with the DNS hint, not inside a guest —
-    // and never writes a config the daemon then refuses at boot.
-    const parsed = parseIpv4HttpUrl(runnerUrl);
+    const parsed = parseRunnerHttpUrl(runnerUrl);
     if (!parsed) {
       throw new Error(
-        `Invalid --runner-url "${runnerUrl}" — must be http(s)://<IPv4>[:port]. ${IPV4_HINT}`,
+        `Invalid --runner-url "${runnerUrl}" — must be http(s)://<host>[:port], e.g. ` +
+          `https://runner.example.com:${RUNNER_DEFAULT_PORT} (TLS reverse proxy in front ` +
+          `of the daemon) or http://10.0.0.9:${RUNNER_DEFAULT_PORT}.`,
       );
     }
+    warnIfPlaintextRunnerUrl(parsed, warn);
     runnerUrl = parsed.url;
   } else {
-    const runnerIp = (await promptText("Runner (KVM host) LAN IPv4", "")).trim();
-    if (!isIpv4(runnerIp)) {
+    const answer = (
+      await promptText(
+        `Runner (KVM host) URL — https://<host>:${RUNNER_DEFAULT_PORT} recommended, or a bare LAN IPv4`,
+        "",
+      )
+    ).trim();
+    // A bare IPv4 keeps the pre-UDS ergonomics (`10.0.0.9` → http://…:3100);
+    // anything else must be a full http(s) URL.
+    const parsed = isIpv4(answer)
+      ? parseRunnerHttpUrl(`http://${answer}:${RUNNER_DEFAULT_PORT}`)
+      : parseRunnerHttpUrl(answer);
+    if (!parsed) {
       throw new Error(
-        `Invalid runner IP "${runnerIp}" — must be an IPv4 literal (e.g. 10.0.0.9). ${IPV4_HINT}`,
+        `Invalid runner URL "${answer}" — must be http(s)://<host>[:port] or a bare ` +
+          `IPv4 literal (e.g. 10.0.0.9).`,
       );
     }
-    runnerUrl = `http://${runnerIp}:${RUNNER_DEFAULT_PORT}`;
+    warnIfPlaintextRunnerUrl(parsed, warn);
+    runnerUrl = parsed.url;
   }
 
   const token = resolveRunnerToken(inputs.runnerToken, mintToken);
@@ -1360,7 +1426,8 @@ export function firecrackerFollowupNote(
     lines.push(
       `The platform reaches the daemon over a unix socket (${rb.runnerUrl}) —`,
       `no network port, no TLS to configure. The platform container bind-mounts`,
-      `${RUNNER_RUNTIME_DIR} for it (the shipped compose templates include the mount).`,
+      `${RUNNER_RUNTIME_DIR} for it (the compose templates mount it when the`,
+      `installer-written APPSTRATE_RUNNER_SOCKET_DIR is set in .env).`,
       "",
     );
   }
