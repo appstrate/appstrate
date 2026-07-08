@@ -197,10 +197,6 @@ program
     "Host port the Appstrate platform binds to (default: 3000). Also honored via APPSTRATE_PORT.",
   )
   .option(
-    "--minio-console-port <port>",
-    "Host port the MinIO console binds to on Tier 3 (default: 9001). Also honored via APPSTRATE_MINIO_CONSOLE_PORT.",
-  )
-  .option(
     "--app-url <url>",
     "Public URL of the platform for remote deployments behind a reverse proxy, e.g. https://appstrate.example.com (origin only). Drives APP_URL + TRUSTED_ORIGINS and auto-enables TRUST_PROXY for non-localhost/https URLs. Independent of --port (the host bind port the proxy forwards to). Also honored via APPSTRATE_APP_URL. Default: http://localhost:<port>.",
   )
@@ -249,8 +245,6 @@ program
       tier: typeof opts.tier === "string" ? opts.tier : undefined,
       dir: typeof opts.dir === "string" ? opts.dir : undefined,
       port: typeof opts.port === "string" ? opts.port : undefined,
-      minioConsolePort:
-        typeof opts.minioConsolePort === "string" ? opts.minioConsolePort : undefined,
       appUrl: typeof opts.appUrl === "string" ? opts.appUrl : undefined,
       force: opts.force === true,
       autoConfirm,

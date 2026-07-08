@@ -27,7 +27,6 @@ import {
   resolveDir,
   parsePort,
   resolveAppstratePort,
-  resolveMinioConsolePort,
   resolveBootstrapEmail,
   resolveAppUrl,
   assertLoopbackPortMatches,
@@ -377,14 +376,11 @@ describe("parsePort", () => {
 describe("resolveAppstratePort (non-interactive preflight)", () => {
   const servers: Server[] = [];
   const originalEnvPort = process.env.APPSTRATE_PORT;
-  const originalEnvMinio = process.env.APPSTRATE_MINIO_CONSOLE_PORT;
 
   afterEach(async () => {
     for (const srv of servers.splice(0)) await new Promise((r) => srv.close(() => r(undefined)));
     if (originalEnvPort === undefined) delete process.env.APPSTRATE_PORT;
     else process.env.APPSTRATE_PORT = originalEnvPort;
-    if (originalEnvMinio === undefined) delete process.env.APPSTRATE_MINIO_CONSOLE_PORT;
-    else process.env.APPSTRATE_MINIO_CONSOLE_PORT = originalEnvMinio;
   });
 
   it("returns the requested port when it is free", async () => {
@@ -552,44 +548,6 @@ describe("resolveAppstratePort auto-pick (--yes path)", () => {
         { autoPick: true },
       ),
     ).rejects.toThrow();
-  });
-});
-
-describe("resolveMinioConsolePort (non-interactive preflight)", () => {
-  const servers: Server[] = [];
-  afterEach(async () => {
-    for (const srv of servers.splice(0)) await new Promise((r) => srv.close(() => r(undefined)));
-  });
-
-  it("surfaces the MinIO label in the error message", async () => {
-    const port = await holdEphemeralPort(servers);
-    await expect(resolveMinioConsolePort(String(port), true)).rejects.toThrow(
-      /MinIO console.*--minio-console-port|APPSTRATE_MINIO_CONSOLE_PORT/,
-    );
-  });
-
-  it("auto-picks the next free port under --yes (parity with resolveAppstratePort)", async () => {
-    // The MinIO console port conflict is rarer than the main :3000
-    // conflict, but the user contract is identical under --yes:
-    // don't fail fast, just pick a free port. Parity test so any
-    // future divergence between the two resolvers is caught here.
-    const held = await holdEphemeralPort(servers);
-    const out = await resolveMinioConsolePort(
-      String(held),
-      true,
-      "fresh",
-      undefined,
-      undefined,
-      undefined,
-      { autoPick: true },
-    );
-    expect(out).toBeGreaterThan(held);
-    expect(out).toBeLessThanOrEqual(65535);
-  });
-
-  it("strict fail-fast remains the default without autoPick (explicit --tier 3)", async () => {
-    const port = await holdEphemeralPort(servers);
-    await expect(resolveMinioConsolePort(String(port), true)).rejects.toThrow(/MinIO console/);
   });
 });
 
@@ -806,209 +764,6 @@ describe("resolveAppstratePort upgrade cross-check (findRunningComposeProject)",
       true,
       "upgrade",
       existingWith({ PORT: String(port) }),
-      dir,
-      "myproject",
-      {
-        findRunningComposeProject: fakeFinder({
-          name: "myproject",
-          configFiles: [join(dir, "docker-compose.yml")],
-        }),
-      },
-    );
-    expect(out).toBe(port);
-  });
-});
-
-describe("resolveMinioConsolePort on upgrade (gated on MINIO_ROOT_PASSWORD presence)", () => {
-  const servers: Server[] = [];
-
-  afterEach(async () => {
-    for (const srv of servers.splice(0)) await new Promise((r) => srv.close(() => r(undefined)));
-  });
-
-  function existingWith(existingEnv: Record<string, string>) {
-    return { hasEnv: true, hasCompose: true, existingEnv };
-  }
-
-  it("skips preflight when MinIO was in the previous install", async () => {
-    // Tier 3 → Tier 3 re-run: MINIO_ROOT_PASSWORD present → console
-    // port is held by the existing MinIO → must skip preflight.
-    const port = await holdEphemeralPort(servers);
-    const out = await resolveMinioConsolePort(
-      undefined,
-      true,
-      "upgrade",
-      existingWith({ MINIO_ROOT_PASSWORD: "existing-secret", MINIO_CONSOLE_PORT: String(port) }),
-    );
-    expect(out).toBe(port);
-  });
-
-  it("inherits the MinIO default 9001 when MINIO_CONSOLE_PORT is absent", async () => {
-    // Default port (9001) is elided by `generateEnvForTier`. With
-    // MINIO_ROOT_PASSWORD present we know MinIO is running, so 9001
-    // is held by us — skip preflight and return 9001.
-    const out = await resolveMinioConsolePort(
-      undefined,
-      true,
-      "upgrade",
-      existingWith({ MINIO_ROOT_PASSWORD: "existing-secret" }),
-    );
-    expect(out).toBe(9001);
-  });
-
-  it("PREFLIGHTS on a tier 1 → tier 3 transition (MinIO is net-new)", async () => {
-    // The existing install was tier 1 or 2 — no MINIO_ROOT_PASSWORD.
-    // Adding MinIO for the first time means its console port must
-    // actually be free; we don't get to trust `.env` here.
-    const port = await holdEphemeralPort(servers);
-    await expect(
-      resolveMinioConsolePort(
-        String(port),
-        true,
-        "upgrade",
-        existingWith({ BETTER_AUTH_SECRET: "tier-1-secret" }),
-      ),
-    ).rejects.toThrow(/MinIO console/);
-  });
-
-  it("PREFLIGHTS when hasEnv is false (stray compose file, no .env to prove MinIO was present)", async () => {
-    // Same edge case as the main resolver: `mode=upgrade` can fire on
-    // hasCompose alone. Without a `.env` we can't claim MinIO was
-    // running, so any port we pick must actually be free.
-    const port = await holdEphemeralPort(servers);
-    await expect(
-      resolveMinioConsolePort(String(port), true, "upgrade", {
-        hasEnv: false,
-        hasCompose: true,
-        existingEnv: {},
-      }),
-    ).rejects.toThrow(/MinIO console/);
-  });
-
-  it("ignores --minio-console-port on an existing-MinIO upgrade", async () => {
-    const port = await holdEphemeralPort(servers);
-    const out = await resolveMinioConsolePort(
-      "9500",
-      true,
-      "upgrade",
-      existingWith({ MINIO_ROOT_PASSWORD: "existing-secret", MINIO_CONSOLE_PORT: String(port) }),
-    );
-    expect(out).toBe(port);
-  });
-});
-
-describe("resolveMinioConsolePort upgrade cross-check (findRunningComposeProject)", () => {
-  const servers: Server[] = [];
-  const dirs: string[] = [];
-  const originalEnvMinio = process.env.APPSTRATE_MINIO_CONSOLE_PORT;
-
-  afterEach(async () => {
-    for (const srv of servers.splice(0)) await new Promise((r) => srv.close(() => r(undefined)));
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-    if (originalEnvMinio === undefined) delete process.env.APPSTRATE_MINIO_CONSOLE_PORT;
-    else process.env.APPSTRATE_MINIO_CONSOLE_PORT = originalEnvMinio;
-  });
-
-  function makeDir(): string {
-    const d = mkdtempSync(join(tmpdir(), "appstrate-cli-minio-"));
-    dirs.push(d);
-    return d;
-  }
-
-  function existingWithMinio(extra: Record<string, string> = {}) {
-    return {
-      hasEnv: true,
-      hasCompose: true,
-      existingEnv: { MINIO_ROOT_PASSWORD: "existing-secret", ...extra },
-    };
-  }
-
-  function fakeFinder(result: RunningComposeProject | null) {
-    return async (_name: string) => result;
-  }
-
-  it("skips preflight when the running compose project's configFiles match this dir", async () => {
-    const port = await holdEphemeralPort(servers);
-    const dir = makeDir();
-    const out = await resolveMinioConsolePort(
-      undefined,
-      true,
-      "upgrade",
-      existingWithMinio({ MINIO_CONSOLE_PORT: String(port) }),
-      dir,
-      "myproject",
-      {
-        findRunningComposeProject: fakeFinder({
-          name: "myproject",
-          configFiles: [join(dir, "docker-compose.yml")],
-        }),
-      },
-    );
-    expect(out).toBe(port);
-  });
-
-  it("PREFLIGHTS when the compose project is down (findRunning returns null)", async () => {
-    const port = await holdEphemeralPort(servers);
-    const dir = makeDir();
-    await expect(
-      resolveMinioConsolePort(
-        String(port),
-        true,
-        "upgrade",
-        existingWithMinio({ MINIO_CONSOLE_PORT: String(port) }),
-        dir,
-        "myproject",
-        { findRunningComposeProject: fakeFinder(null) },
-      ),
-    ).rejects.toThrow(/MinIO console/);
-  });
-
-  it("PREFLIGHTS when the running project belongs to a DIFFERENT dir", async () => {
-    const port = await holdEphemeralPort(servers);
-    const dir = makeDir();
-    const otherDir = makeDir();
-    await expect(
-      resolveMinioConsolePort(
-        String(port),
-        true,
-        "upgrade",
-        existingWithMinio({ MINIO_CONSOLE_PORT: String(port) }),
-        dir,
-        "myproject",
-        {
-          findRunningComposeProject: fakeFinder({
-            name: "myproject",
-            configFiles: [join(otherDir, "docker-compose.yml")],
-          }),
-        },
-      ),
-    ).rejects.toThrow(/MinIO console/);
-  });
-
-  it("skips preflight when projectName is undefined (no compose concept)", async () => {
-    // MinIO is docker-only so this case is unlikely in practice, but
-    // the resolver must stay consistent with resolveAppstratePort.
-    const port = await holdEphemeralPort(servers);
-    const out = await resolveMinioConsolePort(
-      undefined,
-      true,
-      "upgrade",
-      existingWithMinio({ MINIO_CONSOLE_PORT: String(port) }),
-      undefined,
-      undefined,
-    );
-    expect(out).toBe(port);
-  });
-
-  it("returns inherited when $APPSTRATE_MINIO_CONSOLE_PORT diverges from existing .env", async () => {
-    const port = await holdEphemeralPort(servers);
-    const dir = makeDir();
-    process.env.APPSTRATE_MINIO_CONSOLE_PORT = "9500";
-    const out = await resolveMinioConsolePort(
-      undefined,
-      true,
-      "upgrade",
-      existingWithMinio({ MINIO_CONSOLE_PORT: String(port) }),
       dir,
       "myproject",
       {
