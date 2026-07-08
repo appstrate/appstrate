@@ -201,19 +201,20 @@ curl -fsSL https://get.appstrate.dev | bash
 Same result, no prompt. The env vars are read by the installer and
 written into the generated `.env`.
 
-After install, the CLI prints the exact next step:
+After install, the CLI opens `/register` in your browser and prints the
+next step:
 
 ```
 ┌  Next: create your owner account
 │
-│  Open  http://localhost:3000/register
+│  Opened  http://localhost:3000/register  in your browser.
 │  Sign up as  admin@acme.com  (the form is pre-filled and locked)
 │  Pick any password — the org "Acme" is created automatically.
 │
 └
 ```
 
-Open the URL — `/register` is rendered with the email field already
+`/register` is rendered with the email field already
 filled in and disabled (so a typo can't diverge you from the configured
 bootstrap account). Pick a password, submit. The org is created
 synchronously by the signup after-hook, then you're routed through the

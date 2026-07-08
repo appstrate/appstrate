@@ -101,9 +101,9 @@ APPSTRATE_BOOTSTRAP_OWNER_EMAIL=admin@example.com \
   curl -fsSL https://get.appstrate.dev | bash -s -- --yes
 ```
 
-Now the bootstrap owner signs up at `/register` (form pre-fills + locks
-the email field) — see [AUTH_MODES.md](./AUTH_MODES.md) for the full
-matrix of closed-mode options.
+The installer opens `/register` in your browser and the bootstrap owner
+signs up there (form pre-fills + locks the email field) — see
+[AUTH_MODES.md](./AUTH_MODES.md) for the full matrix of closed-mode options.
 
 Legacy `APPSTRATE_AUTO_INSTALL=1` is preserved as an escape hatch for
 existing scripted provisioning that depended on the previous "always
