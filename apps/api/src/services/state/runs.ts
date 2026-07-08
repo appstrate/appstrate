@@ -302,6 +302,15 @@ async function acquireRunNumberLock(tx: DbTx, scope: AppScope, packageId: string
 }
 
 /**
+ * Advisory-lock key serializing per-org run admission. Single-sourced so
+ * every party that must serialize against admission (`enforceOrgConcurrencyCap`
+ * below, `deleteOrganization`) derives the exact same key.
+ */
+export function orgRunConcurrencyLockKey(orgId: string): string {
+  return `run_concurrency:${orgId}`;
+}
+
+/**
  * Atomic per-org concurrency reservation. The shared preflight gate
  * (`run-preflight-gates.ts`) does a fast count-based pre-check that rejects
  * most over-cap launches BEFORE the ~1.75s pipeline work, but that check is
@@ -325,7 +334,7 @@ async function enforceOrgConcurrencyCap(tx: DbTx, scope: AppScope): Promise<void
     return;
   }
   await tx.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtext(${`run_concurrency:${scope.orgId ?? ""}`})::bigint)`,
+    sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId ?? "")})::bigint)`,
   );
   const [row] = await tx
     .select({ active: count() })

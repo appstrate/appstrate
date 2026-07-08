@@ -32,8 +32,7 @@ import {
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeOnHeaders,
 } from "@appstrate/connect";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { checkEgressHost } from "../../lib/egress-host-guard.ts";
+import { checkEgressHost, isBlockedEgressUrl } from "../../lib/egress-host-guard.ts";
 import type { Actor } from "../../lib/actor.ts";
 import {
   resolveIntegrationProxyCredentials,
@@ -245,11 +244,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     // Note: an empty allowlist can never reach here — `allowlist.some(...)` is
     // `false` for `[]`, so the `!ok` guard above already threw. (The former
     // `allowlist.length === 0 && isBlockedUrl(target)` branch was dead.)
-  } else if (isBlockedUrl(target)) {
+  } else if (isBlockedEgressUrl(target)) {
     throw new ProxyAuthorizationError(`Target ${target} resolves to a blocked network range`);
   }
 
-  // DNS-rebind-safe gate: the literal `isBlockedUrl` above (and the
+  // DNS-rebind-safe gate: the literal `isBlockedEgressUrl` above (and the
   // authorized_uris allowlist) is string-only — a public hostname whose A/AAAA
   // record points at a private/loopback/link-local address slips through. Resolve
   // + re-check the final target host before we fetch, matching the sidecar's

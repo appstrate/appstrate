@@ -11,10 +11,16 @@ import type { IntegrationCredentialsWire } from "@appstrate/connect";
  * Unit coverage for the Phase-7 remote-HTTP credential-injection closure
  * (`customFetch`): the security-sensitive bit that injects the resolved
  * Bearer per request and recovers from a mid-run 401. Driven entirely
- * through the DI seam — no platform endpoints, no runner container.
+ * through the DI seam — no platform endpoints, no runner container. The
+ * SSRF guard stays ON even under DI: `deps.resolveHost` maps the fixture
+ * hostname to a public address so the guard passes without real DNS, and
+ * `guardedFetch` delegates the actual send to the stubbed global `fetch`.
  */
 
 const SERVER_URL = "https://mcp.example.com/mcp/v1";
+
+/** Public (unblocked) address the injected resolver returns for fixtures. */
+const PUBLIC_IP = "93.184.216.34";
 
 function spec(): IntegrationSpawnSpec {
   return {
@@ -49,8 +55,16 @@ function wire(
  * so the test can invoke it directly. `refreshOnUnauthorized` is a counting
  * stub. The credentials source is no longer a DI dep — the caller hoists ONE
  * source and passes it in, so the test injects a fake source directly.
+ *
+ * `resolveHost` defaults to a resolver returning a public address so the
+ * always-on SSRF guard passes for the fixture hostname; override it to
+ * exercise the guard's blocking behavior.
  */
-function makeDeps(initial: IntegrationCredentialsWire, refresh: () => Promise<boolean>) {
+function makeDeps(
+  initial: IntegrationCredentialsWire,
+  refresh: () => Promise<boolean>,
+  resolveHost: (hostname: string) => Promise<string[]> = async () => [PUBLIC_IP],
+) {
   let captured: typeof fetch | undefined;
   let refreshCalls = 0;
   const source = {
@@ -65,6 +79,7 @@ function makeDeps(initial: IntegrationCredentialsWire, refresh: () => Promise<bo
       captured = opts.fetch;
       return {} as AppstrateMcpClient;
     }) as unknown as ConnectRemoteHttpDeps["createClient"],
+    resolveHost,
   };
   return { deps, source, getFetch: () => captured!, getRefreshCalls: () => refreshCalls };
 }
@@ -151,6 +166,36 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     expect(calls).toBe(1); // refresh returned false → no retry
     expect(getRefreshCalls()).toBe(1);
     expect(status).toBe(401);
+  });
+
+  it("blocks a private-address target even when a transport factory is injected", async () => {
+    const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
+      oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
+    });
+    // Regression: injecting `createClient`/`createSseClient` must NOT
+    // disable the SSRF guard (it used to — `guardEgress` flipped off under
+    // DI). The resolver maps the hostname to a private address; the guard
+    // must fail closed before the Bearer ever reaches the network layer.
+    const { deps, source, getFetch } = makeDeps(
+      initial,
+      async () => true,
+      async () => ["10.0.0.5"],
+    );
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    let fetchCalls = 0;
+    await withGlobalFetch(
+      (async () => {
+        fetchCalls += 1;
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+      async () => {
+        await expect(getFetch()(SERVER_URL, { method: "POST" })).rejects.toThrow(
+          /SSRF guard blocked outbound request/,
+        );
+      },
+    );
+    expect(fetchCalls).toBe(0); // fail-closed — the stubbed network layer was never reached
   });
 
   it("throws when no auth has a resolvable delivery plan", async () => {

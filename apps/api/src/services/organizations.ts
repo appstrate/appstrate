@@ -17,6 +17,7 @@ import {
 import { and, eq, inArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
+import { orgRunConcurrencyLockKey } from "./state/runs.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -299,14 +300,13 @@ export async function deleteOrganization(orgId: string): Promise<void> {
   // locks on the runs being removed — closes that window.
   await db.transaction(async (tx) => {
     // Serialize against concurrent run admission. `createRun` acquires this
-    // exact per-org advisory lock (key `run_concurrency:<orgId>`, via
-    // `enforceOrgConcurrencyCap`) before its count + INSERT. Taking the same
-    // lock here means a run admitted after our snapshot below cannot commit
-    // until this transaction finishes — closing the TOCTOU window where a run
-    // that started after the count but before the delete would be
-    // cascade-deleted mid-flight. Released automatically at transaction end.
+    // same per-org advisory lock before its count + INSERT. Taking it here
+    // means a run admitted after our snapshot below cannot commit until this
+    // transaction finishes — closing the TOCTOU window where a run that
+    // started after the count but before the delete would be cascade-deleted
+    // mid-flight. Released automatically at transaction end.
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`run_concurrency:${orgId}`})::bigint)`,
+      sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(orgId)})::bigint)`,
     );
 
     const runningResult = await tx

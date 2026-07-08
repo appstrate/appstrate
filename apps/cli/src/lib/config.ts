@@ -115,23 +115,6 @@ export async function readConfig(): Promise<Config> {
   return { defaultProfile, profiles };
 }
 
-/**
- * In-process serialization for read-modify-write cycles. `updateProfile` /
- * `setProfile` / `deleteProfile` each `readConfig()` → mutate → `writeConfig()`;
- * two of them racing in the same process would interleave (both read the same
- * base, the second `rename` clobbers the first's change — a lost update).
- * Chaining every mutating cycle through one promise makes them run one at a
- * time. Failures are swallowed on the chain (but still rejected to the caller)
- * so one error doesn't wedge the lock. Cross-process races are still bounded
- * by the atomic tmp+rename write.
- */
-let configWriteChain: Promise<unknown> = Promise.resolve();
-function withConfigLock<T>(fn: () => Promise<T>): Promise<T> {
-  const run = configWriteChain.then(fn, fn);
-  configWriteChain = run.catch(() => {});
-  return run;
-}
-
 /** Overwrite the config file atomically (tmp + rename). */
 export async function writeConfig(config: Config): Promise<void> {
   const dir = getConfigDir();
@@ -171,19 +154,17 @@ export async function getProfile(name: string): Promise<Profile | null> {
  * so the key doesn't round-trip as a bare TOML entry.
  */
 export async function updateProfile(name: string, patch: Partial<Profile>): Promise<void> {
-  await withConfigLock(async () => {
-    const config = await readConfig();
-    const existing = config.profiles[name];
-    if (!existing) {
-      throw new Error(`Profile "${name}" missing from config — internal invariant broken.`);
-    }
-    const next: Profile = { ...existing, ...patch };
-    for (const [k, v] of Object.entries(patch)) {
-      if (v === undefined) delete (next as unknown as Record<string, unknown>)[k];
-    }
-    config.profiles[name] = next;
-    await writeConfig(config);
-  });
+  const config = await readConfig();
+  const existing = config.profiles[name];
+  if (!existing) {
+    throw new Error(`Profile "${name}" missing from config — internal invariant broken.`);
+  }
+  const next: Profile = { ...existing, ...patch };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete (next as unknown as Record<string, unknown>)[k];
+  }
+  config.profiles[name] = next;
+  await writeConfig(config);
 }
 
 /**
@@ -221,39 +202,35 @@ export function requireLoggedIn(
 }
 
 export async function setProfile(name: string, profile: Profile): Promise<void> {
-  await withConfigLock(async () => {
-    const config = await readConfig();
-    config.profiles[name] = profile;
-    // Point `defaultProfile` at this one if the current pointer is
-    // missing or references a profile that doesn't exist yet. Typical
-    // path: first write to a fresh config (`defaultProfile = "default"`,
-    // profiles = {}) → this becomes the default. Subsequent writes
-    // leave the existing valid default alone.
-    if (!config.defaultProfile || !config.profiles[config.defaultProfile]) {
-      config.defaultProfile = name;
-    }
-    await writeConfig(config);
-  });
+  const config = await readConfig();
+  config.profiles[name] = profile;
+  // Point `defaultProfile` at this one if the current pointer is
+  // missing or references a profile that doesn't exist yet. Typical
+  // path: first write to a fresh config (`defaultProfile = "default"`,
+  // profiles = {}) → this becomes the default. Subsequent writes
+  // leave the existing valid default alone.
+  if (!config.defaultProfile || !config.profiles[config.defaultProfile]) {
+    config.defaultProfile = name;
+  }
+  await writeConfig(config);
 }
 
 export async function deleteProfile(name: string): Promise<boolean> {
-  return withConfigLock(async () => {
-    const config = await readConfig();
-    if (!(name in config.profiles)) return false;
-    delete config.profiles[name];
-    // If we just removed the active default, fall back to any remaining
-    // profile or the literal `"default"` — the next write will materialize
-    // the change. Leaving a stale `defaultProfile` pointer that references
-    // a non-existent profile would force every subsequent command to fall
-    // through to `"default"` anyway, but we clean it up to keep the file
-    // honest.
-    if (config.defaultProfile === name) {
-      const remaining = Object.keys(config.profiles);
-      config.defaultProfile = remaining[0] ?? "default";
-    }
-    await writeConfig(config);
-    return true;
-  });
+  const config = await readConfig();
+  if (!(name in config.profiles)) return false;
+  delete config.profiles[name];
+  // If we just removed the active default, fall back to any remaining
+  // profile or the literal `"default"` — the next write will materialize
+  // the change. Leaving a stale `defaultProfile` pointer that references
+  // a non-existent profile would force every subsequent command to fall
+  // through to `"default"` anyway, but we clean it up to keep the file
+  // honest.
+  if (config.defaultProfile === name) {
+    const remaining = Object.keys(config.profiles);
+    config.defaultProfile = remaining[0] ?? "default";
+  }
+  await writeConfig(config);
+  return true;
 }
 
 export async function listProfiles(): Promise<string[]> {

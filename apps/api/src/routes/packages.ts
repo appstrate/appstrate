@@ -1131,15 +1131,14 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       orgId,
     );
 
-    // Parse optional version override from request body
+    // Parse optional version override from request body. The body itself is
+    // optional (OpenAPI `requestBody.required: false` — the SPA omits it
+    // entirely when no override is chosen), so only read it when present;
+    // a present-but-malformed body is a 400, not a silent no-override.
     let versionOverride: string | undefined;
-    try {
-      const body = await c.req.json();
-      if (body?.version && typeof body.version === "string") {
-        versionOverride = body.version;
-      }
-    } catch {
-      // No body or invalid JSON — proceed without override
+    if (c.req.raw.body !== null) {
+      const body = await readJsonBody(c, z.object({ version: z.string().min(1).optional() }));
+      versionOverride = body.version;
     }
 
     const result = await createVersionFromDraft({

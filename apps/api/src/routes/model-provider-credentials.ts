@@ -65,20 +65,23 @@ export const updateSchema = z.object({
   apiKey: z.string().min(1).optional(),
 });
 
-/** PG `foreign_key_violation`. Drizzle wraps the underlying postgres.js error
- * via `new Error(..., { cause })`, so the SQLSTATE code lives on `err.cause`. */
+/** PG referential-integrity violation on delete. PostgreSQL raises
+ * `foreign_key_violation` (23503); PGlite (tier 0) surfaces `ON DELETE
+ * RESTRICT` as `restrict_violation` (23001). Both mean "rows still
+ * reference this credential". */
 function isForeignKeyViolation(err: unknown): boolean {
-  return pgErrorCode(err) === "23503";
+  const code = pgErrorCode(err);
+  return code === "23503" || code === "23001";
 }
 
+/** Walk the `cause` chain for a SQLSTATE `code` — Drizzle (and the PGlite
+ * driver) wrap the underlying driver error one or more levels deep. */
 function pgErrorCode(err: unknown): string | undefined {
-  if (typeof err !== "object" || err === null) return undefined;
-  const top = (err as { code?: string }).code;
-  if (typeof top === "string") return top;
-  const cause = (err as { cause?: unknown }).cause;
-  if (typeof cause === "object" && cause !== null) {
-    const inner = (cause as { code?: string }).code;
-    if (typeof inner === "string") return inner;
+  let cur: unknown = err;
+  for (let depth = 0; depth < 5 && typeof cur === "object" && cur !== null; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+    cur = (cur as { cause?: unknown }).cause;
   }
   return undefined;
 }

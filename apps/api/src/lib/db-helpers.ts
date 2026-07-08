@@ -164,49 +164,27 @@ export function mergeSystemAndDb<SystemDef, DbRow extends { id: string }, Out>(
 // --- Partial update-set builder ---
 
 /**
- * Tenant-scoping and immutable columns that must NEVER be settable from a
- * caller-supplied data object — overwriting `orgId`/`applicationId` would move
- * a row across tenants, and `id`/`createdAt` are write-once. Blocked
- * unconditionally as a safety net even when a caller forgets to pass an
- * explicit `allowedKeys` allowlist. Both TS field names and their snake_case
- * SQL aliases are listed so a raw wire body can't slip either past.
- */
-const IMMUTABLE_UPDATE_KEYS: ReadonlySet<string> = new Set([
-  "id",
-  "orgId",
-  "org_id",
-  "applicationId",
-  "application_id",
-  "createdAt",
-  "created_at",
-]);
-
-/**
  * Build a Drizzle-compatible update set from a partial data object.
  *
  * Always includes `updatedAt: new Date()`. Keys whose value is `undefined`
  * are skipped.
  *
- * Pass `allowedKeys` — the explicit set of columns a route may update — so a
- * caller cannot mass-assign tenant/immutable columns by handing the raw
- * request body straight through (e.g. `{ name, orgId }` silently rewriting
- * `orgId` cross-tenant). When `allowedKeys` is omitted, a hard-coded
- * `IMMUTABLE_UPDATE_KEYS` blocklist still strips the dangerous columns as a
- * safety net, but passing an allowlist is strongly preferred.
+ * `allowedKeys` — the explicit set of columns the caller may update — is
+ * mandatory so a caller cannot mass-assign tenant/immutable columns by
+ * handing the raw request body straight through (e.g. `{ name, orgId }`
+ * silently rewriting `orgId` cross-tenant). List exactly the keys of the
+ * route's Zod update schema; never include `id`/`orgId`/`applicationId`/
+ * `createdAt`.
  */
 export function buildUpdateSet(
   data: Record<string, unknown>,
-  allowedKeys?: readonly string[],
+  allowedKeys: readonly string[],
 ): Record<string, unknown> {
-  const allow = allowedKeys ? new Set(allowedKeys) : null;
+  const allow = new Set(allowedKeys);
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   for (const [key, value] of Object.entries(data)) {
     if (value === undefined) continue;
-    if (allow) {
-      if (!allow.has(key)) continue;
-    } else if (IMMUTABLE_UPDATE_KEYS.has(key)) {
-      continue;
-    }
+    if (!allow.has(key)) continue;
     updates[key] = value;
   }
   return updates;

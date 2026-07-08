@@ -368,7 +368,8 @@ export async function updateWebhook(
 
   if (params.url) validateWebhookUrl(params.url);
 
-  const updates = buildUpdateSet(params);
+  // Keys of `updateWebhookSchema` (routes.ts).
+  const updates = buildUpdateSet(params, ["url", "events", "packageId", "payloadMode", "enabled"]);
 
   const [updated] = await db
     .update(webhooks)

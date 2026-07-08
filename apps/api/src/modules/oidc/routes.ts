@@ -22,7 +22,8 @@ import type { AppEnv } from "../../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
 import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
-import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
+import { notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
+import { readJsonBody } from "../../lib/request-body.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
@@ -447,8 +448,7 @@ export function createOidcRouter() {
     requireModulePermission("oauth-clients", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const body = await c.req.json();
-      const data = parseBody(createOAuthClientSchema, body);
+      const data = await readJsonBody(c, createOAuthClientSchema);
 
       requireAdminForFirstParty(c, data.isFirstParty);
 
@@ -533,8 +533,7 @@ export function createOidcRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;
-      const body = await c.req.json();
-      const data = parseBody(updateOAuthClientSchema, body);
+      const data = await readJsonBody(c, updateOAuthClientSchema);
       const owning = await getClientOwningOrg(clientId);
       if (!owning || owning !== orgId) throw notFound("OAuth client not found");
 
@@ -640,8 +639,7 @@ export function createOidcRouter() {
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
-      const body = await c.req.json();
-      const data = parseBody(smtpConfigUpsertSchema, body);
+      const data = await readJsonBody(c, smtpConfigUpsertSchema);
       // SSRF: block configurations that would make Appstrate bounce
       // email traffic off internal metadata endpoints / loopback relays.
       if (isBlockedHost(data.host)) {
@@ -672,8 +670,7 @@ export function createOidcRouter() {
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
-      const body = await c.req.json();
-      const data = parseBody(smtpConfigTestSchema, body);
+      const data = await readJsonBody(c, smtpConfigTestSchema);
       try {
         const result = await sendTestEmail(applicationId, data.to);
         return c.json({ ok: true, messageId: result.messageId });
@@ -727,8 +724,7 @@ export function createOidcRouter() {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
       const provider = parseProvider(c.req.param("provider")!);
-      const body = await c.req.json();
-      const data = parseBody(socialProviderUpsertSchema, body);
+      const data = await readJsonBody(c, socialProviderUpsertSchema);
       const saved = await upsertSocialProvider(applicationId, provider, data);
       return c.json(saved);
     },

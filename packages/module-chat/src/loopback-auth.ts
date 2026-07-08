@@ -154,11 +154,10 @@ export const chatLoopbackStrategy: AuthStrategy = {
 
     // Scope + capability are carried IN the (HMAC-signed) claims — a token can
     // only ever resolve to the permissions its minter embedded. Both minters
-    // live in this module and set them explicitly; the fallbacks below only
-    // guard a malformed payload that survived signature verification.
-    const permissions = Array.isArray(claims.permissions)
-      ? claims.permissions
-      : [...INFERENCE_PERMISSIONS];
+    // live in this module and set them explicitly; a payload missing them is
+    // malformed and refused like any other invalid token (fail closed).
+    if (!Array.isArray(claims.permissions)) return null;
+    const permissions = claims.permissions;
 
     return {
       user: { id: claims.userId, email: claims.email, name: claims.name },

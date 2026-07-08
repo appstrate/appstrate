@@ -247,7 +247,9 @@ export async function updateEndUser(
 
   // Build update set — merge metadata (Stripe pattern)
   const { metadata, ...rest } = params;
-  const updates = buildUpdateSet(rest);
+  // Keys of `updateEndUserSchema` (routes/end-users.ts) minus `metadata`,
+  // which is merged with the current value below.
+  const updates = buildUpdateSet(rest, ["name", "email", "externalId"]);
   if (metadata !== undefined) {
     const [current] = await db
       .select({ metadata: endUsers.metadata })

@@ -121,7 +121,7 @@ export function createAgentsRouter() {
     async (c) => {
       const agent = c.get("package");
 
-      const body = await c.req.json<Record<string, unknown>>();
+      const body = await readJsonBody(c, z.record(z.string(), z.unknown()));
       const schema = agent.manifest.config?.schema ?? { type: "object" as const, properties: {} };
 
       // Validate config with AJV

@@ -357,6 +357,15 @@ export interface ConnectRemoteHttpDeps {
       clientInfo: { name: string; version: string };
     },
   ) => Promise<AppstrateMcpClient>;
+  /**
+   * Optional DNS resolver forwarded to the SSRF guard (`guardedFetch`'s
+   * `resolve` option) — same seam as `credential-proxy.ts`'s
+   * `deps.resolveHost`. Tests inject a resolver returning a public address
+   * so fixture hostnames pass the guard without real DNS; production
+   * callers omit it (system resolver). The guard itself ALWAYS runs —
+   * injecting a transport factory does NOT disable it.
+   */
+  resolveHost?: HostResolver;
 }
 
 /**
@@ -464,23 +473,19 @@ export async function connectRemoteHttpIntegration(
     return { name: plan.headerName, value: `${plan.headerPrefix}${plan.value}` };
   };
 
-  // SSRF-guard the egress on the PRODUCTION wiring (P0-2): `guardedFetch`
-  // does per-hop DNS re-checking, manual redirect following, drops credential
-  // headers on cross-origin redirects and strips userinfo — throwing
-  // `SsrfBlockedError` on private/loopback/link-local hosts. This is the only
-  // otherwise-unguarded sidecar egress path (the MITM/CONNECT listeners
-  // already resolve+check). The guard sits INSIDE the credential closure so
-  // the Bearer is injected exactly once on the original request and
+  // SSRF-guard the egress — ALWAYS (P0-2): `guardedFetch` does per-hop DNS
+  // re-checking, manual redirect following, drops credential headers on
+  // cross-origin redirects and strips userinfo — throwing `SsrfBlockedError`
+  // on private/loopback/link-local hosts. This is the only otherwise-
+  // unguarded sidecar egress path (the MITM/CONNECT listeners already
+  // resolve+check). The guard sits INSIDE the credential closure so the
+  // Bearer is injected exactly once on the original request and
   // `guardedFetch` owns the redirect hops (re-injecting per hop would leak
-  // the credential cross-origin). When a caller injects its own transport
-  // factory — the unit-test DI seam (see CLAUDE.md "Mocking Policy") — the
-  // injected factory owns the network layer, so the closure delegates to the
-  // live global `fetch` unguarded: the tested contract is "inject header,
-  // delegate to `globalThis.fetch`, 401 ⇒ refresh once and retry", and the
-  // guard's real DNS resolution would fail-close on the fixture hostnames.
-  // The single production caller (bootIntegrations) passes no deps, so every
-  // real remote-MCP request flows through `guardedFetch`.
-  const guardEgress = !deps.createClient && !deps.createSseClient;
+  // the credential cross-origin). Tests never disable the guard — they
+  // inject `deps.resolveHost` (a resolver returning a public address for
+  // fixture hostnames) so the guard code on this path is identical for
+  // every caller; `guardedFetch` reads the live global `fetch`, which the
+  // tests stub.
 
   // `typeof fetch` (Bun) carries a static `preconnect` member alongside the
   // call signature. The MCP transport's `fetch?: typeof fetch` option demands
@@ -492,7 +497,6 @@ export async function connectRemoteHttpIntegration(
         const headers = new Headers(init?.headers);
         const h = readHeader();
         if (h) headers.set(h.name, h.value);
-        if (!guardEgress) return fetch(input, { ...init, headers });
         // `guardedFetch` accepts `string | URL`; the MCP transports always
         // call with a URL/string target (headers/body ride in `init`), so a
         // stray `Request` is normalised to its URL for the type.
@@ -506,7 +510,10 @@ export async function connectRemoteHttpIntegration(
         return guardedFetch(
           target,
           { ...init, headers },
-          { allowHost: isOperatorTrustedEgressHost },
+          {
+            allowHost: isOperatorTrustedEgressHost,
+            ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
+          },
         );
       };
       let res = await send();

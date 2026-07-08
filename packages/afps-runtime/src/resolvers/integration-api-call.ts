@@ -56,7 +56,7 @@ import {
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { substituteVars } from "./template-vars.ts";
+import { substituteVars, referencesField } from "./template-vars.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -253,12 +253,7 @@ function referencesCredentialField(
   input: string,
   fields: Readonly<Record<string, string>>,
 ): boolean {
-  let found = false;
-  input.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) => {
-    if (key in fields) found = true;
-    return match;
-  });
-  return found;
+  return referencesField(input, fields);
 }
 
 // ─────────────────────────────────────────────
@@ -434,7 +429,9 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       // SSRF net and still let the call proceed to any PUBLIC host with the
       // credential embedded. Refuse outright instead — same semantics as the
       // sidecar's credential-proxy 403 for this exact case.
-      if (substitutesCredential && !allowAllUris && !meta.authorizedUris.length) {
+      // (`allowAllUris` is already false whenever `substitutesCredential` is
+      // true — see its definition above — so only the allowlist matters here.)
+      if (substitutesCredential && meta.authorizedUris.length === 0) {
         throw new ResolverError(
           "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
           `Integration ${meta.name}: the call substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,

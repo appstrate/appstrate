@@ -144,7 +144,9 @@ export async function updateOrgProxy(
   }
 
   const { url, ...rest } = data;
-  const updates = buildUpdateSet(rest);
+  // Keys of `updateProxySchema` (routes/proxies.ts) minus `url`, which is
+  // encrypted below and stored as `urlEncrypted`.
+  const updates = buildUpdateSet(rest, ["label", "enabled"]);
   if (url !== undefined) {
     if (isBlockedEgressUrl(url)) throw new Error("URL targets a blocked network");
     updates.urlEncrypted = encrypt(url);

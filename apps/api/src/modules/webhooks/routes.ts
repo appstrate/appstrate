@@ -34,6 +34,7 @@ import {
   webhookEventSchema,
 } from "./service.ts";
 import { parseBody, forbidden, invalidRequest } from "../../lib/errors.ts";
+import { readJsonBody } from "../../lib/request-body.ts";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { getOrgScope, type AppScope, type OrgScope } from "../../lib/scope.ts";
 
@@ -108,8 +109,7 @@ export function createWebhooksRouter() {
     requireModulePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const body = await c.req.json();
-      const data = parseBody(createWebhookSchema, body);
+      const data = await readJsonBody(c, createWebhookSchema);
 
       // API keys cannot create org-level webhooks (would span foreign apps)
       // and cannot create app-level webhooks targeting another application.
@@ -203,8 +203,7 @@ export function createWebhooksRouter() {
     rateLimit(10),
     requireModulePermission("webhooks", "write"),
     async (c) => {
-      const body = await c.req.json();
-      const data = parseBody(updateWebhookSchema, body);
+      const data = await readJsonBody(c, updateWebhookSchema);
 
       const result = await updateWebhook(webhookScope(c), c.req.param("id")!, data);
       await recordAuditFromContext(c, {

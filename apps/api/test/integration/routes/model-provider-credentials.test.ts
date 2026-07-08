@@ -294,7 +294,7 @@ describe("Model Provider Keys API", () => {
    * Both routes ultimately call `testModelConfig`, which fetches upstream.
    * Tests pin the boundary behaviour (auth, scoping, 404, 400, Zod) and
    * the SSRF short-circuit (`isBlockedUrl` returns BLOCKED_URL before any
-   * fetch fires) — using `http://127.0.0.1:9` keeps the tests offline and
+   * fetch fires) — using `http://10.255.255.9:9` keeps the tests offline and
    * deterministic. Real upstream coverage lives at the unit level
    * (`build-inference-probe-request.test.ts` + `build-model-test-request.test.ts`).
    */
@@ -345,8 +345,10 @@ describe("Model Provider Keys API", () => {
     });
 
     it("returns 200 + BLOCKED_URL when the saved key targets a private baseUrl (SSRF guard hits before any fetch)", async () => {
-      // Use 127.0.0.1 (loopback) → isBlockedUrl returns true →
-      // testModelConfig short-circuits with BLOCKED_URL, no network call.
+      // Use 10.255.255.9 (RFC 1918, NOT in the test preload's operator
+      // allowlist — 127.0.0.1 is exempted there) → isBlockedEgressUrl
+      // returns true → testModelConfig short-circuits with BLOCKED_URL,
+      // no network call.
       // The test still exercises the route → service → loadInferenceCredentials
       // → testModelConfig wiring end-to-end; only the upstream call is short-circuited.
       const createRes = await app.request("/api/model-provider-credentials", {
@@ -355,7 +357,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Local",
           providerId: "openai-compatible",
-          baseUrlOverride: "http://127.0.0.1:9",
+          baseUrlOverride: "http://10.255.255.9:9",
           apiKey: "sk-local",
         }),
       });
@@ -379,7 +381,7 @@ describe("Model Provider Keys API", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://127.0.0.1:9",
+          baseUrl: "http://10.255.255.9:9",
           apiKey: "sk-x",
         }),
       });
@@ -392,7 +394,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://127.0.0.1:9",
+          baseUrl: "http://10.255.255.9:9",
         }),
       });
       expect(res.status).toBe(400);
@@ -416,7 +418,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://127.0.0.1:9",
+          baseUrl: "http://10.255.255.9:9",
           apiKey: "sk-inline",
         }),
       });
@@ -429,7 +431,7 @@ describe("Model Provider Keys API", () => {
       // Regression for the same wiring that broke as bug 2: the inline
       // /test route also goes through `loadInferenceCredentials`.
       // The test verifies the resolution succeeds end-to-end (we hit
-      // BLOCKED_URL because the baseUrl is loopback — but to reach
+      // BLOCKED_URL because the baseUrl is a private address — but to reach
       // BLOCKED_URL the route MUST have decrypted and threaded the key).
       const createRes = await app.request("/api/model-provider-credentials", {
         method: "POST",
@@ -437,7 +439,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Inline-existing",
           providerId: "openai-compatible",
-          baseUrlOverride: "http://127.0.0.1:9",
+          baseUrlOverride: "http://10.255.255.9:9",
           apiKey: "sk-stored",
         }),
       });
@@ -448,7 +450,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://127.0.0.1:9",
+          baseUrl: "http://10.255.255.9:9",
           existingKeyId: id,
         }),
       });
@@ -466,7 +468,7 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://127.0.0.1:9",
+          baseUrl: "http://10.255.255.9:9",
           existingKeyId: "00000000-0000-0000-0000-000000000000",
         }),
       });

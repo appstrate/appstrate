@@ -9,8 +9,7 @@ import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { notFound } from "../lib/errors.ts";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { checkEgressHost } from "../lib/egress-host-guard.ts";
+import { checkEgressHost, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
@@ -344,7 +343,19 @@ export async function updateOrgModel(
     throw new Error("Cannot modify built-in model");
   }
 
-  const updates = buildUpdateSet(data);
+  // Keys of `updateModelSchema` (routes/models.ts).
+  const updates = buildUpdateSet(data, [
+    "label",
+    "modelId",
+    "credentialId",
+    "enabled",
+    "input",
+    "contextWindow",
+    "maxTokens",
+    "reasoning",
+    "cost",
+    "aliased",
+  ]);
 
   await db
     .update(orgModels)
@@ -851,7 +862,7 @@ export async function testModelConfig(config: {
       : { ok: false, latency: 0, error: result.error, message: result.message };
   }
 
-  if (isBlockedUrl(config.baseUrl)) {
+  if (isBlockedEgressUrl(config.baseUrl)) {
     return {
       ok: false,
       latency: 0,
