@@ -4,7 +4,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, internalError, notFound, parseBody } from "../lib/errors.ts";
+import { ApiError, internalError, notFound } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { validateScopes, roleScopes, getApiKeyAllowedScopes } from "../lib/permissions.ts";
@@ -53,8 +54,7 @@ export function createApiKeysRouter() {
   router.post("/", requirePermission("api-keys", "create"), async (c) => {
     const scope = getAppScope(c);
     const user = c.get("user");
-    const body = await c.req.json();
-    const data = parseBody(createApiKeySchema, body);
+    const data = await readJsonBody(c, createApiKeySchema);
 
     const { name, expiresAt } = data;
     const orgRole = c.get("orgRole");

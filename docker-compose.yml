@@ -163,14 +163,26 @@ services:
     entrypoint: ["true"]
     restart: "no"
 
-  # ── Docker socket proxy (RECOMMENDED hardening — commented by default) ──────
+  # ── Docker socket proxy (PARTIAL hardening — commented by default) ─────────
   #
   # Fronts the Docker socket with a filtering reverse proxy so the platform
   # container never touches `/var/run/docker.sock` directly. Only THIS service
   # mounts the socket (still `:ro`, but it is the only process that can reach
-  # the daemon), and it rejects (403) every API verb not explicitly enabled
-  # below — shrinking a platform compromise from "root on the host" to "can
-  # drive the whitelisted container/image/network/volume verbs".
+  # the daemon), and it rejects (403) every API verb group not explicitly
+  # enabled below.
+  #
+  # IMPORTANT — this does NOT contain a platform compromise to "just the
+  # whitelisted verbs". The proxy filters by API GROUP/VERB only; it does NOT
+  # inspect request bodies. With CONTAINERS=1 + POST=1 (which the platform
+  # needs to create run containers), a compromised platform can still
+  # `POST /containers/create` with `HostConfig.Privileged: true` plus a host
+  # bind mount (e.g. `/:/host`) and start it — regaining full root on the host.
+  # What the proxy DOES buy you is blocking the host-level / cluster / exec
+  # surface (INFO/AUTH/SECRETS/SWARM/SERVICES/EXEC/… stay default-deny), which
+  # narrows the reachable API — but container-create is itself a host-root
+  # primitive, so treat this as defense-in-depth, not a security boundary.
+  # A real boundary needs an authorization plugin that filters create payloads,
+  # or a rootless/VM-isolated daemon (see RUN_ADAPTER=firecracker).
   #
   # Pinned by digest (tecnativa/docker-socket-proxy:0.3.0). Verbs enabled match
   # what the platform actually uses: create/start/stop/inspect/logs containers,

@@ -190,15 +190,17 @@ export function useGlobalRunSync() {
 
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, ms);
-        controller.signal.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            resolve();
-          },
-          { once: true },
-        );
+        const onAbort = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          // Timer fired normally — drop the abort listener so it doesn't leak
+          // for the lifetime of the controller (one per reconnect delay).
+          controller.signal.removeEventListener("abort", onAbort);
+          resolve();
+        }, ms);
+        controller.signal.addEventListener("abort", onAbort, { once: true });
       });
 
     // One connection attempt. Returns when the stream ends or errors; throws
@@ -214,12 +216,15 @@ export function useGlobalRunSync() {
       if (!res.ok || !res.body) {
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
-      // Connected — reset the backoff so the next drop starts from BASE again.
-      attempt = 0;
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
+      // A 200 followed by an immediate close would otherwise reset the backoff
+      // on `res.ok` and re-hammer the endpoint at 1 req/s forever. Only reset
+      // the backoff once the stream actually delivers a frame — a healthy
+      // connection — so the next real drop starts from BASE again.
+      let firstFrameSeen = false;
 
       for (;;) {
         const { done, value } = await reader.read();
@@ -227,6 +232,11 @@ export function useGlobalRunSync() {
 
         const { frames, buffer } = parseSseFrames(decoder.decode(value, { stream: true }), buf);
         buf = buffer;
+
+        if (!firstFrameSeen && frames.length > 0) {
+          firstFrameSeen = true;
+          attempt = 0;
+        }
 
         for (const { event, data } of frames) {
           if (event === "run_update" && data) {

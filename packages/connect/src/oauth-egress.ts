@@ -16,8 +16,11 @@
  * Escape hatch for self-hosting: some operators legitimately run an internal
  * IdP on a private address. `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` (comma-separated
  * hostnames) is an OPT-IN allowlist — when the target host matches an entry the
- * operator has explicitly trusted, we fall back to plain `fetch` (no SSRF
- * guard). Empty/unset ⇒ every OAuth egress host is guarded (the secure default).
+ * operator has explicitly trusted, the host blocklist is skipped for it. The
+ * request still goes through {@link guardedFetch} so the manual-redirect
+ * discipline (cross-origin credential + body stripping) holds — a trusted IdP
+ * that open-redirects cannot forward the secret to a third origin. Empty/unset
+ * ⇒ every OAuth egress host is guarded (the secure default).
  */
 
 import { getEnv } from "@appstrate/env";
@@ -55,16 +58,7 @@ export function isAllowedInternalIdpHost(host: string): boolean {
  * (private/link-local/loopback/metadata) address.
  */
 export async function oauthEgressFetch(input: string | URL, init?: RequestInit): Promise<Response> {
-  let host: string | undefined;
-  try {
-    host = new URL(typeof input === "string" ? input : input.href).hostname;
-  } catch {
-    // Malformed URL — let guardedFetch produce the canonical rejection.
-    host = undefined;
-  }
-  if (host && isAllowedInternalIdpHost(host)) {
-    // Operator explicitly trusts this internal IdP host — bypass the guard.
-    return fetch(input, init);
-  }
-  return guardedFetch(input, init);
+  // Always route through guardedFetch; the operator's opt-in allowlist only
+  // relaxes the HOST blocklist (via `allowHost`), never the redirect discipline.
+  return guardedFetch(input, init, { allowHost: isAllowedInternalIdpHost });
 }

@@ -13,7 +13,6 @@ import {
   LLM_PROXY_TIMEOUT_MS,
   MAX_REQUEST_BODY_SIZE,
   filterHeaders,
-  isBlockedUrl,
   readPositiveIntEnv,
   readRequestBodyBounded,
   type SidecarConfig,
@@ -21,6 +20,7 @@ import {
   type LlmProxyOauthConfig,
   type ModelSwap,
 } from "./helpers.ts";
+import { isBlockedEgressUrl } from "./ssrf.ts";
 import {
   swapRequestModel,
   swapResponseModelJson,
@@ -394,7 +394,7 @@ async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<strin
  * Derive the upstream `/llm/*` target from the inbound request: strip the
  * `/llm` mount prefix, re-append the query string onto the configured base URL,
  * and surface the method. Shared by both `/llm` branches (api_key + oauth);
- * each keeps its own `isBlockedUrl` SSRF check and credential handling.
+ * each keeps its own SSRF check (`isBlockedEgressUrl`) and credential handling.
  */
 function deriveLlmTarget(c: Context, baseUrl: string): { targetUrl: string; method: string } {
   const path = c.req.path.slice("/llm".length) || "/";
@@ -574,7 +574,7 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: "LLM proxy not configured" }, 503);
     }
 
-    if (isBlockedUrl(config.llm.baseUrl)) {
+    if (isBlockedEgressUrl(config.llm.baseUrl)) {
       return c.json({ error: "LLM base URL targets a blocked network range" }, 403);
     }
 
@@ -672,7 +672,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const baseUrl = llmConfig.baseUrl;
-    if (isBlockedUrl(baseUrl)) {
+    if (isBlockedEgressUrl(baseUrl)) {
       return c.json({ error: "Resolved OAuth base URL targets a blocked network range" }, 403);
     }
 

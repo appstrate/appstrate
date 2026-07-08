@@ -10,7 +10,8 @@ import { scopedNameRegex } from "@appstrate/core/validation";
 import { caretRange } from "@appstrate/core/semver";
 import { requireOrgAgent, requireMutableAgent } from "../middleware/guards.ts";
 import { buildAgentDetailDto } from "./agent-detail-handler.ts";
-import { internalError, invalidRequest, parseBody } from "../lib/errors.ts";
+import { internalError, invalidRequest } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
@@ -74,8 +75,7 @@ export function createUserAgentsRouter() {
       const agent = c.get("package");
       const packageId = agent.id;
 
-      const body = await c.req.json();
-      const data = parseBody(updateSkillsSchema, body, "skillIds");
+      const data = await readJsonBody(c, updateSkillsSchema, "skillIds");
       const { skillIds } = data;
 
       const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));

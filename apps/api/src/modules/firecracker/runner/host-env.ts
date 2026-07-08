@@ -97,13 +97,22 @@ const firecrackerEnvSchema = z.object({
   // credentials) and RFC1918 ranges (Docker bridges, LAN, VPC neighbours).
   // Comma-separated CIDRs. Narrow this list only for deployments that
   // intentionally expose private-range services to guest workloads.
+  // Keep in lockstep with the app-layer floor in
+  // packages/afps-shared/src/ssrf.ts (isBlockedHost) — guests egress at L3
+  // and never pass through that TS predicate, so a range present there but
+  // absent here is reachable from a guest: 100.64.0.0/10 is CGN AND the
+  // Alibaba/Tencent metadata space (100.100.100.200), 198.18.0.0/15 is
+  // benchmark, 192.0.0.0/24 IETF protocol assignments, 224.0.0.0/3 covers
+  // multicast + reserved + broadcast.
   FIRECRACKER_EGRESS_DENY_CIDRS: z
     .string()
     .regex(
       /^\d+\.\d+\.\d+\.\d+\/\d+(,\d+\.\d+\.\d+\.\d+\/\d+)*$/,
       "must be comma-separated IPv4 CIDRs",
     )
-    .default("169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
+    .default(
+      "169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,198.18.0.0/15,192.0.0.0/24,224.0.0.0/3",
+    ),
   // Per-run serial console log cap (bytes). The console aggregates the
   // guest kernel + supervisor + full workload stdout and appends
   // unbounded — with FIRECRACKER_DATA_DIR on a tmpfs a chatty workload

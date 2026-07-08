@@ -69,6 +69,40 @@ export function generateRunnerToken(): string {
  * `bun build --compile`d daemon from its launch cwd.
  */
 export function renderRunnerEnvFile(config: RunnerConfig): string {
+  // Injection guard: this file is root-owned, mode 0600, and read verbatim by
+  // systemd's EnvironmentFile parser (one KEY=value per line). A `\r`/`\n` in
+  // any interpolated value would smuggle in extra env lines — e.g. a
+  // `FIRECRACKER_ARTIFACTS_LOCAL=1` that disables the daemon's manifest-
+  // signature verification. Reject rather than sanitize: every value here is a
+  // machine-shaped token (hex secret, IPv4 URL, host, version tag, base64 key)
+  // with no legitimate newline.
+  const rejectNewline = (label: string, value: string | undefined): void => {
+    if (value !== undefined && /[\r\n]/.test(value)) {
+      throw new Error(
+        `${label} must not contain a newline — refusing to write a runner env file ` +
+          `with an injected line.`,
+      );
+    }
+  };
+  rejectNewline("token", config.token);
+  rejectNewline("platformUrl", config.platformUrl);
+  rejectNewline("host", config.host);
+  rejectNewline("artifactsVersion", config.artifactsVersion);
+  rejectNewline("FIRECRACKER_ARTIFACTS_PUBKEY", config.artifactsPubkey);
+
+  // Pubkey must be a base64 raw 32-byte Ed25519 key when present — the same
+  // shape the daemon enforces at boot. Validating here fails the install fast
+  // with a clear message instead of a fatal daemon crash after systemd start.
+  if (config.artifactsPubkey) {
+    const decoded = Buffer.from(config.artifactsPubkey, "base64");
+    if (decoded.length !== 32) {
+      throw new Error(
+        `FIRECRACKER_ARTIFACTS_PUBKEY must be a base64 raw 32-byte Ed25519 public key ` +
+          `(decoded to ${decoded.length} bytes).`,
+      );
+    }
+  }
+
   const paths = runnerDataPaths(config.dataDir);
   const lines = [
     "# Managed by `appstrate runner install` — edit with care.",

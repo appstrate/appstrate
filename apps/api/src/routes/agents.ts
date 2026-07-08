@@ -30,7 +30,8 @@ import { getActor } from "../lib/actor.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
-import { ApiError, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { ApiError, invalidRequest, notFound } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
@@ -186,8 +187,7 @@ export function createAgentsRouter() {
     async (c) => {
       const agent = c.get("package");
       const scope = getAppScope(c);
-      const body = await c.req.json();
-      const data = parseBody(proxyIdSchema, body);
+      const data = await readJsonBody(c, proxyIdSchema);
 
       await updateInstalledPackage(scope, agent.id, { proxyId: data.proxyId });
 
@@ -222,8 +222,7 @@ export function createAgentsRouter() {
     async (c) => {
       const agent = c.get("package");
       const scope = getAppScope(c);
-      const body = await c.req.json();
-      const data = parseBody(modelIdSchema, body);
+      const data = await readJsonBody(c, modelIdSchema);
 
       await updateInstalledPackage(scope, agent.id, { modelId: data.modelId });
 

@@ -396,6 +396,14 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       // and allow_all_uris integrations legitimately send it to the
       // agent-chosen first hop.
       let substitutesCredential = referencesCredentialField(req.target, fields);
+      // A `{{field}}` credential reference in the request BODY is the same
+      // exfiltration channel as one in the URL/headers — only a string body is
+      // substituted (`transformString` below runs on strings only; multipart /
+      // fromFile / fromBytes parts are never `{{}}`-substituted), so that is the
+      // one shape to scan.
+      if (typeof req.body === "string" && referencesCredentialField(req.body, fields)) {
+        substitutesCredential = true;
+      }
       const target = substituteVars(req.target, fields);
 
       // Strip agent overrides of reserved transport / credential headers
@@ -415,10 +423,24 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       const injectedCredentialHeader = injectCredential(headers, meta, entry);
 
       // A call that substitutes a credential field into the agent-controlled
-      // URL / headers MUST respect the auth's `authorized_uris` allowlist —
-      // `allow_all_uris` is not honoured for it, so the secret can't be
-      // exfiltrated to an arbitrary off-allowlist host.
+      // URL / headers / body MUST respect the auth's `authorized_uris`
+      // allowlist — `allow_all_uris` is not honoured for it, so the secret
+      // can't be exfiltrated to an arbitrary off-allowlist host.
       const allowAllUris = meta.allowAllUris && !substitutesCredential;
+
+      // When allow_all_uris was the integration's ONLY permission (no
+      // authorized_uris allowlist exists), downgrading the flag alone is not
+      // enough: the engine's preflight would fall back to the internal-host
+      // SSRF net and still let the call proceed to any PUBLIC host with the
+      // credential embedded. Refuse outright instead — same semantics as the
+      // sidecar's credential-proxy 403 for this exact case.
+      if (substitutesCredential && !allowAllUris && !meta.authorizedUris.length) {
+        throw new ResolverError(
+          "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
+          `Integration ${meta.name}: the call substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
+          { integration: meta.name },
+        );
+      }
 
       const resolvedBody = await resolveBodyForFetch(req.body, {
         allowFromFile: true,

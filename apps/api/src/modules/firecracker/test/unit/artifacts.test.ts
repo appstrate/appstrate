@@ -220,7 +220,11 @@ describe("ensureGuestArtifacts — install", () => {
     expect(files.get(ROOTFS_PATH)).toEqual(s.rootfsPlain);
     // Marker records the installed release version + protocol.
     const marker = JSON.parse(files.get(MARKER_PATH) as string);
-    expect(marker).toEqual({ version: "1.2.3", guest_protocol: GUEST_PROTOCOL_VERSION });
+    expect(marker).toEqual({
+      version: "1.2.3",
+      guest_protocol: GUEST_PROTOCOL_VERSION,
+      signed: true,
+    });
   });
 
   it("hits the `latest` URL when no version is pinned and a versioned URL when pinned", async () => {
@@ -345,6 +349,7 @@ describe("ensureGuestArtifacts — skip when present", () => {
       [MARKER_PATH]: JSON.stringify({
         version: "1.2.3",
         guest_protocol: GUEST_PROTOCOL_VERSION,
+        signed: true,
       }),
     });
 
@@ -370,6 +375,7 @@ describe("ensureGuestArtifacts — skip when present", () => {
       [MARKER_PATH]: JSON.stringify({
         version: "1.2.3",
         guest_protocol: GUEST_PROTOCOL_VERSION,
+        signed: true,
       }),
     });
 
@@ -447,6 +453,36 @@ describe("ensureGuestArtifacts — skip when present", () => {
     expect(s.calls.length).toBeGreaterThan(0);
   });
 
+  it("re-verifies when the installed marker predates the signature gate (no `signed` flag)", async () => {
+    // A host installed by a pre-signing daemon has a marker with a matching
+    // protocol but no `signed: true` — those artifacts were never signature-
+    // attested, so the skip fast-path must NOT grandfather them; it re-downloads
+    // and re-verifies once, then records `signed: true`.
+    const s = scenario();
+    const { fs, files } = makeFs({
+      [KERNEL_PATH]: new Uint8Array([1]),
+      [ROOTFS_PATH]: new Uint8Array([2]),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION,
+      }),
+    });
+
+    await ensureGuestArtifacts(
+      { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
+      {
+        fetchFn: s.fetchFn,
+        fs,
+        decompressZstd: s.decompressZstd,
+        arch: "x86_64",
+        manifestPublicKey: PUBKEY_B64,
+      },
+    );
+
+    expect(s.calls.length).toBeGreaterThan(0);
+    expect(JSON.parse(files.get(MARKER_PATH) as string).signed).toBe(true);
+  });
+
   it("re-downloads when the pinned version differs from the installed marker", async () => {
     const s = scenario({ version: "2.0.0" });
     const { fs, files } = makeFs({
@@ -478,6 +514,36 @@ describe("ensureGuestArtifacts — skip when present", () => {
     expect(s.calls.length).toBeGreaterThan(0);
     expect(files.get(KERNEL_PATH)).toEqual(s.kernelBytes);
     expect(JSON.parse(files.get(MARKER_PATH) as string).version).toBe("2.0.0");
+  });
+
+  it("is fatal when the signed manifest version does not match the pinned version (rollback)", async () => {
+    // Attacker serves an older, validly-signed manifest (version 1.2.3) under a
+    // pinned tag of 2.0.0 — the signature verifies, but the version binding must
+    // refuse it rather than install known-older artifacts under the newer pin.
+    const s = scenario({ version: "1.2.3" });
+    const { fs } = makeFs({
+      [KERNEL_PATH]: new Uint8Array([1]),
+      [ROOTFS_PATH]: new Uint8Array([2]),
+    });
+
+    await expect(
+      ensureGuestArtifacts(
+        {
+          kernelPath: KERNEL_PATH,
+          rootfsPath: ROOTFS_PATH,
+          baseUrl: BASE_URL,
+          version: "2.0.0",
+          local: false,
+        },
+        {
+          fetchFn: s.fetchFn,
+          fs,
+          decompressZstd: s.decompressZstd,
+          arch: "x86_64",
+          manifestPublicKey: PUBKEY_B64,
+        },
+      ),
+    ).rejects.toThrow(/version/i);
   });
 });
 
@@ -673,12 +739,15 @@ describe("ensureGuestArtifacts — manifest signature gate (P1-4)", () => {
 
 describe("ensureGuestArtifacts — network failure policy", () => {
   it("warns and continues when download fails but PROTOCOL-COMPATIBLE artifacts are present", async () => {
+    // Marker carries `signed: true` — the keep-existing fallback only applies
+    // to installs that already passed the signature gate.
     const { fs } = makeFs({
       [KERNEL_PATH]: new Uint8Array([1]),
       [ROOTFS_PATH]: new Uint8Array([2]),
       [MARKER_PATH]: JSON.stringify({
         version: "1.2.3",
         guest_protocol: GUEST_PROTOCOL_VERSION,
+        signed: true,
       }),
     });
 
@@ -692,6 +761,58 @@ describe("ensureGuestArtifacts — network failure policy", () => {
           version: "5.0.0",
           local: false,
         },
+        { fetchFn: throwingFetch, fs, arch: "x86_64", manifestPublicKey: PUBKEY_B64 },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does NOT keep a never-signature-verified install through a download failure", async () => {
+    // Pre-signing marker (no `signed: true`): the skip path already refuses
+    // it, and the keep-existing fallback must refuse it too — otherwise a
+    // transient (or attacker-induced) fetch failure boots unverified
+    // artifacts on every boot, bypassing the signed-marker gate.
+    const { fs } = makeFs({
+      [KERNEL_PATH]: new Uint8Array([1]),
+      [ROOTFS_PATH]: new Uint8Array([2]),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION,
+      }),
+    });
+
+    await expect(
+      ensureGuestArtifacts(
+        { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
+        { fetchFn: throwingFetch, fs, arch: "x86_64", manifestPublicKey: PUBKEY_B64 },
+      ),
+    ).rejects.toThrow(/without signature verification.*could not be downloaded/);
+  });
+
+  it("skips (no download) when a v-prefixed pin matches the marker's v-stripped version", async () => {
+    // Operators pin "v1.2.3" (the documented form); the marker records the
+    // manifest's v-stripped "1.2.3". The skip comparison must normalize both
+    // sides or every daemon boot silently re-downloads kernel+rootfs.
+    const { fs } = makeFs({
+      [KERNEL_PATH]: new Uint8Array([1]),
+      [ROOTFS_PATH]: new Uint8Array([2]),
+      [MARKER_PATH]: JSON.stringify({
+        version: "1.2.3",
+        guest_protocol: GUEST_PROTOCOL_VERSION,
+        signed: true,
+      }),
+    });
+
+    await expect(
+      ensureGuestArtifacts(
+        {
+          kernelPath: KERNEL_PATH,
+          rootfsPath: ROOTFS_PATH,
+          baseUrl: BASE_URL,
+          version: "v1.2.3",
+          local: false,
+        },
+        // throwingFetch: any download attempt would reject — resolving proves
+        // the skip fast-path fired.
         { fetchFn: throwingFetch, fs, arch: "x86_64", manifestPublicKey: PUBKEY_B64 },
       ),
     ).resolves.toBeUndefined();

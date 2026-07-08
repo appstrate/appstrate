@@ -65,6 +65,14 @@ function EndUserAvatar({ user }: { user: EndUserInfo }) {
 }
 
 export function EndUsersPage() {
+  // Remount on application switch so cursor + loadedPages (and the rest of the
+  // page state) reset — otherwise app A's accumulated "Load more" pages would
+  // bleed into app B's list.
+  const applicationId = useCurrentApplicationId();
+  return <EndUsersPageContent key={applicationId ?? "none"} />;
+}
+
+function EndUsersPageContent() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const applicationId = useCurrentApplicationId();

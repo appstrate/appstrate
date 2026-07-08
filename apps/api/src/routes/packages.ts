@@ -173,6 +173,16 @@ interface ParsedUpload {
   version?: string;
 }
 
+/** JSON body shape for the non-multipart package upload branch. */
+const jsonUploadSchema = z.object({
+  id: z.string().min(1),
+  content: z.string().min(1),
+  manifest: z.record(z.string(), z.unknown()).optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  version: z.string().optional(),
+});
+
 /**
  * Parse a package item upload from a Hono context (multipart ZIP or JSON body).
  * Throws ApiError on validation errors.
@@ -254,18 +264,7 @@ async function parsePackageUpload(
   }
 
   // JSON body
-  const body = await c.req.json<{
-    id: string;
-    content: string;
-    manifest?: Record<string, unknown>;
-    name?: string;
-    description?: string;
-    version?: string;
-  }>();
-
-  if (!body.id || !body.content) {
-    throw invalidRequest("id and content are required");
-  }
+  const body = await readJsonBody(c, jsonUploadSchema);
 
   if (!SLUG_REGEX.test(body.id)) {
     throw invalidRequest("Invalid id (kebab-case slug required)", "id");

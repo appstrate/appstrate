@@ -7,8 +7,7 @@ import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { logger } from "../lib/logger.ts";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { checkEgressHost } from "../lib/egress-host-guard.ts";
+import { checkEgressHost, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
 import {
   mergeSystemAndDb,
@@ -115,7 +114,7 @@ export async function createOrgProxy(
   url: string,
   userId: string,
 ): Promise<string> {
-  if (isBlockedUrl(url)) throw new Error("URL targets a blocked network");
+  if (isBlockedEgressUrl(url)) throw new Error("URL targets a blocked network");
   const urlEncrypted = encrypt(url);
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -147,7 +146,7 @@ export async function updateOrgProxy(
   const { url, ...rest } = data;
   const updates = buildUpdateSet(rest);
   if (url !== undefined) {
-    if (isBlockedUrl(url)) throw new Error("URL targets a blocked network");
+    if (isBlockedEgressUrl(url)) throw new Error("URL targets a blocked network");
     updates.urlEncrypted = encrypt(url);
   }
 
@@ -268,7 +267,7 @@ export async function testProxyConnection(orgId: string, proxyId: string): Promi
     return { ok: false, latency: 0, error: "PROXY_NOT_FOUND", message: "Proxy not found" };
   }
 
-  if (isBlockedUrl(proxy.url)) {
+  if (isBlockedEgressUrl(proxy.url)) {
     return {
       ok: false,
       latency: 0,

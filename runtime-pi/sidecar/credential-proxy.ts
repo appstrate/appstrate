@@ -211,6 +211,43 @@ function assertNever(value: never): never {
 }
 
 /**
+ * True when `input` contains a `{{key}}` placeholder naming a decrypted
+ * credential field. Mirrors the local resolver's `referencesCredentialField`:
+ * an agent that templates a credential into an agent-controlled URL / header /
+ * body must not be allowed to ship that secret to an arbitrary host under
+ * `allow_all_uris`.
+ */
+// Reuses the canonical placeholder grammar so this exfil guard can never drift from what substituteVars actually substitutes.
+const referencesCredentialField = (input: string, creds: Record<string, unknown>): boolean =>
+  findUnresolvedPlaceholders(input).some((k) => k in creds);
+
+/**
+ * True when a `substituteBody: true` request body would have a decrypted
+ * credential field templated into it. Exhaustive over every
+ * {@link ApiCallRequestBody} kind — adding a new kind without deciding its
+ * exfil-guard behaviour fails to compile via `assertNever`.
+ */
+function bodyReferencesCredential(
+  body: ApiCallRequestBody,
+  creds: Record<string, string>,
+): boolean {
+  switch (body.kind) {
+    case "none":
+    case "streaming":
+      // Pass-through by design — no substitution ever happens on these kinds.
+      return false;
+    case "buffered":
+      return body.text !== undefined && referencesCredentialField(body.text, creds);
+    case "formData":
+      return !!body.fieldTemplates?.some((t) => referencesCredentialField(t, creds));
+    case "json":
+      return referencesCredentialField(JSON.stringify(body.value), creds);
+    default:
+      return assertNever(body);
+  }
+}
+
+/**
  * Execute an integration call end-to-end: fetch credentials, validate
  * the URL, substitute placeholders, inject the credential header
  * server-side, send the request, retry once on 401, capture cookies,
@@ -263,7 +300,21 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    and a glob-matched host is agent-chosen, not operator-chosen —
   //    without the gate that branch would be strictly weaker than
   //    allow_all.
-  if (creds.allowAllUris) {
+  // 4a. Credential-exfiltration guard. When the agent templates a decrypted
+  //     credential (`{{field}}`) into the agent-controlled URL, a header, or a
+  //     substituted body, `allow_all_uris` MUST NOT be honoured — the SSRF net
+  //     alone blocks only internal hosts, so the secret would still be
+  //     shippable to any external attacker host. Downgrade to allowlist-only,
+  //     mirroring the local resolver, and refuse outright if the integration
+  //     declares no `authorized_uris` to constrain the destination.
+  const substitutesCredential =
+    referencesCredentialField(targetUrl, creds.credentials) ||
+    Object.values(callerHeaders).some((v) => referencesCredentialField(v, creds.credentials)) ||
+    (substituteBody && bodyReferencesCredential(body, creds.credentials));
+
+  const effectiveAllowAll = creds.allowAllUris && !substitutesCredential;
+
+  if (effectiveAllowAll) {
     const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
     if (refusal) return refusal;
   } else if (creds.authorizedUris && creds.authorizedUris.length) {
@@ -278,6 +329,14 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
       if (refusal) return refusal;
     }
+  } else if (substitutesCredential) {
+    // allow_all_uris was the only permission but the call would exfiltrate a
+    // credential to an agent-chosen host — no allowlist exists to constrain it.
+    return {
+      ok: false,
+      status: 403,
+      error: `Call for integration "${integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
+    };
   } else {
     // No authorizedUris and no allowAllUris — apply the SSRF safety net.
     const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);

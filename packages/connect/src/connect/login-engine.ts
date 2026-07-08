@@ -58,7 +58,7 @@ import {
   matchesAuthorizedUriSpec,
 } from "../proxy-primitives.ts";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "../oauth-egress.ts";
 
 export interface LoginLimits {
@@ -145,6 +145,8 @@ export interface LoginContext {
   authorizedUris: string[] | null;
   allowAllUris: boolean;
   fetchImpl?: typeof fetch;
+  /** Injectable DNS resolver for the SSRF host check (tests). Prod omits it. */
+  resolveHost?: HostResolver;
   now?: () => number;
 }
 
@@ -717,14 +719,30 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   // `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` (a self-hosted deployment whose login
   // endpoint legitimately lives on a private address). Unset in production by
   // default, so every internal host stays blocked there.
-  let blockedHost: string | undefined;
+  let loginUrl: URL;
   try {
-    blockedHost = new URL(url).hostname;
+    loginUrl = new URL(url);
   } catch {
     throw new LoginError("url targets a blocked/internal address", "url_not_allowed");
   }
-  if (isBlockedUrl(url) && !isAllowedInternalIdpHost(blockedHost)) {
+  // Scheme floor: only http(s) may leave the engine. The literal `isBlockedUrl`
+  // gate this check replaced also rejected non-http(s) schemes; the DNS-aware
+  // host check below is host-only, so keep the floor explicit — an `ftp:` /
+  // `file:` / `gopher:` URL must fail here, not later as a generic fetch error.
+  if (loginUrl.protocol !== "https:" && loginUrl.protocol !== "http:") {
     throw new LoginError("url targets a blocked/internal address", "url_not_allowed");
+  }
+  const loginHost = loginUrl.hostname;
+  // DNS-aware check (resolves the host, blocks if ANY resolved address is
+  // private/link-local/loopback/metadata) — the literal `isBlockedUrl` used
+  // before was string-only, so `evil.example.com → 169.254.169.254` (DNS
+  // rebind) sailed through on this credential-bearing path. Matches the OAuth
+  // egress paths. Operator-trusted internal hosts opt out.
+  if (!isAllowedInternalIdpHost(loginHost)) {
+    const hostCheck = await resolveAndCheckHost(loginHost, { resolve: ctx.resolveHost });
+    if (hostCheck.blocked) {
+      throw new LoginError("url targets a blocked/internal address", "url_not_allowed");
+    }
   }
   // When an allowlist is present (`!allowAllUris`), the URL must additionally
   // match one of the author's explicit, auditable `authorizedUris` patterns.

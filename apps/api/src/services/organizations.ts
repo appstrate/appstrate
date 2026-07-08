@@ -298,6 +298,17 @@ export async function deleteOrganization(orgId: string): Promise<void> {
   // Doing the count in the same transaction as the deletes — which take row
   // locks on the runs being removed — closes that window.
   await db.transaction(async (tx) => {
+    // Serialize against concurrent run admission. `createRun` acquires this
+    // exact per-org advisory lock (key `run_concurrency:<orgId>`, via
+    // `enforceOrgConcurrencyCap`) before its count + INSERT. Taking the same
+    // lock here means a run admitted after our snapshot below cannot commit
+    // until this transaction finishes — closing the TOCTOU window where a run
+    // that started after the count but before the delete would be
+    // cascade-deleted mid-flight. Released automatically at transaction end.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`run_concurrency:${orgId}`})::bigint)`,
+    );
+
     const runningResult = await tx
       .select({ runningCount: count() })
       .from(runs)

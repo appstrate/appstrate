@@ -27,7 +27,8 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { invalidRequest, notFound, ApiError } from "../lib/errors.ts";
+import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { getActor } from "../lib/actor.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
@@ -143,11 +144,7 @@ export function createRunsRemoteRouter() {
     idempotency(),
     requirePermission("agents", "run"),
     async (c) => {
-      const parsed = CreateRemoteRunBodySchema.safeParse(await c.req.json());
-      if (!parsed.success) {
-        throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid request body");
-      }
-      const body = parsed.data;
+      const body = await readJsonBody(c, CreateRemoteRunBodySchema);
 
       const orgId = c.get("orgId");
       const actor = getActor(c);
@@ -159,6 +156,20 @@ export function createRunsRemoteRouter() {
       // credentials. Assert org membership up front (404 on mismatch); every
       // downstream resolver keys on this applicationId.
       const applicationId = body.applicationId;
+      // The caller's authenticated application context (`c.get("applicationId")`,
+      // resolved by `requireAppContext` from a credential pin — API key, OIDC
+      // bearer, any module auth strategy — or the X-Application-Id header) is
+      // the app-scope boundary for this write. The org-scope assertion below
+      // only proves app∈org, so without this check a credential pinned to app
+      // A could name a sibling app B in the body and escape its app scope (the
+      // path-param `apiKeyAppScopeGuard` doesn't cover the body). Enforced for
+      // EVERY auth method — gating on `authMethod === "api_key"` would leave
+      // the same escape open to any module strategy that pins an application
+      // (e.g. oauth2-end-user bearers).
+      const pinnedAppId = c.get("applicationId");
+      if (pinnedAppId && applicationId !== pinnedAppId) {
+        throw forbidden("Caller's application scope does not include this application");
+      }
       await assertApplicationInScope({ orgId, applicationId });
 
       const src = body.source;
@@ -380,13 +391,10 @@ export function createRunsRemoteRouter() {
       const runId = c.req.param("runId");
       if (!runId) throw invalidRequest("runId path parameter is required", "runId");
 
-      const parsed = ExtendSinkBodySchema.safeParse(await c.req.json());
-      if (!parsed.success) {
-        throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid request body");
-      }
+      const body = await readJsonBody(c, ExtendSinkBodySchema);
 
       const env = getEnv();
-      const ttl = Math.min(parsed.data.ttl_seconds, env.REMOTE_RUN_SINK_MAX_TTL_SECONDS);
+      const ttl = Math.min(body.ttl_seconds, env.REMOTE_RUN_SINK_MAX_TTL_SECONDS);
       const newExpiresAt = new Date(Date.now() + ttl * 1000);
 
       // Update only open sinks (not closed, not already expired) owned by

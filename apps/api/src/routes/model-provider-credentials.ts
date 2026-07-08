@@ -37,9 +37,9 @@ import {
   invalidRequest,
   notFound,
   internalError,
-  parseBody,
   systemEntityForbidden,
 } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createSchema = z.object({
@@ -181,8 +181,7 @@ export function createModelProviderCredentialsRouter() {
   router.post("/", requirePermission("model-provider-credentials", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
-    const body = await c.req.json();
-    const data = parseBody(createSchema, body);
+    const data = await readJsonBody(c, createSchema);
     const { providerId, apiKey, baseUrlOverride } = data;
 
     const cfg = getModelProvider(providerId);
@@ -237,8 +236,7 @@ export function createModelProviderCredentialsRouter() {
     requirePermission("model-provider-credentials", "read"),
     async (c) => {
       const orgId = c.get("orgId");
-      const body = await c.req.json();
-      const data = parseBody(testInlineSchema, body);
+      const data = await readJsonBody(c, testInlineSchema);
       let { apiKey } = data;
       if (!apiKey && data.existingKeyId) {
         const existing = await loadInferenceCredentials(orgId, data.existingKeyId);
@@ -348,8 +346,7 @@ export function createModelProviderCredentialsRouter() {
     if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id);
     }
-    const body = await c.req.json();
-    const data = parseBody(updateSchema, body);
+    const data = await readJsonBody(c, updateSchema);
     try {
       await updateModelProviderCredential(orgId, id, data);
       const { apiKey: _apiKey, ...auditData } = data;

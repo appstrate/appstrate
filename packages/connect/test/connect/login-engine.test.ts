@@ -24,6 +24,13 @@ function fakeFetch(
   return { impl, calls };
 }
 
+// The login engine now runs a DNS-aware SSRF host check (`resolveAndCheckHost`)
+// before dispatch. Inject a deterministic resolver so test hostnames resolve to
+// a fixed PUBLIC address — otherwise a real DNS lookup of `idp.example.com`
+// (NXDOMAIN) would fail-close every happy-path test. Numeric-IP tests
+// (169.254.169.254) skip the resolver and hit the literal blocklist directly.
+const TEST_RESOLVE = async (): Promise<string[]> => ["93.184.216.34"];
+
 const ALLOW = ["https://idp.example.com/**"];
 
 describe("runLogin — declarative login (AFPS)", () => {
@@ -52,6 +59,7 @@ describe("runLogin — declarative login (AFPS)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
       now: () => 1_000_000,
     });
 
@@ -75,6 +83,7 @@ describe("runLogin — declarative login (AFPS)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     });
     expect(res.outputs).toEqual({ access_token: "TOK" });
     expect(JSON.stringify(res.outputs)).not.toContain("s3cr3t");
@@ -93,9 +102,32 @@ describe("runLogin — declarative login (AFPS)", () => {
       authorizedUris: [],
       allowAllUris: true, // waives the allowlist — must NOT waive the blocklist
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     });
     await expect(run).rejects.toMatchObject({ reason: "url_not_allowed" });
     // Fail-closed: the request never went out.
+    expect(calls.length).toBe(0);
+  });
+
+  it("rejects a non-http(s) scheme (ftp://) before any DNS resolve or fetch", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "GET", url: "ftp://idp.example.com/token" },
+        outputs: { access_token: "$response.header.x-token" },
+      },
+    };
+    const run = runLogin(config, {
+      inputs: {},
+      authorizedUris: [],
+      allowAllUris: true, // scheme floor must hold even with the allowlist waived
+      fetchImpl: impl,
+      resolveHost: async () => {
+        throw new Error("resolver must not run for a scheme-rejected URL");
+      },
+    });
+    await expect(run).rejects.toMatchObject({ reason: "url_not_allowed" });
+    // Fail-closed: neither the resolver nor the request ever fired.
     expect(calls.length).toBe(0);
   });
 
@@ -117,6 +149,7 @@ describe("runLogin — declarative login (AFPS)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     });
     expect(res.outputs.person_id).toBe("P-42");
     expect(res.identityClaims.person_id).toBe("P-42");
@@ -142,6 +175,7 @@ describe("runLogin — declarative login (AFPS)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     });
     expect(res.outputs.person_id).toBe("P-7");
   });
@@ -162,6 +196,7 @@ describe("runLogin — declarative login (AFPS)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("extract_failed");
@@ -182,6 +217,7 @@ describe("runLogin — declarative login (AFPS)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     });
     expect(res.outputs.JSESSIONID).toBe("abc123");
   });
@@ -204,6 +240,7 @@ describe("runLogin — security limits", () => {
         authorizedUris: ALLOW,
         allowAllUris: false,
         fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
       }),
     ).rejects.toMatchObject({ reason: "url_not_allowed" });
   });
@@ -219,6 +256,7 @@ describe("runLogin — security limits", () => {
         authorizedUris: ALLOW,
         allowAllUris: false,
         fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
       }),
     ).rejects.toMatchObject({ reason: "unresolved_placeholder" });
   });
@@ -231,6 +269,7 @@ describe("runLogin — security limits", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("bad_status");
@@ -248,6 +287,7 @@ describe("runLogin — security limits", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("bad_status");
@@ -262,6 +302,7 @@ describe("runLogin — security limits", () => {
         authorizedUris: ALLOW,
         allowAllUris: false,
         fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
       }),
     ).rejects.toMatchObject({ reason: "response_too_large" });
   });
@@ -289,6 +330,7 @@ describe("runLogin — security limits", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: hangingFetch,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("timeout");
@@ -304,6 +346,7 @@ describe("runLogin — security limits", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("extract_failed");
@@ -328,6 +371,7 @@ describe("runLogin — security limits", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("extract_failed");
@@ -354,6 +398,7 @@ describe("runLogin — security limits", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("extract_failed");
@@ -385,6 +430,7 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     });
     expect(res.outputs.access_token).toBe("ABC123");
   });
@@ -410,6 +456,7 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     });
     expect(res.outputs.access_token).toBe("TOK-XYZ");
   });
@@ -438,6 +485,7 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     });
     expect(res.outputs.access_token).toBe("first");
   });
@@ -461,6 +509,7 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("invalid_config");
@@ -486,6 +535,7 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("invalid_config");
@@ -626,6 +676,7 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     });
     expect(res.outputs.access_token).toBe("TOK");
   });
@@ -646,6 +697,7 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("bad_status");

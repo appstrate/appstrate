@@ -129,6 +129,87 @@ describe("guardedFetch — SSRF", () => {
     expect(seen[2]!.auth).toBeNull(); // cross-origin hop dropped it
   });
 
+  it("drops the request body (and content-type) on a cross-host 307 redirect", async () => {
+    const seen: Array<{ body: unknown; contentType: string | null }> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, reqInit?: RequestInit) => {
+      seen.push({
+        body: reqInit?.body,
+        contentType: new Headers(reqInit?.headers ?? {}).get("content-type"),
+      });
+      if (seen.length === 1) {
+        return new Response(null, {
+          status: 307,
+          headers: { location: "https://other.example/token" },
+        });
+      }
+      return new Response("done", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await guardedFetch(
+      "https://first.example/token",
+      {
+        method: "POST",
+        body: "client_secret=shh",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      },
+      {
+        resolve: resolverFor({
+          "first.example": ["203.0.113.1"],
+          "other.example": ["203.0.113.2"],
+        }),
+      },
+    );
+    expect(seen[0]!.body).toBe("client_secret=shh");
+    expect(seen[1]!.body).toBeUndefined();
+    expect(seen[1]!.contentType).toBeNull();
+  });
+
+  it("preserves the request body on a same-host http→https 307 upgrade", async () => {
+    // A TLS-terminating reverse proxy in front of an (allowlisted) internal
+    // IdP routinely 307-upgrades http→https on the same host — the host
+    // boundary is what the secret-containment drop keys on, not the origin.
+    const seen: Array<{ body: unknown }> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, reqInit?: RequestInit) => {
+      seen.push({ body: reqInit?.body });
+      if (seen.length === 1) {
+        return new Response(null, {
+          status: 307,
+          headers: { location: "https://idp.example/token" },
+        });
+      }
+      return new Response("done", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await guardedFetch(
+      "http://idp.example/token",
+      { method: "POST", body: "grant_type=refresh_token" },
+      { resolve: resolverFor({ "idp.example": ["203.0.113.9"] }) },
+    );
+    expect(seen[1]!.body).toBe("grant_type=refresh_token");
+  });
+
+  it("drops the request body on a same-host https→http downgrade", async () => {
+    // Same host, but the secret would be re-sent in cleartext — drop it.
+    const seen: Array<{ body: unknown }> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, reqInit?: RequestInit) => {
+      seen.push({ body: reqInit?.body });
+      if (seen.length === 1) {
+        return new Response(null, {
+          status: 307,
+          headers: { location: "http://idp.example/token" },
+        });
+      }
+      return new Response("done", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await guardedFetch(
+      "https://idp.example/token",
+      { method: "POST", body: "client_secret=shh" },
+      { resolve: resolverFor({ "idp.example": ["203.0.113.9"] }) },
+    );
+    expect(seen[1]!.body).toBeUndefined();
+  });
+
   it("stops after maxRedirects", async () => {
     globalThis.fetch = (async () =>
       new Response(null, {

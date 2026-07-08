@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { resolveAndCheckHost, type ResolvedHostCheck } from "@appstrate/core/ssrf";
+import { resolveAndCheckHost, isBlockedUrl, type ResolvedHostCheck } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 
 /**
@@ -22,4 +22,15 @@ export async function checkEgressHost(hostname: string): Promise<ResolvedHostChe
     return { blocked: false, pinnedAddress: hostname };
   }
   return resolveAndCheckHost(hostname);
+}
+
+/**
+ * Allowlist-aware literal (no-DNS) twin of {@link checkEgressHost} for the
+ * same egress sites. Without it, a LITERAL private/CGN address (e.g. a
+ * Tailscale `100.x` model endpoint or org proxy) can never be exempted: the
+ * bare `isBlockedUrl` check fires before the allowlist-aware DNS gate is
+ * ever consulted. Parse/scheme stay fail-closed inside `isBlockedUrl`.
+ */
+export function isBlockedEgressUrl(url: string): boolean {
+  return isBlockedUrl(url, isAllowedInternalIdpHost);
 }

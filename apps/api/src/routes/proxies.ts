@@ -18,13 +18,8 @@ import {
 } from "../services/org-proxies.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
-import {
-  ApiError,
-  notFound,
-  internalError,
-  parseBody,
-  systemEntityForbidden,
-} from "../lib/errors.ts";
+import { ApiError, notFound, internalError, systemEntityForbidden } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createProxySchema = z.object({
@@ -56,8 +51,7 @@ export function createProxiesRouter() {
   router.post("/", requirePermission("proxies", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
-    const body = await c.req.json();
-    const data = parseBody(createProxySchema, body);
+    const data = await readJsonBody(c, createProxySchema);
 
     try {
       const id = await createOrgProxy(orgId, data.label, data.url, user.id);
@@ -87,8 +81,7 @@ export function createProxiesRouter() {
   // MUST be registered before PUT /:id
   router.put("/default", requirePermission("proxies", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json();
-    const data = parseBody(setDefaultSchema, body);
+    const data = await readJsonBody(c, setDefaultSchema);
 
     try {
       await setDefaultProxy(orgId, data.proxyId);
@@ -142,8 +135,7 @@ export function createProxiesRouter() {
   router.put("/:id", requirePermission("proxies", "write"), async (c) => {
     const orgId = c.get("orgId");
     const proxyId = c.req.param("id")!;
-    const body = await c.req.json();
-    const data = parseBody(updateProxySchema, body);
+    const data = await readJsonBody(c, updateProxySchema);
 
     if (isSystemProxy(proxyId)) {
       throw systemEntityForbidden("proxy", proxyId);

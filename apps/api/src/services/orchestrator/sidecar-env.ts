@@ -22,6 +22,7 @@
 
 import type { SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 import type { WorkspaceHandle } from "@appstrate/core/platform-types";
+import { getEnv } from "@appstrate/env";
 
 interface BaseSidecarEnvParams {
   spec: SidecarLaunchSpec;
@@ -63,6 +64,14 @@ export function buildBaseSidecarEnv(params: BaseSidecarEnvParams): Record<string
     PLATFORM_API_URL: params.platformApiUrl,
     WORKSPACE_HANDLE_JSON: JSON.stringify(params.workspace),
   };
+  // Forward the operator's internal-egress allowlist to the sidecar. The
+  // sidecar's own SSRF gates (LLM baseUrl, remote-MCP fetch) are otherwise
+  // strictly literal/fail-closed with no env access to the platform
+  // allowlist — a host the platform-side checks just exempted (internal
+  // model endpoint, allowlisted remote MCP server) would be re-blocked
+  // in-run. Empty/unset ⇒ nothing exempted (secure default).
+  const egressAllowHosts = getEnv().OAUTH_ALLOWED_INTERNAL_IDP_HOSTS;
+  if (egressAllowHosts) env.APPSTRATE_EGRESS_ALLOW_HOSTS = egressAllowHosts;
   applySpecToSidecarEnv(params.spec, env);
   return env;
 }

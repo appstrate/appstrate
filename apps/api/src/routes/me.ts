@@ -294,12 +294,17 @@ router.delete("/connections/:connectionId", async (c) => {
     return c.body(null, 204);
   }
 
-  // orgId is unused by deleteIntegrationConnection (the service filters
-  // by applicationId + actor ownership only). Pass empty string rather
-  // than fetching the row's org id — adding a JOIN to satisfy a typed
-  // field the service ignores is dead work.
+  // Pass an EMPTY orgId deliberately. `/me/connections` is an actor-ownership
+  // boundary, not an app∈org one: a connection belongs to its owner regardless
+  // of which org the caller is currently scoped to. The service treats an empty
+  // `scope.orgId` as "no org context" and skips its app∈org assertion, relying
+  // solely on the (userId | endUserId) ownership predicate. Passing the caller's
+  // live `c.get("orgId")` here (populated for API-key/OIDC callers, empty for
+  // cookie sessions) would wrongly run that assertion and 404 a self-owned
+  // connection whose application lives in a different org. Ownership is still
+  // fully enforced downstream by the actor filter.
   await deleteIntegrationConnection(
-    { orgId: c.get("orgId") ?? "", applicationId: row.applicationId },
+    { orgId: "", applicationId: row.applicationId },
     connectionId,
     actor,
   );

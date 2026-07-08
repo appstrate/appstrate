@@ -326,20 +326,26 @@ async function fetchBytes(fetchFn: typeof fetch, url: string): Promise<Uint8Arra
 
 /**
  * Fetch the detached manifest signature (base64 raw Ed25519, one line). A
- * missing signature asset (404) is ALWAYS fatal — a release that ships an
- * unsigned manifest cannot be trusted, so we refuse to boot rather than fall
- * back to the "keep existing" network-failure path. Genuine transport errors
- * (thrown by `fetchFn`) propagate as ordinary Errors so the caller's
- * keep-existing fallback still applies when nothing has actually been tampered.
+ * genuinely MISSING signature asset (404) is ALWAYS fatal — a release that
+ * ships an unsigned manifest cannot be trusted, so we refuse to boot rather
+ * than fall back to the "keep existing" network-failure path. A TRANSIENT
+ * upstream error (5xx, a proxy hiccup) is NOT proof of an unsigned release, so
+ * it propagates as an ordinary Error — matching how the manifest fetch
+ * (`fetchBytes`) treats the same status — and the caller's keep-existing
+ * fallback still applies. Transport errors thrown by `fetchFn` propagate the
+ * same way.
  */
 async function fetchManifestSignature(fetchFn: typeof fetch, url: string): Promise<string> {
   const res = await fetchFn(url);
   if (!res.ok) {
-    throw new FatalArtifactsError(
-      `manifest signature asset is missing (GET ${url} → HTTP ${res.status}). ` +
-        `The release did not publish "${MANIFEST_SIGNATURE_ASSET_NAME}" — refusing to ` +
-        `trust an unsigned Firecracker artifacts manifest.`,
-    );
+    if (res.status === 404) {
+      throw new FatalArtifactsError(
+        `manifest signature asset is missing (GET ${url} → HTTP 404). ` +
+          `The release did not publish "${MANIFEST_SIGNATURE_ASSET_NAME}" — refusing to ` +
+          `trust an unsigned Firecracker artifacts manifest.`,
+      );
+    }
+    throw new Error(`GET ${url} → HTTP ${res.status}`);
   }
   return (await res.text()).trim();
 }
@@ -447,9 +453,23 @@ export async function ensureGuestArtifacts(
   // unverifiable, not as compatible.
   const installedProtocolOk = installed?.guestProtocol === GUEST_PROTOCOL_VERSION;
 
-  // Skip: artifacts present, protocol verified, and either no version
-  // pinned or the marker already matches the pinned version.
-  if (present && installedProtocolOk && (!config.version || installed.version === config.version)) {
+  // The skip fast-path also requires the install to have been signature-
+  // verified (`signed: true` on the marker). A marker lacking it — hosts
+  // installed by a pre-signing daemon, or hand-copied files — is treated like
+  // a missing/unverifiable marker: not eligible to skip, so it forces one
+  // re-download that runs the signature gate before it is trusted.
+  const installedSignedOk = installed?.signed === true;
+
+  // Skip: artifacts present, protocol verified, signature-covered, and either
+  // no version pinned or the marker already matches the pinned version.
+  // Compare tag-normalized (strip a leading `v` on either side) — the marker
+  // records the manifest's v-stripped version while operators legitimately pin
+  // "v1.2.3" (host-env documents that form), and a raw string compare would
+  // silently re-download the full kernel+rootfs on every boot.
+  const versionMatches =
+    !config.version ||
+    (installed != null && installed.version.replace(/^v/, "") === config.version.replace(/^v/, ""));
+  if (present && installedProtocolOk && installedSignedOk && versionMatches) {
     log.info("Firecracker artifacts: present, skipping download", {
       arch,
       installedVersion: installed.version,
@@ -480,11 +500,13 @@ export async function ensureGuestArtifacts(
       throw err;
     }
     // Network/transient failure with artifacts already on disk: keep them
-    // — but ONLY when the installed protocol is verified compatible. A
-    // stale-protocol install must never be "kept" through a download
-    // failure; that would resurrect exactly the daemon-upgraded-next-to-
-    // old-rootfs state the protocol gate exists to prevent.
-    if (present && installedProtocolOk) {
+    // — but ONLY when the installed protocol is verified compatible AND the
+    // install was signature-verified. A stale-protocol install must never be
+    // "kept" through a download failure, and neither must a never-attested
+    // one (pre-signing marker): otherwise a transient — or attacker-induced —
+    // fetch failure boots unverified artifacts on every boot, bypassing the
+    // signed-marker gate the skip path enforces.
+    if (present && installedProtocolOk && installedSignedOk) {
       log.warn("Firecracker artifacts: download failed, using existing on-disk artifacts", {
         error: getErrorMessage(err),
         kernelPath: config.kernelPath,
@@ -492,10 +514,16 @@ export async function ensureGuestArtifacts(
       });
       return;
     }
-    // Nothing usable on disk (absent, or present at an incompatible guest
-    // protocol) and we could not fetch: the daemon cannot run VMs.
+    // Nothing usable on disk (absent, present at an incompatible guest
+    // protocol, or present but never signature-verified) and we could not
+    // fetch: the daemon cannot run VMs.
+    const unusableReason = !present
+      ? "missing"
+      : !installedProtocolOk
+        ? `installed at an incompatible guest protocol (daemon speaks ${GUEST_PROTOCOL_VERSION})`
+        : "installed without signature verification (pre-signing or hand-copied install)";
     throw new Error(
-      `Firecracker guest artifacts are ${present ? `installed at an incompatible guest protocol (daemon speaks ${GUEST_PROTOCOL_VERSION})` : "missing"} and could not be downloaded: ${getErrorMessage(err)}. ` +
+      `Firecracker guest artifacts are ${unusableReason} and could not be downloaded: ${getErrorMessage(err)}. ` +
         `Pin FIRECRACKER_ARTIFACTS_VERSION to a reachable release, ` +
         `build them locally with \`bun run firecracker:build\` (then set FIRECRACKER_ARTIFACTS_LOCAL=1), ` +
         `or check network access to ${baseUrl}.`,
@@ -546,7 +574,28 @@ async function downloadAndInstall(ctx: InstallCtx): Promise<void> {
     JSON.parse(new TextDecoder().decode(manifestBytes)),
   );
 
-  // 2. Protocol gate — ALWAYS fatal: this daemon build cannot drive
+  // 2. Version binding — ALWAYS fatal when a version is PINNED
+  //    (FIRECRACKER_ARTIFACTS_VERSION): the signed manifest MUST declare that
+  //    exact version. GitHub serves `download/v<tag>/<asset>` from whatever the
+  //    tag currently points at, so without this an attacker who can place an
+  //    OLDER but validly-signed manifest under the pinned tag's URL could roll
+  //    the daemon back to superseded artifacts. Compare tag-normalized (strip a
+  //    leading `v` on either side). Not applied to the unpinned `latest` path —
+  //    there is no expected version to bind against there.
+  if (version) {
+    const pinned = version.replace(/^v/, "");
+    const declared = manifest.version.replace(/^v/, "");
+    if (pinned !== declared) {
+      throw new FatalArtifactsError(
+        `guest-artifact version mismatch: pinned FIRECRACKER_ARTIFACTS_VERSION ` +
+          `"${version}" but the signed manifest declares version "${manifest.version}". ` +
+          `Refusing to install a release under a tag it was not signed for (possible ` +
+          `rollback to older, still-validly-signed artifacts).`,
+      );
+    }
+  }
+
+  // 3. Protocol gate — ALWAYS fatal: this daemon build cannot drive
   //    artifacts published under a different guest protocol.
   if (manifest.guest_protocol !== GUEST_PROTOCOL_VERSION) {
     throw new FatalArtifactsError(
@@ -565,7 +614,7 @@ async function downloadAndInstall(ctx: InstallCtx): Promise<void> {
     );
   }
 
-  // 3. Kernel — downloaded and verified as-is (uncompressed).
+  // 4. Kernel — downloaded and verified as-is (uncompressed).
   const vmlinuxUrl = assetUrl(baseUrl, version, `vmlinux-${arch}`);
   log.info("Firecracker artifacts: downloading kernel", { url: vmlinuxUrl });
   const kernel = await downloadHashed(fetchFn, vmlinuxUrl);
@@ -577,7 +626,7 @@ async function downloadAndInstall(ctx: InstallCtx): Promise<void> {
     entry.vmlinux.size,
   );
 
-  // 4. Rootfs — downloaded compressed, verified after decompression against
+  // 5. Rootfs — downloaded compressed, verified after decompression against
   //    the manifest sha256 (which is the DECOMPRESSED file's digest).
   const rootfsUrl = assetUrl(baseUrl, version, `rootfs-${arch}.ext4.zst`);
   log.info("Firecracker artifacts: downloading rootfs", { url: rootfsUrl });
@@ -612,18 +661,26 @@ async function downloadAndInstall(ctx: InstallCtx): Promise<void> {
     entry.rootfs.size,
   );
 
-  // 5. Atomic install — tmp write then rename, so a crash mid-write never
+  // 6. Atomic install — tmp write then rename, so a crash mid-write never
   //    leaves the engine reading a half-written kernel/rootfs.
   await fs.mkdirp(dirname(ctx.kernelPath));
   await fs.mkdirp(dirname(ctx.rootfsPath));
   await installAtomic(fs, ctx.kernelPath, kernel.bytes);
   await installAtomic(fs, ctx.rootfsPath, rootfsBytes);
 
-  // 6. Marker last — only after both files are in place, so a partial
-  //    install never records a version it did not finish.
+  // 7. Marker last — only after both files are in place, so a partial
+  //    install never records a version it did not finish. `signed: true`
+  //    records that this install went through signature verification above;
+  //    the skip fast-path in ensureGuestArtifacts refuses to trust a marker
+  //    lacking it (a pre-signing daemon never wrote it), forcing one
+  //    re-download+verify.
   await fs.writeText(
     ctx.markerPath,
-    JSON.stringify({ version: manifest.version, guest_protocol: manifest.guest_protocol }),
+    JSON.stringify({
+      version: manifest.version,
+      guest_protocol: manifest.guest_protocol,
+      signed: true,
+    }),
   );
 
   log.info("Firecracker artifacts: installed", {
@@ -670,6 +727,12 @@ interface InstalledMarker {
   version: string;
   /** Absent on markers written before the protocol was recorded. */
   guestProtocol: number | undefined;
+  /**
+   * True only when this install was written after signature verification.
+   * Absent/false on markers written by a pre-signing daemon (or hand-copied),
+   * which the skip fast-path treats as unverifiable → forces a re-download.
+   */
+  signed: boolean;
 }
 
 async function readMarker(fs: ArtifactsFs, markerPath: string): Promise<InstalledMarker | null> {
@@ -677,10 +740,18 @@ async function readMarker(fs: ArtifactsFs, markerPath: string): Promise<Installe
   if (!text) return null;
   try {
     const parsed = z
-      .object({ version: z.string(), guest_protocol: z.number().int().optional() })
+      .object({
+        version: z.string(),
+        guest_protocol: z.number().int().optional(),
+        signed: z.boolean().optional(),
+      })
       .safeParse(JSON.parse(text));
     if (!parsed.success) return null;
-    return { version: parsed.data.version, guestProtocol: parsed.data.guest_protocol };
+    return {
+      version: parsed.data.version,
+      guestProtocol: parsed.data.guest_protocol,
+      signed: parsed.data.signed === true,
+    };
   } catch {
     return null;
   }

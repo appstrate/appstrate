@@ -1619,6 +1619,29 @@ async function installDockerTier(
   },
 ): Promise<void> {
   const runBackend = opts.runBackend;
+  // Upgrade: preserve the runner token the daemon was already paired with.
+  // `resolveRunBackend` freshly MINTS a token when the operator passes no
+  // `--runner-token` (tokenSource === "generated"). On a REMOTE-daemon upgrade
+  // we only re-print the pairing one-liner (the daemon isn't re-paired here),
+  // so writing that minted token to the platform `.env` would rotate the
+  // platform to a secret the running daemon never saw → every run 401s until a
+  // manual re-pair. Seed the token from the preserved `.env` instead. Two
+  // cases deliberately keep the resolved token: an explicit `--runner-token`
+  // (tokenSource === "flag" — a deliberate rotation the same-host re-pair /
+  // printed one-liner propagates to the daemon), and a first-time firecracker
+  // setup on top of an existing docker install (no token to preserve). This
+  // mutation happens before `runBackendEnv` + the post-install steps so every
+  // downstream consumer of `runBackend.token` stays consistent.
+  if (
+    opts.mode === "upgrade" &&
+    runBackend.adapter === "firecracker" &&
+    runBackend.tokenSource === "generated"
+  ) {
+    const preserved = opts.existing.existingEnv.FIRECRACKER_RUNNER_TOKEN;
+    if (typeof preserved === "string" && preserved.trim() !== "") {
+      runBackend.token = preserved;
+    }
+  }
   // Firecracker `.env` keys (RUN_ADAPTER/MODULES/FIRECRACKER_RUNNER_*).
   // FIRECRACKER_RUNNER_URL/_TOKEN are re-applied AFTER `mergeEnv` on upgrade
   // (see below) — the same-host `runner install` step re-pairs the daemon
@@ -1724,12 +1747,13 @@ async function installDockerTier(
         runBackendEnv,
       );
       let envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
-      // Firecracker pairing token/URL must track the CURRENT install, not the
-      // preserved one: `runSameHostRunnerInstall` below (and the remote
-      // one-liner) re-pair the daemon with `runBackend.token`. Let the fresh
-      // runner keys win so the platform side agrees with the daemon it just
-      // paired — otherwise `mergeEnv` keeps the OLD token and every request to
-      // the daemon 401s ("token does not match").
+      // Firecracker pairing token/URL must track the CURRENT install, not
+      // whatever `mergeEnv` happened to keep: `runSameHostRunnerInstall` below
+      // (and the remote one-liner) pair the daemon with `runBackend.token`, so
+      // the platform `.env` must carry that exact token. Note `runBackend.token`
+      // was already reconciled above — on a remote/generated upgrade it holds
+      // the PRESERVED token so we don't rotate the platform away from the
+      // daemon; otherwise it's the flag/minted token being (re-)paired.
       if (mode === "upgrade" && runBackend.adapter === "firecracker") {
         envVars = {
           ...envVars,

@@ -22,7 +22,8 @@ import {
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
-import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
   createInvitation,
@@ -110,8 +111,7 @@ router.post("/", async (c) => {
   if (getEnv().AUTH_DISABLE_ORG_CREATION && !isPlatformAdmin(user.email)) {
     throw forbidden("Organization creation is disabled on this instance");
   }
-  const body = await c.req.json();
-  const data = parseBody(createOrgSchema, body);
+  const data = await readJsonBody(c, createOrgSchema);
 
   const slug = data.slug?.trim() || toSlug(data.name, 50);
   if (!slug) {
@@ -223,8 +223,7 @@ router.put("/:orgId", async (c) => {
 
   await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can modify the organization");
 
-  const body = await c.req.json();
-  const data = parseBody(updateOrgSchema, body);
+  const data = await readJsonBody(c, updateOrgSchema);
 
   if (data.slug) {
     if (!(await isSlugAvailable(data.slug))) {
@@ -302,8 +301,7 @@ router.post("/:orgId/members", async (c) => {
     "Admin access required to invite members",
   );
 
-  const body = await c.req.json();
-  const data = parseBody(addMemberSchema, body);
+  const data = await readJsonBody(c, addMemberSchema);
   const role = data.role;
 
   try {
@@ -371,8 +369,7 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
 
   await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can change roles");
 
-  const body = await c.req.json();
-  const data = parseBody(updateRoleSchema, body);
+  const data = await readJsonBody(c, updateRoleSchema);
 
   const updated = await updateInvitationRole(invitationId, orgId, data.role);
   if (!updated) {
@@ -439,8 +436,7 @@ router.put("/:orgId/members/:userId", async (c) => {
 
   await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can change roles");
 
-  const body = await c.req.json();
-  const data = parseBody(updateRoleSchema, body);
+  const data = await readJsonBody(c, updateRoleSchema);
 
   // Cannot change own role
   if (targetUserId === user.id) {
@@ -503,8 +499,7 @@ router.put("/:orgId/settings", async (c) => {
     "Admin access required to update settings",
   );
 
-  const raw = await c.req.json();
-  const data = parseBody(orgSettingsSchema.partial(), raw);
+  const data = await readJsonBody(c, orgSettingsSchema.partial());
 
   const settings = await updateOrgSettings(orgId, data);
   await recordAuditFromContext(c, {

@@ -35,6 +35,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
 import { guardedFetch } from "@appstrate/core/ssrf";
+import { isOperatorTrustedEgressHost } from "./ssrf.ts";
 import { unzipBounded } from "@appstrate/core/zip";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -497,7 +498,16 @@ export async function connectRemoteHttpIntegration(
         // stray `Request` is normalised to its URL for the type.
         const target: string | URL =
           typeof input === "string" || input instanceof URL ? input : input.url;
-        return guardedFetch(target, { ...init, headers });
+        // Operator-trusted internal hosts (APPSTRATE_EGRESS_ALLOW_HOSTS, injected
+        // by the platform) skip only the host blocklist — without this, a remote
+        // MCP server the platform-side spawn validation just allowed (internal
+        // host explicitly allowlisted by the operator) would be re-blocked here
+        // and fail opaquely in-run. Redirect discipline still applies.
+        return guardedFetch(
+          target,
+          { ...init, headers },
+          { allowHost: isOperatorTrustedEgressHost },
+        );
       };
       let res = await send();
       if (res.status === 401 && source.refreshOnUnauthorized) {

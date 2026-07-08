@@ -29,7 +29,26 @@ const CONSUMERS: Consumer[] = [
 ];
 
 const DEPENDENCY_NAME = "@appstrate/core";
-const POLICY = (process.env.CONSUMER_DRIFT_POLICY ?? "fail") as "warn" | "fail" | "off";
+
+type DriftPolicy = "warn" | "fail" | "off";
+const VALID_POLICIES: readonly DriftPolicy[] = ["warn", "fail", "off"];
+
+/**
+ * Resolve the drift policy from the environment. An unset value defaults to the
+ * strictest (`fail`). An *unrecognized* value (typo, wrong case like `FAIL`)
+ * must NOT silently disable blocking — fall back to `fail` with a warning so a
+ * misconfigured env can never fail open.
+ */
+function resolvePolicy(raw: string | undefined): DriftPolicy {
+  if (raw === undefined) return "fail";
+  if ((VALID_POLICIES as readonly string[]).includes(raw)) return raw as DriftPolicy;
+  console.warn(
+    `Unrecognized CONSUMER_DRIFT_POLICY="${raw}" — expected one of ${VALID_POLICIES.join("|")}. Defaulting to "fail".`,
+  );
+  return "fail";
+}
+
+const POLICY = resolvePolicy(process.env.CONSUMER_DRIFT_POLICY);
 
 function parseSemver(v: string): [number, number, number] | null {
   const cleaned = v.replace(/^[\^~>=<\s]+/, "").trim();
