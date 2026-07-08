@@ -49,6 +49,7 @@ jobs:
         run: |
           bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage \
             apps/api/test/unit/ \
+            apps/api/src/modules/firecracker/test/unit/ \
             apps/api/src/modules/mcp/test/unit/ \
             apps/api/src/modules/oidc/test/unit/ \
             apps/api/src/modules/webhooks/test/unit/ \
