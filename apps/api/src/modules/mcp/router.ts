@@ -48,6 +48,7 @@ import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
 import { buildMcpTools, FORWARDED_AUTH_HEADERS, type Dispatch, type McpObserver } from "./tools.ts";
 import { buildOperationIndex } from "./catalog.ts";
+import { renderAssistantSkillsIndex } from "./assistant-skills.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -133,6 +134,11 @@ function buildServerInstructions(
   const grounding = contextInjected
     ? "Your caller context — who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent) — is already provided to you; there is no get_me tool, do not look for one."
     : "Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent).";
+  // The `## Assistant skills` index (system skills shipped with this module,
+  // served by the load_skill tool). Placed BEFORE the operation index so it
+  // survives the chat's Mistral instruction-trim, which cuts from
+  // `## Operation index` onward. Empty string when no skills folder.
+  const skillsIndex = renderAssistantSkillsIndex();
   return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema. Exception: when you need to launch or wait on an agent run, do not call runAgent, runInline, or getRun through invoke_operation; use the run_and_wait tool directly.
 
 ## Core model
@@ -151,7 +157,7 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 - Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this application but not yet connected, then (3) one that is neither. \`GET /api/integrations\` lists every integration with an \`active\` flag (activated for this app) and \`block_user_connections\`; use it to tell tiers 2 and 3 apart. Do not silently activate or connect an integration the caller did not ask for — surface that it would be needed and let them decide.
 - Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" inline run: \`run_and_wait\` already runs the same readiness preflight and returns a 400 without consuming credits when the manifest cannot run. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\` (or if you intentionally call \`validateInlineRun\` only to iterate/check readiness without launching), that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …). For each such error you MUST start its connect flow (do not just describe it): CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationConnect"\`, \`path_params: { packageId: "<id>", authKey: "<key>" }\` (the auth key is in \`manifest.auths\` of the integration row from \`GET /api/integrations\`). This op is auth-type-agnostic — it works for every auth (oauth2, api_key, basic, mtls, custom), so you never inspect the auth type yourself. If the error carries a \`connection_id\`, also pass \`body: { connection_id: "<that id>" }\` so the existing connection is reconnected/upgraded in place instead of duplicated. This tool call is what renders the one-click connect button (from its result); without it there is NO button, so never claim a button will appear unless you just made this exact call this turn. After the call, the client renders the connect button on its own from your tool result — your text must NOT duplicate it: do NOT paste the returned \`connect_url\`, do NOT describe the button or tell the caller where to click, do NOT restate the connection request. End your turn with ONE short sentence saying you'll continue once the integration is connected — do NOT poll, loop, wait, or run in the same turn. On a later turn, call \`run_and_wait\` again (or \`validateInlineRun\` if you are only checking readiness); when readiness passes, proceed with the run. (Non-interactive clients with no button can open the returned \`connect_url\`.)
 
-${OPERATION_INDEX_HEADING}
+${skillsIndex ? `${skillsIndex}\n\n` : ""}${OPERATION_INDEX_HEADING}
 ${buildOperationIndex(permissions)}`;
 }
 
