@@ -220,7 +220,7 @@ jobs:
       # discard the 20-min build and re-pay it on every push.
       - name: Restore guest kernel cache
         id: kernel-cache
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
         with:
           path: data/firecracker/vmlinux
           key: fc-kernel-${{ runner.arch }}-${{ hashFiles('apps/api/src/modules/firecracker/scripts/build-kernel.sh') }}
