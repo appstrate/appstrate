@@ -29,8 +29,11 @@ ok() { printf '\033[0;32m✓\033[0m %s\n' "$*"; }
 
 if [[ "$APPSTRATE_PUBKEY" == __* ]]; then
   err "verify.sh has not been provisioned with a public key yet."
-  err "  → The Appstrate signing keypair has not been generated."
-  err "  → Use the unsigned installer for now: curl -fsSL ${BASE_URL} | bash"
+  err "  → The Appstrate signing keypair has not been generated/baked in."
+  err "  → Refusing to run: without a real key this wrapper cannot verify the"
+  err "    installer, and recommending an unsigned fallback would defeat its"
+  err "    purpose. Do NOT pipe an unsigned installer to your shell as a"
+  err "    workaround. Install a signed release build instead."
   err "  → Track progress: https://github.com/appstrate/appstrate/issues"
   exit 1
 fi
