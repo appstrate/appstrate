@@ -905,6 +905,12 @@ export const integrationsPaths = {
         "302": { description: "Redirect to the provider OAuth screen or the hosted form." },
         "400": { description: "Missing token (HTML error page)." },
         "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
+        "500": {
+          description: "Integration cannot be connected / unexpected failure (HTML error page).",
+        },
+        "502": {
+          description: "Upstream provider failed to start the connection (HTML error page).",
+        },
       },
     },
   },

@@ -9870,6 +9870,20 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Integration cannot be connected / unexpected failure (HTML error page). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Upstream provider failed to start the connection (HTML error page). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     submitIntegrationConnect: {
