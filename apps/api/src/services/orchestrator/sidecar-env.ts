@@ -22,7 +22,6 @@
 
 import type { SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 import type { WorkspaceHandle } from "@appstrate/core/platform-types";
-import { getEnv } from "@appstrate/env";
 
 interface BaseSidecarEnvParams {
   spec: SidecarLaunchSpec;
@@ -70,7 +69,11 @@ export function buildBaseSidecarEnv(params: BaseSidecarEnvParams): Record<string
   // allowlist — a host the platform-side checks just exempted (internal
   // model endpoint, allowlisted remote MCP server) would be re-blocked
   // in-run. Empty/unset ⇒ nothing exempted (secure default).
-  const egressAllowHosts = getEnv().OAUTH_ALLOWED_INTERNAL_IDP_HOSTS;
+  // Raw process.env read, NOT getEnv(): buildBaseSidecarEnv also runs
+  // inside the standalone firecracker runner daemon, which does not carry
+  // the platform's required env vars (BETTER_AUTH_SECRET, …) — getEnv()'s
+  // fail-fast validation would crash sidecar creation there.
+  const egressAllowHosts = process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS;
   if (egressAllowHosts) env.APPSTRATE_EGRESS_ALLOW_HOSTS = egressAllowHosts;
   applySpecToSidecarEnv(params.spec, env);
   return env;
