@@ -48,6 +48,13 @@ const envSchema = z
   .object({
     // Node environment — gates production-only invariants (e.g. APP_URL https)
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+    // Deployed build identity — stamped into the image at build time
+    // (Dockerfile ARG → ENV, fed by the release workflow). Surfaced read-only
+    // via /health and the SPA footer so operators can see which build is live.
+    // Absent in dev/source runs → the UI falls back to "dev".
+    APP_VERSION: z.string().optional(),
+    // Short git SHA of the build commit (companion to APP_VERSION).
+    GIT_SHA: z.string().optional(),
     // Trust proxy hops: "false" (default, ignore XFF) | "true" (=1) | "N" (N trusted hops)
     TRUST_PROXY: z
       .string()

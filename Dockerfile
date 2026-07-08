@@ -116,6 +116,13 @@ EXPOSE 3000
 
 ENV NODE_ENV=production
 
+# Deployed build identity — fed by the release workflow's build-args, surfaced
+# read-only via /health and the SPA footer. Default "dev" for local builds.
+ARG APP_VERSION=dev
+ARG GIT_SHA=""
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_SHA=${GIT_SHA}
+
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1
 

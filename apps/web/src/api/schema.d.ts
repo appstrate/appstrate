@@ -19214,6 +19214,10 @@ export interface operations {
                     /**
                      * @example {
                      *       "status": "healthy",
+                     *       "version": {
+                     *         "app": "v1.0.0-beta.38",
+                     *         "commit": "5bbe1d9"
+                     *       },
                      *       "uptime_ms": 3600000,
                      *       "checks": {
                      *         "database": {
@@ -19229,6 +19233,10 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         status?: "healthy" | "degraded" | "unhealthy";
+                        version?: {
+                            app: string;
+                            commit?: string;
+                        };
                         uptime_ms?: number;
                         checks?: {
                             database?: {

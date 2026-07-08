@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getSystemPackagesByType } from "../services/system-packages.ts";
+import { getVersionInfo } from "../lib/version.ts";
 
 const startedAt = Date.now();
 
@@ -38,6 +39,7 @@ healthRouter.get("/health", async (c) => {
   return c.json(
     {
       status,
+      version: getVersionInfo(),
       uptime_ms: Date.now() - startedAt,
       checks,
     },
