@@ -47,24 +47,33 @@ describe("sidecarSocketOverrides — Docker socket gating", () => {
     expect(overrides).toEqual({});
   });
 
-  it("≥1-integration run → socket bind + user 0:0", () => {
+  it("≥1-integration run → socket bind + user 0:0 + low-port sysctl (#779)", () => {
     const overrides = sidecarSocketOverrides({
       integrations: [fakeIntegration("@test/gmail-mcp")],
     });
     expect(overrides).toEqual({
       binds: ["/var/run/docker.sock:/var/run/docker.sock"],
       user: "0:0",
+      sysctls: { "net.ipv4.ip_unprivileged_port_start": "0" },
     });
   });
 
-  it("multiple integrations → socket bind + user 0:0 (same as one)", () => {
+  it("multiple integrations → socket bind + user 0:0 + sysctl (same as one)", () => {
     const overrides = sidecarSocketOverrides({
       integrations: [fakeIntegration("@test/a"), fakeIntegration("@test/b")],
     });
     expect(overrides).toEqual({
       binds: ["/var/run/docker.sock:/var/run/docker.sock"],
       user: "0:0",
+      sysctls: { "net.ipv4.ip_unprivileged_port_start": "0" },
     });
+  });
+
+  it("sysctl grants only the netns low-port knob — no capability creep", () => {
+    const overrides = sidecarSocketOverrides({
+      integrations: [fakeIntegration("@test/x")],
+    }) as { sysctls: Record<string, string> };
+    expect(Object.keys(overrides.sysctls)).toEqual(["net.ipv4.ip_unprivileged_port_start"]);
   });
 
   it("the only socket binds the host docker.sock — no other path is exposed", () => {

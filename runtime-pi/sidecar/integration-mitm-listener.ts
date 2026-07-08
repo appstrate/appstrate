@@ -475,7 +475,7 @@ async function handleInboundConnection(
  * accumulated buffer is returned and the data listener is detached
  * before we pipe to upstream.
  */
-async function collectUntilSniParses(rawSocket: Socket, seed: Buffer): Promise<Buffer> {
+export async function collectUntilSniParses(rawSocket: Socket, seed: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     let buf = seed;
     const MAX = 16 * 1024;
@@ -536,7 +536,7 @@ async function collectUntilSniParses(rawSocket: Socket, seed: Buffer): Promise<B
  *     uint16 list_length
  *     ServerName{ uint8 name_type (0x00=host_name), uint16 host_len, opaque host_name }
  */
-function extractSni(buf: Buffer): string | null {
+export function extractSni(buf: Buffer): string | null {
   let p = 0;
   // TLS record header
   if (buf.length < 5) return null;

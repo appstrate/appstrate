@@ -603,6 +603,11 @@ if (sidecarUrl) {
       // earlier RUN_TOKEN-as-bearer path was wired but never validated — dropped.)
       mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
         clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+        // #779 annex — operator-tunable per-call tool timeout (absent →
+        // SDK default). The same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` knob is
+        // honoured sidecar-side, so both legs of an integration tool call
+        // share one budget.
+        ...(env.mcpToolTimeoutMs !== undefined ? { defaultTimeoutMs: env.mcpToolTimeoutMs } : {}),
         retry: {
           deadlineMs: env.mcpConnectDeadlineMs,
           baseMs: 50,

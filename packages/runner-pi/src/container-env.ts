@@ -251,10 +251,14 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // runtime-side mirror (afps-runtime/.../http-call-core.ts) agrees with
   // the sidecar on what counts as "too large" — otherwise large uploads
   // would fail with a 413 from the sidecar instead of a typed
-  // RESOLVER_BODY_TOO_LARGE caught client-side. Only the request-body
-  // cap is forwarded; the envelope cap is sidecar-internal and the
-  // runtime never builds JSON-RPC envelopes itself.
-  Object.assign(env, pickOperatorSidecarEnv(["SIDECAR_MAX_REQUEST_BODY_BYTES"]));
+  // RESOLVER_BODY_TOO_LARGE caught client-side. The envelope cap stays
+  // sidecar-internal (the runtime never builds JSON-RPC envelopes). The
+  // tool-timeout knob (#779) rides along so the agent→sidecar leg honours
+  // the same per-call budget as the sidecar→runner leg.
+  Object.assign(
+    env,
+    pickOperatorSidecarEnv(["SIDECAR_MAX_REQUEST_BODY_BYTES", "APPSTRATE_MCP_TOOL_TIMEOUT_MS"]),
+  );
 
   // Forward the operator-tunable tool-result truncation cap (read by
   // `truncateToolResult` in pi-runner.ts). Tool results are truncated at
@@ -291,6 +295,12 @@ export const SIDECAR_OPERATOR_ENV_KEYS = [
   "RUNNER_IMAGE_PYTHON",
   "RUNNER_IMAGE_UV",
   "RUNNER_IMAGE_BINARY",
+  // Per-call MCP tool timeout override (#779 annex). Consumed sidecar-side
+  // (integration clients, `integrations-boot.toolTimeoutMsFromEnv`) and
+  // agent-side (`runtime-pi/env.ts` → entrypoint's sidecar client), so a
+  // single operator knob widens BOTH legs of a tool call. Absent → the
+  // MCP SDK default applies on each leg.
+  "APPSTRATE_MCP_TOOL_TIMEOUT_MS",
 ] as const;
 
 export type SidecarOperatorEnvKey = (typeof SIDECAR_OPERATOR_ENV_KEYS)[number];
