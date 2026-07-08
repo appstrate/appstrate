@@ -156,6 +156,14 @@ export interface CreateContainerOptions {
    * `USER nobody:nobody` image directive intact for every other path.
    */
   user?: string;
+  /**
+   * Namespaced `HostConfig.Sysctls` entries. Used by the sidecar to get
+   * `net.ipv4.ip_unprivileged_port_start=0` so its transparent egress
+   * plane (#779) can bind :53/:443/:80 inside its own netns despite the
+   * unconditional `CapDrop: ["ALL"]` — a netns-scoped knob, granting no
+   * capability. Empty by default for every other workload.
+   */
+  sysctls?: Record<string, string>;
 }
 
 export async function createContainer(
@@ -190,6 +198,9 @@ export async function createContainer(
       NetworkMode: options.networkId ?? "bridge",
       ExtraHosts: options.extraHosts ?? [],
       ...(options.binds && options.binds.length > 0 ? { Binds: options.binds } : {}),
+      ...(options.sysctls && Object.keys(options.sysctls).length > 0
+        ? { Sysctls: options.sysctls }
+        : {}),
     },
     ...(options.user ? { User: options.user } : {}),
     NetworkingConfig: {

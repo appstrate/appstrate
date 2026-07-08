@@ -381,7 +381,7 @@ async function defaultCreateSseClient(
     await transport.close().catch(() => {});
     throw err;
   }
-  return wrapClient(client, transport);
+  return wrapClient(client, transport, toolTimeoutMsFromEnv());
 }
 
 export async function connectRemoteHttpIntegration(
@@ -482,6 +482,7 @@ export async function connectRemoteHttpIntegration(
   // branches share the same per-request Bearer + 401-retry closure
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
+  const toolTimeoutMs = toolTimeoutMsFromEnv();
   const client =
     transport === "sse"
       ? await createSseClient(serverUrl, { fetch: customFetch, clientInfo })
@@ -489,6 +490,7 @@ export async function connectRemoteHttpIntegration(
           fetch: customFetch,
           clientInfo,
           retry: { deadlineMs: 30_000 },
+          ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
         });
   return { client, authKey };
 }
@@ -644,6 +646,56 @@ interface SpawnAndConnectResult {
  * collectors AS they are created, so a throw mid-pipeline still lets the
  * caller's teardown reclaim a half-built listener/client (no leak on error).
  */
+/** Max runner-stderr lines retained per integration for failure reports (#779). */
+const STDERR_TAIL_MAX_LINES = 20;
+/** Cap per stderr line folded into a failure report — avoids a runaway blob. */
+const STDERR_LINE_MAX_CHARS = 500;
+
+/**
+ * Best-effort secret scrub for a runner stderr line before it is folded
+ * into a run's failure report (#779). Runner stderr already flows to the
+ * sidecar's own logs; surfacing it in the run report widens the audience
+ * to the operator who triggered the run, so scrub the high-signal
+ * credential shapes a third-party server might print on a failed auth
+ * (bearer tokens, provider key prefixes, JWTs, `key=`/`token=` values).
+ * This is defence-in-depth, not a guarantee — the primary control remains
+ * that runs are org-scoped to an actor who already holds the integration's
+ * credentials.
+ */
+export function scrubStderrLine(line: string): string {
+  return (
+    line
+      .slice(0, STDERR_LINE_MAX_CHARS)
+      .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+      .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, "[redacted-jwt]")
+      // Separator-prefixed families (`sk-…`, `ghp_…`, `xoxb-…`) keep the
+      // mandatory `-`/`_` so prose words starting with `sk`/`pk` survive;
+      // AWS access-key ids (`AKIA` + 16 upper-alnum, no separator) and Google
+      // OAuth tokens (`ya29.` + dot) get their own literal shapes.
+      .replace(/\b(sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9._-]{6,}/g, "[redacted-key]")
+      .replace(/\bAKIA[A-Z0-9]{12,}/g, "[redacted-key]")
+      .replace(/\bya29\.[A-Za-z0-9._-]{6,}/g, "[redacted-key]")
+      .replace(
+        /\b(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)(["'\s:=]+)[^\s"',&]+/gi,
+        "$1$2[redacted]",
+      )
+  );
+}
+
+/**
+ * Operator override for the per-call MCP tool timeout applied to
+ * integration clients (#779 annex). Absent/invalid → `undefined` → the
+ * MCP SDK default applies, unchanged behaviour. Third-party servers that
+ * do a cold OAuth refresh on their first tool call can legitimately need
+ * more; mirrors the `APPSTRATE_MCP_CONNECT_DEADLINE_MS` operator knob.
+ */
+export function toolTimeoutMsFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const raw = env.APPSTRATE_MCP_TOOL_TIMEOUT_MS;
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
 async function spawnAndConnectLocalIntegration(params: {
   spec: IntegrationSpawnSpec;
   runId: string;
@@ -694,6 +746,15 @@ async function spawnAndConnectLocalIntegration(params: {
   /** Caller-owned teardown collectors — appended to as resources are built. */
   clients: AppstrateMcpClient[];
   mitmListeners: MitmListenerHandle[];
+  /**
+   * Caller-owned bounded tail of the runner's stderr lines (#779). The
+   * spawn pipeline pushes every line (capped at
+   * {@link STDERR_TAIL_MAX_LINES}); on failure the caller folds the tail
+   * into the recorded error so the actual cause (an OAuth 405, a module
+   * crash, …) reaches the run report instead of living only in
+   * `docker logs` on the sidecar host.
+   */
+  stderrTail?: string[];
 }): Promise<SpawnAndConnectResult> {
   const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
 
@@ -799,6 +860,10 @@ async function spawnAndConnectLocalIntegration(params: {
     workspaceHandle: params.workspaceHandle,
     onStderrLine: (line) => {
       logger.info(`${logLabel} integration stderr`, { integrationId: spec.integrationId, line });
+      if (params.stderrTail) {
+        params.stderrTail.push(scrubStderrLine(line));
+        if (params.stderrTail.length > STDERR_TAIL_MAX_LINES) params.stderrTail.shift();
+      }
     },
   });
 
@@ -854,7 +919,7 @@ async function spawnAndConnectLocalIntegration(params: {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
   const connectMs = performance.now() - connectStart;
-  const wrapped = wrapClient(client, spawnedIntegration.transport);
+  const wrapped = wrapClient(client, spawnedIntegration.transport, toolTimeoutMsFromEnv());
   params.clients.push(wrapped);
 
   const sizeBefore = host.size();
@@ -1101,6 +1166,10 @@ export async function bootIntegrations(
 
   for (const spec of specs) {
     const specStart = performance.now();
+    // #779 — bounded tail of the runner's stderr, folded into the failure
+    // report below so the real cause (an OAuth 405, a crashed module, …)
+    // reaches operators instead of living only in `docker logs`.
+    const stderrTail: string[] = [];
     try {
       // ─── ONE shared credentials source per integration ───
       // The Source/Sink model (see integration-credentials-source.ts header):
@@ -1336,6 +1405,7 @@ export async function bootIntegrations(
         logLabel: "integration",
         clients,
         mitmListeners,
+        stderrTail,
       });
       pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
 
@@ -1394,13 +1464,21 @@ export async function bootIntegrations(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const ms = Math.round(performance.now() - specStart);
-      failed.push({ integrationId: spec.integrationId, error: msg });
+      // #779 — append the runner's stderr tail so the boot report carries
+      // the actual upstream cause, not just the transport-level symptom
+      // (e.g. "MCP connect timeout (30s)" hiding an OAuth 405 underneath).
+      const stderrSuffix =
+        stderrTail.length > 0
+          ? ` — runner stderr (last ${stderrTail.length} line${stderrTail.length > 1 ? "s" : ""}): ${stderrTail.join(" ⏎ ")}`
+          : "";
+      failed.push({ integrationId: spec.integrationId, error: msg + stderrSuffix });
       logger.warn("integration spawn failed", {
         integrationId: spec.integrationId,
         error: msg,
+        ...(stderrTail.length > 0 ? { stderrTail } : {}),
       });
       breadcrumbs.push({
-        message: `${spec.integrationId}: failed after ${ms}ms — ${msg}`,
+        message: `${spec.integrationId}: failed after ${ms}ms — ${msg}${stderrSuffix}`,
         level: "error",
         data: { integrationId: spec.integrationId, durationMs: ms, error: msg },
       });

@@ -37,17 +37,22 @@ class DockerWorkloadHandle implements WorkloadHandle {
  * the gating decision is unit-testable without a Docker daemon.
  *
  * Returns the `HostConfig`/`User` overrides to merge into the
- * `createContainer` options: the socket bind + `user: "0:0"` when
+ * `createContainer` options: the socket bind + `user: "0:0"` + the
+ * low-port sysctl for the transparent egress plane (#779) when
  * integrations are present, otherwise an empty object (defaults apply).
  */
 export function sidecarSocketOverrides(
   spec: Pick<SidecarLaunchSpec, "integrations">,
-): { binds: string[]; user: string } | Record<string, never> {
+): { binds: string[]; user: string; sysctls: Record<string, string> } | Record<string, never> {
   const hasIntegrations = spec.integrations !== undefined && spec.integrations.length > 0;
   return hasIntegrations
     ? {
         binds: ["/var/run/docker.sock:/var/run/docker.sock"],
         user: "0:0",
+        // #779 — let the sidecar bind :53/:443/:80 on the per-run bridge for
+        // its transparent egress plane (DNS responder + SNI-passthrough).
+        // Netns-scoped sysctl, not a capability: `CapDrop: ["ALL"]` stays.
+        sysctls: { "net.ipv4.ip_unprivileged_port_start": "0" },
       }
     : {};
 }
