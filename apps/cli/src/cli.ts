@@ -210,7 +210,7 @@ program
   )
   .option(
     "--runner-url <url>",
-    "Firecracker (remote): URL of an existing appstrate-runner daemon on a KVM host, e.g. https://runner.example.com:3100 (TLS reverse proxy in front of the daemon). Plaintext http:// to a non-loopback host is refused at platform boot. Implies the remote topology.",
+    "Firecracker (remote): URL of an existing appstrate-runner daemon on a KVM host, e.g. https://runner.example.com:3100 (TLS reverse proxy in front of the daemon). Passing plaintext http:// to a non-loopback host opts in to plaintext transport: the install warns and writes FIRECRACKER_RUNNER_TLS_REQUIRED=0 (only safe on a VPN/WireGuard link). Implies the remote topology.",
   )
   .option(
     "--runner-token <token>",

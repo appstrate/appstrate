@@ -307,6 +307,28 @@ describe("generateEnvForTier — Firecracker backend (#819)", () => {
     expect(env.FIRECRACKER_RUNNER_TOKEN).toBe("tok-abcdef1234567890");
     // TCP transport — the compose socket-dir mount keeps its harmless default.
     expect(env.APPSTRATE_RUNNER_SOCKET_DIR).toBeUndefined();
+    // No plaintext opt-in flag → the fail-closed boot guard stays armed.
+    expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBeUndefined();
+  });
+
+  it("writes the TLS escape hatch when the operator opted in to plaintext http", () => {
+    // Without this key the platform REFUSES the http://<lan-ip> URL at boot
+    // (assertRunnerTransportSecurity) and the install ships a .env that
+    // never boots — warn-only was the PR #874 review's P1.
+    const env = generateEnvForTier(
+      3,
+      "http://localhost:3000",
+      {},
+      {},
+      {
+        adapter: "firecracker",
+        runnerUrl: "http://10.0.0.5:3100",
+        runnerToken: "tok-abcdef1234567890",
+        plaintextOptIn: true,
+      },
+    );
+    expect(env.FIRECRACKER_RUNNER_URL).toBe("http://10.0.0.5:3100");
+    expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBe("0");
   });
 
   it("points the compose socket-dir mount at the daemon's dir for a unix:// runner URL", () => {

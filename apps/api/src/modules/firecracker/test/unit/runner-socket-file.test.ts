@@ -3,8 +3,9 @@
 /**
  * Unit tests for the daemon's socket filesystem guard (runner/socket-file.ts,
  * #868 follow-up): the root daemon must only ever delete a node that IS a
- * unix socket — a misconfigured FIRECRACKER_RUNNER_SOCKET pointing at a
- * regular file (or anything else) must be refused loudly, never unlinked.
+ * unix socket AND that nobody is accepting on — a misconfigured
+ * FIRECRACKER_RUNNER_SOCKET pointing at a regular file must be refused
+ * loudly, and a live daemon's socket must never be stolen out from under it.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -25,12 +26,10 @@ afterEach(async () => {
 });
 
 /**
- * Bind a unix listener so a REAL socket node exists at `path`, run `fn`
- * against it, then stop the listener. The listener is kept open for the
- * duration on purpose: whether `stop()` unlinks the node varies across
- * Bun versions, and the guard under test only inspects the NODE TYPE —
- * unlinking a path out from under a bound fd is exactly what the daemon
- * does to a crashed predecessor's leftover.
+ * Bind a unix listener so a LIVE socket node exists at `path` (something
+ * is accepting on it), run `fn` against it, then stop the listener. The
+ * listener is kept open for the duration on purpose: whether `stop()`
+ * unlinks the node varies across Bun versions.
  */
 async function withSocketNode(path: string, fn: () => Promise<void>): Promise<void> {
   const listener = Bun.listen({ unix: path, socket: { data() {} } });
@@ -41,17 +40,42 @@ async function withSocketNode(path: string, fn: () => Promise<void>): Promise<vo
   }
 }
 
+/**
+ * Leave a genuinely STALE socket node at `path`: a child process binds it,
+ * then SIGKILLs itself — the kernel closes the fd but never unlinks the
+ * node, exactly what a crashed daemon leaves behind. (Binding in THIS
+ * process and stopping the listener won't do: some Bun versions unlink the
+ * node on stop, and a clean stop is the one path that never strands one.)
+ */
+async function createStaleSocketNode(path: string): Promise<void> {
+  const script =
+    `Bun.listen({ unix: ${JSON.stringify(path)}, socket: { data() {} } });` +
+    `process.kill(process.pid, "SIGKILL");`;
+  const proc = Bun.spawn([process.execPath, "-e", script], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  await proc.exited;
+  expect(existsSync(path)).toBe(true);
+}
+
 describe("removeStaleSocket", () => {
   it("is a no-op when nothing exists at the path", async () => {
     await expect(removeStaleSocket(join(dir, "missing.sock"))).resolves.toBeUndefined();
   });
 
-  it("unlinks a socket node so a fresh bind can succeed", async () => {
+  it("unlinks a stale socket node (crashed predecessor) so a fresh bind can succeed", async () => {
     const path = join(dir, "stale.sock");
+    await createStaleSocketNode(path);
+    await removeStaleSocket(path);
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("REFUSES to unlink a socket a live process is accepting on", async () => {
+    const path = join(dir, "live.sock");
     await withSocketNode(path, async () => {
+      await expect(removeStaleSocket(path)).rejects.toThrow(/accepting connections/);
       expect(existsSync(path)).toBe(true);
-      await removeStaleSocket(path);
-      expect(existsSync(path)).toBe(false);
     });
   });
 

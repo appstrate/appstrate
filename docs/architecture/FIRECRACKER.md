@@ -100,7 +100,10 @@ security decision. Decision matrix:
   hatch `FIRECRACKER_RUNNER_TLS_REQUIRED=0` (platform-side) downgrades
   the refusal to a warning; reserve it for a link that is already
   encrypted and authenticated at a lower layer (VPN / WireGuard), never
-  as a plain-LAN convenience.
+  as a plain-LAN convenience. The installer treats an explicit plaintext
+  `http://` runner URL (flag, or interactive prompt + confirm) as that
+  opt-in: it warns loudly and writes the escape hatch itself — otherwise
+  it would generate a `.env` the platform refuses to boot.
 - **Loopback `http://`** (`127.0.0.1` / `localhost`) is allowed as
   before — the wire never leaves the host.
 

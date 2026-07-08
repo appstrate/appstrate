@@ -1210,10 +1210,12 @@ describe("resolveRunBackend — non-interactive firecracker validation matrix", 
     expect(warnings).toEqual([]);
   });
 
-  it("warns loudly on a plaintext http:// --runner-url to a non-loopback host", async () => {
-    // The platform refuses this URL at boot (fail-closed) — the installer
-    // must say so at write time, with the exact remediation, instead of
-    // letting the operator discover a crash-looping platform later.
+  it("warns AND opts in on a plaintext http:// --runner-url to a non-loopback host", async () => {
+    // The platform refuses this transport at boot (fail-closed). An explicit
+    // plaintext --runner-url counts as the opt-in (flags stay scriptable), so
+    // the resolver flags plaintextOptIn — generateEnvForTier then writes
+    // FIRECRACKER_RUNNER_TLS_REQUIRED=0, otherwise the install ships a .env
+    // the platform rejects until hand-edited.
     const warnings: string[] = [];
     const cfg = await resolveRunBackend(
       {
@@ -1226,14 +1228,15 @@ describe("resolveRunBackend — non-interactive firecracker validation matrix", 
       { warn: (m) => warnings.push(m), detectLanIpv4: () => "10.0.0.5" },
     );
     expect(cfg.adapter === "firecracker" && cfg.runnerUrl).toBe("http://10.0.0.9:3100");
+    expect(cfg.adapter === "firecracker" && cfg.plaintextOptIn).toBe(true);
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("REFUSES this at boot");
     expect(warnings[0]).toContain("FIRECRACKER_RUNNER_TLS_REQUIRED=0");
+    expect(warnings[0]).toContain("https://");
   });
 
   it("does not warn on a loopback http:// --runner-url (gate exempts loopback)", async () => {
     const warnings: string[] = [];
-    await resolveRunBackend(
+    const cfg = await resolveRunBackend(
       {
         runAdapter: "firecracker",
         runnerUrl: "http://127.0.0.1:3100",
@@ -1244,6 +1247,7 @@ describe("resolveRunBackend — non-interactive firecracker validation matrix", 
       { warn: (m) => warnings.push(m), detectLanIpv4: () => "10.0.0.5" },
     );
     expect(warnings).toEqual([]);
+    expect(cfg.adapter === "firecracker" && cfg.plaintextOptIn).toBe(false);
   });
 
   it("rejects an out-of-range-octet --runner-url (dotted-quad shape, bad octets)", async () => {
@@ -1299,6 +1303,7 @@ describe("resolveRunBackend — firecracker same-host", () => {
       // (platformUrl) — only the platform↔daemon leg moved onto the socket.
       hostIp: "10.0.0.5",
       platformUrl: "http://10.0.0.5:8080",
+      plaintextOptIn: false,
     } satisfies RunBackendConfig);
   });
 
@@ -1380,6 +1385,82 @@ describe("resolveRunBackend — interactive prompts", () => {
     expect(cfg.hostIp).toBe("10.1.2.3");
     expect(prompts.some((p) => p.endsWith("::10.1.2.3"))).toBe(true);
   });
+
+  it("remote bare-IP prompt + confirmed plaintext → warns and opts in to TLS_REQUIRED=0", async () => {
+    const warnings: string[] = [];
+    const confirms: string[] = [];
+    const askText = (async (msg: string, initial?: string) =>
+      msg.includes("Runner (KVM host) URL") ? "10.0.0.9" : (initial ?? "")) as unknown as AskText;
+    const cfg = await resolveRunBackend(
+      { appPort: 3000, nonInteractive: false, runnerToken: "x".repeat(16) },
+      {
+        select: asSelect(async (opts) =>
+          opts.message.toLowerCase().includes("backend") ? "firecracker" : "remote",
+        ),
+        isCancel: noCancel,
+        askText,
+        confirm: (async (opts: { message: string }) => {
+          confirms.push(opts.message);
+          return true;
+        }) as unknown as typeof import("@clack/prompts").confirm,
+        detectLanIpv4: () => "192.168.1.20",
+        warn: (m) => warnings.push(m),
+      },
+    );
+    if (cfg.adapter !== "firecracker") throw new Error("expected firecracker");
+    expect(cfg.runnerUrl).toBe("http://10.0.0.9:3100");
+    expect(cfg.plaintextOptIn).toBe(true);
+    expect(warnings).toHaveLength(1);
+    expect(confirms).toHaveLength(1);
+    expect(confirms[0]).toContain("FIRECRACKER_RUNNER_TLS_REQUIRED=0");
+  });
+
+  it("remote plaintext prompt DECLINED → throws with the https remediation", async () => {
+    const askText = (async (msg: string, initial?: string) =>
+      msg.includes("Runner (KVM host) URL") ? "10.0.0.9" : (initial ?? "")) as unknown as AskText;
+    await expect(
+      resolveRunBackend(
+        { appPort: 3000, nonInteractive: false, runnerToken: "x".repeat(16) },
+        {
+          select: asSelect(async (opts) =>
+            opts.message.toLowerCase().includes("backend") ? "firecracker" : "remote",
+          ),
+          isCancel: noCancel,
+          askText,
+          confirm: (async () => false) as unknown as typeof import("@clack/prompts").confirm,
+          detectLanIpv4: () => "192.168.1.20",
+          warn: () => {},
+        },
+      ),
+    ).rejects.toThrow(/https:\/\/<host>/);
+  });
+
+  it("remote https URL at the prompt → no confirm, no opt-in", async () => {
+    const askText = (async (msg: string, initial?: string) =>
+      msg.includes("Runner (KVM host) URL")
+        ? "https://runner.example.com:3100"
+        : (initial ?? "")) as unknown as AskText;
+    const cfg = await resolveRunBackend(
+      { appPort: 3000, nonInteractive: false, runnerToken: "x".repeat(16) },
+      {
+        select: asSelect(async (opts) =>
+          opts.message.toLowerCase().includes("backend") ? "firecracker" : "remote",
+        ),
+        isCancel: noCancel,
+        askText,
+        confirm: (async () => {
+          throw new Error("confirm must not be called for https");
+        }) as unknown as typeof import("@clack/prompts").confirm,
+        detectLanIpv4: () => "192.168.1.20",
+        warn: (m) => {
+          throw new Error(`unexpected warning: ${m}`);
+        },
+      },
+    );
+    if (cfg.adapter !== "firecracker") throw new Error("expected firecracker");
+    expect(cfg.runnerUrl).toBe("https://runner.example.com:3100");
+    expect(cfg.plaintextOptIn).toBe(false);
+  });
 });
 
 describe("runner-install command builder + follow-up", () => {
@@ -1428,6 +1509,7 @@ describe("runner-install command builder + follow-up", () => {
       topology: "remote",
       hostIp: "192.168.1.20",
       platformUrl: "http://192.168.1.20:3000",
+      plaintextOptIn: true,
     });
     expect(note).toContain("curl -fsSL https://get.appstrate.dev/runner");
     expect(note).toContain("--platform-url http://192.168.1.20:3000");
@@ -1444,6 +1526,7 @@ describe("runner-install command builder + follow-up", () => {
       topology: "same-host",
       hostIp: "10.0.0.5",
       platformUrl: "http://10.0.0.5:3000",
+      plaintextOptIn: false,
     });
     expect(note).not.toContain("curl -fsSL");
     expect(note).toContain("unix:///run/appstrate-runner/runner.sock");
@@ -1462,6 +1545,7 @@ describe("runSameHostRunnerInstall", () => {
     topology: "same-host",
     hostIp: "10.0.0.5",
     platformUrl: "http://10.0.0.5:3000",
+    plaintextOptIn: false,
   } satisfies RunBackendConfig;
 
   it("interactive + exit 0: spawns sudo in UDS mode, no warning, no manual-command note", async () => {

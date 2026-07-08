@@ -1016,6 +1016,15 @@ export type RunBackendConfig =
       hostIp: string;
       /** Full platform URL for `runner install --platform-url` (http://<hostIp>:<appPort>). */
       platformUrl: string;
+      /**
+       * The operator accepted a plaintext `http://` runner URL to a
+       * non-loopback host (flag passed explicitly, or interactive confirm).
+       * The platform refuses that transport at boot by default, so the
+       * install writes the `FIRECRACKER_RUNNER_TLS_REQUIRED=0` escape hatch
+       * alongside — otherwise the installer would produce a config the
+       * platform rejects until the operator hand-edits `.env`.
+       */
+      plaintextOptIn: boolean;
     };
 
 export interface RunBackendInputs {
@@ -1042,6 +1051,7 @@ export interface RunBackendResolverDeps {
   select?: typeof clack.select;
   isCancel?: typeof clack.isCancel;
   askText?: typeof askText;
+  confirm?: typeof clack.confirm;
   detectLanIpv4?: () => string | null;
   generateToken?: () => string;
   /** Loud-warning sink — injectable so tests can assert the plaintext warning. */
@@ -1077,23 +1087,23 @@ function parseRunnerHttpUrl(raw: string): { url: string; protocol: string; host:
 /**
  * The platform refuses a plaintext `http://` runner URL to a non-loopback
  * host at boot (fail-closed, see the firecracker module's
- * assertRunnerTransportSecurity). The installer cannot know whether the
- * operator plans the `FIRECRACKER_RUNNER_TLS_REQUIRED=0` escape hatch
- * (VPN/WireGuard link), so it warns loudly instead of refusing — but the
- * warning carries the exact remediation so the boot refusal is never a
- * surprise.
+ * assertRunnerTransportSecurity). When the operator opts in anyway, the
+ * install must ALSO write `FIRECRACKER_RUNNER_TLS_REQUIRED=0` — warning
+ * without writing the escape hatch would ship a `.env` the platform
+ * rejects at boot, a broken install until hand-edited.
  */
-function warnIfPlaintextRunnerUrl(
-  parsed: { url: string; protocol: string; host: string },
-  warn: (message: string) => void,
-): void {
-  if (parsed.protocol !== "http:" || LOOPBACK_RUNNER_HOSTNAMES.has(parsed.host)) return;
-  warn(
-    `FIRECRACKER_RUNNER_URL=${parsed.url} is plaintext http:// to a non-loopback host — ` +
-      `the platform REFUSES this at boot (the wire carries run credentials). Use ` +
-      `https:// behind a TLS reverse proxy, or — only for a link already encrypted at a ` +
-      `lower layer (VPN/WireGuard) — set FIRECRACKER_RUNNER_TLS_REQUIRED=0 in the ` +
-      `platform .env.`,
+function isPlaintextNonLoopback(parsed: { protocol: string; host: string }): boolean {
+  return parsed.protocol === "http:" && !LOOPBACK_RUNNER_HOSTNAMES.has(parsed.host);
+}
+
+function plaintextRunnerWarning(url: string): string {
+  return (
+    `FIRECRACKER_RUNNER_URL=${url} is plaintext http:// to a non-loopback host — ` +
+    `the platform↔daemon wire carries run credentials (model API keys, sink secrets); ` +
+    `anyone on the network path can capture and replay them. The install writes ` +
+    `FIRECRACKER_RUNNER_TLS_REQUIRED=0 so the platform accepts this transport — put a ` +
+    `TLS reverse proxy in front of the daemon and switch to https:// unless the link ` +
+    `is already encrypted at a lower layer (VPN/WireGuard).`
   );
 }
 
@@ -1164,6 +1174,7 @@ export async function resolveRunBackend(
   const select = deps.select ?? clack.select;
   const isCancel = deps.isCancel ?? clack.isCancel;
   const promptText = deps.askText ?? askText;
+  const confirmPrompt = deps.confirm ?? clack.confirm;
   const detectIp = deps.detectLanIpv4 ?? detectLanIpv4;
   const mintToken = deps.generateToken ?? generateRunnerToken;
   const warn = deps.warn ?? ((message: string) => clack.log.warn(message));
@@ -1280,6 +1291,7 @@ export async function resolveRunBackend(
       topology: "same-host",
       hostIp: ip,
       platformUrl: `http://${ip}:${appPort}`,
+      plaintextOptIn: false,
     };
   }
 
@@ -1289,6 +1301,7 @@ export async function resolveRunBackend(
   // daemon should sit behind an https:// reverse proxy, which usually means
   // a DNS name; the guests-need-IPv4 rule applies to --platform-url only.
   let runnerUrl = inputs.runnerUrl?.trim();
+  let plaintextOptIn = false;
   if (runnerUrl) {
     const parsed = parseRunnerHttpUrl(runnerUrl);
     if (!parsed) {
@@ -1298,7 +1311,13 @@ export async function resolveRunBackend(
           `of the daemon) or http://10.0.0.9:${RUNNER_DEFAULT_PORT}.`,
       );
     }
-    warnIfPlaintextRunnerUrl(parsed, warn);
+    // An explicit plaintext --runner-url IS the opt-in (flags must stay
+    // scriptable — a confirm prompt here would break unattended installs):
+    // warn loudly and write the escape hatch so the platform actually boots.
+    if (isPlaintextNonLoopback(parsed)) {
+      warn(plaintextRunnerWarning(parsed.url));
+      plaintextOptIn = true;
+    }
     runnerUrl = parsed.url;
   } else {
     const answer = (
@@ -1318,7 +1337,28 @@ export async function resolveRunBackend(
           `IPv4 literal (e.g. 10.0.0.9).`,
       );
     }
-    warnIfPlaintextRunnerUrl(parsed, warn);
+    // Interactive typo ≠ informed choice: a bare IP typed at the prompt gets
+    // an explicit confirm before the install commits to plaintext transport.
+    if (isPlaintextNonLoopback(parsed)) {
+      warn(plaintextRunnerWarning(parsed.url));
+      const proceed = await confirmPrompt({
+        message:
+          "Proceed over plaintext http:// and write FIRECRACKER_RUNNER_TLS_REQUIRED=0 " +
+          "to the platform .env? (only safe on a link already encrypted — VPN/WireGuard)",
+        initialValue: false,
+      });
+      if (isCancel(proceed)) {
+        clack.cancel("Cancelled.");
+        process.exit(130);
+      }
+      if (!proceed) {
+        throw new Error(
+          `Plaintext runner URL declined — put a TLS reverse proxy in front of the ` +
+            `daemon and re-run with https://<host>:${RUNNER_DEFAULT_PORT}.`,
+        );
+      }
+      plaintextOptIn = true;
+    }
     runnerUrl = parsed.url;
   }
 
@@ -1354,6 +1394,7 @@ export async function resolveRunBackend(
     topology: "remote",
     hostIp,
     platformUrl: `http://${platformHost}:${appPort}`,
+    plaintextOptIn,
   };
 }
 
@@ -1724,7 +1765,12 @@ async function installDockerTier(
   // would leave platform and daemon paired on different secrets.
   const runBackendEnv: RunBackendEnv =
     runBackend.adapter === "firecracker"
-      ? { adapter: "firecracker", runnerUrl: runBackend.runnerUrl, runnerToken: runBackend.token }
+      ? {
+          adapter: "firecracker",
+          runnerUrl: runBackend.runnerUrl,
+          runnerToken: runBackend.token,
+          plaintextOptIn: runBackend.plaintextOptIn,
+        }
       : { adapter: "docker" };
   // Healthcheck + browser go through the local bind address: on a
   // remote deployment the public URL only resolves once the operator's
@@ -1829,6 +1875,12 @@ async function installDockerTier(
           FIRECRACKER_RUNNER_URL: runBackend.runnerUrl,
           FIRECRACKER_RUNNER_TOKEN: runBackend.token,
         };
+        // The plaintext escape hatch tracks the CURRENT runner URL. Carrying
+        // a stale `=0` forward after the operator moved to https:// (or to
+        // the unix socket) would silently keep the plaintext door open for
+        // the next http:// misconfiguration.
+        if (runBackend.plaintextOptIn) envVars.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
+        else delete envVars.FIRECRACKER_RUNNER_TLS_REQUIRED;
       }
       await writeComposeEnv(dir, renderEnvFile(envVars));
       writeSpinner.stop(
