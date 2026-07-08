@@ -302,7 +302,7 @@ describe("generateEnvForTier — Firecracker backend (#819)", () => {
     );
     expect(env.RUN_ADAPTER).toBe("firecracker");
     // Base module default + firecracker (mirror of the Zod schema default).
-    expect(env.MODULES).toBe("oidc,webhooks,mcp,core-providers,firecracker");
+    expect(env.MODULES).toBe("oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker");
     expect(env.FIRECRACKER_RUNNER_URL).toBe("http://10.0.0.5:3100");
     expect(env.FIRECRACKER_RUNNER_TOKEN).toBe("tok-abcdef1234567890");
   });

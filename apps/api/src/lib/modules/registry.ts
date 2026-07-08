@@ -51,10 +51,10 @@ const _chatHandlers = new Map<string, ChatEngineHandler>();
  * `@appstrate/env` to flush the cached snapshot.
  *
  * Defaults to the built-in OSS modules ONLY
- * (`oidc,webhooks,mcp,core-providers`) — the authoritative default lives
+ * (`oidc,webhooks,mcp,core-providers,@appstrate/module-chat`) — the authoritative default lives
  * in the `@appstrate/env` Zod schema (`packages/env/src/index.ts`).
  * External deployments extend the list by appending specifiers, e.g.:
- *   MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code,@scope/module
+ *   MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,@appstrate/module-codex,@appstrate/module-claude-code,@scope/module
  *
  * `core-providers` ships the API-key model providers (openai, anthropic,
  * openai-compatible) as an explicit, disablable module so cloud SaaS

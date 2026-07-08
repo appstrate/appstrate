@@ -8,7 +8,7 @@ At boot, `apps/api/src/lib/modules/module-loader.ts` scans this directory and re
 
 Only modules listed in the `MODULES` environment variable are actually initialized. Everything else is inert: no tables, no routes, no workers, no hook handlers.
 
-The default value is `oidc,webhooks,mcp,core-providers` — these are built-in OSS modules that ship with the platform and are loaded out of the box. Override `MODULES` to extend (by appending external npm specifiers) or to remove a built-in.
+The default value is `oidc,webhooks,mcp,core-providers,@appstrate/module-chat` — `oidc`/`webhooks`/`mcp`/`core-providers` are built-in dir modules and `@appstrate/module-chat` is a workspace npm module (all Apache-2.0 OSS), loaded out of the box. Override `MODULES` to extend (by appending external npm specifiers) or to remove any of them.
 
 ## Directory layout
 

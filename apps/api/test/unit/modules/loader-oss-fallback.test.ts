@@ -58,7 +58,13 @@ describe("OSS-mode module loading", () => {
       // @appstrate/module-claude-code) are OPT-IN — a personal subscription
       // powering a product is an operator-owned grey-zone, so the OSS default
       // ships neither. See docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
-      expect(getModuleRegistry()).toEqual(["oidc", "webhooks", "mcp", "core-providers"]);
+      expect(getModuleRegistry()).toEqual([
+        "oidc",
+        "webhooks",
+        "mcp",
+        "core-providers",
+        "@appstrate/module-chat",
+      ]);
     } finally {
       setModulesEnv(previous);
     }
