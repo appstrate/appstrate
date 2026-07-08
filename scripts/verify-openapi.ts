@@ -923,21 +923,78 @@ const ROUTE_VERBS = ["get", "post", "put", "patch", "delete", "all", "head", "op
 const ROUTE_VERB_PATTERN = ROUTE_VERBS.join("|");
 
 /**
- * Find the body of a top-level `function`/`export function` declaration by
- * locating its opening `{` after `name(...)` and brace-counting forward.
- * Returns the source slice between the matching braces (exclusive), or null
- * if the function isn't found.
+ * Shared bracket-matching scanner used by {@link extractFunctionBody} and
+ * {@link extractCallText}. Walks `src` from `start`, invoking `onCodeChar(ch, i)`
+ * only for characters OUTSIDE string / template / line- / block-comment content,
+ * so a bracket inside a string or comment cannot throw off a caller's depth
+ * count. The callback returns `true` to stop the scan (its matching bracket
+ * closed); the scan otherwise runs to end-of-source.
  *
- * The forward scan skips string / template / line- / block-comment content
- * (same handling as `extractCallText`) so a `{`/`}` inside a string or comment
- * cannot throw off the depth count and truncate the body — which would hide
- * the `router.METHOD(...)` registrations that live past the miscounted brace.
- *
- * KNOWN LIMITATION: regex literals (e.g. `/\}/`) are NOT tokenized — a brace
+ * KNOWN LIMITATION: regex literals (e.g. `/\}/`) are NOT tokenized — a bracket
  * inside a regex literal can still miscount. Distinguishing a regex literal
  * from a division operator needs a real tokenizer (JS grammar is
  * context-sensitive here); that is out of scope for this static gate. In
  * practice the scanned route-registration functions contain no such literals.
+ */
+function scanSkippingStringsAndComments(
+  src: string,
+  start: number,
+  onCodeChar: (ch: string, i: number) => boolean | void,
+): void {
+  let inStr: string | null = null;
+  let inLine = false;
+  let inBlock = false;
+  let i = start;
+  while (i < src.length) {
+    const ch = src[i]!;
+    const next = src[i + 1];
+    if (inLine) {
+      if (ch === "\n") inLine = false;
+      i++;
+      continue;
+    }
+    if (inBlock) {
+      if (ch === "*" && next === "/") {
+        inBlock = false;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (inStr) {
+      if (ch === "\\")
+        i++; // skip escaped char
+      else if (ch === inStr) inStr = null;
+      i++;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLine = true;
+      i += 2;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlock = true;
+      i += 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inStr = ch;
+      i++;
+      continue;
+    }
+    if (onCodeChar(ch, i) === true) return;
+    i++;
+  }
+}
+
+/**
+ * Find the body of a top-level `function`/`export function` declaration by
+ * locating its opening `{` after `name(...)` and brace-counting forward via
+ * {@link scanSkippingStringsAndComments}. Returns the source slice between the
+ * matching braces (exclusive), or null if the function isn't found or the braces
+ * never balance — which would otherwise hide the `router.METHOD(...)`
+ * registrations that live past a miscounted brace.
  */
 function extractFunctionBody(src: string, fnName: string): string | null {
   const sigPattern = new RegExp(`(?:export\\s+)?function\\s+${fnName}\\s*\\(`, "g");
@@ -946,107 +1003,40 @@ function extractFunctionBody(src: string, fnName: string): string | null {
   const openIdx = src.indexOf("{", sig.index + sig[0].length);
   if (openIdx === -1) return null;
   let depth = 1;
-  let inStr: string | null = null;
-  let inLine = false;
-  let inBlock = false;
-  let i = openIdx + 1;
-  while (i < src.length && depth > 0) {
-    const ch = src[i];
-    const next = src[i + 1];
-    if (inLine) {
-      if (ch === "\n") inLine = false;
-      i++;
-      continue;
-    }
-    if (inBlock) {
-      if (ch === "*" && next === "/") {
-        inBlock = false;
-        i++;
-      }
-      i++;
-      continue;
-    }
-    if (inStr) {
-      if (ch === "\\")
-        i++; // skip escaped char
-      else if (ch === inStr) inStr = null;
-      i++;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLine = true;
-      i += 2;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlock = true;
-      i += 2;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      inStr = ch;
-      i++;
-      continue;
-    }
+  let closeIdx = -1;
+  scanSkippingStringsAndComments(src, openIdx + 1, (ch, i) => {
     if (ch === "{") depth++;
-    else if (ch === "}") depth--;
-    i++;
-  }
-  return depth === 0 ? src.slice(openIdx + 1, i - 1) : null;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        closeIdx = i;
+        return true;
+      }
+    }
+  });
+  return closeIdx === -1 ? null : src.slice(openIdx + 1, closeIdx);
 }
 
 /**
  * Capture a `router.METHOD( … )` call's full source text starting at its
- * opening `(`, paren-matching to the matching `)`. Skips string / template /
- * line / block-comment content so parens inside those don't throw off the
- * count. Returns the slice INCLUDING both parens, or null if unbalanced.
+ * opening `(`, paren-matching to the matching `)` via
+ * {@link scanSkippingStringsAndComments}. Returns the slice INCLUDING both
+ * parens, or null if unbalanced.
  */
 function extractCallText(src: string, openParenIdx: number): string | null {
   let depth = 0;
-  let inStr: string | null = null;
-  let inLine = false;
-  let inBlock = false;
-  for (let i = openParenIdx; i < src.length; i++) {
-    const ch = src[i]!;
-    const next = src[i + 1];
-    if (inLine) {
-      if (ch === "\n") inLine = false;
-      continue;
-    }
-    if (inBlock) {
-      if (ch === "*" && next === "/") {
-        inBlock = false;
-        i++;
-      }
-      continue;
-    }
-    if (inStr) {
-      if (ch === "\\")
-        i++; // skip escaped char
-      else if (ch === inStr) inStr = null;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLine = true;
-      i++;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlock = true;
-      i++;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      inStr = ch;
-      continue;
-    }
+  let closeIdx = -1;
+  scanSkippingStringsAndComments(src, openParenIdx, (ch, i) => {
     if (ch === "(") depth++;
     else if (ch === ")") {
       depth--;
-      if (depth === 0) return src.slice(openParenIdx, i + 1);
+      if (depth === 0) {
+        closeIdx = i;
+        return true;
+      }
     }
-  }
-  return null;
+  });
+  return closeIdx === -1 ? null : src.slice(openParenIdx, closeIdx + 1);
 }
 
 /**

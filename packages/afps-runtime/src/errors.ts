@@ -34,6 +34,23 @@ import {
   type SignaturePolicyReason,
 } from "./bundle/signature-policy.ts";
 
+/** Machine-readable codes for {@link ResolverError} — the generic resolver
+ * wiring taxonomy shared by the runtime and the standalone `afps` CLI. */
+export type ResolverErrorCode =
+  | "RESOLVER_MISSING_REQUIRED"
+  | "RESOLVER_BODY_REFERENCE_FORBIDDEN"
+  | "RESOLVER_BODY_TOO_LARGE"
+  | "RESOLVER_BODY_INVALID"
+  | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
+  | "RESOLVER_PATH_SYMLINK_REFUSED"
+  | "RESOLVER_PATH_INVALID"
+  // The standalone CLI's `LocalIntegrationResolver` surfaces these
+  // when the shared outbound-HTTP engine refuses the initial target
+  // (SSRF blocklist) or a redirect hop (per-hop SSRF / off-allowlist).
+  | "RESOLVER_URL_BLOCKED"
+  | "RESOLVER_REDIRECT_BLOCKED"
+  | "RESOLVER_CREDENTIAL_EXFIL_BLOCKED";
+
 /** Stable, machine-readable code for every error class in this module. */
 export type AfpsErrorCode =
   | BundleErrorCode
@@ -44,20 +61,9 @@ export type AfpsErrorCode =
   | "WORKLOAD_EXIT_NONZERO"
   | "AUTHORIZED_URIS_EMPTY"
   | "AUTHORIZED_URIS_MISMATCH"
-  | "RESOLVER_INVALID_TOOL_SHAPE"
-  | "RESOLVER_MISSING_REQUIRED"
-  | "RESOLVER_BODY_REFERENCE_FORBIDDEN"
-  | "RESOLVER_BODY_TOO_LARGE"
-  | "RESOLVER_BODY_INVALID"
-  | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
-  | "RESOLVER_PATH_SYMLINK_REFUSED"
-  | "RESOLVER_PATH_INVALID"
-  | "RESOLVER_URL_BLOCKED"
-  | "RESOLVER_REDIRECT_BLOCKED"
-  | "RESOLVER_CREDENTIAL_EXFIL_BLOCKED"
+  | ResolverErrorCode
   | "RUN_HISTORY_FETCH_FAILED"
   | "RUN_HISTORY_BAD_RESPONSE"
-  | "RUN_HISTORY_TIMEOUT"
   | "CREDENTIAL_RESOLUTION";
 
 /**
@@ -133,38 +139,9 @@ export class AuthorizedUrisError extends AfpsRuntimeError {
 /** Generic resolver wiring failure (bad tool shape, missing entrypoint metadata, etc). */
 export class ResolverError extends AfpsRuntimeError {
   override readonly name = "ResolverError";
-  readonly code:
-    | "RESOLVER_INVALID_TOOL_SHAPE"
-    | "RESOLVER_MISSING_REQUIRED"
-    | "RESOLVER_BODY_REFERENCE_FORBIDDEN"
-    | "RESOLVER_BODY_TOO_LARGE"
-    | "RESOLVER_BODY_INVALID"
-    | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
-    | "RESOLVER_PATH_SYMLINK_REFUSED"
-    | "RESOLVER_PATH_INVALID"
-    | "RESOLVER_URL_BLOCKED"
-    | "RESOLVER_REDIRECT_BLOCKED"
-    | "RESOLVER_CREDENTIAL_EXFIL_BLOCKED";
+  readonly code: ResolverErrorCode;
 
-  constructor(
-    code:
-      | "RESOLVER_INVALID_TOOL_SHAPE"
-      | "RESOLVER_MISSING_REQUIRED"
-      | "RESOLVER_BODY_REFERENCE_FORBIDDEN"
-      | "RESOLVER_BODY_TOO_LARGE"
-      | "RESOLVER_BODY_INVALID"
-      | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
-      | "RESOLVER_PATH_SYMLINK_REFUSED"
-      | "RESOLVER_PATH_INVALID"
-      // The standalone CLI's `LocalIntegrationResolver` surfaces these
-      // when the shared outbound-HTTP engine refuses the initial target
-      // (SSRF blocklist) or a redirect hop (per-hop SSRF / off-allowlist).
-      | "RESOLVER_URL_BLOCKED"
-      | "RESOLVER_REDIRECT_BLOCKED"
-      | "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
-    message: string,
-    details?: Record<string, unknown>,
-  ) {
+  constructor(code: ResolverErrorCode, message: string, details?: Record<string, unknown>) {
     super(message, details);
     this.code = code;
   }
@@ -173,10 +150,10 @@ export class ResolverError extends AfpsRuntimeError {
 /** A `run_history` sidecar fetch failed (HTTP, JSON, or shape). */
 export class RunHistoryError extends AfpsRuntimeError {
   override readonly name = "RunHistoryError";
-  readonly code: "RUN_HISTORY_FETCH_FAILED" | "RUN_HISTORY_BAD_RESPONSE" | "RUN_HISTORY_TIMEOUT";
+  readonly code: "RUN_HISTORY_FETCH_FAILED" | "RUN_HISTORY_BAD_RESPONSE";
 
   constructor(
-    code: "RUN_HISTORY_FETCH_FAILED" | "RUN_HISTORY_BAD_RESPONSE" | "RUN_HISTORY_TIMEOUT",
+    code: "RUN_HISTORY_FETCH_FAILED" | "RUN_HISTORY_BAD_RESPONSE",
     message: string,
     details?: Record<string, unknown>,
   ) {

@@ -47,7 +47,7 @@ import { listMeConnections } from "../services/me-connections.ts";
 import { getActor } from "../lib/actor.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { requireAppContext } from "../middleware/app-context.ts";
-import { getAppScope } from "../lib/scope.ts";
+import { getAppScope, type ActorScope } from "../lib/scope.ts";
 import {
   upsertMemberPin,
   deleteMemberPin,
@@ -61,7 +61,8 @@ import { listRunnableAgents, listInstalledSkills } from "../services/application
 import { listRecentForActor } from "../services/state/runs.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { parseBody, unauthorized, invalidRequest } from "../lib/errors.ts";
+import { unauthorized, invalidRequest } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 
 const router = new Hono<AppEnv>();
@@ -208,8 +209,7 @@ router.put("/integration-pins", requireAppContext(), async (c) => {
     throw unauthorized("End-user cannot set a member-scope pin");
   }
   const scope = getAppScope(c);
-  const body = await c.req.json().catch(() => ({}));
-  const input = parseBody(upsertMemberPinSchema, body);
+  const input = await readJsonBody(c, upsertMemberPinSchema, { allowEmpty: true });
   const result = await upsertMemberPin(scope, {
     agentPackageId: input.agent_package_id,
     integrationId: input.integration_package_id,
@@ -294,20 +294,18 @@ router.delete("/connections/:connectionId", async (c) => {
     return c.body(null, 204);
   }
 
-  // Pass an EMPTY orgId deliberately. `/me/connections` is an actor-ownership
-  // boundary, not an app∈org one: a connection belongs to its owner regardless
-  // of which org the caller is currently scoped to. The service treats an empty
-  // `scope.orgId` as "no org context" and skips its app∈org assertion, relying
-  // solely on the (userId | endUserId) ownership predicate. Passing the caller's
-  // live `c.get("orgId")` here (populated for API-key/OIDC callers, empty for
-  // cookie sessions) would wrongly run that assertion and 404 a self-owned
-  // connection whose application lives in a different org. Ownership is still
-  // fully enforced downstream by the actor filter.
-  await deleteIntegrationConnection(
-    { orgId: "", applicationId: row.applicationId },
-    connectionId,
-    actor,
-  );
+  // Pass an `ActorScope` (applicationId only, no orgId) deliberately.
+  // `/me/connections` is an actor-ownership boundary, not an app∈org one: a
+  // connection belongs to its owner regardless of which org the caller is
+  // currently scoped to. The absence of `orgId` tells the service to skip its
+  // app∈org assertion and rely solely on the (userId | endUserId) ownership
+  // predicate. Passing the caller's live `c.get("orgId")` here (populated for
+  // API-key/OIDC callers, empty for cookie sessions) would wrongly run that
+  // assertion and 404 a self-owned connection whose application lives in a
+  // different org. Ownership is still fully enforced downstream by the actor
+  // filter.
+  const scope: ActorScope = { applicationId: row.applicationId };
+  await deleteIntegrationConnection(scope, connectionId, actor);
   await recordAuditFromContext(c, {
     action: "integration.connection.deleted",
     resourceType: "integration_connection",

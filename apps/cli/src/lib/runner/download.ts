@@ -27,6 +27,7 @@ import {
 import type { RunnerExec, RunnerFs, RunnerHttp } from "./exec.ts";
 import type { ProgressFn } from "../download.ts";
 import { APPSTRATE_MINISIGN_PUBKEY, parseChecksumLine } from "../self-update.ts";
+import { stripVersionPrefix } from "@appstrate/core/semver";
 
 /** Hex SHA-256 of a byte buffer via Bun's baked-in hasher. */
 export function sha256Hex(bytes: Uint8Array): string {
@@ -60,7 +61,7 @@ export function daemonUrls(
   const base =
     version === "latest"
       ? `${APPSTRATE_RELEASE_BASE}/latest/download`
-      : `${APPSTRATE_RELEASE_BASE}/download/v${version.replace(/^v/, "")}`;
+      : `${APPSTRATE_RELEASE_BASE}/download/v${stripVersionPrefix(version)}`;
   return {
     binary: `${base}/${asset}`,
     checksums: `${base}/checksums.txt`,
@@ -225,7 +226,7 @@ export function firecrackerUrls(
   version: string,
   arch: RunnerArch,
 ): { tarball: string; sha256: string; innerPath: string; jailerInnerPath: string } {
-  const tag = `v${version.replace(/^v/, "")}`;
+  const tag = `v${stripVersionPrefix(version)}`;
   const asset = `firecracker-${tag}-${arch}.tgz`;
   return {
     tarball: `${FIRECRACKER_RELEASE_BASE}/${tag}/${asset}`,

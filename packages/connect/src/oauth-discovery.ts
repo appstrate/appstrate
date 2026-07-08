@@ -348,7 +348,7 @@ async function fetchDiscoveryDocument(
   // throw `SsrfBlockedError`, which the catch below turns into the same
   // best-effort `null` as any other discovery failure. Self-hosted deployments
   // that legitimately run an internal IdP opt that host into the SSRF bypass via
-  // `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS`.
+  // `EGRESS_ALLOW_INTERNAL_HOSTS`.
   try {
     const doFetch = fetchImpl ?? oauthEgressFetch;
     const res = await doFetch(url, {

@@ -33,7 +33,7 @@ import {
   buildEventEnvelope,
   webhookEventSchema,
 } from "./service.ts";
-import { parseBody, forbidden, invalidRequest } from "../../lib/errors.ts";
+import { forbidden, invalidRequest } from "../../lib/errors.ts";
 import { readJsonBody } from "../../lib/request-body.ts";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { getOrgScope, type AppScope, type OrgScope } from "../../lib/scope.ts";
@@ -267,8 +267,7 @@ export function createWebhooksRouter() {
     requireModulePermission("webhooks", "write"),
     async (c) => {
       const id = c.req.param("id")!;
-      const body = await c.req.json().catch(() => ({}));
-      const parsed = parseBody(rotateSecretSchema, body);
+      const parsed = await readJsonBody(c, rotateSecretSchema, { allowEmpty: true });
       const result = await rotateSecret(webhookScope(c), id, parsed);
       await recordAuditFromContext(c, {
         action: "webhook.secret_rotated",

@@ -9,7 +9,7 @@ import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { notFound } from "../lib/errors.ts";
-import { checkEgressHost, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
+import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
@@ -862,20 +862,12 @@ export async function testModelConfig(config: {
       : { ok: false, latency: 0, error: result.error, message: result.message };
   }
 
-  if (isBlockedEgressUrl(config.baseUrl)) {
-    return {
-      ok: false,
-      latency: 0,
-      error: "BLOCKED_URL",
-      message: "URL targets a blocked network",
-    };
-  }
-  // DNS-rebind-safe gate: the literal check above is string-only, so a public
-  // hostname that resolves to a private/loopback/link-local address slips
-  // through it. Resolve + re-check before the test fetch; fail closed with the
+  // Canonical egress guard (parse + scheme floor + allowlist-aware literal +
+  // DNS-rebind host gate) before the test fetch: a public hostname resolving to
+  // a private/loopback/link-local address is refused, fail-closed, with the
   // same BLOCKED_URL result (the resolution reason is never surfaced).
-  const hostCheck = await checkEgressHost(new URL(config.baseUrl).hostname);
-  if (hostCheck.blocked) {
+  const egress = await checkEgressUrl(config.baseUrl);
+  if (!egress.ok) {
     return {
       ok: false,
       latency: 0,

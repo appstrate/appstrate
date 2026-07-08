@@ -32,7 +32,7 @@ import {
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeOnHeaders,
 } from "@appstrate/connect";
-import { checkEgressHost, isBlockedEgressUrl } from "../../lib/egress-host-guard.ts";
+import { checkEgressUrl } from "../../lib/egress-host-guard.ts";
 import type { Actor } from "../../lib/actor.ts";
 import {
   resolveIntegrationProxyCredentials,
@@ -244,18 +244,16 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     // Note: an empty allowlist can never reach here — `allowlist.some(...)` is
     // `false` for `[]`, so the `!ok` guard above already threw. (The former
     // `allowlist.length === 0 && isBlockedUrl(target)` branch was dead.)
-  } else if (isBlockedEgressUrl(target)) {
-    throw new ProxyAuthorizationError(`Target ${target} resolves to a blocked network range`);
   }
 
-  // DNS-rebind-safe gate: the literal `isBlockedEgressUrl` above (and the
-  // authorized_uris allowlist) is string-only — a public hostname whose A/AAAA
-  // record points at a private/loopback/link-local address slips through. Resolve
-  // + re-check the final target host before we fetch, matching the sidecar's
-  // stronger guard (runtime-pi/sidecar/credential-proxy.ts). Fail closed with the
-  // same authorization error.
-  const targetHostCheck = await checkEgressHost(new URL(target).hostname);
-  if (targetHostCheck.blocked) {
+  // Canonical egress guard: parse + scheme floor + allowlist-aware literal +
+  // DNS-rebind host gate, one decision shared with the other egress sites
+  // (mirrors the sidecar credential-proxy). Runs for BOTH the authorized_uris
+  // and allow_all_uris paths — a public hostname whose A/AAAA record points at a
+  // private/loopback/link-local address is refused even when it matched an
+  // authorized_uris pattern. Fail closed with the same authorization error.
+  const egress = await checkEgressUrl(target);
+  if (!egress.ok) {
     throw new ProxyAuthorizationError(`Target ${target} resolves to a blocked network range`);
   }
 

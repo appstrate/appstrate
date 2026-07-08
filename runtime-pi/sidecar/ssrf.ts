@@ -16,17 +16,24 @@ export { isBlockedHost, isBlockedUrl, resolveAndCheckHost } from "@appstrate/cor
 export type { HostResolver } from "@appstrate/core/ssrf";
 
 /**
- * Operator-trusted internal egress hosts, injected by the platform as
- * `APPSTRATE_EGRESS_ALLOW_HOSTS` (comma-separated hostnames) when it spawns
- * the sidecar — derived from the platform's `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS`
- * allowlist. The sidecar has no `@appstrate/env`/`@appstrate/connect` access,
- * so without this channel a host the operator explicitly trusts (an internal
- * model endpoint or remote MCP server on a private/Tailscale address) passes
- * the platform-side checks and then fails opaquely here at run time. Empty /
- * unset ⇒ nothing is exempt (the secure default).
+ * Operator-trusted internal egress hosts, forwarded by the platform as
+ * `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated hostnames) when it spawns the
+ * sidecar. The sidecar has no `@appstrate/env`/`@appstrate/connect` access, so
+ * without this channel a host the operator explicitly trusts (an internal model
+ * endpoint or remote MCP server on a private/Tailscale address) passes the
+ * platform-side checks and then fails opaquely here at run time. Empty / unset
+ * ⇒ nothing is exempt (the secure default).
+ *
+ * Scope is deliberate: this allowlist relaxes egress ONLY for operator-
+ * configured upstreams — the LLM baseUrl gate (`/llm/*`) and the remote-MCP
+ * client boot (`integrations-boot.ts`). It is intentionally NOT consulted by
+ * the MITM / transparent / egress listeners, whose targets are agent- or
+ * manifest-chosen rather than operator-trusted; relaxing the blocklist there
+ * would let an agent-supplied URL reach an internal host the operator never
+ * vouched for.
  */
 const trustedEgressHosts: ReadonlySet<string> = new Set(
-  (process.env.APPSTRATE_EGRESS_ALLOW_HOSTS ?? "")
+  (process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? "")
     .split(",")
     .map((h) => h.trim().toLowerCase())
     .filter((h) => h.length > 0),

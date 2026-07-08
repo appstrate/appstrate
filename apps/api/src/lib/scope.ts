@@ -31,6 +31,23 @@ export interface AppScope extends OrgScope {
 }
 
 /**
+ * App-scoped access WITHOUT an org boundary — the actor-ownership case.
+ *
+ * `/me/*` connection management operates purely on `(userId | endUserId)`
+ * ownership: a connection belongs to its owner regardless of which org the
+ * caller is currently scoped to (or whether they have an org context at all,
+ * as with a cookie session). It carries the `applicationId` re-derived from the
+ * resource row but deliberately NO `orgId`, so a consuming service can tell it
+ * apart from an {@link AppScope} at the type level (`"orgId" in scope`) and skip
+ * the app∈org escalation guard that only makes sense with an org. This replaces
+ * the old `{ orgId: "" }` sentinel — the actor boundary is now expressed by the
+ * absence of `orgId`, not a magic empty string.
+ */
+export interface ActorScope {
+  readonly applicationId: string;
+}
+
+/**
  * Read `orgId` from the Hono context. The request has already passed the
  * org-context middleware so `orgId` is guaranteed to be present; throwing
  * here means a route skipped the middleware chain — a bug, not a runtime

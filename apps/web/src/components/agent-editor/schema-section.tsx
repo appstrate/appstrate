@@ -137,7 +137,7 @@ function SortableFieldCard({
 
   // Credential keys must match the sidecar substitution contract (underscore-based,
   // no hyphens) — agent/tool input/config keys stay slug-based (hyphen-based,
-  // URL-safe). See @appstrate/core/validation#CREDENTIAL_KEY_RE.
+  // URL-safe). See @appstrate/core/naming#CREDENTIAL_KEY_RE.
   const keyTransform =
     mode === "credentials"
       ? { live: toLiveCredentialKey, final: toCredentialKey }

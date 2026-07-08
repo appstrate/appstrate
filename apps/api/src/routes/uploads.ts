@@ -19,7 +19,8 @@ import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { createUpload, writeProxyUploadContent } from "../services/uploads.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { parseBody, invalidRequest, unauthorized } from "../lib/errors.ts";
+import { invalidRequest, unauthorized } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
 import { getEnv } from "@appstrate/env";
 
@@ -44,8 +45,7 @@ export function createUploadsRouter() {
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
     const user = c.get("user");
-    const body = await c.req.json().catch(() => ({}));
-    const data = parseBody(createUploadSchema, body);
+    const data = await readJsonBody(c, createUploadSchema, { allowEmpty: true });
     const upload = await createUpload({
       orgId,
       applicationId,

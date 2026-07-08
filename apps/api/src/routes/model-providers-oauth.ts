@@ -16,6 +16,7 @@ import {
   linkPairingCredential,
 } from "../services/model-providers/pairings.ts";
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getClientIp } from "../lib/client-ip.ts";
 
@@ -189,8 +190,7 @@ export function createModelProvidersOAuthRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const user = c.get("user");
-      const body = await c.req.json().catch(() => ({}));
-      const input = parseBody(createPairingBody, body);
+      const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
 
       const platformUrl = getEnv().APP_URL;
       const { id, token, expiresAt } = await createPairing({

@@ -1601,6 +1601,40 @@ async function preflightProjectCollision(
   );
 }
 
+/**
+ * On a firecracker UPGRADE, keep the runner token the daemon was already paired
+ * with. `resolveRunBackend` freshly MINTS a token when the operator passes no
+ * `--runner-token` (tokenSource === "generated"); on a remote-daemon upgrade we
+ * only re-print the pairing one-liner (the daemon isn't re-paired here), so
+ * writing that minted token to the platform `.env` would rotate the platform to
+ * a secret the running daemon never saw → every run 401s until a manual re-pair.
+ * Seed the token from the preserved `.env` instead.
+ *
+ * Two cases deliberately keep the resolved token: an explicit `--runner-token`
+ * (tokenSource === "flag" — a deliberate rotation the same-host re-pair / printed
+ * one-liner propagates to the daemon), and a first-time firecracker setup on top
+ * of an existing docker install (no token to preserve). Returns a new config
+ * (never mutates the input) so the caller resolves the final token exactly once.
+ */
+export function seedUpgradeRunnerToken(
+  runBackend: RunBackendConfig,
+  mode: InstallMode,
+  existing: ExistingInstall,
+): RunBackendConfig {
+  if (
+    mode !== "upgrade" ||
+    runBackend.adapter !== "firecracker" ||
+    runBackend.tokenSource !== "generated"
+  ) {
+    return runBackend;
+  }
+  const preserved = existing.existingEnv.FIRECRACKER_RUNNER_TOKEN;
+  if (typeof preserved === "string" && preserved.trim() !== "") {
+    return { ...runBackend, token: preserved };
+  }
+  return runBackend;
+}
+
 async function installDockerTier(
   dir: string,
   tier: 1 | 2 | 3,
@@ -1618,30 +1652,11 @@ async function installDockerTier(
     runBackend: RunBackendConfig;
   },
 ): Promise<void> {
-  const runBackend = opts.runBackend;
-  // Upgrade: preserve the runner token the daemon was already paired with.
-  // `resolveRunBackend` freshly MINTS a token when the operator passes no
-  // `--runner-token` (tokenSource === "generated"). On a REMOTE-daemon upgrade
-  // we only re-print the pairing one-liner (the daemon isn't re-paired here),
-  // so writing that minted token to the platform `.env` would rotate the
-  // platform to a secret the running daemon never saw → every run 401s until a
-  // manual re-pair. Seed the token from the preserved `.env` instead. Two
-  // cases deliberately keep the resolved token: an explicit `--runner-token`
-  // (tokenSource === "flag" — a deliberate rotation the same-host re-pair /
-  // printed one-liner propagates to the daemon), and a first-time firecracker
-  // setup on top of an existing docker install (no token to preserve). This
-  // mutation happens before `runBackendEnv` + the post-install steps so every
-  // downstream consumer of `runBackend.token` stays consistent.
-  if (
-    opts.mode === "upgrade" &&
-    runBackend.adapter === "firecracker" &&
-    runBackend.tokenSource === "generated"
-  ) {
-    const preserved = opts.existing.existingEnv.FIRECRACKER_RUNNER_TOKEN;
-    if (typeof preserved === "string" && preserved.trim() !== "") {
-      runBackend.token = preserved;
-    }
-  }
+  // Resolve the runner token ONCE, up front, so every downstream consumer
+  // (`runBackendEnv`, the post-mergeEnv `.env` override, `runSameHostRunnerInstall`,
+  // the follow-up note) reads the same value — no in-place mutation of the
+  // passed-in config threaded across the function.
+  const runBackend = seedUpgradeRunnerToken(opts.runBackend, opts.mode, opts.existing);
   // Firecracker `.env` keys (RUN_ADAPTER/MODULES/FIRECRACKER_RUNNER_*).
   // FIRECRACKER_RUNNER_URL/_TOKEN are re-applied AFTER `mergeEnv` on upgrade
   // (see below) — the same-host `runner install` step re-pairs the daemon
@@ -1750,10 +1765,10 @@ async function installDockerTier(
       // Firecracker pairing token/URL must track the CURRENT install, not
       // whatever `mergeEnv` happened to keep: `runSameHostRunnerInstall` below
       // (and the remote one-liner) pair the daemon with `runBackend.token`, so
-      // the platform `.env` must carry that exact token. Note `runBackend.token`
-      // was already reconciled above — on a remote/generated upgrade it holds
-      // the PRESERVED token so we don't rotate the platform away from the
-      // daemon; otherwise it's the flag/minted token being (re-)paired.
+      // the platform `.env` must carry that exact token. `runBackend.token` was
+      // already resolved by `seedUpgradeRunnerToken` above — on a remote/generated
+      // upgrade it holds the PRESERVED token so we don't rotate the platform away
+      // from the daemon; otherwise it's the flag/minted token being (re-)paired.
       if (mode === "upgrade" && runBackend.adapter === "firecracker") {
         envVars = {
           ...envVars,

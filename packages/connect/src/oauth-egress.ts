@@ -14,7 +14,7 @@
  * blocked host.
  *
  * Escape hatch for self-hosting: some operators legitimately run an internal
- * IdP on a private address. `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` (comma-separated
+ * IdP on a private address. `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated
  * hostnames) is an OPT-IN allowlist — when the target host matches an entry the
  * operator has explicitly trusted, the host blocklist is skipped for it. The
  * request still goes through {@link guardedFetch} so the manual-redirect
@@ -29,12 +29,12 @@ import { guardedFetch, SsrfBlockedError } from "@appstrate/core/ssrf";
 export { SsrfBlockedError };
 
 /**
- * Parse `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` into a lowercased hostname set.
+ * Parse `EGRESS_ALLOW_INTERNAL_HOSTS` into a lowercased hostname set.
  * Recomputed per call so a hot env reload is honoured without a restart; the
  * split is trivial next to the network round-trip that follows.
  */
 function allowedInternalIdpHosts(): Set<string> {
-  const raw = getEnv().OAUTH_ALLOWED_INTERNAL_IDP_HOSTS;
+  const raw = getEnv().EGRESS_ALLOW_INTERNAL_HOSTS;
   if (!raw) return new Set();
   return new Set(
     raw
@@ -51,7 +51,7 @@ export function isAllowedInternalIdpHost(host: string): boolean {
 
 /**
  * SSRF-guarded `fetch` for secret-bearing OAuth egress, with an opt-in bypass
- * for operator-trusted internal IdP hosts (`OAUTH_ALLOWED_INTERNAL_IDP_HOSTS`).
+ * for operator-trusted internal hosts (`EGRESS_ALLOW_INTERNAL_HOSTS`).
  *
  * `fetch`-compatible for the `(url, init)` call shape. Throws
  * {@link SsrfBlockedError} when a non-allowlisted host resolves to a blocked

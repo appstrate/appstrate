@@ -71,6 +71,7 @@ import {
   upsertSocialProvider,
   deleteSocialProvider,
   resolveSocialProviderForClient,
+  SOCIAL_PROVIDER_IDS,
   type SocialProviderId,
 } from "./services/social.ts";
 import { isBlockedHost } from "@appstrate/core/ssrf";
@@ -183,7 +184,7 @@ export const smtpConfigTestSchema = z.object({
   to: z.email(),
 });
 
-export const socialProviderIdSchema = z.enum(["google", "github"]);
+export const socialProviderIdSchema = z.enum(SOCIAL_PROVIDER_IDS);
 
 export const socialProviderUpsertSchema = z.object({
   clientId: z.string().min(1).max(512),

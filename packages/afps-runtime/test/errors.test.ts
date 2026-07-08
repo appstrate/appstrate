@@ -31,11 +31,13 @@ describe("AfpsRuntimeError taxonomy", () => {
       "AUTHORIZED_URIS_EMPTY",
     );
 
-    expect(new ResolverError("RESOLVER_INVALID_TOOL_SHAPE", "x").code).toBe(
-      "RESOLVER_INVALID_TOOL_SHAPE",
+    expect(new ResolverError("RESOLVER_MISSING_REQUIRED", "x").code).toBe(
+      "RESOLVER_MISSING_REQUIRED",
     );
 
-    expect(new RunHistoryError("RUN_HISTORY_TIMEOUT", "x").code).toBe("RUN_HISTORY_TIMEOUT");
+    expect(new RunHistoryError("RUN_HISTORY_BAD_RESPONSE", "x").code).toBe(
+      "RUN_HISTORY_BAD_RESPONSE",
+    );
     expect(new CredentialResolutionError("x").code).toBe("CREDENTIAL_RESOLUTION");
   });
 
@@ -68,7 +70,7 @@ describe("isAfpsError marker", () => {
     expect(isAfpsError(new WorkloadExitError("d", 1))).toBe(true);
     expect(isAfpsError(new RunTimeoutError("x"))).toBe(true);
     expect(isAfpsError(new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", "x"))).toBe(true);
-    expect(isAfpsError(new ResolverError("RESOLVER_INVALID_TOOL_SHAPE", "x"))).toBe(true);
+    expect(isAfpsError(new ResolverError("RESOLVER_MISSING_REQUIRED", "x"))).toBe(true);
     expect(isAfpsError(new RunHistoryError("RUN_HISTORY_FETCH_FAILED", "x"))).toBe(true);
     expect(isAfpsError(new CredentialResolutionError("x"))).toBe(true);
     expect(isAfpsError(new BundleError("INTEGRITY_MISMATCH", "x"))).toBe(true);

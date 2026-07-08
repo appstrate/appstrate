@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export { toSlug } from "@appstrate/core/naming";
-
-/**
- * Credential schema keys must be underscore-based to satisfy the sidecar
- * substitution contract (lowercase letters, digits and underscores; must
- * start with a letter). Shared canonical pattern — used both to validate
- * user input and as the invariant guaranteed by {@link toCredentialKey}.
- */
-export const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
+export { toSlug, CREDENTIAL_KEY_RE } from "@appstrate/core/naming";
 
 /**
  * NFD-normalize, strip diacritics, and lowercase a string. Shared scaffold for

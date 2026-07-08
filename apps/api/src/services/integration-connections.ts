@@ -50,7 +50,7 @@ import {
 import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
-import type { AppScope } from "../lib/scope.ts";
+import type { ActorScope, AppScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter } from "../lib/actor.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import type { Actor } from "@appstrate/connect";
@@ -2106,7 +2106,7 @@ export async function listUsableIntegrationsForActor(
  * (or per account, when multi-account).
  */
 export async function deleteIntegrationConnection(
-  scope: AppScope,
+  scope: AppScope | ActorScope,
   connectionId: string,
   actor: Actor,
 ): Promise<void> {
@@ -2116,12 +2116,12 @@ export async function deleteIntegrationConnection(
   // WHERE (id + applicationId + owner) would silently match zero rows and 404,
   // masking the cross-org attempt instead of rejecting it up front.
   //
-  // The `/me/connections` path is actor-scoped and deliberately carries NO org
-  // context (empty `scope.orgId`); there the actor-ownership predicate below is
-  // the authoritative boundary, and running the app∈org check would 500 on an
-  // `org_id = ''` lookup. So the escalation guard applies only to app-scoped
-  // callers (those that resolved an org). See docs: /me routes skip org context.
-  if (scope.orgId) await assertApplicationInScope(scope);
+  // The `/me/connections` path passes an `ActorScope` (no `orgId`): it is
+  // actor-scoped, so the actor-ownership predicate below is the authoritative
+  // boundary and the app∈org check does not apply. The escalation guard runs
+  // only for `AppScope` callers (those that resolved an org). See docs: /me
+  // routes skip org context.
+  if ("orgId" in scope) await assertApplicationInScope(scope);
   const ownerPredicate = actorFilter(actor, integrationConnections);
   const deleted = await db
     .delete(integrationConnections)

@@ -42,6 +42,7 @@
 
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
+import { CREDENTIAL_KEY_RE } from "@appstrate/core/naming";
 import { logger } from "../lib/logger.ts";
 
 // `integration_connections.client_ref` is a flat client id — the env id of a
@@ -71,8 +72,9 @@ const rawSystemIntegrationClientSchema = z.object({
   // UUID-shaped: ids are resolved system-first, so a system id colliding with a
   // custom `integration_oauth_clients.id` (UUID) would shadow the custom row.
   id: z.string().regex(/^[\w.-]+$/, "id must match ^[\\w.-]+$"),
-  // AFPS §7.2: auth keys match `^[a-z][a-z0-9_]*$` — mirror the manifest gate.
-  auth_key: z.string().regex(/^[a-z][a-z0-9_]*$/, "auth_key must match ^[a-z][a-z0-9_]*$"),
+  // AFPS §7.2: auth keys match `^[a-z][a-z0-9_]*$` — mirror the manifest gate
+  // via the canonical `CREDENTIAL_KEY_RE` (@appstrate/core/naming).
+  auth_key: z.string().regex(CREDENTIAL_KEY_RE, "auth_key must match ^[a-z][a-z0-9_]*$"),
   client_id: z.string().min(1),
   // Public clients (`token_endpoint_auth_method: "none"`) carry an empty secret.
   client_secret: z.string().default(""),

@@ -7,6 +7,21 @@ export const SLUG_PATTERN = "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
 export const SLUG_REGEX = new RegExp(`^${SLUG_PATTERN}$`);
 
 /**
+ * Canonical snake_case identifier pattern: a lowercase letter followed by
+ * lowercase alphanumerics and underscores. Single source of truth for every
+ * `^[a-z][a-z0-9_]*$` check in the codebase (previously re-declared verbatim
+ * in `apps/web/src/lib/strings.ts` and inline Zod in the API).
+ *
+ * Two distinct concepts share this exact alphabet:
+ *  - **Credential / AFPS auth keys** — the sidecar substitution contract
+ *    (`\w+`, hyphens disallowed); consumed by the web credentials editor and
+ *    the API's system-integration `auth_key` gate (AFPS §7.2).
+ *  - **MCP tool-name inner tokens** — each half of a `{ns}__{tool}` name
+ *    (see {@link TOOL_NAME_INNER_PATTERN}, which aliases this).
+ */
+export const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
+
+/**
  * Ensure a scope string is prefixed with `@`.
  * @param scope - Scope string, with or without leading `@`
  * @returns The scope prefixed with `@`
@@ -111,8 +126,10 @@ export const TOOL_NAME_MAX_LEN = 56;
  * `TOOL_NAME_PATTERN`. Forbids a leading underscore so validation.ts and
  * naming.ts agree: validation.ts used to accept `_internal` while
  * naming.ts rejected `_internal__foo`, leaving a manifest-vs-runtime drift.
+ *
+ * Same shape as {@link CREDENTIAL_KEY_RE} — aliased so the pattern lives once.
  */
-export const TOOL_NAME_INNER_PATTERN = /^[a-z][a-z0-9_]*$/;
+export const TOOL_NAME_INNER_PATTERN = CREDENTIAL_KEY_RE;
 const TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*$/;
 
 export function isValidToolName(name: string): boolean {

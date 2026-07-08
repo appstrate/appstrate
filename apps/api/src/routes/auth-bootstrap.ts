@@ -46,7 +46,8 @@ import { db, reservePgConnection } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
-import { ApiError, parseBody } from "../lib/errors.ts";
+import { ApiError } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { logger } from "../lib/logger.ts";
 import { getClientIp } from "../lib/client-ip.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
@@ -81,8 +82,7 @@ export function createAuthBootstrapRouter(): Hono {
   // sees it — we pin our own IP-keyed limiter explicitly. Logged 429s
   // give SIEMs the brute-force signal.
   router.post("/redeem", rateLimitByIp(5, 60), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as unknown;
-    const data = parseBody(redeemSchema, body);
+    const data = await readJsonBody(c, redeemSchema, { allowEmpty: true });
 
     // Cluster-wide serialization. PGlite mode (single-process dev) returns
     // null — we fall through to the in-process CAS below.

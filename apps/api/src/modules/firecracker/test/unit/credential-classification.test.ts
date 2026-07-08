@@ -57,9 +57,9 @@ const CLASSIFIED_NON_SECRET: readonly string[] = [
   // Integration runtime adapter selector (docker/process) — layered by each
   // orchestrator after the base build; plain configuration.
   "INTEGRATION_RUNTIME_ADAPTER",
-  // Operator-trusted internal egress hostnames (comma list, mirrors
-  // OAUTH_ALLOWED_INTERNAL_IDP_HOSTS) — network policy, no credential.
-  "APPSTRATE_EGRESS_ALLOW_HOSTS",
+  // Operator-trusted internal egress hostnames (comma list, forwarded from the
+  // platform's EGRESS_ALLOW_INTERNAL_HOSTS) — network policy, no credential.
+  "EGRESS_ALLOW_INTERNAL_HOSTS",
 ];
 
 /** Minimal but structurally valid integration spawn spec. */
