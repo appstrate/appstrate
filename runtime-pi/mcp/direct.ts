@@ -67,9 +67,8 @@ interface BuildMcpDirectFactoriesOptions {
    * executes each runtime tool (log/note/pin/report/output) ONCE and journals
    * its canonical events; after every forwarded tool call this drains the
    * journal and re-emits on the run's sink. Pi's MCP transport preserves the
-   * result `_meta`, but the runner drains the journal anyway — uniform with the
-   * Claude + Codex runners, single source of truth, no `_meta` trust. Absent →
-   * no runtime tools (nothing to drain).
+   * result `_meta`, but the runner drains the journal anyway — single source
+   * of truth, no `_meta` trust. Absent → no runtime tools (nothing to drain).
    */
   drainer?: RuntimeEventDrainer;
 }
@@ -240,12 +239,12 @@ function buildIntegrationToolFactories(
           // First-party runtime tools (output/log/note/pin/report) are executed
           // ONCE by the sidecar, which journals their canonical events. Drain
           // the journal after every forwarded call and re-emit on the run's
-          // sink — uniform with the Claude + Codex runners, single source of
+          // sink — single source of
           // truth, no trust in the result `_meta`. A drain is a cheap localhost
           // round-trip and a no-op when the journal is empty (e.g. integration
           // tools, which journal nothing). The shared helper preserves each
           // event's journaled `timestamp` (it no longer gets overwritten with
-          // the drain-time wall clock, matching the Claude + Codex runners).
+          // the drain-time wall clock).
           await drainAndEmitInto({
             drainer: opts.drainer,
             emit: (ev) => opts.emit(ev as Parameters<RuntimeEventEmitter>[0]),

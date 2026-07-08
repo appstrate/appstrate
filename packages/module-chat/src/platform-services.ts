@@ -13,30 +13,19 @@
  *     used in OSS/test wiring where `ctx.services.inProcess` is absent — lives
  *     INSIDE this object, so callers never branch on it.
  *   - `rateLimit` is the platform's authenticated per-route limiter.
- *   - `chatEngine` looks up a subscription chat engine (e.g. Claude) by provider
- *     id — resolved through the platform contract
- *     (`ctx.services.chatHandlerForProvider`), which a provider module populates
- *     at boot via `ctx.services.registerChatHandler`. This module never imports
- *     the provider module, the model-provider registry, or any vendor SDK; the
- *     `ChatEngineInput` contract is a first-party core type
- *     (`@appstrate/core/chat-engine-contract`), so the handler crosses through
- *     `ctx.services`, never a module-to-module import.
+ *   - `resolveSubscriptionChatModel` resolves the chosen model row to an
+ *     oauth-subscription binding + a fresh access token (or a reconnect signal),
+ *     so the module's generic in-process Pi chat engine can drive ANY
+ *     subscription provider without importing the provider module, the
+ *     model-provider registry, or any vendor SDK. `recordChatUsage` persists one
+ *     metered `llm_usage` row for a turn. Both are first-party core contracts
+ *     (`@appstrate/core/chat-contract`), so they cross through `ctx.services`,
+ *     never a module-to-module import.
  */
 
 import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext } from "@appstrate/core/module";
-import type { ChatEngineInput } from "@appstrate/core/chat-engine-contract";
-
-/**
- * A subscription chat engine surfaced to the chat: the provider it serves + its
- * turn handler. Assembled from the provider id + the handler resolved through
- * the platform contract — only providers that registered a chat handler (Claude)
- * become a `ChatEngine`; codex (no chat surface) resolves to `undefined`.
- */
-export interface ChatEngine {
-  providerId: string;
-  handler: (input: ChatEngineInput) => Response;
-}
+import type { ChatUsageRecord, SubscriptionChatResolution } from "@appstrate/core/chat-contract";
 
 export interface ChatPlatformDeps {
   /**
@@ -47,8 +36,18 @@ export interface ChatPlatformDeps {
   dispatch(request: Request): Promise<Response>;
   /** Platform per-route rate limiter factory. */
   rateLimit(maxPerMinute: number): MiddlewareHandler;
-  /** Subscription chat engine for a provider id, or `undefined` (→ ai-sdk path). */
-  chatEngine(providerId: string): ChatEngine | undefined;
+  /**
+   * Resolve the chosen model row (`presetId`) for a chat turn: an API-key /
+   * unknown provider yields `{ subscription: false }` (ai-sdk path); an oauth2
+   * provider yields the real upstream binding + a fresh access token, or a
+   * `needsReconnection` signal when its credential is dead.
+   */
+  resolveSubscriptionChatModel(
+    orgId: string,
+    presetId: string,
+  ): Promise<SubscriptionChatResolution>;
+  /** Persist one metered `llm_usage` row for a completed chat turn. */
+  recordChatUsage(record: ChatUsageRecord): Promise<void>;
 }
 
 /**
@@ -58,8 +57,8 @@ export interface ChatPlatformDeps {
  * `ctx` is optional: when the module's router is built WITHOUT `init()` having
  * run (the test harness mounts module routers directly, and OSS standalone
  * wiring may skip init), the deps degrade to the safe baseline — loopback
- * `fetch` dispatch, a pass-through rate limiter, and no subscription chat engine
- * — the same posture this module had before deps were threaded explicitly.
+ * `fetch` dispatch, a pass-through rate limiter, and no subscription support
+ * (every provider falls through to the ai-sdk path).
  */
 /** Pass-through limiter used when no init context supplied a real one. */
 const passThroughRateLimit: MiddlewareHandler = (_c, next) => next();
@@ -70,16 +69,13 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
     dispatch: (request) => (inProcess ? inProcess.dispatch(request) : fetch(request)),
     rateLimit: (maxPerMinute) =>
       ctx ? ctx.services.http.rateLimit(maxPerMinute) : passThroughRateLimit,
-    chatEngine: (providerId) => {
-      // Resolved through the platform contract, populated by provider modules at
-      // boot via `ctx.services.registerChatHandler`. Only a provider that
-      // registered a chat handler (Claude) is usable by the chat; codex (no chat
-      // surface) and unknown providers resolve to `undefined` → ai-sdk path /
-      // disabled. Without an init context (test harness / OSS standalone) there
-      // is no platform registry, so no subscription chat engine — the same safe
-      // baseline as before.
-      const handler = ctx?.services.chatHandlerForProvider(providerId);
-      return handler ? { providerId, handler } : undefined;
-    },
+    resolveSubscriptionChatModel: (orgId, presetId) =>
+      ctx
+        ? ctx.services.resolveSubscriptionChatModel(orgId, presetId)
+        : // No init context (test harness / OSS standalone) → no subscription
+          // resolution surface; treat every model as a non-subscription (ai-sdk)
+          // provider, the same safe baseline this module had before.
+          Promise.resolve({ subscription: false }),
+    recordChatUsage: (record) => (ctx ? ctx.services.recordChatUsage(record) : Promise.resolve()),
   };
 }

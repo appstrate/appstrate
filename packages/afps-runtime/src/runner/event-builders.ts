@@ -5,17 +5,16 @@ import type { RunEvent } from "../types/index.ts";
 import type { TokenUsage } from "../types/run-result.ts";
 
 /**
- * Shared constructors for the `appstrate.*` RunEvents every SDK-backed runner
- * emits. The Pi bridge (`runner-pi`) and the Claude SDK mapper (`runner-claude`)
- * produce byte-identical envelopes for assistant text, tool start/result, usage
- * metrics, and error breadcrumbs — previously kept in sync by hand-copied code
- * plus "mirror the other runner" comments. Centralising the envelope here makes
- * the "consistent across runners" invariant real code rather than a convention.
+ * Shared constructors for the `appstrate.*` RunEvents the Pi runner emits.
+ * The Pi bridge (`runner-pi`) builds envelopes for assistant text, tool
+ * start/result, usage metrics, and error breadcrumbs through these builders,
+ * keeping the envelope shape in one place rather than inlined at each call
+ * site.
  *
- * Each runner still owns its own input parsing (Pi events vs Claude SDK
- * messages); it only hands the extracted fields to these builders. `timestamp`
- * is injected by the caller (runners use `Date.now()` or an injectable clock),
- * so this module stays free of ambient time.
+ * The runner owns its own input parsing (Pi events); it only hands the
+ * extracted fields to these builders. `timestamp` is injected by the caller
+ * (the runner uses `Date.now()` or an injectable clock), so this module stays
+ * free of ambient time.
  */
 
 interface EventBase {
@@ -49,9 +48,9 @@ export function buildToolStartProgress(
 /**
  * Tool result → `appstrate.progress` carrying `{ tool?, result, isError,
  * toolCallId? }`. `tool` is optional: the Pi SDK reports the tool name on its
- * end event, but an Anthropic `tool_result` only references the `tool_use` id,
- * so the Claude mapper passes no name — and the message then omits the
- * `: <tool>` suffix and the `tool` data field accordingly.
+ * end event, but a caller that only has a tool-use id can pass no name — and
+ * the message then omits the `: <tool>` suffix and the `tool` data field
+ * accordingly.
  */
 export function buildToolResultProgress(
   base: EventBase,

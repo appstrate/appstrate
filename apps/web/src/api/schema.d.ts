@@ -18150,11 +18150,6 @@ export interface operations {
                     };
                     /** @enum {string} */
                     status?: "success" | "failed" | "timeout" | "cancelled";
-                    /**
-                     * @description How the runner delivers structured output — `native` (Claude Agent SDK `StructuredOutput`) vs `tool` (the `output` runtime tool). Drives the wording of output-validation failures; absent means `tool`.
-                     * @enum {string}
-                     */
-                    outputMode?: "tool" | "native";
                     durationMs?: number;
                     /** @description Authoritative terminal token usage written to the `runs` row. */
                     usage?: {

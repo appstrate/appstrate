@@ -207,12 +207,9 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
     // called finalize itself. Defensively synthesise success so a
     // container that forgot to finalise still reaches a terminal state;
     // the CAS makes this a no-op when the container did call finalize.
-    // `outputMode` rides along so a schema-declaring run closed by THIS
-    // synthesis still gets the engine-accurate validation wording (#833).
     await synthesiseFinalize(runId, {
       status: "success",
       durationMs: Date.now() - startTime,
-      outputMode: lifecycle.outputMode,
     });
   } catch (err) {
     if (signal.aborted) return;

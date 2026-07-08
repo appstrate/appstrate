@@ -83,10 +83,9 @@
     "./jwt": "./src/jwt.ts",
     "./credential-template": "./src/credential-template.ts",
     "./dedupe-label": "./src/dedupe-label.ts",
-    "./subscription-engines": "./src/subscription-engines.ts",
-    "./chat-engine-contract": "./src/chat-engine-contract.ts",
+    "./chat-contract": "./src/chat-contract.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
-    "./claude-oauth-gateway": "./src/claude-oauth-gateway.ts",
+    "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
     "./subprocess-env": "./src/subprocess-env.ts",
     "./run-and-wait-client": "./src/run-and-wait-client.ts"
   },

@@ -51,16 +51,6 @@ export interface RunResult {
   /** Elapsed wall-clock time in milliseconds. Runners populate this. */
   durationMs?: number;
   /**
-   * How this runner delivers the structured output declared by the agent's
-   * output schema. `"tool"` — the `output` runtime tool (Pi engine);
-   * `"native"` — the engine's own structured-output channel (Claude Agent
-   * SDK `outputFormat` → `StructuredOutput`). Consumers use it to phrase
-   * output-validation failures in terms of the mechanism the agent actually
-   * had (issue #833). Optional — absent means `"tool"` (the historical
-   * default; older runners never set it).
-   */
-  outputMode?: "tool" | "native";
-  /**
    * Authoritative token usage for the run. When present, downstream
    * consumers MUST treat this as the source of truth — the field exists
    * so finalize is self-contained and does not race with the side-channel

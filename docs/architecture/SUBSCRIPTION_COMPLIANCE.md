@@ -2,26 +2,25 @@
 
 # Subscription Credential Compliance Posture
 
-**Last reviewed: 2026-06-21.** The third-party-subscription ToS landscape shifted
-repeatedly through 2026 (ban → enforce → reverse → pause for Anthropic; unblocked
-but unendorsed for OpenAI). **Re-verify the current vendor terms before relying on
-this document** — the policy half is volatile; the code half is stable.
+**Last reviewed: 2026-07-08** (code half rewritten for the single Pi execution
+engine). The third-party-subscription ToS landscape shifted repeatedly through
+2026 (ban → enforce → reverse → pause for Anthropic; unblocked but unendorsed for
+OpenAI). **Re-verify the current vendor terms before relying on this document** —
+the policy half is volatile; the code half is stable.
 
 This document records exactly how Appstrate uses model-provider **subscription**
 credentials (Claude Pro/Max via `claude-code`, ChatGPT Plus/Pro/Business via
 `codex`), what we can guarantee at the code level, and what we deliberately do
 **not** claim.
 
-> **Scope of the current release.** Only the **Claude** subscription path
-> (`claude-code` — chat + sandboxed agent runs via the official Claude Agent SDK)
-> is shipped and live. The **Codex** subscription is currently an
-> **inference/model provider only**: it can be connected and its models listed,
-> but running an autonomous agent on a codex credential is **not executable** in
-> this release — it is hard-refused (`UnrunnableOauthProviderError`), never
-> forged. The Codex **agent** path described below (the vended-token + per-run
-> egress-lock mechanism) is **deferred to a follow-up PR**; the sections that
-> describe it record the intended design for when it lands, not code that ships
-> today.
+> **Single execution engine.** There is **one** agent-run engine: Pi
+> (`@mariozechner/pi-coding-agent`). API-key providers **and** OAuth
+> subscription providers (Claude Pro/Max, ChatGPT Codex) all execute on it —
+> there is no "official binary" run path, no Claude Agent SDK engine, no
+> `RunEngine` / `subscriptionEngine` provider→engine binding (that vocabulary
+> was removed). Both subscription providers (`claude-code`, `codex`) are
+> **executable** for agent runs and share the **identical** delivery mechanism
+> (below). They remain **opt-in** modules — not in the `MODULES` default.
 
 ---
 
@@ -30,83 +29,64 @@ credentials (Claude Pro/Max via `claude-code`, ChatGPT Plus/Pro/Business via
 These are properties of the implementation, verifiable by reading the source —
 not policy opinions.
 
-### 1.1 Official vendor tools only, on every axis
+### 1.1 Pi formats the request; the platform forges nothing
 
-A subscription credential is **only ever** driven through the vendor's own
-official binary, which signs its own client fingerprint. There is no
-reimplementation of either vendor's wire protocol for subscription auth — and
-the platform issues **zero** subscription API calls of its own (see §1.5). Every
-request a subscription token authenticates is made by the official binary at run
-time; the platform never sends one to test a credential or to enumerate models.
+Subscription requests are built by **Pi's SDK** (`@mariozechner/pi-ai`), which
+natively emits each provider's subscription request shape / fingerprint — the
+Anthropic OAuth fingerprint (`anthropic-beta: oauth-2025-04-20`, the `claude-cli`
+user-agent, the "You are Claude Code" system prelude) for `claude-code`, and the
+codex-responses shape (`chatgpt-account-id`, the codex user-agent) for `codex`.
+This is exactly what any `pi` / `pi-mono` CLI user's requests look like — the
+request-shape responsibility is **delegated to Pi**, not reimplemented by
+Appstrate. The platform issues **zero** subscription API calls of its own for
+credential-testing or model discovery (see §1.4); every request a subscription
+token authenticates is emitted by Pi at run time.
 
-| Provider      | Chat                                                    | Agents (sandboxed run)                                  |
-| ------------- | ------------------------------------------------------- | ------------------------------------------------------- |
-| `claude-code` | `@anthropic-ai/claude-agent-sdk` `query()` (in-process) | `ClaudeAgentRunner` → official `claude` binary          |
-| `codex`       | _none_ — no chat surface                                | _deferred_ — inference/model provider only this release |
+| Provider      | Chat                            | Agents (sandboxed run) |
+| ------------- | ------------------------------- | ---------------------- |
+| `claude-code` | Pi chat engine (bearer-swapped) | Pi engine              |
+| `codex`       | _none_ — no chat surface        | Pi engine              |
 
-Codex has **no chat surface**: its subscription token can't be safely held
-host-side (the CLI talks to chatgpt.com directly, so the chat host would hold the
-real token). Codex agent runs (the docker-isolated official-CLI path described
-below) are **deferred to a follow-up PR** — in this release a codex credential is
-inference-only and an agent run on it is refused. The Claude subscription is
-chat-usable because its gateway swaps the bearer server-side.
+Codex has **no chat surface** (it contributes no `chatHandler`); it is agent-run
+only. Both subscription providers run through the same Pi loop and the same
+sidecar `/llm` delivery path.
 
-Anchors: `packages/module-claude-code/src/claude-agent/engine.ts`,
-`packages/runner-claude/`, `runtime-pi/entrypoint.ts` (`buildClaudeAgentRunner`).
-
-### 1.2 No fingerprint forging — and no forging fallback
+### 1.2 No fingerprint forging
 
 - The OAuth-subscription **fingerprint-forging** primitives (identity headers,
   system-prepend, `wireFormat` body transforms, originator spoofing) were
-  removed (commit `a2c664f7c`). A repo-wide grep for forging primitives in
-  product code returns nothing.
-- A subscription credential that resolves to a non-official engine is **hard
-  refused**, never forged onto the Pi loop:
-  `assertRunnableOnEngine` throws `UnrunnableOauthProviderError` unless the
-  engine is `claude` or `codex`
-  (`apps/api/src/services/run-launcher/subscription-run-policy.ts`).
+  removed. A repo-wide grep for forging primitives in product code returns
+  nothing.
+- Pi emits the subscription fingerprint itself; the platform neither forges one
+  nor patches Pi's request. The sidecar's only header policy on the OAuth path
+  is a **bearer-swap** (§1.3) — provider-neutral, touching no provider-specific
+  header.
 
-### 1.3 What the upstream actually receives
+### 1.3 Bearer-swap delivery — the real token never enters the container
 
-- **Claude (`/llm` oauth gateway, sidecar):** the official Agent SDK binary
-  builds the request (its `user-agent` / `x-app` / `anthropic-beta` are forwarded
-  **untouched**), but the **upstream TLS request is made by the sidecar's `fetch`,
-  not by the binary** — the sidecar swaps (a) the placeholder bearer for the
-  user's **own** real subscription token and (b) ensures the documented
-  `anthropic-beta: oauth-2025-04-20` flag, then forwards
-  (`runtime-pi/sidecar/app.ts` → `handleOauthLlmRequest`). So the upstream
-  receives the **official client's request headers**; it does **not** see a
-  TLS/transport fingerprint generated by the official binary. We forge nothing,
-  but we do not claim transport-level client identity for the Claude path.
-- **Codex:** the codex agent path (the binary talking to `chatgpt.com` directly)
-  is **deferred to follow-up PR #767** — this release makes no codex agent request
-  (a codex agent run is refused). The codex _inference_ provider that does ship
-  issues zero API calls of its own (offline validation only — see §1.5).
+Both subscription providers share **one** delivery mechanism. The agent
+container is handed a **placeholder** bearer; the real subscription token never
+crosses the isolation boundary. Pi in the container calls the sidecar's `/llm`
+endpoint, and the sidecar's OAuth branch resolves the user's **own** real
+subscription token **server-side** and swaps it onto the outbound request
+(`applyOauthBearerSwap` from `@appstrate/core/oauth-bearer-swap`): it forces the
+real bearer onto `authorization`, drops any stray `x-api-key`, and forwards
+**every other header Pi signed verbatim** (`runtime-pi/sidecar/app.ts`, oauth
+`/llm` branch). The swap is provider-neutral — the same code serves Claude and
+Codex; Pi's fingerprint (user-agent, `anthropic-beta`, `chatgpt-account-id`, …)
+rides through unchanged.
 
-So the shipped subscription request is shaped by the official Claude client and
-carries a genuine, per-user subscription token — no impersonation of another
-client, no pooling (the credential is per-user/org, never shared across tenants).
-The one honest narrowing: the bytes go out over the **sidecar's** socket
-(forwarded official-client _headers_), so we do not claim transport-level client
-identity for the Claude path.
+The one honest narrowing: the upstream TLS request is made by the **sidecar's
+`fetch`** carrying Pi's forwarded headers, not by a vendor binary — so we do not
+claim transport-level client identity. The token is genuine and per-user/org
+(never pooled across tenants); no impersonation of another client, no forging.
 
-### 1.4 Credential isolation (agents) — deferred (#767)
+Because the bearer-swap exists **only on the sidecar path**, subscription runs
+still require an isolating orchestrator (docker / firecracker) — there is no
+sidecar in the plain `process` adapter, so subscription credentials are not
+delivered there.
 
-This release ships only the **Claude** subscription agent path, whose `/llm` oauth
-gateway swaps the bearer **server-side** — the real token never enters the agent
-container, so there is no in-container subscription credential to isolate (§1.3).
-There is no credential-vend endpoint in this release.
-
-The **Codex** agent path takes the opposite approach: the CLI calls `chatgpt.com`
-directly and cannot be reverse-proxied, so the real token would be **vended once**
-into the sandbox and the container's egress **hard-locked** to OpenAI's hosts. That
-mechanism — the `/credential-vend` endpoint, the per-run egress allowlist, the
-`vend ⟺ egress-lock` structural invariant, the "vend run declares no integrations"
-fail-closed guard, and the non-renewable frozen token — is **deferred to follow-up
-PR #767**. Its design and compensating controls are recorded there, not here; none
-of that code ships in this PR.
-
-### 1.5 Zero platform-side subscription API calls — offline validation only
+### 1.4 Zero platform-side subscription API calls — offline validation only
 
 The platform never sends a request that a subscription token authenticates.
 Two paths that historically would have (connection test + per-model discovery)
@@ -130,16 +110,16 @@ are now **offline**:
   hold the vendor's signing key) and **not** a live backend call. A structurally
   valid, unexpired token can still be revoked, throttled, or otherwise dead
   upstream. Real end-to-end credential validity — that the token is live and
-  authentic — is established only at the **first run through the official vendor
-  binary** (Codex CLI / Claude Agent SDK), which presents the credential to the
-  real backend. The offline check is a cheap, no-spend structural gate that
-  catches malformed and expired credentials early; it is not proof of liveness.
+  authentic — is established only at the **first agent run** (Pi presents the
+  credential to the real backend). The offline check is a cheap, no-spend
+  structural gate that catches malformed and expired credentials early; it is
+  not proof of liveness.
 
 - **Model discovery** (`POST /api/model-provider-credentials/:id/refresh-models`):
   for offline providers the platform persists the provider's static
   `modelDiscoveryCandidates` (∩ catalog) as `available_model_ids` **without
-  probing** any candidate. Real per-model availability surfaces at first
-  official-binary run, not via a platform-side request
+  probing** any candidate. Real per-model availability surfaces at the first
+  agent run, not via a platform-side request
   (`apps/api/src/services/model-providers/model-discovery.ts` →
   `persistStaticCandidates`).
 
@@ -148,8 +128,8 @@ core contracts (`packages/core/src/module.ts`): the platform asks "does this
 provider validate offline?" by data, never by hardcoding `codex` / `claude-code`.
 API-key providers leave the flag unset and keep the empirical `/models` probe.
 
-This is what makes §1.1's "official binary only" claim literally true for the
-test/discovery paths, not just the run path. The earlier hand-built
+This keeps §1.1's "zero platform-side subscription API calls" claim literally
+true for the test/discovery paths, not just the run path. The earlier hand-built
 `${baseUrl}/codex/responses` / `/v1/messages` probe requests (which forged an
 `originator: "pi"` client id and sent the subscription bearer directly from the
 platform process) have been **deleted**, along with the now-unused
@@ -183,10 +163,11 @@ opt into subscription providers deliberately (via `MODULES`) and own that choice
 This is the crux: an operator pointing Appstrate's chat/runner at a **personal**
 Claude subscription is acting as a third-party product offering claude.ai login —
 which Anthropic permits only with **prior approval**. Appstrate forges no client
-identity (the official `claude` binary signs its own), but that does NOT confer
-approval. Treat the subscription engines as an operator-owned grey-zone choice,
-not a sanctioned integration, and re-verify the quote against the live docs
-(§4) before relying on it — the wording and policy have changed repeatedly.
+identity (Pi's SDK emits the subscription fingerprint, same as any Pi CLI user),
+but that does NOT confer approval. Treat the subscription providers as an
+operator-owned grey-zone choice, not a sanctioned integration, and re-verify the
+quote against the live docs (§4) before relying on it — the wording and policy
+have changed repeatedly.
 
 ### 2.2 OpenAI / `codex` — a documented grey zone
 
@@ -205,15 +186,15 @@ not a sanctioned integration, and re-verify the quote against the live docs
 
 For automated / headless / team workloads on **either** vendor, the contractually
 unambiguous option is an **API-key** model provider (OpenAI Platform / Anthropic
-API), billed pay-as-you-go. The subscription engines (`claude-code`, `codex`) are
-a convenience/grey-zone option chosen per-operator; they are not the recommended
-substrate for production automation.
+API), billed pay-as-you-go. The subscription providers (`claude-code`, `codex`)
+are a convenience/grey-zone option chosen per-operator; they are not the
+recommended substrate for production automation.
 
 ---
 
 ## 4. Re-verification checklist
 
-Before depending on a subscription engine in production, confirm against the
+Before depending on a subscription provider in production, confirm against the
 **current** vendor docs:
 
 - [ ] Anthropic Consumer Terms + Usage Policy + Help Center (Agent SDK /

@@ -30,15 +30,6 @@ export interface RuntimePiModelConfig {
 
 export interface RuntimePiEnvOptions {
   model: RuntimePiModelConfig;
-  /**
-   * In-container agent engine. `"pi"` (default) runs the Pi SDK loop;
-   * `"claude"` runs the official Claude Agent SDK (claude-code subscription).
-   * The subscription binary signs its own provider identity — the runner forges
-   * nothing. Emitted as `RUN_ENGINE` only when not `"pi"` so existing Pi runs
-   * keep a byte-identical env. The entrypoint defaults to `"pi"` when the var is
-   * absent.
-   */
-  engine?: "pi" | "claude";
   /** Full enriched system prompt fed to the Pi SDK. */
   agentPrompt: string;
   /** Run identifier. Bundled tools + the entrypoint surface it in every emitted {@link RunEvent}. */
@@ -136,10 +127,6 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     MODEL_API: model.api,
     MODEL_ID: model.modelId,
   };
-
-  // Only emit when non-default — keeps existing Pi runs byte-identical; the
-  // entrypoint falls back to "pi" when RUN_ENGINE is absent.
-  if (opts.engine && opts.engine !== "pi") env.RUN_ENGINE = opts.engine;
 
   if (!opts.noSidecar) {
     // No fallback: a Docker-shaped magic default here would silently

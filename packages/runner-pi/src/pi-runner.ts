@@ -341,19 +341,13 @@ export class PiRunner implements Runner {
     // instead of having the platform reconstruct it from the `run_logs`
     // adapter-error trail post-hoc (issue: run_fd977eb6).
     const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
-    // This engine delivers structured output via the `output` runtime tool.
-    // Explicit (though it matches the absent-field default) so both runners
-    // state their delivery mechanism — finalize phrases output-validation
-    // failures from it (issue #833).
-    result.outputMode = "tool";
     const terminalError = bridgeRef.current?.getTerminalError();
     if (terminalError) {
       result.status = "failed";
       result.error = terminalError;
     } else {
       // Set success explicitly (don't leave it for the ingestion layer to
-      // infer) so the runner is the single source of truth on BOTH branches —
-      // matching the Claude + Codex runners.
+      // infer) so the runner is the single source of truth on BOTH branches.
       result.status = "success";
     }
     attachAccumulators(result);
@@ -671,9 +665,9 @@ interface PiToolExecutionEndEvent {
 type PiSubscribedEvent = { type: string } & Record<string, unknown>;
 
 // Tool-result truncation (byte-aware, env-tunable via `TOOL_RESULT_BYTE_LIMIT`)
-// is shared with the Claude Agent SDK runner, so it lives in
-// `@appstrate/afps-runtime/runner` (imported above for the bridge's own use).
-// Re-exported here for this package's existing test imports + public surface.
+// lives in `@appstrate/afps-runtime/runner` (imported above for the bridge's
+// own use). Re-exported here for this package's existing test imports + public
+// surface.
 export { truncateToolResult, toolResultByteLimit };
 
 /**

@@ -39,14 +39,14 @@ COPY --parents */package.json */*/package.json ./
 # `--filter=appstrate-sidecar` restricts the install to the sidecar's
 # subgraph. Same root lockfile, subset of the workspace.
 #
-# NOT `--frozen-lockfile` / `--production`: bun's frozen comparator has a bug
-# with @openai/codex's same-name aliased platform binaries
-# (@openai/codex@0.141.0-<platform>) and false-reports "lockfile had changes" on
-# a byte-stable lockfile (confirmed on bun 1.3.11 + 1.3.14, full graph + subset);
-# `--production` implicitly freezes with no override flag in bun 1.3.x. Versions
-# stay pinned by the COPY'd bun.lock (resolution reads it); lockfile drift is
-# caught by the `git diff --exit-code bun.lock` guard in CI
-# (.github/workflows/check.yml) on every commit.
+# NOT `--frozen-lockfile` / `--production`: bun's frozen comparator has a known
+# bug with same-name aliased platform binaries in the workspace graph — it
+# false-reports "lockfile had changes" on a byte-stable lockfile (confirmed on
+# bun 1.3.11 + 1.3.14, full graph + subset); `--production` implicitly freezes
+# with no override flag in bun 1.3.x. Versions stay pinned by the COPY'd bun.lock
+# (resolution reads it); lockfile drift is caught by the
+# `git diff --exit-code bun.lock` guard in CI (.github/workflows/check.yml) on
+# every commit.
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
     bun install \
         --filter=appstrate-sidecar \

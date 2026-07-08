@@ -117,7 +117,8 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   // No fingerprint forging: an OAuth-subscription provider has no path through
   // this generic gateway (a bare bearer won't satisfy a subscription upstream).
-  // claude-code is served by its own SDK gateway; reject everything else.
+  // Subscription chat runs on the in-process Pi engine (module-chat), not here;
+  // subscription runs go through the sidecar's oauth gateway. Reject them here.
   if (getModelProvider(resolved.providerId)?.authMode === "oauth2") {
     throw new LlmProxyUnsupportedSubscriptionError(resolved.providerId);
   }

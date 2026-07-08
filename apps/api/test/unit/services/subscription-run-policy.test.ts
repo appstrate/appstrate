@@ -2,12 +2,10 @@
 
 import { afterAll, beforeAll, describe, it, expect } from "bun:test";
 import {
-  assertRunnableOnEngine,
-  assertSubscriptionEngineIsolation,
+  assertOauthRunIsolation,
   resolveCredentialDelivery,
-  SubscriptionRequiresIsolationError,
+  OauthRunRequiresIsolationError,
   buildOauthSidecarLlm,
-  UnrunnableOauthProviderError,
 } from "../../../src/services/run-launcher/subscription-run-policy.ts";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import {
@@ -37,50 +35,8 @@ function fakeProvider(
   };
 }
 
-// The provider→engine binding lives on the model-provider definition, read by
-// the policy through the model-provider registry. Seed the two reference
-// subscription providers so these pure-unit assertions have data to resolve.
-beforeAll(() => {
-  resetModelProviders();
-  registerModelProvider(
-    fakeProvider("claude-code", {
-      authMode: "oauth2",
-      subscriptionEngine: { engine: "claude" },
-    }),
-  );
-});
-afterAll(() => seedTestModelProviders());
-
-describe("assertRunnableOnEngine", () => {
-  it("allows claude-code (oauth credential) on the claude engine", () => {
-    expect(() =>
-      assertRunnableOnEngine({
-        engine: "claude",
-        providerId: "claude-code",
-        isOauthCredential: true,
-      }),
-    ).not.toThrow();
-  });
-
-  it("allows any api-key credential on the pi engine", () => {
-    expect(() =>
-      assertRunnableOnEngine({ engine: "pi", providerId: "anthropic", isOauthCredential: false }),
-    ).not.toThrow();
-  });
-
-  it("rejects an oauth-subscription provider that resolves to pi (no forging fallback)", () => {
-    expect(() =>
-      assertRunnableOnEngine({
-        engine: "pi",
-        providerId: "some-oauth-sub",
-        isOauthCredential: true,
-      }),
-    ).toThrow(UnrunnableOauthProviderError);
-  });
-});
-
 describe("buildOauthSidecarLlm", () => {
-  it("builds the non-forging oauth config (bearer swap only, no wireFormat)", () => {
+  it("builds the bearer-swap oauth config (no forging field)", () => {
     const cfg = buildOauthSidecarLlm({
       baseUrl: "https://api.anthropic.com",
       credentialId: "cred_1",
@@ -103,32 +59,31 @@ describe("buildOauthSidecarLlm", () => {
   });
 });
 
-describe("assertSubscriptionEngineIsolation", () => {
-  // The guard consumes the engine resolved by resolveCredentialDelivery
-  // (claude → subscription engine, pi → API-key) and allowlists against the
-  // orchestrator registry's `isolatesWorkloads` flag — any backend that
-  // never declared isolation is refused, not just the known in-host mode.
-  it("rejects a claude-code subscription run under the process orchestrator", () => {
+describe("assertOauthRunIsolation", () => {
+  // An OAuth run's credential is swapped in by the sidecar, which only an
+  // isolating orchestrator provisions — the guard allowlists against the
+  // orchestrator registry's `isolatesWorkloads` flag.
+  it("rejects an oauth run under the process orchestrator", () => {
     expect(() =>
-      assertSubscriptionEngineIsolation({
-        engine: "claude",
+      assertOauthRunIsolation({
+        isOauthCredential: true,
         providerId: "claude-code",
         orchestratorMode: "process",
       }),
-    ).toThrow(SubscriptionRequiresIsolationError);
+    ).toThrow(OauthRunRequiresIsolationError);
   });
 
-  it("allows a claude-code subscription run under docker", () => {
+  it("allows an oauth run under docker", () => {
     expect(() =>
-      assertSubscriptionEngineIsolation({
-        engine: "claude",
+      assertOauthRunIsolation({
+        isOauthCredential: true,
         providerId: "claude-code",
         orchestratorMode: "docker",
       }),
     ).not.toThrow();
   });
 
-  it("allows a claude-code subscription run under a module-contributed isolating backend", () => {
+  it("allows an oauth run under a module-contributed isolating backend", () => {
     registerOrchestrator(
       "fake-isolated",
       {
@@ -140,8 +95,8 @@ describe("assertSubscriptionEngineIsolation", () => {
     );
     try {
       expect(() =>
-        assertSubscriptionEngineIsolation({
-          engine: "claude",
+        assertOauthRunIsolation({
+          isOauthCredential: true,
           providerId: "claude-code",
           orchestratorMode: "fake-isolated",
         }),
@@ -156,25 +111,25 @@ describe("assertSubscriptionEngineIsolation", () => {
     // registration forgot `isolatesWorkloads: true` must be refused by
     // default — the guard is an allowlist, not a denylist of known-bad modes.
     expect(() =>
-      assertSubscriptionEngineIsolation({
-        engine: "claude",
+      assertOauthRunIsolation({
+        isOauthCredential: true,
         providerId: "claude-code",
         orchestratorMode: "some-future-backend" as never,
       }),
-    ).toThrow(SubscriptionRequiresIsolationError);
+    ).toThrow(OauthRunRequiresIsolationError);
   });
 
-  it("allows an API-key provider under either orchestrator mode", () => {
+  it("allows a non-oauth (API-key) run under either orchestrator mode", () => {
     expect(() =>
-      assertSubscriptionEngineIsolation({
-        engine: "pi",
+      assertOauthRunIsolation({
+        isOauthCredential: false,
         providerId: "openai",
         orchestratorMode: "process",
       }),
     ).not.toThrow();
     expect(() =>
-      assertSubscriptionEngineIsolation({
-        engine: "pi",
+      assertOauthRunIsolation({
+        isOauthCredential: false,
         providerId: "openai",
         orchestratorMode: "docker",
       }),
@@ -182,62 +137,40 @@ describe("assertSubscriptionEngineIsolation", () => {
   });
 });
 
-describe("resolveCredentialDelivery (single classification axis)", () => {
+describe("resolveCredentialDelivery (oauth-class classification)", () => {
   // Seed the model-provider registry so the oauth-class flag (authMode:
-  // "oauth2") resolves. registerModelProvider also contributes the
-  // subscription-engine binding for providers that carry one, so both axes
-  // come from the SAME registration — the drift this resolver eliminates.
+  // "oauth2") resolves off the same registration the launcher reads.
   beforeAll(() => {
     resetModelProviders();
-    registerModelProvider(
-      fakeProvider("claude-code", {
-        authMode: "oauth2",
-        subscriptionEngine: { engine: "claude" },
-      }),
-    );
-    // An oauth-class provider with NO official engine — the hard-refuse path.
-    registerModelProvider(fakeProvider("oauth-no-engine", { authMode: "oauth2" }));
+    registerModelProvider(fakeProvider("claude-code", { authMode: "oauth2" }));
+    registerModelProvider(fakeProvider("codex", { authMode: "oauth2" }));
     registerModelProvider(fakeProvider("openai", { authMode: "api_key" }));
   });
   afterAll(() => {
-    // Restore the canonical cross-file baseline (model-provider registry, which
-    // carries each module's subscriptionEngine binding).
     seedTestModelProviders();
   });
 
-  it("resolves an oauth subscription credential + engine from the registry (single source)", () => {
-    const d = resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: true });
-    expect(d.isOauthCredential).toBe(true);
-    // The engine comes from the SAME registry entry the launcher reads.
-    expect(d.engine).toBe("claude");
+  it("classifies an oauth subscription credential as oauth-class (delivered via sidecar swap)", () => {
+    expect(
+      resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: true })
+        .isOauthCredential,
+    ).toBe(true);
+    // codex is now oauth-class and runs on Pi like claude-code (no refuse path).
+    expect(
+      resolveCredentialDelivery({ providerId: "codex", hasCredentialId: true }).isOauthCredential,
+    ).toBe(true);
   });
 
-  it("classifies an oauth-class credential with no official engine as oauth on pi — then hard-refuses", () => {
-    const d = resolveCredentialDelivery({ providerId: "oauth-no-engine", hasCredentialId: true });
-    expect(d.isOauthCredential).toBe(true);
-    expect(d.engine).toBe("pi");
-    // The launcher feeds this into assertRunnableOnEngine, which MUST refuse
-    // (no forging fallback for an oauth credential without an official engine).
-    expect(() =>
-      assertRunnableOnEngine({
-        engine: d.engine,
-        providerId: "oauth-no-engine",
-        isOauthCredential: d.isOauthCredential,
-      }),
-    ).toThrow(UnrunnableOauthProviderError);
-  });
-
-  it("classifies an api-key provider as non-oauth on pi", () => {
-    const d = resolveCredentialDelivery({ providerId: "openai", hasCredentialId: true });
-    expect(d.isOauthCredential).toBe(false);
-    expect(d.engine).toBe("pi");
+  it("classifies an api-key provider as non-oauth", () => {
+    expect(
+      resolveCredentialDelivery({ providerId: "openai", hasCredentialId: true }).isOauthCredential,
+    ).toBe(false);
   });
 
   it("is not oauth-class when no credential id is present (e.g. unconfigured)", () => {
-    const d = resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: false });
-    // With no oauth credential it is NOT routed to oauth delivery.
-    expect(d.isOauthCredential).toBe(false);
-    // Engine still resolves from the registry regardless of credential presence.
-    expect(d.engine).toBe("claude");
+    expect(
+      resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: false })
+        .isOauthCredential,
+    ).toBe(false);
   });
 });

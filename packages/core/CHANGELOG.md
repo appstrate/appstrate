@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Collapses the multi-engine execution model onto the single Pi engine
+(`@mariozechner/pi-coding-agent`). API-key and OAuth subscription runs (Claude
+Pro/Max, ChatGPT Codex) all execute on Pi, whose SDK (`@mariozechner/pi-ai`)
+emits each provider's subscription request fingerprint natively — the platform
+forges nothing. Removes the provider→execution-engine binding contract in favour
+of a provider-neutral bearer-swap.
+
+### Added
+
+- **`@appstrate/core/oauth-bearer-swap`** — `applyOauthBearerSwap(headers,
+accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
+  real subscription bearer onto `authorization`, drops any `x-api-key`, and
+  forwards every other header verbatim. Provider-neutral — it touches no
+  provider-specific header, so the Pi SDK's own request fingerprint (user-agent,
+  `anthropic-beta`, `chatgpt-account-id`, …) rides through unchanged. Pure (no
+  credential lookup, no I/O); the caller owns SSRF + credential resolution.
+
+### Removed (BREAKING)
+
+- **`@appstrate/core/subscription-engines` removed.** The provider→execution-engine
+  binding registry (the `"claude"|"codex"` engine vocabulary, the binding shape,
+  and the read/write accessors, added in 3.0.0) is gone. There is a single Pi
+  execution engine; runs are no longer routed by a per-provider engine binding.
+- **`@appstrate/core/claude-oauth-gateway` removed.** The anthropic-specific OAuth
+  gateway header helper (`applyClaudeOauthGatewayHeaders`, which forced the
+  bearer and ensured `anthropic-beta: oauth-2025-04-20`) is superseded by the
+  provider-neutral `@appstrate/core/oauth-bearer-swap`.
+
+  Both are removed public subpaths → requires a major version bump on next
+  publish. Consumers on the `claude`/`codex` engine vocabulary should drop it;
+  the run path is provider-neutral.
+
 ## [3.0.0] — 2026-07-08
 
 Major release: removes forging OAuth subscription wire-format, the deprecated

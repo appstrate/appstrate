@@ -26,7 +26,6 @@
  */
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
-import type { SubscriptionEngineDef } from "@appstrate/core/subscription-engines";
 import { hasCatalog, lookupCatalogModel } from "../pricing-catalog.ts";
 
 // ---------------------------------------------------------------------------
@@ -129,26 +128,4 @@ export function isOAuthModelProvider(providerId: string): boolean {
 /** Iterate all registered model providers (insertion order). */
 export function listModelProviders(): readonly ModelProviderDefinition[] {
   return Array.from(_byId.values());
-}
-
-// ---------------------------------------------------------------------------
-// Subscription-engine read helpers
-//
-// The provider definition's `subscriptionEngine` binding is the SINGLE source
-// of truth for which engine a provider runs on. These helpers read it directly
-// (no separate copied map), so the run launcher, chat, and llm-proxy gateways
-// resolve the engine by provider id off the SAME registration. API-key /
-// unregistered providers carry no binding and resolve to the `pi` engine.
-// ---------------------------------------------------------------------------
-
-/**
- * The subscription-engine definition for a provider id (binding + the provider's
- * own id/label), or `undefined` for an API-key / unregistered provider. Pure read.
- */
-export function subscriptionEngineForProvider(
-  providerId: string,
-): SubscriptionEngineDef | undefined {
-  const def = _byId.get(providerId);
-  if (!def?.subscriptionEngine) return undefined;
-  return { ...def.subscriptionEngine, providerId: def.providerId, label: def.displayName };
 }

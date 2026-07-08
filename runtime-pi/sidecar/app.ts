@@ -28,7 +28,7 @@ import {
   syntheticAliasErrorBody,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "./model-swap.ts";
-import { applyClaudeOauthGatewayHeaders } from "@appstrate/core/claude-oauth-gateway";
+import { applyOauthBearerSwap } from "@appstrate/core/oauth-bearer-swap";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
@@ -563,12 +563,12 @@ export function createApp(deps: AppDeps): Hono {
   //     for the real key and forward directly to the upstream provider.
   //     Request/response bodies stream through zero-copy. The Pi SDK
   //     handles retry on 429/5xx natively (Retry-After honoring + jitter).
-  //   - oauth: the no-forge path for a driver that signs its OWN provider
-  //     fingerprint (the official Claude Agent SDK binary). The sidecar
-  //     resolves a fresh access token from the platform
-  //     (`/internal/oauth-token/:id`), swaps the request bearer for it, and
-  //     ensures the OAuth beta header — forging nothing. On 401 we refresh +
-  //     retry once. There is no fingerprint-forging mode.
+  //   - oauth: the no-forge path for an OAuth subscription. The Pi SDK
+  //     already signs the subscription request shape (Anthropic OAuth
+  //     fingerprint or codex-responses headers); the sidecar resolves a fresh
+  //     access token from the platform (`/internal/oauth-token/:id`) and swaps
+  //     the placeholder request bearer for it — forging nothing. On 401 we
+  //     refresh + retry once. There is no fingerprint-forging mode.
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
       return c.json({ error: "LLM proxy not configured" }, 503);
@@ -638,11 +638,12 @@ export function createApp(deps: AppDeps): Hono {
     return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
   });
 
-  // OAuth: resolve the real bearer and ensure the OAuth beta is present, but
-  // DO NOT forge — no identity headers, no body transform. The driver (the
-  // official Claude Agent SDK binary) signs its own fingerprint; we forward its
-  // user-agent / x-app / anthropic-beta untouched. This is the no-forge runner
-  // path and the in-container twin of the chat's `claude-code-sdk-gateway`.
+  // OAuth: resolve the real subscription bearer and swap it onto the request,
+  // but DO NOT forge — no identity headers, no body transform. The Pi SDK
+  // (in-container) already signed the subscription request shape (Anthropic
+  // OAuth fingerprint or codex-responses headers); we forward its user-agent /
+  // anthropic-beta / chatgpt-account-id untouched and only replace the
+  // placeholder bearer with the real token.
   async function handleOauthLlmRequest(
     c: Context,
     llmConfig: LlmProxyOauthConfig,
@@ -678,15 +679,14 @@ export function createApp(deps: AppDeps): Hono {
 
     const { targetUrl, method } = deriveLlmTarget(c, baseUrl);
 
-    // Forward the driver's headers verbatim except for the shared no-forge
-    // gateway policy: drop any x-api-key (bearer-only), force the real bearer,
-    // and merge the OAuth beta. The driver's own fingerprint (user-agent,
-    // x-app, anthropic-beta) is preserved — the whole point of pass-through.
-    // `filterHeaders` first drops host/content-length/hop-by-hop; wrapping the
-    // result in a Headers normalises casing so the policy needs no manual
-    // anthropic-beta/authorization variant hunt.
+    // Forward the SDK's headers verbatim except for the bearer-swap policy:
+    // drop any x-api-key (bearer-only) and force the real subscription bearer.
+    // The SDK's own fingerprint (user-agent, anthropic-beta, chatgpt-account-id)
+    // is preserved — the whole point of pass-through. `filterHeaders` first
+    // drops host/content-length/hop-by-hop; wrapping the result in a Headers
+    // normalises casing so the swap needs no manual authorization variant hunt.
     const buildHeaders = (accessToken: string): Headers =>
-      applyClaudeOauthGatewayHeaders(new Headers(filterHeaders(c.req.header())), accessToken);
+      applyOauthBearerSwap(new Headers(filterHeaders(c.req.header())), accessToken);
 
     // Buffer the request body (inference JSON, bounded by
     // SIDECAR_MAX_REQUEST_BODY_BYTES via the Content-Length precheck +
@@ -765,7 +765,7 @@ export function createApp(deps: AppDeps): Hono {
   // `bootIntegrations` (when `server.ts` pre-builds them) so the
   // in-process api_call server and the outer resource provider use the
   // same blob store.
-  // Runtime-event drain surface — the runner (pi/claude/codex) pulls the
+  // Runtime-event drain surface — the Pi runner pulls the
   // canonical events the sidecar journaled while executing runtime tools, and
   // re-emits them on its single run-event sink. Same `Host: sidecar` posture as
   // `/mcp` (the per-run Docker network is the boundary; no token). An empty

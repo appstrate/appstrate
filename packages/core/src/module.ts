@@ -16,8 +16,7 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
-import type { ChatEngineHandler } from "./chat-engine-contract.ts";
-import type { SubscriptionEngineBinding } from "./subscription-engines.ts";
+import type { ChatUsageRecord, SubscriptionChatResolution } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
@@ -756,19 +755,6 @@ export interface ModelProviderDefinition {
    * returned (or nothing if the hook is absent).
    */
   requiredIdentityClaims?: readonly (keyof ModelProviderIdentity)[];
-
-  /**
-   * Subscription-engine binding — set ONLY by OAuth-subscription providers
-   * whose runs execute on a vendor's OFFICIAL binary instead of the generic
-   * `pi` loop (e.g. `claude-code` → Claude Agent SDK, `codex` → Codex CLI).
-   * This binding IS the single source of truth for the provider's engine: the
-   * platform's model-provider registry reads it directly (no copied registry),
-   * so the run-launcher + the llm-proxy gateways resolve this provider's engine
-   * by id. API-key providers omit it (they run on `pi`). Keeping the binding on
-   * the provider definition is what lets core ship zero hardcoded subscription
-   * machinery — disable the module and the engine vanishes with it.
-   */
-  subscriptionEngine?: SubscriptionEngineBinding;
 }
 
 // ---------------------------------------------------------------------------
@@ -1073,21 +1059,26 @@ export interface PlatformServices {
     dispatch(request: Request): Promise<Response>;
   };
   /**
-   * Register a provider module's interactive chat-turn handler, keyed by
-   * provider id. Called from the provider module's `init(ctx)` (e.g.
-   * `@appstrate/module-claude-code`). This is the platform-contract channel that
-   * keeps the chat handler OFF the run-engine binding and lets a provider module
-   * contribute chat without any other module importing it — module isolation is
-   * preserved because the handler crosses through `ctx.services`, not a
-   * module-to-module import. Re-registering replaces the handler.
+   * Resolve the chosen chat model row to its real upstream binding for one chat
+   * turn. For an oauth-subscription (claude-code/codex) model, returns the real
+   * model id + baseUrl + a FRESH access token so the chat module can drive the
+   * single generic in-process Pi chat engine inline; for an API-key / unknown
+   * provider it returns `{ subscription: false }` so the chat falls to its
+   * generic ai-sdk (llm-proxy) path; for a dead oauth credential it returns
+   * `{ subscription: true, needsReconnection: true }`. The chat module has no DB
+   * access — this is the seam that resolves the credential + token server-side,
+   * so the real subscription token never enters the module's own resolution
+   * (only the returned in-memory string, used to build the Pi `AuthStorage`).
    */
-  registerChatHandler(providerId: string, handler: ChatEngineHandler): void;
+  resolveSubscriptionChatModel(
+    orgId: string,
+    presetId: string,
+  ): Promise<SubscriptionChatResolution>;
   /**
-   * Resolve a provider's registered chat-turn handler, or `undefined` for an
-   * API-key / unknown provider OR a subscription engine with no chat surface
-   * (codex). The `chat` module reads this to dispatch a vendor chat turn by
-   * provider id WITHOUT importing the provider module or any vendor SDK; only
-   * the `ChatEngineInput` contract (defined in core) is cross-cutting.
+   * Record one chat turn's LLM usage as an `llm_usage` ledger row (source
+   * `proxy`, `run_id` null). The chat module has no DB access, so metering for
+   * the inline Pi engine crosses through here — same ledger the llm-proxy meters
+   * into for the ai-sdk chat path and every agent run.
    */
-  chatHandlerForProvider(providerId: string): ChatEngineHandler | undefined;
+  recordChatUsage(record: ChatUsageRecord): Promise<void>;
 }

@@ -27,13 +27,14 @@ import {
 } from "ai";
 import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
-import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-engine-contract";
+import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { logger } from "./logger.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
 import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { buildTranscriptPrompt } from "./transcript.ts";
+import { runPiSubscriptionChat } from "./pi-chat/engine.ts";
 import { SYSTEM_PROMPT, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
@@ -64,11 +65,33 @@ import {
  * always has search_operations for discovery when the index is absent.
  */
 export function applyOperationIndexPolicy(system: string, apiShape: string): string {
-  const drop = apiShape === "mistral-conversations";
+  // Mistral has no prompt cache; codex (chatgpt.com backend) is not
+  // prompt-cached the way Anthropic/OpenAI are — both would re-send the
+  // multi-KB index uncached every step, so drop it for them.
+  const drop = apiShape === "mistral-conversations" || apiShape === "openai-codex-responses";
   if (drop && system.includes(OPERATION_INDEX_HEADING)) {
     return system.slice(0, system.indexOf(OPERATION_INDEX_HEADING)).trimEnd();
   }
   return system;
+}
+
+/**
+ * RFC 9457 `401` returned when the chosen subscription model's oauth credential
+ * is dead (revoked/expired-beyond-refresh). The client renders a reconnect
+ * prompt rather than the engine launching a session that would 401 upstream.
+ */
+function subscriptionReconnectResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      type: "https://docs.appstrate.dev/errors/subscription-reconnect",
+      title: "Reconnection required",
+      status: 401,
+      detail: "Reconnectez votre abonnement — la connexion a expiré ou été révoquée.",
+      code: "needs_reconnection",
+      needsReconnection: true,
+    }),
+    { status: 401, headers: { "content-type": "application/problem+json" } },
+  );
 }
 
 type ConvertedModelMessages = Awaited<ReturnType<typeof convertToModelMessages>>;
@@ -230,17 +253,15 @@ export async function handleChatStream(
     providerId: chosen.providerId,
   });
 
-  // Subscription chat engine — the chat driver is contributed by the provider
-  // module (only `@appstrate/module-claude-code` today) through the platform
-  // contract (`ctx.services.registerChatHandler`), surfaced here through
-  // `deps.chatEngine`. The chat dispatches by provider id WITHOUT importing the
-  // provider module or any vendor SDK. With no provider module loaded
-  // the lookup is undefined and every provider falls through to the generic
-  // ai-sdk path below. Codex is agent-only (filtered from the chat model list by
-  // CHAT_USABLE_FAMILIES) and registers no chat engine, so today only the Claude
-  // Agent SDK reaches this branch.
-  const chatEngine = deps.chatEngine(chosen.providerId ?? "");
-  const isSubscription = Boolean(chatEngine);
+  // Subscription chat routing. Every oauth-subscription provider (claude-code,
+  // codex) is served by ONE generic in-process Pi engine owned by this module —
+  // there is no per-provider vendor-SDK seam. The platform resolves the chosen
+  // model row: an API-key/unknown provider → `{ subscription: false }` (the
+  // generic ai-sdk path below); an oauth2 provider → the real upstream binding +
+  // a fresh access token (or a reconnect signal). Token resolution (decrypt +
+  // possible refresh) happens here in the preamble, alongside the other reads.
+  const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
+  const isSubscription = subscription.subscription;
 
   // ── Preamble phase B (parallel) ──────────────────────────────────────────
   // The caller-context block (both paths) and the platform MCP probe (ai-sdk
@@ -383,26 +404,22 @@ export async function handleChatStream(
     await closeMcp();
   };
 
-  // The credential-injection gateway swaps the placeholder bearer server-side;
-  // the real subscription token never enters this process or the spawned
-  // binary's env. The gateway slug derives from the provider id — no vendor
-  // literal. `platformMcp` is passed unconditionally (see phase B note).
-  if (chatEngine) {
-    const loopbackToken = mintLoopbackToken(
-      { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
-      { ttlMs: ENGINE_LOOPBACK_TTL_MS },
-    );
-    // The EXTERNAL subscription binary opens its OWN connection to the platform
-    // MCP (`/api/mcp/o/:org`), and its run-and-wait bridge hits platform run
-    // routes with these same headers. It must NEVER receive the caller's raw
-    // cookie/Authorization — those are reusable well beyond chat scope and
-    // across every platform route. Hand it a short-lived, process-local bearer
-    // that (a) carries EXACTLY the caller's already-resolved permissions, so the
-    // meta-tools authorize with full RBAC fidelity and zero amplification, and
-    // (b) does NOT grant first-party-loopback, so it can't be replayed against
-    // the subscription LLM gateway. Only the org/app scoping headers ride with
-    // it — no cookie, no raw Authorization. The TTL spans the whole turn (the
-    // binary bakes the header once and may reconnect between steps).
+  // Subscription path — the generic in-process Pi engine drives the turn with
+  // the real access token resolved above; the token stays in this process's
+  // memory (in-memory AuthStorage, never persisted, never sent to the client).
+  if (subscription.subscription) {
+    if ("needsReconnection" in subscription) {
+      // The oauth credential is dead → tell the client to reconnect rather than
+      // launching a session that would 401 upstream.
+      await failCleanup();
+      return subscriptionReconnectResponse();
+    }
+    // The Pi session opens its OWN platform MCP connection (`/api/mcp/o/:org`),
+    // and run_and_wait hits platform run routes with these headers. It must NEVER
+    // receive the caller's raw cookie/Authorization (reusable far beyond chat).
+    // Hand it a short-lived, process-local bearer carrying EXACTLY the caller's
+    // already-resolved permissions (full RBAC fidelity, zero amplification) and
+    // NOT first-party-loopback (can't be replayed against the inference proxy).
     const mcpToken = mintMcpLoopbackToken(
       {
         userId: user.id,
@@ -421,16 +438,23 @@ export async function handleChatStream(
     if (applicationId) mcpHeaders["x-application-id"] = applicationId;
     try {
       return await finalize(
-        chatEngine.handler({
+        runPiSubscriptionChat({
+          model: subscription.model,
+          presetId: chosen.id,
+          orgId,
+          userId: user.id,
           prompt: buildTranscriptPrompt(messages),
           system,
-          modelId: chosen.modelId,
-          gatewayBaseUrl: `${origin}/api/llm-proxy/${chatEngine.providerId}-sdk/${encodeURIComponent(chosen.id)}`,
-          placeholderToken: loopbackToken,
           platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },
           // Decoupled from the request connection (see `generation` above).
           abortSignal: generation.signal,
           onError: clientErrorMessage,
+          // Fire-and-forget metering — never blocks or fails the turn.
+          recordUsage: (record) => {
+            void deps.recordChatUsage(record).catch((err) => {
+              logger.warn("chat usage metering failed", { err: String(err) });
+            });
+          },
         }),
       );
     } catch (err) {
