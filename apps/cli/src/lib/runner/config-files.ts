@@ -35,6 +35,16 @@ export interface RunnerConfig {
    * tracks the latest release to match a latest binary.
    */
   artifactsVersion?: string;
+  /**
+   * Optional FIRECRACKER_ARTIFACTS_PUBKEY override (base64 raw 32-byte
+   * Ed25519 public key) the daemon verifies the artifacts-manifest signature
+   * against. The released daemon binary already pins the official release key
+   * at compile time, so this is OVERRIDE-ONLY — for bring-your-own-artifacts
+   * hosts that sign their own manifest (or a dev daemon whose pinned key is
+   * still the placeholder). Sourced from the CLI's own env at install time;
+   * omitted otherwise.
+   */
+  artifactsPubkey?: string;
 }
 
 /**
@@ -84,6 +94,10 @@ export function renderRunnerEnvFile(config: RunnerConfig): string {
     ...(config.artifactsVersion
       ? [`FIRECRACKER_ARTIFACTS_VERSION=${config.artifactsVersion}`]
       : []),
+    // Manifest-signature key OVERRIDE (bring-your-own-artifacts / dev). The
+    // released daemon pins the official key at compile time — only written
+    // when the operator explicitly provided one at install time.
+    ...(config.artifactsPubkey ? [`FIRECRACKER_ARTIFACTS_PUBKEY=${config.artifactsPubkey}`] : []),
     "",
   ];
   return lines.join("\n");

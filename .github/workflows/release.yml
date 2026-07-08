@@ -75,6 +75,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # ── Firecracker manifest-signing pubkey bake (appstrate image only) ──
+      # The `appstrate` image ships apps/api SOURCE (no build step), so a
+      # self-hosted user can run the runner daemon from it. Bake the real
+      # Ed25519 public key over the `__FIRECRACKER_ARTIFACTS_ED25519_PUBKEY__`
+      # placeholder in runner/artifacts.ts BEFORE the image build, so shipped
+      # source pins the key this release's manifest is signed with (the
+      # `Sign Firecracker manifest` step in the `release` job uses the same
+      # secret). Fail-closed, mirroring the minisign guard in sign-cli: a
+      # release where some builds pin the real key and others still carry the
+      # placeholder (mixed signed/unsigned) is worse than a failed release —
+      # an unreplaced placeholder makes the daemon refuse to boot
+      # (FatalArtifactsError "signing key is not provisioned").
+      - name: Setup Bun (Firecracker pubkey derivation)
+        if: matrix.name == 'appstrate'
+        uses: ./.github/actions/bun-setup
+
+      - name: Bake Firecracker manifest signing pubkey
+        if: matrix.name == 'appstrate'
+        env:
+          FIRECRACKER_MANIFEST_SIGNING_KEY: ${{ secrets.FIRECRACKER_MANIFEST_SIGNING_KEY }}
+        run: |
+          if [ -z "${FIRECRACKER_MANIFEST_SIGNING_KEY:-}" ]; then
+            echo "::error::FIRECRACKER_MANIFEST_SIGNING_KEY secret must be set (base64 raw 32-byte Ed25519 seed)."
+            echo "::error::Generate a keypair with: bun scripts/sign-firecracker-manifest.ts --generate"
+            exit 1
+          fi
+          # Zero-dep script (node:crypto only) — no `bun install` needed.
+          PUBKEY=$(bun scripts/sign-firecracker-manifest.ts --pubkey)
+          FILE=apps/api/src/modules/firecracker/runner/artifacts.ts
+          PLACEHOLDER="__FIRECRACKER_ARTIFACTS_ED25519_PUBKEY__"
+          # Drift guard: if the pinned-key constant moved/renamed, fail loudly
+          # instead of silently shipping a build that fails closed at boot.
+          if ! grep -q "\"$PLACEHOLDER\"" "$FILE"; then
+            echo "::error::Placeholder $PLACEHOLDER not found in $FILE — the ARTIFACTS_SIGNING_PUBKEY constant moved or was renamed. Update this step (and its twin in build-runner-daemon)."
+            exit 1
+          fi
+          sed -i "s|$PLACEHOLDER|$PUBKEY|g" "$FILE"
+          if grep -q "$PLACEHOLDER" "$FILE"; then
+            echo "::error::Placeholder $PLACEHOLDER was not fully replaced in $FILE"
+            exit 1
+          fi
+          echo "Baked Firecracker artifacts signing pubkey: $PUBKEY"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
 
@@ -398,6 +441,10 @@ jobs:
   # single `firecracker-artifacts-manifest.json`. The resolver verifies the
   # DECOMPRESSED rootfs sha256 against the manifest, so `rootfs.sha256` is
   # the digest of the ext4 image and `rootfs.compressed_size` is the `.zst`.
+  # The merged manifest is Ed25519-signed in the `release` job (detached
+  # `firecracker-artifacts-manifest.json.sig` asset) — the daemon verifies
+  # that signature against a source-pinned public key BEFORE trusting any
+  # hash inside the manifest (P1-4, runner/artifacts.ts).
   firecracker-artifacts:
     name: Firecracker guest artifacts (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -503,6 +550,38 @@ jobs:
 
       - name: Install dependencies
         run: bun install
+
+      # Twin of the bake step in `build-and-push` (see the comment there):
+      # replace the `__FIRECRACKER_ARTIFACTS_ED25519_PUBKEY__` placeholder
+      # with the real public key BEFORE the compile below embeds
+      # runner/artifacts.ts into the daemon binary. This is the primary
+      # consumer of the pinned key — the compiled daemon verifies every
+      # downloaded manifest against it. Fail-closed (mirrors the minisign
+      # guard in sign-cli): shipping a daemon that still carries the
+      # placeholder means every boot dies with FatalArtifactsError
+      # "signing key is not provisioned".
+      - name: Bake Firecracker manifest signing pubkey
+        env:
+          FIRECRACKER_MANIFEST_SIGNING_KEY: ${{ secrets.FIRECRACKER_MANIFEST_SIGNING_KEY }}
+        run: |
+          if [ -z "${FIRECRACKER_MANIFEST_SIGNING_KEY:-}" ]; then
+            echo "::error::FIRECRACKER_MANIFEST_SIGNING_KEY secret must be set (base64 raw 32-byte Ed25519 seed)."
+            echo "::error::Generate a keypair with: bun scripts/sign-firecracker-manifest.ts --generate"
+            exit 1
+          fi
+          PUBKEY=$(bun scripts/sign-firecracker-manifest.ts --pubkey)
+          FILE=apps/api/src/modules/firecracker/runner/artifacts.ts
+          PLACEHOLDER="__FIRECRACKER_ARTIFACTS_ED25519_PUBKEY__"
+          if ! grep -q "\"$PLACEHOLDER\"" "$FILE"; then
+            echo "::error::Placeholder $PLACEHOLDER not found in $FILE — the ARTIFACTS_SIGNING_PUBKEY constant moved or was renamed. Update this step (and its twin in build-and-push)."
+            exit 1
+          fi
+          sed -i "s|$PLACEHOLDER|$PUBKEY|g" "$FILE"
+          if grep -q "$PLACEHOLDER" "$FILE"; then
+            echo "::error::Placeholder $PLACEHOLDER was not fully replaced in $FILE"
+            exit 1
+          fi
+          echo "Baked Firecracker artifacts signing pubkey: $PUBKEY"
 
       - name: Compile runner daemon binary
         run: |
@@ -654,6 +733,36 @@ jobs:
             > firecracker-artifacts-manifest.json
           cat firecracker-artifacts-manifest.json
 
+      - name: Setup Bun (Firecracker manifest signing)
+        if: needs.firecracker-artifacts.result == 'success'
+        uses: ./.github/actions/bun-setup
+
+      - name: Sign Firecracker manifest
+        # The manifest is the ROOT OF TRUST for the guest kernel/rootfs hashes
+        # — the daemon verifies its detached Ed25519 signature against the
+        # source-pinned public key (baked over the placeholder by the
+        # `Bake Firecracker manifest signing pubkey` steps, same secret)
+        # BEFORE trusting any hash inside it. Signature format: base64 raw
+        # 64-byte Ed25519 over the exact manifest bytes, one line
+        # (runner/artifacts.ts verifyManifestSignature).
+        if: needs.firecracker-artifacts.result == 'success'
+        env:
+          FIRECRACKER_MANIFEST_SIGNING_KEY: ${{ secrets.FIRECRACKER_MANIFEST_SIGNING_KEY }}
+        run: |
+          # Fail-closed, mirroring the minisign guard in sign-cli: the daemon
+          # HARD-FAILS on a release that publishes a manifest without its
+          # `.sig` asset (fetchManifestSignature → FatalArtifactsError), so
+          # publishing unsigned would brick `runner install` for this tag —
+          # worse than a failed release.
+          if [ -z "${FIRECRACKER_MANIFEST_SIGNING_KEY:-}" ]; then
+            echo "::error::FIRECRACKER_MANIFEST_SIGNING_KEY secret must be set — refusing to publish an unsigned Firecracker artifacts manifest."
+            echo "::error::Generate a keypair with: bun scripts/sign-firecracker-manifest.ts --generate"
+            exit 1
+          fi
+          # Signs + self-verifies with the derived public key (the exact check
+          # the daemon performs), writing firecracker-artifacts-manifest.json.sig.
+          bun scripts/sign-firecracker-manifest.ts firecracker-artifacts-manifest.json
+
       - name: Generate release notes
         id: notes
         run: |
@@ -706,4 +815,5 @@ jobs:
             firecracker-assets/*/vmlinux-*
             firecracker-assets/*/rootfs-*.ext4.zst
             firecracker-artifacts-manifest.json
+            firecracker-artifacts-manifest.json.sig
             runner-daemon/*/appstrate-runner-*

@@ -207,11 +207,15 @@ export async function resolveInstallConfig(
   // generated (printed once). The env-var channel lets the same-host
   // firecracker installer hand us the pairing token off-argv (so it never
   // shows up in `ps aux`); see RUNNER_TOKEN_ENV.
+  // Existing env file (re-install): token + artifacts-pubkey overrides are
+  // preserved across re-installs so a re-run never silently drops them.
+  const existingEnv = await d.fs.readFile(RUNNER_ENV_PATH);
+  const existingVars = existingEnv ? parseRunnerEnvFile(existingEnv) : {};
+
   let token = opts.token?.trim() || process.env[RUNNER_TOKEN_ENV]?.trim();
   let tokenSource: TokenSource = "flag";
   if (!token) {
-    const existing = await d.fs.readFile(RUNNER_ENV_PATH);
-    const preserved = existing ? parseRunnerEnvFile(existing).FIRECRACKER_RUNNER_TOKEN : undefined;
+    const preserved = existingVars.FIRECRACKER_RUNNER_TOKEN;
     if (preserved && preserved.length >= 16) {
       token = preserved;
       tokenSource = "preserved";
@@ -226,7 +230,16 @@ export async function resolveInstallConfig(
     );
   }
 
-  return { config: { token, platformUrl, port, host, dataDir }, tokenSource };
+  // Optional FIRECRACKER_ARTIFACTS_PUBKEY passthrough (bring-your-own-
+  // artifacts hosts that sign their own manifest): CLI env > value preserved
+  // from an existing env file. The released daemon pins the official release
+  // key at compile time, so this is override-only and normally absent.
+  const artifactsPubkey =
+    process.env.FIRECRACKER_ARTIFACTS_PUBKEY?.trim() ||
+    existingVars.FIRECRACKER_ARTIFACTS_PUBKEY ||
+    undefined;
+
+  return { config: { token, platformUrl, port, host, dataDir, artifactsPubkey }, tokenSource };
 }
 
 function parsePort(raw: string | undefined): number {
