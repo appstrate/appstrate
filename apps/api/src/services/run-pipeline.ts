@@ -35,7 +35,7 @@ import type { Actor } from "../lib/actor.ts";
 import type { FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { runWithSpan } from "../observability/index.ts";
+import { runWithSpan } from "@appstrate/core/telemetry";
 
 /**
  * Extract the denormalized @scope and display-name snapshot for a loaded

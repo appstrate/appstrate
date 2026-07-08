@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import type { Hono, MiddlewareHandler } from "hono";
+import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
@@ -1035,6 +1035,14 @@ export interface PlatformServices {
    */
   http: {
     rateLimit(maxPerMinute: number): MiddlewareHandler;
+    /**
+     * Resolve the client IP for a request, honoring the platform's
+     * `TRUST_PROXY` semantics (trusted `X-Forwarded-For` hops vs. socket
+     * address). Returns the `"unknown"` sentinel when nothing resolves.
+     * Same resolver every core route uses — modules that tag telemetry or
+     * key rate buckets by IP get identical trust semantics.
+     */
+    clientIp(c: Context): string;
   };
   /** Run-ledger read surface. */
   runs: {

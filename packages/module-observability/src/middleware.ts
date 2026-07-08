@@ -4,10 +4,11 @@
  * HTTP server-span middleware. Wraps each request in an OTel `SERVER` span and
  * records the matched route template + response status.
  *
- * Registered right after `requestId` so the span — and its bound logger trace
- * context — covers the full handler chain. When observability is disabled the
- * middleware is a straight pass-through (`next()`), adding nothing to the hot
- * path.
+ * Contributed to the platform via {@link TelemetryProvider.httpMiddleware} —
+ * the core global telemetry middleware (registered right after `requestId`)
+ * delegates here, so the span — and its bound logger trace context — covers
+ * the full handler chain. When observability is disabled the middleware is a
+ * straight pass-through (`next()`), adding nothing to the hot path.
  *
  * Route template resolution happens AFTER `await next()`: while the global
  * `app.use("*")` frame is still on the stack the only route in scope is the
@@ -25,13 +26,20 @@
 import type { Context, Next } from "hono";
 import { routePath } from "hono/route";
 import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
-import { getEnv } from "@appstrate/env";
+import { readOtelEnv } from "./env.ts";
 import { isObservabilityEnabled, runWithSpan, currentSpan } from "./otel.ts";
-import { getClientIp } from "../lib/client-ip.ts";
-import type { AppEnv } from "../types/index.ts";
+
+export interface ObservabilityMiddlewareDeps {
+  /**
+   * Client-IP resolver honoring the platform's `TRUST_PROXY` semantics —
+   * injected from `ctx.services.http.clientIp` at module init (the resolver
+   * lives in the platform, not in this module).
+   */
+  clientIp: (c: Context) => string;
+}
 
 /** Resolve the matched route template, defensively — never throw post-response. */
-function resolveRouteTemplate(c: Context<AppEnv>): string {
+function resolveRouteTemplate(c: Context): string {
   try {
     return routePath(c);
   } catch {
@@ -39,23 +47,23 @@ function resolveRouteTemplate(c: Context<AppEnv>): string {
   }
 }
 
-export function observability() {
-  // Read the trust flag once at registration (env is cached + already
-  // validated at boot). Untrusted by default — see the module doc above.
-  const trustInbound = getEnv().OTEL_TRUST_INCOMING_TRACE;
+export function observability(deps: ObservabilityMiddlewareDeps) {
+  // Read the trust flag once at construction (module init — env is stable
+  // for the process lifetime). Untrusted by default — see the module doc above.
+  const trustInbound = readOtelEnv().trustIncomingTrace;
 
-  return async (c: Context<AppEnv>, next: Next) => {
+  return async (c: Context, next: Next) => {
     if (!isObservabilityEnabled()) return next();
 
     const method = c.req.method;
     const url = new URL(c.req.url);
-    // Resolved socket/forwarded client IP (honors TRUST_PROXY). `getClientIp`
+    // Resolved socket/forwarded client IP (honors TRUST_PROXY). The resolver
     // returns the "unknown" sentinel when nothing resolves (e.g. the test
     // harness has no conn info) — omit the attribute rather than record it.
     // NOTE: `network.protocol.version` is deliberately absent — Bun/Hono hand
     // the handler a fetch `Request`, which does not expose the negotiated HTTP
     // version, and semconv forbids guessing it.
-    const clientAddress = getClientIp(c);
+    const clientAddress = deps.clientIp(c);
 
     return runWithSpan(
       // Provisional, low-cardinality name — overwritten with `<METHOD> <template>`

@@ -275,8 +275,9 @@ services:
       - API_BODY_LIMIT_BYTES=${API_BODY_LIMIT_BYTES:-10485760}
       - S3_PUBLIC_ENDPOINT=${S3_PUBLIC_ENDPOINT:-}
       # ── Observability (OpenTelemetry, optional) ──
-      # Off by default; a complete no-op until enabled. Passthrough means an
-      # unset host env falls back to the Zod schema's single source of truth.
+      # Off by default; a complete no-op until enabled. Enabling needs
+      # @appstrate/module-observability in MODULES plus an endpoint; the vars
+      # are read from process.env by the module (not in the Zod schema).
       # Full guide: docs/architecture/OBSERVABILITY.md
       - OTEL_ENABLED
       - OTEL_EXPORTER_OTLP_ENDPOINT

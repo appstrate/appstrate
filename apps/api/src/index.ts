@@ -4,12 +4,13 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
-import { initObservability, observability, recordProcessAnomaly } from "./observability/index.ts";
+import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
 import { boot } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
 import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
+import { telemetry } from "./middleware/telemetry.ts";
 import { clientIp } from "./middleware/client-ip.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { bodyLimit } from "./middleware/body-limit.ts";
@@ -62,14 +63,6 @@ import type { AppEnv } from "./types/index.ts";
 // Fail-fast: validate all env vars at startup
 const env = getEnv();
 
-// Initialize OpenTelemetry BEFORE any server wiring so spans + metrics are
-// available on the first request. Awaited at module top-level so the SDK (lazy-
-// imported only when enabled) is wired before the `export default` server is
-// read by Bun. Defensive: `initObservability` never throws (a misconfiguration
-// disables telemetry rather than crashing boot), and is a complete no-op —
-// loading only `@opentelemetry/api` — unless an OTLP endpoint is configured.
-await initObservability();
-
 const app = new Hono<AppEnv>();
 
 // Error handler — converts ApiError to RFC 9457 application/problem+json
@@ -78,10 +71,12 @@ app.onError(errorHandler);
 // Request-Id — generates req_ prefixed ID, sets header + context variable
 app.use("*", requestId());
 
-// Observability — wraps each request in an OTel SERVER span (parented from the
-// inbound traceparent) and binds the span's trace context into the logger.
-// Pass-through no-op when telemetry is disabled.
-app.use("*", observability());
+// Telemetry — delegates to the telemetry provider's HTTP SERVER-span
+// middleware (installed by an observability module at boot, e.g.
+// `@appstrate/module-observability`). Registered right after `requestId()` so
+// the span — and its bound logger trace context — covers the full handler
+// chain. Pass-through no-op when no provider is installed.
+app.use("*", telemetry());
 
 // Client IP — captures `getConnInfo(c).remote.address` into a per-Request
 // WeakMap so downstream code that only sees the bare `Request` (Better

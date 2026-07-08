@@ -56,7 +56,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest } from "../lib/errors.ts";
 import { assertBearerOnly, assertLoopbackOnly } from "../lib/bearer-only.ts";
-import { recordLlmLatency } from "../observability/index.ts";
+import { recordLlmLatency } from "@appstrate/core/telemetry";
 import {
   proxyLlmCall,
   LlmProxyModelApiMismatchError,

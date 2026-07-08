@@ -14,7 +14,7 @@ import { emitEvent } from "../../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "../inline-run.ts";
 import { synthesiseFinalize } from "../run-event-ingestion.ts";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
-import { runWithSpan } from "../../observability/index.ts";
+import { runWithSpan } from "@appstrate/core/telemetry";
 
 // --- Background run (decoupled from client) ---
 

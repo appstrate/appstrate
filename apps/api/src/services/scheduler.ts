@@ -28,7 +28,7 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
-import { setQueueDepthProvider } from "../observability/index.ts";
+import { setQueueDepthSource } from "@appstrate/core/telemetry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -221,7 +221,7 @@ export async function initScheduleWorker(): Promise<void> {
 
   // Feed the observability queue-depth gauge. Stored unconditionally — the
   // gauge only pulls it when telemetry is enabled, otherwise it's never read.
-  setQueueDepthProvider(() => queue.count());
+  setQueueDepthSource(() => queue.count());
 
   // Sync all enabled schedules from DB to queue
   const rows = await db.select().from(schedules).where(eq(schedules.enabled, true));

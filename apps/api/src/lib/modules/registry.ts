@@ -20,6 +20,7 @@ import { getEnv } from "@appstrate/env";
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
+import { getClientIp } from "../client-ip.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
 import { dispatchInProcess } from "../platform-app.ts";
 
@@ -107,6 +108,9 @@ function buildPlatformServices(): PlatformServices {
       // Same authenticated limiter every core route uses — modules get
       // identical guard semantics (keying, headers, 429 shape).
       rateLimit: (maxPerMinute) => rateLimit(maxPerMinute) as MiddlewareHandler,
+      // Same TRUST_PROXY-honoring resolver every core route uses — modules
+      // that tag telemetry or key rate buckets by IP get identical semantics.
+      clientIp: getClientIp,
     },
     runs: {
       listLlmUsage: listLlmUsageForRun,

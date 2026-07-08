@@ -6,6 +6,11 @@
  * wiring: a global `app.onError` + a wildcard `app.use`), and asserts the
  * emitted SERVER span via the in-memory exporter.
  *
+ * The client-IP resolver is INJECTED (in production the module receives
+ * `ctx.services.http.clientIp` at init) — tests pass a stub, so the
+ * TRUST_PROXY resolution semantics themselves stay covered platform-side
+ * where the resolver lives.
+ *
  * Guards the deep-review regressions:
  *   - Route grouping: the span is named `<METHOD> <template>` and `http.route`
  *     carries the matched template (`/x/:id`), NOT the wildcard `/*` (the bug)
@@ -21,7 +26,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { SpanStatusCode, SpanKind } from "@opentelemetry/api";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { InMemorySpanExporter, type ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import {
   InMemoryMetricExporter,
@@ -30,33 +35,20 @@ import {
 } from "@opentelemetry/sdk-metrics";
 import {
   initObservability,
-  runWithSpan,
   _resetObservabilityForTesting,
   _forceFlushForTesting,
-} from "../../src/observability/otel.ts";
-import { observability } from "../../src/observability/middleware.ts";
-import { runTraceparent } from "../../src/routes/runs.ts";
-import { resetClientIpCache } from "../../src/lib/client-ip.ts";
-import { _resetCacheForTesting } from "@appstrate/env";
-import { parseTraceparent } from "@appstrate/afps-runtime/transport";
-import type { AppEnv } from "../../src/types/index.ts";
+} from "../src/otel.ts";
+import { observability } from "../src/middleware.ts";
 
-const INBOUND_TRACE_ID = "a".repeat(32);
-const INBOUND_TRACEPARENT = `00-${INBOUND_TRACE_ID}-${"b".repeat(16)}-01`;
+/** Stub resolver — the "nothing resolves" sentinel unless a test overrides it. */
+const unknownClientIp = (_c: Context) => "unknown";
 
-/** Minimal Hono context exposing only `get("traceparent")` for the gate test. */
-function fakeContext(traceparent?: string): Context<AppEnv> {
-  return {
-    get: (key: string) => (key === "traceparent" ? traceparent : undefined),
-  } as unknown as Context<AppEnv>;
-}
-
-function buildApp() {
-  const app = new Hono<AppEnv>();
+function buildApp(clientIp: (c: Context) => string = unknownClientIp) {
+  const app = new Hono();
   // Mirror production: global error hook converts thrown route errors into a
   // 500 response, so the wildcard middleware's `await next()` resolves normally.
   app.onError((_err, c) => c.json({ error: "boom" }, 500));
-  app.use("*", observability());
+  app.use("*", observability({ clientIp }));
   app.get("/x/:id", (c) => c.text("ok"));
   app.get("/boom", () => {
     throw new Error("kaboom");
@@ -120,31 +112,22 @@ describe("observability() middleware", () => {
     // client targeted (Hono's test harness builds http://localhost/...).
     expect(span!.attributes["url.scheme"]).toBe("http");
     expect(span!.attributes["server.address"]).toBe("localhost");
-    // No conn info and TRUST_PROXY off → IP unresolvable → the attribute is
-    // OMITTED, never the "unknown" sentinel.
+    // Resolver returned the "unknown" sentinel → the attribute is OMITTED,
+    // never recorded verbatim.
     expect(span!.attributes["client.address"]).toBeUndefined();
     // Success: no error.type.
     expect(span!.attributes["error.type"]).toBeUndefined();
   });
 
-  it("sets client.address from the trusted forwarded header", async () => {
-    process.env.TRUST_PROXY = "1";
-    _resetCacheForTesting();
-    resetClientIpCache();
-    try {
-      const app = buildApp();
-      const res = await app.request("/x/1", { headers: { "x-forwarded-for": "203.0.113.9" } });
-      expect(res.status).toBe(200);
-      await _forceFlushForTesting();
+  it("sets client.address from the injected resolver when it resolves", async () => {
+    const app = buildApp(() => "203.0.113.9");
+    const res = await app.request("/x/1");
+    expect(res.status).toBe(200);
+    await _forceFlushForTesting();
 
-      const span = findSpan(spanExporter, "GET /x/:id");
-      expect(span).toBeDefined();
-      expect(span!.attributes["client.address"]).toBe("203.0.113.9");
-    } finally {
-      delete process.env.TRUST_PROXY;
-      _resetCacheForTesting();
-      resetClientIpCache();
-    }
+    const span = findSpan(spanExporter, "GET /x/:id");
+    expect(span).toBeDefined();
+    expect(span!.attributes["client.address"]).toBe("203.0.113.9");
   });
 
   it("sets ERROR span status + exception-class error.type on a 5xx swallowed by app.onError", async () => {
@@ -191,61 +174,42 @@ describe("observability() middleware", () => {
     // The raw path never leaked into the span name.
     expect(findSpan(spanExporter, "GET /no/such/route")).toBeUndefined();
   });
-});
 
-/**
- * `runTraceparent()` is the run-path counterpart of the SERVER-span trust gate:
- * it decides which traceparent seeds the run-execution trace tree. With
- * `OTEL_TRUST_INCOMING_TRACE` off (default), an unverified inbound header must
- * NOT become the run's trace — the run links to the in-process SERVER span
- * instead (or starts fresh). With the flag on, the inbound header is adopted.
- */
-describe("runTraceparent() trust gate", () => {
-  beforeEach(async () => {
-    await _resetObservabilityForTesting();
-    await initObservability({
-      enabled: true,
-      spanExporter: new InMemorySpanExporter(),
-      metricReader: new PeriodicExportingMetricReader({
-        exporter: new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE),
-        exportIntervalMillis: 100_000,
-      }),
-    });
-  });
-
-  afterEach(async () => {
-    await _resetObservabilityForTesting();
+  it("does not adopt the inbound traceparent when trust is off (default)", async () => {
     delete process.env.OTEL_TRUST_INCOMING_TRACE;
-    _resetCacheForTesting();
-  });
-
-  it("does NOT adopt the inbound trace_id when trust is off", async () => {
-    process.env.OTEL_TRUST_INCOMING_TRACE = "false";
-    _resetCacheForTesting();
-
-    // Mirror the trust-off SERVER span: a fresh root (NOT parented from the
-    // inbound header). Inside it, the run path resolves its traceparent.
-    let resolved: string | undefined;
-    let serverTraceId: string | undefined;
-    await runWithSpan("GET /api/agents/:scope/:name/run", { kind: SpanKind.SERVER }, async () => {
-      serverTraceId = parseTraceparent(
-        // the active SERVER span's own traceparent, via the gate's fallback
-        runTraceparent(fakeContext(undefined)),
-      )?.traceId;
-      resolved = runTraceparent(fakeContext(INBOUND_TRACEPARENT));
+    const app = buildApp();
+    const inboundTraceId = "a".repeat(32);
+    const res = await app.request("/x/1", {
+      headers: { traceparent: `00-${inboundTraceId}-${"b".repeat(16)}-01` },
     });
+    expect(res.status).toBe(200);
+    await _forceFlushForTesting();
 
-    const resolvedTraceId = parseTraceparent(resolved)?.traceId;
-    // The run span links to the in-process SERVER span, never the inbound id.
-    expect(resolvedTraceId).toBeDefined();
-    expect(resolvedTraceId).not.toBe(INBOUND_TRACE_ID);
-    expect(resolvedTraceId).toBe(serverTraceId);
+    const span = findSpan(spanExporter, "GET /x/:id");
+    expect(span).toBeDefined();
+    // Fresh root — the unverified inbound header never becomes the trace.
+    expect(span!.spanContext().traceId).not.toBe(inboundTraceId);
+    expect(span!.parentSpanContext).toBeUndefined();
   });
 
-  it("adopts the inbound traceparent verbatim when trust is on", () => {
+  it("adopts the inbound traceparent when OTEL_TRUST_INCOMING_TRACE=true", async () => {
     process.env.OTEL_TRUST_INCOMING_TRACE = "true";
-    _resetCacheForTesting();
+    try {
+      const app = buildApp();
+      const inboundTraceId = "a".repeat(32);
+      const inboundSpanId = "b".repeat(16);
+      const res = await app.request("/x/1", {
+        headers: { traceparent: `00-${inboundTraceId}-${inboundSpanId}-01` },
+      });
+      expect(res.status).toBe(200);
+      await _forceFlushForTesting();
 
-    expect(runTraceparent(fakeContext(INBOUND_TRACEPARENT))).toBe(INBOUND_TRACEPARENT);
+      const span = findSpan(spanExporter, "GET /x/:id");
+      expect(span).toBeDefined();
+      expect(span!.spanContext().traceId).toBe(inboundTraceId);
+      expect(span!.parentSpanContext?.spanId).toBe(inboundSpanId);
+    } finally {
+      delete process.env.OTEL_TRUST_INCOMING_TRACE;
+    }
   });
 });
