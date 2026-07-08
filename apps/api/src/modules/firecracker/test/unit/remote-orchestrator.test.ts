@@ -83,6 +83,10 @@ function authHeaderOf(call: RecordedCall): string | undefined {
   return (call.init?.headers as Record<string, string> | undefined)?.authorization;
 }
 
+function unixOf(call: RecordedCall): string | undefined {
+  return (call.init as { unix?: string } | undefined)?.unix;
+}
+
 function ndjsonBody(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let i = 0;
@@ -346,6 +350,58 @@ describe("RemoteFirecrackerOrchestrator.streamLogs", () => {
     const end = await generator.next();
     expect(end.done).toBe(true);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("RemoteFirecrackerOrchestrator UDS transport", () => {
+  const SOCKET = "/run/appstrate-runner/runner.sock";
+
+  it("dials the socket via init.unix with a fixed http base (authority ignored over UDS)", async () => {
+    process.env.FIRECRACKER_RUNNER_URL = `unix://${SOCKET}`;
+    _resetRemoteEnvCacheForTesting();
+    const { fn, calls } = fetchStub(() => json({}));
+    const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
+
+    await orchestrator.startWorkload(HANDLE);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(`http://appstrate-runner${RUNNER_ROUTES.startWorkload}`);
+    expect(unixOf(calls[0] as RecordedCall)).toBe(SOCKET);
+    // Bearer auth is unchanged over UDS — the socket mode is
+    // defense-in-depth, not a substitute for the token.
+    expect(authHeaderOf(calls[0] as RecordedCall)).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it("keeps init.unix undefined over a TCP (https) runner URL", async () => {
+    process.env.FIRECRACKER_RUNNER_URL = "https://runner.internal:3100";
+    _resetRemoteEnvCacheForTesting();
+    const { fn, calls } = fetchStub(() => json({}));
+    const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
+
+    await orchestrator.startWorkload(HANDLE);
+
+    expect(calls[0]?.url).toBe(`https://runner.internal:3100${RUNNER_ROUTES.startWorkload}`);
+    expect(unixOf(calls[0] as RecordedCall)).toBeUndefined();
+    expect(calls[0]?.init && "unix" in calls[0].init).toBe(false);
+  });
+
+  it("keeps error messages readable with the unix:// URL when the socket is unreachable", async () => {
+    process.env.FIRECRACKER_RUNNER_URL = `unix://${SOCKET}`;
+    _resetRemoteEnvCacheForTesting();
+    const fn = (async () => {
+      throw new TypeError("Unable to connect");
+    }) as unknown as typeof fetch;
+    const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
+
+    const error = await orchestrator.startWorkload(HANDLE).then(
+      () => undefined,
+      (err: unknown) => err as Error,
+    );
+
+    // The operator-facing message interpolates the env URL — a unix://
+    // path names the socket, which is exactly "which daemon?".
+    expect(error?.message).toContain(`unix://${SOCKET}`);
+    expect(error?.message).toContain("running and reachable");
   });
 });
 

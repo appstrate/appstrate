@@ -60,6 +60,25 @@ export const RUNNER_DATA_DIR = "/var/lib/appstrate-runner";
 export const RUNNER_DEFAULT_PORT = 3100;
 
 /**
+ * Runtime dir for the co-located (same-host) UDS transport. The daemon can
+ * serve its /v1 API over a unix socket instead of TCP: when the platform
+ * container and the daemon share one box, the socket removes the network
+ * listener entirely — no port, no firewall rule, and no plaintext-HTTP
+ * wire for the fail-closed non-loopback guard to refuse. The systemd unit
+ * declares `RuntimeDirectory=appstrate-runner` so systemd creates/cleans
+ * this tmpfs dir (`ProtectSystem=strict` makes /run read-only otherwise).
+ */
+export const RUNNER_RUNTIME_DIR = "/run/appstrate-runner";
+
+/**
+ * Canonical socket path for the UDS transport. The daemon binds it
+ * (FIRECRACKER_RUNNER_SOCKET, mode 0660 by default); the platform container
+ * bind-mounts {@link RUNNER_RUNTIME_DIR} and dials
+ * `FIRECRACKER_RUNNER_URL=unix://<this path>`.
+ */
+export const RUNNER_DEFAULT_SOCKET_PATH = "/run/appstrate-runner/runner.sock";
+
+/**
  * Firecracker VMM version the daemon is validated against. The engine
  * enforces `>= 1.16` at initialize() (older releases are exposed to
  * CVE-2026-5747); pin the exact release the repo's build scripts already

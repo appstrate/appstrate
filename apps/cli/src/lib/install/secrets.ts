@@ -114,7 +114,11 @@ export interface PortOverrides {
  */
 export interface RunBackendEnv {
   adapter: "docker" | "firecracker";
-  /** FIRECRACKER_RUNNER_URL — http://<ip>:3100. Only for the firecracker adapter. */
+  /**
+   * FIRECRACKER_RUNNER_URL — `http://<ip>:3100` (remote KVM host) or
+   * `unix:///run/appstrate-runner/runner.sock` (same-host UDS transport).
+   * Only for the firecracker adapter.
+   */
   runnerUrl?: string;
   /** FIRECRACKER_RUNNER_TOKEN — shared bearer secret. Only for the firecracker adapter. */
   runnerToken?: string;
@@ -295,7 +299,8 @@ export function generateEnvForTier(
   // Firecracker execution backend (Docker tiers only — never reached on
   // tier 0, which returns above). Switches RUN_ADAPTER away from the
   // compose default `docker` and loads the `firecracker` module so the
-  // platform talks to the runner daemon over HTTP.
+  // platform talks to the runner daemon — over TCP (remote KVM host) or
+  // the co-located unix socket (same-host, unix:// runner URL).
   if (runBackend.adapter === "firecracker") {
     env.RUN_ADAPTER = "firecracker";
     env.MODULES = FIRECRACKER_MODULES;

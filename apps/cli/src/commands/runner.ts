@@ -29,6 +29,7 @@ import {
   RUNNER_UNIT_PATH,
   RUNNER_DATA_DIR,
   RUNNER_DEFAULT_PORT,
+  RUNNER_DEFAULT_SOCKET_PATH,
   RUNNER_TOKEN_ENV,
   FIRECRACKER_VERSION,
   resolveRunnerArch,
@@ -57,11 +58,50 @@ import { downloadDaemon, installFirecracker } from "../lib/runner/download.ts";
 import { formatProgress } from "../lib/download.ts";
 import { parseIpv4HttpUrl } from "../lib/install/os.ts";
 
+/** Result shape shared by the TCP (`RunnerHttp.getJson`) and UDS probes. */
+type GetJsonResult =
+  | { reachable: true; status: number; body: unknown }
+  | { reachable: false; error: string };
+
+/**
+ * GET a JSON endpoint over a unix socket. Separate seam from
+ * `RunnerHttp.getJson` (URL-based) because the UDS transport has no URL —
+ * Bun's `fetch(…, { unix })` dials the socket and only uses the http://
+ * authority for the Host header.
+ */
+export type RunnerUnixGetJson = (
+  socketPath: string,
+  path: string,
+  token: string,
+) => Promise<GetJsonResult>;
+
+const defaultUnixGetJson: RunnerUnixGetJson = async (socketPath, path, token) => {
+  try {
+    // `appstrate-runner` is a placeholder authority — with `unix` set, Bun
+    // never resolves it; it only feeds the Host header.
+    const res = await fetch(`http://appstrate-runner${path}`, {
+      unix: socketPath,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    return { reachable: true, status: res.status, body };
+  } catch (err) {
+    return { reachable: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
 /** Shared DI surface for every runner subcommand. */
 export interface RunnerDeps {
   exec?: RunnerExec;
   fs?: RunnerFs;
   http?: RunnerHttp;
+  /** UDS health probe — overridable so tests never dial a real socket. */
+  unixGetJson?: RunnerUnixGetJson;
   /** `process.getuid` — overridable so tests can exercise the root gate. */
   getuid?: () => number;
   /** Preflight override (tests inject a deterministic matrix). */
@@ -72,6 +112,7 @@ interface ResolvedDeps {
   exec: RunnerExec;
   fs: RunnerFs;
   http: RunnerHttp;
+  unixGetJson: RunnerUnixGetJson;
   getuid: () => number;
   preflight: () => Promise<PreflightResult>;
 }
@@ -81,6 +122,7 @@ function resolve(deps: RunnerDeps): ResolvedDeps {
     exec: deps.exec ?? defaultRunnerExec,
     fs: deps.fs ?? defaultRunnerFs,
     http: deps.http ?? defaultRunnerHttp,
+    unixGetJson: deps.unixGetJson ?? defaultUnixGetJson,
     getuid: deps.getuid ?? (() => (typeof process.getuid === "function" ? process.getuid() : 0)),
     preflight: (deps.preflight as () => Promise<PreflightResult>) ?? (() => runPreflight()),
   };
@@ -110,6 +152,12 @@ export interface RunnerInstallOptions {
   port?: string;
   dataDir?: string;
   host?: string;
+  /**
+   * `--socket <abs path>` — serve the daemon API on a unix socket instead
+   * of a TCP port (same-host topology). Mutually exclusive with
+   * `--port`/`--host`.
+   */
+  socket?: string;
   yes?: boolean;
   deps?: RunnerDeps;
 }
@@ -183,6 +231,30 @@ export async function resolveInstallConfig(
 
   const port = parsePort(opts.port);
 
+  // Transport: unix socket (same-host, no network listener) vs TCP (remote).
+  // `--socket` replaces the whole TCP listen surface, so combining it with
+  // the TCP flags is a contradiction — fail loudly instead of guessing.
+  const hasPortFlag = opts.port !== undefined && opts.port !== "";
+  const hasHostFlag = (opts.host?.trim() ?? "") !== "";
+  let socketPath: string | undefined;
+  if (opts.socket !== undefined) {
+    if (hasPortFlag || hasHostFlag) {
+      throw new Error(
+        `--socket is mutually exclusive with --port/--host: the unix socket replaces ` +
+          `the TCP listener entirely. Drop ${hasPortFlag ? "--port" : "--host"} (UDS) ` +
+          `or --socket (TCP).`,
+      );
+    }
+    const trimmed = opts.socket.trim();
+    if (!trimmed.startsWith("/")) {
+      throw new Error(
+        `Invalid --socket "${opts.socket}" — must be an absolute path the daemon binds ` +
+          `its unix socket at, e.g. --socket ${RUNNER_DEFAULT_SOCKET_PATH}.`,
+      );
+    }
+    socketPath = trimmed;
+  }
+
   // Platform URL: flag > prompt (interactive) > error.
   let platformUrl = opts.platformUrl?.trim();
   if (!platformUrl) {
@@ -202,6 +274,41 @@ export async function resolveInstallConfig(
     );
   }
   platformUrl = parsedPlatformUrl.url;
+
+  // Transport prompt (interactive only): no --socket and no TCP flag means
+  // the operator has not chosen yet. Same-host (platform container on this
+  // box) should use the socket — it sidesteps the platform's fail-closed
+  // plaintext-http-to-non-loopback guard by having no network wire at all.
+  // Non-interactive stays TCP, exactly the pre-UDS behavior.
+  if (
+    socketPath === undefined &&
+    !hasPortFlag &&
+    !hasHostFlag &&
+    !opts.yes &&
+    process.stdin.isTTY
+  ) {
+    const chosen = await clack.select<"unix" | "tcp">({
+      message: "How does the platform reach this daemon?",
+      initialValue: "unix",
+      options: [
+        {
+          value: "unix",
+          label: `Unix socket at ${RUNNER_DEFAULT_SOCKET_PATH}`,
+          hint: "Same host — the platform container bind-mounts /run/appstrate-runner; no network port",
+        },
+        {
+          value: "tcp",
+          label: `TCP port ${RUNNER_DEFAULT_PORT}`,
+          hint: "Remote platform — reachable over the network",
+        },
+      ],
+    });
+    if (clack.isCancel(chosen)) {
+      clack.cancel("Cancelled.");
+      process.exit(130);
+    }
+    if (chosen === "unix") socketPath = RUNNER_DEFAULT_SOCKET_PATH;
+  }
 
   // Token: flag > APPSTRATE_RUNNER_TOKEN env > existing env file > freshly
   // generated (printed once). The env-var channel lets the same-host
@@ -239,7 +346,10 @@ export async function resolveInstallConfig(
     existingVars.FIRECRACKER_ARTIFACTS_PUBKEY ||
     undefined;
 
-  return { config: { token, platformUrl, port, host, dataDir, artifactsPubkey }, tokenSource };
+  return {
+    config: { token, platformUrl, port, host, dataDir, artifactsPubkey, socketPath },
+    tokenSource,
+  };
 }
 
 function parsePort(raw: string | undefined): number {
@@ -350,14 +460,19 @@ export async function enableService(d: ResolvedDeps): Promise<void> {
  * exec + http seams only.
  */
 export async function pollHealth(
-  config: { port: number; token: string },
-  d: { exec: RunnerExec; http: RunnerHttp },
+  config: { port: number; token: string; socketPath?: string },
+  d: { exec: RunnerExec; http: RunnerHttp; unixGetJson?: RunnerUnixGetJson },
   timeoutMs: number,
 ): Promise<boolean> {
-  const url = `http://127.0.0.1:${config.port}/v1/health`;
+  // UDS installs have no TCP listener — probe through the socket instead.
+  const { socketPath } = config;
+  const probe = (): Promise<GetJsonResult> =>
+    socketPath
+      ? (d.unixGetJson ?? defaultUnixGetJson)(socketPath, "/v1/health", config.token)
+      : d.http.getJson(`http://127.0.0.1:${config.port}/v1/health`, config.token);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const res = await d.http.getJson(url, config.token);
+    const res = await probe();
     if (res.reachable && res.status === 200) return true;
 
     const parked = await unitParkedState(d.exec);
@@ -415,7 +530,6 @@ function printPreflight(pf: PreflightResult): void {
 }
 
 function printPostInstall(config: RunnerConfig, source: TokenSource, healthy: boolean): void {
-  const fw = detectFirewallCommands(config.port);
   const tokenBlock =
     source === "generated"
       ? `\n\nRunner token (shown once — also in ${RUNNER_ENV_PATH}, mode 0600):\n  ${config.token}\n` +
@@ -424,18 +538,33 @@ function printPostInstall(config: RunnerConfig, source: TokenSource, healthy: bo
         ? `\n\nExisting runner token preserved (see ${RUNNER_ENV_PATH}).`
         : "";
 
+  // UDS transport: no port was opened, so the whole firewall/TLS section is
+  // moot — the platform dials the socket through a bind-mount instead.
+  const transportLines = config.socketPath
+    ? [
+        `  FIRECRACKER_RUNNER_URL=unix://${config.socketPath}`,
+        `  FIRECRACKER_RUNNER_TOKEN=<token above>`,
+        ``,
+        `Unix socket transport — no network port exposed, no firewall rule needed.`,
+        `The platform container must bind-mount ${dirname(config.socketPath)} to dial`,
+        `the socket (the shipped compose templates include it).`,
+      ]
+    : [
+        `  FIRECRACKER_RUNNER_URL=http://<this-host>:${config.port}`,
+        `  FIRECRACKER_RUNNER_TOKEN=<token above>`,
+        ``,
+        `Open the daemon port for the platform:`,
+        ...detectFirewallCommands(config.port).commands.map((c) => `  ${c}`),
+        ``,
+        `Platform on a DIFFERENT host? Put TLS in front of this daemon (reverse proxy)`,
+        `and use https:// in FIRECRACKER_RUNNER_URL — the wire carries run credentials.`,
+      ];
+
   clack.note(
     [
       `Platform config (set on the containerized platform):`,
       `  RUN_ADAPTER=firecracker`,
-      `  FIRECRACKER_RUNNER_URL=http://<this-host>:${config.port}`,
-      `  FIRECRACKER_RUNNER_TOKEN=<token above>`,
-      ``,
-      `Open the daemon port for the platform:`,
-      ...fw.commands.map((c) => `  ${c}`),
-      ``,
-      `Platform on a DIFFERENT host? Put TLS in front of this daemon (reverse proxy)`,
-      `and use https:// in FIRECRACKER_RUNNER_URL — the wire carries run credentials.`,
+      ...transportLines,
       ``,
       `Guest egress uses the host's own TAP/nft path (set up by the daemon) —`,
       `no extra ufw/firewalld rule is needed for guest→platform traffic.`,
@@ -470,6 +599,8 @@ export interface RunnerDoctorReport {
     protocol?: number;
     initialized?: boolean;
     error?: string;
+    /** Probed endpoint — `127.0.0.1:<port>` (TCP) or the unix socket path. */
+    endpoint?: string;
   };
   artifacts: { version?: string; guestProtocol?: number };
   /** Jailer binary presence (FIRECRACKER_JAILER=on needs it at boot). */
@@ -496,14 +627,20 @@ export async function runnerDoctor(opts: RunnerDoctorOptions = {}): Promise<Runn
   const envText = await d.fs.readFile(RUNNER_ENV_PATH);
   const env = envText ? parseRunnerEnvFile(envText) : {};
   const token = env.FIRECRACKER_RUNNER_TOKEN ?? "";
+  // UDS install (FIRECRACKER_RUNNER_SOCKET) has no TCP listener — the health
+  // probe must dial the socket the daemon actually binds.
+  const socketPath = env.FIRECRACKER_RUNNER_SOCKET;
   const port = Number(env.FIRECRACKER_RUNNER_PORT ?? RUNNER_DEFAULT_PORT) || RUNNER_DEFAULT_PORT;
+  const endpoint = socketPath ?? `127.0.0.1:${port}`;
   const dataDir = env.FIRECRACKER_ROOTFS_PATH
     ? env.FIRECRACKER_ROOTFS_PATH.replace(/\/rootfs\.ext4$/, "")
     : RUNNER_DATA_DIR;
 
   let health: RunnerDoctorReport["health"];
   if (token) {
-    const res = await d.http.getJson(`http://127.0.0.1:${port}/v1/health`, token);
+    const res = socketPath
+      ? await d.unixGetJson(socketPath, "/v1/health", token)
+      : await d.http.getJson(`http://127.0.0.1:${port}/v1/health`, token);
     if (res.reachable) {
       const body = (res.body ?? {}) as { protocol?: number; initialized?: boolean };
       health = {
@@ -511,12 +648,13 @@ export async function runnerDoctor(opts: RunnerDoctorOptions = {}): Promise<Runn
         status: res.status,
         protocol: body.protocol,
         initialized: body.initialized,
+        endpoint,
       };
     } else {
-      health = { reachable: false, error: res.error };
+      health = { reachable: false, error: res.error, endpoint };
     }
   } else {
-    health = { reachable: false, error: `no token found in ${RUNNER_ENV_PATH}` };
+    health = { reachable: false, error: `no token found in ${RUNNER_ENV_PATH}`, endpoint };
   }
 
   // Artifact marker (written by runner/artifacts.ts next to the rootfs).
@@ -563,11 +701,14 @@ export async function runnerDoctorCommand(opts: RunnerDoctorOptions = {}): Promi
   const svc = report.service;
   const svcLine = `${svc.active ? "✓" : "✗"} systemd: ${svc.state}${svc.enabled ? " (enabled)" : svc.installed ? " (not enabled)" : " (unit not installed)"}`;
   const health = report.health;
+  // Show WHERE the probe went — the socket path for a UDS install, host:port
+  // for TCP — so a wrong-transport misconfig is visible at a glance.
+  const at = health.endpoint ? ` (${health.endpoint})` : "";
   const healthLine = health.reachable
-    ? `${health.status === 200 ? "✓" : "✗"} daemon /v1/health: HTTP ${health.status}` +
+    ? `${health.status === 200 ? "✓" : "✗"} daemon /v1/health${at}: HTTP ${health.status}` +
       (health.protocol !== undefined ? `, protocol ${health.protocol}` : "") +
       (health.initialized ? ", initialized" : "")
-    : `✗ daemon /v1/health: unreachable${health.error ? ` (${health.error})` : ""}`;
+    : `✗ daemon /v1/health${at}: unreachable${health.error ? ` (${health.error})` : ""}`;
   const artLine = report.artifacts.version
     ? `✓ guest artifacts: ${report.artifacts.version} (protocol ${report.artifacts.guestProtocol ?? "?"})`
     : "• guest artifacts: not yet installed (daemon downloads them on first boot)";

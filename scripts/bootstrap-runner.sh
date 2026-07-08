@@ -13,6 +13,13 @@
 #   curl -fsSL https://get.appstrate.dev/runner | bash -s -- \
 #     --platform-url http://<PLATFORM_IPV4>:3000 --token <TOKEN>
 #
+#   Co-located install (platform container on the same host) — bind a Unix
+#   domain socket instead of a TCP port (platform then uses
+#   FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock):
+#   curl -fsSL https://get.appstrate.dev/runner | bash -s -- \
+#     --platform-url http://<PLATFORM_IPV4>:3000 --token <TOKEN> \
+#     --socket /run/appstrate-runner/runner.sock
+#
 # Env overrides (mirror scripts/bootstrap.sh):
 #   APPSTRATE_VERSION        Pin a release tag (default: pinned or "latest").
 #   APPSTRATE_BIN_DIR        CLI install location (default: /usr/local/bin —

@@ -14,6 +14,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import {
   assertRunnerTransportSecurity,
   getRemoteEnv,
+  parseRunnerTransport,
   _resetRemoteEnvCacheForTesting,
 } from "../../remote-env.ts";
 
@@ -30,6 +31,43 @@ afterEach(() => {
     else process.env[k] = saved[k];
   }
   _resetRemoteEnvCacheForTesting();
+});
+
+describe("parseRunnerTransport", () => {
+  it("classifies unix:///abs/path.sock as a unix transport with the verbatim path", () => {
+    expect(parseRunnerTransport("unix:///run/appstrate-runner/runner.sock")).toEqual({
+      kind: "unix",
+      socketPath: "/run/appstrate-runner/runner.sock",
+    });
+  });
+
+  it("classifies http(s) as tcp, stripping trailing slashes (http only concern)", () => {
+    expect(parseRunnerTransport("http://127.0.0.1:3100/")).toEqual({
+      kind: "tcp",
+      url: "http://127.0.0.1:3100",
+    });
+    expect(parseRunnerTransport("https://runner.internal:3100")).toEqual({
+      kind: "tcp",
+      url: "https://runner.internal:3100",
+    });
+  });
+
+  it("rejects the two-slash typo (host component) with the three-slash hint", () => {
+    // unix://var/run/x.sock parses "var" as a hostname — dialing
+    // /run/x.sock instead of /var/run/x.sock would be a silent misroute.
+    expect(() => parseRunnerTransport("unix://var/run/x.sock")).toThrow(/THREE slashes/);
+    expect(() => parseRunnerTransport("unix://var/run/x.sock")).toThrow(
+      /unix:\/\/\/var\/run\/x\.sock/,
+    );
+  });
+
+  it("rejects a unix:// URL without a socket path", () => {
+    expect(() => parseRunnerTransport("unix://")).toThrow(/absolute socket path/);
+  });
+
+  it("rejects unsupported protocols with the accepted alternatives", () => {
+    expect(() => parseRunnerTransport("ftp://runner:3100")).toThrow(/http\(s\)/);
+  });
 });
 
 describe("assertRunnerTransportSecurity", () => {
@@ -64,6 +102,16 @@ describe("assertRunnerTransportSecurity", () => {
     expect(() => assertRunnerTransportSecurity("http://10.0.0.5:3100", true)).toThrow(
       /FIRECRACKER_RUNNER_TLS_REQUIRED/,
     );
+  });
+
+  it("passes a unix:// URL silently even with tlsRequired — no network path exists", () => {
+    const warnings: string[] = [];
+    expect(() =>
+      assertRunnerTransportSecurity("unix:///run/appstrate-runner/runner.sock", true, (m) =>
+        warnings.push(m),
+      ),
+    ).not.toThrow();
+    expect(warnings).toEqual([]);
   });
 });
 
@@ -105,5 +153,33 @@ describe("getRemoteEnv transport gate (end-to-end)", () => {
     const env = getRemoteEnv();
     expect(env.FIRECRACKER_RUNNER_URL).toBe("https://runner.internal:3100");
     expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBe(true);
+  });
+
+  it("derives a tcp transport for an http(s) URL", () => {
+    setEnv("https://runner.internal:3100");
+    expect(getRemoteEnv().transport).toEqual({ kind: "tcp", url: "https://runner.internal:3100" });
+  });
+
+  it("accepts unix:/// with tlsRequired defaulted on — the gate never applies to a UDS", () => {
+    // The exact self-host topology the transport exists for: no escape
+    // hatch, no warning, straight through the fail-closed default.
+    setEnv("unix:///run/appstrate-runner/runner.sock");
+    const env = getRemoteEnv();
+    expect(env.FIRECRACKER_RUNNER_URL).toBe("unix:///run/appstrate-runner/runner.sock");
+    expect(env.FIRECRACKER_RUNNER_TLS_REQUIRED).toBe(true);
+    expect(env.transport).toEqual({
+      kind: "unix",
+      socketPath: "/run/appstrate-runner/runner.sock",
+    });
+  });
+
+  it("rejects the two-slash unix typo at parse time with the three-slash hint", () => {
+    setEnv("unix://var/run/x.sock");
+    expect(() => getRemoteEnv()).toThrow(/THREE slashes/);
+  });
+
+  it("rejects a unix:// URL with an empty socket path", () => {
+    setEnv("unix://");
+    expect(() => getRemoteEnv()).toThrow(/absolute socket path/);
   });
 });

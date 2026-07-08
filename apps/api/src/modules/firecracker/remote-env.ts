@@ -14,15 +14,72 @@
  */
 
 import { z } from "zod";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./runner/logger.ts";
 
+/**
+ * How the platform reaches the daemon: over TCP (http/https base URL) or
+ * over a Unix domain socket (co-located daemon — the wire never touches
+ * the network, so the SEC-2 plaintext gate does not apply).
+ */
+export type RunnerTransport = { kind: "unix"; socketPath: string } | { kind: "tcp"; url: string };
+
+/**
+ * Classify a runner URL into its transport. Pure — throws an actionable
+ * Error on malformed input (the schema surfaces it as the Zod issue).
+ * `unix:///abs/path.sock` → unix; `http(s)://…` → tcp with trailing
+ * slashes stripped (route concatenation must never produce `//v1/...`,
+ * which some proxies refuse to route). A unix socket path stays VERBATIM
+ * — stripping would change which filesystem node we dial.
+ */
+export function parseRunnerTransport(rawUrl: string): RunnerTransport {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error(`not a valid URL: ${rawUrl}`);
+  }
+  if (parsed.protocol === "unix:") {
+    // `unix://var/run/x.sock` parses "var" as a HOSTNAME and silently
+    // drops the first path segment — the classic two-slash typo. Refuse
+    // loudly instead of dialing the wrong socket.
+    if (parsed.hostname !== "") {
+      throw new Error(
+        `unix:// runner URL has a host component ("${parsed.hostname}") — a socket path ` +
+          `needs THREE slashes: unix:///${parsed.hostname}${parsed.pathname} (you wrote ${rawUrl})`,
+      );
+    }
+    if (!parsed.pathname || !parsed.pathname.startsWith("/")) {
+      throw new Error(
+        `unix:// runner URL must carry an absolute socket path, e.g. ` +
+          `unix:///run/appstrate-runner/runner.sock (you wrote ${rawUrl})`,
+      );
+    }
+    return { kind: "unix", socketPath: parsed.pathname };
+  }
+  if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+    return { kind: "tcp", url: rawUrl.replace(/\/+$/, "") };
+  }
+  throw new Error(
+    `unsupported protocol ${parsed.protocol}// — use http(s):// (TCP daemon) or ` +
+      `unix:///path.sock (co-located daemon over a Unix socket)`,
+  );
+}
+
 const remoteEnvSchema = z.object({
-  // Base URL of the appstrate-runner daemon. http(s) only. Trailing
-  // slashes are stripped so route concatenation can never produce
-  // `//v1/...` (which some proxies refuse to route).
-  FIRECRACKER_RUNNER_URL: z
-    .url({ protocol: /^https?$/ })
-    .transform((url) => url.replace(/\/+$/, "")),
+  // Base URL of the appstrate-runner daemon: http(s) (TCP) or
+  // unix:///abs/path.sock (co-located daemon over a Unix domain socket).
+  // Normalization lives in parseRunnerTransport (trailing-slash strip for
+  // http(s) only; a unix path stays verbatim).
+  FIRECRACKER_RUNNER_URL: z.string().transform((raw, ctx) => {
+    try {
+      const transport = parseRunnerTransport(raw);
+      return transport.kind === "tcp" ? transport.url : raw;
+    } catch (err) {
+      ctx.addIssue({ code: "custom", message: getErrorMessage(err) });
+      return z.NEVER;
+    }
+  }),
   // Shared bearer secret between platform and daemon. The daemon fronts
   // run credentials (sidecar launch specs carry the run token), so a
   // trivially guessable token is refused outright.
@@ -45,7 +102,10 @@ const remoteEnvSchema = z.object({
     }),
 });
 
-export type RemoteRunnerEnv = z.infer<typeof remoteEnvSchema>;
+export type RemoteRunnerEnv = z.infer<typeof remoteEnvSchema> & {
+  /** Derived from FIRECRACKER_RUNNER_URL — computed once at parse time. */
+  transport: RunnerTransport;
+};
 
 /** Loopback hosts exempt from the plaintext-transport gate. */
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
@@ -53,9 +113,13 @@ const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 /**
  * Enforce the plaintext-transport policy on the runner URL. Pure —
  * exported for unit tests; getRemoteEnv() applies it with the module
- * logger. `https://` and loopback `http://` always pass; non-loopback
- * `http://` is REFUSED by default (`tlsRequired`) and only downgraded to a
- * loud warning when the escape (`FIRECRACKER_RUNNER_TLS_REQUIRED=0`) is set.
+ * logger. `unix://` always passes silently (the RECOMMENDED co-located
+ * transport — the wire never crosses the network, so there is nothing to
+ * capture on-path). `https://` and loopback `http://` always pass;
+ * non-loopback `http://` is REFUSED by default (`tlsRequired`) and only
+ * downgraded to a loud warning when the escape
+ * (`FIRECRACKER_RUNNER_TLS_REQUIRED=0`) is set — RFC1918 is never
+ * auto-trusted, the refusal stays fail-closed.
  */
 export function assertRunnerTransportSecurity(
   runnerUrl: string,
@@ -63,6 +127,9 @@ export function assertRunnerTransportSecurity(
   warn: (message: string) => void = (message) => logger.warn(message),
 ): void {
   const parsed = new URL(runnerUrl);
+  // UDS first, before any TCP reasoning: no network path exists, so no
+  // TLS requirement and no warning — regardless of tlsRequired.
+  if (parsed.protocol === "unix:") return;
   if (parsed.protocol !== "http:") return;
   if (LOOPBACK_HOSTNAMES.has(parsed.hostname)) return;
   const message =
@@ -100,7 +167,9 @@ export function getRemoteEnv(): RemoteRunnerEnv {
       parsed.FIRECRACKER_RUNNER_URL,
       parsed.FIRECRACKER_RUNNER_TLS_REQUIRED,
     );
-    cached = parsed;
+    // Derive the transport once — the orchestrator branches on it per
+    // call, so re-parsing the URL on every request would be pure waste.
+    cached = { ...parsed, transport: parseRunnerTransport(parsed.FIRECRACKER_RUNNER_URL) };
   }
   return cached;
 }

@@ -328,18 +328,18 @@ It never touches `.env` or runs Docker; restart the stack afterwards
 
 See `.env.example` for all available environment variables. Key settings:
 
-| Variable                                  | Description                                                             |
-| ----------------------------------------- | ----------------------------------------------------------------------- |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD`     | Database credentials                                                    |
-| `BETTER_AUTH_SECRET`                      | Session signing secret (32 bytes hex)                                   |
-| `CONNECTION_ENCRYPTION_KEY`               | Credential encryption key (32 bytes base64)                             |
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO admin credentials                                                 |
-| `APP_URL`                                 | Public URL (for OAuth callbacks, email links)                           |
-| `TRUSTED_ORIGINS`                         | CORS origins (comma-separated)                                          |
-| `SYSTEM_PROVIDER_KEYS`                    | Pre-configured LLM provider credentials (JSON array)                    |
-| `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`                     |
-| `RUN_ADAPTER`                             | Agent execution backend: `docker` (default) or `firecracker` (microVMs) |
-| `FIRECRACKER_RUNNER_URL` / `_TOKEN`       | Firecracker only: appstrate-runner daemon URL + shared bearer token     |
+| Variable                                  | Description                                                                                                                                    |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD`     | Database credentials                                                                                                                           |
+| `BETTER_AUTH_SECRET`                      | Session signing secret (32 bytes hex)                                                                                                          |
+| `CONNECTION_ENCRYPTION_KEY`               | Credential encryption key (32 bytes base64)                                                                                                    |
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO admin credentials                                                                                                                        |
+| `APP_URL`                                 | Public URL (for OAuth callbacks, email links)                                                                                                  |
+| `TRUSTED_ORIGINS`                         | CORS origins (comma-separated)                                                                                                                 |
+| `SYSTEM_PROVIDER_KEYS`                    | Pre-configured LLM provider credentials (JSON array)                                                                                           |
+| `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`                                                                                            |
+| `RUN_ADAPTER`                             | Agent execution backend: `docker` (default) or `firecracker` (microVMs)                                                                        |
+| `FIRECRACKER_RUNNER_URL` / `_TOKEN`       | Firecracker only: appstrate-runner daemon URL (`unix:///run/appstrate-runner/runner.sock` co-located, `https://` remote) + shared bearer token |
 
 ### Firecracker execution backend (optional)
 
@@ -347,7 +347,13 @@ To run agents in microVMs instead of Docker containers, pass
 `--run-adapter firecracker` to `appstrate install`. It writes the
 `RUN_ADAPTER` / `MODULES` / `FIRECRACKER_RUNNER_*` keys above and either drives
 the runner-daemon install on this host (`--host-ip <ipv4>`) or prints the
-one-liner to run on a remote KVM host (`--runner-url` + `--runner-token`). See
+one-liner to run on a remote KVM host (`--runner-url` + `--runner-token`). On
+the same-host topology the daemon binds a Unix domain socket and the installer
+sets `FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock` — the
+compose templates bind-mount `/run/appstrate-runner` into the platform
+container so the socket is reachable from inside it. A remote daemon stays on
+TCP: use `https://` behind a TLS reverse proxy (plaintext `http://` to a
+non-loopback host is refused at boot). See
 [`../../docs/architecture/FIRECRACKER.md`](../../docs/architecture/FIRECRACKER.md)
 → "Installer integration".
 

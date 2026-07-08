@@ -781,6 +781,10 @@ runnerGroup
     "State root for kernel/rootfs/runs/firecracker (default: /var/lib/appstrate-runner)",
   )
   .option("--host <addr>", "Daemon bind address (default: 0.0.0.0)")
+  .option(
+    "--socket <path>",
+    "Serve the daemon API on a unix socket at this absolute path instead of a TCP port (same-host topology — the platform dials unix://<path>). Mutually exclusive with --port/--host.",
+  )
   .option("-y, --yes", "Skip prompts (requires --platform-url).")
   .action(async (opts) => {
     await runnerInstallCommand({
@@ -789,6 +793,7 @@ runnerGroup
       port: typeof opts.port === "string" ? opts.port : undefined,
       dataDir: typeof opts.dataDir === "string" ? opts.dataDir : undefined,
       host: typeof opts.host === "string" ? opts.host : undefined,
+      socket: typeof opts.socket === "string" ? opts.socket : undefined,
       yes: opts.yes === true,
     });
   });

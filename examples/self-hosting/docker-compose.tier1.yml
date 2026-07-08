@@ -175,6 +175,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - storagedata:/data/storage
+      # Co-located Firecracker runner socket dir (UDS transport). The dir
+      # is bind-mounted so FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock
+      # works from inside the container. Harmless when Firecracker is not
+      # used — the directory is simply empty.
+      - /run/appstrate-runner:/run/appstrate-runner
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
       interval: 30s

@@ -56,7 +56,12 @@ import {
   runCommand,
 } from "../lib/install/os.ts";
 import { generateRunnerToken } from "../lib/runner/config-files.ts";
-import { RUNNER_DEFAULT_PORT, RUNNER_TOKEN_ENV } from "../lib/runner/constants.ts";
+import {
+  RUNNER_DEFAULT_PORT,
+  RUNNER_DEFAULT_SOCKET_PATH,
+  RUNNER_RUNTIME_DIR,
+  RUNNER_TOKEN_ENV,
+} from "../lib/runner/constants.ts";
 import {
   detectInstallMode,
   inferInstalledTier,
@@ -987,7 +992,14 @@ export type RunBackendConfig =
   | { adapter: "docker" }
   | {
       adapter: "firecracker";
-      /** FIRECRACKER_RUNNER_URL written to the platform `.env` (http://<runner-ip>:3100). */
+      /**
+       * FIRECRACKER_RUNNER_URL written to the platform `.env`. Remote:
+       * `http://<runner-ip>:3100` (TCP). Same-host: `unix://<socket path>` —
+       * the platform container dials the daemon's unix socket through a
+       * bind-mount of /run/appstrate-runner (shipped compose templates
+       * include it), so no port, no plaintext network wire, and the
+       * fail-closed non-loopback-http guard never applies.
+       */
       runnerUrl: string;
       /** Shared bearer token between platform and daemon. */
       token: string;
@@ -995,7 +1007,12 @@ export type RunBackendConfig =
       tokenSource: "flag" | "generated";
       /** Daemon lives on this host, or a separate KVM host. */
       topology: "same-host" | "remote";
-      /** This host's LAN IPv4 — the address the daemon/guests reach the platform on. */
+      /**
+       * This host's LAN IPv4 — the address the GUESTS reach the platform on.
+       * Still required for same-host UDS installs: the socket only carries
+       * platform↔daemon traffic; guest→platform egress rides the LAN via
+       * `platformUrl`.
+       */
       hostIp: string;
       /** Full platform URL for `runner install --platform-url` (http://<hostIp>:<appPort>). */
       platformUrl: string;
@@ -1200,7 +1217,12 @@ export async function resolveRunBackend(
     const token = resolveRunnerToken(inputs.runnerToken, mintToken);
     return {
       adapter: "firecracker",
-      runnerUrl: `http://${ip}:${RUNNER_DEFAULT_PORT}`,
+      // Same-host = UDS transport: the daemon binds the canonical socket
+      // (`runner install --socket`, appended in buildRunnerInstallArgs) and
+      // the platform dials it — no TCP port, so beta.38's fail-closed
+      // "plaintext http to a non-loopback host" guard never trips. The LAN
+      // IP is still collected: it feeds platformUrl (guest→platform).
+      runnerUrl: `unix://${RUNNER_DEFAULT_SOCKET_PATH}`,
       token: token.value,
       tokenSource: token.source,
       topology: "same-host",
@@ -1292,9 +1314,11 @@ export function resolveCliInvocation(
 
 /**
  * Build the argv (excluding the leading `sudo`) for the same-host runner
- * install: `<cli> runner install --platform-url <url> --token <token> --yes`.
- * The token is a secret but must appear here — it is how the daemon pairs
- * with the platform.
+ * install: `<cli> runner install --platform-url <url> --token <token>
+ * --socket <canonical sock> --yes`. The token is a secret but must appear
+ * here — it is how the daemon pairs with the platform. `--socket` puts the
+ * daemon in UDS mode (same-host transport); the platform side was already
+ * written as `FIRECRACKER_RUNNER_URL=unix://…` by `resolveRunBackend`.
  */
 export function buildRunnerInstallArgs(
   cliInvocation: string[],
@@ -1309,6 +1333,8 @@ export function buildRunnerInstallArgs(
     platformUrl,
     "--token",
     token,
+    "--socket",
+    RUNNER_DEFAULT_SOCKET_PATH,
     "--yes",
   ];
 }
@@ -1328,6 +1354,13 @@ export function firecrackerFollowupNote(
       "Run this on your KVM host to install + pair the runner daemon:",
       "",
       `  curl -fsSL https://get.appstrate.dev/runner | bash -s -- --platform-url ${rb.platformUrl} --token ${rb.token}`,
+      "",
+    );
+  } else {
+    lines.push(
+      `The platform reaches the daemon over a unix socket (${rb.runnerUrl}) —`,
+      `no network port, no TLS to configure. The platform container bind-mounts`,
+      `${RUNNER_RUNTIME_DIR} for it (the shipped compose templates include the mount).`,
       "",
     );
   }
@@ -1395,6 +1428,10 @@ export async function runSameHostRunnerInstall(
     "install",
     "--platform-url",
     rb.platformUrl,
+    // Same-host = UDS mode: the daemon binds the canonical socket instead of
+    // a TCP port, matching the unix:// runner URL already in the platform .env.
+    "--socket",
+    RUNNER_DEFAULT_SOCKET_PATH,
     "--yes",
   ];
   const prevToken = process.env[RUNNER_TOKEN_ENV];

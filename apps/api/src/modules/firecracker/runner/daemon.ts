@@ -26,10 +26,12 @@
  * health with the guest→platform reachability facts.
  */
 
+import { chmod, mkdir, unlink } from "node:fs/promises";
+import { dirname } from "node:path";
 import { FirecrackerOrchestrator } from "../orchestrator.ts";
 import { createHostExec } from "../host-net.ts";
 import { getFirecrackerEnv } from "./host-env.ts";
-import { getRunnerEnv } from "./env.ts";
+import { getRunnerEnv, resolveListenConfig } from "./env.ts";
 import { createRunnerApp } from "./server.ts";
 import { ensureGuestArtifacts } from "./artifacts.ts";
 import { warmHostPageCache } from "./readahead.ts";
@@ -144,27 +146,80 @@ const app = createRunnerApp({
   health,
 });
 
-const server = Bun.serve({
-  hostname: runnerEnv.FIRECRACKER_RUNNER_HOST,
-  port: runnerEnv.FIRECRACKER_RUNNER_PORT,
-  fetch: app.fetch,
-  // 0 disables Bun's idle timeout entirely: the exit route long-polls
-  // 45s and the log route streams NDJSON for the whole run — either
-  // would be severed by the 10s default.
-  idleTimeout: 0,
-});
+// Listen transport (issue #868): a Unix socket when
+// FIRECRACKER_RUNNER_SOCKET is set (co-located platform container
+// bind-mounts the socket dir — the wire never touches the network),
+// TCP host:port otherwise.
+const listen = resolveListenConfig(runnerEnv);
+if (listen.kind === "unix") {
+  // Host/port always have schema defaults, so only RAW process.env
+  // reveals whether the operator set them explicitly — worth a heads-up
+  // that the socket takes precedence, silence would look like a hang on
+  // the port they expected.
+  if (
+    process.env.FIRECRACKER_RUNNER_HOST !== undefined ||
+    process.env.FIRECRACKER_RUNNER_PORT !== undefined
+  ) {
+    logger.info(
+      "FIRECRACKER_RUNNER_SOCKET is set — ignoring FIRECRACKER_RUNNER_HOST/FIRECRACKER_RUNNER_PORT",
+      { socket: listen.socketPath },
+    );
+  }
+  // The socket's directory may not exist on a fresh host (/run subdirs
+  // are tmpfs, gone after reboot); a stale socket FILE from a crashed
+  // daemon must be unlinked too — Bun.serve refuses to bind over one.
+  await mkdir(dirname(listen.socketPath), { recursive: true });
+  await unlink(listen.socketPath).catch(() => {});
+}
 
-logger.info("appstrate-runner listening", {
-  host: runnerEnv.FIRECRACKER_RUNNER_HOST,
-  port: runnerEnv.FIRECRACKER_RUNNER_PORT,
-  platformUrl: runnerEnv.FIRECRACKER_RUNNER_PLATFORM_URL,
-});
+// idleTimeout: 0 disables Bun's idle timeout entirely on BOTH branches:
+// the exit route long-polls 45s and the log route streams NDJSON for the
+// whole run — either would be severed by the 10s default. (@types/bun
+// only declares idleTimeout on the TCP options branch, but the runtime
+// honors it per-connection regardless of transport — hence the cast.)
+const server =
+  listen.kind === "unix"
+    ? Bun.serve({
+        unix: listen.socketPath,
+        fetch: app.fetch,
+        idleTimeout: 0,
+      } as unknown as Parameters<typeof Bun.serve>[0])
+    : Bun.serve({
+        hostname: listen.host,
+        port: listen.port,
+        fetch: app.fetch,
+        idleTimeout: 0,
+      });
+
+if (listen.kind === "unix") {
+  // chmod AFTER bind (the node only exists then). Default 0660 —
+  // root-owned; the platform container typically runs uid 0, so
+  // root:root 0660 works on plain Docker. Bearer-token auth in
+  // server.ts stays enforced regardless — this is defense-in-depth.
+  await chmod(listen.socketPath, listen.mode);
+  logger.info("appstrate-runner listening (unix socket)", {
+    socket: listen.socketPath,
+    platformUrl: runnerEnv.FIRECRACKER_RUNNER_PLATFORM_URL,
+  });
+} else {
+  logger.info("appstrate-runner listening", {
+    host: listen.host,
+    port: listen.port,
+    platformUrl: runnerEnv.FIRECRACKER_RUNNER_PLATFORM_URL,
+  });
+}
 
 async function shutdown(signal: string): Promise<void> {
   logger.info("appstrate-runner shutting down", { signal });
   // Stop accepting new requests first, then tear down VMs — the reverse
   // order would let the platform start a run into a dying daemon.
   server.stop();
+  // Best-effort socket cleanup — a leftover node would force the NEXT
+  // boot through the stale-socket unlink path anyway, but tidying here
+  // keeps `ls` honest. Never throws (shutdown must reach exit(0)).
+  if (listen.kind === "unix") {
+    await unlink(listen.socketPath).catch(() => {});
+  }
   try {
     await orchestrator.shutdown();
   } catch (err) {

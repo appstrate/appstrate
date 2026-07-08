@@ -28,7 +28,10 @@ Zero footprint when absent: no env vars read, no backend registered.
 # Platform (container)
 MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker
 RUN_ADAPTER=firecracker
-FIRECRACKER_RUNNER_URL=http://<runner-host>:3100
+# Co-located daemon (same host) — Unix domain socket, recommended:
+FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock
+# Remote KVM host — TLS behind a reverse proxy:
+# FIRECRACKER_RUNNER_URL=https://<runner-host>:3100
 FIRECRACKER_RUNNER_TOKEN=<shared secret, >=16 chars>
 ```
 
@@ -36,10 +39,10 @@ Setting `RUN_ADAPTER=firecracker` without the module is a fatal boot error
 listing the registered backends; a stale `RUN_ADAPTER=firecracker-remote`
 (the id before the in-process backend was removed) gets a targeted "renamed to
 `firecracker`" error. Platform-side only `FIRECRACKER_RUNNER_URL`/`_TOKEN` are
-read (validated lazily, on the first `initialize()`), plus the opt-in
-`FIRECRACKER_RUNNER_TLS_REQUIRED=1` — also platform-side, NOT a daemon
-variable — which turns the plaintext-`http://`-to-non-loopback-host boot
-warning into a hard refusal (see _Transport & auth_). The host-side
+read (validated lazily, on the first `initialize()`), plus the escape hatch
+`FIRECRACKER_RUNNER_TLS_REQUIRED=0` — also platform-side, NOT a daemon
+variable — which downgrades the plaintext-`http://`-to-non-loopback-host hard
+boot refusal to a warning (last resort, see _Transport & auth_). The host-side
 `FIRECRACKER_*` variables (kernel/rootfs, subnet CIDR, …) are **daemon-only** —
 never parsed platform-side. None of these are part of the `@appstrate/env`
 schema.
@@ -60,13 +63,42 @@ ip:port ahead of the egress-deny CIDRs. Capabilities: `isolatesWorkloads: true`
 process), `supportsSidecarOnly: false`.
 
 **Transport & auth.** The wire carries the bearer token and per-run
-credential bundles (`POST /v1/sidecars`). Same machine or a genuinely
-private network is acceptable; for any **split-host** deployment TLS (a
-reverse proxy in front of the daemon) is REQUIRED, not advised. The
-platform enforces the posture at boot: a plaintext `http://`
-`FIRECRACKER_RUNNER_URL` pointing at a non-loopback host logs a loud
-warning, and setting `FIRECRACKER_RUNNER_TLS_REQUIRED=1` (platform-side)
-turns it into a hard boot refusal. Auth is a single shared
+credential bundles (`POST /v1/sidecars`), so the transport choice is a
+security decision. Decision matrix:
+
+- **Co-located (daemon and platform on the same host) — Unix domain
+  socket, RECOMMENDED.**
+  `FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock`
+  (three slashes — absolute socket path). The wire never touches the
+  network: no TLS needed, no boot guard involved. The daemon binds the
+  socket instead of a TCP port when `FIRECRACKER_RUNNER_SOCKET` is set
+  (`appstrate runner install --socket …`; the systemd unit uses
+  `RuntimeDirectory=appstrate-runner` for the canonical
+  `/run/appstrate-runner/runner.sock` path). A containerized platform
+  reaches it through a bind-mount of the socket directory
+  (`/run/appstrate-runner:/run/appstrate-runner` in the
+  `examples/self-hosting` compose templates). Socket permissions default
+  to `0660 root:root` — sufficient for the stock platform image, whose
+  container process runs as root; a rootless / userns-remapped platform
+  container needs `FIRECRACKER_RUNNER_SOCKET_MODE=0666` on the daemon
+  (the bearer token is still enforced on every request, so the wider
+  mode grants transport reachability, not auth). This replaces the old
+  co-located workaround of pointing the containerized platform at the
+  host LAN IP over plaintext `http://`, which the boot guard refuses.
+- **Split host (separate KVM box) — `https://` behind a TLS reverse
+  proxy in front of the daemon, REQUIRED.** The platform enforces this
+  fail-closed at boot: a plaintext `http://` `FIRECRACKER_RUNNER_URL`
+  pointing at a non-loopback host is REFUSED. RFC1918/private addresses
+  are never auto-trusted — "it's my LAN" is not a trust boundary
+  (zero-trust posture, NIST 800-207 aligned). The last-resort escape
+  hatch `FIRECRACKER_RUNNER_TLS_REQUIRED=0` (platform-side) downgrades
+  the refusal to a warning; reserve it for a link that is already
+  encrypted and authenticated at a lower layer (VPN / WireGuard), never
+  as a plain-LAN convenience.
+- **Loopback `http://`** (`127.0.0.1` / `localhost`) is allowed as
+  before — the wire never leaves the host.
+
+Auth is a single shared
 token compared in constant time; run **one platform per daemon** (the orphan
 sweep is daemon-wide). The protocol is JSON over HTTP (`runner/protocol.ts`,
 versioned — the client refuses a daemon speaking another major version); logs
@@ -85,6 +117,13 @@ curl -fsSL https://get.appstrate.dev/runner | sudo bash -s -- \
 # Or, if the CLI is already installed:
 sudo appstrate runner install --platform-url http://<PLATFORM_IPV4>:3000
 ```
+
+For a co-located install (platform container on the same host) add
+`--socket /run/appstrate-runner/runner.sock`: the daemon then binds a Unix
+domain socket instead of a TCP port (the generated systemd unit uses
+`RuntimeDirectory=appstrate-runner`) and the platform is pointed at
+`unix:///run/appstrate-runner/runner.sock` — see _Transport & auth_. The
+platform installer's same-host topology does both automatically.
 
 `appstrate runner install` (`apps/cli/src/commands/runner.ts`):
 
@@ -142,7 +181,8 @@ across upgrades by `mergeEnv` like every other secret):
 ```sh
 RUN_ADAPTER=firecracker
 MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker
-FIRECRACKER_RUNNER_URL=http://<runner-ip>:3100
+# Same host: unix:///run/appstrate-runner/runner.sock — remote: http(s)://<runner-ip>:3100
+FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock
 FIRECRACKER_RUNNER_TOKEN=<minted or --runner-token>
 ```
 
@@ -154,16 +194,23 @@ FIRECRACKER_RUNNER_TOKEN=<minted or --runner-token>
 The main install itself stays **rootless** — it never sudo's. Two topologies:
 
 - **Same host** — the runner daemon runs on the install host. The installer
-  detects the host LAN IPv4 (confirm/override interactively, or `--host-ip`),
-  mints a runner token, brings up the platform, and _then_ runs
-  `sudo appstrate runner install --platform-url http://<host-ip>:<port> --token <token> --yes`
+  detects the host LAN IPv4 (confirm/override interactively, or `--host-ip` —
+  guests still reach the platform over the network, so
+  `FIRECRACKER_RUNNER_PLATFORM_URL` needs it), mints a runner token, writes
+  `FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock` into the
+  platform `.env` (UDS transport — the compose templates bind-mount
+  `/run/appstrate-runner` into the platform container), brings up the
+  platform, and _then_ runs
+  `sudo appstrate runner install --socket /run/appstrate-runner/runner.sock --platform-url http://<host-ip>:<port> --token <token> --yes`
   as a subprocess (sudo prompts on the same TTY). If that step fails — or the
   install is non-interactive (`--host-ip` + `--yes`, which can't sudo-prompt) —
   it prints the exact command to run by hand. A runner-install hiccup is a
   warning, never a rollback: the platform is already healthy.
 - **Remote KVM host** — the runner daemon runs elsewhere. Provide
-  `--runner-url http://<kvm-ip>:3100 --runner-token <token>` (or answer the
-  prompts). The installer writes the platform `.env`, then prints the one-liner
+  `--runner-url https://<kvm-host>:3100 --runner-token <token>` (or answer the
+  prompts) — `https://` behind a TLS reverse proxy; a plaintext `http://` URL
+  to a non-loopback host is refused at platform boot (see _Transport &
+  auth_). The installer writes the platform `.env`, then prints the one-liner
   to run on the KVM host:
   `curl -fsSL https://get.appstrate.dev/runner | bash -s -- --platform-url http://<this-host-ip>:<port> --token <token>`.
 
@@ -590,8 +637,10 @@ boots on a bare KVM host with only these variables.
 | Variable                          | Default   | Notes                                                                                                                                                                  |
 | --------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `FIRECRACKER_RUNNER_TOKEN`        | —         | REQUIRED, ≥16 chars. Shared bearer secret; every request must present it. Must match the platform's `FIRECRACKER_RUNNER_TOKEN`                                         |
-| `FIRECRACKER_RUNNER_PORT`         | `3100`    | Daemon listen port                                                                                                                                                     |
-| `FIRECRACKER_RUNNER_HOST`         | `0.0.0.0` | Bind narrowly / firewall the port — the launch spec carries run credentials                                                                                            |
+| `FIRECRACKER_RUNNER_PORT`         | `3100`    | Daemon listen port (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                                                                         |
+| `FIRECRACKER_RUNNER_HOST`         | `0.0.0.0` | Bind narrowly / firewall the port — the launch spec carries run credentials (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                |
+| `FIRECRACKER_RUNNER_SOCKET`       | —         | Absolute path of a Unix domain socket to bind INSTEAD of HOST/PORT (UDS transport — see _Transport & auth_). Canonical: `/run/appstrate-runner/runner.sock`            |
+| `FIRECRACKER_RUNNER_SOCKET_MODE`  | `0660`    | Octal file mode of the bound socket. `0666` for a rootless / userns-remapped platform container (bearer token remains enforced)                                        |
 | `FIRECRACKER_RUNNER_PLATFORM_URL` | —         | REQUIRED. `http(s)://<IPv4>[:port]` guests use to reach the platform (IP literal — no DNS in guests). The daemon opens an explicit nft accept for exactly this ip:port |
 
 ### Engine host config — `FIRECRACKER_*` (`runner/host-env.ts`)

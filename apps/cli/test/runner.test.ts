@@ -37,6 +37,7 @@ import {
   RUNNER_UNIT_PATH,
   RUNNER_ETC_DIR,
   RUNNER_DATA_DIR,
+  RUNNER_DEFAULT_SOCKET_PATH,
   APPSTRATE_RELEASE_BASE,
 } from "../src/lib/runner/constants.ts";
 import {
@@ -257,6 +258,58 @@ describe("resolveInstallConfig — --platform-url validation", () => {
   });
 });
 
+// ─── install config: --socket (UDS transport) ─────────────────────────────
+
+describe("resolveInstallConfig — --socket (UDS transport)", () => {
+  const deps = () =>
+    ({
+      exec: fakeExec().exec,
+      fs: fakeFs().fs,
+      http: fakeHttp({}),
+      getuid: () => 0,
+      preflight: async () => ({ ok: true, arch: "x86_64", checks: [] }),
+    }) as unknown as Parameters<typeof resolveInstallConfig>[1];
+  const base = { platformUrl: "http://10.0.0.5:3000", token: "x".repeat(16), yes: true };
+
+  it("accepts an absolute --socket and records it as the transport", async () => {
+    const { config } = await resolveInstallConfig(
+      { ...base, socket: RUNNER_DEFAULT_SOCKET_PATH },
+      deps(),
+    );
+    expect(config.socketPath).toBe(RUNNER_DEFAULT_SOCKET_PATH);
+  });
+
+  it("errors loudly when --socket is combined with --port (mutually exclusive)", async () => {
+    await expect(
+      resolveInstallConfig({ ...base, socket: RUNNER_DEFAULT_SOCKET_PATH, port: "3200" }, deps()),
+    ).rejects.toThrow(/--socket is mutually exclusive with --port\/--host/);
+  });
+
+  it("errors loudly when --socket is combined with --host (mutually exclusive)", async () => {
+    await expect(
+      resolveInstallConfig(
+        { ...base, socket: RUNNER_DEFAULT_SOCKET_PATH, host: "10.0.0.5" },
+        deps(),
+      ),
+    ).rejects.toThrow(/--socket is mutually exclusive with --port\/--host/);
+  });
+
+  it("rejects a relative or empty --socket with an actionable message", async () => {
+    for (const socket of ["runner.sock", "./runner.sock", "", "   "]) {
+      await expect(resolveInstallConfig({ ...base, socket }, deps())).rejects.toThrow(
+        /must be an absolute path/,
+      );
+    }
+  });
+
+  it("non-interactive without --socket stays TCP (backward compatible)", async () => {
+    const { config } = await resolveInstallConfig(base, deps());
+    expect(config.socketPath).toBeUndefined();
+    expect(config.port).toBe(3100);
+    expect(config.host).toBe("0.0.0.0");
+  });
+});
+
 // ─── config files ─────────────────────────────────────────────────────────
 
 const config: RunnerConfig = {
@@ -297,6 +350,25 @@ describe("renderRunnerEnvFile / parseRunnerEnvFile", () => {
   it("pins the artifacts version to the daemon release when set", () => {
     const env = parseRunnerEnvFile(renderRunnerEnvFile({ ...config, artifactsVersion: "1.2.3" }));
     expect(env.FIRECRACKER_ARTIFACTS_VERSION).toBe("1.2.3");
+  });
+
+  it("UDS transport: renders FIRECRACKER_RUNNER_SOCKET and drops the HOST/PORT lines", () => {
+    const text = renderRunnerEnvFile({ ...config, socketPath: RUNNER_DEFAULT_SOCKET_PATH });
+    const env = parseRunnerEnvFile(text);
+    expect(env.FIRECRACKER_RUNNER_SOCKET).toBe(RUNNER_DEFAULT_SOCKET_PATH);
+    // The socket REPLACES the TCP listen surface — no dual-listener ambiguity.
+    expect(text).not.toContain("FIRECRACKER_RUNNER_HOST=");
+    expect(text).not.toContain("FIRECRACKER_RUNNER_PORT=");
+    // Everything else is identical to a TCP render.
+    expect(env.FIRECRACKER_RUNNER_TOKEN).toBe(config.token);
+    expect(env.FIRECRACKER_RUNNER_PLATFORM_URL).toBe(config.platformUrl);
+    expect(env.FIRECRACKER_KERNEL_PATH).toBe(runnerDataPaths(config.dataDir).kernelPath);
+  });
+
+  it("rejects a newline-injected socketPath (env-file line smuggling)", () => {
+    expect(() =>
+      renderRunnerEnvFile({ ...config, socketPath: "/run/x.sock\nFIRECRACKER_ARTIFACTS_LOCAL=1" }),
+    ).toThrow(/must not contain a newline/);
   });
 });
 
@@ -361,6 +433,31 @@ describe("renderRunnerUnit", () => {
     expect(unit).not.toContain("PrivateDevices=");
     expect(unit).not.toContain("ProtectKernelTunables=true");
     expect(unit).not.toContain("RestrictAddressFamilies=");
+    // TCP install: no UDS-only directives leak into the unit.
+    expect(unit).not.toContain("RuntimeDirectory=");
+  });
+
+  it("UDS at the canonical /run location: systemd owns the socket dir (RuntimeDirectory)", () => {
+    const unit = renderRunnerUnit({ ...config, socketPath: RUNNER_DEFAULT_SOCKET_PATH });
+    // ProtectSystem=strict makes /run read-only — RuntimeDirectory is what
+    // lets the daemon bind its socket there (created 0770). Preserve=yes is
+    // load-bearing: the platform container bind-mounts the dir, and a
+    // remove+recreate on daemon restart would strand the container on the
+    // orphaned directory inode (new socket invisible until container restart).
+    expect(unit).toContain("RuntimeDirectory=appstrate-runner");
+    expect(unit).toContain("RuntimeDirectoryMode=0770");
+    expect(unit).toContain("RuntimeDirectoryPreserve=yes");
+    expect(unit).not.toContain("ReadWritePaths=/run/appstrate-runner");
+    // The rest of the hardening posture is untouched.
+    expect(unit).toContain("ProtectSystem=strict");
+    expect(unit).toContain(`ReadWritePaths=${config.dataDir}`);
+  });
+
+  it("UDS at a custom parent dir: carves it writable via ReadWritePaths instead", () => {
+    const unit = renderRunnerUnit({ ...config, socketPath: "/srv/sockets/runner.sock" });
+    expect(unit).toContain("ReadWritePaths=/srv/sockets");
+    expect(unit).not.toContain("RuntimeDirectory=");
+    expect(unit).not.toContain("RuntimeDirectoryMode=");
   });
 });
 
@@ -622,6 +719,7 @@ describe("enableService", () => {
     exec,
     fs: fakeFs().fs,
     http: fakeHttp({}),
+    unixGetJson: async () => ({ reachable: false as const, error: "no fake socket" }),
     getuid: () => 0,
     preflight: async () => ({ ok: true, arch: "x86_64" as const, checks: [] }),
   });
@@ -733,6 +831,49 @@ describe("runnerDoctor", () => {
     expect(report.ok).toBe(true);
   });
 
+  it("UDS install: probes /v1/health through the socket and reports it as the endpoint", async () => {
+    const udsConfig: RunnerConfig = { ...config, socketPath: RUNNER_DEFAULT_SOCKET_PATH };
+    const marker = runnerDataPaths(config.dataDir).artifactsMarker;
+    const { fs } = fakeFs({
+      "/etc/appstrate-runner/env": renderRunnerEnvFile(udsConfig),
+      "/etc/systemd/system/appstrate-runner.service": "unit",
+      [marker]: JSON.stringify({ version: "1.2.3", guest_protocol: 1 }),
+      [runnerDataPaths(config.dataDir).jailerBin]: "<installed>",
+    });
+    const { exec } = fakeExec({
+      "systemctl is-active": () => ({ ok: true, exitCode: 0, stdout: "active\n", stderr: "" }),
+      "systemctl is-enabled": () => ({ ok: true, exitCode: 0, stdout: "enabled\n", stderr: "" }),
+    });
+    let tcpProbed = false;
+    const unixCalls: Array<{ socketPath: string; path: string; token: string }> = [];
+    const report = await runnerDoctor({
+      deps: {
+        fs,
+        exec,
+        http: {
+          ...fakeHttp({}),
+          async getJson() {
+            tcpProbed = true;
+            return { reachable: false, error: "should not be dialed" };
+          },
+        },
+        unixGetJson: async (socketPath, path, token) => {
+          unixCalls.push({ socketPath, path, token });
+          return { reachable: true, status: 200, body: { protocol: 1, initialized: true } };
+        },
+        preflight: async () => ({ ok: true, arch: "x86_64", checks: [] }),
+      },
+    });
+    expect(tcpProbed).toBe(false);
+    expect(unixCalls).toEqual([
+      { socketPath: RUNNER_DEFAULT_SOCKET_PATH, path: "/v1/health", token: config.token },
+    ]);
+    expect(report.ok).toBe(true);
+    expect(report.health.status).toBe(200);
+    // The report shows the socket path where a TCP install shows host:port.
+    expect(report.health.endpoint).toBe(RUNNER_DEFAULT_SOCKET_PATH);
+  });
+
   it("reports not-ok when the daemon is unreachable", async () => {
     const { fs } = fakeFs({ "/etc/appstrate-runner/env": renderRunnerEnvFile(config) });
     const { exec } = fakeExec({
@@ -791,6 +932,36 @@ describe("pollHealth", () => {
     const { exec } = fakeExec();
     // timeoutMs 0 → the loop never enters; no 3s sleeps in the test.
     expect(await pollHealth(cfg, { exec, http }, 0)).toBe(false);
+  });
+
+  it("UDS install: probes through the unix socket, never the TCP seam", async () => {
+    const unixCalls: Array<{ socketPath: string; path: string; token: string }> = [];
+    let tcpProbed = false;
+    const http: RunnerHttp = {
+      ...fakeHttp({}),
+      async getJson() {
+        tcpProbed = true;
+        return { reachable: false, error: "should not be dialed" };
+      },
+    };
+    const { exec } = fakeExec();
+    const ok = await pollHealth(
+      { ...cfg, socketPath: RUNNER_DEFAULT_SOCKET_PATH },
+      {
+        exec,
+        http,
+        unixGetJson: async (socketPath, path, token) => {
+          unixCalls.push({ socketPath, path, token });
+          return { reachable: true, status: 200, body: {} };
+        },
+      },
+      5000,
+    );
+    expect(ok).toBe(true);
+    expect(tcpProbed).toBe(false);
+    expect(unixCalls).toEqual([
+      { socketPath: RUNNER_DEFAULT_SOCKET_PATH, path: "/v1/health", token: cfg.token },
+    ]);
   });
 });
 

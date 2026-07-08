@@ -321,16 +321,29 @@ async function defaultReadEnvFile(dir: string): Promise<string | null> {
  * any other status or connection error → unreachable. Never throws (a
  * connection failure is the common "daemon down" case, reported as
  * `unreachable`). The deep check is `appstrate runner doctor`.
+ *
+ * `unix://<abs path>` URLs (same-host UDS transport) are dialed through
+ * Bun's `fetch(…, { unix })` — the CLI runs on the host, so it can open the
+ * daemon's socket directly, with the same token/status interpretation as
+ * TCP. The socket path is the URL's pathname (three-slash form:
+ * `unix:///run/appstrate-runner/runner.sock`), matching how the platform
+ * parses FIRECRACKER_RUNNER_URL. `fetchImpl` is injectable for tests only.
  */
 export async function defaultProbeFirecracker(
   url: string,
   token: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<FirecrackerHealth> {
   const base = url.replace(/\/+$/, "");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3000);
   try {
-    const res = await fetch(`${base}/v1/health`, {
+    // UDS: the http:// authority is a placeholder (feeds only the Host
+    // header); Bun dials the socket instead of the network.
+    const isUnix = base.startsWith("unix://");
+    const target = isUnix ? "http://appstrate-runner/v1/health" : `${base}/v1/health`;
+    const res = await fetchImpl(target, {
+      ...(isUnix ? { unix: new URL(base).pathname } : {}),
       headers: token ? { authorization: `Bearer ${token}` } : {},
       signal: controller.signal,
     });

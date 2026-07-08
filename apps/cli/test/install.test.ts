@@ -1226,17 +1226,21 @@ describe("resolveRunBackend — non-interactive firecracker validation matrix", 
 });
 
 describe("resolveRunBackend — firecracker same-host", () => {
-  it("builds runner + platform URLs and mints a token from --host-ip", async () => {
+  it("uses the unix-socket runner URL and still builds the LAN platform URL from --host-ip", async () => {
     const cfg = await resolveRunBackend(
       { runAdapter: "firecracker", hostIp: "10.0.0.5", appPort: 8080, nonInteractive: true },
       { generateToken: () => "generated-token-abcdef1234" },
     );
     expect(cfg).toEqual({
       adapter: "firecracker",
-      runnerUrl: "http://10.0.0.5:3100",
+      // Same-host = UDS: no TCP port, no plaintext wire — the beta.38
+      // fail-closed http-to-non-loopback guard has nothing to refuse.
+      runnerUrl: "unix:///run/appstrate-runner/runner.sock",
       token: "generated-token-abcdef1234",
       tokenSource: "generated",
       topology: "same-host",
+      // hostIp is STILL collected: guests reach the platform over the LAN
+      // (platformUrl) — only the platform↔daemon leg moved onto the socket.
       hostIp: "10.0.0.5",
       platformUrl: "http://10.0.0.5:8080",
     } satisfies RunBackendConfig);
@@ -1339,7 +1343,7 @@ describe("runner-install command builder + follow-up", () => {
     ).toEqual(["/opt/homebrew/bin/bun", "/repo/apps/cli/src/cli.ts"]);
   });
 
-  it("buildRunnerInstallArgs carries --platform-url and --token", () => {
+  it("buildRunnerInstallArgs carries --platform-url, --token, and the UDS --socket", () => {
     const args = buildRunnerInstallArgs(
       ["/usr/local/bin/appstrate"],
       "http://10.0.0.5:3000",
@@ -1353,6 +1357,8 @@ describe("runner-install command builder + follow-up", () => {
       "http://10.0.0.5:3000",
       "--token",
       "the-token",
+      "--socket",
+      "/run/appstrate-runner/runner.sock",
       "--yes",
     ]);
   });
@@ -1373,10 +1379,10 @@ describe("runner-install command builder + follow-up", () => {
     expect(note).toContain("appstrate runner status");
   });
 
-  it("firecrackerFollowupNote (same-host) prints lifecycle hints, no curl one-liner", () => {
+  it("firecrackerFollowupNote (same-host) explains the socket + bind-mount, no curl one-liner", () => {
     const note = firecrackerFollowupNote({
       adapter: "firecracker",
-      runnerUrl: "http://10.0.0.5:3100",
+      runnerUrl: "unix:///run/appstrate-runner/runner.sock",
       token: "tok-123456",
       tokenSource: "generated",
       topology: "same-host",
@@ -1384,6 +1390,9 @@ describe("runner-install command builder + follow-up", () => {
       platformUrl: "http://10.0.0.5:3000",
     });
     expect(note).not.toContain("curl -fsSL");
+    expect(note).toContain("unix:///run/appstrate-runner/runner.sock");
+    expect(note).toContain("bind-mount");
+    expect(note).toContain("/run/appstrate-runner");
     expect(note).toContain("appstrate runner logs -f");
   });
 });
@@ -1391,7 +1400,7 @@ describe("runner-install command builder + follow-up", () => {
 describe("runSameHostRunnerInstall", () => {
   const rb = {
     adapter: "firecracker",
-    runnerUrl: "http://10.0.0.5:3100",
+    runnerUrl: "unix:///run/appstrate-runner/runner.sock",
     token: "pairing-token-123456",
     tokenSource: "generated",
     topology: "same-host",
@@ -1399,7 +1408,7 @@ describe("runSameHostRunnerInstall", () => {
     platformUrl: "http://10.0.0.5:3000",
   } satisfies RunBackendConfig;
 
-  it("interactive + exit 0: spawns sudo, no warning, no manual-command note", async () => {
+  it("interactive + exit 0: spawns sudo in UDS mode, no warning, no manual-command note", async () => {
     const runCalls: Array<{ cmd: string; args: string[] }> = [];
     const notes: string[] = [];
     const warns: string[] = [];
@@ -1416,6 +1425,11 @@ describe("runSameHostRunnerInstall", () => {
     });
     expect(runCalls).toHaveLength(1);
     expect(runCalls[0]?.cmd).toBe("sudo");
+    // Same-host installs the daemon in UDS mode — the sudo argv carries the
+    // canonical socket so the daemon matches the unix:// URL in the .env.
+    const argv = runCalls[0]?.args ?? [];
+    expect(argv).toContain("--socket");
+    expect(argv[argv.indexOf("--socket") + 1]).toBe("/run/appstrate-runner/runner.sock");
     expect(warns).toHaveLength(0);
     expect(notes).toHaveLength(0);
   });
@@ -1435,6 +1449,7 @@ describe("runSameHostRunnerInstall", () => {
     expect(warning).toContain("sudo /usr/local/bin/appstrate runner install");
     expect(warning).toContain("--platform-url http://10.0.0.5:3000");
     expect(warning).toContain("--token pairing-token-123456");
+    expect(warning).toContain("--socket /run/appstrate-runner/runner.sock");
   });
 
   it("non-interactive: never spawns, prints the manual sudo command instead", async () => {
@@ -1457,6 +1472,7 @@ describe("runSameHostRunnerInstall", () => {
     expect(note).toContain("sudo /usr/local/bin/appstrate runner install");
     expect(note).toContain("--platform-url http://10.0.0.5:3000");
     expect(note).toContain("--token pairing-token-123456");
+    expect(note).toContain("--socket /run/appstrate-runner/runner.sock");
   });
 });
 
