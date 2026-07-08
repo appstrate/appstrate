@@ -68,6 +68,7 @@ describe("PiRunner.run — event forwarding", () => {
     expect(sink.finalized).toEqual({
       ...emptyRunResult(),
       status: "success",
+      outputMode: "tool",
       usage: {
         input_tokens: 0,
         output_tokens: 0,

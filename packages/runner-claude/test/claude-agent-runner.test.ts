@@ -6,6 +6,7 @@ import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import {
   ClaudeAgentRunner,
+  parseFinalJsonObject,
   type ClaudeAgentRunnerOptions,
   type ClaudeQueryInput,
 } from "../src/claude-agent-runner.ts";
@@ -87,6 +88,9 @@ describe("ClaudeAgentRunner — happy path", () => {
     expect(types).toContain("appstrate.progress");
     expect(types).toContain("appstrate.metric");
     expect(types).toContain("output.emitted");
+    // The claude engine always states its native delivery mechanism so
+    // finalize phrases output-validation failures correctly (issue #833).
+    expect(m.result?.outputMode).toBe("native");
   });
 
   it("passes outputFormat, the sidecar MCP server (no in-process server), native tools, and curated env", async () => {
@@ -122,6 +126,218 @@ describe("ClaudeAgentRunner — happy path", () => {
     expect(opts.env.ANTHROPIC_BASE_URL).toBe("http://sidecar:8088/llm");
     expect(opts.env.ANTHROPIC_API_KEY).toBe("");
     expect(calls[0]!.prompt).toBe("do the thing");
+  });
+});
+
+describe("ClaudeAgentRunner — final-message output fallback (issue #833)", () => {
+  const outputSchema = {
+    type: "object",
+    properties: { numbers: { type: "array" } },
+    required: ["numbers"],
+  };
+  const successResult: SdkRunMessage = {
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    usage: { input_tokens: 10, output_tokens: 5 },
+  };
+
+  it("captures a schema-declaring run's final JSON text message when structured_output is absent", async () => {
+    // The #833 shape: the model wrote the deliverable as its final text
+    // message instead of calling `StructuredOutput` → the SDK result carries
+    // no `structured_output`, but the run must still end with output.
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: "working on it" }] } },
+      {
+        type: "assistant",
+        message: { content: [{ type: "text", text: '{"numbers": [1, 2, 3]}' }] },
+      },
+      successResult,
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, outputSchema })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+
+    expect(m.result?.status).toBe("success");
+    expect(m.result?.output).toEqual({ numbers: [1, 2, 3] });
+    expect(m.events.map((e) => e.type)).toContain("output.emitted");
+  });
+
+  it("captures a fenced ```json final message", async () => {
+    const { fn } = fakeQuery([
+      {
+        type: "assistant",
+        message: { content: [{ type: "text", text: '```json\n{"numbers": []}\n```' }] },
+      },
+      successResult,
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, outputSchema })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.output).toEqual({ numbers: [] });
+  });
+
+  it("does not promote a stale mid-run draft: a later tool_use-only turn clears the final-message slot", async () => {
+    // The fallback must read the run's FINAL message, not the last text ever
+    // seen — otherwise a mid-run JSON draft becomes the deliverable and a
+    // loose schema silently validates wrong output.
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: '{"numbers": [9, 9]}' }] } },
+      {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "t1", name: "mcp__appstrate__log" }] },
+      },
+      successResult,
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, outputSchema })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.output).toBeNull();
+    expect(m.events.map((e) => e.type)).not.toContain("output.emitted");
+  });
+
+  it("ignores subagent/sidechain text — a subagent's JSON is never the run's deliverable", async () => {
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: "delegating" }] } },
+      {
+        type: "assistant",
+        parent_tool_use_id: "task_1",
+        message: { content: [{ type: "text", text: '{"numbers": [7]}' }] },
+      },
+      successResult,
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, outputSchema })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    // Main thread's final message is "delegating" (not JSON) → no capture.
+    expect(m.result?.output).toBeNull();
+  });
+
+  it("treats structured_output: null as not delivered — the fallback still engages", async () => {
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: '{"numbers": [4]}' }] } },
+      { ...successResult, structured_output: null } as SdkRunMessage,
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, outputSchema })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.output).toEqual({ numbers: [4] });
+  });
+
+  it("captures a plain-string-content final message", async () => {
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: '{"numbers": [5]}' } },
+      successResult,
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, outputSchema })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.output).toEqual({ numbers: [5] });
+  });
+
+  it("prefers the SDK's structured_output over the final text message", async () => {
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: '{"numbers": [9]}' }] } },
+      { ...successResult, structured_output: { numbers: [1] } } as SdkRunMessage,
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, outputSchema })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.output).toEqual({ numbers: [1] });
+  });
+
+  it("leaves the run output-less when the final message is not a JSON object", async () => {
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: "All done, boss!" }] } },
+      successResult,
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, outputSchema })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.output).toBeNull();
+    expect(m.events.map((e) => e.type)).not.toContain("output.emitted");
+  });
+
+  it("does not fall back when the run declares no output schema", async () => {
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: '{"numbers": [1]}' }] } },
+      successResult,
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.output).toBeNull();
+    expect(m.events.map((e) => e.type)).not.toContain("output.emitted");
+  });
+
+  it("does not fall back on a failed terminal", async () => {
+    const { fn } = fakeQuery([
+      { type: "assistant", message: { content: [{ type: "text", text: '{"numbers": [1]}' }] } },
+      { type: "result", subtype: "error_max_turns", is_error: true, usage: {} },
+    ]);
+    const m = memorySink();
+    await new ClaudeAgentRunner(baseOpts({ query: fn, outputSchema })).run({
+      context: ctx,
+      eventSink: m.sink,
+      bundle: undefined as never,
+    });
+    expect(m.result?.status).toBe("failed");
+    expect(m.result?.output).toBeNull();
+  });
+});
+
+describe("parseFinalJsonObject", () => {
+  it("parses a bare JSON object", () => {
+    expect(parseFinalJsonObject('{"a": 1}')).toEqual({ a: 1 });
+  });
+  it("parses a fenced JSON object (with or without the json language tag)", () => {
+    expect(parseFinalJsonObject('```json\n{"a": 1}\n```')).toEqual({ a: 1 });
+    expect(parseFinalJsonObject('```\n{"a": 1}\n```')).toEqual({ a: 1 });
+  });
+  it("tolerates fence variants: uppercase tag, closing fence glued to the JSON", () => {
+    expect(parseFinalJsonObject('```JSON\n{"a": 1}\n```')).toEqual({ a: 1 });
+    expect(parseFinalJsonObject('```json\n{"a": 1}```')).toEqual({ a: 1 });
+  });
+  it("rejects an unclosed fence without pathological scanning", () => {
+    const big = "```json\n" + "{\n".padEnd(200_000, " \n");
+    const start = performance.now();
+    expect(parseFinalJsonObject(big)).toBeUndefined();
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+  it("rejects arrays, scalars, prose, malformed JSON, and empty input", () => {
+    expect(parseFinalJsonObject("[1, 2]")).toBeUndefined();
+    expect(parseFinalJsonObject('"str"')).toBeUndefined();
+    expect(parseFinalJsonObject('Done! {"a": 1}')).toBeUndefined();
+    expect(parseFinalJsonObject('{"a": ')).toBeUndefined();
+    expect(parseFinalJsonObject("")).toBeUndefined();
+    expect(parseFinalJsonObject(null)).toBeUndefined();
   });
 });
 

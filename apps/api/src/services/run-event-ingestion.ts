@@ -319,11 +319,18 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     );
     if (!validation.valid) {
       status = "failed";
+      // The never-emitted wording must name the mechanism the engine
+      // actually had (issue #833): `result.outputMode === "native"` (Claude
+      // Agent SDK) delivers through the SDK's `StructuredOutput` tool, not
+      // the `output` runtime tool. Absent outputMode means "tool" (the
+      // historical default; older runners never set it).
+      const missing = validation.errors.join("; ");
+      const tool = result.outputMode === "native" ? "StructuredOutput" : "output";
       errorMessage = outputEmitted
-        ? `Output validation failed: ${validation.errors.join("; ")}`
-        : "Agent finished without calling the required `output` tool. This agent " +
-          "declares an output schema, so it must call `output` exactly once before " +
-          `finishing with all required fields (missing: ${validation.errors.join("; ")}).`;
+        ? `Output validation failed: ${missing}`
+        : `Agent finished without calling the required \`${tool}\` tool. This agent ` +
+          `declares an output schema, so it must call \`${tool}\` exactly once before ` +
+          `finishing with all required fields (missing: ${missing}).`;
       outputValidationErrors = validation.errors;
     }
   }
@@ -741,6 +748,13 @@ export async function synthesiseFinalize(
     status: "success" | "failed" | "timeout" | "cancelled";
     error?: { message: string; stack?: string };
     durationMs?: number;
+    /**
+     * Delivery mechanism of the engine that ran, when the caller knows it
+     * (execute-background carries it off the container lifecycle). Keeps
+     * the output-validation wording engine-accurate on synthesised
+     * closures too (issue #833); absent means `"tool"` downstream.
+     */
+    outputMode?: "tool" | "native";
   },
 ): Promise<void> {
   const run = await getRunSinkContext(runId);
@@ -753,6 +767,7 @@ export async function synthesiseFinalize(
   result.status = terminal.status;
   if (terminal.error) result.error = terminal.error;
   if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
+  if (terminal.outputMode !== undefined) result.outputMode = terminal.outputMode;
 
   // The synthesis path carries no runner-posted `result.usage` (the container
   // exited without POSTing its own finalize). Reconstruct the terminal usage

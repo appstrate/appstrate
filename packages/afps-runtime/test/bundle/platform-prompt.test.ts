@@ -534,7 +534,7 @@ describe("renderPlatformPrompt", () => {
         outputSchema: schema,
       });
       expect(out).toContain("call the `output` tool");
-      expect(out).not.toContain("NO `output` tool");
+      expect(out).not.toContain("StructuredOutput");
     });
 
     it('outputMode: "tool" renders the terminal `output` tool mandate', () => {
@@ -548,10 +548,13 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("exactly once");
     });
 
-    it('outputMode: "native" instructs a final JSON message and never mandates an `output` tool call', () => {
-      // The claude engine has no `output` tool (deliverable is native via
-      // SDK `outputFormat`); mandating one sends the agent hunting for a
-      // nonexistent tool and the run never completes (issue #824).
+    it('outputMode: "native" mandates one terminal `StructuredOutput` call and never the `output` tool', () => {
+      // The claude engine has no MCP `output` tool (mandating one sends the
+      // agent hunting for a nonexistent tool, issue #824). Its deliverable
+      // is captured ONLY through the SDK's CLI-injected `StructuredOutput`
+      // tool — a schema-conforming final text message is never captured into
+      // `result.structured_output`, so the prompt must not steer the agent
+      // away from tool delivery (issue #833).
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx(),
@@ -559,8 +562,12 @@ describe("renderPlatformPrompt", () => {
         outputMode: "native",
       });
       expect(out).toContain("## Output Format");
-      expect(out).toContain("FINAL message MUST be the run's deliverable");
-      expect(out).toContain("NO `output` tool");
+      expect(out).toContain("call `StructuredOutput` **exactly once**");
+      expect(out).toContain("does not exist on this runtime");
+      // Version-drift escape hatch: a CLI without the injected tool degrades
+      // to the lone-JSON final message the runner's fallback parser captures.
+      expect(out).toContain("If no `StructuredOutput` tool is available");
+      expect(out).toContain("JSON deliverable alone");
       expect(out).not.toContain("call the `output` tool");
       expect(out).not.toContain("output({})");
       // Schema surfaces stay identical across modes.

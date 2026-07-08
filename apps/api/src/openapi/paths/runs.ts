@@ -1224,6 +1224,12 @@ export const runsPaths = {
                   type: "string",
                   enum: ["success", "failed", "timeout", "cancelled"],
                 },
+                outputMode: {
+                  type: "string",
+                  enum: ["tool", "native"],
+                  description:
+                    "How the runner delivers structured output — `native` (Claude Agent SDK `StructuredOutput`) vs `tool` (the `output` runtime tool). Drives the wording of output-validation failures; absent means `tool`.",
+                },
                 durationMs: { type: "integer", minimum: 0 },
                 usage: {
                   type: "object",

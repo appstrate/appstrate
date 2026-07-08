@@ -42,9 +42,10 @@ export async function buildPlatformSystemPrompt(
      * The engine the run executes on, resolved by the launcher via
      * `resolveCredentialDelivery` (provider→engine registry). Drives the
      * `## Output Format` section: the `claude` engine has no `output`
-     * runtime tool — its deliverable is native via the Claude Agent SDK's
-     * `outputFormat` — so the prompt must not mandate an `output` tool
-     * call there (issue #824). Defaults to the Pi tool-call contract.
+     * runtime tool — its deliverable goes through the Claude Agent SDK's
+     * `outputFormat`, i.e. the CLI-injected `StructuredOutput` tool — so
+     * the prompt must mandate THAT call, not an `output` tool call
+     * (issues #824, #833). Defaults to the Pi tool-call contract.
      */
     engine?: RunEngine;
   } = {},

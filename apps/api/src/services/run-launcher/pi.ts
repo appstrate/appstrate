@@ -70,6 +70,14 @@ export interface PlatformContainerResult {
   timedOut: boolean;
   /** Whether the run was cancelled by the caller's `AbortSignal`. */
   cancelled: boolean;
+  /**
+   * Structured-output delivery mechanism of the engine that ran (from the
+   * resolved `delivery.engine`). Carried so a platform-SYNTHESISED finalize
+   * (runner never posted its own) phrases output-validation failures with
+   * the right mechanism — without it, a claude run closed by synthesis
+   * would resurface the wrong `output`-tool wording (issue #833).
+   */
+  outputMode: "tool" | "native";
 }
 
 export interface RunPlatformContainerInput {
@@ -438,7 +446,7 @@ async function runPlatformContainerImpl(
     recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
     spawnRecorded = true;
 
-    return await waitForWorkload(
+    const lifecycle = await waitForWorkload(
       orch,
       agent,
       sidecar,
@@ -446,6 +454,7 @@ async function runPlatformContainerImpl(
       signal,
       input.timeoutBootGraceMs ?? PLATFORM_TIMEOUT_BOOT_GRACE_MS,
     );
+    return { ...lifecycle, outputMode: delivery.engine === "claude" ? "native" : "tool" };
   } catch (err) {
     // SOTA per OTel "Recording errors": the spawn histogram covers failures too,
     // tagged with a bounded `error.type` naming the phase that failed (no
@@ -507,7 +516,7 @@ async function waitForWorkload(
   timeoutSeconds: number,
   signal: AbortSignal | undefined,
   bootGraceMs: number,
-): Promise<PlatformContainerResult> {
+): Promise<Omit<PlatformContainerResult, "outputMode">> {
   await orch.startWorkload(agent);
 
   // Ring-buffer the agent's stdout+stderr so a non-zero exit can be

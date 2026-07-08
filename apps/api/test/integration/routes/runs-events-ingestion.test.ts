@@ -43,6 +43,7 @@ import {
   capUtf8Text,
   finalizeRun,
   getRunSinkContext,
+  synthesiseFinalize,
 } from "../../../src/services/run-event-ingestion.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
@@ -1886,6 +1887,62 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
     expect(row?.status).toBe("failed");
     expect(row?.error).toMatch(/without calling the required `output` tool/);
     expect(row?.error).not.toMatch(/^Output validation failed/);
+  });
+
+  it('native-mode runs (outputMode: "native") get the StructuredOutput wording, never the `output` tool one (issue #833)', async () => {
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent");
+
+    // A claude-engine run has no `output` runtime tool — telling the user it
+    // "must call `output`" points at a tool that does not exist on that
+    // engine. The runner states its mechanism via `outputMode` and the
+    // failure message follows it.
+    const res = await postFinalize(runId, {
+      status: "success",
+      outputMode: "native",
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/without calling the required `StructuredOutput` tool/);
+    expect(row?.error).not.toMatch(/required `output` tool/);
+  });
+
+  it("a platform-SYNTHESISED success carries outputMode so crash-path closures keep the engine-accurate wording", async () => {
+    // Lost finalize POST + container exit 0: execute-background synthesises
+    // success and forwards the engine's delivery mode off the container
+    // lifecycle — without it, a claude run closed by synthesis would
+    // resurface the wrong `output`-tool wording (issue #833).
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent");
+
+    await synthesiseFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      outputMode: "native",
+    });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/without calling the required `StructuredOutput` tool/);
+    expect(row?.error).not.toMatch(/required `output` tool/);
+  });
+
+  it("a malformed outputMode degrades to the tool wording instead of failing finalize", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent");
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      outputMode: "banana",
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/without calling the required `output` tool/);
   });
 });
 
