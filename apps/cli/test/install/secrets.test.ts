@@ -146,15 +146,9 @@ describe("generateEnvForTier — port overrides", () => {
     expect(env.PORT).toBe("5000");
   });
 
-  it("emits MINIO_CONSOLE_PORT only on Tier 3 + only when non-default", () => {
-    const t3 = generateEnvForTier(3, "http://localhost:3000", { minioConsolePort: 9100 });
-    expect(t3.MINIO_CONSOLE_PORT).toBe("9100");
-
-    const t3Default = generateEnvForTier(3, "http://localhost:3000", { minioConsolePort: 9001 });
-    expect(t3Default.MINIO_CONSOLE_PORT).toBeUndefined();
-
-    const t1 = generateEnvForTier(1, "http://localhost:3000", { minioConsolePort: 9100 });
-    expect(t1.MINIO_CONSOLE_PORT).toBeUndefined();
+  it("never emits MINIO_CONSOLE_PORT (console disabled, MinIO fully private)", () => {
+    const t3 = generateEnvForTier(3, "http://localhost:3000", { port: 3000 });
+    expect(t3.MINIO_CONSOLE_PORT).toBeUndefined();
   });
 });
 

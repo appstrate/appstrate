@@ -81,19 +81,26 @@ services:
       timeout: 5s
       retries: 5
 
+  # Deliberately PRIVATE: no host ports are published. In proxy-upload
+  # mode (S3_PUBLIC_ENDPOINT unset — the default below) the platform
+  # streams upload bytes to MinIO server-side over the internal
+  # `appstrate-data` network, so the S3 API (:9000) needs no host
+  # exposure. The admin web console is disabled entirely
+  # (MINIO_BROWSER=off); inspect buckets via
+  # `docker compose exec appstrate-minio mc ...`. Only publish :9000
+  # (add a `ports:` mapping) if you opt into direct-to-bucket presign by
+  # setting S3_PUBLIC_ENDPOINT to a public MinIO domain.
   appstrate-minio:
     image: minio/minio:RELEASE.2025-03-12T18-04-18Z
     networks:
       - appstrate-data
-    command: server /data --console-address ":9001"
-    ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    command: server /data
     restart: unless-stopped
     mem_limit: 512m
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      MINIO_BROWSER: "off"
     volumes:
       - miniodata:/data
     healthcheck:

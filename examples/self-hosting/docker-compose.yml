@@ -53,15 +53,17 @@ services:
       retries: 5
 
   # ── MinIO (S3-compatible storage) ───────────────────────────
-  # Deliberately PRIVATE: the S3 API port (:9000) is never published.
-  # Browser uploads proxy through the platform on APP_URL (issue #829 —
-  # the platform signs app-domain upload URLs and streams the bytes to
-  # MinIO server-side), so MinIO needs no public FQDN and no exposed
-  # S3 port. Only the admin console (:9001) is published on the host.
-  # To presign direct-to-bucket URLs instead (multi-node offload), expose
-  # the S3 API publicly at a domain ROOT (SigV4 signs the full path —
-  # subpath proxying is unsupported, minio/minio#7857) and set
-  # S3_PUBLIC_ENDPOINT on the appstrate service.
+  # Deliberately PRIVATE: no host ports are published at all. The S3 API
+  # (:9000) is unreachable from outside the compose network — browser
+  # uploads proxy through the platform on APP_URL (issue #829 — the
+  # platform signs app-domain upload URLs and streams the bytes to MinIO
+  # server-side), so MinIO needs no public FQDN and no exposed port. The
+  # admin web console is disabled entirely (MINIO_BROWSER=off); inspect
+  # buckets with `docker compose exec minio mc ...`. To presign
+  # direct-to-bucket URLs instead (multi-node offload), expose the S3 API
+  # publicly at a domain ROOT (SigV4 signs the full path — subpath
+  # proxying is unsupported, minio/minio#7857) and set S3_PUBLIC_ENDPOINT
+  # on the appstrate service.
   minio:
     # Pinned to a verified release (digest-locked) — matches the tier3
     # `docker-compose.yml`. `:latest` would let `docker compose pull`
@@ -69,13 +71,12 @@ services:
     image: minio/minio:RELEASE.2025-03-12T18-04-18Z@sha256:46b3009bf7041eefbd90bd0d2b38c6ddc24d20a35d609551a1802c558c1c958f
     networks:
       - appstrate-data
-    command: server /data --console-address ":9001"
-    ports:
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    command: server /data
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      MINIO_BROWSER: "off"
     volumes:
       - miniodata:/data
     healthcheck:

@@ -89,8 +89,6 @@ export interface InstallOptions {
   dir?: string;
   /** Override the host port the platform binds to (Tier 0/1/2/3). */
   port?: string;
-  /** Override the host port the MinIO console binds to (Tier 3 only). */
-  minioConsolePort?: string;
   /**
    * Public URL of the platform (issue #822) — what browsers, OAuth
    * redirects, and email links use. Independent of `--port` (the host
@@ -139,7 +137,6 @@ export interface InstallOptions {
 }
 
 const DEFAULT_PORT = 3000;
-const DEFAULT_MINIO_CONSOLE_PORT = 9001;
 
 function appUrlForPort(port: number): string {
   return port === 80 ? "http://localhost" : `http://localhost:${port}`;
@@ -310,19 +307,6 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
       project?.name,
       { autoPick: autoConfirm },
     );
-    const minioConsolePort =
-      tier === 3
-        ? await resolveMinioConsolePort(
-            opts.minioConsolePort,
-            nonInteractive,
-            installState.mode,
-            installState.existing,
-            dir,
-            project?.name,
-            { autoPick: autoConfirm },
-          )
-        : undefined;
-
     // Closed-mode bootstrap (issue #228) — env var > prompt > undefined.
     // Skipped on upgrades (mergeEnv preserves whatever the user had) and
     // on Tier 0 interactive (local dev — invitation-only is meaningless).
@@ -357,7 +341,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
         appPort: port,
         nonInteractive,
       });
-      await installDockerTier(dir, tier, port, minioConsolePort, appUrl, {
+      await installDockerTier(dir, tier, port, appUrl, {
         force: opts.force ?? false,
         mode: installState.mode,
         existing: installState.existing,
@@ -697,50 +681,6 @@ export async function resolveAppstratePort(
     "APPSTRATE_PORT",
     "--port",
     "Appstrate",
-    nonInteractive,
-    deps.autoPick ?? false,
-  );
-}
-
-/** Resolve the MinIO console port (Tier 3); preflight-skip additionally gated on MINIO_ROOT_PASSWORD so a Tier 1/2 → 3 upgrade still probes the net-new port. */
-export async function resolveMinioConsolePort(
-  raw: string | undefined,
-  nonInteractive: boolean,
-  mode: InstallMode = "fresh",
-  existing: ExistingInstall = NO_EXISTING_INSTALL,
-  dir?: string,
-  projectName?: string,
-  deps: PortResolverDeps = {},
-): Promise<number> {
-  const envValue = process.env.APPSTRATE_MINIO_CONSOLE_PORT;
-  const requested = parsePort(raw, envValue, DEFAULT_MINIO_CONSOLE_PORT, "--minio-console-port");
-  // MINIO_ROOT_PASSWORD presence is the unambiguous signal that the
-  // previous install actually ran MinIO — absence means MinIO is
-  // net-new on this upgrade and its port must genuinely be free.
-  const minioWasPresent =
-    existing.hasEnv && typeof existing.existingEnv.MINIO_ROOT_PASSWORD === "string";
-  if (mode === "upgrade" && minioWasPresent) {
-    const findRunning = deps.findRunningComposeProject ?? findRunningComposeProjectImport;
-    if (await ourStackOwnsPort(dir, projectName, findRunning)) {
-      const inherited = readExistingPort(
-        existing.existingEnv,
-        "MINIO_CONSOLE_PORT",
-        DEFAULT_MINIO_CONSOLE_PORT,
-      );
-      const userExpressed = (raw ?? envValue ?? "") !== "";
-      if (userExpressed && requested !== inherited) {
-        clack.log.warn(
-          `port ${requested} ignored on upgrade — existing .env pins MINIO_CONSOLE_PORT=${inherited}. Edit <dir>/.env manually to change the port.`,
-        );
-      }
-      return inherited;
-    }
-  }
-  return ensurePortFree(
-    requested,
-    "APPSTRATE_MINIO_CONSOLE_PORT",
-    "--minio-console-port",
-    "MinIO console",
     nonInteractive,
     deps.autoPick ?? false,
   );
@@ -1639,7 +1579,6 @@ async function installDockerTier(
   dir: string,
   tier: 1 | 2 | 3,
   port: number,
-  minioConsolePort: number | undefined,
   appUrl: string,
   opts: {
     force: boolean;
@@ -1754,13 +1693,7 @@ async function installDockerTier(
         mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
       );
       await writeComposeFile(dir, tier);
-      const fresh = generateEnvForTier(
-        tier,
-        appUrl,
-        { port, minioConsolePort },
-        opts.bootstrap,
-        runBackendEnv,
-      );
+      const fresh = generateEnvForTier(tier, appUrl, { port }, opts.bootstrap, runBackendEnv);
       let envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
       // Firecracker pairing token/URL must track the CURRENT install, not
       // whatever `mergeEnv` happened to keep: `runSameHostRunnerInstall` below

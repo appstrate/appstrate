@@ -80,16 +80,13 @@ export function generateBootstrapToken(): string {
 /**
  * Optional host-port overrides written into `.env`. `port` goes in as
  * `PORT=...`; compose files interpolate it via `${PORT:-3000}`, Bun
- * picks it up automatically on `bun run dev`. `minioConsolePort` is
- * only meaningful on Tier 3 (`${MINIO_CONSOLE_PORT:-9001}`); it is
- * ignored on lower tiers to avoid polluting `.env` with dead keys.
+ * picks it up automatically on `bun run dev`.
  *
  * Defaults are elided (not written) so a vanilla install produces the
  * same `.env` as before — no churn, no diff noise.
  */
 export interface PortOverrides {
   port?: number;
-  minioConsolePort?: number;
 }
 
 /**
@@ -293,9 +290,6 @@ export function generateEnvForTier(
     env.MINIO_ROOT_PASSWORD = base64urlPassword24();
     env.S3_BUCKET = "appstrate";
     env.S3_REGION = "us-east-1";
-    if (ports.minioConsolePort !== undefined && ports.minioConsolePort !== 9001) {
-      env.MINIO_CONSOLE_PORT = String(ports.minioConsolePort);
-    }
   }
 
   // Firecracker execution backend (Docker tiers only — never reached on
