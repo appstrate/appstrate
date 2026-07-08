@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] — 2026-07-08
+
+Major release: removes forging OAuth subscription wire-format, the deprecated
+`ContainerOrchestrator` alias, and the dead `RealtimeEvent` envelope (all
+BREAKING). Adds the orchestrator/subscription-engine module extension points,
+proxy-upload storage mode, and the shared model-alias swap. `ssrf` DNS layer
+now lives in `@appstrate/afps-shared` ^0.2.0.
+
 ### Added
 
 - **`@appstrate/core/storage-s3`** — proxy-upload mode (issue #829).
