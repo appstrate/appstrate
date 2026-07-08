@@ -29,6 +29,7 @@ import { rm } from "node:fs/promises";
 import * as clack from "@clack/prompts";
 import { runCommand } from "../lib/install/os.ts";
 import { resolveInstall } from "../lib/install/project.ts";
+import { reportRunning, resolveRunningUrls } from "../lib/install/report.ts";
 
 export interface LifecycleOptions {
   /**
@@ -92,10 +93,34 @@ async function runCompose(dir: string, projectName: string, args: string[]): Pro
   throw new Error(`docker compose ${args.join(" ")} failed with exit code ${res.exitCode}`);
 }
 
-/** `appstrate start` → `docker compose up -d` (idempotent). */
+/**
+ * Print the unified "running at … / manage the stack" banner after a
+ * start/restart, once the platform answers on its healthcheck URL — the
+ * same banner `appstrate install` ends on, so all three entry points
+ * report an identical, health-verified result instead of `start`
+ * silently handing back a bare shell.
+ *
+ * The URLs come from `<dir>/.env`; if that file is unreadable we skip
+ * the banner (a guessed URL that doesn't match the real port would be
+ * worse than none) but leave the successful `up`/`restart` untouched.
+ */
+async function reportRunningStack(dir: string, projectName: string): Promise<void> {
+  const urls = await resolveRunningUrls(dir);
+  if (!urls) {
+    clack.log.warn(
+      `Stack is up, but ${dir}/.env is missing or unreadable — skipping the status banner.\n` +
+        `Manage the stack with \`appstrate logs -f\` / \`appstrate stop\`.`,
+    );
+    return;
+  }
+  await reportRunning({ dir, projectName, appUrl: urls.appUrl, healthUrl: urls.healthUrl });
+}
+
+/** `appstrate start` → `docker compose up -d` (idempotent), then the banner. */
 export async function startCommand(opts: LifecycleOptions = {}): Promise<void> {
   const { dir, projectName } = await resolveInstall(opts);
   await runCompose(dir, projectName, ["up", "-d"]);
+  await reportRunningStack(dir, projectName);
 }
 
 /** `appstrate stop` → `docker compose stop` (containers off, volumes intact). */
@@ -104,10 +129,11 @@ export async function stopCommand(opts: LifecycleOptions = {}): Promise<void> {
   await runCompose(dir, projectName, ["stop"]);
 }
 
-/** `appstrate restart` → `docker compose restart`. */
+/** `appstrate restart` → `docker compose restart`, then the banner. */
 export async function restartCommand(opts: LifecycleOptions = {}): Promise<void> {
   const { dir, projectName } = await resolveInstall(opts);
   await runCompose(dir, projectName, ["restart"]);
+  await reportRunningStack(dir, projectName);
 }
 
 /**

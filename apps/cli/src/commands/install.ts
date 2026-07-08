@@ -74,6 +74,7 @@ import {
   readProjectFile,
   writeProjectFile,
 } from "../lib/install/project.ts";
+import { appUrlForPort, runningBanner } from "../lib/install/report.ts";
 import {
   formatComposeUpgradeResult,
   resolveComposeUpgradeDir,
@@ -137,10 +138,6 @@ export interface InstallOptions {
 }
 
 const DEFAULT_PORT = 3000;
-
-function appUrlForPort(port: number): string {
-  return port === 80 ? "http://localhost" : `http://localhost:${port}`;
-}
 
 /**
  * Write a single line directly to the controlling terminal, bypassing
@@ -1780,16 +1777,9 @@ async function installDockerTier(
   printBootstrapFollowup(appUrl, opts.bootstrap);
   // The lifecycle commands (#343) read `<dir>/.appstrate/project.json`
   // to find the right `--project-name`, so the user never has to type
-  // (or remember) the derived hash. We pass `--dir` only when the
-  // install isn't at the default `~/appstrate`, to keep the hint short
-  // for the most common path.
-  const dirHint = resolve(dir) === resolve(defaultInstallDir()) ? "" : ` --dir ${dir}`;
-  outro(
-    `Appstrate is running at ${appUrl}.\n` +
-      `Manage the stack:\n` +
-      `  appstrate logs -f${dirHint}\n` +
-      `  appstrate stop${dirHint}\n` +
-      `  appstrate uninstall${dirHint}\n` +
-      `Raw form (for advanced cases): docker compose --project-name ${project.name} <verb> from ${dir}.`,
-  );
+  // (or remember) the derived hash. The banner is health-verified
+  // above (waitForAppstrate inside the rollback block), so we print it
+  // directly rather than through `reportRunning` (which re-checks) —
+  // start/restart use that path since they have no prior healthcheck.
+  outro(runningBanner({ appUrl, projectName: project.name, dir }));
 }
