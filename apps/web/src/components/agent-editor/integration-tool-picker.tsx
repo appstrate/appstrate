@@ -25,6 +25,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
+  apiUploadToolNameFor,
   expandScopesGranted,
   isApiCallToolName,
   isApiUploadToolName,
@@ -349,28 +350,42 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
       )}
       {!wildcardSelected &&
         isApiCall &&
-        apiCallEntries.map((tool) => (
-          <label key={tool.name} className="flex cursor-pointer items-start gap-2">
-            <Checkbox
-              checked={selectedTools.has(tool.name)}
-              onCheckedChange={() => toggleApiCallTool(tool.name)}
-              data-testid={
-                apiCallEntries.length > 1
-                  ? `integ-apicall-${packageId}-${tool.name}`
-                  : `integ-apicall-${packageId}`
-              }
-            />
-            <span className="flex flex-col">
-              <span className="text-xs font-medium">
-                {t("agentEditor.integrations.apiCall.label")}
-                {apiCallEntries.length > 1 ? ` · ${tool.name}` : ""}
+        apiCallEntries.map((tool) => {
+          // The `api_upload` companion has no checkbox of its own — it is
+          // granted with its api_call sibling. Say so in the row's own label
+          // rather than leaving the extra capability invisible.
+          const withUpload = catalogToolNames.includes(apiUploadToolNameFor(tool.name));
+          return (
+            <label key={tool.name} className="flex cursor-pointer items-start gap-2">
+              <Checkbox
+                checked={selectedTools.has(tool.name)}
+                onCheckedChange={() => toggleApiCallTool(tool.name)}
+                data-testid={
+                  apiCallEntries.length > 1
+                    ? `integ-apicall-${packageId}-${tool.name}`
+                    : `integ-apicall-${packageId}`
+                }
+              />
+              <span className="flex flex-col">
+                <span className="text-xs font-medium">
+                  {t(
+                    withUpload
+                      ? "agentEditor.integrations.apiCall.labelWithUpload"
+                      : "agentEditor.integrations.apiCall.label",
+                  )}
+                  {apiCallEntries.length > 1 ? ` · ${tool.name}` : ""}
+                </span>
+                <span className="text-muted-foreground text-[11px]">
+                  {t(
+                    withUpload
+                      ? "agentEditor.integrations.apiCall.descriptionWithUpload"
+                      : "agentEditor.integrations.apiCall.description",
+                  )}
+                </span>
               </span>
-              <span className="text-muted-foreground text-[11px]">
-                {t("agentEditor.integrations.apiCall.description")}
-              </span>
-            </span>
-          </label>
-        ))}
+            </label>
+          );
+        })}
       {!wildcardSelected && hasToolCatalog && (
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">

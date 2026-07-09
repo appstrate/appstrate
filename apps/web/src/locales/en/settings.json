@@ -843,6 +843,8 @@
   "agentEditor.integrations.authKey.default": "Default (per integration)",
   "agentEditor.integrations.apiCall.label": "Generic API call (api_call)",
   "agentEditor.integrations.apiCall.description": "Lets the agent make authenticated HTTP calls to this integration. Credentials are injected server-side; the scopes below bound the access.",
+  "agentEditor.integrations.apiCall.labelWithUpload": "Generic API call + file upload (api_call + api_upload)",
+  "agentEditor.integrations.apiCall.descriptionWithUpload": "Lets the agent make authenticated HTTP calls to this integration, and upload large workspace files over a chunked resumable protocol (api_upload). Both tools are granted together: every chunk travels through api_call. Credentials are injected server-side; the scopes below bound the access.",
   "agentEditor.integrations.wildcard.label": "Include all upstream tools (advanced)",
   "agentEditor.integrations.wildcard.description": "Expose every tool the remote MCP server advertises to the agent, including tools that aren't enumerated in the manifest. Available only when the integration permits it.",
   "agentEditor.integrations.wildcard.scopesNotice": "OAuth scopes will use the selected auth's default scopes — per-tool selection and scope inference are disabled.",
