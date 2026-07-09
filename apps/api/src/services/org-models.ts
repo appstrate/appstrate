@@ -263,19 +263,33 @@ export async function getOrgModel(orgId: string, id: string): Promise<OrgModelIn
  * filtering. {@link getOrgModel} deliberately drops rows whose backing
  * credential is unreachable, which makes it unusable as the *pre-state* read
  * for update-time invariant checks (a row must be inspectable even when its
- * credential is dead). Exposes exactly the three fields the alias invariants
- * need. System (env) models are not rows — callers gate on `isSystemModel`
- * first.
+ * credential is dead). Exposes exactly the fields the update-time invariants
+ * need: alias fields, plus the stored modelId + token-budget overrides (the
+ * effective-state `maxTokens < contextWindow` check). System (env) models are
+ * not rows — callers gate on `isSystemModel` first.
  */
 export async function getOrgModelRow(
   orgId: string,
   id: string,
-): Promise<{ label: string; credentialId: string; aliased: boolean } | undefined> {
+): Promise<
+  | {
+      label: string;
+      credentialId: string;
+      aliased: boolean;
+      modelId: string;
+      contextWindow: number | null;
+      maxTokens: number | null;
+    }
+  | undefined
+> {
   const [row] = await db
     .select({
       label: orgModels.label,
       credentialId: orgModels.credentialId,
       aliased: orgModels.aliased,
+      modelId: orgModels.modelId,
+      contextWindow: orgModels.contextWindow,
+      maxTokens: orgModels.maxTokens,
     })
     .from(orgModels)
     .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, id)] }))

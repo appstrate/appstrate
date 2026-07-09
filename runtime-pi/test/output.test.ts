@@ -11,8 +11,8 @@ import {
  * Tests for the `output` runtime tool — now a transport-neutral MCP tool
  * definition (`@appstrate/core/runtime-tool-defs`) rather than a Pi-SDK
  * extension. The output JSON Schema is passed explicitly (no longer read
- * from `process.env.OUTPUT_SCHEMA`): the schema constrains the `data`
- * argument (constrained decoding) AND is validated at call time. The call
+ * from `process.env.OUTPUT_SCHEMA`): the schema is advertised as the `data`
+ * argument's input schema AND is AJV-validated at call time. The call
  * returns its canonical `output.emitted` event under the result `_meta`
  * key for the host to re-emit into the run sink.
  */

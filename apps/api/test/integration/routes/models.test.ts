@@ -19,6 +19,7 @@ import { db } from "@appstrate/db/client";
 import { orgModels, organizations } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
+import { listCatalogModels } from "../../../src/services/pricing-catalog.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
@@ -308,6 +309,43 @@ describe("Models API", () => {
         }),
       });
       expect(res.status).toBe(400);
+    });
+
+    it("rejects a lone maxTokens override that exceeds the catalog contextWindow (effective state)", async () => {
+      // The Zod refine only fires when both fields ride together. An omitted
+      // contextWindow falls back to the live catalog at read/run time, so the
+      // effective pairing must be checked against the catalog value.
+      const credentialId = await createProviderKey();
+      const catalogModel = listCatalogModels("openai").find((m) => m.contextWindow != null)!;
+
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Over Budget",
+          modelId: catalogModel.id,
+          credentialId,
+          maxTokens: catalogModel.contextWindow,
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("contextWindow");
+    });
+
+    it("accepts a lone maxTokens for a model unknown to the catalog (nothing to compare)", async () => {
+      const credentialId = await createProviderKey();
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Uncatalogued",
+          modelId: "no-such-catalog-model-zq7",
+          credentialId,
+          maxTokens: 10_000_000,
+        }),
+      });
+      expect(res.status).toBe(201);
     });
 
     it("rejects a needs-reconnection credential with 400 before inserting (explicit label path)", async () => {
@@ -600,6 +638,126 @@ describe("Models API", () => {
       const body = (await res.json()) as { enabled?: boolean; label?: string };
       expect(body.enabled).toBe(false);
       expect(body.label).toBe("Appstrate Medium");
+    });
+
+    it("rejects a lone maxTokens that meets or exceeds the stored contextWindow override", async () => {
+      // The Zod refine only sees the payload — the effective pairing is
+      // stored-override vs new-override.
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Budgeted",
+          modelId: "no-such-catalog-model-b1",
+          credentialId,
+          contextWindow: 100_000,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ maxTokens: 100_000 }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("contextWindow");
+
+      // Rejected before landing — no override stored.
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.maxTokens).toBeNull();
+    });
+
+    it("rejects a lone contextWindow that dips below the stored maxTokens override, accepts a valid one", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Shrinking",
+          modelId: "no-such-catalog-model-b2",
+          credentialId,
+          contextWindow: 100_000,
+          maxTokens: 50_000,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const reject = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ contextWindow: 50_000 }),
+      });
+      expect(reject.status).toBe(400);
+
+      const accept = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ contextWindow: 60_000 }),
+      });
+      expect(accept.status).toBe(200);
+    });
+
+    it("rejects a modelId change that swaps the catalog under a kept maxTokens override", async () => {
+      // The row's maxTokens was valid against an uncatalogued model (nothing
+      // to compare); re-pointing modelId at a catalog entry pairs that kept
+      // override with the new catalog contextWindow.
+      const credentialId = await createProviderKey();
+      const catalogModel = listCatalogModels("openai").find((m) => m.contextWindow != null)!;
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Repointed",
+          modelId: "no-such-catalog-model-b3",
+          credentialId,
+          maxTokens: catalogModel.contextWindow,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: catalogModel.id }),
+      });
+      expect(res.status).toBe(400);
+
+      // Rejected before landing — modelId unchanged.
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.modelId).toBe("no-such-catalog-model-b3");
+    });
+
+    it("rejects clearing a contextWindow override when the catalog fallback violates the kept maxTokens", async () => {
+      // `contextWindow: null` clears the override — the effective value falls
+      // back to the live catalog, which must still beat the kept maxTokens.
+      const credentialId = await createProviderKey();
+      const catalogModel = listCatalogModels("openai").find((m) => m.contextWindow != null)!;
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Cleared",
+          modelId: catalogModel.id,
+          credentialId,
+          contextWindow: 10_000_000,
+          maxTokens: catalogModel.contextWindow,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ contextWindow: null }),
+      });
+      expect(res.status).toBe(400);
     });
   });
 

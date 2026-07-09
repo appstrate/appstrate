@@ -101,9 +101,10 @@ export interface BuildRuntimeToolDefsOptions {
   /** Agent-selected runtime tools (`manifest.runtime_tools`). */
   runtimeTools?: readonly string[];
   /**
-   * Output JSON Schema. When set, `output`'s `data` argument is constrained
-   * to it (constrained decoding) and validated at call time. `null`/omitted
-   * leaves `output` accepting any JSON object.
+   * Output JSON Schema. When set, it becomes `output`'s `data` argument
+   * schema (the model sees it in the tool definition) and calls are
+   * AJV-validated against it. `null`/omitted leaves `output` accepting any
+   * JSON object.
    */
   outputSchema?: Record<string, unknown> | null;
 }

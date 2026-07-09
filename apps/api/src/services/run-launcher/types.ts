@@ -40,7 +40,10 @@ export interface AppstrateRunPlan {
   bundle: Bundle;
   /** Raw Mustache prompt from the bundle. */
   rawPrompt: string;
-  /** Output JSON Schema (used for native LLM constrained decoding). */
+  /**
+   * Output JSON Schema — becomes the input schema of the `output` runtime
+   * tool (AJV-validated at call time, re-validated at ingestion).
+   */
   outputSchema?: JSONSchemaObject;
   /**
    * Platform runtime tools the agent selected (`manifest.runtime_tools`):

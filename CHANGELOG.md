@@ -28,6 +28,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   flipped to `aliased` — or re-pointed to an oauth credential — into a state
   creation rejects. The subscription chat resolver also fail-closes on a
   legacy aliased oauth row instead of executing its hidden binding.
+- **`maxTokens < contextWindow` enforced on the effective model state (#875)**
+  — `POST`/`PUT /api/models` used to check the token-budget invariant only
+  when both fields rode in the same payload; a lone `maxTokens` override could
+  exceed the catalog (or stored) `contextWindow`, or a `modelId`/credential
+  change could swap the catalog defaults under a kept override. Both routes
+  now validate the effective pairing (payload → stored override → live
+  catalog) before writing.
 
 ### Security
 

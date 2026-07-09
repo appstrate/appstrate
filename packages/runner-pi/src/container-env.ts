@@ -58,7 +58,7 @@ export interface RuntimePiEnvOptions {
    * providers and use a static API key.
    */
   noSidecar?: boolean;
-  /** Optional JSON Schema injected for constrained decoding. */
+  /** Optional JSON Schema — becomes the `output` runtime tool's `data` argument schema. */
   outputSchema?: unknown;
   /** Forward-proxy URL reachable from the agent container. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
   forwardProxyUrl?: string;

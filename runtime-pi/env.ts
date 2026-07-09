@@ -58,7 +58,10 @@ export interface RuntimeEnv {
    * forward `AGENT_TIMEOUT_SECONDS` — no runner-side enforcement.
    */
   timeoutSeconds?: number;
-  /** Optional output JSON schema for constrained decoding (raw string — Pi SDK consumes it directly). */
+  /**
+   * Optional output JSON schema (raw string) — becomes the `output` runtime
+   * tool's `data` argument schema, AJV-validated at call time.
+   */
   outputSchemaRaw?: string;
   /**
    * W3C `traceparent` value (header wire format). When the platform

@@ -22,6 +22,8 @@ import {
   loadModel,
   deriveModelLabel,
   projectAliasedModel,
+  resolveCatalogDefaults,
+  type CatalogDefaults,
 } from "../services/org-models.ts";
 import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
 import { checkAliasInvariants, type AliasInvariantViolation } from "@appstrate/core/model-swap";
@@ -30,6 +32,7 @@ import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   getOrgModelProviderCredential,
   loadInferenceCredentials,
+  loadCredentialMetadata,
 } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -162,6 +165,26 @@ function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiSha
   }
 }
 
+/**
+ * Canonical model invariant (`input + output <= context`) enforced on the
+ * EFFECTIVE state. The Zod refines above only fire when both fields ride in
+ * the same payload — a lone `maxTokens` override must be checked against the
+ * value it will actually be paired with at read/run time (the stored override
+ * or the live catalog), and vice versa. `null`/absent on either side (model
+ * unknown to the catalog) means there is nothing to compare against — allow.
+ */
+function throwOnTokenBudgetViolation(
+  maxTokens: number | null | undefined,
+  contextWindow: number | null | undefined,
+): void {
+  if (maxTokens != null && contextWindow != null && maxTokens >= contextWindow) {
+    throw invalidRequest(
+      `maxTokens (${maxTokens}) must be strictly less than the effective contextWindow (${contextWindow})`,
+      "maxTokens",
+    );
+  }
+}
+
 export function createModelsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -239,6 +262,15 @@ export function createModelsRouter() {
           creds.apiShape,
         );
       }
+      // Token-budget invariant on the EFFECTIVE state: an override omitted
+      // from the payload falls back to the live catalog at read/run time, so
+      // a lone `maxTokens` (or a lone `contextWindow`) must be checked
+      // against the catalog value it will be paired with.
+      const catalogDefaults = resolveCatalogDefaults(creds.providerId, modelId);
+      throwOnTokenBudgetViolation(
+        maxTokens ?? catalogDefaults.maxTokens,
+        contextWindow ?? catalogDefaults.contextWindow,
+      );
       // Label is optional on the wire — derive from the catalog when the
       // caller omits it. Needs the credential's providerId to pick the
       // right catalog (handles `catalogProviderId` for OAuth wrappers).
@@ -616,6 +648,37 @@ export function createModelsRouter() {
           authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
         }),
         creds.apiShape,
+      );
+    }
+
+    // Token-budget invariant on the EFFECTIVE post-update state. The Zod
+    // refine only sees the payload: a lone `maxTokens` can exceed the stored
+    // (or catalog) contextWindow, a lone `contextWindow` can dip below the
+    // stored maxTokens, and a `modelId`/`credentialId` change swaps the
+    // catalog defaults under a kept override. Gated on the budget-relevant
+    // fields so a legacy-invalid row can still be disabled or relabelled.
+    if (
+      data.maxTokens !== undefined ||
+      data.contextWindow !== undefined ||
+      data.modelId !== undefined ||
+      data.credentialId !== undefined
+    ) {
+      const effectiveModelId = data.modelId ?? current.modelId;
+      // Metadata-only provider resolution — no decrypt, no reachability
+      // probe: the catalog lookup must work even when the row's credential
+      // is dead. A gone credential/provider yields no catalog defaults and
+      // the check runs on the stored overrides alone.
+      const providerId =
+        newCreds?.providerId ??
+        (await loadCredentialMetadata(current.credentialId, orgId))?.providerId;
+      const catalogDefaults: CatalogDefaults = providerId
+        ? resolveCatalogDefaults(providerId, effectiveModelId)
+        : {};
+      throwOnTokenBudgetViolation(
+        (data.maxTokens === undefined ? current.maxTokens : data.maxTokens) ??
+          catalogDefaults.maxTokens,
+        (data.contextWindow === undefined ? current.contextWindow : data.contextWindow) ??
+          catalogDefaults.contextWindow,
       );
     }
 

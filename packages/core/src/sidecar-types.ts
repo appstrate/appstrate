@@ -92,7 +92,8 @@ export interface SidecarLaunchSpec {
   /**
    * Output JSON Schema (`manifest.output.schema`). Forwarded so the
    * sidecar's `output` runtime tool exposes it as the `data` argument
-   * schema (constrained decoding) and validates against it at call time.
+   * schema (visible to the model in the tool definition) and AJV-validates
+   * calls against it.
    * Serialised as the `OUTPUT_SCHEMA` env var. Omitted when the agent
    * declares no output schema.
    */
