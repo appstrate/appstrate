@@ -61,12 +61,14 @@ export async function buildAgentDetailDto(
   // Version-aware projection (issue #770). `draft`/omitted reads the live
   // manifest; a concrete version substitutes the published manifest + prompt
   // via the same resolver the run uses, so the detail (config/input/integrations)
-  // matches what the run will execute. Skills are pinned per-version from the
-  // version manifest's `dependencies.skills` map (the resolved `agent.skills`
-  // closure is the draft's — id + range is what the dependency-override UI needs).
+  // matches what the run will execute. Skills are read straight off the version
+  // manifest's `dependencies.skills` map rather than off the resolver's
+  // catalog-resolved `agent.skills`: the dependency-override UI needs every
+  // DECLARED id + range, including one whose package is absent from the org
+  // catalog (which the catalog resolution necessarily drops).
   const versionSel = opts.version?.trim();
   const versioned = !!versionSel && versionSel !== VERSION_SELECTOR_DRAFT;
-  const effective = versioned ? await resolveAgentRunVersion(agent, versionSel) : null;
+  const effective = versioned ? await resolveAgentRunVersion(agent, versionSel, orgId) : null;
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
 

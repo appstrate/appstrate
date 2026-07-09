@@ -422,7 +422,7 @@ export async function triggerScheduledRun(
     let agent: LoadedPackage;
     let overrideVersionLabel: string | undefined;
     try {
-      const resolved = await resolveAgentRunVersion(draftAgent, overrides.versionOverride);
+      const resolved = await resolveAgentRunVersion(draftAgent, overrides.versionOverride, orgId);
       agent = resolved.agent;
       overrideVersionLabel = resolved.overrideVersionLabel;
     } catch (err) {

@@ -102,6 +102,7 @@ export function createRunsRouter() {
       const { agent: effectiveAgent, overrideVersionLabel } = await resolveAgentRunVersion(
         agent,
         versionOverride,
+        orgId,
       );
 
       // Single canonical prefix — `run_` — shared with inline + remote origins.

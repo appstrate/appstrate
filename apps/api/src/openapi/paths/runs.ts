@@ -23,7 +23,14 @@ export const runsPaths = {
         "The effective model is resolved at run creation with precedence: request `modelId` > " +
         "agent model setting > org default model > system default. Without an explicit `modelId`, " +
         "a change to the org default model between triggers applies to the next run — send " +
-        "`modelId` to pin a specific model per run.",
+        "`modelId` to pin a specific model per run. " +
+        "A run against a published version assembles its bundle from stored artifacts before " +
+        "the container starts, so a bad artifact fails the trigger rather than the run: `422 " +
+        "dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the " +
+        "stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by " +
+        "`AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no " +
+        "longer match the integrity hash recorded at publish time — republish the package). " +
+        "No run row is created in any of those cases.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
