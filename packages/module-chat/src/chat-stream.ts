@@ -27,8 +27,9 @@ import {
 } from "ai";
 import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
-import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { logger } from "./logger.ts";
+import { applyOperationIndexPolicy } from "./operation-index.ts";
+export { applyOperationIndexPolicy } from "./operation-index.ts";
 import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } from "./llm.ts";
 import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
@@ -50,30 +51,6 @@ import {
   mergeTurnMetadata,
   type AppstrateTurnMetadata,
 } from "@appstrate/core/chat-turn-metadata";
-
-// Heading that fences the generated operation index at the tail of the platform
-// MCP server instructions (emitted by apps/api/src/modules/mcp/router.ts). We
-// split on this shared literal to drop the index — several KB re-sent on every
-// step — for providers without a prompt cache (Mistral), where it would be
-// re-sent uncached every step. Cached providers (Claude SDK, Anthropic via
-// cache_control, OpenAI auto-prefix) keep it.
-
-/**
- * Strip the trailing operation index from the system prompt for providers
- * without a prompt cache, where the multi-KB index would be re-sent uncached on
- * every step: Mistral. Everyone else keeps it. Tools are unaffected — the agent
- * always has search_operations for discovery when the index is absent.
- */
-export function applyOperationIndexPolicy(system: string, apiShape: string): string {
-  // Mistral has no prompt cache; codex (chatgpt.com backend) is not
-  // prompt-cached the way Anthropic/OpenAI are — both would re-send the
-  // multi-KB index uncached every step, so drop it for them.
-  const drop = apiShape === "mistral-conversations" || apiShape === "openai-codex-responses";
-  if (drop && system.includes(OPERATION_INDEX_HEADING)) {
-    return system.slice(0, system.indexOf(OPERATION_INDEX_HEADING)).trimEnd();
-  }
-  return system;
-}
 
 /**
  * RFC 9457 `401` returned when the chosen subscription model's oauth credential

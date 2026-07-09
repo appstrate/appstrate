@@ -32,8 +32,8 @@ import {
   type Model,
 } from "@appstrate/runner-pi";
 import { mergeTurnMetadata, CHAT_MAX_STEPS } from "@appstrate/core/chat-turn-metadata";
-import { OPERATION_INDEX_HEADING, type SubscriptionChatModel } from "@appstrate/core/chat-contract";
-import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
+import type { SubscriptionChatModel, ChatUsageRecord } from "@appstrate/core/chat-contract";
+import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
@@ -137,11 +137,11 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
 
         // MCP server usage guidance is appended to the system prompt, then the
         // (uncacheable) operation index is dropped for providers without a
-        // prompt cache — mirrors the ai-sdk path's `applyOperationIndexPolicy`.
+        // prompt cache — the same shared policy the ai-sdk path applies.
         let system = mcpTools.instructions
           ? `${input.system}\n\n${mcpTools.instructions}`
           : input.system;
-        system = dropOperationIndexForUncached(system, model.apiShape);
+        system = applyOperationIndexPolicy(system, model.apiShape);
 
         const resourceLoader = new DefaultResourceLoader({
           cwd: "/tmp",
@@ -246,18 +246,4 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
   return createUIMessageStreamResponse({
     stream: releaseOnClose<UIMessageChunk>(stream, () => slot.release()),
   });
-}
-
-/**
- * Drop the trailing operation index (fenced by {@link OPERATION_INDEX_HEADING})
- * for providers without a prompt cache — the multi-KB index would otherwise be
- * re-sent uncached every step. Mirrors `applyOperationIndexPolicy` on the ai-sdk
- * path; kept local so the engine owns the full system-prompt assembly.
- */
-function dropOperationIndexForUncached(system: string, apiShape: string): string {
-  const uncached = apiShape === "mistral-conversations" || apiShape === "openai-codex-responses";
-  if (uncached && system.includes(OPERATION_INDEX_HEADING)) {
-    return system.slice(0, system.indexOf(OPERATION_INDEX_HEADING)).trimEnd();
-  }
-  return system;
 }

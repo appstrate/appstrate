@@ -490,14 +490,13 @@ export interface IntegrationSpawnSpec {
  *
  *   - `api_key`: the agent SDK builds the auth header with a placeholder and
  *     the sidecar swaps the placeholder for the real key.
- *   - `oauth`: the no-forging OAuth path for an agent driver that signs its OWN
- *     provider fingerprint (the official Claude Agent SDK binary). The sidecar
- *     fetches a fresh access token from the platform
- *     (`GET /internal/oauth-token/:credentialId`), swaps the request bearer for
- *     it, and ensures the OAuth beta flag — but forges nothing (no identity
- *     headers, no body transforms). There is deliberately no fingerprint-forging
- *     mode: a subscription provider whose driver can't sign its own fingerprint
- *     cannot execute.
+ *   - `oauth`: the no-forging OAuth path for subscription runs. The in-container
+ *     Pi engine (`pi-ai`) emits the provider's own subscription request shape
+ *     from its OAuth-shaped placeholder token; the sidecar fetches a fresh
+ *     access token from the platform (`GET /internal/oauth-token/:credentialId`)
+ *     and swaps the request bearer for it verbatim — no identity headers, no
+ *     body transforms. There is deliberately no fingerprint-forging mode: the
+ *     platform itself never synthesises a provider fingerprint.
  */
 export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
 

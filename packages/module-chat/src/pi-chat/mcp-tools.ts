@@ -21,6 +21,7 @@ import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-tra
 import { Type, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
+import { redactConnectPayload } from "../platform-mcp.ts";
 import { logger } from "../logger.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
@@ -31,26 +32,54 @@ interface PiToolResult {
   details: unknown;
 }
 
-/** Wrap an arbitrary payload as a Pi tool result (text block the LLM sees + details). */
-function toPiToolResult(payload: unknown): PiToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(payload) }], details: payload };
+/**
+ * Wrap an arbitrary payload as a Pi tool result. Channel split mirrors the
+ * ai-sdk path's `wrapToolModelOutputs`: `content` is what pi-ai serializes to
+ * the MODEL, so connect links are redacted there; `details` never reaches the
+ * model (pi-ai sends only `content` upstream) and carries the FULL payload for
+ * the UI, whose connect-card extractor walks the whole tool output.
+ */
+export function toPiToolResult(payload: unknown): PiToolResult {
+  return {
+    content: [{ type: "text", text: JSON.stringify(redactConnectPayload(payload)) }],
+    details: payload,
+  };
 }
 
 /** Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (text/image blocks only). */
-function mcpResultToPi(result: {
+export function mcpResultToPi(result: {
   content: Array<Record<string, unknown>>;
   structuredContent?: unknown;
 }): PiToolResult {
   const content = result.content.map((c) => {
-    if (c.type === "text") return { type: "text" as const, text: String(c.text ?? "") };
+    // MODEL-visible channel — scrub connect links from JSON text (same
+    // semantics as the ai-sdk path's redaction: valid JSON is redacted and
+    // re-stringified only when something changed; non-JSON text passes
+    // through byte-identical).
+    if (c.type === "text")
+      return { type: "text" as const, text: redactJsonText(String(c.text ?? "")) };
     // Pi tool results the LLM reads are text/image; render anything else as a
     // text pointer so the model still sees it (parity with the runtime forwarder).
     if (c.type === "image") {
       return { type: "text" as const, text: `[image ${String(c.mimeType ?? "")}]` };
     }
-    return { type: "text" as const, text: JSON.stringify(c) };
+    return { type: "text" as const, text: JSON.stringify(redactConnectPayload(c)) };
   });
-  return { content, details: result.structuredContent };
+  // `details` is UI-only (never serialized to the model): keep the FULL result
+  // so the connect card can extract the unredacted connect_url.
+  return { content, details: result.structuredContent ?? result };
+}
+
+/** Redact connect links inside a JSON text block; non-JSON text is untouched. */
+function redactJsonText(text: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text; // Non-JSON text: leave byte-identical, never regex-mangle.
+  }
+  const redacted = redactConnectPayload(parsed);
+  return redacted === parsed ? text : JSON.stringify(redacted);
 }
 
 export interface PlatformMcpTools {

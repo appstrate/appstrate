@@ -42,14 +42,16 @@ Appstrate. The platform issues **zero** subscription API calls of its own for
 credential-testing or model discovery (see §1.4); every request a subscription
 token authenticates is emitted by Pi at run time.
 
-| Provider      | Chat                            | Agents (sandboxed run) |
-| ------------- | ------------------------------- | ---------------------- |
-| `claude-code` | Pi chat engine (bearer-swapped) | Pi engine              |
-| `codex`       | _none_ — no chat surface        | Pi engine              |
+| Provider      | Chat                        | Agents (sandboxed run)          |
+| ------------- | --------------------------- | ------------------------------- |
+| `claude-code` | Pi chat engine (in-process) | Pi engine (sidecar bearer-swap) |
+| `codex`       | Pi chat engine (in-process) | Pi engine (sidecar bearer-swap) |
 
-Codex has **no chat surface** (it contributes no `chatHandler`); it is agent-run
-only. Both subscription providers run through the same Pi loop and the same
-sidecar `/llm` delivery path.
+Both subscription providers share the SAME two paths: the generic in-process Pi
+chat engine (`@appstrate/module-chat`, `src/pi-chat/` — the real token stays in
+the platform process, registered in an in-memory AuthStorage) and the sandboxed
+Pi run loop (placeholder token in the container, verbatim bearer-swap on the
+sidecar `/llm` path). There is no per-provider engine or handler anywhere.
 
 ### 1.2 No fingerprint forging
 

@@ -32,21 +32,18 @@ inachevé.
 - **Rate limiting** : `rateLimit()`/`idempotency()` sont internes à apps/api ; un module npm ne peut pas encore les appliquer tant qu'ils ne sont pas exportés.
 - **End-users** : `endUserGrantable` reste désactivé jusqu'à l'arrivée du chat embarqué B2B2C.
 
-### Écarts de parité entre moteurs (ai-sdk vs subscription)
+### Parité entre moteurs (ai-sdk vs subscription)
 
-Le moteur `ai-sdk` intercepte chaque tool result avant le modèle ; le moteur
-subscription (le moteur Pi in-process, `src/pi-chat/`) exécute sa boucle
-d'outils en interne, sans hook équivalent. Une protection est donc
-**ai-sdk uniquement** :
+Les deux protections côté modèle sont couvertes sur les DEUX moteurs :
 
-- **Redaction des liens de connexion** (`redactConnectLinks`, `platform-mcp.ts`) :
-  côté subscription, le modèle voit le `connect_url` brut dans le tool result —
-  seule l'instruction du serveur MCP (« ne jamais coller le lien ») le retient.
-  Une redaction serveur casserait le bouton de connexion : l'UI extrait l'offre
-  du même tool result (`extract-auth-offer`).
-- **Politique d'index d'opérations** (`applyOperationIndexPolicy`) : couverte
-  des deux côtés — le moteur Pi la reflète localement
-  (`dropOperationIndexForUncached`, `src/pi-chat/engine.ts`).
+- **Redaction des liens de connexion** : côté ai-sdk via `wrapToolModelOutputs`
+  (`platform-mcp.ts`) ; côté subscription via le forwarder Pi
+  (`src/pi-chat/mcp-tools.ts`) — le canal `content` (seul sérialisé vers le
+  modèle par pi-ai) est redacté, tandis que `details` conserve le payload
+  complet pour que l'UI extraie l'offre de connexion (`extract-auth-offer`).
+- **Politique d'index d'opérations** : helper unique partagé
+  (`applyOperationIndexPolicy`, `src/operation-index.ts`) importé par les deux
+  moteurs.
 
 ## Configuration (variables d'environnement)
 
