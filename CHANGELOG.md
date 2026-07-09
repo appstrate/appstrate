@@ -21,6 +21,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **OIDC cross-context PKCE resume (#852)** — the end-user OAuth flow survives
   a cross-context resume (invite-signup state mismatch) instead of failing the
   PKCE exchange.
+- **`PUT /api/models/:id` enforces the model-alias invariants (#875)** — the
+  update route now runs the same alias checks as create on the effective
+  post-update state (explicit label, body-`model` protocol, no
+  oauth-subscription credential), closing a bypass where a row could be
+  flipped to `aliased` — or re-pointed to an oauth credential — into a state
+  creation rejects. The subscription chat resolver also fail-closes on a
+  legacy aliased oauth row instead of executing its hidden binding.
 
 ### Security
 

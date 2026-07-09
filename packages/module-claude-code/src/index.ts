@@ -24,9 +24,10 @@
  * calls to validate a credential or discover models. Both `claude-code` runs
  * and the chat execute on the single generic Pi engine
  * (`@mariozechner/pi-coding-agent` / `pi-ai`) — pi-ai emits the Anthropic OAuth
- * request shape natively from the token, and the sidecar (run) / in-process
- * token resolution (chat) only swap the bearer + ensure the `oauth-2025-04-20`
- * beta. The provider declares no `oauthWireFormat`; the module's only `hooks`
+ * request shape natively from the token, including the `oauth-2025-04-20` beta
+ * header; the sidecar (run) / in-process token resolution (chat) only swap the
+ * bearer and add or modify no `anthropic-beta` header.
+ * The provider declares no `oauthWireFormat`; the module's only `hooks`
  * entry is `validateCredential`, an OFFLINE check (no network) that confirms
  * the bearer is well-formed and unexpired — its presence is what makes
  * credential validation offline. Model discovery persists the static

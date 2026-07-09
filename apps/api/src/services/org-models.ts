@@ -259,6 +259,31 @@ export async function getOrgModel(orgId: string, id: string): Promise<OrgModelIn
 }
 
 /**
+ * Raw custom-model row fetch — NO credential resolution, NO reachability
+ * filtering. {@link getOrgModel} deliberately drops rows whose backing
+ * credential is unreachable, which makes it unusable as the *pre-state* read
+ * for update-time invariant checks (a row must be inspectable even when its
+ * credential is dead). Exposes exactly the three fields the alias invariants
+ * need. System (env) models are not rows — callers gate on `isSystemModel`
+ * first.
+ */
+export async function getOrgModelRow(
+  orgId: string,
+  id: string,
+): Promise<{ label: string; credentialId: string; aliased: boolean } | undefined> {
+  const [row] = await db
+    .select({
+      label: orgModels.label,
+      credentialId: orgModels.credentialId,
+      aliased: orgModels.aliased,
+    })
+    .from(orgModels)
+    .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, id)] }))
+    .limit(1);
+  return row;
+}
+
+/**
  * Derive a model label when the caller doesn't supply one. Picks the catalog
  * label (`(catalogProviderId ?? providerId, modelId)`) and dedupes against
  * existing org rows by appending ` (2)`, ` (3)`, …  Unknown models fall back

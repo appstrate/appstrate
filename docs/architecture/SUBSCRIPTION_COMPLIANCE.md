@@ -81,9 +81,10 @@ rides through unchanged.
 The body is forwarded **byte-identical** — the oauth sidecar mode carries no
 body-rewrite capability at all (`LlmProxyOauthConfig` has no `modelSwap`). The
 platform's model-alias feature is **rejected for oauth-subscription providers**
-at alias creation (`POST /api/models` → 400) and again fail-closed at run
-launch, so no alias ever reaches this path. Aliases remain available on
-API-key providers, whose sidecar mode does the alias↔real body swap.
+at alias creation and update (`POST`/`PUT /api/models` → 400), again fail-closed
+at run launch, and refused by the subscription chat resolver — so no alias ever
+reaches this path. Aliases remain available on API-key providers, whose sidecar
+mode does the alias↔real body swap.
 
 The one honest narrowing: the upstream TLS request is made by the **sidecar's
 `fetch`** carrying Pi's forwarded headers, not by a vendor binary — so we do not

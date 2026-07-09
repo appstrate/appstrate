@@ -146,6 +146,18 @@
                       "type": "string",
                       "enum": ["healthy", "degraded", "unhealthy"]
                     },
+                    "version": {
+                      "type": "object",
+                      "properties": {
+                        "app": {
+                          "type": "string"
+                        },
+                        "commit": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["app"]
+                    },
                     "uptime_ms": {
                       "type": "number"
                     },
@@ -179,6 +191,10 @@
                 },
                 "example": {
                   "status": "healthy",
+                  "version": {
+                    "app": "v1.0.0-beta.38",
+                    "commit": "5bbe1d9"
+                  },
                   "uptime_ms": 3600000,
                   "checks": {
                     "database": {
@@ -8907,7 +8923,7 @@
         "operationId": "refreshModelProviderCredentialModels",
         "tags": ["Model Provider Credentials"],
         "summary": "Discover the models this credential serves",
-        "description": "Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at first run by the official binary. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
+        "description": "Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"

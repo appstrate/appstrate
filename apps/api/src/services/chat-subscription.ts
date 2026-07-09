@@ -57,6 +57,22 @@ export async function resolveSubscriptionChatModel(
     return { subscription: false };
   }
 
+  // Fail-closed on an aliased oauth-subscription row (issue #727). Such a row
+  // is an invalid state — alias creation AND update reject `aliased` for
+  // oauth2 providers, and the run launcher fail-closes on it too
+  // (`assertOauthRunNotAliased`) — but a legacy/hand-written row must not make
+  // chat quietly execute the real hidden binding while runs refuse it.
+  // Falling through to the generic ai-sdk path routes the turn to the LLM
+  // gateway, whose oauth-subscription rejection names the alias only.
+  if (resolved.aliased) {
+    logger.warn("chat: refusing aliased oauth-subscription model (invalid row)", {
+      orgId,
+      presetId,
+      providerId: resolved.providerId,
+    });
+    return { subscription: false };
+  }
+
   // An oauth2 model with no credential can never be spent — a reconnect (which
   // creates the credential) is the fix, so surface the reconnect prompt rather
   // than a raw error.

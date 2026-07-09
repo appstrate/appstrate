@@ -470,6 +470,137 @@ describe("Models API", () => {
       const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
       expect(row!.credentialId).toBe(credentialId);
     });
+
+    it("rejects flipping aliased on an oauth-subscription model — PUT enforces the same invariants as POST", async () => {
+      // Regression: PUT used to write `data` (incl. `aliased`) with no
+      // invariant check, so a non-aliased oauth model could become aliased by
+      // update — a state POST rejects, caught only late at run launch.
+      const oauth = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: "Test OAuth",
+        accessToken: "test-access",
+        refreshToken: "test-refresh",
+        expiresAt: null,
+        createdBy: ctx.user.id,
+      });
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Subscribed",
+          modelId: "test-model",
+          credentialId: oauth.id,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ aliased: true, label: "Masked" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(String(body.detail)).toContain("oauth-subscription");
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.aliased).toBe(false);
+    });
+
+    it("rejects flipping aliased without a fresh explicit label — the stored label may name the backing", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        // No label → derived from the catalog (names the backing model).
+        body: JSON.stringify({ modelId: "gpt-4o", credentialId }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      // Flip without a label — rejected (the derived label would leak).
+      const noLabel = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ aliased: true }),
+      });
+      expect(noLabel.status).toBe(400);
+      const body = (await noLabel.json()) as { detail?: string };
+      expect(String(body.detail)).toContain("label");
+
+      // Same flip with an explicit label — accepted (api-key, body-model shape).
+      const withLabel = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ aliased: true, label: "Appstrate Medium" }),
+      });
+      expect(withLabel.status).toBe(200);
+    });
+
+    it("rejects re-pointing an aliased model to an oauth-subscription credential", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: "gpt-4o",
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const oauth = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: "Test OAuth",
+        accessToken: "test-access",
+        refreshToken: "test-refresh",
+        expiresAt: null,
+        createdBy: ctx.user.id,
+      });
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: oauth.id }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(String(body.detail)).toContain("oauth-subscription");
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.credentialId).toBe(credentialId);
+    });
+
+    it("updates an already-aliased model without re-sending the label (explicit by construction)", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: "gpt-4o",
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ enabled: false }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { enabled?: boolean; label?: string };
+      expect(body.enabled).toBe(false);
+      expect(body.label).toBe("Appstrate Medium");
+    });
   });
 
   describe("PUT /api/models/default", () => {
