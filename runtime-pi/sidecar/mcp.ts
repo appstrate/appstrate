@@ -234,9 +234,16 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
 
 /**
  * MCP `_meta` key under which the sidecar surfaces token-budget
- * accounting to the agent runtime. Agent-side resolvers can read this
- * to display "X / Y tokens of run budget consumed" or to react to
- * structured truncation events.
+ * accounting to the agent runtime.
+ *
+ * NOTHING reads it today — no agent-side resolver, no runner, no test
+ * outside `sidecar/test/token-budget-integration.test.ts`. It is emitted
+ * for operators and for a future consumer ("X / Y tokens of run budget
+ * consumed", structured truncation events). Treat it as informational:
+ * the spill decisions it reports are already enforced sidecar-side and
+ * logged, so a client that drops `_meta` loses telemetry, not behaviour.
+ * Do not make it load-bearing without giving it a real reader — most MCP
+ * HTTP clients drop result `_meta` (see `META_DROPPED`).
  *
  * Distinct from {@link UPSTREAM_META_KEY} (which carries upstream
  * `{ status, headers }`) so a CallToolResult can carry both without
@@ -825,44 +832,28 @@ function buildSidecarTools(options: MountMcpOptions): {
     },
   } as const;
 
-  // Output schema for `{ns}__api_call` — describes the machine-readable
-  // `structuredContent` (NOT the human/LLM `content` blocks). Three
-  // disjoint shapes share it:
-  //   - plain calls: `{ status }` (attached by responseToToolResult
-  //     alongside the `_meta` upstream payload),
-  //   - `responseMode.toFile` (shaped agent-side): the full
-  //     `{ kind: "file", path, size, status }` descriptor,
-  //   - structured pre-flight refusals: `{ error: { code, … } }`
-  //     (e.g. PAYLOAD_TOO_LARGE).
-  // No property is `required`: the MCP SDK client validates
-  // `structuredContent` against this schema even on `isError` results,
-  // so requiring `status` would reject the error envelope.
-  const API_CALL_OUTPUT_SCHEMA = {
-    type: "object",
-    properties: {
-      status: {
-        type: "integer",
-        description: "Upstream HTTP status code. 0 = pre-flight failure (no upstream contact).",
-      },
-      kind: {
-        type: "string",
-        const: "file",
-        description: "Present when responseMode.toFile wrote the body to a workspace file.",
-      },
-      path: {
-        type: "string",
-        description: "Workspace-relative path the response body was written to (toFile mode).",
-      },
-      size: {
-        type: "integer",
-        description: "Response body size in bytes (toFile mode).",
-      },
-      error: {
-        type: "object",
-        description: "Structured pre-flight error envelope (e.g. code: PAYLOAD_TOO_LARGE).",
-      },
-    },
-  } as const;
+  // `{ns}__api_call` deliberately declares NO `outputSchema`.
+  //
+  // Declaring one is not free: the MCP SDK client then refuses any
+  // non-error result that lacks `structuredContent`, which forced this
+  // server to attach `structuredContent: { status }` to every response.
+  // Per the MCP spec `structuredContent` is a structured MIRROR of
+  // `content` — so a client that prefers it (Claude Code, VS Code)
+  // handed the model `{"status":200}` and discarded the response body
+  // sitting in `content`. See issue #876.
+  //
+  // The upstream status/headers/finalUrl ride on `_meta`
+  // (`UPSTREAM_META_KEY`); the agent-side shaper re-renders the status
+  // into a model-visible text line.
+  //
+  // Two paths still emit `structuredContent` — legal, since the spec only
+  // requires it when an `outputSchema` is declared:
+  //   - the agent-side `toFile` descriptor, mirrored verbatim into a text
+  //     block (`api-call-response-resolver.ts`),
+  //   - the pre-flight refusal envelope (`{ error: { code, … } }`), which
+  //     rides alongside `isError: true` and a human-readable message. It
+  //     is not a mirror, but a client surfacing it sees strictly more than
+  //     the message — never less, and never a swallowed response body.
 
   // Build one generic `{ns}__api_call` tool for an integration that opted
   // into `apiCall`. Runs the credential-proxy core (body parsing,
@@ -896,11 +887,6 @@ function buildSidecarTools(options: MountMcpOptions): {
           "`resources` and are returned as a `resource_link`.",
         inputSchema:
           CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as AppstrateToolDefinition["descriptor"]["inputSchema"],
-        // MCP spec: a tool that returns `structuredContent` SHOULD declare
-        // the shape. Every api_call result carries it (see
-        // responseToToolResult / the agent-side toFile shaper).
-        outputSchema:
-          API_CALL_OUTPUT_SCHEMA as unknown as AppstrateToolDefinition["descriptor"]["outputSchema"],
         // Capability marker (read agent-side by `direct.ts`) — routes this
         // tool by an explicit, rename-safe flag instead of its
         // `{ns}__api_call` name.
@@ -1437,21 +1423,17 @@ async function responseToToolResult(
   // are independent of agent-side mapping, both can be present
   // simultaneously.
   //
-  // When upstream meta is attached (api_call), the status is ALSO
-  // mirrored into spec-level `structuredContent`: api_call declares an
-  // `outputSchema`, and the MCP SDK client refuses a non-error result
-  // from such a tool that lacks `structuredContent`. `_meta` stays the
-  // richer transport (headers, finalUrl) for the runtime resolver.
+  // No `structuredContent` is attached here. The response body owns
+  // `content`, and a `structuredContent` that does not mirror it makes
+  // spec-compliant clients drop the body (#876). The status, headers and
+  // finalUrl travel on `_meta[UPSTREAM_META_KEY]`, which the agent-side
+  // shaper reads back into a model-visible `[api_call status=…]` line.
   const withMeta = (r: Result): Result => {
     if (!upstreamMeta && !budgetMeta) return r;
     const meta: Record<string, unknown> = {};
     if (upstreamMeta) meta[UPSTREAM_META_KEY] = upstreamMeta;
     if (budgetMeta) meta[TOKEN_BUDGET_META_KEY] = budgetMeta;
-    return {
-      ...r,
-      _meta: meta,
-      ...(upstreamMeta ? { structuredContent: { status: upstreamMeta.status } } : {}),
-    };
+    return { ...r, _meta: meta };
   };
 
   const ct = res.headers.get("content-type") ?? "";

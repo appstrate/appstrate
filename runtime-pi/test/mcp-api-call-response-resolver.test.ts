@@ -9,13 +9,18 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UPSTREAM_META_KEY } from "@appstrate/mcp-transport";
 import { shapeApiCallResponse } from "../mcp/api-call-response-resolver.ts";
 
-const ws = () => mkdtempSync(join(tmpdir(), "apicall-resp-"));
+// `realpathSync`: on macOS `tmpdir()` is `/var/folders/…`, a symlink to
+// `/private/var/folders/…`. `writeBodyConfined` resolves the target's parent
+// with `realpath` before comparing it to the workspace root, so an unresolved
+// root makes every write look like a symlink escape. Real runs mount a real
+// directory; only the fixture needs this.
+const ws = () => realpathSync(mkdtempSync(join(tmpdir(), "apicall-resp-")));
 const noop = () => {};
 const baseOpts = (workspace: string, toFile?: string) => ({
   workspace,
@@ -91,14 +96,15 @@ describe("shapeApiCallResponse — no toFile (status surfacing)", () => {
     expect((out.content[1] as { text: string }).text).toBe("hi");
   });
 
-  it("preserves the sidecar-attached structuredContent { status } through shaping", async () => {
+  // #876: the sidecar attaches no structuredContent on the inline path, so the
+  // body stays the sole payload. Shaping must not invent one either — a
+  // structuredContent-preferring client would surface it instead of the body.
+  it("emits no structuredContent on the inline path, leaving the body in content", async () => {
     const workspace = ws();
-    const result = {
-      ...withStatus([{ type: "text", text: "hi" }], 404),
-      structuredContent: { status: 404 },
-    };
+    const result = withStatus([{ type: "text", text: '{"files":[]}' }], 200);
     const out = await shapeApiCallResponse(result, baseOpts(workspace));
-    expect(out.structuredContent).toEqual({ status: 404 });
+    expect(out.structuredContent).toBeUndefined();
+    expect((out.content[1] as { text: string }).text).toBe('{"files":[]}');
   });
 
   it("leaves the result unchanged when no upstream _meta is present", async () => {

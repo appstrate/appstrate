@@ -22,13 +22,14 @@
  * we just prepend an `[api_call status=…]` line so the status is visible.
  *
  * Structured data vs. text: the file descriptor is ALSO emitted as MCP
- * `structuredContent` (matching the api_call tool's declared
- * `outputSchema`), with the JSON text block kept as the spec-recommended
- * fallback. Do NOT drop the text forms: Pi's `AgentToolResult` forwards
- * only text/image `content` blocks to the model (`details` is logs/UI
- * only — see `callToolResultToPi`), so the `[api_call status=…]` line and
- * the JSON descriptor text block remain the ONLY way the model sees the
- * status while Pi is the runtime.
+ * `structuredContent`, mirrored verbatim into a JSON text block. The tool
+ * declares no `outputSchema` (see `sidecar/mcp.ts`, issue #876), so the
+ * mirror is the spec's backwards-compat recommendation rather than a
+ * validated contract. Do NOT drop the text forms: Pi's `AgentToolResult`
+ * forwards only text/image `content` blocks to the model (`details` is
+ * logs/UI only — see `callToolResultToPi`), so the `[api_call status=…]`
+ * line and the JSON descriptor text block remain the ONLY way the model
+ * sees the status while Pi is the runtime.
  */
 
 import { mkdir, lstat, realpath, open } from "node:fs/promises";
@@ -214,10 +215,10 @@ export async function shapeApiCallResponse(
     },
   )) as ToolResult;
   if (status === null) return spilled;
-  // The spread keeps the sidecar-attached `structuredContent: { status }`
-  // (and `_meta`) intact. The text prefix is NOT redundant with it: Pi
-  // forwards only text/image content to the model, so this line is the
-  // model-visible status channel (see module doc).
+  // The spread keeps `_meta` intact. The sidecar attaches no
+  // `structuredContent` on this path (#876) — the body owns `content`.
+  // This prefix is the model-visible status channel: Pi forwards only
+  // text/image content to the model (see module doc).
   return {
     ...spilled,
     content: [{ type: "text", text: `[api_call status=${status}]` }, ...spilled.content],
