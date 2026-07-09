@@ -86,7 +86,6 @@
     "./chat-contract": "./src/chat-contract.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
-    "./subprocess-env": "./src/subprocess-env.ts",
     "./run-and-wait-client": "./src/run-and-wait-client.ts"
   },
   "dependencies": {

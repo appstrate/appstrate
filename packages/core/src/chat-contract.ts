@@ -36,10 +36,13 @@ export interface SubscriptionChatModel {
   reasoning: boolean;
   /** Modality flags (`["text","image"]`), or `null` (defaults to text-only). */
   input: string[] | null;
-  /** Fresh subscription access token — pi-ai emits the OAuth request shape from it natively. */
+  /**
+   * Fresh subscription access token — pi-ai emits the OAuth request shape
+   * from it natively, including any account routing header (codex decodes
+   * `chatgpt_account_id` from the token itself), so no separate account id
+   * rides this contract.
+   */
   accessToken: string;
-  /** Abstract account/tenant id (e.g. codex `chatgpt_account_id`), when present. */
-  accountId?: string;
 }
 
 /**

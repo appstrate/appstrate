@@ -342,7 +342,7 @@ const envSchema = z
     // `@appstrate/module-claude-code` (Claude Pro/Max/Team) — are OPT-IN: a
     // personal subscription powering a product is an operator-owned grey-zone
     // (see docs/architecture/SUBSCRIPTION_COMPLIANCE.md), so the OSS default
-    // ships neither. Append them to enable subscription providers/engines.
+    // ships neither. Append them to enable subscription providers.
     // `MODULES=none` boots with zero modules (the only sentinel — `""`
     // coalesces to unset, i.e. the default set, per the compose `${VAR:-}`
     // pattern).

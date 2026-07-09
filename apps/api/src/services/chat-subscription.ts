@@ -103,7 +103,6 @@ export async function resolveSubscriptionChatModel(
       reasoning: resolved.reasoning ?? false,
       input: resolved.input ?? null,
       accessToken: token.accessToken,
-      ...(token.accountId ? { accountId: token.accountId } : {}),
     },
   };
 }

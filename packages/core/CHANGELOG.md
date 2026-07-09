@@ -48,6 +48,11 @@ accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
   requires an `authMode` input and returns the new `"oauth_provider"`
   violation for an alias backed by an oauth credential. `modelSwap` remains on
   `LlmProxyApiKeyConfig` (api_key aliases are unchanged).
+- **`@appstrate/core/subprocess-env` removed.** The vendor-binary spawn helpers
+  (`buildIsolatedSubprocessEnv`, `makeScopeResolver`, `BinaryResolver`) existed
+  solely for the deleted Claude Agent SDK runner (`@appstrate/runner-claude` /
+  `claude-binary.ts`); nothing spawns a vendor CLI on the single Pi engine and
+  the subpath had zero importers left.
 
   These are removed public API → requires a major version bump on next
   publish. Consumers on the `claude`/`codex` engine vocabulary should drop it;

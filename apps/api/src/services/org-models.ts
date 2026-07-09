@@ -565,8 +565,11 @@ export interface ResolvedModel extends Pick<
   aliasId: string;
   /**
    * Abstract account/tenant identifier surfaced by the credential's
-   * `extractTokenIdentity` hook — echoed by the sidecar as a routing
-   * header at request time (e.g. `chatgpt-account-id` for Codex).
+   * `extractTokenIdentity` hook. Consumed by the offline credential check
+   * (`validateCredential` in testModelConfig); it is NOT injected as a
+   * request header — any routing header (e.g. codex `chatgpt-account-id`)
+   * is emitted by pi-ai inside the container from the token/placeholder,
+   * and the sidecar only swaps the bearer.
    */
   accountId?: string;
   /** `model_provider_credentials` row id — passed to the sidecar so it can pull fresh OAuth tokens at request time. Unset for system (env-driven) keys. */

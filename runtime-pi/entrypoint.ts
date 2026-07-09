@@ -532,12 +532,11 @@ await progress(
 const sidecarUrl = env.sidecarUrl;
 
 // Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
-// executes each runtime tool ONCE and journals its canonical events; every
-// runner drains this on its single sink (pi after each forwarded tool call,
-// claude after each stream step + a final drain). One instance so the
-// cursor stays consistent across intermediate + final drains. Undefined when no
-// sidecar is attached (no journal to drain — the in-process Pi extension path
-// emits its own events).
+// executes each runtime tool ONCE and journals its canonical events; the Pi
+// runner drains this on its single sink after each forwarded tool call, plus
+// a retrying final drain. One instance so the cursor stays consistent across
+// intermediate + final drains. Undefined when no sidecar is attached (no
+// journal to drain — the in-process Pi extension path emits its own events).
 const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
   ? createRuntimeEventDrainer({
       url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
@@ -621,13 +620,13 @@ if (sidecarUrl) {
       // integration tool (including the generic `{ns}__api_call`). Runtime
       // tools (log/note/pin/report/output) are executed once by the sidecar and
       // journaled; the drainer pulls them on the run sink after each forwarded
-      // call — uniform with the Claude runner, no `_meta` trust.
+      // call — never trusted from `_meta`.
       //
       // Pi drains each tool call inline in `execute()` right after `callTool`
       // resolves — the sidecar appends the events synchronously inside the
       // wrapped handler BEFORE responding, so the per-call drain always captures
-      // them in time (no "events land after the stream ends" gap that
-      // claude must backstop). What the per-call drain CANNOT cover is a
+      // them in time (no "events land after the stream ends" gap to
+      // backstop). What the per-call drain CANNOT cover is a
       // transient localhost failure of the LAST call's single best-effort drain
       // (no subsequent call retries it). The retrying final drain for that case
       // is injected via `piEventSink` (below): PiRunner owns its finalize, so a

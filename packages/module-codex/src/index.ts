@@ -86,12 +86,13 @@ const codexHooks: ModelProviderHooks = {
   /**
    * Decode the access JWT and map Codex-specific claims into the
    * platform's abstract identity slots:
-   *  - `chatgpt_account_id` → `accountId` (echoed by the sidecar as the
-   *    `chatgpt-account-id` header at request time)
+   *  - `chatgpt_account_id` → `accountId`
    *  - `email` → `email`
    *
-   * The platform persists the result alongside the credential row so the
-   * sidecar doesn't re-decode on every call.
+   * Identity/display only (credential label, dedup). At request time the
+   * `chatgpt-account-id` header is emitted by pi-ai INSIDE the container,
+   * decoded from the placeholder JWT built by `buildApiKeyPlaceholder`
+   * below — the sidecar only swaps the bearer and sets no headers itself.
    */
   extractTokenIdentity(accessToken: string): ModelProviderIdentity | null {
     const claims = decodeCodexJwtPayload(accessToken);
