@@ -103,8 +103,12 @@ function parseLogLine(raw: string): string | undefined {
 }
 
 export interface RemoteOrchestratorDeps {
-  /** Injected by tests — canned Response objects, no network. */
-  fetchFn?: typeof fetch;
+  /**
+   * Injected by tests — canned Response objects, no network. The init is
+   * widened with Bun's `unix` extension: over a UDS runner URL every call
+   * dials the socket instead of a TCP host.
+   */
+  fetchFn?: (input: string | URL, init?: RequestInit & { unix?: string }) => Promise<Response>;
   /**
    * Initial backoff (ms) for waitForExit retries and streamLogs
    * reconnect pauses. Injectable so tests exercise the retry paths
@@ -132,7 +136,10 @@ export interface RemoteOrchestratorDeps {
 }
 
 export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
-  private readonly fetchFn: (input: string | URL, init?: RequestInit) => Promise<Response>;
+  private readonly fetchFn: (
+    input: string | URL,
+    init?: RequestInit & { unix?: string },
+  ) => Promise<Response>;
   private readonly retryBaseMs: number;
   private readonly heartbeatIntervalMs: number;
   private readonly recordBootHeartbeat:
@@ -164,7 +171,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     } catch (err) {
       throw new Error(
         `firecracker backend is not configured: set FIRECRACKER_RUNNER_URL ` +
-          `(http(s) address of the appstrate-runner daemon) and FIRECRACKER_RUNNER_TOKEN ` +
+          `(http(s) address of the appstrate-runner daemon, or unix:///path.sock ` +
+          `for a co-located daemon over a Unix socket) and FIRECRACKER_RUNNER_TOKEN ` +
           `(shared bearer secret, at least 16 chars). See ` +
           `apps/api/src/modules/firecracker/README.md. (${getErrorMessage(err)})`,
       );
@@ -193,9 +201,14 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     if (signal) signals.push(signal);
     if (timeoutMs !== null) signals.push(AbortSignal.timeout(timeoutMs));
 
+    // UDS: fetch still needs an http URL for routing/headers, but the
+    // AUTHORITY is ignored — the connection dials the socket via Bun's
+    // `unix` init. The fixed placeholder host keeps request lines stable.
+    const baseUrl =
+      env.transport.kind === "unix" ? "http://appstrate-runner" : env.FIRECRACKER_RUNNER_URL;
     let res: Response;
     try {
-      res = await this.fetchFn(`${env.FIRECRACKER_RUNNER_URL}${route}`, {
+      res = await this.fetchFn(`${baseUrl}${route}`, {
         method,
         headers: {
           authorization: `Bearer ${env.FIRECRACKER_RUNNER_TOKEN}`,
@@ -203,6 +216,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
         },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
+        ...(env.transport.kind === "unix" ? { unix: env.transport.socketPath } : {}),
       });
     } catch (err) {
       throw new Error(

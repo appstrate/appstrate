@@ -114,10 +114,21 @@ export interface PortOverrides {
  */
 export interface RunBackendEnv {
   adapter: "docker" | "firecracker";
-  /** FIRECRACKER_RUNNER_URL — http://<ip>:3100. Only for the firecracker adapter. */
+  /**
+   * FIRECRACKER_RUNNER_URL — `http://<ip>:3100` (remote KVM host) or
+   * `unix:///run/appstrate-runner/runner.sock` (same-host UDS transport).
+   * Only for the firecracker adapter.
+   */
   runnerUrl?: string;
   /** FIRECRACKER_RUNNER_TOKEN — shared bearer secret. Only for the firecracker adapter. */
   runnerToken?: string;
+  /**
+   * Operator explicitly accepted a plaintext `http://` runner URL to a
+   * non-loopback host. The platform refuses that transport at boot by
+   * default, so the install writes `FIRECRACKER_RUNNER_TLS_REQUIRED=0`
+   * alongside — otherwise the generated `.env` would not boot.
+   */
+  plaintextOptIn?: boolean;
 }
 
 export interface BootstrapOverrides {
@@ -295,12 +306,28 @@ export function generateEnvForTier(
   // Firecracker execution backend (Docker tiers only — never reached on
   // tier 0, which returns above). Switches RUN_ADAPTER away from the
   // compose default `docker` and loads the `firecracker` module so the
-  // platform talks to the runner daemon over HTTP.
+  // platform talks to the runner daemon — over TCP (remote KVM host) or
+  // the co-located unix socket (same-host, unix:// runner URL).
   if (runBackend.adapter === "firecracker") {
     env.RUN_ADAPTER = "firecracker";
     env.MODULES = FIRECRACKER_MODULES;
     if (runBackend.runnerUrl) env.FIRECRACKER_RUNNER_URL = runBackend.runnerUrl;
     if (runBackend.runnerToken) env.FIRECRACKER_RUNNER_TOKEN = runBackend.runnerToken;
+    // Plaintext http:// to a non-loopback daemon is REFUSED by the platform
+    // at boot unless this escape hatch is set — the operator opted in during
+    // the install (VPN/WireGuard link), so write it or the install ships a
+    // `.env` that never boots.
+    if (runBackend.plaintextOptIn) env.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
+    // UDS transport: the compose templates mount
+    // ${APPSTRATE_RUNNER_SOCKET_DIR:-./data/appstrate-runner} at
+    // /run/appstrate-runner in the platform container. Point the host side
+    // at the daemon's real socket dir — without this key the mount falls
+    // back to an empty local dir and the platform would dial a socket that
+    // never appears.
+    if (runBackend.runnerUrl?.startsWith("unix://")) {
+      const socketPath = runBackend.runnerUrl.slice("unix://".length);
+      env.APPSTRATE_RUNNER_SOCKET_DIR = socketPath.slice(0, socketPath.lastIndexOf("/")) || "/";
+    }
   }
 
   return env;

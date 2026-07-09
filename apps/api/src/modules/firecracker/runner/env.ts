@@ -27,6 +27,29 @@ const runnerEnvSchema = z.object({
   // interface or 127.0.0.1 behind a reverse proxy) and firewalling the
   // port: the bearer token is the only lock on this door.
   FIRECRACKER_RUNNER_HOST: z.string().default("0.0.0.0"),
+  // Unix-domain-socket listen path (issue #868). When set, the daemon
+  // binds this socket INSTEAD of host:port — the recommended co-located
+  // transport: a containerized platform bind-mounts the socket's
+  // directory and the platform↔daemon wire (bearer token + per-run
+  // credentials) never touches the network. Must be absolute: the daemon
+  // may be launched from any cwd (systemd, installer), so a relative
+  // path would bind a different node per launch.
+  FIRECRACKER_RUNNER_SOCKET: z
+    .string()
+    .refine((v) => v.startsWith("/"), {
+      message:
+        "must be an absolute path (e.g. /run/appstrate-runner/runner.sock) — " +
+        "a relative socket path would resolve against the daemon's cwd",
+    })
+    .optional(),
+  // Filesystem mode applied to the socket after bind (chmod). Octal
+  // string, "0660" or "660" — default 0660: owner+group only, no world
+  // access. The bearer-token auth stays enforced regardless; this is
+  // defense-in-depth at the filesystem layer.
+  FIRECRACKER_RUNNER_SOCKET_MODE: z
+    .string()
+    .regex(/^0?[0-7]{3}$/, 'must be a 3-digit octal mode like "0660" or "660"')
+    .default("0660"),
   // Base URL guest workloads use to reach the platform API, e.g.
   // "http://10.0.0.5:3000". REQUIRED and IPv4-literal-only — the daemon
   // cannot guess where the platform lives when it runs in a container on
@@ -44,6 +67,28 @@ const runnerEnvSchema = z.object({
 });
 
 export type RunnerEnv = z.infer<typeof runnerEnvSchema>;
+
+/** Where the daemon listens — a UDS (socket wins when set) or a TCP host:port. */
+export type RunnerListenConfig =
+  | { kind: "unix"; socketPath: string; mode: number }
+  | { kind: "tcp"; host: string; port: number };
+
+/**
+ * Resolve the daemon's listen configuration. Pure — the socket, when
+ * set, WINS over host/port (both always carry defaults, so presence of
+ * the socket var is the only meaningful precedence signal). The octal
+ * mode string is parsed here so daemon.ts chmods with a plain number.
+ */
+export function resolveListenConfig(env: RunnerEnv): RunnerListenConfig {
+  if (env.FIRECRACKER_RUNNER_SOCKET !== undefined) {
+    return {
+      kind: "unix",
+      socketPath: env.FIRECRACKER_RUNNER_SOCKET,
+      mode: parseInt(env.FIRECRACKER_RUNNER_SOCKET_MODE, 8),
+    };
+  }
+  return { kind: "tcp", host: env.FIRECRACKER_RUNNER_HOST, port: env.FIRECRACKER_RUNNER_PORT };
+}
 
 let cached: RunnerEnv | undefined;
 

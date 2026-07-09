@@ -52,11 +52,15 @@ import {
   describeProcessOnPort,
   detectLanIpv4,
   isIpv4,
-  parseIpv4HttpUrl,
   runCommand,
 } from "../lib/install/os.ts";
 import { generateRunnerToken } from "../lib/runner/config-files.ts";
-import { RUNNER_DEFAULT_PORT, RUNNER_TOKEN_ENV } from "../lib/runner/constants.ts";
+import {
+  RUNNER_DEFAULT_PORT,
+  RUNNER_DEFAULT_SOCKET_PATH,
+  RUNNER_RUNTIME_DIR,
+  RUNNER_TOKEN_ENV,
+} from "../lib/runner/constants.ts";
 import {
   detectInstallMode,
   inferInstalledTier,
@@ -987,7 +991,15 @@ export type RunBackendConfig =
   | { adapter: "docker" }
   | {
       adapter: "firecracker";
-      /** FIRECRACKER_RUNNER_URL written to the platform `.env` (http://<runner-ip>:3100). */
+      /**
+       * FIRECRACKER_RUNNER_URL written to the platform `.env`. Remote:
+       * `http(s)://<runner-host>:3100` (TCP). Same-host: `unix://<socket
+       * path>` — the platform container dials the daemon's unix socket
+       * through a bind-mount of /run/appstrate-runner (the compose templates
+       * mount it from the installer-written APPSTRATE_RUNNER_SOCKET_DIR), so
+       * no port, no plaintext network wire, and the fail-closed
+       * non-loopback-http guard never applies.
+       */
       runnerUrl: string;
       /** Shared bearer token between platform and daemon. */
       token: string;
@@ -995,10 +1007,24 @@ export type RunBackendConfig =
       tokenSource: "flag" | "generated";
       /** Daemon lives on this host, or a separate KVM host. */
       topology: "same-host" | "remote";
-      /** This host's LAN IPv4 — the address the daemon/guests reach the platform on. */
+      /**
+       * This host's LAN IPv4 — the address the GUESTS reach the platform on.
+       * Still required for same-host UDS installs: the socket only carries
+       * platform↔daemon traffic; guest→platform egress rides the LAN via
+       * `platformUrl`.
+       */
       hostIp: string;
       /** Full platform URL for `runner install --platform-url` (http://<hostIp>:<appPort>). */
       platformUrl: string;
+      /**
+       * The operator accepted a plaintext `http://` runner URL to a
+       * non-loopback host (flag passed explicitly, or interactive confirm).
+       * The platform refuses that transport at boot by default, so the
+       * install writes the `FIRECRACKER_RUNNER_TLS_REQUIRED=0` escape hatch
+       * alongside — otherwise the installer would produce a config the
+       * platform rejects until the operator hand-edits `.env`.
+       */
+      plaintextOptIn: boolean;
     };
 
 export interface RunBackendInputs {
@@ -1025,8 +1051,60 @@ export interface RunBackendResolverDeps {
   select?: typeof clack.select;
   isCancel?: typeof clack.isCancel;
   askText?: typeof askText;
+  confirm?: typeof clack.confirm;
   detectLanIpv4?: () => string | null;
   generateToken?: () => string;
+  /** Loud-warning sink — injectable so tests can assert the plaintext warning. */
+  warn?: (message: string) => void;
+}
+
+/** Loopback hosts the platform's plaintext-transport gate exempts. */
+const LOOPBACK_RUNNER_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * Validate a remote runner URL: `http(s)://<host>[:port]`, where host may
+ * be a HOSTNAME (the platform→daemon leg runs on the host network with
+ * normal DNS — an https:// reverse proxy usually sits behind a name) or an
+ * IPv4 literal. A dotted-quad that is NOT a valid IPv4 (`300.0.0.1`) is
+ * still rejected — it would never resolve, and the old IPv4-only validator
+ * caught exactly that typo. Only `--platform-url` stays IPv4-only (guests
+ * have no DNS); the runner URL never reaches a guest.
+ */
+function parseRunnerHttpUrl(raw: string): { url: string; protocol: string; host: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  const host = parsed.hostname;
+  if (host === "") return null;
+  if (/^\d+(\.\d+){3}$/.test(host) && !isIpv4(host)) return null;
+  return { url: raw.replace(/\/+$/, ""), protocol: parsed.protocol, host };
+}
+
+/**
+ * The platform refuses a plaintext `http://` runner URL to a non-loopback
+ * host at boot (fail-closed, see the firecracker module's
+ * assertRunnerTransportSecurity). When the operator opts in anyway, the
+ * install must ALSO write `FIRECRACKER_RUNNER_TLS_REQUIRED=0` — warning
+ * without writing the escape hatch would ship a `.env` the platform
+ * rejects at boot, a broken install until hand-edited.
+ */
+function isPlaintextNonLoopback(parsed: { protocol: string; host: string }): boolean {
+  return parsed.protocol === "http:" && !LOOPBACK_RUNNER_HOSTNAMES.has(parsed.host);
+}
+
+function plaintextRunnerWarning(url: string): string {
+  return (
+    `FIRECRACKER_RUNNER_URL=${url} is plaintext http:// to a non-loopback host — ` +
+    `the platform↔daemon wire carries run credentials (model API keys, sink secrets); ` +
+    `anyone on the network path can capture and replay them. The install writes ` +
+    `FIRECRACKER_RUNNER_TLS_REQUIRED=0 so the platform accepts this transport — put a ` +
+    `TLS reverse proxy in front of the daemon and switch to https:// unless the link ` +
+    `is already encrypted at a lower layer (VPN/WireGuard).`
+  );
 }
 
 /** Resolve + validate the runner token (flag > freshly minted). */
@@ -1096,8 +1174,10 @@ export async function resolveRunBackend(
   const select = deps.select ?? clack.select;
   const isCancel = deps.isCancel ?? clack.isCancel;
   const promptText = deps.askText ?? askText;
+  const confirmPrompt = deps.confirm ?? clack.confirm;
   const detectIp = deps.detectLanIpv4 ?? detectLanIpv4;
   const mintToken = deps.generateToken ?? generateRunnerToken;
+  const warn = deps.warn ?? ((message: string) => clack.log.warn(message));
   const { appPort, nonInteractive } = inputs;
 
   // 1. Which adapter? Flag > env > prompt (interactive) > docker.
@@ -1200,38 +1280,86 @@ export async function resolveRunBackend(
     const token = resolveRunnerToken(inputs.runnerToken, mintToken);
     return {
       adapter: "firecracker",
-      runnerUrl: `http://${ip}:${RUNNER_DEFAULT_PORT}`,
+      // Same-host = UDS transport: the daemon binds the canonical socket
+      // (`runner install --socket`, appended in buildRunnerInstallArgs) and
+      // the platform dials it — no TCP port, so beta.38's fail-closed
+      // "plaintext http to a non-loopback host" guard never trips. The LAN
+      // IP is still collected: it feeds platformUrl (guest→platform).
+      runnerUrl: `unix://${RUNNER_DEFAULT_SOCKET_PATH}`,
       token: token.value,
       tokenSource: token.source,
       topology: "same-host",
       hostIp: ip,
       platformUrl: `http://${ip}:${appPort}`,
+      plaintextOptIn: false,
     };
   }
 
   // topology === "remote"
-  // Runner daemon URL: flag (full URL) > interactive prompt for the KVM host IP.
+  // Runner daemon URL: flag (full URL) > interactive prompt (full URL, or a
+  // bare IPv4 kept for muscle memory). Hostnames are ACCEPTED — a split-host
+  // daemon should sit behind an https:// reverse proxy, which usually means
+  // a DNS name; the guests-need-IPv4 rule applies to --platform-url only.
   let runnerUrl = inputs.runnerUrl?.trim();
+  let plaintextOptIn = false;
   if (runnerUrl) {
-    // One shared validator with `runner install --platform-url`: it rejects a
-    // non-IPv4 host AND out-of-range octets (`300.0.0.1`, `256.256.256.256`),
-    // so a bogus literal fails here with the DNS hint, not inside a guest —
-    // and never writes a config the daemon then refuses at boot.
-    const parsed = parseIpv4HttpUrl(runnerUrl);
+    const parsed = parseRunnerHttpUrl(runnerUrl);
     if (!parsed) {
       throw new Error(
-        `Invalid --runner-url "${runnerUrl}" — must be http(s)://<IPv4>[:port]. ${IPV4_HINT}`,
+        `Invalid --runner-url "${runnerUrl}" — must be http(s)://<host>[:port], e.g. ` +
+          `https://runner.example.com:${RUNNER_DEFAULT_PORT} (TLS reverse proxy in front ` +
+          `of the daemon) or http://10.0.0.9:${RUNNER_DEFAULT_PORT}.`,
       );
+    }
+    // An explicit plaintext --runner-url IS the opt-in (flags must stay
+    // scriptable — a confirm prompt here would break unattended installs):
+    // warn loudly and write the escape hatch so the platform actually boots.
+    if (isPlaintextNonLoopback(parsed)) {
+      warn(plaintextRunnerWarning(parsed.url));
+      plaintextOptIn = true;
     }
     runnerUrl = parsed.url;
   } else {
-    const runnerIp = (await promptText("Runner (KVM host) LAN IPv4", "")).trim();
-    if (!isIpv4(runnerIp)) {
+    const answer = (
+      await promptText(
+        `Runner (KVM host) URL — https://<host>:${RUNNER_DEFAULT_PORT} recommended, or a bare LAN IPv4`,
+        "",
+      )
+    ).trim();
+    // A bare IPv4 keeps the pre-UDS ergonomics (`10.0.0.9` → http://…:3100);
+    // anything else must be a full http(s) URL.
+    const parsed = isIpv4(answer)
+      ? parseRunnerHttpUrl(`http://${answer}:${RUNNER_DEFAULT_PORT}`)
+      : parseRunnerHttpUrl(answer);
+    if (!parsed) {
       throw new Error(
-        `Invalid runner IP "${runnerIp}" — must be an IPv4 literal (e.g. 10.0.0.9). ${IPV4_HINT}`,
+        `Invalid runner URL "${answer}" — must be http(s)://<host>[:port] or a bare ` +
+          `IPv4 literal (e.g. 10.0.0.9).`,
       );
     }
-    runnerUrl = `http://${runnerIp}:${RUNNER_DEFAULT_PORT}`;
+    // Interactive typo ≠ informed choice: a bare IP typed at the prompt gets
+    // an explicit confirm before the install commits to plaintext transport.
+    if (isPlaintextNonLoopback(parsed)) {
+      warn(plaintextRunnerWarning(parsed.url));
+      const proceed = await confirmPrompt({
+        message:
+          "Proceed over plaintext http:// and write FIRECRACKER_RUNNER_TLS_REQUIRED=0 " +
+          "to the platform .env? (only safe on a link already encrypted — VPN/WireGuard)",
+        initialValue: false,
+      });
+      if (isCancel(proceed)) {
+        clack.cancel("Cancelled.");
+        process.exit(130);
+      }
+      if (!proceed) {
+        throw new Error(
+          `Plaintext runner URL declined — put a TLS reverse proxy in front of the ` +
+            `daemon and re-run with https://<host>:${RUNNER_DEFAULT_PORT}.`,
+        );
+      }
+      plaintextOptIn = true;
+    }
+    runnerUrl = parsed.url;
   }
 
   const token = resolveRunnerToken(inputs.runnerToken, mintToken);
@@ -1266,6 +1394,7 @@ export async function resolveRunBackend(
     topology: "remote",
     hostIp,
     platformUrl: `http://${platformHost}:${appPort}`,
+    plaintextOptIn,
   };
 }
 
@@ -1292,9 +1421,11 @@ export function resolveCliInvocation(
 
 /**
  * Build the argv (excluding the leading `sudo`) for the same-host runner
- * install: `<cli> runner install --platform-url <url> --token <token> --yes`.
- * The token is a secret but must appear here — it is how the daemon pairs
- * with the platform.
+ * install: `<cli> runner install --platform-url <url> --token <token>
+ * --socket <canonical sock> --yes`. The token is a secret but must appear
+ * here — it is how the daemon pairs with the platform. `--socket` puts the
+ * daemon in UDS mode (same-host transport); the platform side was already
+ * written as `FIRECRACKER_RUNNER_URL=unix://…` by `resolveRunBackend`.
  */
 export function buildRunnerInstallArgs(
   cliInvocation: string[],
@@ -1309,6 +1440,8 @@ export function buildRunnerInstallArgs(
     platformUrl,
     "--token",
     token,
+    "--socket",
+    RUNNER_DEFAULT_SOCKET_PATH,
     "--yes",
   ];
 }
@@ -1328,6 +1461,14 @@ export function firecrackerFollowupNote(
       "Run this on your KVM host to install + pair the runner daemon:",
       "",
       `  curl -fsSL https://get.appstrate.dev/runner | bash -s -- --platform-url ${rb.platformUrl} --token ${rb.token}`,
+      "",
+    );
+  } else {
+    lines.push(
+      `The platform reaches the daemon over a unix socket (${rb.runnerUrl}) —`,
+      `no network port, no TLS to configure. The platform container bind-mounts`,
+      `${RUNNER_RUNTIME_DIR} for it (the compose templates mount it when the`,
+      `installer-written APPSTRATE_RUNNER_SOCKET_DIR is set in .env).`,
       "",
     );
   }
@@ -1395,6 +1536,10 @@ export async function runSameHostRunnerInstall(
     "install",
     "--platform-url",
     rb.platformUrl,
+    // Same-host = UDS mode: the daemon binds the canonical socket instead of
+    // a TCP port, matching the unix:// runner URL already in the platform .env.
+    "--socket",
+    RUNNER_DEFAULT_SOCKET_PATH,
     "--yes",
   ];
   const prevToken = process.env[RUNNER_TOKEN_ENV];
@@ -1620,7 +1765,12 @@ async function installDockerTier(
   // would leave platform and daemon paired on different secrets.
   const runBackendEnv: RunBackendEnv =
     runBackend.adapter === "firecracker"
-      ? { adapter: "firecracker", runnerUrl: runBackend.runnerUrl, runnerToken: runBackend.token }
+      ? {
+          adapter: "firecracker",
+          runnerUrl: runBackend.runnerUrl,
+          runnerToken: runBackend.token,
+          plaintextOptIn: runBackend.plaintextOptIn,
+        }
       : { adapter: "docker" };
   // Healthcheck + browser go through the local bind address: on a
   // remote deployment the public URL only resolves once the operator's
@@ -1725,6 +1875,12 @@ async function installDockerTier(
           FIRECRACKER_RUNNER_URL: runBackend.runnerUrl,
           FIRECRACKER_RUNNER_TOKEN: runBackend.token,
         };
+        // The plaintext escape hatch tracks the CURRENT runner URL. Carrying
+        // a stale `=0` forward after the operator moved to https:// (or to
+        // the unix socket) would silently keep the plaintext door open for
+        // the next http:// misconfiguration.
+        if (runBackend.plaintextOptIn) envVars.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
+        else delete envVars.FIRECRACKER_RUNNER_TLS_REQUIRED;
       }
       await writeComposeEnv(dir, renderEnvFile(envVars));
       writeSpinner.stop(

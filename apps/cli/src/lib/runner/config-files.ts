@@ -8,9 +8,11 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { dirname } from "node:path";
 import {
   RUNNER_BIN_PATH,
   RUNNER_ENV_PATH,
+  RUNNER_RUNTIME_DIR,
   RUNNER_SERVICE_NAME,
   runnerDataPaths,
 } from "./constants.ts";
@@ -25,6 +27,14 @@ export interface RunnerConfig {
   port: number;
   /** Bind address (default 0.0.0.0). */
   host: string;
+  /**
+   * UDS transport (same-host topology): absolute path the daemon binds its
+   * unix socket at instead of a TCP listener. Mutually exclusive with the
+   * TCP listen surface — when set, the host/port lines are NOT rendered
+   * (the daemon treats FIRECRACKER_RUNNER_SOCKET as authoritative). The
+   * platform dials it as `FIRECRACKER_RUNNER_URL=unix://<path>`.
+   */
+  socketPath?: string;
   /** State root — kernel/rootfs/runs/firecracker all live under here. */
   dataDir: string;
   /**
@@ -87,6 +97,7 @@ export function renderRunnerEnvFile(config: RunnerConfig): string {
   rejectNewline("token", config.token);
   rejectNewline("platformUrl", config.platformUrl);
   rejectNewline("host", config.host);
+  rejectNewline("socketPath", config.socketPath);
   rejectNewline("artifactsVersion", config.artifactsVersion);
   rejectNewline("FIRECRACKER_ARTIFACTS_PUBKEY", config.artifactsPubkey);
 
@@ -111,8 +122,11 @@ export function renderRunnerEnvFile(config: RunnerConfig): string {
     "# --- Daemon listen/link surface (runner/env.ts) ---",
     `FIRECRACKER_RUNNER_TOKEN=${config.token}`,
     `FIRECRACKER_RUNNER_PLATFORM_URL=${config.platformUrl}`,
-    `FIRECRACKER_RUNNER_HOST=${config.host}`,
-    `FIRECRACKER_RUNNER_PORT=${config.port}`,
+    // UDS transport replaces the TCP listen surface entirely: the daemon
+    // binds the socket (mode 0660 by default) and never opens a port.
+    ...(config.socketPath
+      ? [`FIRECRACKER_RUNNER_SOCKET=${config.socketPath}`]
+      : [`FIRECRACKER_RUNNER_HOST=${config.host}`, `FIRECRACKER_RUNNER_PORT=${config.port}`]),
     "",
     "# --- Engine host config (runner/host-env.ts) — absolute paths so the",
     "#     compiled daemon does not depend on its launch working directory. ---",
@@ -221,8 +235,55 @@ export function parseRunnerEnvFile(text: string): Record<string, string> {
  *                                in /usr/sbin://sbin, which systemd's default
  *                                unit PATH omits. Without this the daemon
  *                                spawns fail with ENOENT at first run.
+ *   - RuntimeDirectory=…       → UDS transport only: ProtectSystem=strict
+ *                                makes /run read-only, so the daemon could
+ *                                not bind its socket there. For the canonical
+ *                                /run/appstrate-runner location we let systemd
+ *                                own the dir (created 0771 at start).
+ *                                RuntimeDirectoryPreserve=yes is REQUIRED:
+ *                                the platform container bind-mounts this dir,
+ *                                and a bind mount pins the directory INODE —
+ *                                if systemd removed and recreated the dir on
+ *                                a daemon restart (the default), the container
+ *                                would keep the orphaned inode and never see
+ *                                the new socket until its own restart. The
+ *                                tmpfs still clears it on reboot (when the
+ *                                container remounts anyway). A custom socket
+ *                                parent gets a plain ReadWritePaths carve-out
+ *                                instead.
  */
 export function renderRunnerUnit(config: RunnerConfig): string {
+  // UDS transport: the socket's parent dir must be writable under
+  // ProtectSystem=strict. The canonical /run/appstrate-runner location gets
+  // the systemd RuntimeDirectory treatment (create 0771, PRESERVED across
+  // restarts — see the doc-comment: the platform container's bind mount pins
+  // the dir inode); any other parent is the operator's own dir — pre-create
+  // it (privileged ExecStartPre) and carve it writable.
+  const socketDirLines: string[] = [];
+  if (config.socketPath) {
+    const socketDir = dirname(config.socketPath);
+    if (socketDir === RUNNER_RUNTIME_DIR) {
+      socketDirLines.push(
+        "# UDS transport: systemd owns the socket dir (strict /run is read-only).",
+        "# Preserve=yes: the platform container bind-mounts this dir — recreating",
+        "# it on restart would strand the container on the old directory inode.",
+        "# Mode 0771 (o=x, not o=rwx): a rootless / userns-remapped platform",
+        "# container needs TRAVERSAL to reach the socket; the socket's own mode",
+        "# (FIRECRACKER_RUNNER_SOCKET_MODE) + the bearer token stay the gates.",
+        `RuntimeDirectory=${RUNNER_RUNTIME_DIR.replace(/^\/run\//, "")}`,
+        "RuntimeDirectoryMode=0771",
+        "RuntimeDirectoryPreserve=yes",
+      );
+    } else {
+      socketDirLines.push(
+        "# UDS transport: custom socket dir — pre-created OUTSIDE the sandbox",
+        "# (`+` prefix; ReadWritePaths on a missing dir is a no-op and the daemon",
+        "# cannot mkdir a parent under ProtectSystem=strict), then carved writable.",
+        `ExecStartPre=+/bin/mkdir -p ${socketDir}`,
+        `ReadWritePaths=${socketDir}`,
+      );
+    }
+  }
   return [
     "[Unit]",
     "Description=Appstrate Firecracker runner daemon",
@@ -270,6 +331,7 @@ export function renderRunnerUnit(config: RunnerConfig): string {
     // `ip netns add` writes under /run/netns — carve just that path writable
     // (paired with the ExecStartPre above that guarantees the dir exists).
     "ReadWritePaths=/run/netns",
+    ...socketDirLines,
     "ProtectHome=true",
     "ProtectClock=true",
     "",

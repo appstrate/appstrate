@@ -248,6 +248,14 @@ services:
       - OTEL_EXPORTER_OTLP_PROTOCOL
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Co-located Firecracker runner socket dir (UDS transport): mounted at
+      # /run/appstrate-runner in the container so
+      # FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock works.
+      # The HOST side is env-driven: the firecracker installer sets
+      # APPSTRATE_RUNNER_SOCKET_DIR=/run/appstrate-runner in .env; without it
+      # the mount falls back to a harmless empty local dir (never touches
+      # /run — Docker Desktop's default file sharing does not cover it).
+      - ${APPSTRATE_RUNNER_SOCKET_DIR:-./data/appstrate-runner}:/run/appstrate-runner
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
       interval: 30s

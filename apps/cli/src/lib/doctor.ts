@@ -321,16 +321,55 @@ async function defaultReadEnvFile(dir: string): Promise<string | null> {
  * any other status or connection error → unreachable. Never throws (a
  * connection failure is the common "daemon down" case, reported as
  * `unreachable`). The deep check is `appstrate runner doctor`.
+ *
+ * `unix://<abs path>` URLs (same-host UDS transport) are dialed through
+ * Bun's `fetch(…, { unix })` — the CLI runs on the host, so it can open the
+ * daemon's socket directly, with the same token/status interpretation as
+ * TCP. The socket path is the URL's pathname (three-slash form:
+ * `unix:///run/appstrate-runner/runner.sock`), matching how the platform
+ * parses FIRECRACKER_RUNNER_URL. `fetchImpl` is injectable for tests only.
  */
 export async function defaultProbeFirecracker(
   url: string,
   token: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<FirecrackerHealth> {
-  const base = url.replace(/\/+$/, "");
+  // A unix:// URL stays VERBATIM (its path names a filesystem node —
+  // stripping a trailing slash would change which node we dial); the
+  // trailing-slash normalization is an http(s)-only concern.
+  const isUnix = url.startsWith("unix://");
+  const base = isUnix ? url : url.replace(/\/+$/, "");
+  let socketPath: string | undefined;
+  if (isUnix) {
+    // Same policy as the platform's parseRunnerTransport: the two-slash
+    // typo (`unix://var/run/x.sock`) parses "var" as a hostname and would
+    // silently probe the WRONG socket — refuse instead. (The platform
+    // refuses the same URL at boot; the doctor must not contradict it.)
+    let parsed: URL;
+    try {
+      parsed = new URL(base);
+    } catch {
+      return { status: "unreachable", url: base, detail: "not a valid unix:// URL" };
+    }
+    if (parsed.hostname !== "") {
+      return {
+        status: "unreachable",
+        url: base,
+        detail:
+          `unix:// URL has a host component ("${parsed.hostname}") — a socket path ` +
+          `needs THREE slashes: unix:///${parsed.hostname}${parsed.pathname}`,
+      };
+    }
+    socketPath = decodeURIComponent(parsed.pathname);
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3000);
   try {
-    const res = await fetch(`${base}/v1/health`, {
+    // UDS: the http:// authority is a placeholder (feeds only the Host
+    // header); Bun dials the socket instead of the network.
+    const target = isUnix ? "http://appstrate-runner/v1/health" : `${base}/v1/health`;
+    const res = await fetchImpl(target, {
+      ...(isUnix ? { unix: socketPath } : {}),
       headers: token ? { authorization: `Bearer ${token}` } : {},
       signal: controller.signal,
     });
@@ -340,11 +379,15 @@ export async function defaultProbeFirecracker(
     if (res.ok) return { status: "ok", url: base };
     return { status: "unreachable", url: base, detail: `HTTP ${res.status}` };
   } catch (err) {
-    return {
-      status: "unreachable",
-      url: base,
-      detail: err instanceof Error ? err.message : String(err),
-    };
+    const message = err instanceof Error ? err.message : String(err);
+    // A permission error on the socket is the rootless-doctor false
+    // negative: the daemon is likely fine, this process just cannot open
+    // a 0660 root:root node — say so instead of reporting "daemon down".
+    const detail =
+      isUnix && /EACCES|permission denied/i.test(message)
+        ? `${message} — the socket is root-owned (mode 0660 by default); re-run with sudo`
+        : message;
+    return { status: "unreachable", url: base, detail };
   } finally {
     clearTimeout(timer);
   }

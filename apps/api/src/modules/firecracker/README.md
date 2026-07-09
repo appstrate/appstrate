@@ -9,9 +9,14 @@ Platform side (the container) reads only these four variables:
 ```sh
 MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker   # add "firecracker"
 RUN_ADAPTER=firecracker
-FIRECRACKER_RUNNER_URL=http://<runner-host>:3100
+# Co-located daemon (same host) — Unix domain socket, recommended:
+FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock
+# Remote KVM host — TLS behind a reverse proxy:
+# FIRECRACKER_RUNNER_URL=https://<runner-host>:3100
 FIRECRACKER_RUNNER_TOKEN=<shared secret, >=16 chars>
 ```
+
+The wire carries the bearer token and per-run credentials, so a plaintext `http://` URL to a non-loopback host is refused fail-closed at boot (loopback `http://` and `unix://` are exempt).
 
 The host-side `FIRECRACKER_*` / `FIRECRACKER_RUNNER_*` variables are **daemon-only** — never parsed platform-side. Install the daemon on a fresh KVM host with the CLI (no checkout, no bun, no on-host build):
 

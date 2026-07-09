@@ -210,7 +210,7 @@ program
   )
   .option(
     "--runner-url <url>",
-    "Firecracker (remote): URL of an existing appstrate-runner daemon on a KVM host, e.g. http://10.0.0.9:3100. Implies the remote topology.",
+    "Firecracker (remote): URL of an existing appstrate-runner daemon on a KVM host, e.g. https://runner.example.com:3100 (TLS reverse proxy in front of the daemon). Passing plaintext http:// to a non-loopback host opts in to plaintext transport: the install warns and writes FIRECRACKER_RUNNER_TLS_REQUIRED=0 (only safe on a VPN/WireGuard link). Implies the remote topology.",
   )
   .option(
     "--runner-token <token>",
@@ -781,6 +781,10 @@ runnerGroup
     "State root for kernel/rootfs/runs/firecracker (default: /var/lib/appstrate-runner)",
   )
   .option("--host <addr>", "Daemon bind address (default: 0.0.0.0)")
+  .option(
+    "--socket <path>",
+    "Serve the daemon API on a unix socket at this absolute path instead of a TCP port (same-host topology — the platform dials unix://<path>). Mutually exclusive with --port/--host.",
+  )
   .option("-y, --yes", "Skip prompts (requires --platform-url).")
   .action(async (opts) => {
     await runnerInstallCommand({
@@ -789,6 +793,7 @@ runnerGroup
       port: typeof opts.port === "string" ? opts.port : undefined,
       dataDir: typeof opts.dataDir === "string" ? opts.dataDir : undefined,
       host: typeof opts.host === "string" ? opts.host : undefined,
+      socket: typeof opts.socket === "string" ? opts.socket : undefined,
       yes: opts.yes === true,
     });
   });

@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  defaultProbeFirecracker,
   formatDoctorReport,
   runDoctor,
   type FirecrackerHealth,
@@ -588,6 +589,99 @@ describe("runDoctor — Firecracker runner reachability (#819)", () => {
     });
     expect(report.firecracker).toBeUndefined();
     expect(probed).toBe(false);
+  });
+});
+
+describe("defaultProbeFirecracker — unix:// runner URL (UDS transport, #868)", () => {
+  /** Fake fetch capturing the target + init so we can assert the unix option. */
+  function capturingFetch(status: number) {
+    const calls: Array<{ input: string; init?: RequestInit & { unix?: string } }> = [];
+    const fetchImpl = (async (input: unknown, init?: RequestInit & { unix?: string }) => {
+      calls.push({ input: String(input), init });
+      return new Response("{}", { status });
+    }) as unknown as typeof fetch;
+    return { calls, fetchImpl };
+  }
+
+  it("dials the socket via the fetch `unix` option (path from the three-slash URL)", async () => {
+    const { calls, fetchImpl } = capturingFetch(200);
+    const health = await defaultProbeFirecracker(
+      "unix:///run/appstrate-runner/runner.sock",
+      "tok-abcdef1234567890",
+      fetchImpl,
+    );
+    expect(health).toEqual({ status: "ok", url: "unix:///run/appstrate-runner/runner.sock" });
+    expect(calls).toHaveLength(1);
+    // The authority is a placeholder; the socket path is what gets dialed.
+    expect(calls[0]!.input).toBe("http://appstrate-runner/v1/health");
+    expect(calls[0]!.init?.unix).toBe("/run/appstrate-runner/runner.sock");
+    // Same bearer-token behavior as the TCP probe.
+    expect((calls[0]!.init?.headers as Record<string, string>).authorization).toBe(
+      "Bearer tok-abcdef1234567890",
+    );
+  });
+
+  it("keeps the TCP path untouched: no unix option, URL dialed directly", async () => {
+    const { calls, fetchImpl } = capturingFetch(200);
+    const health = await defaultProbeFirecracker(
+      "http://10.0.0.9:3100",
+      "tok-abcdef1234567890",
+      fetchImpl,
+    );
+    expect(health.status).toBe("ok");
+    expect(calls[0]!.input).toBe("http://10.0.0.9:3100/v1/health");
+    expect(calls[0]!.init?.unix).toBeUndefined();
+  });
+
+  it("classifies a 401 over the socket as unauthorized (status logic unchanged)", async () => {
+    const { fetchImpl } = capturingFetch(401);
+    const health = await defaultProbeFirecracker(
+      "unix:///run/appstrate-runner/runner.sock",
+      "wrong-token-1234567890",
+      fetchImpl,
+    );
+    expect(health.status).toBe("unauthorized");
+    expect(health.detail).toBe("HTTP 401");
+  });
+
+  it("refuses the two-slash unix typo instead of probing the wrong socket", async () => {
+    // unix://var/run/x.sock parses "var" as a hostname — probing
+    // /run/x.sock would contradict the platform's boot refusal of the
+    // same URL. No fetch must happen.
+    const { calls, fetchImpl } = capturingFetch(200);
+    const health = await defaultProbeFirecracker(
+      "unix://var/run/x.sock",
+      "tok-abcdef1234567890",
+      fetchImpl,
+    );
+    expect(health.status).toBe("unreachable");
+    expect(health.detail).toContain("THREE slashes");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("keeps a unix:// URL verbatim — no trailing-slash strip on a socket path", async () => {
+    const { calls, fetchImpl } = capturingFetch(200);
+    await defaultProbeFirecracker(
+      // A trailing slash on a unix path names a DIFFERENT node — the
+      // http(s)-only normalization must not touch it.
+      "unix:///run/appstrate-runner/runner.sock/",
+      "tok-abcdef1234567890",
+      fetchImpl,
+    );
+    expect(calls[0]!.init?.unix).toBe("/run/appstrate-runner/runner.sock/");
+  });
+
+  it("appends a sudo hint when the socket probe fails with EACCES (rootless doctor)", async () => {
+    const fetchImpl = (async () => {
+      throw new Error("EACCES: permission denied, connect");
+    }) as unknown as typeof fetch;
+    const health = await defaultProbeFirecracker(
+      "unix:///run/appstrate-runner/runner.sock",
+      "tok-abcdef1234567890",
+      fetchImpl,
+    );
+    expect(health.status).toBe("unreachable");
+    expect(health.detail).toContain("re-run with sudo");
   });
 });
 
