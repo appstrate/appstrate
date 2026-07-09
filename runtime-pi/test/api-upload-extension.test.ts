@@ -3,7 +3,6 @@
 /**
  * Unit tests for the `{ns}__api_upload` agent-side extension wiring:
  *
- *   - `apiCallToolNameFor` maps an upload tool to its sibling api_call tool.
  *   - `buildApiUploadToolFactory` gates off (returns []) when the
  *     advertised descriptor declares no dispatchable `uploadProtocol`,
  *     and registers a Pi tool when it does.
@@ -15,7 +14,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
-import { apiCallToolNameFor, buildApiUploadToolFactory } from "../mcp/api-upload-extension.ts";
+import { buildApiUploadToolFactory } from "../mcp/api-upload-extension.ts";
 
 const fakeMcp = {} as AppstrateMcpClient;
 
@@ -35,17 +34,11 @@ function uploadTool(
   };
 }
 
-describe("apiCallToolNameFor", () => {
-  it("maps the upload tool to its sibling api_call tool", () => {
-    expect(apiCallToolNameFor("gmail__api_upload")).toBe("gmail__api_call");
-    expect(apiCallToolNameFor("@scope/drive__api_upload")).toBe("@scope/drive__api_call");
-  });
-});
-
 describe("buildApiUploadToolFactory", () => {
   it("returns [] when the descriptor declares no dispatchable protocol", () => {
     const factories = buildApiUploadToolFactory({
       tool: uploadTool("x__api_upload", undefined),
+      apiCallToolName: "x__api_call",
       mcp: fakeMcp,
       runId: "r",
       workspace: "/ws",
@@ -58,6 +51,7 @@ describe("buildApiUploadToolFactory", () => {
     expect(
       buildApiUploadToolFactory({
         tool: uploadTool("x__api_upload", []),
+        apiCallToolName: "x__api_call",
         mcp: fakeMcp,
         runId: "r",
         workspace: "/ws",
@@ -67,6 +61,7 @@ describe("buildApiUploadToolFactory", () => {
     expect(
       buildApiUploadToolFactory({
         tool: uploadTool("x__api_upload", "google-resumable"),
+        apiCallToolName: "x__api_call",
         mcp: fakeMcp,
         runId: "r",
         workspace: "/ws",
@@ -80,6 +75,7 @@ describe("buildApiUploadToolFactory", () => {
     // factory still registers (≥1 valid protocol remains).
     const factories = buildApiUploadToolFactory({
       tool: uploadTool("x__api_upload", ["google-resumable", "made-up"]),
+      apiCallToolName: "x__api_call",
       mcp: fakeMcp,
       runId: "r",
       workspace: "/ws",
@@ -91,6 +87,7 @@ describe("buildApiUploadToolFactory", () => {
   it("returns [] when every declared protocol is unknown", () => {
     const factories = buildApiUploadToolFactory({
       tool: uploadTool("x__api_upload", ["nonexistent", "another-fake"]),
+      apiCallToolName: "x__api_call",
       mcp: fakeMcp,
       runId: "r",
       workspace: "/ws",
@@ -102,6 +99,7 @@ describe("buildApiUploadToolFactory", () => {
   it("registers a Pi tool named after the advertised upload tool", () => {
     const factories = buildApiUploadToolFactory({
       tool: uploadTool("@scope/drive__api_upload", ["google-resumable", "s3-multipart"]),
+      apiCallToolName: "x__api_call",
       mcp: fakeMcp,
       runId: "r",
       workspace: "/ws",

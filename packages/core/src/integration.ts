@@ -766,32 +766,6 @@ export function isApiUploadToolName(name: string): boolean {
 }
 
 /**
- * Add or remove an api_call tool AND its `api_upload` companion as one unit,
- * returning the next tool selection. The companion joins the move only when the
- * resolved catalog actually contains it (i.e. the auth declared
- * `upload_protocols`) — never invent a tool the runtime won't serve.
- *
- * The pairing mirrors the spawn resolver, which grants both from either name:
- * upload chunks are dispatched through the sibling api_call tool, so a
- * half-selection is either a broken tool or a capability the manifest hides.
- * Order is preserved and the result is duplicate-free.
- */
-export function toggleApiCallToolSelection(
-  selection: readonly string[],
-  apiCallToolName: string,
-  catalogToolNames: readonly string[],
-): string[] {
-  const companion = apiUploadToolNameFor(apiCallToolName);
-  const pair = catalogToolNames.includes(companion)
-    ? [apiCallToolName, companion]
-    : [apiCallToolName];
-  if (selection.includes(apiCallToolName)) {
-    return selection.filter((t) => !pair.includes(t));
-  }
-  return [...selection, ...pair.filter((t) => !selection.includes(t))];
-}
-
-/**
  * Which auth keys a connection COULD satisfy for the agent's tool selection —
  * the candidate set for a connection *picker* (run/schedule override UI). It
  * returns the auths a connection MAY satisfy, as opposed to the auths that

@@ -25,6 +25,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   tool, so a half-selection is never valid). No manifest change was required —
   `upload_protocols` was already in its documented `_meta` location.
 
+- **Multi-auth `api_call` tools collided on one name (#881)** — an integration
+  opting several auths into `_meta["dev.appstrate/api"]` exposes one tool per
+  auth (`api_call__{authKey}`), but the sidecar collapsed every def onto the
+  bare `api_call` name. The two registrations collided and `McpHost` silently
+  disambiguated the second to `{ns}__api_call_2` — a name no catalog advertises
+  and no agent can select. The defs now keep the auth suffix. The agent-side
+  upload extension pairs an `api_upload` tool with its `api_call` sibling by
+  reading the key both stamp into their `_meta` markers, instead of rewriting
+  one tool name into the other (which never worked for the per-auth variants).
+
 - **Phantom "selected tool unavailable" warning (#881)** — the sidecar's
   no-silent-degradation guard compared the agent's full tool allowlist against
   the count of the integration's own MCP tools that survived registration. The

@@ -25,7 +25,13 @@
  * orchestration-only.
  */
 
-import { isApiCallTool, isApiUploadTool, type AppstrateMcpClient } from "@appstrate/mcp-transport";
+import {
+  isApiCallTool,
+  isApiUploadTool,
+  readApiCallToolKey,
+  readApiUploadSiblingKey,
+  type AppstrateMcpClient,
+} from "@appstrate/mcp-transport";
 import { Type, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolFactories,
@@ -138,6 +144,16 @@ function buildIntegrationToolFactories(
   opts: BuildMcpDirectFactoriesOptions,
 ): ExtensionFactory[] {
   const factories: ExtensionFactory[] = [];
+  // Index every advertised api_call tool by the auth-scoped key it stamped
+  // into its `_meta` marker, so an `api_upload` tool can find the sibling it
+  // dispatches chunks through by identity. Built up-front: `tools/list` gives
+  // no ordering guarantee, so the upload tool may precede its sibling.
+  const apiCallToolsByKey = new Map<string, string>();
+  for (const tool of advertised) {
+    if (!isApiCallTool(tool)) continue;
+    const key = readApiCallToolKey(tool);
+    if (key !== undefined) apiCallToolsByKey.set(key, tool.name);
+  }
   for (const tool of advertised) {
     if (claimed.has(tool.name)) continue;
     // `api_upload` tools are advertised by the sidecar (so the gating +
@@ -148,9 +164,18 @@ function buildIntegrationToolFactories(
     // the sidecar's advertise-only error handler). Detected by the
     // `dev.appstrate/api-upload` `_meta` marker, not the tool name.
     if (isApiUploadTool(tool)) {
+      // Gate the tool off entirely when the sibling can't be resolved: an
+      // upload that cannot dispatch is a capability the LLM would call and
+      // watch fail. `buildApiUploadToolFactory` gates the same way on an
+      // undispatchable protocol.
+      const siblingKey = readApiUploadSiblingKey(tool);
+      const apiCallToolName =
+        siblingKey !== undefined ? apiCallToolsByKey.get(siblingKey) : undefined;
+      if (apiCallToolName === undefined) continue;
       factories.push(
         ...buildApiUploadToolFactory({
           tool,
+          apiCallToolName,
           mcp: opts.mcp,
           runId: opts.runId,
           workspace: opts.workspace,

@@ -30,8 +30,8 @@ import {
   isApiCallToolName,
   isApiUploadToolName,
   readDefaultTools,
-  toggleApiCallToolSelection,
 } from "@appstrate/core/integration";
+import { toggleApiCallToolSelection } from "./tool-selection.ts";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Spinner } from "../spinner";
 import { useIntegrationDetail } from "../../hooks/use-integrations";

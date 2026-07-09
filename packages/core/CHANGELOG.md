@@ -21,7 +21,7 @@ of a provider-neutral bearer-swap.
   each `api_call` whose auth declares `_meta["dev.appstrate/api"].auths.<key>
 .upload_protocols`, matching the tool the sidecar already advertises at
   runtime. New exports: `API_UPLOAD_TOOL_NAME`, `apiUploadToolNameFor()`,
-  `isApiUploadToolName()`, `toggleApiCallToolSelection()`. `ApiCallConfig` gains
+  `isApiUploadToolName()`. `ApiCallConfig` gains
   an optional `uploadToolName`, present iff `uploadProtocols` is non-empty.
   Previously the catalog listed only `api_call`, so
   `validateAgentIntegrationScopes` rejected an agent that selected `api_upload`
