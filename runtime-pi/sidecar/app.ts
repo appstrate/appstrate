@@ -411,10 +411,9 @@ function deriveLlmTarget(c: Context, baseUrl: string): { targetUrl: string; meth
  * Buffer an inbound `/llm` request body under the hard byte cap and apply the
  * model-alias swap when one is configured; otherwise return the buffered text
  * verbatim. Returns a 413 `Response` (the caller returns it verbatim) when the
- * body exceeds the cap, or `undefined` for an empty body. Used by both branches
- * that must materialise the body: oauth always (so a 401 can be replayed),
- * api_key only when an alias requires the rewrite (the no-swap api_key path
- * keeps its zero-copy stream).
+ * body exceeds the cap, or `undefined` for an empty body. api_key-only: the
+ * oauth branch buffers via `bufferLlmBodyBounded` directly (401 replay) and
+ * never swaps — its config carries no `modelSwap`.
  */
 async function bufferAndSwapRequestBody(
   c: Context,
@@ -644,13 +643,12 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // OAuth: resolve the real subscription bearer and swap it onto the request,
-  // but DO NOT forge — no identity headers, no fingerprint transform. The Pi
-  // SDK (in-container) already signed the subscription request shape (Anthropic
+  // but DO NOT forge — no identity headers, no body transform. The Pi SDK
+  // (in-container) already signed the subscription request shape (Anthropic
   // OAuth fingerprint or codex-responses headers); we forward its user-agent /
-  // anthropic-beta / chatgpt-account-id untouched and only replace the
-  // placeholder bearer with the real token. The single deliberate body touch is
-  // the platform's own model-alias swap (`modelSwap`, exact-location
-  // alias↔real) — the same provider-neutral rewrite the api_key branch applies.
+  // anthropic-beta / chatgpt-account-id untouched, forward the body verbatim
+  // (no modelSwap in oauth mode — aliases are rejected platform-side), and only
+  // replace the placeholder bearer with the real token.
   async function handleOauthLlmRequest(
     c: Context,
     llmConfig: LlmProxyOauthConfig,
@@ -698,13 +696,14 @@ export function createApp(deps: AppDeps): Hono {
     // Buffer the request body (inference JSON, bounded by
     // SIDECAR_MAX_REQUEST_BODY_BYTES via the Content-Length precheck +
     // bounded streaming read → 413) so a 401 can be replayed after a token
-    // refresh — a consumed stream can't be. Apply the model-alias swap here
-    // when configured; otherwise forward the body verbatim.
+    // refresh — a consumed stream can't be. The body is forwarded VERBATIM:
+    // the oauth mode carries no modelSwap (aliases are rejected platform-side)
+    // and never rewrites what Pi signed.
     let body: string | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      const swapped = await bufferAndSwapRequestBody(c, llmConfig.modelSwap);
-      if (swapped instanceof Response) return swapped;
-      body = swapped;
+      const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+      if (buffered instanceof Response) return buffered;
+      body = buffered || undefined;
     }
 
     const doFetch = (headers: Headers): Promise<Response> =>
@@ -724,7 +723,7 @@ export function createApp(deps: AppDeps): Hono {
         targetUrl,
         error: err instanceof Error ? err.message : String(err),
       });
-      return llmFetchErrorResponse(c, targetUrl, err, llmConfig.modelSwap);
+      return llmFetchErrorResponse(c, targetUrl, err);
     }
 
     upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
@@ -754,15 +753,13 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    return passUpstream(
-      upstream,
-      {
-        targetUrl,
-        credentialId: llmConfig.credentialId,
-        authMode: "oauth",
-      },
-      llmConfig.modelSwap,
-    );
+    // No model-alias swap on the oauth path — the response streams back
+    // verbatim (zero-copy telemetry passthrough only).
+    return passUpstream(upstream, {
+      targetUrl,
+      credentialId: llmConfig.credentialId,
+      authMode: "oauth",
+    });
   }
 
   // MCP exposure — the agent-facing surface for the first-party tools

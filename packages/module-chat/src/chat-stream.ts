@@ -245,12 +245,12 @@ export async function handleChatStream(
   // The caller-context block (both paths) and the platform MCP probe (ai-sdk
   // path only) are independent — run them together.
   //
-  // The subscription (claude-code) path SKIPS the probe entirely: the official
-  // binary opens its OWN MCP connection from `platformMcp.url`, and the MCP
-  // server's instructions reach the model through that handshake. A probe here
-  // would be a second handshake we'd immediately close (2 round-trips wasted on
-  // the TTFT path). We pass `platformMcp` optimistically; if the `mcp` module is
-  // absent the SDK just gets no tools.
+  // The subscription path SKIPS the probe entirely: the Pi chat engine opens
+  // its OWN MCP connection from `platformMcp.url`, and the MCP server's
+  // instructions reach the model through that handshake. A probe here would be
+  // a second handshake we'd immediately close (2 round-trips wasted on the
+  // TTFT path). We pass `platformMcp` optimistically; if the `mcp` module is
+  // absent the engine just gets no tools.
   let mcp: Awaited<ReturnType<typeof openPlatformMcp>> | null = null;
   // Single MCP-teardown path. The session must be closed on EVERY ai-sdk exit
   // (stream `onError` AND `onFinish`, and a mid-stream client disconnect) or it
@@ -460,10 +460,10 @@ export async function handleChatStream(
       // System rides as a cached message part rather than the `system` field:
       // the platform MCP instructions now carry a generated operation index
       // (several KB, re-sent on every one of the up-to-CHAT_MAX_STEPS inference
-      // calls in a turn). OpenAI auto-caches the prefix and the Claude Agent
-      // SDK path caches on its own; the ai-sdk Anthropic providers need an
-      // explicit cache_control breakpoint or they'd pay the index in full each
-      // step. Harmless for non-Anthropic models (providerOptions is namespaced).
+      // calls in a turn). OpenAI auto-caches the prefix; the ai-sdk Anthropic
+      // providers need an explicit cache_control breakpoint or they'd pay the
+      // index in full each step. Harmless for non-Anthropic models
+      // (providerOptions is namespaced).
       messages: [aiSdkCachedSystemMessage(system), ...modelMessages],
       tools: mcp ? mcp.tools : undefined,
       stopWhen: stepCountIs(CHAT_MAX_STEPS),

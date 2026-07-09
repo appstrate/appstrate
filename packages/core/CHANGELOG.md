@@ -41,6 +41,13 @@ accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
   oauth header policy is the provider-neutral bearer-swap, and any
   provider-specific routing header (e.g. `chatgpt-account-id`) is emitted by
   Pi's SDK from the token itself.
+- **`LlmProxyOauthConfig.modelSwap` removed** (`@appstrate/core/sidecar-types`).
+  The oauth sidecar mode is a pure bearer-swap and never rewrites the
+  request/response body; model aliases are rejected for oauth-subscription
+  providers instead. `checkAliasInvariants` (`@appstrate/core/model-swap`) now
+  requires an `authMode` input and returns the new `"oauth_provider"`
+  violation for an alias backed by an oauth credential. `modelSwap` remains on
+  `LlmProxyApiKeyConfig` (api_key aliases are unchanged).
 
   These are removed public API → requires a major version bump on next
   publish. Consumers on the `claude`/`codex` engine vocabulary should drop it;

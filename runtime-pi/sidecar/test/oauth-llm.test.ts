@@ -180,21 +180,19 @@ describe("/llm/* oauth — no forging", () => {
     expect(keys).not.toContain("x-api-key");
   });
 
-  it("rewrites the model alias→real in the request body when modelSwap is set", async () => {
+  it("forwards the request body byte-identical (no model swap exists in oauth mode)", async () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
-    deps.config.llm = {
-      ...OAUTH_CFG,
-      modelSwap: { alias: "appstrate-small", real: "claude-haiku-4-5" },
-    };
+    deps.config.llm = OAUTH_CFG;
     const app = createApp(deps);
 
+    const body = JSON.stringify({ model: "claude-haiku-4-5", messages: [], metadata: { a: 1 } });
     await app.request("/llm/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "appstrate-small", messages: [] }),
+      body,
     });
-    expect(JSON.parse(calls[1]!.body!).model).toBe("claude-haiku-4-5");
+    expect(calls[1]!.body).toBe(body);
   });
 
   it("retries once on 401 with a force-refreshed token", async () => {

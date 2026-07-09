@@ -21,7 +21,7 @@
  * orchestrator because that swap only exists on the sidecar path.
  */
 
-import type { LlmProxyOauthConfig, ModelSwap } from "@appstrate/core/sidecar-types";
+import type { LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
 import type { ExecutionMode } from "../../infra/mode.ts";
 import { orchestratorIsolatesWorkloads, isolatingOrchestratorIds } from "../orchestrator/index.ts";
 import { isOAuthModelProvider } from "../model-providers/registry.ts";
@@ -98,23 +98,56 @@ export function assertOauthRunIsolation(params: {
 }
 
 /**
+ * Thrown when an OAuth-subscription run resolves to an ALIASED model. The
+ * sidecar's oauth `/llm` mode is a pure bearer-swap — it never rewrites the
+ * request/response body, so the alias could neither reach the upstream under
+ * its real id nor stay masked on the way back. Alias creation already rejects
+ * oauth-backed credentials (`checkAliasInvariants` → `oauth_provider`); this
+ * launch-time guard fail-closes any row that predates that rule.
+ */
+export class OauthAliasedModelUnsupportedError extends Error {
+  constructor(public readonly providerId: string) {
+    super(
+      `Provider "${providerId}" uses an OAuth subscription credential, whose run path ` +
+        `is a pure bearer-swap and never rewrites the request body — a model alias ` +
+        `cannot be swapped there. Bind the alias to an API-key credential, or run ` +
+        `this agent on the un-aliased subscription model.`,
+    );
+    this.name = "OauthAliasedModelUnsupportedError";
+  }
+}
+
+/**
+ * Fail-closed alias guard for OAuth-subscription runs. Throws
+ * {@link OauthAliasedModelUnsupportedError} when the resolved model is an
+ * alias backed by an oauth credential. API-key aliases are unaffected.
+ */
+export function assertOauthRunNotAliased(params: {
+  isOauthCredential: boolean;
+  aliased: boolean;
+  providerId: string;
+}): void {
+  const { isOauthCredential, aliased, providerId } = params;
+  if (isOauthCredential && aliased) {
+    throw new OauthAliasedModelUnsupportedError(providerId);
+  }
+}
+
+/**
  * Build the sidecar `/llm` config for an OAuth-subscription run. The Pi SDK
  * signs the subscription request shape itself, so the sidecar only swaps the
  * placeholder bearer for the real token — no identity headers, no
- * system-prepend, no fingerprint transform. When the run's model is an alias,
- * `modelSwap` rides along so the sidecar applies the same provider-neutral
- * alias↔real body rewrite as on the api_key path. Pure for unit testing.
+ * system-prepend, no body transform (aliases are rejected upstream by
+ * {@link assertOauthRunNotAliased}). Pure for unit testing.
  */
 export function buildOauthSidecarLlm(params: {
   baseUrl: string;
   credentialId: string;
-  modelSwap?: ModelSwap;
 }): LlmProxyOauthConfig {
-  const { baseUrl, credentialId, modelSwap } = params;
+  const { baseUrl, credentialId } = params;
   return {
     authMode: "oauth",
     baseUrl,
     credentialId,
-    ...(modelSwap ? { modelSwap } : {}),
   };
 }

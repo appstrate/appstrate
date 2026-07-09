@@ -3,7 +3,9 @@
 import { afterAll, beforeAll, describe, it, expect } from "bun:test";
 import {
   assertOauthRunIsolation,
+  assertOauthRunNotAliased,
   resolveCredentialDelivery,
+  OauthAliasedModelUnsupportedError,
   OauthRunRequiresIsolationError,
   buildOauthSidecarLlm,
 } from "../../../src/services/run-launcher/subscription-run-policy.ts";
@@ -50,12 +52,34 @@ describe("buildOauthSidecarLlm", () => {
     expect("wireFormat" in cfg).toBe(false);
   });
 
-  it("carries modelSwap through", () => {
-    const modelSwap = { alias: "appstrate-small", real: "claude-haiku-4-5" };
-    expect(buildOauthSidecarLlm({ baseUrl: "u", credentialId: "c", modelSwap })).toMatchObject({
-      authMode: "oauth",
-      modelSwap,
-    });
+  it("carries no modelSwap — the oauth mode never rewrites the body", () => {
+    const cfg = buildOauthSidecarLlm({ baseUrl: "u", credentialId: "c" });
+    expect("modelSwap" in cfg).toBe(false);
+  });
+});
+
+describe("assertOauthRunNotAliased", () => {
+  it("rejects an aliased model on an oauth credential", () => {
+    expect(() =>
+      assertOauthRunNotAliased({
+        isOauthCredential: true,
+        aliased: true,
+        providerId: "claude-code",
+      }),
+    ).toThrow(OauthAliasedModelUnsupportedError);
+  });
+
+  it("allows an un-aliased oauth model and any api_key alias", () => {
+    expect(() =>
+      assertOauthRunNotAliased({
+        isOauthCredential: true,
+        aliased: false,
+        providerId: "claude-code",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertOauthRunNotAliased({ isOauthCredential: false, aliased: true, providerId: "openai" }),
+    ).not.toThrow();
   });
 });
 

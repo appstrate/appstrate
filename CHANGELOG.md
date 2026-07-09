@@ -15,10 +15,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **Claude-engine native structured output (#849)** — a run whose agent
-  declares an `output.schema` now captures the Claude engine's native
-  structured output into `RunResult.output` (previously only populated via
-  the `output` runtime tool).
 - **Transparent egress for `delivery.env` integrations (#850, #779)** — the
   sidecar no longer drops egress for integrations that inject credentials via
   `delivery.env`; the per-run proxy path is applied transparently.
@@ -46,6 +42,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Single Pi execution engine (#875)** — agent runs AND oauth-subscription
+  chat (Claude Pro/Max via `claude-code`, ChatGPT via `codex`) all execute on
+  the one Pi engine (`@mariozechner/pi-coding-agent`); the per-provider
+  "official binary" run path and the Claude Agent SDK chat engine are removed.
+  Pi's SDK emits each provider's subscription request shape natively — the
+  platform forges nothing; the sidecar's oauth `/llm` mode is a pure
+  bearer-swap (model aliases are rejected for oauth-subscription providers).
+  Codex becomes chat-usable. The `#849` Claude-engine structured-output fix is
+  superseded (that engine no longer exists; structured output flows through
+  the Pi `output` runtime tool).
 - CI action bumps: `docker/setup-buildx-action` 4.1.0→4.2.0 (#857),
   `actions/cache/restore` 4.2.4→6.1.0 (#858),
   `github/codeql-action/upload-sarif` 4.36.2→4.36.3 (#859),

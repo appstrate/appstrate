@@ -22,7 +22,7 @@ import {
   deriveModelLabel,
   projectAliasedModel,
 } from "../services/org-models.ts";
-import { getModelProvider } from "../services/model-providers/registry.ts";
+import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
 import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
@@ -192,7 +192,11 @@ export function createModelsRouter() {
       }
       // Model-alias guards (issue #727, Threat A) — shared invariant rule:
       if (aliased) {
-        const violation = checkAliasInvariants({ label: data.label, apiShape: creds.apiShape });
+        const violation = checkAliasInvariants({
+          label: data.label,
+          apiShape: creds.apiShape,
+          authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
+        });
         // 1. Require an explicit label. The derive-from-catalog fallback below
         //    would name the alias after its REAL backing ("DeepSeek Chat"),
         //    and `label` survives the projection — leaking the backing on
@@ -210,6 +214,15 @@ export function createModelsRouter() {
         if (violation === "non_aliasable_shape") {
           throw invalidRequest(
             `Model aliases are not supported for the "${creds.apiShape}" protocol (the model id is carried in the URL, not the request body).`,
+            "aliased",
+          );
+        }
+        // 3. The oauth-subscription run path is a pure sidecar bearer-swap —
+        //    it never rewrites the body, so an alias there could not be
+        //    swapped (nor masked). Reject up front.
+        if (violation === "oauth_provider") {
+          throw invalidRequest(
+            "Model aliases are not supported for oauth-subscription providers — the subscription run path never rewrites the request body. Bind the alias to an API-key credential instead.",
             "aliased",
           );
         }

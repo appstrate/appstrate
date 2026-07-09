@@ -28,6 +28,7 @@ import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import {
   assertOauthRunIsolation,
+  assertOauthRunNotAliased,
   buildOauthSidecarLlm,
   resolveCredentialDelivery,
 } from "./subscription-run-policy.ts";
@@ -172,6 +173,15 @@ async function runPlatformContainerImpl(
       providerId: llmConfig.providerId,
       orchestratorMode: getExecutionMode(),
     });
+    // The oauth sidecar mode is a pure bearer-swap — it carries no modelSwap,
+    // so an aliased subscription model can neither work nor stay masked.
+    // Alias creation already rejects oauth credentials; fail-closed here for
+    // any row predating that rule.
+    assertOauthRunNotAliased({
+      isOauthCredential: delivery.isOauthCredential,
+      aliased: !!llmConfig.aliased,
+      providerId: llmConfig.providerId,
+    });
 
     const llmApiKey = llmConfig.apiKey;
 
@@ -233,11 +243,10 @@ async function runPlatformContainerImpl(
     if (isOauthCredential) {
       // OAuth subscription: the Pi SDK signs the subscription request shape
       // itself, so the sidecar just swaps the placeholder bearer for the real
-      // token — no forging.
+      // token — no forging, no modelSwap (aliases rejected above).
       sidecarLlm = buildOauthSidecarLlm({
         baseUrl: llmConfig.baseUrl,
         credentialId: llmConfig.credentialId!,
-        ...(modelSwap ? { modelSwap } : {}),
       });
     } else if (llmApiKey) {
       // API-key flow: the sidecar forwards directly to the upstream

@@ -244,6 +244,33 @@ describe("Models API", () => {
       expect(res.status).toBe(400);
     });
 
+    it("rejects an alias on an oauth-subscription credential (bearer-swap-only path) — 400", async () => {
+      // The oauth run path is a pure sidecar bearer-swap: no body rewrite
+      // exists there, so an alias could neither be swapped nor masked.
+      const row = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: "Test OAuth",
+        accessToken: "test-access",
+        refreshToken: "test-refresh",
+        expiresAt: null,
+        createdBy: ctx.user.id,
+      });
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Subscribed",
+          modelId: "test-model",
+          credentialId: row.id,
+          aliased: true,
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(String(body.detail)).toContain("oauth-subscription");
+    });
+
     it("rejects non-UUID credentialId with 400 (built-in slugs like 'anthropic')", async () => {
       // System-key ids ("anthropic", "openai-prod", …) are slugs, not UUIDs —
       // they live in SYSTEM_PROVIDER_KEYS env and never appear in the

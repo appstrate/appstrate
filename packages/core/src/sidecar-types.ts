@@ -495,13 +495,12 @@ export interface IntegrationSpawnSpec {
  *     from its OAuth-shaped placeholder token; the sidecar fetches a fresh
  *     access token from the platform (`GET /internal/oauth-token/:credentialId`)
  *     and swaps the request bearer for it verbatim — no identity headers, no
- *     fingerprint transforms. There is deliberately no fingerprint-forging
- *     mode: the platform itself never synthesises a provider fingerprint.
+ *     body transforms. There is deliberately no fingerprint-forging mode: the
+ *     platform itself never synthesises a provider fingerprint.
  *
- * Both modes honour the platform's own model-alias swap when `modelSwap` is
- * set ({@link ModelSwap}): the `model` field is rewritten alias↔real at exact
- * JSON locations in the request/response — a provider-neutral platform
- * feature, not a fingerprint transform.
+ * The model-alias swap ({@link ModelSwap}) exists only on the `api_key` mode.
+ * Aliases are rejected for oauth-subscription providers (at alias creation and
+ * again at run launch) so the oauth path stays a pure bearer-swap.
  */
 export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
 
@@ -561,10 +560,10 @@ export interface LlmProxyApiKeyConfig {
  *
  * The sidecar forges nothing. It only resolves a fresh access token from the
  * platform and swaps the request bearer for it verbatim (`applyOauthBearerSwap`)
- * — every other header passes through untouched, and the body's single
- * deliberate touch is the platform's own model-alias swap when `modelSwap` is
- * set (same rewrite as the api_key mode). There is no forging fallback: the
- * platform itself never synthesises a provider fingerprint.
+ * — every other header and the body pass through untouched. There is no forging
+ * fallback: the platform itself never synthesises a provider fingerprint. There
+ * is also no `modelSwap`: model aliases are rejected for oauth-subscription
+ * providers, so this mode never rewrites the body.
  */
 export interface LlmProxyOauthConfig {
   authMode: "oauth";
@@ -572,8 +571,6 @@ export interface LlmProxyOauthConfig {
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   credentialId: string;
-  /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
-  modelSwap?: ModelSwap;
 }
 
 /**

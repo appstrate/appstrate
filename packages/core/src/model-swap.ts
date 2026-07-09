@@ -67,8 +67,12 @@ export function isAliasableApiShape(shape: ModelApiShape): boolean {
  *     real backing and leak it on `/api/models` and `run.model_label`.
  *   - `non_aliasable_shape` — the protocol carries the model id in the URL, not
  *     the request body, so the swap can't hide the backing.
+ *   - `oauth_provider` — the backing credential is an oauth-subscription
+ *     provider. The sidecar's oauth `/llm` mode is a pure bearer-swap (no body
+ *     rewrite, `LlmProxyOauthConfig` carries no `modelSwap`), so an alias there
+ *     could never be swapped — reject at configuration time.
  */
-export type AliasInvariantViolation = "missing_label" | "non_aliasable_shape";
+export type AliasInvariantViolation = "missing_label" | "non_aliasable_shape" | "oauth_provider";
 
 /**
  * Single source of truth for the model-alias invariants, shared by both trust
@@ -79,9 +83,12 @@ export type AliasInvariantViolation = "missing_label" | "non_aliasable_shape";
 export function checkAliasInvariants(input: {
   label?: string | null;
   apiShape: ModelApiShape;
+  /** Auth mode of the backing credential's provider. */
+  authMode: "api_key" | "oauth2";
 }): AliasInvariantViolation | null {
   if (!input.label) return "missing_label";
   if (!isAliasableApiShape(input.apiShape)) return "non_aliasable_shape";
+  if (input.authMode === "oauth2") return "oauth_provider";
   return null;
 }
 
