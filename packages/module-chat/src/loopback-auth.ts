@@ -20,14 +20,14 @@
  *
  * Two minters share this machinery:
  *
- *   - `mintLoopbackToken` — the INFERENCE bearer. Scope `llm-proxy:call`
- *     + `models:read`, `firstPartyLoopback: true` (the subscription LLM
- *     gateway accepts only first-party-loopback callers).
+ *   - `mintLoopbackToken` — the INFERENCE bearer (ai-sdk path). Scope
+ *     `llm-proxy:call` + `models:read`, `firstPartyLoopback: true` (the
+ *     llm-proxy accepts a loopback caller without an API key).
  *   - `mintMcpLoopbackToken` — the platform-MCP bearer handed to the
- *     EXTERNAL subscription binary. Scope is the caller's own already-
+ *     in-process Pi subscription engine. Scope is the caller's own already-
  *     resolved permission set (RBAC fidelity, no amplification) and
  *     `firstPartyLoopback: false` — it authorizes the MCP meta-tools but
- *     can NEVER be replayed against the subscription LLM gateway.
+ *     can NEVER be replayed against the inference proxy.
  *
  * Contributed through the standard `authStrategies()` module extension
  * point. The strategy declares the `firstPartyLoopback` capability on its
@@ -95,19 +95,17 @@ function mint(
  * first-party-loopback granted).
  *
  * The default 60 s TTL fits the `ai-sdk` path, which re-mints on every proxy
- * call. The Claude Agent SDK path can't — it bakes the bearer into the spawned
- * binary's env once at turn start (`ANTHROPIC_AUTH_TOKEN`), and the turn can
- * run for minutes (multi-step + blocking run long-polls). It passes a longer
- * `ttlMs` so the token outlives the whole turn. The token stays least-privilege,
- * process-local, and only usable on the 127.0.0.1 first-party gateway.
+ * call. A caller whose token must live across a whole multi-step turn (minutes
+ * — blocking run long-polls) passes a longer `ttlMs`. The token stays
+ * least-privilege and process-local either way.
  */
 export function mintLoopbackToken(identity: LoopbackIdentity, opts?: { ttlMs?: number }): string {
   return mint(identity, INFERENCE_PERMISSIONS, true, opts?.ttlMs ?? TOKEN_TTL_MS);
 }
 
 /**
- * Mint the platform-MCP loopback bearer handed to the EXTERNAL subscription
- * binary for its own `/api/mcp/o/:org` connection.
+ * Mint the platform-MCP loopback bearer handed to the in-process Pi
+ * subscription engine for its own `/api/mcp/o/:org` connection.
  *
  * `permissions` MUST be the caller's already-resolved permission set (from
  * `c.get("permissions")`): the MCP meta-tools re-enter the platform in-process
@@ -115,11 +113,10 @@ export function mintLoopbackToken(identity: LoopbackIdentity, opts?: { ttlMs?: n
  * carrying the caller's own permissions preserves full RBAC fidelity WITHOUT
  * amplifying beyond what the caller could already do over REST. The token does
  * NOT grant `firstPartyLoopback`, so — unlike the inference bearer — it can
- * never be replayed against the subscription LLM gateway (`assertLoopbackOnly`).
+ * never be replayed against the inference proxy.
  *
- * The external binary bakes these headers once and may reconnect across the
- * turn, so callers pass a `ttlMs` that spans the whole turn (mirroring the
- * inference bearer's engine-path TTL).
+ * The engine bakes these headers once and may reconnect across the turn, so
+ * callers pass a `ttlMs` that spans the whole turn.
  */
 export function mintMcpLoopbackToken(
   identity: LoopbackIdentity & { permissions: readonly string[] },

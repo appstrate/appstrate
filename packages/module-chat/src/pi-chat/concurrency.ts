@@ -19,6 +19,8 @@
  * standalone wiring).
  */
 
+import { logger } from "../logger.ts";
+
 const DEFAULT_MAX_CONCURRENCY = 6;
 const ENV_VAR = "CHAT_PI_MAX_CONCURRENCY";
 
@@ -53,6 +55,54 @@ export const acquirePiChatSlot = (): PiChatSlot | null => {
     },
   };
 };
+
+/**
+ * Wrap a stream so `onClose` runs exactly once when it terminates — used to
+ * release a concurrency slot after the response body has fully drained, not
+ * when the producer function returns. Fires on every terminal path: normal
+ * completion, downstream cancellation (client disconnected while the
+ * persistence drain also stopped), and source error — so the slot can never
+ * leak. (A `TransformStream` with a `flush` hook misses the cancellation path:
+ * Bun does not invoke the transformer's `cancel` callback.)
+ */
+export function releaseOnClose<T>(
+  stream: ReadableStream<T>,
+  onClose: () => void,
+): ReadableStream<T> {
+  let done = false;
+  const fire = () => {
+    if (done) return;
+    done = true;
+    try {
+      onClose();
+    } catch (err) {
+      logger.warn("pi chat slot release failed", { err: String(err) });
+    }
+  };
+  const reader = stream.getReader();
+  return new ReadableStream<T>({
+    async pull(controller) {
+      let result: Awaited<ReturnType<typeof reader.read>>;
+      try {
+        result = await reader.read();
+      } catch (err) {
+        fire();
+        controller.error(err);
+        return;
+      }
+      if (result.done) {
+        fire();
+        controller.close();
+        return;
+      }
+      controller.enqueue(result.value);
+    },
+    async cancel(reason) {
+      fire();
+      await reader.cancel(reason);
+    },
+  });
+}
 
 /**
  * RFC 9457 `429` returned (instead of a stream) when the Pi chat engine is at

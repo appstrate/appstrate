@@ -98,7 +98,7 @@ async function loadMessages(sessionId: string): Promise<MessageRow[]> {
 
 // ---------------------------------------------------------------------------
 // Router — built once at module init with the platform deps captured from
-// `ctx.services` (rate limiter + in-process dispatch + chat-engine lookup).
+// `ctx.services` (rate limiter + in-process dispatch + subscription-model resolution).
 // ---------------------------------------------------------------------------
 
 export function createChatRouter(deps: ChatPlatformDeps) {

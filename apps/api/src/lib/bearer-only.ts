@@ -54,31 +54,3 @@ export function assertBearerOnly(
     );
   }
 }
-
-/**
- * Throw `forbidden(...)` unless the caller is a first-party loopback bearer —
- * the only caller allowed to drive a subscription LLM gateway. The effective
- * gate is the strategy's process-local HMAC secret (never persisted/transmitted),
- * which only a server-constructed request carries; core merely reads the
- * `firstPartyLoopback` capability the strategy declared.
- *
- * Everything else — including `oauth2-dashboard` — is refused: a logged-in org
- * member could otherwise point a normal dashboard token at the gateway and use
- * it as a raw subscription proxy, driving the upstream as a NON-official client
- * and defeating the "official binary signs its own fingerprint" argument.
- * Persisting/exporting a loopback secret, or declaring `firstPartyLoopback` on a
- * browser-reachable strategy, breaks the invariant that a personal subscription
- * is never spendable as a bare proxy.
- */
-export function assertLoopbackOnly(
-  authMethod: string | undefined,
-  surfaceName: string,
-  caps: BearerCallerCapabilities = {},
-): void {
-  assertBearerOnly(authMethod, surfaceName, caps);
-  if (!caps.firstPartyLoopback) {
-    throw forbidden(
-      `${surfaceName} is restricted to the first-party loopback caller — subscription credentials are never spendable through API keys, dashboard tokens, or external tokens`,
-    );
-  }
-}

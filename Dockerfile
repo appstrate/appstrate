@@ -61,8 +61,8 @@ WORKDIR /app
 # Runtime dependencies (root hoisted + every workspace member's isolated
 # node_modules), graph-derived via `COPY --parents` like the build stage.
 # Bun isolated installs keep each package's deps OUT of the root hoist
-# (e.g. @anthropic-ai/claude-agent-sdk under module-claude-code, zod under
-# module-chat) as symlink farms into the root .bun store — cheap to ship,
+# (e.g. zod under module-chat) as symlink farms into the root .bun store
+# — cheap to ship,
 # and a missing one crash-loops at module load. A manual allowlist here
 # caused exactly that three times (afps-shared/semver, module-claude-code,
 # module-chat); the glob can't miss a member and skips absent dirs instead

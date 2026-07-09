@@ -25,8 +25,10 @@
  * discover models: validation is the local JWT decode below (inferred from the
  * presence of the `validateCredential` hook), and model discovery persists the
  * static `modelDiscoveryCandidates` (declared via `modelDiscovery: { mode:
- * "static" }`). The user's subscription token is only ever spent through the
- * official Codex CLI at run time. See
+ * "static" }`). The user's subscription token is only ever spent via the
+ * sidecar's verbatim bearer swap at run time — agent runs execute on the
+ * single Pi engine, whose pi-ai SDK emits the codex-responses request
+ * shape natively. See
  * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 

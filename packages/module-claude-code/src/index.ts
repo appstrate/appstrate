@@ -21,17 +21,18 @@
  * Anthropic stay on the `anthropic` provider in `core-providers`.
  *
  * No fingerprint forging anywhere — and the platform issues ZERO Anthropic API
- * calls to validate a credential or discover models. A `claude-code` run
- * executes on the official Claude Agent SDK (the `claude` runner engine) and the
- * chat on the same SDK — the official `claude` binary signs its own client
- * fingerprint, and the sidecar / chat gateways only swap the bearer + ensure the
- * `oauth-2025-04-20` beta. The provider declares no `oauthWireFormat`; the
- * module's only `hooks` entry is `validateCredential`, an OFFLINE check (no
- * network) that confirms the bearer is well-formed and unexpired — its
- * presence is what makes credential validation offline. Model discovery
- * persists the static `modelDiscoveryCandidates` (declared via `modelDiscovery:
- * { mode: "static" }`) without probing — real per-model availability is
- * validated at first official-binary run. See
+ * calls to validate a credential or discover models. Both `claude-code` runs
+ * and the chat execute on the single generic Pi engine
+ * (`@mariozechner/pi-coding-agent` / `pi-ai`) — pi-ai emits the Anthropic OAuth
+ * request shape natively from the token, and the sidecar (run) / in-process
+ * token resolution (chat) only swap the bearer + ensure the `oauth-2025-04-20`
+ * beta. The provider declares no `oauthWireFormat`; the module's only `hooks`
+ * entry is `validateCredential`, an OFFLINE check (no network) that confirms
+ * the bearer is well-formed and unexpired — its presence is what makes
+ * credential validation offline. Model discovery persists the static
+ * `modelDiscoveryCandidates` (declared via `modelDiscovery: { mode: "static" }`)
+ * without probing — real per-model availability is validated at the first
+ * agent run (on the Pi engine). See
  * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
@@ -69,8 +70,9 @@ const claudeCodeHooks: ModelProviderHooks = {
    * not pass. This is a STRUCTURAL/offline check only, NOT a signature
    * verification or a live backend call. The platform never spends a
    * subscription request to test a token — real per-model availability
-   * and true credential liveness are established at first
-   * official-binary run.
+   * and true credential liveness are established at the first agent run
+   * (on the Pi engine), which presents the credential to the real
+   * backend.
    */
   validateCredential(ctx: CredentialValidationContext): CredentialValidationResult {
     if (typeof ctx.apiKey !== "string" || ctx.apiKey.trim().length === 0) {
@@ -121,7 +123,8 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // `validateCredential` hook below (a non-empty/unexpired bearer check) — its
   // mere presence is what tells the platform to validate offline. Static
   // discovery persists the candidates below (∩ catalog) without per-model
-  // probing. Real availability is checked at first official-binary run.
+  // probing. Real availability is checked at the first agent run (on the
+  // Pi engine).
   // Persisted as-is (∩ catalog) — what THIS account's plan actually serves
   // (Pro vs Max vs Team differ, e.g. Opus/Fable access) lands on the
   // credential's `available_model_ids`. No machine-readable source describes

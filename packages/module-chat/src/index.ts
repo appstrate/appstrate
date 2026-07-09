@@ -52,7 +52,7 @@ const chatModule: AppstrateModule = {
     // workers: chat is request-driven. Capture the platform deps once: the
     // rate limiter, the in-process dispatcher (re-enters the platform app for
     // /api/models, /api/applications, /api/me/context, the llm-proxy — loopback
-    // fetch fallback inside), and the subscription chat-engine lookup.
+    // fetch fallback inside), and the subscription-model resolution + usage metering.
     deps = buildChatPlatformDeps(ctx);
   },
 

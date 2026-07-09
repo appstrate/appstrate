@@ -550,16 +550,15 @@ export interface LlmProxyApiKeyConfig {
 }
 
 /**
- * OAuth mode — the no-forging path for an agent driver that signs its OWN
- * provider fingerprint (the official Claude Agent SDK binary).
+ * OAuth mode — the no-forging path for oauth-subscription runs. The in-container
+ * Pi engine (`pi-ai`) emits the provider's own subscription request shape from
+ * the OAuth-shaped placeholder token it was given (headers, beta flags,
+ * user-agent — request-shape fidelity is delegated to Pi).
  *
  * The sidecar forges nothing. It only resolves a fresh access token from the
- * platform, swaps the request bearer for it, and ensures the documented OAuth
- * beta flag (`oauth-2025-04-20`) is present — leaving the driver's own
- * user-agent / `x-app` / `anthropic-beta` fingerprint, request headers, and body
- * untouched. This is the runner-side counterpart of the chat's
- * `claude-code-sdk-gateway`. There is no forging fallback: a subscription
- * provider whose driver can't sign its own fingerprint has no execution path.
+ * platform and swaps the request bearer for it verbatim (`applyOauthBearerSwap`)
+ * — every other header and the body pass through untouched. There is no forging
+ * fallback: the platform itself never synthesises a provider fingerprint.
  */
 export interface LlmProxyOauthConfig {
   authMode: "oauth";

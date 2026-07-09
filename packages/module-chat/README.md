@@ -6,17 +6,17 @@ Module Appstrate — chat conversationnel first-party au-dessus de la plateforme
 
 ## Surfaces
 
-| Surface                | Contenu                                                                                                                                                                                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.` (backend)          | `AppstrateModule` : routes `/api/chat/*`, RBAC `chat:read/write`, flag `features.chat`, contribution OpenAPI (→ auto-exposé en MCP via le module `mcp`)                                                                                     |
-| `./ui` (front)         | `ChatPage` (plein écran, lazy-loadé par le shell derrière `features.chat` ; liste de sessions + thread)                                                                                                                                     |
-| `./chat-engine` (leaf) | Contrat `ChatEngineInput` + registre `registerChatEngine`/`getChatEngine` — le seam par lequel un module fournisseur (ex. `@appstrate/module-claude-code`) branche un moteur de chat « binaire officiel » sans que core ne porte le contrat |
+| Surface        | Contenu                                                                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.` (backend)  | `AppstrateModule` : routes `/api/chat/*`, RBAC `chat:read/write`, flag `features.chat`, contribution OpenAPI (→ auto-exposé en MCP via le module `mcp`) |
+| `./ui` (front) | `ChatPage` (plein écran, lazy-loadé par le shell derrière `features.chat` ; liste de sessions + thread)                                                 |
 
 ## Cerveau LLM (✅ transplanté du satellite appstrate-chat)
 
 `POST /api/chat` = boucle AI SDK v6 `streamText` (UIMessage stream) :
 
 - **Modèles** : résolus via `GET /api/models` de l'org, inference via le **llm-proxy** de la plateforme (clé injectée côté serveur, métrée) — le module ne détient aucune clé.
+- **Subscription** : les modèles oauth-subscription (ex. claude-code) sont servis par le moteur Pi in-process générique du module (`src/pi-chat/`), résolu via les services plateforme (`resolveSubscriptionChatModel`) — pas de seam par fournisseur, pas de binaire externe ; pi-ai émet nativement le request shape subscription du fournisseur depuis le token.
 - **Outils** : les méta-tools du module `mcp` (`search_operations` / `describe_operation` / `invoke_operation`) exposés via le MCP HTTP de la plateforme — le modèle pilote la plateforme avec les permissions de l'appelant.
 - **Identité** : forward des headers de l'appelant (cookie/Authorization + X-Org-Id/X-Application-Id) sur appels loopback — l'OAuth audience-bindé du satellite disparaît, le pipeline d'auth ré-authentifie chaque saut.
 - **Persistance** : chaque tour est écrit dans `chat_sessions`/`chat_messages` ; la session est identifiée par un id de chemin (`/api/chat/sessions/:id/messages`), créé côté serveur — pas de header dédié.
@@ -35,16 +35,18 @@ inachevé.
 ### Écarts de parité entre moteurs (ai-sdk vs subscription)
 
 Le moteur `ai-sdk` intercepte chaque tool result avant le modèle ; le moteur
-subscription (Claude Agent SDK) exécute sa boucle d'outils en interne, sans
-hook équivalent. Deux protections sont donc **ai-sdk uniquement** :
+subscription (le moteur Pi in-process, `src/pi-chat/`) exécute sa boucle
+d'outils en interne, sans hook équivalent. Une protection est donc
+**ai-sdk uniquement** :
 
 - **Redaction des liens de connexion** (`redactConnectLinks`, `platform-mcp.ts`) :
   côté subscription, le modèle voit le `connect_url` brut dans le tool result —
   seule l'instruction du serveur MCP (« ne jamais coller le lien ») le retient.
   Une redaction serveur casserait le bouton de connexion : l'UI extrait l'offre
   du même tool result (`extract-auth-offer`).
-- **Politique d'index d'opérations** (`applyOperationIndexPolicy`) : ne concerne
-  que les providers ai-sdk sans prompt cache (Mistral) ; N/A côté subscription.
+- **Politique d'index d'opérations** (`applyOperationIndexPolicy`) : couverte
+  des deux côtés — le moteur Pi la reflète localement
+  (`dropOperationIndexForUncached`, `src/pi-chat/engine.ts`).
 
 ## Configuration (variables d'environnement)
 

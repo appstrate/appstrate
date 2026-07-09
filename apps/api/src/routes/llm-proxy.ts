@@ -18,19 +18,16 @@
  * spec explicitly resists premature abstraction so each route keeps its
  * own adapter binding instead of sharing a single dispatch table.
  *
- * Subscription shapes (FIRST-PARTY-ONLY):
- *   - The Claude Pro/Max/Team subscription (`claude-code`) is served by the
- *     `/claude-code-sdk/:presetId/*` gateway, which injects the token WITHOUT
- *     forging any client identity — the chat's official Claude Agent SDK signs
- *     the legit Claude Code fingerprint itself. See
- *     services/llm-proxy/claude-code-sdk-gateway.ts.
- *   - The Codex (ChatGPT) subscription (`codex`) is NOT served here: it remains
- *     an inference/model provider only — its agent-run engine is deferred to a
- *     follow-up, so it has no chat surface and no agent gateway. See
+ * Subscription shapes are NOT served here:
+ *   - OAuth-subscription models (`claude-code`, `codex`) never flow through this
+ *     proxy. Chat drives them via the in-process Pi engine
+ *     (packages/module-chat/src/pi-chat/engine.ts); runs get the token via the
+ *     sidecar's verbatim bearer-swap. In both paths `pi-ai` emits the provider's
+ *     own subscription request shape — the platform forges nothing. See
  *     docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
- *   - The generic gateway (`proxyLlmCall`) forges nothing, so an
- *     OAuth-subscription model with no dedicated CLI gateway is refused with
- *     `LlmProxyUnsupportedSubscriptionError`. Connect an API-key provider.
+ *   - The generic gateway (`proxyLlmCall`) therefore refuses an
+ *     OAuth-subscription model with `LlmProxyUnsupportedSubscriptionError`.
+ *     Connect an API-key provider to use this proxy.
  *
  * Security:
  *   - Bearer auth only — API keys with `llm-proxy:call` (headless) OR

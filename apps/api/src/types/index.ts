@@ -75,9 +75,9 @@ export type AppEnv = {
     /**
      * Set by an auth strategy that declared `AuthResolution.firstPartyLoopback`
      * — a server-minted, process-local loopback bearer. The bearer-only proxy
-     * gates (`assertBearerOnly`/`assertLoopbackOnly`) and the models route read
-     * this declared capability instead of special-casing a module's auth-method
-     * id. See `apps/api/src/lib/bearer-only.ts`.
+     * gate (`assertBearerOnly`) and the models route read this declared
+     * capability instead of special-casing a module's auth-method id. See
+     * `apps/api/src/lib/bearer-only.ts`.
      */
     firstPartyLoopback?: boolean;
     /**

@@ -34,11 +34,10 @@ import {
 import { mergeTurnMetadata, CHAT_MAX_STEPS } from "@appstrate/core/chat-turn-metadata";
 import { OPERATION_INDEX_HEADING, type SubscriptionChatModel } from "@appstrate/core/chat-contract";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
-import { logger } from "../logger.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
-import { acquirePiChatSlot, chatCapacityResponse } from "./concurrency.ts";
+import { acquirePiChatSlot, chatCapacityResponse, releaseOnClose } from "./concurrency.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -241,11 +240,11 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
     },
   });
 
-  // Release the concurrency slot once the producer has fully drained — the
-  // response body streams from `stream`, so the slot must outlive it.
-  const release = () => slot.release();
+  // Release the concurrency slot once the response body has fully drained (or
+  // been cancelled/errored) — it streams from `stream`, so the slot must
+  // outlive the producer function.
   return createUIMessageStreamResponse({
-    stream: stream.pipeThrough(releaseOnClose(release)),
+    stream: releaseOnClose<UIMessageChunk>(stream, () => slot.release()),
   });
 }
 
@@ -261,30 +260,4 @@ function dropOperationIndexForUncached(system: string, apiShape: string): string
     return system.slice(0, system.indexOf(OPERATION_INDEX_HEADING)).trimEnd();
   }
   return system;
-}
-
-/**
- * A passthrough transform that runs `onClose` exactly once when the UI-message
- * stream ends (flush) — used to release the concurrency slot after the response
- * body has fully drained, not when the producer function returns.
- */
-function releaseOnClose(onClose: () => void): TransformStream<UIMessageChunk, UIMessageChunk> {
-  let done = false;
-  const fire = () => {
-    if (done) return;
-    done = true;
-    try {
-      onClose();
-    } catch (err) {
-      logger.warn("pi chat slot release failed", { err: String(err) });
-    }
-  };
-  return new TransformStream<UIMessageChunk, UIMessageChunk>({
-    transform(chunk, controller) {
-      controller.enqueue(chunk);
-    },
-    flush() {
-      fire();
-    },
-  });
 }
