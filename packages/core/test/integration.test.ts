@@ -947,10 +947,51 @@ describe("getApiCallConfigs", () => {
     );
   }
 
-  it("returns a single api_call config with upload protocols", () => {
+  it("returns a single api_call config with upload protocols + its api_upload companion", () => {
     const m = apiCallManifest({ key: { upload_protocols: ["tus"] } });
     expect(getApiCallConfigs(m)).toEqual([
-      { authKey: "key", toolName: "api_call", uploadProtocols: ["tus"] },
+      {
+        authKey: "key",
+        toolName: "api_call",
+        uploadProtocols: ["tus"],
+        uploadToolName: "api_upload",
+      },
+    ]);
+  });
+
+  it("omits uploadToolName when the auth declares no upload_protocols", () => {
+    const m = apiCallManifest({ key: {} });
+    expect(getApiCallConfigs(m)[0]).not.toHaveProperty("uploadToolName");
+  });
+
+  it("drops malformed upload_protocols entries (non-string / empty) rather than trusting them", () => {
+    // The install-time superRefine already rejects these, so bypass `parse` —
+    // this is the defence-in-depth path for manifests already stored in the DB.
+    const m = {
+      ...baseManifest({ source: { kind: "none" } }),
+      _meta: {
+        "dev.appstrate/api": {
+          auths: { oauth: { upload_protocols: ["tus", "", 42, "s3-multipart"] } },
+        },
+      },
+    } as unknown as IntegrationManifest;
+    expect(getApiCallConfigs(m)).toEqual([
+      {
+        authKey: "oauth",
+        toolName: "api_call",
+        uploadProtocols: ["tus", "s3-multipart"],
+        uploadToolName: "api_upload",
+      },
+    ]);
+  });
+
+  it("omits uploadToolName when every declared upload_protocol is malformed", () => {
+    const m = {
+      ...baseManifest({ source: { kind: "none" } }),
+      _meta: { "dev.appstrate/api": { auths: { oauth: { upload_protocols: ["", 7] } } } },
+    } as unknown as IntegrationManifest;
+    expect(getApiCallConfigs(m)).toEqual([
+      { authKey: "oauth", toolName: "api_call", uploadProtocols: [] },
     ]);
   });
 
@@ -959,6 +1000,17 @@ describe("getApiCallConfigs", () => {
     expect(getApiCallConfigs(m)).toEqual([
       { authKey: "key", toolName: "api_call__key", uploadProtocols: [] },
       { authKey: "alt", toolName: "api_call__alt", uploadProtocols: [] },
+    ]);
+  });
+
+  it("names the api_upload companion per-auth when several auths opt in", () => {
+    const m = apiCallManifest({
+      key: { upload_protocols: ["google-resumable"] },
+      alt: { upload_protocols: ["tus"] },
+    });
+    expect(getApiCallConfigs(m).map((c) => c.uploadToolName)).toEqual([
+      "api_upload__key",
+      "api_upload__alt",
     ]);
   });
 

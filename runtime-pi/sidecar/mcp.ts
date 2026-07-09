@@ -1763,6 +1763,22 @@ export function createApiCallToolDefs(
 export const API_CALL_TOOL_NAME = "api_call";
 export const API_UPLOAD_TOOL_NAME = "api_upload";
 
+/**
+ * True for the synthetic `api_call` / `api_upload` tool names (bare, or the
+ * per-auth `__{authKey}` variants). These are served by the in-process api_call
+ * server, never by the integration's own MCP server, so any accounting over the
+ * spawned server's tools must exclude them.
+ *
+ * Kept as a local predicate rather than importing `@appstrate/core/integration`
+ * — the sidecar bundle deliberately avoids pulling in the manifest schema stack.
+ */
+export function isSyntheticApiToolName(name: string): boolean {
+  for (const base of [API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME]) {
+    if (name === base || name.startsWith(`${base}__`)) return true;
+  }
+  return false;
+}
+
 export interface MountMcpOptions {
   /** Run-scoped blob store for `api_call` resource spillover. */
   blobStore?: BlobStore;

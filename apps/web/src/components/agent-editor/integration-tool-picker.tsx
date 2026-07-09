@@ -27,7 +27,9 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   expandScopesGranted,
   isApiCallToolName,
+  isApiUploadToolName,
   readDefaultTools,
+  toggleApiCallToolSelection,
 } from "@appstrate/core/integration";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Spinner } from "../spinner";
@@ -67,10 +69,17 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // exists" (it only carries per-tool policy when present).
   const fullCatalog = detail.tool_catalog ?? [];
   // The api_call tool(s) have their own dedicated checkbox row(s); exclude
-  // them from the native tools list so they don't render twice.
+  // them from the native tools list so they don't render twice. Their
+  // `api_upload` companions get no row of their own: the runtime grants the
+  // pair together (each upload chunk is dispatched through the sibling
+  // api_call tool), so a separate checkbox could only express a selection the
+  // resolver refuses to honour.
+  const catalogToolNames = fullCatalog.map((t) => t.name);
   const apiCallEntries = fullCatalog.filter((t) => isApiCallToolName(t.name));
   const apiCallToolNames = apiCallEntries.map((t) => t.name);
-  const nativeCatalog = fullCatalog.filter((t) => !isApiCallToolName(t.name));
+  const nativeCatalog = fullCatalog.filter(
+    (t) => !isApiCallToolName(t.name) && !isApiUploadToolName(t.name),
+  );
   const declaredToolNames = nativeCatalog.map((t) => t.name);
   const hasToolCatalog = declaredToolNames.length > 0;
 
@@ -197,6 +206,16 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
     const current = arrayTools;
     const next = current.includes(name) ? current.filter((t) => t !== name) : [...current, name];
     onChange({ ...entry, tools: next });
+  };
+
+  // api_call rows carry their `api_upload` companion (when the integration
+  // declared `upload_protocols`) so the written selection matches what the
+  // runtime will expose. Toggling the pair as one keeps the manifest honest —
+  // the resolver grants both from either name, and a half-selection would read
+  // as a capability the agent doesn't have.
+  const toggleApiCallTool = (name: string) => {
+    if (wildcardSelected) return;
+    onChange({ ...entry, tools: toggleApiCallToolSelection(arrayTools, name, catalogToolNames) });
   };
 
   // Wildcard toggle (AFPS §4.4) — gated by `detail.allow_undeclared_tools`.
@@ -334,7 +353,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
           <label key={tool.name} className="flex cursor-pointer items-start gap-2">
             <Checkbox
               checked={selectedTools.has(tool.name)}
-              onCheckedChange={() => toggleTool(tool.name)}
+              onCheckedChange={() => toggleApiCallTool(tool.name)}
               data-testid={
                 apiCallEntries.length > 1
                   ? `integ-apicall-${packageId}-${tool.name}`

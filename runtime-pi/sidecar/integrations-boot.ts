@@ -72,6 +72,7 @@ import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
 import { runConnectLogin } from "./connect-login.ts";
 import {
   createApiCallToolDefs,
+  isSyntheticApiToolName,
   type ApiCallIntegrationConfig,
   type ApiCallToolDeps,
 } from "./mcp.ts";
@@ -1016,7 +1017,11 @@ async function spawnAndConnectLocalIntegration(params: {
  * (a selected tool can vanish if the server doesn't advertise it under the
  * declared name, or if the poisoning sanitiser drops its descriptor for being
  * too large). `added` counts ONLY the spawned/remote server's tools — never the
- * in-process api_call tool, which is not part of the agent's tool selection.
+ * in-process `api_call`/`api_upload` tools, which are registered separately.
+ * Those synthetic names ARE part of `spec.toolAllowlist` (the agent selects
+ * them like any other tool), so they must be discounted from the requested set
+ * before comparing — otherwise every agent that selects `api_call` alongside a
+ * native tool gets a spurious "1 selected tool unavailable" warning.
  * Surface the shortfall as a `warn` breadcrumb so it reaches the boot report
  * and run logs instead of the LLM silently behaving as if the tool was never
  * authorised. Non-fatal by design: an optional tool that the upstream dropped
@@ -1027,8 +1032,8 @@ export function pushUnavailableToolBreadcrumb(
   added: number,
   breadcrumbs: IntegrationBootBreadcrumb[],
 ): void {
-  const requested = spec.toolAllowlist;
-  if (!requested || requested.length === 0 || added >= requested.length) return;
+  const requested = (spec.toolAllowlist ?? []).filter((t) => !isSyntheticApiToolName(t));
+  if (requested.length === 0 || added >= requested.length) return;
   const missing = requested.length - added;
   breadcrumbs.push({
     message: `${spec.integrationId}: ${missing}/${requested.length} selected tool(s) unavailable`,

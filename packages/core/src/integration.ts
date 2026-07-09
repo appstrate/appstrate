@@ -438,6 +438,27 @@ function collectDeliveryCredentialRefs(delivery: DeliveryView | undefined): stri
 export const API_CALL_TOOL_NAME = "api_call";
 
 /**
+ * Tool name the chunked/resumable upload capability is exposed under (before
+ * the sidecar's `{namespace}__` prefix). Companion of {@link API_CALL_TOOL_NAME}:
+ * the sidecar advertises it for every api_call auth whose
+ * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols` is non-empty, and
+ * the agent-side Pi extension drives it by dispatching each chunk through the
+ * sibling `api_call` tool.
+ */
+export const API_UPLOAD_TOOL_NAME = "api_upload";
+
+/**
+ * Derive the `api_upload` companion name from an api_call tool name:
+ * `api_call` → `api_upload`, `api_call__{authKey}` → `api_upload__{authKey}`.
+ * This MUST stay in lockstep with the sidecar's own derivation
+ * (`runtime-pi/sidecar/mcp.ts` → `makeApiUploadTool`), which the agent-side
+ * resolver relies on to find the sibling api_call tool.
+ */
+export function apiUploadToolNameFor(apiCallToolName: string): string {
+  return `${API_UPLOAD_TOOL_NAME}${apiCallToolName.slice(API_CALL_TOOL_NAME.length)}`;
+}
+
+/**
  * Names of MCP tools the integration declares POLICY for in its top-level
  * `tools_policy` record. Empty when the integration didn't opt into per-tool
  * metadata. This is NOT the catalog of exposed tools — `tools_policy` is a
@@ -558,7 +579,9 @@ export interface ResolveIntegrationToolCatalogInput {
  *      - local + mcpServerTools provided → MCPB-canonical entries
  *      - otherwise          → `integration.tools_policy` keys (sparse fallback)
  *   1b. Append api_call tool(s) from `_meta["dev.appstrate/api"]` (additive —
- *       orthogonal to source kind; a `none` source contributes only these)
+ *       orthogonal to source kind; a `none` source contributes only these),
+ *       each with its `api_upload` companion when the auth declared
+ *       `upload_protocols`
  *   2. Subtract `integration.hidden_tools` (explicit opt-out)
  *   3. Subtract `getConnectToolNames` (auto-hide run-start primitives)
  *   4. Attach policy from `integration.tools_policy[name]` when present
@@ -576,8 +599,20 @@ export function resolveIntegrationToolCatalog(
     base = getDeclaredToolNames(integration).map((name) => ({ name }));
   }
 
-  // Step 1b — append api_call tool(s) (vendor extension, additive)
-  base = [...base, ...getApiCallConfigs(integration).map((c) => ({ name: c.toolName }))];
+  // Step 1b — append api_call tool(s) (vendor extension, additive), each
+  // followed by its `api_upload` companion when the auth declared
+  // `upload_protocols`. The companion is what the sidecar actually advertises
+  // (`makeApiUploadTool`), so omitting it here would leave the catalog — and
+  // therefore the picker and the agent-import validator — narrower than the
+  // runtime surface.
+  base = [
+    ...base,
+    ...getApiCallConfigs(integration).flatMap((c) =>
+      c.uploadToolName
+        ? [{ name: c.toolName }, { name: c.uploadToolName }]
+        : [{ name: c.toolName }],
+    ),
+  ];
 
   // Step 2+3 — hide set (explicit + auto)
   const hidden = new Set<string>([
@@ -617,6 +652,13 @@ export interface ApiCallConfig {
   toolName: string;
   /** Resumable upload protocols this auth's surface supports (open list). */
   uploadProtocols: IntegrationUploadProtocol[];
+  /**
+   * Agent-facing name of the `api_upload` companion tool, present iff
+   * {@link ApiCallConfig.uploadProtocols} is non-empty — i.e. exactly when the
+   * sidecar advertises it. Absent otherwise, so callers never surface a tool
+   * the runtime won't serve.
+   */
+  uploadToolName?: string;
 }
 
 /** Read `_meta["dev.appstrate/api"].auths` as a raw record (or undefined). */
@@ -651,12 +693,14 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
   return authKeys.map((authKey) => {
     const raw = metaAuths[authKey]?.upload_protocols;
     const uploadProtocols = Array.isArray(raw)
-      ? raw.filter((v): v is string => typeof v === "string")
+      ? raw.filter((v): v is string => typeof v === "string" && v.length > 0)
       : [];
+    const toolName = single ? API_CALL_TOOL_NAME : `${API_CALL_TOOL_NAME}__${authKey}`;
     return {
       authKey,
-      toolName: single ? API_CALL_TOOL_NAME : `${API_CALL_TOOL_NAME}__${authKey}`,
+      toolName,
       uploadProtocols,
+      ...(uploadProtocols.length > 0 ? { uploadToolName: apiUploadToolNameFor(toolName) } : {}),
     };
   });
 }
@@ -709,6 +753,42 @@ export function resolveEffectiveToolSelection(
  */
 export function isApiCallToolName(name: string): boolean {
   return name === API_CALL_TOOL_NAME || name.startsWith(`${API_CALL_TOOL_NAME}__`);
+}
+
+/**
+ * True when `name` is an api_upload tool name — the bare `api_upload` or a
+ * per-auth `api_upload__{authKey}` variant. Like {@link isApiCallToolName},
+ * these never appear in `tools_policy`: they are derived from the
+ * `_meta["dev.appstrate/api"]` extension, not declared.
+ */
+export function isApiUploadToolName(name: string): boolean {
+  return name === API_UPLOAD_TOOL_NAME || name.startsWith(`${API_UPLOAD_TOOL_NAME}__`);
+}
+
+/**
+ * Add or remove an api_call tool AND its `api_upload` companion as one unit,
+ * returning the next tool selection. The companion joins the move only when the
+ * resolved catalog actually contains it (i.e. the auth declared
+ * `upload_protocols`) — never invent a tool the runtime won't serve.
+ *
+ * The pairing mirrors the spawn resolver, which grants both from either name:
+ * upload chunks are dispatched through the sibling api_call tool, so a
+ * half-selection is either a broken tool or a capability the manifest hides.
+ * Order is preserved and the result is duplicate-free.
+ */
+export function toggleApiCallToolSelection(
+  selection: readonly string[],
+  apiCallToolName: string,
+  catalogToolNames: readonly string[],
+): string[] {
+  const companion = apiUploadToolNameFor(apiCallToolName);
+  const pair = catalogToolNames.includes(companion)
+    ? [apiCallToolName, companion]
+    : [apiCallToolName];
+  if (selection.includes(apiCallToolName)) {
+    return selection.filter((t) => !pair.includes(t));
+  }
+  return [...selection, ...pair.filter((t) => !selection.includes(t))];
 }
 
 /**

@@ -16,6 +16,17 @@ of a provider-neutral bearer-swap.
 
 ### Added
 
+- **`api_upload` is a first-class catalog member (#881)** —
+  `resolveIntegrationToolCatalog` now appends the `api_upload` companion after
+  each `api_call` whose auth declares `_meta["dev.appstrate/api"].auths.<key>
+.upload_protocols`, matching the tool the sidecar already advertises at
+  runtime. New exports: `API_UPLOAD_TOOL_NAME`, `apiUploadToolNameFor()`,
+  `isApiUploadToolName()`, `toggleApiCallToolSelection()`. `ApiCallConfig` gains
+  an optional `uploadToolName`, present iff `uploadProtocols` is non-empty.
+  Previously the catalog listed only `api_call`, so
+  `validateAgentIntegrationScopes` rejected an agent that selected `api_upload`
+  with `unknown_tool` even though the runtime served it.
+
 - **`@appstrate/core/oauth-bearer-swap`** — `applyOauthBearerSwap(headers,
 accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
   real subscription bearer onto `authorization`, drops any `x-api-key`, and

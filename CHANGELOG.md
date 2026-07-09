@@ -15,6 +15,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`api_upload` never exposed on `@appstrate/google-drive` (#881)** — the
+  integration tool catalog listed only `api_call`, so the agent editor's tool
+  picker never offered `api_upload` and importing an agent that selected it
+  failed with `unknown_tool`, even though the sidecar advertises the tool at
+  runtime for every auth declaring `upload_protocols`. The catalog now surfaces
+  the companion, and the spawn resolver grants the `api_call`/`api_upload` pair
+  from either name (upload chunks are dispatched through the sibling api_call
+  tool, so a half-selection is never valid). No manifest change was required —
+  `upload_protocols` was already in its documented `_meta` location.
+
+- **Phantom "selected tool unavailable" warning (#881)** — the sidecar's
+  no-silent-degradation guard compared the agent's full tool allowlist against
+  the count of the integration's own MCP tools that survived registration. The
+  synthetic `api_call`/`api_upload` tools are served by a separate in-process
+  server and were never counted, so any agent selecting them alongside a native
+  tool got a spurious warn breadcrumb. They are now discounted from the
+  requested set.
+
 - **Transparent egress for `delivery.env` integrations (#850, #779)** — the
   sidecar no longer drops egress for integrations that inject credentials via
   `delivery.env`; the per-run proxy path is applied transparently.

@@ -92,6 +92,13 @@ multiple → `api_call__<authKey>`.
 identifiers (prefer reverse-DNS qualified strings such as
 `com.example/proprietary-resumable`); consumers MUST preserve unknown values.
 
+Declaring it also adds an `api_upload` companion tool to the integration's
+`tool_catalog` (`api_upload__<authKey>` in the multi-auth case) — a chunked/resumable
+uploader for workspace files, orchestrated agent-side and dispatched through the
+sibling `api_call` tool. Agents get the pair from either name: selecting `api_call`
+grants `api_upload` and vice-versa. Hide the companion with
+`hidden_tools: ["api_upload"]` if the API's upload surface shouldn't be agent-facing.
+
 ---
 
 ## `delivery` — where the credential is injected

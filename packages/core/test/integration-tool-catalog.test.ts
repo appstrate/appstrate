@@ -19,7 +19,12 @@ import {
   resolveIntegrationToolCatalog,
   getConnectToolNames,
   validateAgentIntegrationScopes,
+  apiUploadToolNameFor,
+  isApiCallToolName,
+  isApiUploadToolName,
+  toggleApiCallToolSelection,
   API_CALL_TOOL_NAME,
+  API_UPLOAD_TOOL_NAME,
   type IntegrationManifest,
 } from "../src/integration.ts";
 
@@ -59,32 +64,50 @@ function localSourceManifest(opts: {
   } as unknown as IntegrationManifest;
 }
 
-function apiSourceManifest(): IntegrationManifest {
+function apiKeyAuth(): Record<string, unknown> {
+  return {
+    type: "api_key",
+    authorized_uris: ["https://api.example.com/**"],
+    credentials: {
+      schema: {
+        type: "object",
+        required: ["api_key"],
+        properties: { api_key: { type: "string" } },
+      },
+    },
+    delivery: { http: { in: "header", name: "Authorization", value: "{$credential.api_key}" } },
+  };
+}
+
+/**
+ * Serverless integration: no MCP backing, api_call exposed via the
+ * `_meta["dev.appstrate/api"]` vendor extension (orthogonal to source.kind).
+ * `metaAuths` overrides the opted-in auth map — pass `upload_protocols` to
+ * reproduce `@appstrate/google-drive`'s shape.
+ */
+function apiSourceManifest(
+  opts: {
+    metaAuths?: Record<string, unknown>;
+    auths?: Record<string, unknown>;
+    hidden_tools?: string[];
+  } = {},
+): IntegrationManifest {
   return {
     schema_version: "0.1",
     type: "integration",
     name: "@me/api-integ",
     version: "1.0.0",
     display_name: "API",
-    // Serverless integration: no MCP backing, api_call exposed via the
-    // `_meta["dev.appstrate/api"]` vendor extension (orthogonal to source.kind).
     source: { kind: "none" },
-    _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
-    auths: {
-      primary: {
-        type: "api_key",
-        authorized_uris: ["https://api.example.com/**"],
-        credentials: {
-          schema: {
-            type: "object",
-            required: ["api_key"],
-            properties: { api_key: { type: "string" } },
-          },
-        },
-        delivery: { http: { in: "header", name: "Authorization", value: "{$credential.api_key}" } },
-      },
-    },
+    _meta: { "dev.appstrate/api": { auths: opts.metaAuths ?? { primary: {} } } },
+    auths: opts.auths ?? { primary: apiKeyAuth() },
+    ...(opts.hidden_tools ? { hidden_tools: opts.hidden_tools } : {}),
   } as unknown as IntegrationManifest;
+}
+
+/** The `@appstrate/google-drive` shape: one auth, one declared upload protocol. */
+function driveLikeManifest(): IntegrationManifest {
+  return apiSourceManifest({ metaAuths: { primary: { upload_protocols: ["google-resumable"] } } });
 }
 
 describe("resolveIntegrationToolCatalog", () => {
@@ -158,6 +181,65 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out.map((e) => e.name)).toEqual(["kv_set", "kv_get", API_CALL_TOOL_NAME]);
   });
 
+  // Regression — issue #881. `@appstrate/google-drive` declares
+  // `upload_protocols`, so the sidecar advertises `{ns}__api_upload` at runtime,
+  // but the catalog only listed `api_call`. The picker couldn't show the tool
+  // and `validateAgentIntegrationScopes` rejected it as `unknown_tool`.
+  it("none source with upload_protocols: appends the api_upload companion after api_call", () => {
+    const out = resolveIntegrationToolCatalog({ integration: driveLikeManifest() });
+    expect(out).toEqual([{ name: API_CALL_TOOL_NAME }, { name: API_UPLOAD_TOOL_NAME }]);
+  });
+
+  it("none source WITHOUT upload_protocols: no api_upload companion", () => {
+    const out = resolveIntegrationToolCatalog({ integration: apiSourceManifest() });
+    expect(out).toEqual([{ name: API_CALL_TOOL_NAME }]);
+  });
+
+  it("multi-auth: each opted-in auth gets its own api_call + api_upload pair", () => {
+    const integration = apiSourceManifest({
+      auths: { primary: apiKeyAuth(), backup: apiKeyAuth() },
+      metaAuths: {
+        primary: { upload_protocols: ["google-resumable"] },
+        // `backup` declares none → api_call only, no companion.
+        backup: {},
+      },
+    });
+    expect(resolveIntegrationToolCatalog({ integration }).map((e) => e.name)).toEqual([
+      "api_call__primary",
+      "api_upload__primary",
+      "api_call__backup",
+    ]);
+  });
+
+  it("an opted-in _meta auth with no matching auths.{key} contributes nothing", () => {
+    const integration = apiSourceManifest({
+      metaAuths: { ghost: { upload_protocols: ["tus"] } },
+    });
+    expect(resolveIntegrationToolCatalog({ integration })).toEqual([]);
+  });
+
+  it("hidden_tools can hide the api_upload companion without hiding api_call", () => {
+    const integration = apiSourceManifest({
+      metaAuths: { primary: { upload_protocols: ["tus"] } },
+      hidden_tools: [API_UPLOAD_TOOL_NAME],
+    });
+    expect(resolveIntegrationToolCatalog({ integration }).map((e) => e.name)).toEqual([
+      API_CALL_TOOL_NAME,
+    ]);
+  });
+
+  it("local source WITH upload_protocols: the pair is appended after the mcp tools", () => {
+    const integration = localSourceManifest({});
+    (integration as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": { auths: { primary: { upload_protocols: ["s3-multipart"] } } },
+    };
+    const out = resolveIntegrationToolCatalog({
+      integration,
+      mcpServerTools: [{ name: "kv_set" }],
+    });
+    expect(out.map((e) => e.name)).toEqual(["kv_set", API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME]);
+  });
+
   it("local source without mcp-server tools: falls back to integration.tools_policy keys", () => {
     const out = resolveIntegrationToolCatalog({
       integration: localSourceManifest({
@@ -221,5 +303,115 @@ describe("validateAgentIntegrationScopes — uses the catalog, not the policy ta
       apiSourceManifest(),
     );
     expect(errors).toEqual([]);
+  });
+
+  // Regression — issue #881: importing an agent that selected `api_upload`
+  // failed with `unknown_tool` even though the runtime exposed the tool.
+  it("api source with upload_protocols: accepts api_upload", () => {
+    const errors = validateAgentIntegrationScopes(
+      { id: "@me/api-integ", tools: [API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME] },
+      driveLikeManifest(),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("api source without upload_protocols: still rejects api_upload", () => {
+    const errors = validateAgentIntegrationScopes(
+      { id: "@me/api-integ", tools: [API_UPLOAD_TOOL_NAME] },
+      apiSourceManifest(),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.code).toBe("unknown_tool");
+  });
+});
+
+describe("api_call / api_upload tool-name helpers", () => {
+  it("derives the companion name for the bare and per-auth forms", () => {
+    expect(apiUploadToolNameFor(API_CALL_TOOL_NAME)).toBe(API_UPLOAD_TOOL_NAME);
+    expect(apiUploadToolNameFor("api_call__primary")).toBe("api_upload__primary");
+  });
+
+  // Lockstep guard: `runtime-pi/sidecar/mcp.ts` derives the advertised upload
+  // tool name with this exact substitution, and the agent-side resolver walks
+  // back from `{ns}__api_upload` to `{ns}__api_call`. If the two drift, the
+  // extension dispatches chunks through a tool that doesn't exist.
+  it("matches the sidecar's own derivation", () => {
+    for (const name of [API_CALL_TOOL_NAME, "api_call__primary", "api_call__backup"]) {
+      expect(apiUploadToolNameFor(name)).toBe(name.replace(/^api_call/, "api_upload"));
+    }
+  });
+
+  it("classifies both families without overlap", () => {
+    for (const name of [API_CALL_TOOL_NAME, "api_call__k"]) {
+      expect(isApiCallToolName(name)).toBe(true);
+      expect(isApiUploadToolName(name)).toBe(false);
+    }
+    for (const name of [API_UPLOAD_TOOL_NAME, "api_upload__k"]) {
+      expect(isApiUploadToolName(name)).toBe(true);
+      expect(isApiCallToolName(name)).toBe(false);
+    }
+  });
+
+  it("does not classify unrelated tools that merely share a prefix", () => {
+    for (const name of ["api_calls", "api_call_extra", "api_uploader", "kv_set"]) {
+      expect(isApiCallToolName(name)).toBe(false);
+      expect(isApiUploadToolName(name)).toBe(false);
+    }
+  });
+});
+
+describe("toggleApiCallToolSelection", () => {
+  const CATALOG_WITH_UPLOAD = ["kv_set", API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME];
+  const CATALOG_NO_UPLOAD = ["kv_set", API_CALL_TOOL_NAME];
+
+  it("adds the pair when the catalog exposes the companion", () => {
+    expect(toggleApiCallToolSelection(["kv_set"], API_CALL_TOOL_NAME, CATALOG_WITH_UPLOAD)).toEqual(
+      ["kv_set", API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME],
+    );
+  });
+
+  it("adds api_call alone when the catalog has no companion", () => {
+    expect(toggleApiCallToolSelection([], API_CALL_TOOL_NAME, CATALOG_NO_UPLOAD)).toEqual([
+      API_CALL_TOOL_NAME,
+    ]);
+  });
+
+  it("removes the pair on the second toggle, leaving native tools untouched", () => {
+    const on = toggleApiCallToolSelection(["kv_set"], API_CALL_TOOL_NAME, CATALOG_WITH_UPLOAD);
+    expect(toggleApiCallToolSelection(on, API_CALL_TOOL_NAME, CATALOG_WITH_UPLOAD)).toEqual([
+      "kv_set",
+    ]);
+  });
+
+  it("completes a half-selection without duplicating the companion", () => {
+    // `api_call` absent, `api_upload` present (a hand-edited manifest) → the
+    // toggle turns the pair ON and must not repeat the companion.
+    expect(
+      toggleApiCallToolSelection([API_UPLOAD_TOOL_NAME], API_CALL_TOOL_NAME, CATALOG_WITH_UPLOAD),
+    ).toEqual([API_UPLOAD_TOOL_NAME, API_CALL_TOOL_NAME]);
+  });
+
+  it("is idempotent in the off direction (removing an absent pair is a no-op)", () => {
+    expect(toggleApiCallToolSelection(["kv_set"], API_CALL_TOOL_NAME, CATALOG_WITH_UPLOAD)).toEqual(
+      ["kv_set", API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME],
+    );
+    expect(toggleApiCallToolSelection([], API_CALL_TOOL_NAME, [])).toEqual([API_CALL_TOOL_NAME]);
+  });
+
+  it("pairs the per-auth variants with their matching companion", () => {
+    const catalog = ["api_call__primary", "api_upload__primary", "api_call__backup"];
+    expect(toggleApiCallToolSelection([], "api_call__primary", catalog)).toEqual([
+      "api_call__primary",
+      "api_upload__primary",
+    ]);
+    expect(toggleApiCallToolSelection([], "api_call__backup", catalog)).toEqual([
+      "api_call__backup",
+    ]);
+  });
+
+  it("never invents a companion the catalog doesn't list", () => {
+    expect(toggleApiCallToolSelection([], API_CALL_TOOL_NAME, ["kv_set"])).toEqual([
+      API_CALL_TOOL_NAME,
+    ]);
   });
 });
