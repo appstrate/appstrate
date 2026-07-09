@@ -833,7 +833,7 @@ export async function resolveAgentConnectionReadiness(args: {
   // Resolve the effective definition for the selected version. `draft`/omitted
   // short-circuits to the draft `LoadedPackage` untouched; a concrete version
   // substitutes the published manifest via the same resolver the run uses.
-  const { agent } = await resolveAgentRunVersion(loaded, version ?? "draft", scope.orgId);
+  const { agent } = await resolveAgentRunVersion(loaded, version ?? "draft");
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const declared = parseManifestIntegrations(agentManifest);
 

@@ -81,7 +81,7 @@ describe("resolveAgentRunVersion", () => {
   it("default (selector omitted) executes the latest published version, not the dirty draft", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, undefined, ctx.orgId);
+    const resolved = await resolveAgentRunVersion(agent, undefined);
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -90,7 +90,7 @@ describe("resolveAgentRunVersion", () => {
   it("treats an empty selector like an omitted one", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "", ctx.orgId);
+    const resolved = await resolveAgentRunVersion(agent, "");
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -99,7 +99,7 @@ describe("resolveAgentRunVersion", () => {
   it("'draft' executes the live draft (no version label override)", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "draft", ctx.orgId);
+    const resolved = await resolveAgentRunVersion(agent, "draft");
 
     expect(resolved.overrideVersionLabel).toBeUndefined();
     expect(resolved.agent.prompt).toBe(DIRTY_PROMPT);
@@ -108,7 +108,7 @@ describe("resolveAgentRunVersion", () => {
   it("'published' executes the latest published version", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "published", ctx.orgId);
+    const resolved = await resolveAgentRunVersion(agent, "published");
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -117,7 +117,7 @@ describe("resolveAgentRunVersion", () => {
   it("an exact version spec resolves that version", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "1.0.0", ctx.orgId);
+    const resolved = await resolveAgentRunVersion(agent, "1.0.0");
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -126,7 +126,7 @@ describe("resolveAgentRunVersion", () => {
   it("a semver range resolves through the 3-step resolution", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    const resolved = await resolveAgentRunVersion(agent, "^1.0.0", ctx.orgId);
+    const resolved = await resolveAgentRunVersion(agent, "^1.0.0");
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
@@ -135,9 +135,9 @@ describe("resolveAgentRunVersion", () => {
   it("an unresolvable spec throws 404 — never a silent draft fallback", async () => {
     const agent = await seedPublishedDirtyAgent();
 
-    expect(resolveAgentRunVersion(agent, "9.9.9", ctx.orgId)).rejects.toThrow(ApiError);
+    expect(resolveAgentRunVersion(agent, "9.9.9")).rejects.toThrow(ApiError);
     try {
-      await resolveAgentRunVersion(agent, "9.9.9", ctx.orgId);
+      await resolveAgentRunVersion(agent, "9.9.9");
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -159,7 +159,7 @@ describe("resolveAgentRunVersion", () => {
     const agent = await getPackage("@verorg/never-published", ctx.orgId);
 
     try {
-      await resolveAgentRunVersion(agent!, undefined, ctx.orgId);
+      await resolveAgentRunVersion(agent!, undefined);
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -177,7 +177,7 @@ describe("resolveAgentRunVersion", () => {
     });
     const agent = await getPackage("@verorg/never-published", ctx.orgId);
 
-    expect(resolveAgentRunVersion(agent!, "", ctx.orgId)).rejects.toThrow(ApiError);
+    expect(resolveAgentRunVersion(agent!, "")).rejects.toThrow(ApiError);
   });
 
   it("'published' on a never-published agent throws 404 no_published_version", async () => {
@@ -189,7 +189,7 @@ describe("resolveAgentRunVersion", () => {
     const agent = await getPackage("@verorg/never-published", ctx.orgId);
 
     try {
-      await resolveAgentRunVersion(agent!, "published", ctx.orgId);
+      await resolveAgentRunVersion(agent!, "published");
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -227,7 +227,7 @@ describe("resolveAgentRunVersion", () => {
     expect(agent).not.toBeNull();
 
     try {
-      await resolveAgentRunVersion(agent!, undefined, ctx.orgId);
+      await resolveAgentRunVersion(agent!, undefined);
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -235,7 +235,7 @@ describe("resolveAgentRunVersion", () => {
       expect((err as ApiError).code).toBe("no_published_version");
     }
 
-    const exact = await resolveAgentRunVersion(agent!, "1.0.0-beta.1", ctx.orgId);
+    const exact = await resolveAgentRunVersion(agent!, "1.0.0-beta.1");
     expect(exact.overrideVersionLabel).toBe("1.0.0-beta.1");
     expect(exact.agent.prompt).toBe(PUBLISHED_PROMPT);
   });
@@ -249,7 +249,7 @@ describe("resolveAgentRunVersion", () => {
     });
     const agent = await getPackage("@verorg/never-published", ctx.orgId);
 
-    const resolved = await resolveAgentRunVersion(agent!, "draft", ctx.orgId);
+    const resolved = await resolveAgentRunVersion(agent!, "draft");
 
     expect(resolved.overrideVersionLabel).toBeUndefined();
     expect(resolved.agent.prompt).toBe(DIRTY_PROMPT);
@@ -259,146 +259,9 @@ describe("resolveAgentRunVersion", () => {
     const agent = await seedPublishedDirtyAgent();
     const systemAgent: LoadedPackage = { ...agent, source: "system" };
 
-    const resolved = await resolveAgentRunVersion(systemAgent, "published", ctx.orgId);
+    const resolved = await resolveAgentRunVersion(systemAgent, "published");
 
     expect(resolved.overrideVersionLabel).toBeUndefined();
     expect(resolved.agent).toBe(systemAgent);
-  });
-
-  /**
-   * #878 — `LoadedPackage.manifest` and `LoadedPackage.skills` must describe
-   * the SAME definition.
-   *
-   * `getPackage` resolves `.skills` from the DRAFT manifest. Substituting a
-   * published version used to swap `.manifest` alone, leaving the two halves
-   * disagreeing. The readiness gate compares one against the other, so any
-   * skill the published version declares but the current draft has since
-   * dropped was reported as `missing_skill` — "not installed" — even when the
-   * skill package was installed and enabled.
-   */
-  describe("skill closure follows the resolved version (#878)", () => {
-    const SKILL_X = "@verorg/skill-x";
-    const SKILL_Y = "@verorg/skill-y";
-    const AGENT_ID = "@verorg/drifted-agent";
-
-    /**
-     * Publish v1.0.0 declaring skill-x, then rewrite the draft to declare
-     * skill-y instead — the "I lightened the dependency list and never
-     * republished" shape from the bug report.
-     */
-    async function seedAgentWithDriftedSkillDeps(): Promise<LoadedPackage> {
-      for (const id of [SKILL_X, SKILL_Y]) {
-        await seedAgent({
-          id,
-          type: "skill",
-          orgId: ctx.orgId,
-          createdBy: ctx.user.id,
-          draftManifest: { name: id, version: "1.0.0", type: "skill" },
-        });
-      }
-
-      await seedAgent({
-        id: AGENT_ID,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        draftManifest: {
-          name: AGENT_ID,
-          version: "1.0.0",
-          type: "agent",
-          dependencies: { skills: { [SKILL_X]: "^1.0.0" } },
-        },
-        draftContent: PUBLISHED_PROMPT,
-      });
-
-      const published = await createVersionFromDraft({
-        packageId: AGENT_ID,
-        orgId: ctx.orgId,
-        userId: ctx.user.id,
-      });
-      expect("version" in published && published.version).toBe("1.0.0");
-
-      await db
-        .update(packages)
-        .set({
-          draftManifest: {
-            name: AGENT_ID,
-            version: "1.2.0",
-            type: "agent",
-            dependencies: { skills: { [SKILL_Y]: "^1.0.0" } },
-          },
-          draftContent: DIRTY_PROMPT,
-          updatedAt: new Date(Date.now() + 5_000),
-        })
-        .where(eq(packages.id, AGENT_ID));
-
-      const agent = await getPackage(AGENT_ID, ctx.orgId);
-      expect(agent).not.toBeNull();
-      // Baseline: the loaded package carries the DRAFT closure.
-      expect(agent!.skills.map((s) => s.id)).toEqual([SKILL_Y]);
-      return agent!;
-    }
-
-    it("a published run re-resolves skills from the version manifest", async () => {
-      const agent = await seedAgentWithDriftedSkillDeps();
-
-      const resolved = await resolveAgentRunVersion(agent, "published", ctx.orgId);
-
-      expect(resolved.overrideVersionLabel).toBe("1.0.0");
-      expect(resolved.agent.skills.map((s) => s.id)).toEqual([SKILL_X]);
-    });
-
-    it("manifest deps and resolved skills agree, so readiness cannot report a false missing_skill", async () => {
-      const agent = await seedAgentWithDriftedSkillDeps();
-
-      const resolved = await resolveAgentRunVersion(agent, "published", ctx.orgId);
-
-      // Exactly the comparison `collectAgentReadinessErrors` performs.
-      const declared = Object.keys(resolved.agent.manifest.dependencies?.skills ?? {});
-      const installed = resolved.agent.skills.map((s) => s.id);
-      expect(declared).toEqual([SKILL_X]);
-      expect(declared.filter((id) => !installed.includes(id))).toEqual([]);
-    });
-
-    it("an omitted selector gets the same re-resolved closure as 'published'", async () => {
-      const agent = await seedAgentWithDriftedSkillDeps();
-
-      const resolved = await resolveAgentRunVersion(agent, undefined, ctx.orgId);
-
-      expect(resolved.agent.skills.map((s) => s.id)).toEqual([SKILL_X]);
-    });
-
-    it("'draft' keeps the draft closure untouched", async () => {
-      const agent = await seedAgentWithDriftedSkillDeps();
-
-      const resolved = await resolveAgentRunVersion(agent, "draft", ctx.orgId);
-
-      expect(resolved.agent.skills.map((s) => s.id)).toEqual([SKILL_Y]);
-    });
-
-    it("carries the version manifest's declared range, not the draft's", async () => {
-      const agent = await seedAgentWithDriftedSkillDeps();
-
-      const resolved = await resolveAgentRunVersion(agent, "1.0.0", ctx.orgId);
-
-      expect(resolved.agent.skills).toHaveLength(1);
-      expect(resolved.agent.skills[0]!.version).toBe("^1.0.0");
-    });
-
-    it("does not leak a same-named skill from another org into the resolved closure", async () => {
-      const agent = await seedAgentWithDriftedSkillDeps();
-      const other = await createTestContext({ orgSlug: "otherorg" });
-      await db.delete(packages).where(eq(packages.id, SKILL_X));
-      await seedAgent({
-        id: SKILL_X,
-        type: "skill",
-        orgId: other.orgId,
-        createdBy: other.user.id,
-        draftManifest: { name: SKILL_X, version: "1.0.0", type: "skill" },
-      });
-
-      const resolved = await resolveAgentRunVersion(agent, "published", ctx.orgId);
-
-      expect(resolved.agent.skills).toEqual([]);
-    });
   });
 });

@@ -69,13 +69,12 @@ describe("inline-run helpers", () => {
       author: "test",
     } as AgentManifest;
 
-    it("wraps manifest + prompt into a LoadedPackage with empty skills", () => {
+    it("wraps manifest + prompt into a LoadedPackage — definition only", () => {
       const loaded = buildShadowLoadedPackage("@inline/r-1", manifest, "hello");
       expect(loaded).toEqual({
         id: "@inline/r-1",
         manifest,
         prompt: "hello",
-        skills: [],
         source: "local",
       });
     });
@@ -86,12 +85,11 @@ describe("inline-run helpers", () => {
       expect(loaded.prompt).toBe(prompt);
     });
 
-    it("applies resolved skills when deps are passed", () => {
-      const deps = {
-        skills: [{ id: "@x/skill", version: "^1.0.0" }],
-      };
-      const loaded = buildShadowLoadedPackage("@inline/r-3", manifest, "p", deps);
-      expect(loaded.skills).toEqual(deps.skills);
+    // A shadow package carries no derived closure: the declared skills are
+    // projected off `manifest.dependencies.skills` at the point of use (#878).
+    it("carries no resolved-skill projection", () => {
+      const loaded = buildShadowLoadedPackage("@inline/r-3", manifest, "p");
+      expect(loaded).not.toHaveProperty("skills");
     });
   });
 });

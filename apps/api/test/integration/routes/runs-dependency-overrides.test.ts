@@ -64,8 +64,8 @@ describe("POST /api/agents/:scope/:name/run — dependency_overrides validation"
 // proven at the service level in `services/build-agent-package-bundle.test.ts`
 // ("fails loud for a never-published dependency"). Reproducing it through the
 // run route would first have to satisfy the orthogonal agent-readiness
-// `missing_skill` gate (which requires the skill to be installed + resolved
-// into `agent.skills`), so the catalog-level test is the right altitude.
+// `missing_skill` gate (which requires the declared skill to resolve against
+// the org catalog), so the catalog-level test is the right altitude.
 
 describe("GET /api/runs/:id — dependency_overrides echo", () => {
   let ctx: TestContext;

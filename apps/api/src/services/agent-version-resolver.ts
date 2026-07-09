@@ -35,20 +35,18 @@
  * `version_label` and `version_ref`.
  *
  * Scope: this resolver pins the agent's OWN definition (manifest + prompt) to
- * the selected version, and re-resolves its declared skill IDs against the
- * org/system catalog so `LoadedPackage.skills` describes the SAME definition
- * as `LoadedPackage.manifest` (#878). That pair feeds the readiness gate.
- * The transitive skill closure that actually ships to the container is pinned
- * separately, on the run hot path, by `RunPackageCatalog` (#666) — it resolves
- * each `dependencies.skills` entry against PUBLISHED versions honoring the
- * manifest pin, so a dependency's mutable draft never leaks into a run.
- * Integration / mcp-server spawns are frozen by the shared run-pipeline
- * dependency resolver before the sidecar receives its spawn plan (#686).
+ * the selected version. It derives nothing: the readiness gate projects the
+ * declared skills off the effective manifest itself (#878). The transitive
+ * skill closure that ships to the container is pinned separately, on the run
+ * hot path, by `RunPackageCatalog` (#666) — it resolves each
+ * `dependencies.skills` entry against PUBLISHED versions honoring the manifest
+ * pin, so a dependency's mutable draft never leaks into a run. Integration /
+ * mcp-server spawns are frozen by the shared run-pipeline dependency resolver
+ * before the sidecar receives its spawn plan (#686).
  */
 
 import { ApiError, notFound } from "../lib/errors.ts";
 import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
-import { resolveManifestCatalogDeps } from "./package-catalog.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 
 // Both keywords are reserved dist-tag names (`isProtectedTag` in
@@ -71,29 +69,24 @@ export interface ResolvedRunAgent {
   overrideVersionLabel?: string;
 }
 
-/** Build the effective LoadedPackage for a resolved published version. */
-async function substituteVersion(
+/**
+ * Build the effective LoadedPackage for a resolved published version.
+ *
+ * A `LoadedPackage` carries only what the definition SAYS (manifest + prompt),
+ * so swapping those two fields swaps the definition wholesale. Nothing derived
+ * from the draft manifest rides along to be compared against the version's —
+ * the invariant that `LoadedPackage.skills` used to break (#878).
+ */
+function substituteVersion(
   agent: LoadedPackage,
   detail: { version: string; manifest: Record<string, unknown>; prompt: string | null },
-  orgId: string,
-): Promise<ResolvedRunAgent> {
-  const manifest = detail.manifest as unknown as AgentManifest;
-  // `agent.skills` was resolved by `getPackage` from the DRAFT manifest's
-  // `dependencies.skills`. Swapping only `manifest` would leave the two
-  // halves describing different definitions: the readiness gate compares
-  // `manifest.dependencies.skills` (now the version's) against `agent.skills`
-  // (still the draft's) and reports a bogus `missing_skill` for every skill
-  // the published version declares but the current draft no longer does —
-  // even when that skill is installed and enabled (#878). Re-resolve the
-  // closure from the version manifest so both halves agree.
-  const { skills } = await resolveManifestCatalogDeps(manifest, orgId);
+): ResolvedRunAgent {
   return {
     agent: {
       ...agent,
       // Version manifest replaces the draft manifest entirely.
-      manifest,
+      manifest: detail.manifest as unknown as AgentManifest,
       prompt: detail.prompt ?? agent.prompt,
-      skills,
     },
     overrideVersionLabel: detail.version,
   };
@@ -107,7 +100,6 @@ async function substituteVersion(
 export async function resolveAgentRunVersion(
   agent: LoadedPackage,
   selector: string | undefined,
-  orgId: string,
 ): Promise<ResolvedRunAgent> {
   // System agents ship their definition with the platform — no published
   // versions exist, the selector is ignored (pre-existing route behavior).
@@ -135,7 +127,7 @@ export async function resolveAgentRunVersion(
     if (!detail) {
       throw notFound(`Version '${latest.version}' of '${agent.id}' is not available`);
     }
-    return substituteVersion(agent, detail, orgId);
+    return substituteVersion(agent, detail);
   }
 
   // Explicit spec: exact version → dist-tag → semver range.
@@ -143,5 +135,5 @@ export async function resolveAgentRunVersion(
   if (!detail) {
     throw notFound(`Version '${sel}' not found`);
   }
-  return substituteVersion(agent, detail, orgId);
+  return substituteVersion(agent, detail);
 }

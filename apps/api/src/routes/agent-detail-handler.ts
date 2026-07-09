@@ -2,7 +2,11 @@
 
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts";
+import {
+  getPackage,
+  getPackageWithAccess,
+  resolveDeclaredSkills,
+} from "../services/package-catalog.ts";
 import {
   resolveAgentRunVersion,
   VERSION_SELECTOR_DRAFT,
@@ -61,27 +65,35 @@ export async function buildAgentDetailDto(
   // Version-aware projection (issue #770). `draft`/omitted reads the live
   // manifest; a concrete version substitutes the published manifest + prompt
   // via the same resolver the run uses, so the detail (config/input/integrations)
-  // matches what the run will execute. Skills are read straight off the version
-  // manifest's `dependencies.skills` map rather than off the resolver's
-  // catalog-resolved `agent.skills`: the dependency-override UI needs every
-  // DECLARED id + range, including one whose package is absent from the org
-  // catalog (which the catalog resolution necessarily drops).
+  // matches what the run will execute.
   const versionSel = opts.version?.trim();
   const versioned = !!versionSel && versionSel !== VERSION_SELECTOR_DRAFT;
-  const effective = versioned ? await resolveAgentRunVersion(agent, versionSel, orgId) : null;
+  const effective = versioned ? await resolveAgentRunVersion(agent, versionSel) : null;
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
 
+  // Projected off the EFFECTIVE manifest, never off the package object (#878).
+  //
+  // The two branches below preserve a wire inconsistency that predates this
+  // refactor and that `resolved` now makes visible: the draft detail exposes
+  // only skills the org catalog can see (enriched with their display metadata),
+  // while a versioned detail exposes every DECLARED skill (bare id + range) so
+  // the dependency-override UI can offer a pin for one that is missing.
+  // `use-agent-readiness.ts` mirrors the server's missing-skill check against
+  // this array, so widening the draft branch here would silently make the
+  // client stop flagging a missing skill. Unifying the two — one array of
+  // declared skills carrying `resolved` — is a wire change, tracked separately.
+  const declaredSkills = await resolveDeclaredSkills(m, orgId);
   const skillDeps = versioned
-    ? Object.entries(
-        (m as { dependencies?: { skills?: Record<string, string> } }).dependencies?.skills ?? {},
-      ).map(([id, version]) => ({ id, ...(version ? { version } : {}) }))
-    : agent.skills.map((s) => ({
-        id: s.id,
-        ...(s.version ? { version: s.version } : {}),
-        ...(s.name ? { name: s.name } : {}),
-        ...(s.description ? { description: s.description } : {}),
-      }));
+    ? declaredSkills.map((s) => ({ id: s.id, ...(s.version ? { version: s.version } : {}) }))
+    : declaredSkills
+        .filter((s) => s.resolved)
+        .map((s) => ({
+          id: s.id,
+          ...(s.version ? { version: s.version } : {}),
+          ...(s.name ? { name: s.name } : {}),
+          ...(s.description ? { description: s.description } : {}),
+        }));
 
   const packageConfig = await getPackageConfig(applicationId, agent.id);
 

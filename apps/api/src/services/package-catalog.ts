@@ -17,69 +17,60 @@ interface DbPackageRow {
   draftContent: string;
   source?: string;
   updatedAt?: Date;
-  depRefs?: {
-    dependencyId: string;
-    type: string;
-    draftManifest: unknown;
-  }[];
 }
 
-function mapDependencies(
-  depRefs: NonNullable<DbPackageRow["depRefs"]>,
-  type: string,
-  versionMap: Record<string, string>,
-): LoadedPackage["skills"] {
-  return depRefs
-    .filter((d) => d.type === type)
-    .map((d) => {
-      const m = parseDraftManifest(d.draftManifest);
-      // Manifest's declared range is the source of truth. If the
-      // manifest doesn't carry one for a dep that resolved (data
-      // inconsistency — extractSkillIdsFromManifest reads the same
-      // section), fall back to caret-of-current so we never emit a
-      // bare wildcard. `m.version` is "0.0.0" only for malformed
-      // drafts, in which case the dep wouldn't load at runtime anyway.
-      return {
-        id: d.dependencyId,
-        version: versionMap[d.dependencyId] ?? caretRange(m.version ?? "0.0.0"),
-        name: m.display_name ?? undefined,
-        description: m.description ?? undefined,
-      };
-    });
-}
-
-function pickSkills(
-  depRefs: NonNullable<DbPackageRow["depRefs"]>,
-  manifest: AgentManifest,
-): Pick<LoadedPackage, "skills"> {
-  const deps = manifest.dependencies ?? {};
-  return {
-    skills: mapDependencies(depRefs, "skill", (deps.skills ?? {}) as Record<string, string>),
-  };
+/**
+ * One entry of a manifest's `dependencies.skills` map, paired with what the
+ * org/system catalog knows about it.
+ *
+ * `resolved` is the whole point. Catalog resolution FILTERS (a declared skill
+ * whose package is invisible to the org simply is not there), while display
+ * surfaces need to ENRICH (show every declared skill, missing ones included).
+ * Collapsing both into a single "here are the skills" array is what let a
+ * manifest and a skill list from two different definitions travel together
+ * inside one `LoadedPackage` (#878). Callers now state which semantics they
+ * want by reading or ignoring this flag.
+ */
+export interface DeclaredSkill {
+  id: string;
+  /** Range declared by the manifest, or caret-of-current when it carries none. */
+  version: string;
+  /** True when a skill package with this id is visible to the org. */
+  resolved: boolean;
+  name?: string;
+  description?: string;
 }
 
 function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
-  const manifest = asRecord(row.draftManifest) as AgentManifest;
   return {
     id: row.id,
-    manifest,
+    manifest: asRecord(row.draftManifest) as AgentManifest,
     prompt: row.draftContent,
-    ...pickSkills(row.depRefs ?? [], manifest),
     source: (row.source as "system" | "local") ?? "local",
     updatedAt: row.updatedAt,
   };
 }
 
-/** Resolve dependency refs from a package's manifest. */
-async function resolveDepRefs(
-  manifest: unknown,
+/**
+ * Project a manifest's declared skill dependencies against the org/system
+ * catalog.
+ *
+ * Derived state with a single input: the manifest handed to it. Nothing caches
+ * the result on a package object, so it cannot outlive the manifest it was
+ * computed from — swap the manifest (draft ↔ published version) and the
+ * projection is simply recomputed. Returns one entry per DECLARED skill, in
+ * manifest order; `resolved: false` marks a declared skill the org cannot see.
+ *
+ * No DB read happens when the manifest declares no skills.
+ */
+export async function resolveDeclaredSkills(
+  manifest: AgentManifest,
   orgId: string,
-): Promise<NonNullable<DbPackageRow["depRefs"]>> {
+): Promise<DeclaredSkill[]> {
   const m = parseDraftManifest(manifest);
+  const declaredRanges = asRecord(asRecord(m.dependencies).skills) as Record<string, string>;
   const skillIds = extractSkillIdsFromManifest(m);
   if (skillIds.length === 0) return [];
-
-  const conditions = [inArray(packages.id, skillIds), orgOrSystemFilter(orgId)];
 
   const rows = await db
     .select({
@@ -88,29 +79,29 @@ async function resolveDepRefs(
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .where(and(...conditions));
+    .where(and(inArray(packages.id, skillIds), orgOrSystemFilter(orgId)));
 
-  return rows.map((r) => ({
-    dependencyId: r.id,
-    type: r.type,
-    draftManifest: r.draftManifest,
-  }));
-}
+  // A row of the wrong type is not a skill dependency, resolved or otherwise.
+  const bySkillId = new Map(rows.filter((r) => r.type === "skill").map((r) => [r.id, r]));
 
-/**
- * Resolve the skills declared in an inline manifest's `dependencies`
- * against the org/system catalog. Inline manifests only embed ID refs
- * (`"@scope/name": "^1.0.0"`), so the shadow LoadedPackage needs the same
- * mapped-dep shape as a persisted package before it reaches
- * `validateAgentReadiness`. Returns an empty array when the manifest declares
- * no skill deps — no DB read happens in that case.
- */
-export async function resolveManifestCatalogDeps(
-  manifest: AgentManifest,
-  orgId: string,
-): Promise<Pick<LoadedPackage, "skills">> {
-  const depRefs = await resolveDepRefs(manifest, orgId);
-  return pickSkills(depRefs, manifest);
+  return skillIds.map((id) => {
+    const row = bySkillId.get(id);
+    if (!row) return { id, version: declaredRanges[id] ?? "*", resolved: false };
+
+    const depManifest = parseDraftManifest(row.draftManifest);
+    return {
+      id,
+      // The manifest's declared range is the source of truth. When a resolved
+      // dep carries none (data inconsistency — `extractSkillIdsFromManifest`
+      // reads the same section), fall back to caret-of-current rather than
+      // emitting a bare wildcard. `version` is "0.0.0" only for a malformed
+      // draft, which would not load at runtime anyway.
+      version: declaredRanges[id] ?? caretRange(depManifest.version ?? "0.0.0"),
+      resolved: true,
+      name: depManifest.display_name ?? undefined,
+      description: depManifest.description ?? undefined,
+    };
+  });
 }
 
 /**
@@ -144,15 +135,16 @@ export async function getPackage(
   const pkgRow = pkgRows[0];
   if (!pkgRow) return null;
 
-  const depRefs = await resolveDepRefs(pkgRow.draftManifest, orgId);
-
+  // Deliberately does NOT resolve the skill closure. That projection depends on
+  // the manifest, and a `LoadedPackage` whose manifest can later be swapped for
+  // a published snapshot must not carry a projection of the draft's (#878).
+  // Callers that need it derive it explicitly via `resolveDeclaredSkills`.
   return dbRowToLoadedPackage({
     id: pkgRow.id,
     draftManifest: pkgRow.draftManifest,
     draftContent: pkgRow.draftContent ?? "",
     source: pkgRow.source,
     updatedAt: pkgRow.updatedAt,
-    depRefs,
   });
 }
 

@@ -17,8 +17,9 @@ import {
   type IntegrationManifestLoadFailure,
 } from "./integration-service.ts";
 import { validateConfig } from "./schema.ts";
+import { resolveDeclaredSkills } from "./package-catalog.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
-import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
+import { isPromptEmpty } from "@appstrate/core/validation";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { deepMergeConfig } from "@appstrate/core/schema-validation";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
@@ -120,16 +121,19 @@ export async function collectAgentReadinessErrors(
     });
   }
 
-  const missingSkills = findMissingDependencies(
-    manifest.dependencies?.skills ?? {},
-    agent.skills.map((s) => s.id),
-  );
-  for (const skillId of missingSkills) {
+  // Resolved HERE, from the manifest this call is about — never read off the
+  // package object. `agent.manifest` may be a draft or a published snapshot;
+  // deriving the projection at the point of use is what makes it impossible to
+  // compare one definition's declared skills against another's resolved closure
+  // (#878). The catalog query is skipped entirely when no skill is declared.
+  const declaredSkills = await resolveDeclaredSkills(manifest, orgId);
+  for (const skill of declaredSkills) {
+    if (skill.resolved) continue;
     errors.push({
-      field: `dependencies.skills.${skillId}`,
+      field: `dependencies.skills.${skill.id}`,
       code: "missing_skill",
       title: "Missing Skill",
-      message: `Required skill '${skillId}' is not installed`,
+      message: `Required skill '${skill.id}' is not installed`,
     });
   }
 
