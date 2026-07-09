@@ -102,10 +102,11 @@ export function prepareAiSdkChatStep({
 }
 
 /**
- * TTL for the engine path's loopback bearer. The Agent SDK bakes it into the
- * spawned binary's env once, so it must outlive the whole turn (up to
- * CHAT_MAX_STEPS turns, each able to long-poll a run's status for ~55 s). 30
- * min is a generous ceiling for a single interactive turn.
+ * TTL for the subscription-engine path's loopback bearer. The Pi chat engine
+ * opens its platform MCP client once per turn with these headers, so the token
+ * must outlive the whole turn (up to CHAT_MAX_STEPS steps, each able to
+ * long-poll a run's status for ~55 s). 30 min is a generous ceiling for a
+ * single interactive turn.
  */
 const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
 

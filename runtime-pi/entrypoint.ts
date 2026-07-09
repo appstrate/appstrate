@@ -329,21 +329,20 @@ async function initGitWorkspace(): Promise<void> {
 const extensionFactories: ExtensionFactory[] = [];
 
 // Runtime context exposed to custom tools as the 4th `execute` argument.
-// Assigned in Phase C once the MCP client is connected; the closure provider
-// is read at every `execute` invocation, so factories registered before
-// Phase C still see the wired ctx by the time a tool actually runs.
+// Assigned once tool wiring runs (the sidecar Phase-C block or the no-sidecar
+// `else` branch); the closure provider is read at every `execute` invocation,
+// so factories registered earlier still see the wired ctx by the time a tool
+// actually runs.
 //
-// NOT a definite-assignment (`!`) binding: the claude+sidecar engine combo
-// skips the Pi-only Phase-C wiring block below AND the no-sidecar `else`
-// branch, so this can legitimately stay unassigned. A `!` would let a stray
-// read hand out `undefined` typed as a live ctx (silent null-deref); the
-// guarded provider throws a clear error instead.
+// NOT a definite-assignment (`!`) binding: a `!` would let a stray read
+// BEFORE wiring completes hand out `undefined` typed as a live ctx (silent
+// null-deref); the guarded provider throws a clear error instead.
 let appstrateRuntimeCtx: AppstrateToolCtx | undefined;
 const appstrateCtxProvider: AppstrateCtxProvider = () => {
   if (!appstrateRuntimeCtx) {
     throw new Error(
-      "appstrate runtime tool context is not wired for this engine/phase " +
-        "(no sidecar-backed ctx available). This is a runtime wiring bug.",
+      "appstrate runtime tool context is not wired yet " +
+        "(tool executed before tool wiring completed). This is a runtime wiring bug.",
     );
   }
   return appstrateRuntimeCtx;

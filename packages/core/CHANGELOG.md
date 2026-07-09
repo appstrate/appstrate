@@ -34,8 +34,15 @@ accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
   gateway header helper (`applyClaudeOauthGatewayHeaders`, which forced the
   bearer and ensured `anthropic-beta: oauth-2025-04-20`) is superseded by the
   provider-neutral `@appstrate/core/oauth-bearer-swap`.
+- **`ModelProviderHooks.beforeLlmProxyRequest` removed** (with the
+  `ModelProviderProxyContext` / `ModelProviderProxyPatch` types from
+  `@appstrate/core/module`). The per-request header-patch hook had no platform
+  caller once the forging wire-format path was deleted — the sidecar's only
+  oauth header policy is the provider-neutral bearer-swap, and any
+  provider-specific routing header (e.g. `chatgpt-account-id`) is emitted by
+  Pi's SDK from the token itself.
 
-  Both are removed public subpaths → requires a major version bump on next
+  These are removed public API → requires a major version bump on next
   publish. Consumers on the `claude`/`codex` engine vocabulary should drop it;
   the run path is provider-neutral.
 

@@ -17,9 +17,6 @@
  *     the chatgpt.com Codex backend) and `email`.
  *   - `validateCredential` decodes the same JWT OFFLINE (no network) to
  *     confirm the token is unexpired and carries `chatgpt_account_id`.
- *   - `beforeLlmProxyRequest` is not currently needed — the sidecar
- *     reads the persisted `accountId` from the credential row before
- *     each request.
  *
  * The platform issues ZERO Codex API calls to validate a credential or
  * discover models: validation is the local JWT decode below (inferred from the
@@ -245,9 +242,8 @@ const codexProvider: ModelProviderDefinition = {
   // Pi's SDK (`@mariozechner/pi-ai`) natively emits the codex-responses OAuth
   // request shape (`chatgpt-account-id`, the codex user-agent), so the platform
   // forges nothing — the sidecar `/llm` oauth branch only swaps the placeholder
-  // bearer for the real subscription token server-side. There is no
-  // per-provider `subscriptionEngine` binding anymore (that field was removed);
-  // the run path is provider-neutral. See
+  // bearer for the real subscription token server-side. The run path is
+  // provider-neutral: no per-provider execution-engine binding. See
   // docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
 };
 

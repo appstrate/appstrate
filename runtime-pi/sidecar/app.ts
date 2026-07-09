@@ -37,7 +37,7 @@ import {
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import { logger } from "./logger.ts";
-import { filterSensitiveHeaders } from "./redact.ts";
+import { filterSensitiveHeaders, scrubBearerMaterial } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -190,11 +190,16 @@ async function passUpstream(
     } catch {
       // body unreadable — log what we have
     }
+    // Scrub before logging — on the oauth path this body flowed AFTER the
+    // bearer-swap, so an upstream/proxy error that echoes request material
+    // could carry the real subscription bearer. Same no-leak posture as
+    // `logOauthLlmResponse`.
+    const scrubbedSample = scrubBearerMaterial(bodySample);
     logger.warn("llm alias: upstream error body replaced by synthetic envelope", {
       targetUrl: observe?.targetUrl,
       status: upstream.status,
       contentType: upstream.headers.get("content-type"),
-      bodySample: bodySample.length > 200 ? bodySample.slice(0, 200) + "…" : bodySample,
+      bodySample: scrubbedSample.length > 200 ? scrubbedSample.slice(0, 200) + "…" : scrubbedSample,
     });
     // The synthesized body is JSON even when the upstream error was text/html —
     // the allowlist copied the upstream's content-type, so override it.
@@ -309,7 +314,7 @@ async function logOauthLlmResponse(
   // we still scrub bearer/api-key patterns from the sample so the no-leak
   // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const scrubbed = bodySample.replace(/(sk-ant-[a-z0-9-]+|Bearer\s+[\w.~+/=-]+)/gi, "[redacted]");
+  const scrubbed = scrubBearerMaterial(bodySample);
   const truncated = scrubbed.length > 200 ? scrubbed.slice(0, 200) + "…" : scrubbed;
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,
@@ -639,11 +644,13 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // OAuth: resolve the real subscription bearer and swap it onto the request,
-  // but DO NOT forge — no identity headers, no body transform. The Pi SDK
-  // (in-container) already signed the subscription request shape (Anthropic
+  // but DO NOT forge — no identity headers, no fingerprint transform. The Pi
+  // SDK (in-container) already signed the subscription request shape (Anthropic
   // OAuth fingerprint or codex-responses headers); we forward its user-agent /
   // anthropic-beta / chatgpt-account-id untouched and only replace the
-  // placeholder bearer with the real token.
+  // placeholder bearer with the real token. The single deliberate body touch is
+  // the platform's own model-alias swap (`modelSwap`, exact-location
+  // alias↔real) — the same provider-neutral rewrite the api_key branch applies.
   async function handleOauthLlmRequest(
     c: Context,
     llmConfig: LlmProxyOauthConfig,

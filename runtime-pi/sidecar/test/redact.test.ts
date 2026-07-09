@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { filterSensitiveHeaders, redactLocationHeader } from "../redact.ts";
+import { filterSensitiveHeaders, redactLocationHeader, scrubBearerMaterial } from "../redact.ts";
 
 describe("filterSensitiveHeaders", () => {
   it("drops set-cookie from a Headers instance", () => {
@@ -116,5 +116,25 @@ describe("redactLocationHeader", () => {
 
   it("strips userinfo and query from a scheme-relative Location", () => {
     expect(redactLocationHeader("//user:pass@h.example/p?sig=s")).toBe("//h.example/p");
+  });
+});
+
+describe("scrubBearerMaterial", () => {
+  it("masks an sk-ant token embedded in an error body", () => {
+    expect(scrubBearerMaterial('{"error":"bad key sk-ant-oat01-abc-def"}')).toBe(
+      '{"error":"bad key [redacted]"}',
+    );
+  });
+
+  it("masks a Bearer sequence (echoed authorization material)", () => {
+    expect(scrubBearerMaterial("upstream said: Bearer eyJhbGciOi.abc_def-ghi rejected")).toBe(
+      "upstream said: [redacted] rejected",
+    );
+  });
+
+  it("is case-insensitive and leaves clean text byte-identical", () => {
+    expect(scrubBearerMaterial("bearer tok123 and SK-ANT-x1")).toBe("[redacted] and [redacted]");
+    const clean = '{"error":{"type":"overloaded_error"}}';
+    expect(scrubBearerMaterial(clean)).toBe(clean);
   });
 });

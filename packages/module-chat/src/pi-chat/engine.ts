@@ -10,8 +10,8 @@
  * Anthropic OAuth fingerprint (`sk-ant-oat…` → beta + claude-cli UA + system
  * prelude) or the codex-responses headers (`chatgpt-account-id` decoded from the
  * token JWT). The platform forges nothing; request-shape fidelity is delegated
- * to Pi. This replaces the old per-vendor "official binary" chat engines (Claude
- * Agent SDK) and their per-provider `registerChatHandler` seam.
+ * to Pi. There is no per-provider chat engine or handler seam — every
+ * subscription provider rides this one loop.
  *
  * The chat runs server-side, so the real subscription token is registered
  * directly in an in-memory {@link AuthStorage} (never persisted, never handed to
@@ -95,17 +95,21 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         TURN_DEADLINE_MS,
       );
 
-      // Platform meta-tools (search/describe/invoke_operation + run_and_wait).
-      // A failure here is a genuine misconfiguration (the chat's value IS the
-      // tools) — let it propagate to `onError`.
-      const mcpTools = await buildPlatformMcpTools({
-        url: platformMcp.url,
-        headers: platformMcp.headers,
-        writeChunk: write,
-        signal: turnAbort.signal,
-      });
-
+      // Inside the try so the deadline timer + abort listener above are torn
+      // down even when construction fails (they'd otherwise survive until the
+      // 10-minute deadline).
+      let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       try {
+        // Platform meta-tools (search/describe/invoke_operation + run_and_wait).
+        // A failure here is a genuine misconfiguration (the chat's value IS the
+        // tools) — let it propagate to `onError`.
+        mcpTools = await buildPlatformMcpTools({
+          url: platformMcp.url,
+          headers: platformMcp.headers,
+          writeChunk: write,
+          signal: turnAbort.signal,
+        });
+
         const {
           AuthStorage,
           createAgentSession,
@@ -235,7 +239,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
       } finally {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
-        await mcpTools.close();
+        await mcpTools?.close();
       }
     },
   });

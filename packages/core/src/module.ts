@@ -488,36 +488,16 @@ export interface ModelProviderOAuthConfig {
 }
 
 /**
- * Context passed to provider-specific proxy hooks. The provider's
- * `beforeLlmProxyRequest` decides which headers to add/override on the
- * outbound LLM call (e.g. an account-routing header).
- */
-export interface ModelProviderProxyContext {
-  providerId: string;
-  /** Credential kind backing this call — providers can choose to skip hooks for API-key flows. */
-  credentialKind: "api_key" | "oauth";
-  /** The access token (OAuth) or API key (api_key) the platform will forward upstream. */
-  apiKey: string;
-  /** The incoming request headers from the agent — read-only. */
-  incomingHeaders: Headers;
-}
-
-/** Patch returned by `beforeLlmProxyRequest`. Empty object = no changes. */
-export interface ModelProviderProxyPatch {
-  /** Headers to merge into the outbound request. Later wins over earlier. */
-  headers?: Record<string, string>;
-}
-
-/**
  * Well-known identity slots a provider may surface from an OAuth access
  * token. Modules map their provider-specific claim names into these
  * abstract slots, so the platform never needs to know any provider's
  * internal claim vocabulary.
  *
  * `accountId` is the stable account/tenant identifier the provider uses
- * for routing (echoed back to the upstream by the sidecar's identity
- * layer, which decides the routing header from the boot config). `email`
- * is the user identity associated with the credential.
+ * for routing — persisted on the credential row and used at connect time
+ * for required-claim validation; the platform never forwards it as an
+ * upstream header (Pi's SDK derives any routing header from the token
+ * itself). `email` is the user identity associated with the credential.
  */
 export interface ModelProviderIdentity {
   accountId?: string;
@@ -588,16 +568,6 @@ export function validateOfflineExpiry(
  */
 export interface ModelProviderHooks {
   /**
-   * Called by the LLM proxy and the in-container sidecar before forwarding
-   * a request upstream. Returns a patch (typically extra headers) merged
-   * into the outbound request. MUST be fast and side-effect-free — invoked
-   * on every LLM call.
-   */
-  beforeLlmProxyRequest?: (
-    ctx: ModelProviderProxyContext,
-  ) => Promise<ModelProviderProxyPatch> | ModelProviderProxyPatch;
-
-  /**
    * Decode an OAuth access token into the well-known
    * {@link ModelProviderIdentity} slots. Called once at credential creation
    * and after every refresh; the result is persisted on the credential row
@@ -633,8 +603,8 @@ export interface ModelProviderHooks {
    * providers (`claude-code`, `codex`) implement this so the platform can
    * confirm a token is structurally valid and unexpired by decoding it
    * locally, instead of spending a subscription request against the
-   * vendor's backend. Real per-model availability is validated at first
-   * official-binary run.
+   * vendor's backend. Real per-model availability is validated at the
+   * first agent run (on the Pi engine).
    *
    * When present, the platform's connection test calls this hook and
    * NEVER issues a subscription API request. API-key providers omit it
@@ -733,8 +703,8 @@ export interface ModelProviderDefinition {
    * discover models: it persists the static {@link modelDiscoveryCandidates}
    * (∩ catalog) WITHOUT per-model live probing. Set by subscription providers
    * (`claude-code`, `codex`) so a user's subscription token is never spent
-   * enumerating models — real per-model availability is validated at first
-   * official-binary run.
+   * enumerating models — real per-model availability is validated at the
+   * first agent run (on the Pi engine).
    *
    * Offline credential VALIDATION (no upstream probe to test a token) is a
    * separate, orthogonal concern inferred from the PRESENCE of
@@ -744,7 +714,7 @@ export interface ModelProviderDefinition {
   modelDiscovery?: { mode: "static" };
 
   // — Behavior —
-  /** Provider-scoped hooks (header injection, identity extraction). */
+  /** Provider-scoped hooks (identity extraction, placeholder, offline validation). */
   hooks?: ModelProviderHooks;
   /**
    * Well-known {@link ModelProviderIdentity} slots the platform MUST refuse

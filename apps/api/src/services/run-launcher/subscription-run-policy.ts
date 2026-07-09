@@ -101,7 +101,9 @@ export function assertOauthRunIsolation(params: {
  * Build the sidecar `/llm` config for an OAuth-subscription run. The Pi SDK
  * signs the subscription request shape itself, so the sidecar only swaps the
  * placeholder bearer for the real token — no identity headers, no
- * system-prepend, no body transform. Pure for unit testing.
+ * system-prepend, no fingerprint transform. When the run's model is an alias,
+ * `modelSwap` rides along so the sidecar applies the same provider-neutral
+ * alias↔real body rewrite as on the api_key path. Pure for unit testing.
  */
 export function buildOauthSidecarLlm(params: {
   baseUrl: string;

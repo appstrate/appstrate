@@ -11,8 +11,7 @@
  * The Pi chat engine drives `@mariozechner/pi-coding-agent` in-process; pi-ai
  * emits each provider's subscription request shape natively from the real token
  * (anthropic detects `sk-ant-oat`; codex decodes `chatgpt_account_id`), so the
- * platform forges nothing. Codex is now chat-usable (it was previously
- * chat-excluded when chat only had the Claude Agent SDK engine).
+ * platform forges nothing.
  *
  * Shared by the server-side picker (`llm.ts`) and the client model picker
  * (`ui/models-data.ts`) so the two filters can never drift. Kept dependency-

@@ -166,14 +166,13 @@ Modules contribute model providers (the LLM backends Appstrate knows how to auth
 
 Provider hooks (`ModelProviderHooks`):
 
-- **`beforeLlmProxyRequest(ctx) → patch`** — runs at every LLM call, returns extra headers / URL rewrites to merge into the outbound request. Use it to inject provider-specific routing headers.
 - **`extractTokenIdentity(accessToken) → ModelProviderIdentity | null`** — runs once at credential import + after every refresh. Maps the provider's claim vocabulary (e.g. a JWT payload) into the platform's well-known abstract slots: `{ accountId?, email? }`. The platform persists the result and never re-decodes.
 - **`buildApiKeyPlaceholder(accessToken) → string | null`** — builds the `MODEL_API_KEY` value the agent container sees, when the in-container LLM client expects a structurally meaningful shape (e.g. a JWT it will decode). Return `null` to fall back to the platform's generic dash-stripped placeholder. The real upstream credential never leaves the platform/sidecar boundary.
 - **`validateCredential(ctx) → CredentialValidationResult`** — validates a credential **offline** (no network), used by the connection test (`POST /api/models/test`). Implement it together with `credentialValidation: "offline"` on the provider definition: the platform then runs this local check instead of issuing any API call (subscription providers decode the token to confirm it is well-formed + unexpired). Return `{ ok: true }` for a valid credential or `{ ok: false, error, message }` otherwise. API-key providers omit it and fall back to the generic `GET ${baseUrl}/models` probe.
 
 Declarative gate: `requiredIdentityClaims: readonly (keyof ModelProviderIdentity)[]` on the provider definition makes the platform refuse to import a credential whose mandatory slots can't be resolved — fail-loud at import time instead of silently persisting a dead credential.
 
-Reference module: `core-providers` (openai/anthropic/openai-compatible — API keys only, no hooks needed). Workspace OAuth modules under `packages/module-*/` show how to implement the four hooks together with `requiredIdentityClaims`. External operator-installed providers extend the catalog the same way.
+Reference module: `core-providers` (openai/anthropic/openai-compatible — API keys only, no hooks needed). Workspace OAuth modules under `packages/module-*/` show how to implement the three hooks together with `requiredIdentityClaims`. External operator-installed providers extend the catalog the same way.
 
 ## Orchestrators (execution backends)
 

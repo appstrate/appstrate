@@ -78,6 +78,13 @@ real bearer onto `authorization`, drops any stray `x-api-key`, and forwards
 Codex; Pi's fingerprint (user-agent, `anthropic-beta`, `chatgpt-account-id`, …)
 rides through unchanged.
 
+One deliberate, disclosed exception on the body: when the org runs the model
+under a **model alias** (the platform's LLM-gateway alias feature), the sidecar
+rewrites the `model` field alias↔real at exact JSON locations in the
+request/response — identical on the API-key path, provider-neutral, and not a
+fingerprint transform (no header, prelude, or identity field is touched).
+Runs without an alias forward the body byte-identical.
+
 The one honest narrowing: the upstream TLS request is made by the **sidecar's
 `fetch`** carrying Pi's forwarded headers, not by a vendor binary — so we do not
 claim transport-level client identity. The token is genuine and per-user/org
