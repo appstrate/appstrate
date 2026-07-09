@@ -154,22 +154,39 @@ function sanitiseSchemaDescriptions(schema: unknown, depth = 0): unknown {
  * never mutates the input — with all known injection vectors stripped
  * and length caps enforced.
  *
- * Drops the tool entirely (returns `null`) when the resulting schema
- * is too large after sanitisation. The host should log this and refuse
+ * Drops the tool entirely (returns `null`) when the resulting schemas
+ * are too large after sanitisation. The host should log this and refuse
  * to advertise the tool to the agent rather than ship a half-sanitised
  * descriptor.
+ *
+ * `outputSchema` is sanitised and budgeted alongside `inputSchema`. It
+ * used to ride through untouched on the `...tool` spread: an untrusted
+ * server could hide poisoned `description` fields in it and blow past the
+ * size cap, which only weighed `inputSchema`. It is also load-bearing —
+ * the MCP SDK client validates every result of a tool that declares one —
+ * so a hostile or oversized `outputSchema` is not inert.
  */
 export function sanitiseToolDescriptor(tool: Tool): Tool | null {
   const description = sanitiseTextField(tool.description, MAX_TOOL_DESCRIPTION_BYTES);
   const inputSchema = sanitiseSchemaDescriptions(tool.inputSchema) as Tool["inputSchema"];
-  const serialised = JSON.stringify(inputSchema);
+  const outputSchema =
+    tool.outputSchema === undefined
+      ? undefined
+      : (sanitiseSchemaDescriptions(tool.outputSchema) as Tool["outputSchema"]);
   // Measure the UTF-8 byte length — `String.length` counts UTF-16 code units,
   // so a schema of multibyte characters could carry up to ~4× the intended
-  // byte budget past this cap.
-  if (new TextEncoder().encode(serialised).byteLength > MAX_SCHEMA_SERIALISED_BYTES) return null;
+  // byte budget past this cap. Both schemas share one budget: they reach the
+  // agent together.
+  const encoder = new TextEncoder();
+  let serialisedBytes = encoder.encode(JSON.stringify(inputSchema)).byteLength;
+  if (outputSchema !== undefined) {
+    serialisedBytes += encoder.encode(JSON.stringify(outputSchema)).byteLength;
+  }
+  if (serialisedBytes > MAX_SCHEMA_SERIALISED_BYTES) return null;
   const out: Tool = {
     ...tool,
     inputSchema,
+    ...(outputSchema !== undefined ? { outputSchema } : {}),
     ...(description !== undefined ? { description } : {}),
   };
   if (typeof tool.title === "string") {

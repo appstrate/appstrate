@@ -283,23 +283,25 @@ describe("POST /mcp — api_call resource spillover", () => {
   });
 });
 
-describe("POST /mcp — api_call structured output (outputSchema + structuredContent)", () => {
-  it("advertises an outputSchema on the api_call descriptor through the McpHost", async () => {
+// Regression guard for #876: api_call must NOT declare an `outputSchema`,
+// and must NOT attach a `structuredContent` that fails to mirror `content`.
+// Declaring the schema forces the MCP SDK client to demand structuredContent
+// on every non-error result; a client that then prefers structuredContent
+// (Claude Code, VS Code) hands the model `{"status":200}` and discards the
+// response body. The status travels on `_meta` instead.
+describe("POST /mcp — api_call response body survives (no outputSchema / no structuredContent)", () => {
+  it("advertises no outputSchema on the api_call descriptor through the McpHost", async () => {
     const app = await makeResourcesApp();
     const res = await rpc(app, { method: "tools/list" });
     const { tools } = res.json.result as {
-      tools: Array<{ name: string; outputSchema?: { type: string; properties: object } }>;
+      tools: Array<{ name: string; outputSchema?: unknown }>;
     };
     const apiCall = tools.find((t) => t.name === "test__api_call");
     expect(apiCall).toBeDefined();
-    expect(apiCall!.outputSchema?.type).toBe("object");
-    // status (plain calls), file-descriptor fields (toFile), error envelope.
-    expect(Object.keys(apiCall!.outputSchema!.properties)).toEqual(
-      expect.arrayContaining(["status", "kind", "path", "size", "error"]),
-    );
+    expect(apiCall!.outputSchema).toBeUndefined();
   });
 
-  it("attaches structuredContent { status } to a successful api_call result", async () => {
+  it("returns the body in content with no structuredContent, status on _meta", async () => {
     const app = await makeResourcesApp();
     const res = await rpc(app, {
       method: "tools/call",
@@ -309,14 +311,19 @@ describe("POST /mcp — api_call structured output (outputSchema + structuredCon
       },
     });
     const result = res.json.result as {
+      content: Array<{ type: string; text?: string }>;
       isError?: boolean;
-      structuredContent?: { status?: number };
+      structuredContent?: unknown;
+      _meta?: Record<string, { status?: number }>;
     };
     expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toEqual({ status: 200 });
+    expect(result.structuredContent).toBeUndefined();
+    // The body — not `{"status":200}` — is what the model must receive.
+    expect(JSON.parse(result.content[0]!.text!)).toEqual({ ok: true });
+    expect(result._meta?.["dev.appstrate/upstream"]?.status).toBe(200);
   });
 
-  it("attaches structuredContent { status } to an upstream error result too", async () => {
+  it("returns an upstream error body in content with no structuredContent", async () => {
     const fetchFn = mock(
       async () =>
         new Response('{"error":"nope"}', {
@@ -333,11 +340,15 @@ describe("POST /mcp — api_call structured output (outputSchema + structuredCon
       },
     });
     const result = res.json.result as {
+      content: Array<{ type: string; text?: string }>;
       isError?: boolean;
-      structuredContent?: { status?: number };
+      structuredContent?: unknown;
+      _meta?: Record<string, { status?: number }>;
     };
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toEqual({ status: 404 });
+    expect(result.structuredContent).toBeUndefined();
+    expect(JSON.parse(result.content[0]!.text!)).toEqual({ error: "nope" });
+    expect(result._meta?.["dev.appstrate/upstream"]?.status).toBe(404);
   });
 });
 
