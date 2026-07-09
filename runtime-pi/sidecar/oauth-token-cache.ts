@@ -5,8 +5,10 @@
  *
  * Backs the OAuth code path (cf. SPEC §5.2): the sidecar polls
  * `GET /internal/oauth-token/:credentialId` on the platform API to
- * obtain a fresh access token (+ optional `accountId`), then caches the
- * result for {@link CACHE_TTL_MS}. The platform's read endpoint already
+ * obtain a fresh access token, then caches the result for
+ * {@link CACHE_TTL_MS}. Only the token is consumed here — the swap path
+ * sets no provider headers (pi-ai emits those inside the container). The
+ * platform's read endpoint already
  * proactively refreshes whenever the token is within
  * `OAUTH_REFRESH_LEAD_MS` of expiry, so the sidecar trusts whatever it
  * returns and only round-trips again on 401 via {@link forceRefresh}.

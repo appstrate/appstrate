@@ -28,7 +28,7 @@ import {
   syntheticAliasErrorBody,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "./model-swap.ts";
-import { applyClaudeOauthGatewayHeaders } from "@appstrate/core/claude-oauth-gateway";
+import { applyOauthBearerSwap } from "@appstrate/core/oauth-bearer-swap";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
@@ -37,7 +37,7 @@ import {
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import { logger } from "./logger.ts";
-import { filterSensitiveHeaders } from "./redact.ts";
+import { filterSensitiveHeaders, scrubBearerMaterial } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -190,11 +190,16 @@ async function passUpstream(
     } catch {
       // body unreadable — log what we have
     }
+    // Scrub before logging — on the oauth path this body flowed AFTER the
+    // bearer-swap, so an upstream/proxy error that echoes request material
+    // could carry the real subscription bearer. Same no-leak posture as
+    // `logOauthLlmResponse`.
+    const scrubbedSample = scrubBearerMaterial(bodySample);
     logger.warn("llm alias: upstream error body replaced by synthetic envelope", {
       targetUrl: observe?.targetUrl,
       status: upstream.status,
       contentType: upstream.headers.get("content-type"),
-      bodySample: bodySample.length > 200 ? bodySample.slice(0, 200) + "…" : bodySample,
+      bodySample: scrubbedSample.length > 200 ? scrubbedSample.slice(0, 200) + "…" : scrubbedSample,
     });
     // The synthesized body is JSON even when the upstream error was text/html —
     // the allowlist copied the upstream's content-type, so override it.
@@ -309,7 +314,7 @@ async function logOauthLlmResponse(
   // we still scrub bearer/api-key patterns from the sample so the no-leak
   // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const scrubbed = bodySample.replace(/(sk-ant-[a-z0-9-]+|Bearer\s+[\w.~+/=-]+)/gi, "[redacted]");
+  const scrubbed = scrubBearerMaterial(bodySample);
   const truncated = scrubbed.length > 200 ? scrubbed.slice(0, 200) + "…" : scrubbed;
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,
@@ -406,10 +411,9 @@ function deriveLlmTarget(c: Context, baseUrl: string): { targetUrl: string; meth
  * Buffer an inbound `/llm` request body under the hard byte cap and apply the
  * model-alias swap when one is configured; otherwise return the buffered text
  * verbatim. Returns a 413 `Response` (the caller returns it verbatim) when the
- * body exceeds the cap, or `undefined` for an empty body. Used by both branches
- * that must materialise the body: oauth always (so a 401 can be replayed),
- * api_key only when an alias requires the rewrite (the no-swap api_key path
- * keeps its zero-copy stream).
+ * body exceeds the cap, or `undefined` for an empty body. api_key-only: the
+ * oauth branch buffers via `bufferLlmBodyBounded` directly (401 replay) and
+ * never swaps — its config carries no `modelSwap`.
  */
 async function bufferAndSwapRequestBody(
   c: Context,
@@ -563,12 +567,12 @@ export function createApp(deps: AppDeps): Hono {
   //     for the real key and forward directly to the upstream provider.
   //     Request/response bodies stream through zero-copy. The Pi SDK
   //     handles retry on 429/5xx natively (Retry-After honoring + jitter).
-  //   - oauth: the no-forge path for a driver that signs its OWN provider
-  //     fingerprint (the official Claude Agent SDK binary). The sidecar
-  //     resolves a fresh access token from the platform
-  //     (`/internal/oauth-token/:id`), swaps the request bearer for it, and
-  //     ensures the OAuth beta header — forging nothing. On 401 we refresh +
-  //     retry once. There is no fingerprint-forging mode.
+  //   - oauth: the no-forge path for an OAuth subscription. The Pi SDK
+  //     already signs the subscription request shape (Anthropic OAuth
+  //     fingerprint or codex-responses headers); the sidecar resolves a fresh
+  //     access token from the platform (`/internal/oauth-token/:id`) and swaps
+  //     the placeholder request bearer for it — forging nothing. On 401 we
+  //     refresh + retry once. There is no fingerprint-forging mode.
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
       return c.json({ error: "LLM proxy not configured" }, 503);
@@ -638,11 +642,13 @@ export function createApp(deps: AppDeps): Hono {
     return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
   });
 
-  // OAuth: resolve the real bearer and ensure the OAuth beta is present, but
-  // DO NOT forge — no identity headers, no body transform. The driver (the
-  // official Claude Agent SDK binary) signs its own fingerprint; we forward its
-  // user-agent / x-app / anthropic-beta untouched. This is the no-forge runner
-  // path and the in-container twin of the chat's `claude-code-sdk-gateway`.
+  // OAuth: resolve the real subscription bearer and swap it onto the request,
+  // but DO NOT forge — no identity headers, no body transform. The Pi SDK
+  // (in-container) already signed the subscription request shape (Anthropic
+  // OAuth fingerprint or codex-responses headers); we forward its user-agent /
+  // anthropic-beta / chatgpt-account-id untouched, forward the body verbatim
+  // (no modelSwap in oauth mode — aliases are rejected platform-side), and only
+  // replace the placeholder bearer with the real token.
   async function handleOauthLlmRequest(
     c: Context,
     llmConfig: LlmProxyOauthConfig,
@@ -678,26 +684,26 @@ export function createApp(deps: AppDeps): Hono {
 
     const { targetUrl, method } = deriveLlmTarget(c, baseUrl);
 
-    // Forward the driver's headers verbatim except for the shared no-forge
-    // gateway policy: drop any x-api-key (bearer-only), force the real bearer,
-    // and merge the OAuth beta. The driver's own fingerprint (user-agent,
-    // x-app, anthropic-beta) is preserved — the whole point of pass-through.
-    // `filterHeaders` first drops host/content-length/hop-by-hop; wrapping the
-    // result in a Headers normalises casing so the policy needs no manual
-    // anthropic-beta/authorization variant hunt.
+    // Forward the SDK's headers verbatim except for the bearer-swap policy:
+    // drop any x-api-key (bearer-only) and force the real subscription bearer.
+    // The SDK's own fingerprint (user-agent, anthropic-beta, chatgpt-account-id)
+    // is preserved — the whole point of pass-through. `filterHeaders` first
+    // drops host/content-length/hop-by-hop; wrapping the result in a Headers
+    // normalises casing so the swap needs no manual authorization variant hunt.
     const buildHeaders = (accessToken: string): Headers =>
-      applyClaudeOauthGatewayHeaders(new Headers(filterHeaders(c.req.header())), accessToken);
+      applyOauthBearerSwap(new Headers(filterHeaders(c.req.header())), accessToken);
 
     // Buffer the request body (inference JSON, bounded by
     // SIDECAR_MAX_REQUEST_BODY_BYTES via the Content-Length precheck +
     // bounded streaming read → 413) so a 401 can be replayed after a token
-    // refresh — a consumed stream can't be. Apply the model-alias swap here
-    // when configured; otherwise forward the body verbatim.
+    // refresh — a consumed stream can't be. The body is forwarded VERBATIM:
+    // the oauth mode carries no modelSwap (aliases are rejected platform-side)
+    // and never rewrites what Pi signed.
     let body: string | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      const swapped = await bufferAndSwapRequestBody(c, llmConfig.modelSwap);
-      if (swapped instanceof Response) return swapped;
-      body = swapped;
+      const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+      if (buffered instanceof Response) return buffered;
+      body = buffered || undefined;
     }
 
     const doFetch = (headers: Headers): Promise<Response> =>
@@ -717,7 +723,7 @@ export function createApp(deps: AppDeps): Hono {
         targetUrl,
         error: err instanceof Error ? err.message : String(err),
       });
-      return llmFetchErrorResponse(c, targetUrl, err, llmConfig.modelSwap);
+      return llmFetchErrorResponse(c, targetUrl, err);
     }
 
     upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
@@ -747,15 +753,13 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    return passUpstream(
-      upstream,
-      {
-        targetUrl,
-        credentialId: llmConfig.credentialId,
-        authMode: "oauth",
-      },
-      llmConfig.modelSwap,
-    );
+    // No model-alias swap on the oauth path — the response streams back
+    // verbatim (zero-copy telemetry passthrough only).
+    return passUpstream(upstream, {
+      targetUrl,
+      credentialId: llmConfig.credentialId,
+      authMode: "oauth",
+    });
   }
 
   // MCP exposure — the agent-facing surface for the first-party tools
@@ -765,7 +769,7 @@ export function createApp(deps: AppDeps): Hono {
   // `bootIntegrations` (when `server.ts` pre-builds them) so the
   // in-process api_call server and the outer resource provider use the
   // same blob store.
-  // Runtime-event drain surface — the runner (pi/claude/codex) pulls the
+  // Runtime-event drain surface — the Pi runner pulls the
   // canonical events the sidecar journaled while executing runtime tools, and
   // re-emits them on its single run-event sink. Same `Host: sidecar` posture as
   // `/mcp` (the per-run Docker network is the boundary; no token). An empty

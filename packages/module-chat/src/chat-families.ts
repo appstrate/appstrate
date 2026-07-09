@@ -2,14 +2,16 @@
 
 /**
  * The apiShapes the chat can use. API-key families bind to the llm-proxy; the
- * Claude subscription family is routed (by `providerId`, in chat-stream.ts) to
- * its own engine instead of the proxy:
- *   - `anthropic-messages` + providerId `claude-code` → Claude Agent SDK engine.
+ * oauth-subscription families are routed (by resolving the model row's provider
+ * in chat-stream.ts) to the single generic in-process Pi chat engine instead of
+ * the proxy:
+ *   - `anthropic-messages` + an oauth `claude-code` credential → Pi chat engine.
+ *   - `openai-codex-responses` (codex) → Pi chat engine.
  *
- * The Claude subscription engine drives the vendor's official binary (which
- * signs its own client fingerprint) behind a non-forging credential-injection
- * gateway. Codex (ChatGPT) subscriptions are NOT usable in chat — they run only
- * as docker-isolated agents (see docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
+ * The Pi chat engine drives `@mariozechner/pi-coding-agent` in-process; pi-ai
+ * emits each provider's subscription request shape natively from the real token
+ * (anthropic detects `sk-ant-oat`; codex decodes `chatgpt_account_id`), so the
+ * platform forges nothing.
  *
  * Shared by the server-side picker (`llm.ts`) and the client model picker
  * (`ui/models-data.ts`) so the two filters can never drift. Kept dependency-
@@ -19,4 +21,5 @@ export const CHAT_USABLE_FAMILIES = new Set([
   "openai-completions",
   "anthropic-messages",
   "mistral-conversations",
+  "openai-codex-responses",
 ]);

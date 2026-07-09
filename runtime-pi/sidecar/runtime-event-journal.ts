@@ -8,10 +8,10 @@
  * `journalRuntimeToolDefs`). The canonical events that handler produces
  * (`log.written`, `memory.added`, `pinned.set`, `report.appended`,
  * `output.emitted`) are appended here, each stamped with a monotonic sequence.
- * The three runners (pi / claude / codex) DRAIN this journal over HTTP
- * (`GET /runtime-events?after=<cursor>`) and re-emit on their single run-event
+ * The Pi runner DRAINs this journal over HTTP
+ * (`GET /runtime-events?after=<cursor>`) and re-emits on its single run-event
  * sink. One execution, one source of truth, transport-agnostic — replacing the
- * per-runner observe-replay (re-running the pure handler on observed args).
+ * older observe-replay (re-running the pure handler on observed args).
  *
  * Safe as in-memory mutable state because the sidecar is ONE process per run
  * (`server.ts` boots a single instance keyed on `RUN_ID`).

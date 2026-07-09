@@ -79,11 +79,10 @@ export class LlmProxyModelApiMismatchError extends Error {
 /**
  * Thrown when an OAuth-subscription model is requested through this generic
  * gateway. The gateway forges nothing — a raw bearer alone won't satisfy a
- * subscription upstream — so subscription providers have no path here. A
- * subscription is only serviceable through its OWN dedicated official-binary SDK
- * gateway (where the vendor's binary signs its own client fingerprint); a
- * subscription engine with no such gateway has no chat path at all (so no path
- * here — this gateway never forges).
+ * subscription upstream — so subscription providers have no path here.
+ * Subscription models are served exclusively by the Pi engine (in-process chat
+ * engine + sidecar bearer-swap for runs), where pi-ai emits the provider's own
+ * subscription request shape.
  */
 export class LlmProxyUnsupportedSubscriptionError extends Error {
   // `providerId` stays a public property for server-side logging, but the
@@ -92,9 +91,8 @@ export class LlmProxyUnsupportedSubscriptionError extends Error {
   constructor(public readonly providerId: string) {
     super(
       `This model is backed by an OAuth subscription and cannot be served through ` +
-        `this gateway (no fingerprint forging). Subscription chat is only available when ` +
-        `the provider's subscription engine has a dedicated official-binary SDK gateway; ` +
-        `this credential's engine has none. Use an API-key model instead.`,
+        `this gateway (no fingerprint forging). Subscription models are only usable ` +
+        `through the platform's own chat and agent runs. Use an API-key model instead.`,
     );
     this.name = "LlmProxyUnsupportedSubscriptionError";
   }
@@ -117,7 +115,8 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   // No fingerprint forging: an OAuth-subscription provider has no path through
   // this generic gateway (a bare bearer won't satisfy a subscription upstream).
-  // claude-code is served by its own SDK gateway; reject everything else.
+  // Subscription chat runs on the in-process Pi engine (module-chat), not here;
+  // subscription runs go through the sidecar's oauth gateway. Reject them here.
   if (getModelProvider(resolved.providerId)?.authMode === "oauth2") {
     throw new LlmProxyUnsupportedSubscriptionError(resolved.providerId);
   }

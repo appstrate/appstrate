@@ -99,9 +99,10 @@ function proxyTarget(family: string): { kind: ProxyKind; suffix: string } | null
       return { kind: "openai-compatible", suffix: "/openai-completions/v1" };
     case "mistral-conversations":
       return { kind: "openai-compatible", suffix: "/mistral-conversations/v1" };
-    // Codex (openai-codex-responses) is intentionally absent: it is not a chat
-    // family (excluded from CHAT_USABLE_FAMILIES) and has no llm-proxy route, so
-    // it must never resolve to a proxy target.
+    // Codex (openai-codex-responses) is intentionally absent: it IS chat-usable
+    // now, but as an oauth-subscription it runs on the in-process Pi chat engine
+    // (resolved before this point in chat-stream.ts), NOT the llm-proxy — so it
+    // must never resolve a proxy target here.
     default:
       return null;
   }

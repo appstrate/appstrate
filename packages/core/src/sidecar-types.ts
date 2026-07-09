@@ -92,7 +92,8 @@ export interface SidecarLaunchSpec {
   /**
    * Output JSON Schema (`manifest.output.schema`). Forwarded so the
    * sidecar's `output` runtime tool exposes it as the `data` argument
-   * schema (constrained decoding) and validates against it at call time.
+   * schema (visible to the model in the tool definition) and AJV-validates
+   * calls against it.
    * Serialised as the `OUTPUT_SCHEMA` env var. Omitted when the agent
    * declares no output schema.
    */
@@ -490,14 +491,17 @@ export interface IntegrationSpawnSpec {
  *
  *   - `api_key`: the agent SDK builds the auth header with a placeholder and
  *     the sidecar swaps the placeholder for the real key.
- *   - `oauth`: the no-forging OAuth path for an agent driver that signs its OWN
- *     provider fingerprint (the official Claude Agent SDK binary). The sidecar
- *     fetches a fresh access token from the platform
- *     (`GET /internal/oauth-token/:credentialId`), swaps the request bearer for
- *     it, and ensures the OAuth beta flag — but forges nothing (no identity
- *     headers, no body transforms). There is deliberately no fingerprint-forging
- *     mode: a subscription provider whose driver can't sign its own fingerprint
- *     cannot execute.
+ *   - `oauth`: the no-forging OAuth path for subscription runs. The in-container
+ *     Pi engine (`pi-ai`) emits the provider's own subscription request shape
+ *     from its OAuth-shaped placeholder token; the sidecar fetches a fresh
+ *     access token from the platform (`GET /internal/oauth-token/:credentialId`)
+ *     and swaps the request bearer for it verbatim — no identity headers, no
+ *     body transforms. There is deliberately no fingerprint-forging mode: the
+ *     platform itself never synthesises a provider fingerprint.
+ *
+ * The model-alias swap ({@link ModelSwap}) exists only on the `api_key` mode.
+ * Aliases are rejected for oauth-subscription providers (at alias creation and
+ * again at run launch) so the oauth path stays a pure bearer-swap.
  */
 export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
 
@@ -550,16 +554,17 @@ export interface LlmProxyApiKeyConfig {
 }
 
 /**
- * OAuth mode — the no-forging path for an agent driver that signs its OWN
- * provider fingerprint (the official Claude Agent SDK binary).
+ * OAuth mode — the no-forging path for oauth-subscription runs. The in-container
+ * Pi engine (`pi-ai`) emits the provider's own subscription request shape from
+ * the OAuth-shaped placeholder token it was given (headers, beta flags,
+ * user-agent — request-shape fidelity is delegated to Pi).
  *
  * The sidecar forges nothing. It only resolves a fresh access token from the
- * platform, swaps the request bearer for it, and ensures the documented OAuth
- * beta flag (`oauth-2025-04-20`) is present — leaving the driver's own
- * user-agent / `x-app` / `anthropic-beta` fingerprint, request headers, and body
- * untouched. This is the runner-side counterpart of the chat's
- * `claude-code-sdk-gateway`. There is no forging fallback: a subscription
- * provider whose driver can't sign its own fingerprint has no execution path.
+ * platform and swaps the request bearer for it verbatim (`applyOauthBearerSwap`)
+ * — every other header and the body pass through untouched. There is no forging
+ * fallback: the platform itself never synthesises a provider fingerprint. There
+ * is also no `modelSwap`: model aliases are rejected for oauth-subscription
+ * providers, so this mode never rewrites the body.
  */
 export interface LlmProxyOauthConfig {
   authMode: "oauth";
@@ -567,8 +572,6 @@ export interface LlmProxyOauthConfig {
   baseUrl: string;
   /** ID of the `model_provider_credentials` row backing this OAuth connection. */
   credentialId: string;
-  /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
-  modelSwap?: ModelSwap;
 }
 
 /**

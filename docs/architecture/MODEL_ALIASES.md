@@ -94,6 +94,14 @@ detail remains in server logs.
   `openai-responses`, `openai-codex-responses`, `mistral-conversations`.
   `google-*`, `azure-*`, and `bedrock-*` carry the model id in the URL path, so
   an alias there is **rejected** (it would forward the alias verbatim and 404).
+- **API-key credentials only.** The oauth-subscription sidecar mode is a pure
+  bearer-swap and never rewrites the body (`LlmProxyOauthConfig` carries no
+  `modelSwap`), so an alias on an oauth-subscription credential is **rejected**
+  at creation and at update (`oauth_provider` violation — the `POST` and `PUT`
+  handlers of `/api/models` share the same invariant check), fail-closed at run launch
+  (`assertOauthRunNotAliased`), and refused by the subscription chat resolver
+  (a legacy aliased row falls to the LLM gateway, which rejects
+  oauth-subscription models with an alias-safe message).
 - **Explicit label required.** An alias must carry a label — the auto-derived
   label would name the backing model and survive the projection.
 

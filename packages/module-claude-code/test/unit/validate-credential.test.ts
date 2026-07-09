@@ -26,9 +26,9 @@ describe("claude-code discovery candidates", () => {
 
 describe("claude-code offline credential validation", () => {
   it("validates offline via validateCredential and declares NO buildInferenceProbe (forging removed)", () => {
-    // Real inference runs on the official Claude Agent SDK (which signs its own
-    // fingerprint); the platform issues ZERO Anthropic API calls to test a
-    // credential. Offline validation is inferred from the presence of the
+    // Real inference runs on the Pi engine (pi-ai emits the provider's
+    // subscription request shape); the platform issues ZERO Anthropic API calls
+    // to test a credential. Offline validation is inferred from the presence of the
     // validateCredential hook; static discovery comes from modelDiscovery.mode.
     expect(def.modelDiscovery?.mode).toBe("static");
     expect(def.hooks?.validateCredential).toBeFunction();

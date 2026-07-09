@@ -67,7 +67,7 @@ describe("finalizeChatStream — disconnect survival", () => {
   });
 
   it("persists every message of a multi-message turn, in order, with correct parent chaining", async () => {
-    // The claude-agent engine can emit several assistant messages in one turn.
+    // The pi-chat engine can emit several assistant messages in one turn.
     // Each must be persisted, chained onto the previous (the first onto the user
     // turn) — earlier ones must not be dropped.
     const engineResponse = engine(async ({ writer }) => {

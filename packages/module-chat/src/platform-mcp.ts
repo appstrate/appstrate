@@ -183,6 +183,17 @@ function redactValue(value: unknown, depth: number): { value: unknown; changed: 
 }
 
 /**
+ * Deep-redact connect links from an arbitrary payload object. Returns the same
+ * reference when nothing changed (prompt-cache friendly). Used by the Pi chat
+ * engine's tool forwarder ({@link ../pi-chat/mcp-tools.ts}) to scrub the
+ * MODEL-visible text channel — the same guarantee `wrapToolModelOutputs` gives
+ * the ai-sdk path.
+ */
+export function redactConnectPayload(payload: unknown): unknown {
+  return redactValue(payload, 0).value;
+}
+
+/**
  * Redact connect links from a `toModelOutput` result ({type:"json"|"content"}).
  * Pure. For `content` text parts we only touch valid JSON (re-stringified only
  * when something changed) — non-JSON text is passed through untouched. Anything

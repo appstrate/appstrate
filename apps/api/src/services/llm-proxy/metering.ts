@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared response-forwarding + usage-metering for the `/api/llm-proxy/*`
- * surfaces.
- *
- * Both the protocol-adapter core ({@link proxyLlmCall}) and the Claude Code
- * subscription SDK gateway forward an upstream LLM response to the caller and
- * record one `llm_usage` row (source="proxy"). The mechanics are identical:
+ * Response-forwarding + usage-metering for the `/api/llm-proxy/*` surfaces
+ * (the protocol-adapter core, {@link proxyLlmCall}):
  *
  *   - strip `content-encoding`/`content-length` from the forwarded headers
  *     (Bun's `fetch` already decompressed the body, so echoing the upstream
@@ -15,9 +11,6 @@
  *     response;
  *   - insert a usage row whose cost is Σ(tokens × cost/1e6), swallowing DB
  *     errors so a metering failure never breaks a successful LLM call.
- *
- * Keeping them here means the gateway and the core meter byte-for-byte the
- * same way — one place to change the ledger shape.
  */
 
 import { db } from "@appstrate/db/client";

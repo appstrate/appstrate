@@ -17,16 +17,15 @@
  *     the chatgpt.com Codex backend) and `email`.
  *   - `validateCredential` decodes the same JWT OFFLINE (no network) to
  *     confirm the token is unexpired and carries `chatgpt_account_id`.
- *   - `beforeLlmProxyRequest` is not currently needed — the sidecar
- *     reads the persisted `accountId` from the credential row before
- *     each request.
  *
  * The platform issues ZERO Codex API calls to validate a credential or
  * discover models: validation is the local JWT decode below (inferred from the
  * presence of the `validateCredential` hook), and model discovery persists the
  * static `modelDiscoveryCandidates` (declared via `modelDiscovery: { mode:
- * "static" }`). The user's subscription token is only ever spent through the
- * official Codex CLI at run time. See
+ * "static" }`). The user's subscription token is only ever spent via the
+ * sidecar's verbatim bearer swap at run time — agent runs execute on the
+ * single Pi engine, whose pi-ai SDK emits the codex-responses request
+ * shape natively. See
  * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
@@ -87,12 +86,13 @@ const codexHooks: ModelProviderHooks = {
   /**
    * Decode the access JWT and map Codex-specific claims into the
    * platform's abstract identity slots:
-   *  - `chatgpt_account_id` → `accountId` (echoed by the sidecar as the
-   *    `chatgpt-account-id` header at request time)
+   *  - `chatgpt_account_id` → `accountId`
    *  - `email` → `email`
    *
-   * The platform persists the result alongside the credential row so the
-   * sidecar doesn't re-decode on every call.
+   * Identity/display only (credential label, dedup). At request time the
+   * `chatgpt-account-id` header is emitted by pi-ai INSIDE the container,
+   * decoded from the placeholder JWT built by `buildApiKeyPlaceholder`
+   * below — the sidecar only swaps the bearer and sets no headers itself.
    */
   extractTokenIdentity(accessToken: string): ModelProviderIdentity | null {
     const claims = decodeCodexJwtPayload(accessToken);
@@ -139,8 +139,8 @@ const codexHooks: ModelProviderHooks = {
    * with no expiry metadata must not pass. This is a STRUCTURAL/offline
    * check only (decode + required claims + expiry), NOT a signature
    * verification or a live backend call. Real per-model availability —
-   * and true credential liveness — is established at first
-   * official-binary run.
+   * and true credential liveness — is established at the first agent run
+   * (on the Pi engine), which presents the credential to the real backend.
    */
   validateCredential(ctx: CredentialValidationContext): CredentialValidationResult {
     const claims = decodeCodexJwtPayload(ctx.apiKey);
@@ -208,7 +208,7 @@ const codexProvider: ModelProviderDefinition = {
   // `validateCredential` hook below (local JWT decode) — its mere presence is
   // what tells the platform to validate offline. Static discovery persists the
   // candidates below (∩ catalog) without per-model probing. Real availability
-  // is checked at first official-binary run.
+  // is checked at the first agent run (on the Pi engine).
   // Persisted as-is (∩ catalog) — what THIS account's plan serves lands on
   // the credential's `available_model_ids`. Superset of `featuredModels`:
   // includes Pro-only previews and recently-deprecated ids so plans that
@@ -238,12 +238,14 @@ const codexProvider: ModelProviderDefinition = {
   // credential whose token doesn't carry this claim — failing at import
   // time is louder than silently persisting a dead credential.
   requiredIdentityClaims: ["accountId"],
-  // Codex is an inference / model provider only: operators can connect a
-  // ChatGPT subscription, list models, and validate the credential offline.
-  // The agent-run engine binding (a docker-isolated official-binary runner) is
-  // deferred to a follow-up — codex has no `subscriptionEngine`, so a codex
-  // agent run is refused by `assertRunnableOnEngine` (oauth-class credential
-  // with no official engine). See docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
+  // Codex agent runs are EXECUTABLE: they run on the single Pi engine
+  // (`@mariozechner/pi-coding-agent`) like any other subscription provider.
+  // Pi's SDK (`@mariozechner/pi-ai`) natively emits the codex-responses OAuth
+  // request shape (`chatgpt-account-id`, the codex user-agent), so the platform
+  // forges nothing — the sidecar `/llm` oauth branch only swaps the placeholder
+  // bearer for the real subscription token server-side. The run path is
+  // provider-neutral: no per-provider execution-engine binding. See
+  // docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
 };
 
 // ---------------------------------------------------------------------------

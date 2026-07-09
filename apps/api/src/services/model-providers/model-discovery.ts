@@ -11,9 +11,9 @@
  *     `modelDiscoveryCandidates` (∩ catalog) directly. Spending a user's
  *     subscription quota to enumerate models would contradict the
  *     compliance posture (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`):
- *     all subscription inference runs through the official binary, never a
- *     platform-side request. Real per-model availability is validated at
- *     first run.
+ *     all subscription inference runs through the Pi engine (pi-ai emits
+ *     the provider's request shape) at run time, never a platform-side
+ *     request. Real per-model availability is validated at first run.
  *
  *   - probe (default, when `modelDiscovery` is omitted — API-key providers) —
  *     empirical: a 1-token inference request per candidate, persisting the ids
@@ -184,7 +184,7 @@ export async function discoverAvailableModels(
   // Static-discovery providers (subscription: codex, claude-code) — persist the
   // static candidate list (∩ catalog) WITHOUT any network probe. The
   // platform never spends a subscription request to enumerate models; real
-  // per-model availability is validated at first official-binary run. The
+  // per-model availability is validated at the first agent run (Pi engine). The
   // catalog intersection keeps `available_model_ids` aligned with what the
   // `/seed` route can actually accept (it gates seeding on catalog
   // membership), so a candidate absent from the catalog isn't persisted as

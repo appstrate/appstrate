@@ -24,7 +24,6 @@
  */
 
 import type { AppstrateRunPlan } from "./types.ts";
-import type { RunEngine } from "./subscription-run-policy.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   buildPlatformPromptInputs,
@@ -37,18 +36,6 @@ import { fetchIntegrationPromptDocs } from "../integration-service.ts";
 export async function buildPlatformSystemPrompt(
   context: ExecutionContext,
   plan: AppstrateRunPlan,
-  opts: {
-    /**
-     * The engine the run executes on, resolved by the launcher via
-     * `resolveCredentialDelivery` (provider→engine registry). Drives the
-     * `## Output Format` section: the `claude` engine has no `output`
-     * runtime tool — its deliverable goes through the Claude Agent SDK's
-     * `outputFormat`, i.e. the CLI-injected `StructuredOutput` tool — so
-     * the prompt must mandate THAT call, not an `output` tool call
-     * (issues #824, #833). Defaults to the Pi tool-call contract.
-     */
-    engine?: RunEngine;
-  } = {},
 ): Promise<string> {
   const uploads = plan.files?.map((f) => ({
     name: f.name,
@@ -79,7 +66,6 @@ export async function buildPlatformSystemPrompt(
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
     timeoutSeconds: plan.timeout,
-    outputMode: opts.engine === "claude" ? "native" : "tool",
     ...(uploads ? { uploads } : {}),
     ...(integrations && integrations.length > 0 ? { integrations } : {}),
   });

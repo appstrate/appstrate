@@ -153,12 +153,9 @@ function splitLegacy(ctx: PromptContext): {
   return { context, plan };
 }
 
-function buildEnrichedPrompt(
-  ctx: PromptContext,
-  opts?: { engine?: "pi" | "claude" },
-): Promise<string> {
+function buildEnrichedPrompt(ctx: PromptContext): Promise<string> {
   const { context, plan } = splitLegacy(ctx);
-  return buildPlatformSystemPrompt(context, plan, opts ?? {});
+  return buildPlatformSystemPrompt(context, plan);
 }
 
 function baseContext(overrides?: Partial<PromptContext>): PromptContext {
@@ -566,29 +563,15 @@ describe("buildEnrichedPrompt — Output Format is engine-aware", () => {
     properties: { answer: { type: "string" as const } },
   };
 
-  it("pi engine (default) mandates the terminal `output` tool call", async () => {
+  it("mandates the terminal `output` tool call (single Pi-engine channel)", async () => {
     const prompt = await buildEnrichedPrompt(baseContext({ schemas: { output: outputSchema } }));
     expect(prompt).toContain("## Output Format");
     expect(prompt).toContain("call the `output` tool");
+    expect(prompt).not.toContain("StructuredOutput");
   });
 
-  it("claude engine mandates one terminal `StructuredOutput` call — never a nonexistent `output` tool", async () => {
-    // The claude runner hosts log/note/pin/report only; the deliverable goes
-    // through the SDK's `outputFormat`, i.e. the CLI-injected
-    // `StructuredOutput` tool — the ONLY channel captured into
-    // `result.structured_output` (issue #833). The `output` tool-call
-    // mandate would send the agent hunting for a tool that does not exist
-    // and the run never completes (issue #824).
-    const prompt = await buildEnrichedPrompt(baseContext({ schemas: { output: outputSchema } }), {
-      engine: "claude",
-    });
-    expect(prompt).toContain("## Output Format");
-    expect(prompt).toContain("call `StructuredOutput` **exactly once**");
-    expect(prompt).not.toContain("call the `output` tool");
-  });
-
-  it("claude engine with no output schema renders no Output Format section", async () => {
-    const prompt = await buildEnrichedPrompt(baseContext(), { engine: "claude" });
+  it("renders no Output Format section when the agent declares no output schema", async () => {
+    const prompt = await buildEnrichedPrompt(baseContext());
     expect(prompt).not.toContain("## Output Format");
   });
 });

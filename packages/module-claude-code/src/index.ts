@@ -21,17 +21,19 @@
  * Anthropic stay on the `anthropic` provider in `core-providers`.
  *
  * No fingerprint forging anywhere — and the platform issues ZERO Anthropic API
- * calls to validate a credential or discover models. A `claude-code` run
- * executes on the official Claude Agent SDK (the `claude` runner engine) and the
- * chat on the same SDK — the official `claude` binary signs its own client
- * fingerprint, and the sidecar / chat gateways only swap the bearer + ensure the
- * `oauth-2025-04-20` beta. The provider declares no `oauthWireFormat`; the
- * module's only `hooks` entry is `validateCredential`, an OFFLINE check (no
- * network) that confirms the bearer is well-formed and unexpired — its
- * presence is what makes credential validation offline. Model discovery
- * persists the static `modelDiscoveryCandidates` (declared via `modelDiscovery:
- * { mode: "static" }`) without probing — real per-model availability is
- * validated at first official-binary run. See
+ * calls to validate a credential or discover models. Both `claude-code` runs
+ * and the chat execute on the single generic Pi engine
+ * (`@mariozechner/pi-coding-agent` / `pi-ai`) — pi-ai emits the Anthropic OAuth
+ * request shape natively from the token, including the `oauth-2025-04-20` beta
+ * header; the sidecar (run) / in-process token resolution (chat) only swap the
+ * bearer and add or modify no `anthropic-beta` header.
+ * The provider declares no `oauthWireFormat`; the module's only `hooks`
+ * entry is `validateCredential`, an OFFLINE check (no network) that confirms
+ * the bearer is well-formed and unexpired — its presence is what makes
+ * credential validation offline. Model discovery persists the static
+ * `modelDiscoveryCandidates` (declared via `modelDiscovery: { mode: "static" }`)
+ * without probing — real per-model availability is validated at the first
+ * agent run (on the Pi engine). See
  * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
@@ -43,9 +45,21 @@ import type {
   ModelProviderHooks,
 } from "@appstrate/core/module";
 import { validateOfflineExpiry } from "@appstrate/core/module";
-import { runClaudeAgentChat } from "./claude-agent/engine.ts";
 
 const claudeCodeHooks: ModelProviderHooks = {
+  /**
+   * Build the `MODEL_API_KEY` placeholder the agent container sees on the RUN
+   * path. pi-ai's `anthropic-messages` provider selects the OAuth request shape
+   * IFF the key string contains `sk-ant-oat`, so the placeholder must contain it
+   * deterministically — regardless of the real subscription token's prefix — or
+   * the run's OAuth-shape detection becomes token-dependent. The real token is
+   * swapped in by the sidecar gateway server-side; this placeholder never leaves
+   * the platform as a spendable credential. Returns a fixed string (the access
+   * token is intentionally ignored — the shape must not depend on it).
+   */
+  buildApiKeyPlaceholder(): string {
+    return "sk-ant-oat01-placeholder";
+  },
   /**
    * Validate a Claude subscription credential OFFLINE — NO request to
    * api.anthropic.com. Anthropic OAuth tokens are NOT JWTs (no decodable
@@ -57,8 +71,9 @@ const claudeCodeHooks: ModelProviderHooks = {
    * not pass. This is a STRUCTURAL/offline check only, NOT a signature
    * verification or a live backend call. The platform never spends a
    * subscription request to test a token — real per-model availability
-   * and true credential liveness are established at first
-   * official-binary run.
+   * and true credential liveness are established at the first agent run
+   * (on the Pi engine), which presents the credential to the real
+   * backend.
    */
   validateCredential(ctx: CredentialValidationContext): CredentialValidationResult {
     if (typeof ctx.apiKey !== "string" || ctx.apiKey.trim().length === 0) {
@@ -109,7 +124,8 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // `validateCredential` hook below (a non-empty/unexpired bearer check) — its
   // mere presence is what tells the platform to validate offline. Static
   // discovery persists the candidates below (∩ catalog) without per-model
-  // probing. Real availability is checked at first official-binary run.
+  // probing. Real availability is checked at the first agent run (on the
+  // Pi engine).
   // Persisted as-is (∩ catalog) — what THIS account's plan actually serves
   // (Pro vs Max vs Team differ, e.g. Opus/Fable access) lands on the
   // credential's `available_model_ids`. No machine-readable source describes
@@ -127,25 +143,14 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // Static discovery: persist the candidates above (∩ catalog) without probing.
   modelDiscovery: { mode: "static" },
   // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. There is no
-  // sidecar fingerprint forging: a `claude-code` run executes on the official
-  // Claude Agent SDK (the `claude` runner engine), whose binary signs its own
-  // client fingerprint. The sidecar's OAuth mode only swaps the bearer + ensures
-  // the OAuth beta — see `runtime-pi/sidecar/app.ts` and `subscription-run-policy.ts`.
-  //
-  // RUN-ONLY engine binding, read off this definition by the platform's
-  // model-provider registry helpers (run-launcher + gateways resolve the engine
-  // by provider id off this one registration). Runs execute on the Claude Agent
-  // SDK (official binary, no forging) — the sidecar `/llm` gateway swaps the
-  // bearer server-side, so the real token never enters the container. The
-  // `claude` engine emits the structured deliverable natively via `outputFormat`
-  // → `structured_output`, so the launcher does NOT offer it the MCP `output`
-  // tool. The interactive chat driver is registered separately, through the
-  // platform contract (`ctx.services.registerChatHandler` in `init()` below) —
-  // NOT on this binding — so the run-engine binding never carries a chat surface
-  // and no module imports another.
-  subscriptionEngine: {
-    engine: "claude",
-  },
+  // fingerprint forging: both `claude-code` agent runs and the interactive chat
+  // execute on the single generic Pi engine (`@mariozechner/pi-coding-agent` /
+  // `pi-ai`), which emits the Anthropic OAuth request shape natively from a
+  // token containing `sk-ant-oat` — the sidecar (run) / in-process token
+  // resolution (chat) only supplies the real bearer server-side. The provider
+  // contributes ONLY this declarative definition; the chat surface is owned by
+  // the generic `@appstrate/module-chat` engine (no per-provider chat handler,
+  // no run-engine binding).
   hooks: claudeCodeHooks,
 };
 
@@ -160,14 +165,10 @@ const claudeCodeModule: AppstrateModule = {
     version: "1.0.0",
   },
 
-  async init(ctx) {
-    // The provider definition (engine routing) is declarative — the registry
-    // pulls it from modelProviders() at boot. The interactive chat driver is
-    // contributed here through the PLATFORM CONTRACT (`ctx.services`), keyed by
-    // provider id, so it lives entirely off the published-core run-engine
-    // binding, requires no import of the chat module (module isolation), and
-    // vanishes with this module when it is not loaded.
-    ctx.services.registerChatHandler("claude-code", runClaudeAgentChat);
+  async init() {
+    // Declarative only — the registry pulls the provider from modelProviders()
+    // at boot. Both agent runs and chat run on the generic Pi engine; this
+    // module contributes no chat handler and no run-engine binding.
   },
 
   modelProviders() {

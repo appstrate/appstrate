@@ -18,9 +18,10 @@ describe("claude-code module", () => {
   });
 
   it("declares NO oauthWireFormat — forging is removed platform-wide", () => {
-    // Real inference runs on the official Claude Agent SDK (which signs its own
-    // fingerprint); the sidecar / chat gateways only swap the bearer + ensure
-    // the oauth beta. There is no wire-format forge to declare.
+    // Real inference runs on the Pi engine (pi-ai emits the provider's
+    // subscription request shape, oauth beta header included); the sidecar /
+    // chat token resolution only swap the bearer — no anthropic-beta header
+    // is added or modified. There is no wire-format forge to declare.
     const cc = claudeCodeModule.modelProviders?.()[0] as Record<string, unknown>;
     expect(cc.oauthWireFormat).toBeUndefined();
   });

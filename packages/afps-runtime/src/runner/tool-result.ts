@@ -5,10 +5,10 @@
  * Bounded, transport-safe truncation of arbitrary tool-result payloads before
  * they ride an {@link EventSink} (HTTP POST, JSONL stdout, a `run_logs` row).
  *
- * Shared by every Runner that forwards a tool's result as an
- * `appstrate.progress` breadcrumb — the Pi runner and the Claude Agent SDK
- * runner both surface tool results, and a filesystem/HTTP read can produce
- * MB-sized strings that have no business sitting in a log row.
+ * Used by any Runner that forwards a tool's result as an
+ * `appstrate.progress` breadcrumb — the Pi runner surfaces tool results, and a
+ * filesystem/HTTP read can produce MB-sized strings that have no business
+ * sitting in a log row.
  */
 
 /**

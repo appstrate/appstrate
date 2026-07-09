@@ -18,19 +18,16 @@
  * spec explicitly resists premature abstraction so each route keeps its
  * own adapter binding instead of sharing a single dispatch table.
  *
- * Subscription shapes (FIRST-PARTY-ONLY):
- *   - The Claude Pro/Max/Team subscription (`claude-code`) is served by the
- *     `/claude-code-sdk/:presetId/*` gateway, which injects the token WITHOUT
- *     forging any client identity — the chat's official Claude Agent SDK signs
- *     the legit Claude Code fingerprint itself. See
- *     services/llm-proxy/claude-code-sdk-gateway.ts.
- *   - The Codex (ChatGPT) subscription (`codex`) is NOT served here: it remains
- *     an inference/model provider only — its agent-run engine is deferred to a
- *     follow-up, so it has no chat surface and no agent gateway. See
+ * Subscription shapes are NOT served here:
+ *   - OAuth-subscription models (`claude-code`, `codex`) never flow through this
+ *     proxy. Chat drives them via the in-process Pi engine
+ *     (packages/module-chat/src/pi-chat/engine.ts); runs get the token via the
+ *     sidecar's verbatim bearer-swap. In both paths `pi-ai` emits the provider's
+ *     own subscription request shape — the platform forges nothing. See
  *     docs/architecture/SUBSCRIPTION_COMPLIANCE.md.
- *   - The generic gateway (`proxyLlmCall`) forges nothing, so an
- *     OAuth-subscription model with no dedicated CLI gateway is refused with
- *     `LlmProxyUnsupportedSubscriptionError`. Connect an API-key provider.
+ *   - The generic gateway (`proxyLlmCall`) therefore refuses an
+ *     OAuth-subscription model with `LlmProxyUnsupportedSubscriptionError`.
+ *     Connect an API-key provider to use this proxy.
  *
  * Security:
  *   - Bearer auth only — API keys with `llm-proxy:call` (headless) OR
@@ -55,7 +52,7 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest } from "../lib/errors.ts";
-import { assertBearerOnly, assertLoopbackOnly } from "../lib/bearer-only.ts";
+import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
 import {
   proxyLlmCall,
@@ -66,18 +63,6 @@ import {
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
-// The Claude Code subscription SDK gateway handler. It lives in apps/api (not in
-// the opt-in `module-claude-code`, unlike the engine binding + chat driver, which
-// DO live in the module) because it is wired to api-internal llm-proxy infra —
-// `metering`, credential resolution, `buildLlmProxyPrincipal`, `credentials` — and
-// a module must not depend on the API package. Runtime footprint is still zero
-// when the module is off: the subscription-engine registry stays empty, so the
-// guard below mounts nothing and this handler is never reached.
-import {
-  handleClaudeCodeSdkGateway,
-  CLAUDE_CODE_PROVIDER_ID,
-} from "../services/llm-proxy/claude-code-sdk-gateway.ts";
-import { subscriptionEngineForProvider } from "../services/model-providers/registry.ts";
 import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
@@ -130,43 +115,10 @@ export function createLlmProxyRouter() {
     );
   }
 
-  // Claude Code subscription SDK gateway — the credential-injection proxy the
-  // chat points the official Claude Agent SDK at (`ANTHROPIC_BASE_URL`). Unlike
-  // the protocol adapters above it forges nothing — the binary signs its own
-  // client identity; we only swap the placeholder bearer for the real
-  // subscription token, server-side.
-  //
-  // Mounted only when the `claude-code` subscription engine is registered — i.e.
-  // `module-claude-code` is loaded. With no subscription module the registry is
-  // empty, the guard is false, and NO gateway route exists (zero footprint). The
-  // gate is the registry presence, so the route can't drift from the engine
-  // binding; the one vendor literal here is appropriate now there is a single
-  // chat-capable subscription gateway (a second one is a router edit, by design).
-  // LOOPBACK ONLY — driven only by the chat loopback bearer (not API keys /
-  // dashboard tokens), so a subscription can't be spent as a bare proxy.
-  const claudeCodeEngine = subscriptionEngineForProvider(CLAUDE_CODE_PROVIDER_ID);
-  if (claudeCodeEngine) {
-    const gateway = async (c: Context<AppEnv>): Promise<Response> => {
-      assertLoopbackOnly(c.get("authMethod"), `${claudeCodeEngine.label} SDK gateway`, {
-        firstPartyLoopback: c.get("firstPartyLoopback"),
-      });
-      return handleClaudeCodeSdkGateway(c, limits.max_request_bytes);
-    };
-    // Wildcard forwards whatever upstream subpath the SDK appends (`/v1/messages`,
-    // …); the bare-preset route catches the SDK's connectivity probe.
-    for (const path of [
-      `/${CLAUDE_CODE_PROVIDER_ID}-sdk/:presetId/*`,
-      `/${CLAUDE_CODE_PROVIDER_ID}-sdk/:presetId`,
-    ]) {
-      router.all(
-        path,
-        rateLimit(limits.rate_per_min),
-        requirePermission("llm-proxy", "call"),
-        gateway,
-      );
-    }
-  }
-
+  // No subscription SDK gateway: oauth-subscription chat now runs on the single
+  // generic in-process Pi chat engine owned by `@appstrate/module-chat`, which
+  // resolves the real token + baseUrl through `ctx.services` and drives Pi
+  // inline — there is no per-provider credential-injection proxy to mount here.
   return router;
 }
 

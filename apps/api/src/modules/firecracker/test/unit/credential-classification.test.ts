@@ -88,11 +88,12 @@ function buildSpec(llm: LlmProxyConfig): SidecarLaunchSpec {
   };
 }
 
+// No modelSwap: the oauth mode is a pure bearer-swap (aliases are rejected
+// for oauth-subscription providers platform-side).
 const oauthSpec = buildSpec({
   authMode: "oauth",
   baseUrl: "https://api.anthropic.com",
   credentialId: "cred_1",
-  modelSwap: { alias: "public-alias", real: "real-model-id" },
 });
 
 const apiKeySpec = buildSpec({

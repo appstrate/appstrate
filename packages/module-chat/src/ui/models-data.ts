@@ -72,9 +72,9 @@ export async function fetchModels(
       return parsed.success ? [parsed.data] : [];
     });
     // Same family gate as the server (pickModel in llm.ts) — shared set so they
-    // never drift. claude-code is selectable via its anthropic-messages
-    // apiShape; the server routes it to the Claude Agent SDK engine by
-    // providerId.
+    // never drift. Subscription models (claude-code via anthropic-messages,
+    // codex via openai-codex-responses) pass the gate and the server routes them
+    // to the in-process Pi chat engine by resolving the model row's provider.
     //
     // Model aliases reach this cookie-authed surface with their backing stripped
     // (`apiShape: null`), so the family gate can't see it — but they're meant to

@@ -2,14 +2,15 @@
 
 /**
  * Integration coverage for the sidecar's `/llm/*` `oauth` path — the no-forge
- * runner mode for a driver that signs its OWN provider fingerprint (the official
- * Claude Agent SDK binary).
+ * mode for an OAuth subscription. The Pi SDK (in-container) already signs the
+ * subscription request shape (Anthropic OAuth fingerprint or codex-responses
+ * headers).
  *
- * The defining property under test: the sidecar does NOT forge. There are no
- * identity headers, no `system`-prepend, no `forceStream`. It only swaps the
- * bearer for a fresh real token, ensures the OAuth beta is present, and forwards
- * the driver's own fingerprint untouched. Mocks the platform token endpoint and
- * the upstream provider via one `fetchFn` dispatcher.
+ * The defining property under test: the sidecar does NOT forge. It only swaps
+ * the placeholder bearer for a fresh real token and drops any x-api-key
+ * (bearer-only), forwarding every other header the SDK sent — including the
+ * anthropic-beta the SDK emitted — untouched. Mocks the platform token endpoint
+ * and the upstream provider via one `fetchFn` dispatcher.
  */
 
 import { describe, it, expect, mock } from "bun:test";
@@ -104,7 +105,7 @@ function upstreamOk(url: string): Response {
 }
 
 describe("/llm/* oauth — no forging", () => {
-  it("swaps the bearer, merges the oauth beta, and preserves the driver fingerprint", async () => {
+  it("swaps the bearer and preserves the SDK fingerprint verbatim (incl. anthropic-beta)", async () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
@@ -117,7 +118,7 @@ describe("/llm/* oauth — no forging", () => {
         authorization: "Bearer placeholder",
         "user-agent": "claude-cli/1.2.3 (external, cli)",
         "x-app": "cli",
-        "anthropic-beta": "claude-code-20250219",
+        "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
@@ -136,11 +137,10 @@ describe("/llm/* oauth — no forging", () => {
     // Real bearer swapped in (placeholder gone).
     expect(up.headers["authorization"]).toBe("Bearer oat-fresh-token");
 
-    // Driver fingerprint preserved verbatim — NOT forged by us.
+    // SDK fingerprint preserved verbatim — NOT forged/altered by us. The Pi SDK
+    // emits user-agent, x-app AND anthropic-beta; the sidecar forwards them as-is.
     expect(up.headers["user-agent"]).toBe("claude-cli/1.2.3 (external, cli)");
     expect(up.headers["x-app"]).toBe("cli");
-
-    // OAuth beta merged onto the driver's existing betas (both present, order kept).
     expect(up.headers["anthropic-beta"]).toBe("claude-code-20250219,oauth-2025-04-20");
 
     // Body forwarded UNCHANGED — no system-prepend injection.
@@ -149,7 +149,7 @@ describe("/llm/* oauth — no forging", () => {
     expect(body.model).toBe("claude-haiku-4-5");
   });
 
-  it("adds the oauth beta even when the driver sent none", async () => {
+  it("does not add or alter anthropic-beta (the SDK owns the fingerprint)", async () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
@@ -160,7 +160,8 @@ describe("/llm/* oauth — no forging", () => {
       headers: { "Content-Type": "application/json", authorization: "Bearer placeholder" },
       body: JSON.stringify({ model: "m", messages: [] }),
     });
-    expect(calls[1]!.headers["anthropic-beta"]).toBe("oauth-2025-04-20");
+    // The sidecar injects no beta of its own — none was sent, none is added.
+    expect(calls[1]!.headers["anthropic-beta"]).toBeUndefined();
   });
 
   it("strips any x-api-key (this path is bearer-only)", async () => {
@@ -179,21 +180,19 @@ describe("/llm/* oauth — no forging", () => {
     expect(keys).not.toContain("x-api-key");
   });
 
-  it("rewrites the model alias→real in the request body when modelSwap is set", async () => {
+  it("forwards the request body byte-identical (no model swap exists in oauth mode)", async () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
-    deps.config.llm = {
-      ...OAUTH_CFG,
-      modelSwap: { alias: "appstrate-small", real: "claude-haiku-4-5" },
-    };
+    deps.config.llm = OAUTH_CFG;
     const app = createApp(deps);
 
+    const body = JSON.stringify({ model: "claude-haiku-4-5", messages: [], metadata: { a: 1 } });
     await app.request("/llm/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "appstrate-small", messages: [] }),
+      body,
     });
-    expect(JSON.parse(calls[1]!.body!).model).toBe("claude-haiku-4-5");
+    expect(calls[1]!.body).toBe(body);
   });
 
   it("retries once on 401 with a force-refreshed token", async () => {

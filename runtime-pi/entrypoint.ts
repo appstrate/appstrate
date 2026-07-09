@@ -49,11 +49,6 @@ import {
   type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
-// The subscription runner (claude) is DYNAMICALLY imported inside its build
-// function, gated by RUN_ENGINE — a `pi` run never loads it, and a slim OSS
-// image built without the package (ISO6) still boots for pi. Only the type is
-// statically referenced (erased at runtime).
-import type { ClaudeAgentRunner } from "@appstrate/runner-claude";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   BUNDLE_FORMAT_VERSION,
@@ -334,21 +329,20 @@ async function initGitWorkspace(): Promise<void> {
 const extensionFactories: ExtensionFactory[] = [];
 
 // Runtime context exposed to custom tools as the 4th `execute` argument.
-// Assigned in Phase C once the MCP client is connected; the closure provider
-// is read at every `execute` invocation, so factories registered before
-// Phase C still see the wired ctx by the time a tool actually runs.
+// Assigned once tool wiring runs (the sidecar Phase-C block or the no-sidecar
+// `else` branch); the closure provider is read at every `execute` invocation,
+// so factories registered earlier still see the wired ctx by the time a tool
+// actually runs.
 //
-// NOT a definite-assignment (`!`) binding: the claude+sidecar engine combo
-// skips the Pi-only Phase-C wiring block below AND the no-sidecar `else`
-// branch, so this can legitimately stay unassigned. A `!` would let a stray
-// read hand out `undefined` typed as a live ctx (silent null-deref); the
-// guarded provider throws a clear error instead.
+// NOT a definite-assignment (`!`) binding: a `!` would let a stray read
+// BEFORE wiring completes hand out `undefined` typed as a live ctx (silent
+// null-deref); the guarded provider throws a clear error instead.
 let appstrateRuntimeCtx: AppstrateToolCtx | undefined;
 const appstrateCtxProvider: AppstrateCtxProvider = () => {
   if (!appstrateRuntimeCtx) {
     throw new Error(
-      "appstrate runtime tool context is not wired for this engine/phase " +
-        "(no sidecar-backed ctx available). This is a runtime wiring bug.",
+      "appstrate runtime tool context is not wired yet " +
+        "(tool executed before tool wiring completed). This is a runtime wiring bug.",
     );
   }
   return appstrateRuntimeCtx;
@@ -422,9 +416,7 @@ const phaseTimings: Record<string, number> = {};
 // the network-bound provisioning below instead of landing on the pre-session
 // boot path. `@mariozechner/pi-coding-agent` is dynamically imported by
 // `PiRunner` at session-build time; ESM caches the module, so this kick-off
-// turns that later `await` into a no-op. A `claude-code` run never builds a
-// PiRunner (it drives the Agent SDK), so it skips the load entirely — this
-// mirrors the `RUN_ENGINE` selection resolved further down.
+// turns that later `await` into a no-op.
 const sdkImportStart = performance.now();
 // The `.catch(() => null)` is attached at creation so the handle is never
 // momentarily unguarded: if the dynamic import rejects before we await it (~400
@@ -436,15 +428,12 @@ const sdkImportStart = performance.now();
 // below, at actual import completion — not at the late await (~400 lines down),
 // which in the nominal case fires after provisioning already overlapped the load
 // and would misattribute the whole boot window to the import.
-const piSdkWarmup =
-  process.env.RUN_ENGINE === "claude"
-    ? null
-    : loadPiCodingAgentSdk()
-        .then((sdk) => {
-          phaseTimings.sdkImportMs = Math.round(performance.now() - sdkImportStart);
-          return sdk;
-        })
-        .catch(() => null);
+const piSdkWarmup = loadPiCodingAgentSdk()
+  .then((sdk) => {
+    phaseTimings.sdkImportMs = Math.round(performance.now() - sdkImportStart);
+    return sdk;
+  })
+  .catch(() => null);
 
 const provisionStart = performance.now();
 
@@ -543,12 +532,11 @@ await progress(
 const sidecarUrl = env.sidecarUrl;
 
 // Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
-// executes each runtime tool ONCE and journals its canonical events; every
-// runner drains this on its single sink (pi after each forwarded tool call,
-// claude after each stream step + a final drain). One instance so the
-// cursor stays consistent across intermediate + final drains. Undefined when no
-// sidecar is attached (no journal to drain — the in-process Pi extension path
-// emits its own events).
+// executes each runtime tool ONCE and journals its canonical events; the Pi
+// runner drains this on its single sink after each forwarded tool call, plus
+// a retrying final drain. One instance so the cursor stays consistent across
+// intermediate + final drains. Undefined when no sidecar is attached (no
+// journal to drain — the in-process Pi extension path emits its own events).
 const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
   ? createRuntimeEventDrainer({
       url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
@@ -566,25 +554,13 @@ const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
     })
   : undefined;
 
-// Engine selection. Set by the launcher's `RUN_ENGINE` container env
-// (`container-env.ts`) — `"claude"` for a `claude-code` subscription run,
-// the Pi default for everything else (and the absent var). The Claude engine
-// drives the official Agent SDK and owns its OWN MCP/tool wiring (in-process
-// runtime tools + the sidecar `/mcp` over HTTP), so the Pi-specific MCP client
-// + extension factories below are skipped for it — but the integration boot
-// gate stays (engine-agnostic).
-const runEngine: "pi" | "claude" = process.env.RUN_ENGINE === "claude" ? "claude" : "pi";
-
 // When no sidecar is attached (no integrations + static API
 // key), the agent runs without MCP-backed tools. The platform wires
 // MODEL_BASE_URL directly to the upstream provider; the LLM only sees
 // the agent's bundle tools + runtime extensions.
 let mcpClient: AppstrateMcpClient | undefined;
 if (sidecarUrl) {
-  // Pi-specific sidecar tool wiring. The Claude engine talks to the sidecar
-  // `/mcp` through the Agent SDK's own HTTP MCP client (configured at runner
-  // construction), so it skips this whole block — only the boot gate below runs.
-  if (runEngine === "pi") {
+  {
     await progress("connecting to sidecar");
     const mcpConnectStart = performance.now();
     try {
@@ -644,13 +620,13 @@ if (sidecarUrl) {
       // integration tool (including the generic `{ns}__api_call`). Runtime
       // tools (log/note/pin/report/output) are executed once by the sidecar and
       // journaled; the drainer pulls them on the run sink after each forwarded
-      // call — uniform with the Claude runner, no `_meta` trust.
+      // call — never trusted from `_meta`.
       //
       // Pi drains each tool call inline in `execute()` right after `callTool`
       // resolves — the sidecar appends the events synchronously inside the
       // wrapped handler BEFORE responding, so the per-call drain always captures
-      // them in time (no "events land after the stream ends" gap that
-      // claude must backstop). What the per-call drain CANNOT cover is a
+      // them in time (no "events land after the stream ends" gap to
+      // backstop). What the per-call drain CANNOT cover is a
       // transient localhost failure of the LAST call's single best-effort drain
       // (no subsequent call retries it). The retrying final drain for that case
       // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
@@ -683,7 +659,7 @@ if (sidecarUrl) {
       await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
       process.exit(1);
     }
-  } // end Pi-only sidecar tool wiring
+  } // end sidecar tool wiring
 
   // --- 2c-bis. Integration boot gate + per-phase observability ---
   // The sidecar booted each declared integration in parallel with this
@@ -865,14 +841,14 @@ const heartbeat = startSinkHeartbeat({
   },
 });
 
-// --- 7. Run via the selected engine (Pi or the Claude Agent SDK) ---
+// --- 7. Run via the Pi engine ---
 //
-// Both runners call `sink.finalize(result)` on the happy path and their own
+// The runner calls `sink.finalize(result)` on the happy path and its own
 // internal error path. Any error escaping here is a bootstrap-level failure
 // (before the runner reached its own try/catch) — we catch it, emit an error +
 // finalize, then exit non-zero so the container monitor also records the crash.
 
-/** Construct the default Pi runner (every non-`claude-code` run). */
+/** Construct the Pi runner (every run). */
 function buildPiRunner(): PiRunner {
   // When the agent selected the `output` runtime tool, a successful call is
   // the run's semantic end — stop the SDK loop there instead of paying one
@@ -896,67 +872,14 @@ function buildPiRunner(): PiRunner {
   });
 }
 
-/**
- * Construct the Claude Agent SDK runner (a `claude-code` run). It drives the
- * official `claude` binary, pointed at the sidecar's non-forging `oauth` `/llm`
- * gateway (swap bearer + ensure beta only), and reaches integrations via
- * the sidecar `/mcp` over HTTP (its own client, not the Pi one). Runtime tools
- * (log/note/pin/report) are hosted in-process by the runner; `output` is native
- * via the SDK's `outputFormat`.
- */
-/** The agent's declared output JSON Schema (`OUTPUT_SCHEMA` env), or null. */
-function runOutputSchema(): Record<string, unknown> | null {
-  if (!process.env.OUTPUT_SCHEMA) return null;
-  try {
-    return JSON.parse(process.env.OUTPUT_SCHEMA) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-async function buildClaudeAgentRunner(): Promise<ClaudeAgentRunner> {
-  if (!sidecarUrl) {
-    // A claude-code run is always OAuth → always sidecar-backed (the gateway
-    // that injects the real bearer). No sidecar means a launcher bug; fail loud
-    // rather than calling the upstream unauthenticated.
-    throw new Error("Claude engine selected but no sidecar is attached (no /llm gateway).");
-  }
-  // Dynamic import: loaded ONLY for a claude run, so a pi run (or a slim
-  // image without @appstrate/runner-claude) never resolves the Agent SDK.
-  const { ClaudeAgentRunner } = await import("@appstrate/runner-claude");
-  const { resolveClaudeCodeBinary, makeSdkScopeResolver } =
-    await import("@appstrate/runner-claude/binary");
-  const base = sidecarUrl.replace(/\/$/, "");
-  const outputSchema = runOutputSchema();
-  return new ClaudeAgentRunner({
-    binaryPath: resolveClaudeCodeBinary({ resolve: makeSdkScopeResolver(import.meta.url) }),
-    modelId: env.modelId,
-    systemPrompt,
-    // The sidecar `/llm` runs in `oauth` mode: it swaps the placeholder bearer
-    // for the real subscription token without forging a fingerprint.
-    baseUrl: `${base}/llm`,
-    placeholderToken: env.modelApiKey ?? "placeholder",
-    cwd: WORKSPACE,
-    // Runtime tools are journaled by the sidecar and drained here; `output`
-    // stays native (SDK `outputFormat` → structured_output).
-    ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
-    outputSchema,
-    // Integrations + api_call + run_history + recall_memory over the sidecar's
-    // stateless Streamable-HTTP `/mcp`. `Host: sidecar` satisfies the sidecar's
-    // host-header gate.
-    sidecarMcp: { url: `${base}/mcp`, headers: { Host: "sidecar" } },
-  });
-}
-
 // Pi-path final drain. Pi drains each tool call inline (see the note in the
 // factories block above), but the LAST call's single best-effort drain has no
-// subsequent call to retry a transient localhost failure — unlike claude,
-// which owns a retrying final drain inside `run()`. PiRunner owns its finalize,
-// so we inject the final drain by wrapping the sink: drain-until-empty +
-// bounded retry through the SAME bridged sink the per-call drains use, so the
+// subsequent call to retry a transient localhost failure. PiRunner owns its
+// finalize, so we inject the final drain by wrapping the sink: drain-until-empty
+// + bounded retry through the SAME bridged sink the per-call drains use, so the
 // stdout-bridge folds any straggler into its aggregate BEFORE merging it into
 // the finalize POST. Best-effort (`final: true`) — never flips an
-// already-decided run. Pi only: claude already drains finally in `run()`.
+// already-decided run.
 const piEventSink: typeof bridgedSink = runtimeDrainer
   ? {
       handle: (event) => bridgedSink.handle(event),
@@ -977,20 +900,20 @@ const startTime = Date.now();
 
 // Graceful shutdown: a container stop sends SIGTERM (then SIGKILL after a grace
 // period). Convert it to an AbortSignal threaded into runner.run so the runner
-// can unwind its cleanup (claude aborting the SDK query, pi cancelling tool
-// calls) BEFORE the hard kill lands — instead of being torn down mid-write.
+// can unwind its cleanup (cancelling tool calls) BEFORE the hard kill lands —
+// instead of being torn down mid-write.
 const runAbort = new AbortController();
 const onTerminate = () => runAbort.abort();
 process.once("SIGTERM", onTerminate);
 process.once("SIGINT", onTerminate);
 
 try {
-  const runner = runEngine === "claude" ? await buildClaudeAgentRunner() : buildPiRunner();
+  const runner = buildPiRunner();
 
   await runner.run({
     bundle: runnerBundle,
     context,
-    eventSink: runEngine === "pi" ? piEventSink : bridgedSink,
+    eventSink: piEventSink,
     signal: runAbort.signal,
   });
   heartbeat.stop();

@@ -40,7 +40,10 @@ export interface AppstrateRunPlan {
   bundle: Bundle;
   /** Raw Mustache prompt from the bundle. */
   rawPrompt: string;
-  /** Output JSON Schema (used for native LLM constrained decoding). */
+  /**
+   * Output JSON Schema — becomes the input schema of the `output` runtime
+   * tool (AJV-validated at call time, re-validated at ingestion).
+   */
   outputSchema?: JSONSchemaObject;
   /**
    * Platform runtime tools the agent selected (`manifest.runtime_tools`):
@@ -53,9 +56,9 @@ export interface AppstrateRunPlan {
   // --- LLM ---
   /**
    * Resolved model + credential. `label`/`isSystemModel` are consumed by
-   * the caller for the run record; `accountId` is re-read by the sidecar
-   * from the credential row on each request. Both are passed through here
-   * verbatim — the executor only reads the inference fields.
+   * the caller for the run record; the sidecar re-pulls fresh OAuth tokens
+   * from the credential row (`credentialId`) at request time. Passed
+   * through here verbatim — the executor only reads the inference fields.
    */
   llmConfig: ResolvedModel;
 

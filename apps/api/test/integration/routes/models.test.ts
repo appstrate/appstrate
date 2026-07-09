@@ -19,6 +19,7 @@ import { db } from "@appstrate/db/client";
 import { orgModels, organizations } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
+import { listCatalogModels } from "../../../src/services/pricing-catalog.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
@@ -244,6 +245,33 @@ describe("Models API", () => {
       expect(res.status).toBe(400);
     });
 
+    it("rejects an alias on an oauth-subscription credential (bearer-swap-only path) — 400", async () => {
+      // The oauth run path is a pure sidecar bearer-swap: no body rewrite
+      // exists there, so an alias could neither be swapped nor masked.
+      const row = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: "Test OAuth",
+        accessToken: "test-access",
+        refreshToken: "test-refresh",
+        expiresAt: null,
+        createdBy: ctx.user.id,
+      });
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Subscribed",
+          modelId: "test-model",
+          credentialId: row.id,
+          aliased: true,
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(String(body.detail)).toContain("oauth-subscription");
+    });
+
     it("rejects non-UUID credentialId with 400 (built-in slugs like 'anthropic')", async () => {
       // System-key ids ("anthropic", "openai-prod", …) are slugs, not UUIDs —
       // they live in SYSTEM_PROVIDER_KEYS env and never appear in the
@@ -281,6 +309,43 @@ describe("Models API", () => {
         }),
       });
       expect(res.status).toBe(400);
+    });
+
+    it("rejects a lone maxTokens override that exceeds the catalog contextWindow (effective state)", async () => {
+      // The Zod refine only fires when both fields ride together. An omitted
+      // contextWindow falls back to the live catalog at read/run time, so the
+      // effective pairing must be checked against the catalog value.
+      const credentialId = await createProviderKey();
+      const catalogModel = listCatalogModels("openai").find((m) => m.contextWindow != null)!;
+
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Over Budget",
+          modelId: catalogModel.id,
+          credentialId,
+          maxTokens: catalogModel.contextWindow,
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("contextWindow");
+    });
+
+    it("accepts a lone maxTokens for a model unknown to the catalog (nothing to compare)", async () => {
+      const credentialId = await createProviderKey();
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Uncatalogued",
+          modelId: "no-such-catalog-model-zq7",
+          credentialId,
+          maxTokens: 10_000_000,
+        }),
+      });
+      expect(res.status).toBe(201);
     });
 
     it("rejects a needs-reconnection credential with 400 before inserting (explicit label path)", async () => {
@@ -442,6 +507,257 @@ describe("Models API", () => {
       // The write was rejected before landing — credential pointer unchanged.
       const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
       expect(row!.credentialId).toBe(credentialId);
+    });
+
+    it("rejects flipping aliased on an oauth-subscription model — PUT enforces the same invariants as POST", async () => {
+      // Regression: PUT used to write `data` (incl. `aliased`) with no
+      // invariant check, so a non-aliased oauth model could become aliased by
+      // update — a state POST rejects, caught only late at run launch.
+      const oauth = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: "Test OAuth",
+        accessToken: "test-access",
+        refreshToken: "test-refresh",
+        expiresAt: null,
+        createdBy: ctx.user.id,
+      });
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Subscribed",
+          modelId: "test-model",
+          credentialId: oauth.id,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ aliased: true, label: "Masked" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(String(body.detail)).toContain("oauth-subscription");
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.aliased).toBe(false);
+    });
+
+    it("rejects flipping aliased without a fresh explicit label — the stored label may name the backing", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        // No label → derived from the catalog (names the backing model).
+        body: JSON.stringify({ modelId: "gpt-4o", credentialId }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      // Flip without a label — rejected (the derived label would leak).
+      const noLabel = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ aliased: true }),
+      });
+      expect(noLabel.status).toBe(400);
+      const body = (await noLabel.json()) as { detail?: string };
+      expect(String(body.detail)).toContain("label");
+
+      // Same flip with an explicit label — accepted (api-key, body-model shape).
+      const withLabel = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ aliased: true, label: "Appstrate Medium" }),
+      });
+      expect(withLabel.status).toBe(200);
+    });
+
+    it("rejects re-pointing an aliased model to an oauth-subscription credential", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: "gpt-4o",
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const oauth = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: "Test OAuth",
+        accessToken: "test-access",
+        refreshToken: "test-refresh",
+        expiresAt: null,
+        createdBy: ctx.user.id,
+      });
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: oauth.id }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(String(body.detail)).toContain("oauth-subscription");
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.credentialId).toBe(credentialId);
+    });
+
+    it("updates an already-aliased model without re-sending the label (explicit by construction)", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: "gpt-4o",
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ enabled: false }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { enabled?: boolean; label?: string };
+      expect(body.enabled).toBe(false);
+      expect(body.label).toBe("Appstrate Medium");
+    });
+
+    it("rejects a lone maxTokens that meets or exceeds the stored contextWindow override", async () => {
+      // The Zod refine only sees the payload — the effective pairing is
+      // stored-override vs new-override.
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Budgeted",
+          modelId: "no-such-catalog-model-b1",
+          credentialId,
+          contextWindow: 100_000,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ maxTokens: 100_000 }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail).toContain("contextWindow");
+
+      // Rejected before landing — no override stored.
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.maxTokens).toBeNull();
+    });
+
+    it("rejects a lone contextWindow that dips below the stored maxTokens override, accepts a valid one", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Shrinking",
+          modelId: "no-such-catalog-model-b2",
+          credentialId,
+          contextWindow: 100_000,
+          maxTokens: 50_000,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const reject = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ contextWindow: 50_000 }),
+      });
+      expect(reject.status).toBe(400);
+
+      const accept = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ contextWindow: 60_000 }),
+      });
+      expect(accept.status).toBe(200);
+    });
+
+    it("rejects a modelId change that swaps the catalog under a kept maxTokens override", async () => {
+      // The row's maxTokens was valid against an uncatalogued model (nothing
+      // to compare); re-pointing modelId at a catalog entry pairs that kept
+      // override with the new catalog contextWindow.
+      const credentialId = await createProviderKey();
+      const catalogModel = listCatalogModels("openai").find((m) => m.contextWindow != null)!;
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Repointed",
+          modelId: "no-such-catalog-model-b3",
+          credentialId,
+          maxTokens: catalogModel.contextWindow,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: catalogModel.id }),
+      });
+      expect(res.status).toBe(400);
+
+      // Rejected before landing — modelId unchanged.
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.modelId).toBe("no-such-catalog-model-b3");
+    });
+
+    it("rejects clearing a contextWindow override when the catalog fallback violates the kept maxTokens", async () => {
+      // `contextWindow: null` clears the override — the effective value falls
+      // back to the live catalog, which must still beat the kept maxTokens.
+      const credentialId = await createProviderKey();
+      const catalogModel = listCatalogModels("openai").find((m) => m.contextWindow != null)!;
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Cleared",
+          modelId: catalogModel.id,
+          credentialId,
+          contextWindow: 10_000_000,
+          maxTokens: catalogModel.contextWindow,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ contextWindow: null }),
+      });
+      expect(res.status).toBe(400);
     });
   });
 

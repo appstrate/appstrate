@@ -96,23 +96,6 @@ export interface PlatformPromptOptions {
    * weaker models routinely call `output({})` before the correct shape.
    */
   outputSchema?: Record<string, unknown>;
-  /**
-   * How the agent delivers the structured output declared by
-   * `outputSchema`. Default `"tool"`.
-   *
-   * - `"tool"` — the Pi engine hosts an `output` runtime tool; the prompt
-   *   mandates one terminal `output` call.
-   * - `"native"` — the Claude Agent SDK engine has NO MCP `output` tool;
-   *   the deliverable is captured via the SDK's `outputFormat: json_schema`,
-   *   which on the current CLI injects a client-side `StructuredOutput`
-   *   tool — the ONLY channel that populates `result.structured_output`
-   *   (a schema-conforming final text message is NOT captured, issue #833).
-   *   The prompt therefore mandates one terminal `StructuredOutput` call.
-   *   Rendering the `output` tool mandate instead would send the agent
-   *   hunting for a tool that does not exist (issue #824).
-   */
-  outputMode?: "tool" | "native";
-
   /** Uploaded documents surfaced in `## Documents`. */
   uploads?: ReadonlyArray<PromptViewUpload>;
 
@@ -390,41 +373,15 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // for why this duplicates the tool-level schema.
   if (opts.outputSchema && Object.keys(opts.outputSchema).length > 0) {
     sections.push("## Output Format\n");
-    if ((opts.outputMode ?? "tool") === "native") {
-      // Native delivery (Claude Agent SDK): the deliverable goes through the
-      // CLI-injected `StructuredOutput` tool — the ONLY channel the SDK
-      // captures into `result.structured_output` (a schema-conforming final
-      // text message is NOT captured, issue #833). There is still no MCP
-      // `output` tool on this engine; mandating one sends the agent hunting
-      // for a tool that does not exist (issue #824), and forbidding tool
-      // delivery outright makes the agent skip `StructuredOutput` too (#833).
-      // The last sentence is the version-drift escape hatch: if the CLI ever
-      // stops injecting a tool by that name, the model degrades to the lone-
-      // JSON final message the runner's fallback parser captures — and it
-      // shapes that message parseably (no surrounding prose).
-      sections.push(
-        "The runtime provides a `StructuredOutput` tool for the run's " +
-          "deliverable. You MUST call `StructuredOutput` **exactly once**, as " +
-          "your FINAL action, with a payload that satisfies the JSON Schema " +
-          "below — provide ALL required fields in that single call. Do not " +
-          "look for an `output` tool (it does not exist on this runtime); " +
-          "`StructuredOutput` is how the platform captures the run's " +
-          "structured output. Finish all other work first, then call it — " +
-          "do not plan any message or step after it. If no `StructuredOutput` " +
-          "tool is available, end the run with the JSON deliverable alone as " +
-          "your FINAL message — no prose before or after it.\n",
-      );
-    } else {
-      sections.push(
-        "You MUST call the `output` tool **exactly once**, as your FINAL action, " +
-          "with a `data` parameter that satisfies the JSON Schema below. " +
-          "Provide ALL required fields in that single call — do not probe " +
-          "with `output({})` first, and do not split the payload across " +
-          "multiple calls. A successful `output` call ends the run immediately: " +
-          "finish all other work before calling it, and do not plan any message " +
-          "or step after it.\n",
-      );
-    }
+    sections.push(
+      "You MUST call the `output` tool **exactly once**, as your FINAL action, " +
+        "with a `data` parameter that satisfies the JSON Schema below. " +
+        "Provide ALL required fields in that single call — do not probe " +
+        "with `output({})` first, and do not split the payload across " +
+        "multiple calls. A successful `output` call ends the run immediately: " +
+        "finish all other work before calling it, and do not plan any message " +
+        "or step after it.\n",
+    );
 
     const required = Array.isArray(opts.outputSchema.required)
       ? (opts.outputSchema.required as readonly unknown[]).filter(

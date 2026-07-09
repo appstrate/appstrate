@@ -11,6 +11,7 @@ import { modelCostSchema } from "@appstrate/core/module";
 import {
   listOrgModels,
   getOrgModel,
+  getOrgModelRow,
   createOrgModel,
   updateOrgModel,
   deleteOrgModel,
@@ -21,14 +22,17 @@ import {
   loadModel,
   deriveModelLabel,
   projectAliasedModel,
+  resolveCatalogDefaults,
+  type CatalogDefaults,
 } from "../services/org-models.ts";
-import { getModelProvider } from "../services/model-providers/registry.ts";
-import { checkAliasInvariants } from "@appstrate/core/model-swap";
+import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
+import { checkAliasInvariants, type AliasInvariantViolation } from "@appstrate/core/model-swap";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   getOrgModelProviderCredential,
   loadInferenceCredentials,
+  loadCredentialMetadata,
 } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -124,6 +128,63 @@ export const testInlineSchema = z.object({
   existingModelId: z.string().optional(),
 });
 
+/**
+ * Map an alias-invariant violation to its 400 — shared by the create and
+ * update handlers so PUT cannot accept a state POST rejects (issue #727).
+ */
+function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiShape: string): void {
+  // 1. Require an explicit label. The derive-from-catalog fallback (POST) —
+  //    or a label derived at creation time and kept on update — would name
+  //    the alias after its REAL backing ("DeepSeek Chat"), and `label`
+  //    survives the projection, leaking the backing on /api/models and
+  //    run.model_label.
+  if (violation === "missing_label") {
+    throw invalidRequest(
+      "An aliased model requires an explicit label — the derived label would name the backing model.",
+      "label",
+    );
+  }
+  // 2. The swap only rewrites the body `model` field, which exists for
+  //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
+  //    model id in the URL path, so an alias there forwards verbatim and
+  //    404s upstream (and never gets swapped). Reject up front.
+  if (violation === "non_aliasable_shape") {
+    throw invalidRequest(
+      `Model aliases are not supported for the "${apiShape}" protocol (the model id is carried in the URL, not the request body).`,
+      "aliased",
+    );
+  }
+  // 3. The oauth-subscription run path is a pure sidecar bearer-swap —
+  //    it never rewrites the body, so an alias there could not be
+  //    swapped (nor masked). Reject up front.
+  if (violation === "oauth_provider") {
+    throw invalidRequest(
+      "Model aliases are not supported for oauth-subscription providers — the subscription run path never rewrites the request body. Bind the alias to an API-key credential instead.",
+      "aliased",
+    );
+  }
+}
+
+/**
+ * Canonical model invariant (`input + output <= context`) enforced on the
+ * EFFECTIVE state. The Zod refines above only fire when both fields ride in
+ * the same payload — a lone `maxTokens` override must be checked against the
+ * value it will actually be paired with at read/run time (the stored override
+ * or the live catalog), and vice versa. `null`/absent on either side (model
+ * unknown to the catalog) means there is nothing to compare against — allow.
+ */
+function throwOnTokenBudgetViolation(
+  maxTokens: number | null | undefined,
+  contextWindow: number | null | undefined,
+): void {
+  if (maxTokens != null && contextWindow != null && maxTokens >= contextWindow) {
+    throw invalidRequest(
+      `maxTokens (${maxTokens}) must be strictly less than the effective contextWindow (${contextWindow})`,
+      "maxTokens",
+    );
+  }
+}
+
 export function createModelsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -192,28 +253,24 @@ export function createModelsRouter() {
       }
       // Model-alias guards (issue #727, Threat A) — shared invariant rule:
       if (aliased) {
-        const violation = checkAliasInvariants({ label: data.label, apiShape: creds.apiShape });
-        // 1. Require an explicit label. The derive-from-catalog fallback below
-        //    would name the alias after its REAL backing ("DeepSeek Chat"),
-        //    and `label` survives the projection — leaking the backing on
-        //    /api/models and run.model_label.
-        if (violation === "missing_label") {
-          throw invalidRequest(
-            "An aliased model requires an explicit label — the derived label would name the backing model.",
-            "label",
-          );
-        }
-        // 2. The swap only rewrites the body `model` field, which exists for
-        //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
-        //    model id in the URL path, so an alias there forwards verbatim and
-        //    404s upstream (and never gets swapped). Reject up front.
-        if (violation === "non_aliasable_shape") {
-          throw invalidRequest(
-            `Model aliases are not supported for the "${creds.apiShape}" protocol (the model id is carried in the URL, not the request body).`,
-            "aliased",
-          );
-        }
+        throwOnAliasViolation(
+          checkAliasInvariants({
+            label: data.label,
+            apiShape: creds.apiShape,
+            authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
+          }),
+          creds.apiShape,
+        );
       }
+      // Token-budget invariant on the EFFECTIVE state: an override omitted
+      // from the payload falls back to the live catalog at read/run time, so
+      // a lone `maxTokens` (or a lone `contextWindow`) must be checked
+      // against the catalog value it will be paired with.
+      const catalogDefaults = resolveCatalogDefaults(creds.providerId, modelId);
+      throwOnTokenBudgetViolation(
+        maxTokens ?? catalogDefaults.maxTokens,
+        contextWindow ?? catalogDefaults.contextWindow,
+      );
       // Label is optional on the wire — derive from the catalog when the
       // caller omits it. Needs the credential's providerId to pick the
       // right catalog (handles `catalogProviderId` for OAuth wrappers).
@@ -550,14 +607,79 @@ export function createModelsRouter() {
     // serializer filters models bound to unreachable credentials — a
     // misleading "Model not found" after a write that DID land. Reject
     // before the write instead.
+    let newCreds: Awaited<ReturnType<typeof loadInferenceCredentials>> = null;
     if (data.credentialId) {
-      const creds = await loadInferenceCredentials(orgId, data.credentialId);
-      if (!creds) {
+      newCreds = await loadInferenceCredentials(orgId, data.credentialId);
+      if (!newCreds) {
         throw invalidRequest(
           "credentialId is unreachable — the credential needs reconnection or no longer exists",
           "credentialId",
         );
       }
+    }
+
+    // Model-alias guards on the EFFECTIVE post-update state (issue #727) —
+    // without this, PUT is a bypass of every invariant POST enforces: flip
+    // `aliased` on an oauth-subscription or url-model row, or re-point an
+    // aliased row to such a credential, and the row becomes a state creation
+    // rejects (runs then fail-close late at launch; chat would diverge).
+    const current = await getOrgModelRow(orgId, modelId);
+    if (!current) {
+      throw notFound("Model not found");
+    }
+    if (data.aliased ?? current.aliased) {
+      const creds = newCreds ?? (await loadInferenceCredentials(orgId, current.credentialId));
+      if (!creds) {
+        // Keeping the current (dead) credential while the row is/becomes
+        // aliased: the invariants can't be established — reject the write.
+        throw invalidRequest(
+          "The model's credential is unreachable — reconnect it before updating an aliased model",
+          "credentialId",
+        );
+      }
+      throwOnAliasViolation(
+        checkAliasInvariants({
+          // A false→true flip must carry a fresh explicit label: the row's
+          // existing label may be catalog-derived and name the backing. An
+          // already-aliased row's label is explicit by construction (POST
+          // enforced it), so it stays valid when this PUT omits `label`.
+          label: data.label ?? (current.aliased ? current.label : undefined),
+          apiShape: creds.apiShape,
+          authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
+        }),
+        creds.apiShape,
+      );
+    }
+
+    // Token-budget invariant on the EFFECTIVE post-update state. The Zod
+    // refine only sees the payload: a lone `maxTokens` can exceed the stored
+    // (or catalog) contextWindow, a lone `contextWindow` can dip below the
+    // stored maxTokens, and a `modelId`/`credentialId` change swaps the
+    // catalog defaults under a kept override. Gated on the budget-relevant
+    // fields so a legacy-invalid row can still be disabled or relabelled.
+    if (
+      data.maxTokens !== undefined ||
+      data.contextWindow !== undefined ||
+      data.modelId !== undefined ||
+      data.credentialId !== undefined
+    ) {
+      const effectiveModelId = data.modelId ?? current.modelId;
+      // Metadata-only provider resolution — no decrypt, no reachability
+      // probe: the catalog lookup must work even when the row's credential
+      // is dead. A gone credential/provider yields no catalog defaults and
+      // the check runs on the stored overrides alone.
+      const providerId =
+        newCreds?.providerId ??
+        (await loadCredentialMetadata(current.credentialId, orgId))?.providerId;
+      const catalogDefaults: CatalogDefaults = providerId
+        ? resolveCatalogDefaults(providerId, effectiveModelId)
+        : {};
+      throwOnTokenBudgetViolation(
+        (data.maxTokens === undefined ? current.maxTokens : data.maxTokens) ??
+          catalogDefaults.maxTokens,
+        (data.contextWindow === undefined ? current.contextWindow : data.contextWindow) ??
+          catalogDefaults.contextWindow,
+      );
     }
 
     try {

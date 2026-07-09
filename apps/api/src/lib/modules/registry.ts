@@ -14,7 +14,6 @@ import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
-import type { ChatEngineHandler } from "@appstrate/core/chat-engine-contract";
 import { getEnv } from "@appstrate/env";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
@@ -23,13 +22,7 @@ import { rateLimit } from "../../middleware/rate-limit.ts";
 import { getClientIp } from "../client-ip.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
 import { dispatchInProcess } from "../platform-app.ts";
-
-// Process-global chat-handler registry, populated by provider modules through
-// the platform contract (`ctx.services.registerChatHandler`) at init and read
-// by the chat module (`ctx.services.chatHandlerForProvider`). apps/api owns this
-// registry; the two modules never import each other — the handler crosses only
-// through `ctx.services`, preserving module isolation.
-const _chatHandlers = new Map<string, ChatEngineHandler>();
+import { recordChatUsage, resolveSubscriptionChatModel } from "../../services/chat-subscription.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -94,12 +87,12 @@ export function getModuleRegistry(): string[] {
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
  * minimal — `runs.listLlmUsage` (the cloud billing module's per-run ledger
- * read), `inProcess.dispatch`, and the chat-handler channel
- * (`registerChatHandler` + `chatHandlerForProvider`), the platform-contract seam
- * by which a provider module contributes an interactive chat handler and the
- * chat module resolves it by provider id — without either module importing the
- * other. See the `PlatformServices` doc in core for the razor and the history of
- * the previous (chat-era) broad surface.
+ * read), `inProcess.dispatch`, and the chat seam
+ * (`resolveSubscriptionChatModel` + `recordChatUsage`) by which the chat module
+ * drives the single generic in-process Pi chat engine for oauth-subscription
+ * models and meters it — the module resolves credentials/tokens + records usage
+ * through here because it has no DB access. See the `PlatformServices` doc in
+ * core for the razor and the history of the previous (chat-era) broad surface.
  */
 function buildPlatformServices(): PlatformServices {
   return {
@@ -119,13 +112,11 @@ function buildPlatformServices(): PlatformServices {
       // In-process self-dispatch through the full platform middleware chain.
       dispatch: dispatchInProcess,
     },
-    // Platform-contract chat-handler channel — a provider module registers its
-    // handler at init, the chat module resolves it by provider id. Neither
-    // module imports the other; both go through this shared registry.
-    registerChatHandler: (providerId, handler) => {
-      _chatHandlers.set(providerId, handler);
-    },
-    chatHandlerForProvider: (providerId) => _chatHandlers.get(providerId),
+    // Chat seam — the chat module resolves a subscription model's real binding +
+    // fresh token (credential resolution stays server-side) and meters each turn
+    // through these, since it has no DB access.
+    resolveSubscriptionChatModel,
+    recordChatUsage,
   };
 }
 

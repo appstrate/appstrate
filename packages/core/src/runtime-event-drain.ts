@@ -6,12 +6,11 @@
  *
  * The sidecar executes each runtime tool's handler ONCE and journals the
  * authoritative canonical events (`log.written`, `memory.added`, …) in an
- * in-memory per-run FIFO. Every runner (pi / claude / codex) DRAINS that
- * journal over HTTP at its step boundaries and re-emits each event on its
- * single run-event sink — preserving the single-writer contiguous sequence.
- * This replaces the per-runner observe-replay (re-executing the pure handler
- * on observed args): one execution, transport-agnostic, no dependence on the
- * MCP transport preserving result `_meta`.
+ * in-memory per-run FIFO. The Pi runner DRAINS that journal over HTTP at its
+ * step boundaries and re-emits each event on its single run-event sink —
+ * preserving the single-writer contiguous sequence. One execution,
+ * transport-agnostic, no dependence on the MCP transport preserving result
+ * `_meta`.
  *
  * The drainer NEVER throws and NEVER fails a run: a network hiccup mid-stream
  * is retried on the next drain; an unreachable journal at finalize is logged
@@ -207,14 +206,13 @@ export interface DrainAndEmitOptions {
 /**
  * Drain the journal once and re-emit every pulled event on the run's sink,
  * stamped with `runId` and a `timestamp`. The single drain+stamp+emit step
- * shared by all three runners (pi / claude / codex) so the cadence and the
- * best-effort-at-finalize contract cannot drift between them.
+ * keeps the cadence and the best-effort-at-finalize contract in one place.
  *
  * Timestamp precedence: `{ timestamp: now(), ...event, runId }` — the event's
  * OWN production-time stamp (set by `withEvents` when the sidecar journals it)
  * wins; `now()` only fills one in if the event somehow lacks it. This keeps the
- * canonical event time stable across engines rather than overwriting it with
- * each runner's drain-time wall clock.
+ * canonical event time stable rather than overwriting it with the runner's
+ * drain-time wall clock.
  */
 export async function drainAndEmitInto(opts: DrainAndEmitOptions): Promise<void> {
   const { drainer, emit, now, runId, final } = opts;

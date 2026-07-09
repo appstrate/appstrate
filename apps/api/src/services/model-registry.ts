@@ -219,7 +219,13 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           // alias would leak its backing rather than hide it, so skip it
           // (loud) instead of registering a half-working alias.
           if (validM.aliased === true) {
-            const violation = checkAliasInvariants({ label: validM.label, apiShape });
+            // SYSTEM_PROVIDER_KEYS entries are static API keys by construction,
+            // so the oauth_provider violation is unreachable here.
+            const violation = checkAliasInvariants({
+              label: validM.label,
+              apiShape,
+              authMode: "api_key",
+            });
             if (violation === "missing_label") {
               logger.error(
                 "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model without an explicit label (the derived label would name the backing)",

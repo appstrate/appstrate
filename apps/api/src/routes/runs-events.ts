@@ -118,12 +118,6 @@ const RunResultSchema = z
       })
       .optional(),
     status: z.enum(["success", "failed", "timeout", "cancelled"]).optional(),
-    // How the runner delivers structured output — `"native"` (Claude Agent
-    // SDK `StructuredOutput`) vs `"tool"` (the `output` runtime tool).
-    // Drives the wording of output-validation failures only (issue #833);
-    // cosmetic-grade, degrades to absent (= `"tool"`, the historical
-    // default) on a bad value.
-    outputMode: z.enum(["tool", "native"]).optional().catch(undefined),
     durationMs: z.number().int().nonnegative().optional().catch(undefined),
     // Authoritative token usage for finalize liveness and the terminal
     // `runs.tokenUsage` write. Missing/malformed usage is tolerated by the
@@ -219,7 +213,6 @@ export function createRunsEventsRouter() {
       logs: d.logs,
       ...(d.error ? { error: d.error } : {}),
       ...(d.status ? { status: d.status } : {}),
-      ...(d.outputMode !== undefined ? { outputMode: d.outputMode } : {}),
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
       ...(d.usage !== undefined ? { usage: d.usage } : {}),
       ...(d.cost !== undefined ? { cost: d.cost } : {}),

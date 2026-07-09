@@ -16,8 +16,7 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
-import type { ChatEngineHandler } from "./chat-engine-contract.ts";
-import type { SubscriptionEngineBinding } from "./subscription-engines.ts";
+import type { ChatUsageRecord, SubscriptionChatResolution } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
@@ -489,36 +488,16 @@ export interface ModelProviderOAuthConfig {
 }
 
 /**
- * Context passed to provider-specific proxy hooks. The provider's
- * `beforeLlmProxyRequest` decides which headers to add/override on the
- * outbound LLM call (e.g. an account-routing header).
- */
-export interface ModelProviderProxyContext {
-  providerId: string;
-  /** Credential kind backing this call — providers can choose to skip hooks for API-key flows. */
-  credentialKind: "api_key" | "oauth";
-  /** The access token (OAuth) or API key (api_key) the platform will forward upstream. */
-  apiKey: string;
-  /** The incoming request headers from the agent — read-only. */
-  incomingHeaders: Headers;
-}
-
-/** Patch returned by `beforeLlmProxyRequest`. Empty object = no changes. */
-export interface ModelProviderProxyPatch {
-  /** Headers to merge into the outbound request. Later wins over earlier. */
-  headers?: Record<string, string>;
-}
-
-/**
  * Well-known identity slots a provider may surface from an OAuth access
  * token. Modules map their provider-specific claim names into these
  * abstract slots, so the platform never needs to know any provider's
  * internal claim vocabulary.
  *
  * `accountId` is the stable account/tenant identifier the provider uses
- * for routing (echoed back to the upstream by the sidecar's identity
- * layer, which decides the routing header from the boot config). `email`
- * is the user identity associated with the credential.
+ * for routing — persisted on the credential row and used at connect time
+ * for required-claim validation; the platform never forwards it as an
+ * upstream header (Pi's SDK derives any routing header from the token
+ * itself). `email` is the user identity associated with the credential.
  */
 export interface ModelProviderIdentity {
   accountId?: string;
@@ -589,16 +568,6 @@ export function validateOfflineExpiry(
  */
 export interface ModelProviderHooks {
   /**
-   * Called by the LLM proxy and the in-container sidecar before forwarding
-   * a request upstream. Returns a patch (typically extra headers) merged
-   * into the outbound request. MUST be fast and side-effect-free — invoked
-   * on every LLM call.
-   */
-  beforeLlmProxyRequest?: (
-    ctx: ModelProviderProxyContext,
-  ) => Promise<ModelProviderProxyPatch> | ModelProviderProxyPatch;
-
-  /**
    * Decode an OAuth access token into the well-known
    * {@link ModelProviderIdentity} slots. Called once at credential creation
    * and after every refresh; the result is persisted on the credential row
@@ -634,8 +603,8 @@ export interface ModelProviderHooks {
    * providers (`claude-code`, `codex`) implement this so the platform can
    * confirm a token is structurally valid and unexpired by decoding it
    * locally, instead of spending a subscription request against the
-   * vendor's backend. Real per-model availability is validated at first
-   * official-binary run.
+   * vendor's backend. Real per-model availability is validated at the
+   * first agent run (on the Pi engine).
    *
    * When present, the platform's connection test calls this hook and
    * NEVER issues a subscription API request. API-key providers omit it
@@ -734,8 +703,8 @@ export interface ModelProviderDefinition {
    * discover models: it persists the static {@link modelDiscoveryCandidates}
    * (∩ catalog) WITHOUT per-model live probing. Set by subscription providers
    * (`claude-code`, `codex`) so a user's subscription token is never spent
-   * enumerating models — real per-model availability is validated at first
-   * official-binary run.
+   * enumerating models — real per-model availability is validated at the
+   * first agent run (on the Pi engine).
    *
    * Offline credential VALIDATION (no upstream probe to test a token) is a
    * separate, orthogonal concern inferred from the PRESENCE of
@@ -745,7 +714,7 @@ export interface ModelProviderDefinition {
   modelDiscovery?: { mode: "static" };
 
   // — Behavior —
-  /** Provider-scoped hooks (header injection, identity extraction). */
+  /** Provider-scoped hooks (identity extraction, placeholder, offline validation). */
   hooks?: ModelProviderHooks;
   /**
    * Well-known {@link ModelProviderIdentity} slots the platform MUST refuse
@@ -756,19 +725,6 @@ export interface ModelProviderDefinition {
    * returned (or nothing if the hook is absent).
    */
   requiredIdentityClaims?: readonly (keyof ModelProviderIdentity)[];
-
-  /**
-   * Subscription-engine binding — set ONLY by OAuth-subscription providers
-   * whose runs execute on a vendor's OFFICIAL binary instead of the generic
-   * `pi` loop (e.g. `claude-code` → Claude Agent SDK, `codex` → Codex CLI).
-   * This binding IS the single source of truth for the provider's engine: the
-   * platform's model-provider registry reads it directly (no copied registry),
-   * so the run-launcher + the llm-proxy gateways resolve this provider's engine
-   * by id. API-key providers omit it (they run on `pi`). Keeping the binding on
-   * the provider definition is what lets core ship zero hardcoded subscription
-   * machinery — disable the module and the engine vanishes with it.
-   */
-  subscriptionEngine?: SubscriptionEngineBinding;
 }
 
 // ---------------------------------------------------------------------------
@@ -1073,21 +1029,26 @@ export interface PlatformServices {
     dispatch(request: Request): Promise<Response>;
   };
   /**
-   * Register a provider module's interactive chat-turn handler, keyed by
-   * provider id. Called from the provider module's `init(ctx)` (e.g.
-   * `@appstrate/module-claude-code`). This is the platform-contract channel that
-   * keeps the chat handler OFF the run-engine binding and lets a provider module
-   * contribute chat without any other module importing it — module isolation is
-   * preserved because the handler crosses through `ctx.services`, not a
-   * module-to-module import. Re-registering replaces the handler.
+   * Resolve the chosen chat model row to its real upstream binding for one chat
+   * turn. For an oauth-subscription (claude-code/codex) model, returns the real
+   * model id + baseUrl + a FRESH access token so the chat module can drive the
+   * single generic in-process Pi chat engine inline; for an API-key / unknown
+   * provider it returns `{ subscription: false }` so the chat falls to its
+   * generic ai-sdk (llm-proxy) path; for a dead oauth credential it returns
+   * `{ subscription: true, needsReconnection: true }`. The chat module has no DB
+   * access — this is the seam that resolves the credential + token server-side,
+   * so the real subscription token never enters the module's own resolution
+   * (only the returned in-memory string, used to build the Pi `AuthStorage`).
    */
-  registerChatHandler(providerId: string, handler: ChatEngineHandler): void;
+  resolveSubscriptionChatModel(
+    orgId: string,
+    presetId: string,
+  ): Promise<SubscriptionChatResolution>;
   /**
-   * Resolve a provider's registered chat-turn handler, or `undefined` for an
-   * API-key / unknown provider OR a subscription engine with no chat surface
-   * (codex). The `chat` module reads this to dispatch a vendor chat turn by
-   * provider id WITHOUT importing the provider module or any vendor SDK; only
-   * the `ChatEngineInput` contract (defined in core) is cross-cutting.
+   * Record one chat turn's LLM usage as an `llm_usage` ledger row (source
+   * `proxy`, `run_id` null). The chat module has no DB access, so metering for
+   * the inline Pi engine crosses through here — same ledger the llm-proxy meters
+   * into for the ai-sdk chat path and every agent run.
    */
-  chatHandlerForProvider(providerId: string): ChatEngineHandler | undefined;
+  recordChatUsage(record: ChatUsageRecord): Promise<void>;
 }

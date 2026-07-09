@@ -2,10 +2,9 @@
 // Copyright 2026 Appstrate
 
 /**
- * Shared thrown-failure epilogue for AFPS runners.
+ * Shared thrown-failure epilogue for the Pi AFPS runner.
  *
- * Every official-binary runner (`runner-claude`, `runner-pi`) wraps its
- * session loop in a `try/catch` whose catch arm
+ * The runner wraps its session loop in a `try/catch` whose catch arm
  * runs the same skeleton when the session throws (as opposed to ending
  * with an authoritative terminal verdict):
  *
@@ -18,29 +17,24 @@
  *      failure error + (optionally) `status = "failed"` + the runner's own
  *      token-usage snapshot, and `finalize` it.
  *
- * The pieces that legitimately differ between runners are injected:
+ * The pieces a runner may customise are injected so the epilogue stays
+ * generic:
  *
- * - **usage** is PASSED IN, never computed here — each runner reads it
- *   from its own accumulator (`mapper.liveUsageSnapshot()` for Claude,
- *   `mapper.usage()` for Codex, `bridge.getUsage()` for Pi).
+ * - **usage** is PASSED IN, never computed here — the runner reads it
+ *   from its own accumulator (`bridge.getUsage()` for Pi).
  * - **buildError** shapes the {@link RunError} from the message — the
- *   default is `{ message, stack }`; Codex overrides it to stamp
- *   `code: "adapter_error"` (and no stack).
- * - **stamp** applies any extra terminal fields after usage — Codex
- *   stamps `cost` + `durationMs`, Pi stamps `cost`; Claude stamps neither.
+ *   default is `{ message, stack }`.
+ * - **stamp** applies any extra terminal fields after usage — Pi stamps
+ *   `cost`.
  * - **setFailedStatus** controls the explicit `status = "failed"` stamp.
- *   Claude + Codex set it; Pi leaves `status` unset in its thrown path
- *   (preserved verbatim — this helper does not "fix" that).
+ *   Pi leaves `status` unset in its thrown path (preserved verbatim — this
+ *   helper does not "fix" that).
  * - **transform** post-processes BOTH the emitted error event and the
- *   terminal result before finalize. The default is identity; Codex
- *   passes `redactSecretsDeep(_, knownSecrets)` so a vended subscription
- *   token can never ride out on the error event or the terminal
- *   `RunResult` (its `emit` closure already scrubs every event, so the
- *   event pass is idempotent — the result pass is the load-bearing one).
+ *   terminal result before finalize. The default is identity.
  *
  * The abort-rethrow MUST stay first, and the drain MUST be best-effort
  * (a dead drain cannot be allowed to mask the failure), so this helper
- * owns both invariants for all three runners.
+ * owns both invariants for the runner.
  */
 
 import type { RunEvent } from "@afps-spec/types";
@@ -79,7 +73,7 @@ export interface FinalizeThrownFailureOptions {
   usage: TokenUsage;
   /**
    * Builds the {@link RunError} attached to the reduced result. Defaults to
-   * `{ message, stack }`; Codex overrides to `{ code: "adapter_error", message }`.
+   * `{ message, stack }`.
    */
   buildError?: (message: string, err: unknown) => RunError;
   /** Stamp the terminal status on the result. Defaults to `true`. */

@@ -90,10 +90,11 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
       baseUrl: process.env.PI_BASE_URL,
       apiKey: process.env.PI_API_KEY,
       placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
-      // Model-alias swap (api-key path). The OAuth path carries `modelSwap`
-      // inside PI_LLM_OAUTH_CONFIG_JSON already. A malformed payload is a
-      // launcher bug — let JSON.parse throw rather than silently disable the
-      // swap (which would leak the real id to the agent).
+      // Model-alias swap (api-key path only — the oauth mode carries no
+      // modelSwap; aliases are rejected platform-side for oauth providers).
+      // A malformed payload is a launcher bug — let JSON.parse throw rather
+      // than silently disable the swap (which would leak the real id to the
+      // agent).
       ...(process.env.PI_MODEL_SWAP_JSON
         ? { modelSwap: JSON.parse(process.env.PI_MODEL_SWAP_JSON) as ModelSwap }
         : {}),

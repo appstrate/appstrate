@@ -65,14 +65,8 @@ describe("buildRuntimePiEnv", () => {
     ).toBeUndefined();
   });
 
-  it("omits RUN_ENGINE for Pi (byte-identical) and emits it only for claude", () => {
+  it("never emits a RUN_ENGINE var (single Pi engine)", () => {
     expect(buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar }).RUN_ENGINE).toBeUndefined();
-    expect(
-      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, engine: "pi" }).RUN_ENGINE,
-    ).toBeUndefined();
-    expect(
-      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, engine: "claude" }).RUN_ENGINE,
-    ).toBe("claude");
   });
 
   it("routes LLM traffic through the sidecar when apiKey + proxy url are set", () => {

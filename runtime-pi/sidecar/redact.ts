@@ -107,3 +107,13 @@ export function filterSensitiveHeaders(
   }
   return out;
 }
+
+/**
+ * Scrub bearer/api-key material from a free-form text sample before it lands
+ * in an operator log. Upstream JSON error payloads don't normally echo
+ * credentials, but the no-leak guarantee must hold independent of upstream
+ * behavior — so any `sk-ant-…` token or `Bearer …` sequence is masked.
+ */
+export function scrubBearerMaterial(text: string): string {
+  return text.replace(/(sk-ant-[a-z0-9-]+|Bearer\s+[\w.~+/=-]+)/gi, "[redacted]");
+}

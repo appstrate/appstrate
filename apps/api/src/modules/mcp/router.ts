@@ -35,7 +35,7 @@ import { z } from "zod";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { getEnv } from "@appstrate/env";
-import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-engine-contract";
+import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";

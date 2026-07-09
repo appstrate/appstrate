@@ -104,9 +104,11 @@ export function applySpecToSidecarEnv(
       target.PI_BASE_URL = spec.llm.baseUrl;
       target.PI_API_KEY = spec.llm.apiKey;
       target.PI_PLACEHOLDER = spec.llm.placeholder;
-      // Model-alias swap (api-key path) — the real backing id rides
-      // platform→sidecar only, never into the agent container. The OAuth path
-      // carries it inside PI_LLM_OAUTH_CONFIG_JSON above.
+      // Model-alias swap (api-key path ONLY) — the real backing id rides
+      // platform→sidecar only, never into the agent container. The OAuth
+      // config above carries NO modelSwap (`LlmProxyOauthConfig` has no such
+      // field): that mode is a pure bearer-swap and aliases are rejected for
+      // oauth-subscription providers.
       if (spec.llm.modelSwap) {
         target.PI_MODEL_SWAP_JSON = JSON.stringify(spec.llm.modelSwap);
       }
