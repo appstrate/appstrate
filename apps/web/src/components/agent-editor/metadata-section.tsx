@@ -18,16 +18,22 @@ export interface MetadataState {
   description: string;
   author: string;
   keywords: string[];
-  timeout?: number;
 }
 
 interface MetadataSectionProps {
   value: MetadataState;
   onChange: (value: MetadataState) => void;
   isEdit: boolean;
+  /**
+   * Editor-specific metadata fields (e.g. the agent editor's `timeout`),
+   * rendered between the common version and description fields. Each editor
+   * binds its own fields to its manifest state — MetadataSection only owns
+   * the fields every package type shares.
+   */
+  children?: React.ReactNode;
 }
 
-export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProps) {
+export function MetadataSection({ value, onChange, isEdit, children }: MetadataSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
   const [nameEdited, setNameEdited] = useState(isEdit);
@@ -96,16 +102,7 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
         placeholder="1.0.0"
         description={t("editor.metaVersionDesc")}
       />
-      {value.timeout !== undefined && (
-        <FormField
-          id="meta-timeout"
-          label={t("editor.execTimeout")}
-          type="number"
-          value={String(value.timeout)}
-          onChange={(v) => update({ timeout: parseInt(v) || 300 })}
-          description={t("editor.execTimeoutDesc")}
-        />
-      )}
+      {children}
       <div className="space-y-2">
         <Label htmlFor="meta-description">{t("editor.metaDescription")}</Label>
         <Textarea

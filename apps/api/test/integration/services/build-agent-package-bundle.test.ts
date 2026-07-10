@@ -123,7 +123,6 @@ function buildAgent(manifest: Record<string, unknown>): LoadedPackage {
     id: manifest.name as string,
     manifest: manifest as unknown as AgentManifest,
     prompt: "You are the agent.",
-    skills: [],
     source: "local",
   };
 }

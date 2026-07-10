@@ -97,27 +97,18 @@ export async function insertShadowPackage(params: InsertShadowPackageParams): Pr
 }
 
 /**
- * Build a `LoadedPackage` from an already-inserted shadow row. Inline
- * manifests only embed ID refs, so callers must pass the resolved
- * skills/tools (via `resolveManifestCatalogDeps`) when the returned
- * package will flow into the run pipeline — otherwise `run-context-builder`
- * will see empty arrays and skip skill/tool injection into the
- * container. Defaults to empty arrays for callers that only need the
- * shape (e.g. deserialization, tests).
+ * Build a `LoadedPackage` from an already-inserted shadow row.
+ *
+ * A definition is its manifest + prompt. The declared skills are projected off
+ * the manifest wherever they are needed (readiness gate; `RunPackageCatalog`
+ * for the container bundle), so nothing derived has to be threaded in here.
  */
 export function buildShadowLoadedPackage(
   id: string,
   manifest: AgentManifest,
   prompt: string,
-  deps: Pick<LoadedPackage, "skills"> = { skills: [] },
 ): LoadedPackage {
-  return {
-    id,
-    manifest,
-    prompt,
-    skills: deps.skills,
-    source: "local",
-  };
+  return { id, manifest, prompt, source: "local" };
 }
 
 /**
@@ -145,15 +136,8 @@ export async function triggerInlineRun(params: {
 
   // ----- 1. Preflight — shape + readiness (no side effects). -----
   const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
-  const {
-    manifest,
-    prompt,
-    effectiveConfig,
-    effectiveInput,
-    modelIdOverride,
-    proxyIdOverride,
-    resolvedDeps,
-  } = preflight;
+  const { manifest, prompt, effectiveConfig, effectiveInput, modelIdOverride, proxyIdOverride } =
+    preflight;
 
   // Reject an unknown/malformed explicit `modelId` with a clean 404 before we
   // mint a shadow package — avoids both a leaked shadow row and the downstream
@@ -163,7 +147,7 @@ export async function triggerInlineRun(params: {
   // ----- 2. Insert shadow row (now that we know the manifest is valid). -----
   const createdBy = actor?.type === "user" ? actor.id : null;
   const shadowId = await insertShadowPackage({ orgId, createdBy, manifest, prompt });
-  const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt, resolvedDeps);
+  const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt);
 
   // ----- 3. Fire the pipeline. -----
   const runId = `run_${crypto.randomUUID()}`;

@@ -11,7 +11,7 @@ import {
   ModelNotConfiguredError,
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
-import { BundleError } from "@appstrate/afps-runtime/bundle";
+import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
@@ -458,25 +458,14 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         detail: err.message,
       });
     }
-    // A dependency pin that resolves to nothing — an unsatisfiable range or a
-    // never-published skill — surfaces here as a DEPENDENCY_UNRESOLVED bundle
-    // error from the closure walk. Fail loud BEFORE the container starts with
-    // a structured 422, never a silent draft fallback (#666). The detail names
-    // the unresolved deps + the fix (publish or pass dependency_overrides).
-    if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") {
-      const missing = (err.details as { missing?: Array<{ name: string; versionSpec: string }> })
-        ?.missing;
-      const list =
-        missing && missing.length > 0
-          ? missing.map((m) => `'${m.name}@${m.versionSpec}'`).join(", ")
-          : "a declared dependency";
-      throw new ApiError({
-        status: 422,
-        code: "dependency_unresolved",
-        title: "Dependency Unresolved",
-        detail: `Could not resolve ${list} against published versions — publish the dependency, fix the pin, or pass \`dependency_overrides\` to run a working copy.`,
-      });
-    }
+    // Every bundle-layer failure over stored artifacts — an unresolved
+    // dependency pin (#666), an integrity mismatch, a signature-policy
+    // rejection, a malformed archive — is translated into a coded RFC 9457
+    // error BEFORE the container starts, never a silent draft fallback.
+    // Anything left unmapped reaches the global handler as an opaque
+    // `500 internal_error` with no detail (#878).
+    const mapped = toBundleApiError(err);
+    if (mapped) throw mapped;
     throw err;
   }
 

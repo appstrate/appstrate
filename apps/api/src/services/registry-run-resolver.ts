@@ -25,7 +25,7 @@
  * route already enforces.
  */
 
-import { getPackage, resolveManifestCatalogDeps } from "./package-catalog.ts";
+import { getPackage } from "./package-catalog.ts";
 import { hasPackageAccess } from "./application-packages.ts";
 import { getVersionDetail } from "./package-versions.ts";
 import { resolveExportVersion } from "./bundle-assembly.ts";
@@ -189,7 +189,6 @@ export async function resolveRegistryAgent(
   }
 
   const prompt = detail.prompt ?? "";
-  const deps = await resolveManifestCatalogDeps(manifest, orgId);
 
   // Build the LoadedPackage from the published version's manifest + prompt
   // while preserving the package row's identity (id, source, updatedAt).
@@ -199,7 +198,6 @@ export async function resolveRegistryAgent(
     id: pkg.id,
     manifest,
     prompt,
-    skills: deps.skills,
     source: pkg.source,
     ...(pkg.updatedAt ? { updatedAt: pkg.updatedAt } : {}),
   };

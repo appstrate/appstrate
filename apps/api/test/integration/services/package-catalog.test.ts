@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { getPackage } from "../../../src/services/package-catalog.ts";
+import { getPackage, resolveDeclaredSkills } from "../../../src/services/package-catalog.ts";
 
 describe("package-catalog", () => {
   let userId: string;
@@ -68,67 +68,10 @@ describe("package-catalog", () => {
       expect(agent).toBeNull();
     });
 
-    it("resolves skill dependencies from manifest", async () => {
-      await seedPackage({
-        orgId,
-        id: `@${orgSlug}/my-skill`,
-        type: "skill",
-        draftManifest: {
-          name: `@${orgSlug}/my-skill`,
-          display_name: "My Skill",
-          version: "0.1.0",
-          type: "skill",
-          description: "A test skill",
-        },
-      });
-
-      await seedPackage({
-        orgId,
-        id: `@${orgSlug}/dep-agent`,
-        draftManifest: {
-          name: `@${orgSlug}/dep-agent`,
-          version: "0.1.0",
-          type: "agent",
-          description: "Agent with deps",
-          dependencies: {
-            skills: { [`@${orgSlug}/my-skill`]: "^0.1.0" },
-          },
-        },
-        draftContent: "Agent with dependencies",
-      });
-
-      // No junction table insert needed — manifest is the source of truth
-      const agent = await getPackage(`@${orgSlug}/dep-agent`, orgId);
-
-      expect(agent).not.toBeNull();
-      expect(agent!.skills).toHaveLength(1);
-      expect(agent!.skills[0]!.id).toBe(`@${orgSlug}/my-skill`);
-      expect(agent!.skills[0]!.name).toBe("My Skill");
-    });
-
-    it("gracefully handles missing dependency packages", async () => {
-      await seedPackage({
-        orgId,
-        id: `@${orgSlug}/missing-dep-agent`,
-        draftManifest: {
-          name: `@${orgSlug}/missing-dep-agent`,
-          version: "0.1.0",
-          type: "agent",
-          description: "Agent referencing non-existent skill",
-          dependencies: {
-            skills: { "@nonexistent/skill": "*" },
-          },
-        },
-      });
-
-      const agent = await getPackage(`@${orgSlug}/missing-dep-agent`, orgId);
-
-      expect(agent).not.toBeNull();
-      // Missing deps are silently ignored (not in DB -> not resolved)
-      expect(agent!.skills).toHaveLength(0);
-    });
-
-    it("returns empty skills when no dependencies exist", async () => {
+    // `getPackage` returns the definition only. The declared-skill projection
+    // is derived on demand from whatever manifest the caller holds (#878), so
+    // it can never be a stale copy of a different definition's closure.
+    it("does not eagerly resolve skills onto the loaded package", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/nodep-agent`,
@@ -143,7 +86,100 @@ describe("package-catalog", () => {
       const agent = await getPackage(`@${orgSlug}/nodep-agent`, orgId);
 
       expect(agent).not.toBeNull();
-      expect(agent!.skills).toHaveLength(0);
+      expect(agent).not.toHaveProperty("skills");
+    });
+  });
+
+  describe("resolveDeclaredSkills", () => {
+    async function seedSkill(id: string, displayName: string): Promise<void> {
+      await seedPackage({
+        orgId,
+        id,
+        type: "skill",
+        draftManifest: {
+          name: id,
+          display_name: displayName,
+          version: "0.1.0",
+          type: "skill",
+          description: "A test skill",
+        },
+      });
+    }
+
+    function agentManifest(skills: Record<string, string>) {
+      return {
+        name: `@${orgSlug}/dep-agent`,
+        version: "0.1.0",
+        type: "agent",
+        dependencies: { skills },
+      } as unknown as Parameters<typeof resolveDeclaredSkills>[0];
+    }
+
+    it("resolves a declared skill and enriches it from the catalog", async () => {
+      await seedSkill(`@${orgSlug}/my-skill`, "My Skill");
+
+      const declared = await resolveDeclaredSkills(
+        agentManifest({ [`@${orgSlug}/my-skill`]: "^0.1.0" }),
+        orgId,
+      );
+
+      expect(declared).toHaveLength(1);
+      expect(declared[0]!.id).toBe(`@${orgSlug}/my-skill`);
+      expect(declared[0]!.resolved).toBe(true);
+      expect(declared[0]!.version).toBe("^0.1.0");
+      expect(declared[0]!.name).toBe("My Skill");
+    });
+
+    // The old projection DROPPED an unresolvable dep. Callers could not tell a
+    // missing skill from an undeclared one — display surfaces silently lost it
+    // and the readiness gate inferred absence from a shorter array. The entry
+    // is now present and flagged.
+    it("keeps a declared skill the org cannot see, flagged unresolved", async () => {
+      const declared = await resolveDeclaredSkills(
+        agentManifest({ "@nonexistent/skill": "*" }),
+        orgId,
+      );
+
+      expect(declared).toEqual([{ id: "@nonexistent/skill", version: "*", resolved: false }]);
+    });
+
+    it("does not resolve a package of the wrong type", async () => {
+      await seedPackage({
+        orgId,
+        id: `@${orgSlug}/not-a-skill`,
+        type: "agent",
+        draftManifest: { name: `@${orgSlug}/not-a-skill`, version: "0.1.0", type: "agent" },
+      });
+
+      const declared = await resolveDeclaredSkills(
+        agentManifest({ [`@${orgSlug}/not-a-skill`]: "^0.1.0" }),
+        orgId,
+      );
+
+      expect(declared[0]!.resolved).toBe(false);
+    });
+
+    it("does not resolve a skill owned by another org", async () => {
+      const { cookie: _c, ...otherUser } = await createTestUser();
+      const { org: otherOrg } = await createTestOrg(otherUser.id, { slug: "foreignorg" });
+      await seedPackage({
+        orgId: otherOrg.id,
+        id: "@foreignorg/leaky-skill",
+        type: "skill",
+        draftManifest: { name: "@foreignorg/leaky-skill", version: "0.1.0", type: "skill" },
+      });
+
+      const declared = await resolveDeclaredSkills(
+        agentManifest({ "@foreignorg/leaky-skill": "^0.1.0" }),
+        orgId,
+      );
+
+      expect(declared[0]!.resolved).toBe(false);
+    });
+
+    it("returns an empty array (and reads no rows) when nothing is declared", async () => {
+      const declared = await resolveDeclaredSkills(agentManifest({}), orgId);
+      expect(declared).toEqual([]);
     });
   });
 });

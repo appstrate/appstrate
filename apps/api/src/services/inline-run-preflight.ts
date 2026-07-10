@@ -25,7 +25,7 @@
  * Throws `ApiError` on any failure (same shape the routes already emit).
  */
 import type { Actor } from "../lib/actor.ts";
-import type { AgentManifest, LoadedPackage } from "../types/index.ts";
+import type { AgentManifest } from "../types/index.ts";
 import {
   ApiError,
   internalError,
@@ -40,7 +40,6 @@ import { validateInlineManifest } from "./inline-manifest-validation.ts";
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
-import { resolveManifestCatalogDeps } from "./package-catalog.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
 
 export type { InlineRunBody };
@@ -52,7 +51,6 @@ export interface InlineRunPreflightResult {
   effectiveInput: Record<string, unknown> | null;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
-  resolvedDeps: Pick<LoadedPackage, "skills">;
 }
 
 type Mode = "fail-fast" | "accumulate";
@@ -145,19 +143,8 @@ export async function runInlinePreflight(params: {
   // This stage requires a parsed manifest. In accumulate mode, skip cleanly
   // when structural validation failed — the manifest-shape errors already
   // explain why. Fail-fast has thrown long before reaching here.
-  let resolvedDeps: Pick<LoadedPackage, "skills"> = { skills: [] };
   if (manifest) {
-    // Inline manifests only embed registry ID refs for skills; resolve
-    // them against the org/system catalog up-front so both the readiness
-    // probe here AND the downstream run pipeline (run-context-builder reads
-    // agent.skills) see the same resolved list.
-    resolvedDeps = await resolveManifestCatalogDeps(manifest, orgId);
-    const probeAgent = buildShadowLoadedPackage(
-      generateShadowPackageId(),
-      manifest,
-      prompt,
-      resolvedDeps,
-    );
+    const probeAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
 
     // Readiness is the single source of truth for both config (AJV against
     // the manifest schema) and prompt emptiness — stage 1's structural check
@@ -211,7 +198,6 @@ export async function runInlinePreflight(params: {
     effectiveInput,
     modelIdOverride,
     proxyIdOverride,
-    resolvedDeps,
   };
 }
 

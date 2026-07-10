@@ -268,9 +268,10 @@ describe("Agents API", () => {
         app.request(`/api/packages/agents/${VER}${suffix}`, { headers: authHeaders(ctx) });
 
       // Default → draft projection. Input + integrations are manifest-derived
-      // on the draft path; skills there come from the resolved closure
-      // (`agent.skills`, empty for these unseeded skill packages), so the
-      // version-vs-draft contrast is asserted on input + integrations.
+      // on the draft path; the draft's skills array lists only skills that
+      // resolve against the org catalog (empty for these unseeded skill
+      // packages), so the version-vs-draft contrast is asserted on input +
+      // integrations.
       const draftBody = (await (await get("")).json()) as any;
       expect(draftBody.input.schema.properties).toHaveProperty("beta");
       expect(draftBody.dependencies.integrations.map((i: any) => i.id)).toEqual([

@@ -23,7 +23,14 @@ export const runsPaths = {
         "The effective model is resolved at run creation with precedence: request `modelId` > " +
         "agent model setting > org default model > system default. Without an explicit `modelId`, " +
         "a change to the org default model between triggers applies to the next run — send " +
-        "`modelId` to pin a specific model per run.",
+        "`modelId` to pin a specific model per run. " +
+        "A run against a published version assembles its bundle from stored artifacts before " +
+        "the container starts, so a bad artifact fails the trigger rather than the run: `422 " +
+        "dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the " +
+        "stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by " +
+        "`AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no " +
+        "longer match the integrity hash recorded at publish time — republish the package). " +
+        "No run row is created in any of those cases.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -208,9 +215,28 @@ export const runsPaths = {
             },
           },
         },
-        "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "422": {
+          description:
+            "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
+        "500": {
+          description:
+            "Unexpected server error (`internal_error`), or the stored bundle's bytes no longer match their recorded integrity hash (`bundle_integrity_mismatch`) — corruption or tampering at rest; retrying will not help, republish the version or contact the operator",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -493,9 +519,28 @@ export const runsPaths = {
             },
           },
         },
-        "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "422": {
+          description:
+            "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
+        "500": {
+          description:
+            "Unexpected server error (`internal_error`), or a stored bundle's bytes no longer match their recorded integrity hash (`bundle_integrity_mismatch`) — corruption or tampering at rest; retrying will not help, republish the version or contact the operator",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

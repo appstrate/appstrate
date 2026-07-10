@@ -22,11 +22,13 @@ import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { buildBundleFromDb } from "../../../src/services/bundle-assembly.ts";
 import {
+  BundleError,
   extractRootFromAfps,
   readBundleFromBuffer,
   writeBundleToBuffer,
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
+import { toBundleApiError } from "../../../src/services/run-launcher/bundle-error-mapping.ts";
 
 const BUCKET = "agent-packages";
 
@@ -167,5 +169,116 @@ describe("bundle-assembly — end-to-end via DbPackageCatalog", () => {
 
     // Second serialization is byte-identical (determinism canary).
     expect(writeBundleToBuffer(bundle)).toEqual(bytes);
+  });
+});
+
+/**
+ * #878 issue 2 — the SRI gate at the storage boundary, exercised for real.
+ *
+ * `bundle-error-mapping.test.ts` proves every `BundleErrorCode` maps onto the
+ * RFC 9457 contract, but only against hand-built `BundleError` instances. This
+ * test proves the production side: bytes at rest that no longer hash to the
+ * `package_versions.integrity` recorded at publish actually surface from
+ * `downloadVersionZip` as a typed `BundleError("INTEGRITY_MISMATCH")` through
+ * the same catalog fetch the run pipeline uses — and land on
+ * `500 bundle_integrity_mismatch`, not an opaque `internal_error`.
+ */
+describe("bundle-assembly — storage integrity gate (#878)", () => {
+  let ctx: TestContext;
+  let ORG_ID: string;
+  let APP_ID: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "bundletest" });
+    ORG_ID = ctx.org.id;
+    APP_ID = ctx.defaultAppId;
+  });
+
+  it("tampered bytes at rest throw BundleError(INTEGRITY_MISMATCH), mapped to 500 bundle_integrity_mismatch", async () => {
+    const skillManifest = {
+      name: "@test/skill-a",
+      version: "1.0.0",
+      type: "skill",
+      schema_version: "0.1",
+      display_name: "A",
+      author: "tester",
+    };
+    await seedPackageWithZip({
+      id: "@test/skill-a",
+      type: "skill",
+      version: "1.0.0",
+      orgId: ORG_ID,
+      manifest: skillManifest,
+    });
+
+    // Tamper at rest: overwrite the stored object AFTER its integrity was
+    // recorded. Still a perfectly valid AFPS ZIP — only the SRI can catch it.
+    const tampered = buildAfps(skillManifest, "tampered content");
+    await storage.uploadFile(BUCKET, "@test/skill-a/1.0.0.afps", Buffer.from(tampered));
+
+    const rootAfps = buildAfps(
+      {
+        name: "@test/agent-root",
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Root",
+        author: "tester",
+        dependencies: { skills: { "@test/skill-a": "^1.0.0" } },
+      },
+      "Do the thing.",
+    );
+    const root = extractRootFromAfps(rootAfps);
+
+    let caught: unknown;
+    try {
+      await buildBundleFromDb(root, { orgId: ORG_ID, applicationId: APP_ID });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(BundleError);
+    expect((caught as BundleError).code).toBe("INTEGRITY_MISMATCH");
+
+    const mapped = toBundleApiError(caught);
+    expect(mapped).not.toBeNull();
+    expect(mapped!.status).toBe(500);
+    expect(mapped!.code).toBe("bundle_integrity_mismatch");
+  });
+
+  it("untampered bytes pass the same gate — the guard has no false positives", async () => {
+    const skillManifest = {
+      name: "@test/skill-a",
+      version: "1.0.0",
+      type: "skill",
+      schema_version: "0.1",
+      display_name: "A",
+      author: "tester",
+    };
+    await seedPackageWithZip({
+      id: "@test/skill-a",
+      type: "skill",
+      version: "1.0.0",
+      orgId: ORG_ID,
+      manifest: skillManifest,
+    });
+
+    const rootAfps = buildAfps(
+      {
+        name: "@test/agent-root",
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Root",
+        author: "tester",
+        dependencies: { skills: { "@test/skill-a": "^1.0.0" } },
+      },
+      "Do the thing.",
+    );
+    const root = extractRootFromAfps(rootAfps);
+
+    const bundle = await buildBundleFromDb(root, { orgId: ORG_ID, applicationId: APP_ID });
+    expect(bundle.packages.has("@test/skill-a@1.0.0" as PackageIdentity)).toBe(true);
   });
 });
