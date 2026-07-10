@@ -83,7 +83,7 @@ const RUN = daemon !== null && image === daemon;
 if (dockerEnabled && !RUN) {
   const hint =
     image !== null && daemon !== null && image !== daemon
-      ? ` — rebuild natively: docker build -t ${IMAGE} -f runtime-pi/Dockerfile .`
+      ? ` — rebuild natively: docker build --platform ${daemon} -t ${IMAGE} -f runtime-pi/Dockerfile .`
       : "";
   console.warn(
     `[provision-container.e2e] skipped — docker=${hasDocker()} image(${IMAGE})=${image ?? "absent"} daemon=${daemon ?? "unknown"}${hint}`,
@@ -180,9 +180,13 @@ describe.skipIf(!RUN)("runtime-pi container provisions documents without spinnin
           "-d",
           "--name",
           containerName,
-          // No --platform pin: the gate above guarantees the local image
-          // matches the engine's native platform, mirroring how the platform's
-          // Docker orchestrator launches this image in production.
+          // Pin to the engine's native platform (which the gate above
+          // guarantees the local image matches, mirroring how the platform's
+          // Docker orchestrator launches this image in production). Explicit
+          // rather than omitted: a DOCKER_DEFAULT_PLATFORM env override would
+          // otherwise re-route the run to a foreign platform behind the
+          // gate's back (#882). `daemon` is non-null whenever RUN is true.
+          ...(daemon !== null ? ["--platform", daemon] : []),
           // Linux portability — Docker Desktop adds this automatically, but CI
           // engines need it explicit.
           "--add-host",
