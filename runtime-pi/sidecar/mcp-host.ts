@@ -11,8 +11,9 @@
  *     filesystem-mcp, etc.
  *
  * Every third-party tool is namespaced as `{namespace}__{tool}` to avoid
- * collisions and to fit OpenAI/Anthropic's 64-char tool name regex with
- * headroom for downstream re-prefixing.
+ * collisions and to stay within `MCP_TOOL_NAME_MAX_LENGTH` (56), which leaves
+ * headroom under OpenAI/Anthropic's 64-char tool name regex for downstream
+ * re-prefixing.
  *
  * What this module owns:
  *   - The {@link McpHost} class — registry of upstream MCP clients plus
@@ -332,8 +333,13 @@ export class McpHost {
       // to `primary`, making the runtime surface diverge from the catalog.
       // `isValidToolName` below still validates the fully namespaced result;
       // malformed trusted descriptors fail loudly because an opaque fallback
-      // would diverge from the platform catalog. Untrusted names retain the
-      // defensive fallback below.
+      // would diverge from the platform catalog. Both halves are platform-
+      // produced — the namespace normalises any AFPS-valid package id
+      // (including digit-leading scopes like `@1password`) and the body is
+      // emitted by `createApiCallToolDefs` within the shared length budget —
+      // so this throw is unreachable for any manifest the platform accepts;
+      // it guards future emitters, not user input. Untrusted names retain
+      // the defensive fallback below.
       const sanitisedToolBody = upstream.trusted
         ? sanitised.name
         : normaliseMcpToolBody(sanitised.name);
@@ -347,7 +353,7 @@ export class McpHost {
         ? namespacedName
         : `${normalisedNs}__tool_${this.toolDescriptors.length}`;
       // Dedup: two DISTINCT upstream tools can converge onto the same
-      // `finalName` after `sanitiseToolBody` collapses separators (e.g.
+      // `finalName` after `normaliseMcpToolBody` collapses separators (e.g.
       // `list-issues`, `list_issues`, and `list.issues` all → `list_issues`).
       // Without this guard the later tool would silently overwrite the
       // earlier one's index entries (toolToClient / originalToolNames) while

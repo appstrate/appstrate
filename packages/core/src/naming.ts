@@ -139,7 +139,11 @@ export const TOOL_NAME_MAX_LEN = MCP_TOOL_NAME_MAX_LENGTH;
  * Same shape as {@link CREDENTIAL_KEY_RE} — aliased so the pattern lives once.
  */
 export const TOOL_NAME_INNER_PATTERN = CREDENTIAL_KEY_RE;
-const TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*$/;
+// The namespace token derives from a package id whose scope may start with a
+// digit (`SLUG_PATTERN` and the AFPS name pattern both allow `@1password/…`),
+// so it admits a leading digit. The tool token keeps the stricter
+// letter-leading alphabet of {@link TOOL_NAME_INNER_PATTERN}.
+const TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9_]*__[a-z][a-z0-9_]*$/;
 
 export function isValidToolName(name: string): boolean {
   if (typeof name !== "string") return false;

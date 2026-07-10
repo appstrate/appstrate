@@ -204,6 +204,36 @@ describe("bootIntegrations — synthetic api_call surface", () => {
     }
   });
 
+  it("registers the pair under a digit-leading package scope", async () => {
+    // `@1password/connect` is a valid AFPS package id (SLUG_PATTERN admits a
+    // leading digit). The spawn resolver passes the raw id as the namespace,
+    // so the trusted registration path must accept the normalised
+    // `1password_connect` prefix instead of failing the whole integration.
+    const result = await boot(
+      serverlessSpec(
+        [
+          {
+            authKey: "primary",
+            toolName: "api_call",
+            authorizedUris: ["https://www.googleapis.com/**"],
+            uploadProtocols: ["google-resumable"],
+          },
+        ],
+        undefined,
+        "@1password/connect",
+      ),
+    );
+    try {
+      expect(result.failed).toEqual([]);
+      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual([
+        "1password_connect__api_call",
+        "1password_connect__api_upload",
+      ]);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
   it("applies hidden_tools to the trusted in-process upload companion", async () => {
     const result = await boot(
       serverlessSpec(

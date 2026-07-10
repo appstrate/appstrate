@@ -50,6 +50,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   final agent-facing MCP surface; hiding `api_call` also removes its dependent
   upload companion so no orphan capability is advertised.
 
+- **Digit-leading integration scopes aborted the run (#881)** — a package
+  published under a scope starting with a digit (`@1password/connect` is a
+  valid AFPS id) produced a `1password_connect__api_call` name that the MCP
+  tool-name pattern rejected, so the trusted registration path failed the
+  integration and killed the run. The namespace half of the pattern now
+  matches the slug alphabet (digit-leading allowed); the tool half is
+  unchanged.
+
 - **Phantom "selected tool unavailable" warning (#881)** — the sidecar's
   no-silent-degradation guard compared the agent's full tool allowlist against
   the count of the integration's own MCP tools that survived registration. The
