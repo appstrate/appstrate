@@ -35,8 +35,10 @@
  * `version_label` and `version_ref`.
  *
  * Scope: this resolver pins the agent's OWN definition (manifest + prompt) to
- * the selected version. The transitive skill closure is pinned separately, on
- * the run hot path, by `RunPackageCatalog` (#666) — it resolves each
+ * the selected version. It derives nothing: the readiness gate projects the
+ * declared skills off the effective manifest itself (#878). The transitive
+ * skill closure that ships to the container is pinned separately, on the run
+ * hot path, by `RunPackageCatalog` (#666) — it resolves each
  * `dependencies.skills` entry against PUBLISHED versions honoring the manifest
  * pin, so a dependency's mutable draft never leaks into a run. Integration /
  * mcp-server spawns are frozen by the shared run-pipeline dependency resolver
@@ -67,7 +69,13 @@ export interface ResolvedRunAgent {
   overrideVersionLabel?: string;
 }
 
-/** Build the effective LoadedPackage for a resolved published version. */
+/**
+ * Build the effective LoadedPackage for a resolved published version.
+ *
+ * A `LoadedPackage` carries only what the definition SAYS (manifest + prompt),
+ * so swapping those two fields swaps the definition wholesale — nothing
+ * derived from the draft manifest rides along (#878).
+ */
 function substituteVersion(
   agent: LoadedPackage,
   detail: { version: string; manifest: Record<string, unknown>; prompt: string | null },

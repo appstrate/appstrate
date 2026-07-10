@@ -288,12 +288,7 @@ export function createRunsRemoteRouter() {
           manifest: preflight.manifest,
           prompt: preflight.prompt,
         });
-        return buildShadowLoadedPackage(
-          shadowId,
-          preflight.manifest,
-          preflight.prompt,
-          preflight.resolvedDeps,
-        );
+        return buildShadowLoadedPackage(shadowId, preflight.manifest, preflight.prompt);
       }
 
       // Reject an explicit `modelId` override that references no real model

@@ -2,7 +2,11 @@
 
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts";
+import {
+  getPackage,
+  getPackageWithAccess,
+  resolveDeclaredSkills,
+} from "../services/package-catalog.ts";
 import {
   resolveAgentRunVersion,
   VERSION_SELECTOR_DRAFT,
@@ -61,25 +65,36 @@ export async function buildAgentDetailDto(
   // Version-aware projection (issue #770). `draft`/omitted reads the live
   // manifest; a concrete version substitutes the published manifest + prompt
   // via the same resolver the run uses, so the detail (config/input/integrations)
-  // matches what the run will execute. Skills are pinned per-version from the
-  // version manifest's `dependencies.skills` map (the resolved `agent.skills`
-  // closure is the draft's — id + range is what the dependency-override UI needs).
+  // matches what the run will execute.
   const versionSel = opts.version?.trim();
   const versioned = !!versionSel && versionSel !== VERSION_SELECTOR_DRAFT;
   const effective = versioned ? await resolveAgentRunVersion(agent, versionSel) : null;
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
 
+  // Both branches project off the EFFECTIVE manifest, never off the package
+  // object (#878), but they expose different sets — a wire inconsistency that
+  // predates this code: a versioned detail lists every DECLARED skill (bare
+  // id + range, straight from the manifest — no catalog read) so the
+  // dependency-override UI can offer a pin for one that is missing, while the
+  // draft detail lists only skills the org catalog resolves, enriched with
+  // display metadata. `use-agent-readiness.ts` mirrors the server's
+  // missing-skill check against the draft array, so widening it here would
+  // silently stop the client flagging a missing skill. Unifying the two — one
+  // array of declared skills carrying `resolved` — is a wire change, tracked
+  // separately.
   const skillDeps = versioned
     ? Object.entries(
         (m as { dependencies?: { skills?: Record<string, string> } }).dependencies?.skills ?? {},
       ).map(([id, version]) => ({ id, ...(version ? { version } : {}) }))
-    : agent.skills.map((s) => ({
-        id: s.id,
-        ...(s.version ? { version: s.version } : {}),
-        ...(s.name ? { name: s.name } : {}),
-        ...(s.description ? { description: s.description } : {}),
-      }));
+    : (await resolveDeclaredSkills(m, orgId))
+        .filter((s) => s.resolved)
+        .map((s) => ({
+          id: s.id,
+          ...(s.version ? { version: s.version } : {}),
+          ...(s.name ? { name: s.name } : {}),
+          ...(s.description ? { description: s.description } : {}),
+        }));
 
   const packageConfig = await getPackageConfig(applicationId, agent.id);
 

@@ -9,6 +9,7 @@ import {
   buildBundleFromCatalog,
   formatPackageIdentity,
   writeBundleToBuffer,
+  BundleError,
   type Bundle,
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
@@ -57,7 +58,14 @@ export async function downloadVersionZip(
         expected: expectedIntegrity,
         computed: result.computed,
       });
-      throw new Error(`Integrity check failed for ${packageId}@${version}`);
+      // Must be a typed `BundleError`: the run pipeline maps those onto the
+      // RFC 9457 contract; a bare Error would reach the global handler as an
+      // opaque `500 internal_error` with no detail (#878).
+      throw new BundleError(
+        "INTEGRITY_MISMATCH",
+        `Integrity check failed for ${packageId}@${version}`,
+        { packageId, version },
+      );
     }
   }
 

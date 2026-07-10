@@ -16,11 +16,20 @@ export type { ToolMeta };
 
 // --- Loaded Package (manifest + prompt from DB) ---
 
+/**
+ * A package definition: what the manifest SAYS, never what a catalog lookup
+ * derived from it.
+ *
+ * Do not add derived projections (resolved skills, spawned integrations…)
+ * here: version resolution swaps `manifest`/`prompt` between draft and
+ * published snapshots, and anything derived would silently keep describing
+ * the other definition (#878). Derive at the point of use from the effective
+ * manifest — see `resolveDeclaredSkills` in `services/package-catalog.ts`.
+ */
 export interface LoadedPackage {
   id: string;
   manifest: AgentManifest;
   prompt: string;
-  skills: ToolMeta[];
   source: "system" | "local";
   updatedAt?: Date;
 }

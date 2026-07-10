@@ -28,7 +28,6 @@ function loadedPackage(id: string, timeoutOverride?: number): LoadedPackage {
       ...(timeoutOverride !== undefined ? { timeout: timeoutOverride } : {}),
     } as unknown as LoadedPackage["manifest"],
     prompt: "x",
-    skills: [],
     source: "local",
   };
 }
