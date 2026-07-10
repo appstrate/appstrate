@@ -161,7 +161,10 @@ export function getManifestName(m: Record<string, unknown>): { scope: string; id
   return match ? { scope: match[1]!, id: match[2]! } : { scope: "", id: raw };
 }
 
-/** Extract MetadataState from a manifest object. Includes timeout if present (agents only).
+/** Extract MetadataState from a manifest object — the fields common to every
+ * package type. Editor-specific manifest fields (e.g. the agent `timeout`)
+ * are bound directly to manifest state by their editor and rendered through
+ * MetadataSection's children slot.
  *
  * `author` accepts both the AFPS §3.1 bare-string form and the structured
  * `{ name, email?, url? }` object form: the editor's metadata UI is a single
@@ -186,7 +189,6 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
     description: (m.description as string) ?? "",
     author: authorText,
     keywords: Array.isArray(m.keywords) ? (m.keywords as string[]) : [],
-    ...(typeof m.timeout === "number" ? { timeout: m.timeout } : {}),
   };
 }
 
@@ -202,7 +204,6 @@ export function metadataToManifestPatch(m: MetadataState): Record<string, unknow
     description: m.description,
     author: m.author,
     keywords: m.keywords,
-    ...(m.timeout !== undefined ? { timeout: m.timeout } : {}),
   };
 }
 

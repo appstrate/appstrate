@@ -12,6 +12,7 @@ import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
 import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
+import { FormField } from "../components/form-field";
 
 // Agent editor components
 import { MetadataSection } from "../components/agent-editor/metadata-section";
@@ -186,7 +187,23 @@ function AgentEditorInner({
       hideSubmitBar={activeTab === "json"}
     >
       {activeTab === "general" && (
-        <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
+        <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit}>
+          <FormField
+            id="meta-timeout"
+            label={t("editor.execTimeout")}
+            type="number"
+            min={1}
+            value={typeof state.manifest.timeout === "number" ? String(state.manifest.timeout) : ""}
+            onChange={(v) => {
+              const n = parseInt(v, 10);
+              // `undefined` clears the key through the shallow manifest merge
+              // (JSON serialization drops it on save → server default, 300s).
+              updateManifest({ timeout: Number.isNaN(n) ? undefined : n });
+            }}
+            placeholder="300"
+            description={t("editor.execTimeoutDesc")}
+          />
+        </MetadataSection>
       )}
       {activeTab === "prompt" && (
         <PromptEditor
