@@ -17,8 +17,9 @@
  * (or use the root `bun run test:docker` script) to enable it; CI always runs
  * it (GitHub Actions sets `CI=true` automatically). Even when enabled, it
  * still skips if Docker or the `appstrate-pi` image is unavailable (local dev
- * without a built image, CI without the runtime image). Build it with:
- *   docker build --platform linux/amd64 -t appstrate-pi -f runtime-pi/Dockerfile .
+ * without a built image, CI without the runtime image). The container runs on
+ * the engine's native platform, so build the image natively:
+ *   docker build -t appstrate-pi -f runtime-pi/Dockerfile .
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -41,22 +42,51 @@ function hasDocker(): boolean {
     return false;
   }
 }
-function hasImage(): boolean {
+/**
+ * `os/arch` from a docker `--format` template (e.g. "linux/arm64"), or null
+ * when the command fails (daemon down, image absent) or prints something
+ * unexpected. Both templates below emit Go's GOOS/GOARCH vocabulary, so the
+ * two results are directly comparable.
+ */
+function dockerPlatform(args: string[]): string | null {
   try {
-    return spawnSync("docker", ["image", "inspect", IMAGE], { stdio: "ignore" }).status === 0;
+    const out = spawnSync("docker", args, { encoding: "utf8" });
+    if (out.status !== 0) return null;
+    const platform = out.stdout.trim();
+    return /^[a-z0-9]+\/[a-z0-9]+$/.test(platform) ? platform : null;
   } catch {
-    return false;
+    return null;
   }
+}
+/** Platform the Docker engine runs containers on natively. */
+function daemonPlatform(): string | null {
+  return dockerPlatform(["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"]);
+}
+/** Platform the local image was built for, or null when the image is absent. */
+function imagePlatform(): string | null {
+  return dockerPlatform(["image", "inspect", IMAGE, "--format", "{{.Os}}/{{.Architecture}}"]);
 }
 
 // Opt-in gate: TEST_DOCKER=1 locally, CI=true on GitHub Actions (set
 // automatically). Mirrors the rule in apps/api/test/helpers/tier.ts.
 const dockerEnabled = process.env.TEST_DOCKER === "1" || process.env.CI === "true";
 
-const RUN = dockerEnabled && hasDocker() && hasImage();
+// The `docker run` below uses the engine's native platform, so the gate must
+// check more than image presence: a bare `docker image inspect` is
+// architecture-blind, and an image built for another platform (e.g. an amd64
+// build left over on an Apple Silicon host) would pass it and then fail inside
+// `docker run` with a misleading "pull access denied" (#882). Require the
+// image's platform to match the daemon's and skip honestly otherwise.
+const daemon = dockerEnabled && hasDocker() ? daemonPlatform() : null;
+const image = daemon !== null ? imagePlatform() : null;
+const RUN = daemon !== null && image === daemon;
 if (dockerEnabled && !RUN) {
+  const hint =
+    image !== null && daemon !== null && image !== daemon
+      ? ` — rebuild natively: docker build -t ${IMAGE} -f runtime-pi/Dockerfile .`
+      : "";
   console.warn(
-    `[provision-container.e2e] skipped — docker=${hasDocker()} image(${IMAGE})=${hasImage()}`,
+    `[provision-container.e2e] skipped — docker=${hasDocker()} image(${IMAGE})=${image ?? "absent"} daemon=${daemon ?? "unknown"}${hint}`,
   );
 }
 
@@ -150,8 +180,9 @@ describe.skipIf(!RUN)("runtime-pi container provisions documents without spinnin
           "-d",
           "--name",
           containerName,
-          "--platform",
-          "linux/amd64",
+          // No --platform pin: the gate above guarantees the local image
+          // matches the engine's native platform, mirroring how the platform's
+          // Docker orchestrator launches this image in production.
           // Linux portability — Docker Desktop adds this automatically, but CI
           // engines need it explicit.
           "--add-host",
