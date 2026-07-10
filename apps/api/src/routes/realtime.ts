@@ -9,8 +9,9 @@ import { organizationMembers, runs } from "@appstrate/db/schema";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
-import { unauthorized } from "../lib/errors.ts";
+import { forbidden, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
+import { resolveApiKeyPermissions } from "../lib/permissions.ts";
 import { validateApplicationInOrg } from "../middleware/app-context.ts";
 import { logger } from "../lib/logger.ts";
 import type { OrgRole } from "../types/index.ts";
@@ -31,8 +32,17 @@ interface SSEAuthResult {
   userId: string;
   orgId: string;
   role: OrgRole;
+  /**
+   * Admin level derived from the resolved role (`admin`/`owner`), never
+   * hardcoded. Drives the subscriber filter's `isAdmin` flag — the only
+   * thing it gates is debug-level `run_log` visibility
+   * (services/realtime.ts).
+   */
+  isAdmin: boolean;
   applicationId: string;
 }
+
+const isAdminRole = (role: OrgRole): boolean => role === "admin" || role === "owner";
 
 /**
  * Validate auth for SSE endpoints.
@@ -42,6 +52,11 @@ interface SSEAuthResult {
  *  2. Cookie session (existing behavior)
  *
  * Org context: `?orgId=` query param (cookie auth only — API key already resolves org).
+ *
+ * API keys go through the same canonical scope resolution as the HTTP
+ * pipeline (`resolveApiKeyPermissions` — key scopes ∩ creator's live role)
+ * and must carry `runs:read` to open any run stream; a valid key without
+ * that grant is rejected with 403 instead of silently inheriting admin.
  */
 async function validateSSEAuth(c: {
   req: {
@@ -55,10 +70,16 @@ async function validateSSEAuth(c: {
     const keyInfo = await validateApiKey(token);
     if (!keyInfo) return null;
 
+    const permissions = resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole);
+    if (!permissions.has("runs:read")) {
+      throw forbidden("API key does not have the 'runs:read' scope");
+    }
+
     return {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
-      role: "admin",
+      role: keyInfo.creatorRole,
+      isAdmin: isAdminRole(keyInfo.creatorRole),
       applicationId: keyInfo.applicationId,
     };
   }
@@ -95,6 +116,7 @@ async function validateSSEAuth(c: {
     userId: session.user.id,
     orgId,
     role: rows[0].role,
+    isAdmin: isAdminRole(rows[0].role),
     applicationId,
   };
 }
@@ -286,7 +308,7 @@ export function createRealtimeRouter() {
         runId,
         orgId: validated.orgId,
         applicationId: validated.applicationId,
-        isAdmin: true,
+        isAdmin: validated.isAdmin,
         userId: validated.userId,
       },
       verbose,
@@ -315,7 +337,7 @@ export function createRealtimeRouter() {
         packageId,
         orgId: validated.orgId,
         applicationId: validated.applicationId,
-        isAdmin: true,
+        isAdmin: validated.isAdmin,
         userId: validated.userId,
       },
       verbose,
@@ -336,7 +358,7 @@ export function createRealtimeRouter() {
       {
         orgId: validated.orgId,
         applicationId: validated.applicationId,
-        isAdmin: true,
+        isAdmin: validated.isAdmin,
         userId: validated.userId,
       },
       verbose,

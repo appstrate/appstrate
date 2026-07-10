@@ -471,18 +471,22 @@ const envSchema = z
       z.string().optional(),
     ),
 
-    // Run token signing (optional — if unset, run tokens are unsigned).
+    // Run token signing (required). Dedicated HMAC secret for run bearer
+    // tokens — without a key, `Bun.CryptoHasher("sha256", undefined)`
+    // degrades to an UNKEYED hash of the runId and anyone who knows a runId
+    // (logs, monitoring) can forge its token, so the keyring must never be
+    // empty. Same tier as UPLOAD_SIGNING_SECRET.
     //
     // Comma-separated keyring for online rotation (single value = keyring of
     // one): the FIRST key signs new run tokens, ALL keys verify, so rotation
     // does not kill event ingestion for in-flight runs. Rotation pattern:
     // prepend the new key + restart, wait out the longest in-flight run, drop
-    // the old key + restart. Keys must be non-empty (and thus comma-free).
+    // the old key + restart. Each key must be ≥16 chars (and thus comma-free).
     RUN_TOKEN_SECRET: z
       .string()
-      .optional()
-      .refine((v) => v === undefined || v.split(",").every((k) => k.length >= 1), {
-        message: "RUN_TOKEN_SECRET: comma-separated keys must be non-empty",
+      .min(1, "RUN_TOKEN_SECRET is required")
+      .refine((v) => v.split(",").every((k) => k.length >= 16), {
+        message: "RUN_TOKEN_SECRET: each comma-separated key must be at least 16 chars",
       }),
 
     // Social auth (optional — enables Google/GitHub sign-in when both are set)

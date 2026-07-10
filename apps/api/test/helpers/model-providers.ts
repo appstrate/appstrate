@@ -8,11 +8,13 @@
  *
  * The baseline has two layers:
  *
- *   1. Synthetic `test-oauth` + `test-oauth-hooks` providers — core
- *      integration tests for the OAuth flow (pairing, import, refresh,
- *      token resolver) seed against THESE providers, not any module's.
- *      The zero-footprint invariant requires that removing a module
- *      never breaks core tests.
+ *   1. Synthetic `test-oauth` + `test-oauth-hooks` + `test-apikey`
+ *      providers — core integration tests for the OAuth flow (pairing,
+ *      import, refresh, token resolver) seed against THESE providers, not
+ *      any module's. The zero-footprint invariant requires that removing a
+ *      module never breaks core tests. `test-apikey` is the only one a
+ *      `SYSTEM_PROVIDER_KEYS` fixture may bind: the registry rejects a
+ *      static system key on an `authMode: "oauth2"` provider at boot.
  *   2. Every discovered module's `modelProviders()` contribution —
  *      modules can layer their own definitions on top. Module-specific
  *      integration tests live in `<module>/test/integration/`.
@@ -30,6 +32,7 @@ import {
   resetModelProviders,
 } from "../../src/services/model-providers/registry.ts";
 import {
+  registerTestApiKeyProvider,
   registerTestOAuthHooksProvider,
   registerTestOAuthProvider,
   _resetTestOAuthProviderRegistration,
@@ -41,6 +44,7 @@ export function seedTestModelProviders(): void {
   _resetTestOAuthProviderRegistration();
   registerTestOAuthProvider();
   registerTestOAuthHooksProvider();
+  registerTestApiKeyProvider();
   // Module-contributed providers are registered with `baseUrlOverridable: true`
   // so the integration harness can point any provider at a mock endpoint
   // (`api.openai.test`, `api.anthropic.test`, …) without each test having to

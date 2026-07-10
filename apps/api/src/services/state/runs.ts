@@ -575,6 +575,20 @@ export async function updateRun(
   if (updates.metadata !== undefined) set.metadata = parseRunMetadata(updates.metadata);
   if (updates.sinkClosedAt !== undefined) set.sinkClosedAt = new Date(updates.sinkClosedAt);
 
+  // Monotone status invariant, enforced in the WHERE (not read-then-write):
+  // a run that reached a terminal status (success|failed|timeout|cancelled)
+  // can never be flipped back to an active one. Without this guard a late
+  // "flip to running" (e.g. event ingestion racing finalize) would resurrect
+  // a finished run. Terminal → terminal updates stay allowed; only updates
+  // that SET an active status are constrained to rows still active.
+  const extra: SQL[] = [eq(runs.id, id)];
+  if (
+    updates.status !== undefined &&
+    (activeRunStatusValues as readonly string[]).includes(updates.status)
+  ) {
+    extra.push(inArray(runs.status, [...activeRunStatusValues]));
+  }
+
   await executor
     .update(runs)
     .set(set)
@@ -582,7 +596,7 @@ export async function updateRun(
       scopedWhere(runs, {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
-        extra: [eq(runs.id, id)],
+        extra,
       }),
     );
 }
@@ -638,16 +652,55 @@ export async function recordRunDegradedIntegration(
  * avoids adding a redundant SUM here.
  *
  * One scalar SUM over the `(run_id)` index — cheap even on long runs.
+ *
+ * `orgId` is mandatory: `llm_usage.run_id` alone is caller-suppliable on the
+ * proxy path (`X-Run-Id`), so the aggregate must be structurally inseparable
+ * from the tenant — a ledger row whose `org_id` doesn't match the run's org
+ * must never inflate that run's cost (CRIT-07). The composite FK
+ * `(run_id, org_id) → runs(id, org_id)` enforces the same invariant at the
+ * DB level for new rows; this filter covers any pre-constraint legacy rows.
  */
-export async function computeRunCost(runId: string): Promise<number> {
+export async function computeRunCost(runId: string, orgId: string): Promise<number> {
   const [llm] = await db
     .select({
       total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
     })
     .from(llmUsage)
-    .where(eq(llmUsage.runId, runId));
+    .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, orgId)));
 
   return Number(llm?.total ?? 0);
+}
+
+/**
+ * Minimal org-scoped attribution row for validating a caller-supplied run
+ * reference (the llm-proxy `X-Run-Id` header) against the calling principal
+ * BEFORE any usage is recorded on it. Returns `null` for an unknown id and
+ * for a run outside `orgId` — the caller must treat both identically (404)
+ * so a foreign tenant's run id can't be probed for existence. Never use this
+ * for reads that return run data to a client.
+ */
+export async function getRunAttribution(
+  orgId: string,
+  runId: string,
+): Promise<{
+  id: string;
+  applicationId: string;
+  userId: string | null;
+  endUserId: string | null;
+  apiKeyId: string | null;
+} | null> {
+  const [row] = await db
+    .select({
+      id: runs.id,
+      applicationId: runs.applicationId,
+      userId: runs.userId,
+      endUserId: runs.endUserId,
+      apiKeyId: runs.apiKeyId,
+    })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))
+    .limit(1);
+  return row ?? null;
 }
 
 export type RecentRunsField = RunHistoryField;
@@ -672,9 +725,14 @@ export async function getRecentRuns(
     eq(runs.status, "success"),
   ];
   // Actor isolation is mandatory — never leak cross-actor checkpoints.
-  // Scheduled / system runs (`actor === null`) read the shared bucket only.
+  // Scheduled / system runs (`actor === null`) read the shared (actor-less)
+  // bucket only: the branch always pushes a predicate. Leaving the null
+  // branch predicate-less would read EVERY actor's successful runs for this
+  // (org, app, package) — cross-actor checkpoint leakage (CRIT-14).
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
+  } else {
+    conditions.push(isNull(runs.userId), isNull(runs.endUserId));
   }
 
   if (options.excludeRunId) {

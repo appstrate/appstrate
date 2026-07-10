@@ -62,6 +62,7 @@ const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6380";
 // Secrets + app config — required in every tier.
 process.env.BETTER_AUTH_SECRET = "test-secret-at-least-32-chars-long-for-hmac";
 process.env.UPLOAD_SIGNING_SECRET = "test-upload-signing-secret-at-least-16-chars";
+process.env.RUN_TOKEN_SECRET = "test-run-token-secret-at-least-16-chars";
 process.env.CONNECT_SESSION_SECRET = "test-connect-session-secret-at-least-16-chars";
 process.env.CONNECTION_ENCRYPTION_KEY = Buffer.from("0123456789abcdef0123456789abcdef").toString(
   "base64",

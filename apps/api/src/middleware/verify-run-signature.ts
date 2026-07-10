@@ -39,6 +39,10 @@ export const verifyRunSignature = createMiddleware<AppEnv>(async (c, next) => {
   const run = await getRunSinkContext(runId);
   if (!run) throw notFound(`run ${runId} not found`);
 
+  // Fast-path rejection on a SNAPSHOT — a concurrent finalize can still close
+  // the sink between this read and the handler's write. The authoritative
+  // gate is the ingestion CAS (`persistEventAndAdvance` includes
+  // `sink_closed_at IS NULL` in its WHERE) which surfaces the same 410.
   assertSinkOpen(run);
 
   // Raw body bytes — the HMAC signs the bytes, not a JSON re-serialisation.

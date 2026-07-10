@@ -27,12 +27,38 @@ import { orchestratorIsolatesWorkloads, isolatingOrchestratorIds } from "../orch
 import { isOAuthModelProvider } from "../model-providers/registry.ts";
 
 /**
+ * Thrown when a run resolves to an OAuth provider (`authMode: "oauth2"`) with
+ * NO stored credential id. That configuration is invalid, never a downgrade:
+ * an OAuth token can only be delivered via the sidecar bearer-swap keyed by a
+ * `model_provider_credentials` row — treating the run as an API-key run would
+ * put the RAW subscription token into `MODEL_API_KEY` inside the agent
+ * container (and, with no integrations/proxy, skip the sidecar entirely).
+ */
+export class OauthProviderMissingCredentialError extends Error {
+  constructor(public readonly providerId: string) {
+    super(
+      `Provider "${providerId}" declares authMode "oauth2" but the run resolved no stored ` +
+        `credential id. OAuth subscription tokens are delivered via the sidecar bearer-swap ` +
+        `against a stored model provider credential — they can never run as static API keys ` +
+        `(the raw token would leak into the agent container). Bind the model to a stored ` +
+        `OAuth credential; SYSTEM_PROVIDER_KEYS cannot carry OAuth providers.`,
+    );
+    this.name = "OauthProviderMissingCredentialError";
+  }
+}
+
+/**
  * Single resolver for "what kind of credential is this and how is it delivered".
  *
- * An oauth-class credential (one whose provider declares `authMode: "oauth2"`
- * AND that resolved to a stored credential id) has its bearer swapped
- * server-side by the sidecar `/llm` gateway. Everything else is a static
- * API-key provider whose placeholder is substituted for the real key inline.
+ * Classification is by the provider's declared `authMode` FIRST: any provider
+ * registered with `authMode: "oauth2"` is an oauth-class credential whose
+ * bearer is swapped server-side by the sidecar `/llm` gateway — regardless of
+ * whether a credential id happens to be present. An OAuth provider WITHOUT a
+ * stored credential id is an invalid configuration and throws
+ * {@link OauthProviderMissingCredentialError} (fail-closed — it must never be
+ * downgraded to API-key handling, which would hand the raw token to the agent
+ * container). Everything else is a static API-key provider whose placeholder
+ * is substituted for the real key inline.
  */
 export function resolveCredentialDelivery(params: {
   providerId: string;
@@ -43,7 +69,10 @@ export function resolveCredentialDelivery(params: {
   isOauthCredential: boolean;
 } {
   const { providerId, hasCredentialId } = params;
-  const isOauthCredential = hasCredentialId && isOAuthModelProvider(providerId);
+  const isOauthCredential = isOAuthModelProvider(providerId);
+  if (isOauthCredential && !hasCredentialId) {
+    throw new OauthProviderMissingCredentialError(providerId);
+  }
   return { isOauthCredential };
 }
 

@@ -15,7 +15,10 @@
  *   - System packages (`isSystemPackage`) are always reused, never
  *     overwritten.
  *   - Cross-org collisions (a package with the same id owned by another
- *     org) fail-fast with a 409.
+ *     org) fail-fast with a 409. This is ENFORCED inside `importBundle`,
+ *     atomically with the write (per-package transaction + advisory lock) —
+ *     the `detectBundleConflicts` preflight is a UX courtesy that reports
+ *     all conflicts at once, not the security boundary.
  *
  * This helper is transaction-aware insofar as each package is inserted
  * by `postInstallPackage` which uses `createVersionAndUpload` —
@@ -131,6 +134,11 @@ export interface BundleConflict {
  * Pre-flight check: does every (packageId, version) in the bundle match
  * what the DB currently knows? Runs ONLY reads — no writes. The caller
  * decides whether a non-empty result is a 409.
+ *
+ * UX-only: this preflight lets the caller report EVERY conflict in one
+ * response. It is NOT the enforcement point — `importBundle` re-checks
+ * ownership atomically with each write, so a package created between this
+ * read and the import still aborts with a 409 instead of being grafted.
  */
 export async function detectBundleConflicts(
   bundle: Bundle,
@@ -231,9 +239,11 @@ export interface ImportBundleResult {
 
 /**
  * Import every package in {@link bundle} into the org registry, then
- * install the root in the calling application. Conflict-free by
- * construction — the caller MUST have run {@link detectBundleConflicts}
- * first and rejected any non-empty result.
+ * install the root in the calling application. Callers SHOULD run
+ * {@link detectBundleConflicts} first for a complete conflict report, but
+ * correctness does not depend on it: ownership is re-checked here,
+ * atomically with each write, so a concurrent cross-org race resolves to a
+ * 409 instead of grafting a version onto another org's package row.
  */
 export async function importBundle(
   bundle: Bundle,
@@ -256,18 +266,28 @@ export async function importBundle(
       continue;
     }
 
-    // Reuse path — version already present. The caller MUST have called
-    // `detectBundleConflicts` first, so if a row exists here the content
-    // is guaranteed equivalent (RECORD integrity match). Skip the upload
-    // to avoid clobbering the storage ZIP with our reconstructed bytes
-    // (which use STORE + pinned mtime and therefore a different envelope
-    // SHA than the original publish).
+    // Reuse path — version already present. The preflight
+    // (`detectBundleConflicts`) verified content equivalence (RECORD
+    // integrity match). Skip the upload to avoid clobbering the storage ZIP
+    // with our reconstructed bytes (which use STORE + pinned mtime and
+    // therefore a different envelope SHA than the original publish).
+    //
+    // The owner is re-read HERE (join on `packages`), not trusted from the
+    // preflight: a foreign-org package+version created between the preflight
+    // and this read must be a 409, not a bogus "reused" success.
     const [existingVer] = await db
-      .select({ id: packageVersions.id })
+      .select({ id: packageVersions.id, ownerOrgId: packages.orgId })
       .from(packageVersions)
+      .innerJoin(packages, eq(packages.id, packageVersions.packageId))
       .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
       .limit(1);
     if (existingVer) {
+      if (existingVer.ownerOrgId !== scope.orgId) {
+        throw conflict(
+          "bundle_conflict",
+          `Bundle conflicts with existing packages: ${identity} is owned by another org`,
+        );
+      }
       imported.push({ identity, status: "reused", version_id: existingVer.id });
       continue;
     }
@@ -301,28 +321,64 @@ export async function importBundle(
       warnings.push(`${identity}: ${w}`);
     }
 
-    // Ensure a packages row exists before the version snapshot. If a
-    // row with the same id already exists owned by another org, leave
-    // it alone — the imported version becomes a parallel snapshot
-    // attached to that pre-existing package (safe because integrity
-    // matched OR the row is new). Don't clobber another org's draft.
-    // `.returning` tells us whether THIS call actually inserted the row
-    // (vs. hit the conflict) so a post-install failure only rolls back
-    // the orphan we created — never a pre-existing foreign-org row.
-    const insertedRows = await db
-      .insert(packages)
-      .values({
-        id: packageId,
-        orgId: scope.orgId,
-        type: parsedZip.type,
-        source: "local",
-        draftManifest: parsedZip.manifest,
-        draftContent: parsedZip.content,
-        createdBy: userId,
-      })
-      .onConflictDoNothing({ target: packages.id })
-      .returning({ id: packages.id });
-    const insertedThisRow = insertedRows.length > 0;
+    // Claim-or-validate the packages row ATOMICALLY, in ONE transaction,
+    // BEFORE any version row or storage byte is written. This closes the
+    // cross-tenant TOCTOU between `detectBundleConflicts` (a read-only
+    // preflight kept for UX — it reports ALL conflicts at once) and the
+    // write: two concurrent imports of the same id from different orgs both
+    // pass the preflight, but only one insert wins; the loser previously
+    // fell through and grafted its version + bytes onto the WINNER's row.
+    //
+    // Serialization per packageId uses the same advisory lock key as
+    // `createPackageVersion` (`pg_advisory_xact_lock(hashtext(id))`), so
+    // concurrent importers of one id are fully ordered through this claim
+    // section; the `FOR UPDATE` re-read additionally guards against a
+    // concurrent DELETE (the delete path does not take the advisory lock).
+    // The surviving row must be owned by the importing org — anything else
+    // (another org, or an orgId-null system-synced row) aborts with a 409.
+    //
+    // `insertedThisRow` tells us whether THIS call actually inserted the row
+    // (vs. reused a same-org survivor) so a post-install failure only rolls
+    // back the orphan we created — never a pre-existing row.
+    const insertedThisRow = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
+      const insertedRows = await tx
+        .insert(packages)
+        .values({
+          id: packageId,
+          orgId: scope.orgId,
+          type: parsedZip.type,
+          source: "local",
+          draftManifest: parsedZip.manifest,
+          draftContent: parsedZip.content,
+          createdBy: userId,
+        })
+        .onConflictDoNothing({ target: packages.id })
+        .returning({ id: packages.id });
+      if (insertedRows.length > 0) return true;
+
+      const [survivor] = await tx
+        .select({ orgId: packages.orgId })
+        .from(packages)
+        .where(eq(packages.id, packageId))
+        .for("update")
+        .limit(1);
+      if (!survivor) {
+        // Insert conflicted yet the row is gone — a concurrent delete won the
+        // race. Surface a retryable conflict rather than guessing.
+        throw conflict(
+          "bundle_conflict",
+          `Bundle conflicts with existing packages: ${identity} was concurrently deleted during import`,
+        );
+      }
+      if (survivor.orgId !== scope.orgId) {
+        throw conflict(
+          "bundle_conflict",
+          `Bundle conflicts with existing packages: ${identity} is owned by another org`,
+        );
+      }
+      return false;
+    });
 
     try {
       await postInstallPackage({

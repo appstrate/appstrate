@@ -123,6 +123,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedConnection(ctx);
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -144,6 +145,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedConnection(ctx);
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -165,6 +167,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedConnection(ctx);
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -204,6 +207,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedConnection(ctx);
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -225,6 +229,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedConnection(ctx);
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),

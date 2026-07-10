@@ -4,7 +4,8 @@
 /**
  * `guardedFetch` — the single outbound-request primitive for any path whose
  * host comes from a less-trusted input (manifest URLs, OAuth endpoints,
- * webhook targets, configurable model/proxy base URLs, MCP discovery).
+ * webhook targets, configurable model/proxy base URLs, MCP discovery,
+ * credential-proxy targets).
  *
  * Two SSRF guards historically coexisted in this codebase: the literal
  * `isBlockedUrl` (string-only, no DNS) and the DNS-rebind-safe
@@ -17,13 +18,23 @@
  *   (per-hop DNS resolution + blocklist), failing closed.
  * - Rejects non-http(s) schemes and strips userinfo/fragment from redirect
  *   targets (defeats `https://user:pass@…` credential-leak + fragment tricks).
+ * - CONNECTS TO THE VALIDATED ADDRESS: under Bun with the global `fetch`, each
+ *   hop's request goes to the `pinnedAddress` returned by the guard (URL host
+ *   rewritten to the resolved IP) while the logical `Host` header and the TLS
+ *   SNI + certificate identity (`tls.serverName`) are preserved. The OS never
+ *   re-resolves the name at connect time, so the classic check-then-fetch
+ *   DNS-rebind TOCTOU is closed, not merely narrowed.
  *
- * Residual: like the platform's other `fetch`-delegating guards, the OS
- * re-resolves the name when `fetch` actually connects, leaving a documented
- * narrow TOCTOU window. Consumers that own the socket (sidecar egress
- * listeners) pin `pinnedAddress` to fully close it; this primitive is for the
- * many `fetch`-based callers that cannot, and is strictly stronger than the
- * literal-only or unguarded status quo it replaces.
+ * The address pin falls back to a name-based connect (re-opening the
+ * documented, narrow re-resolve TOCTOU — still guarded per hop) in exactly
+ * these cases:
+ * - a caller-injected `fetchImpl` (the seam owns its own transport; Bun's
+ *   `tls`/URL-rewrite contract cannot be assumed),
+ * - a non-Bun runtime (no `fetch` `tls.serverName` extension to preserve SNI —
+ *   pinning without it would break certificate validation),
+ * - an operator-trusted host via `allowHost` (blocklist and resolution are
+ *   skipped by design, there is nothing to pin),
+ * - an IP-literal URL (already its own pin; nothing to rebind).
  *
  * Lives in the leaf `@appstrate/afps-shared` (re-exported by
  * `@appstrate/core/ssrf`) so the platform, sidecar, connect and the standalone
@@ -52,7 +63,8 @@ export interface GuardedFetchOptions {
    * (e.g. `login-engine`'s `ctx.fetchImpl`). Production omits it and the global
    * `fetch` is used. Routing an injected fetch THROUGH this primitive keeps the
    * per-hop DNS guard, cross-origin credential/body stripping and scheme checks
-   * that a bare `fetchImpl` call would lose.
+   * that a bare `fetchImpl` call would lose. NOTE: an injected fetch disables
+   * the address pin (see module doc) — the seam owns the connection.
    */
   fetchImpl?: typeof fetch;
   /**
@@ -63,11 +75,30 @@ export interface GuardedFetchOptions {
    * applies — so a trusted host that open-redirects cannot forward the secret.
    */
   allowHost?: (host: string) => boolean;
+  /**
+   * Set to `false` to disable connecting to the DNS-validated address and
+   * connect by name instead (per-hop guard still runs). Default: pin whenever
+   * the runtime supports it. The only known reason to disable is an egress
+   * HTTP proxy whose ACLs match on hostname rather than IP.
+   */
+  pinToResolvedAddress?: boolean;
   /** Structured logger for blocked/hop events. Values are never secrets. */
   logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void };
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Bun extends `fetch` with a per-request `tls` option (`serverName`,
+ * `checkServerIdentity`, …). The address pin depends on `tls.serverName` to
+ * keep SNI + certificate identity on the logical hostname while the TCP
+ * connection goes to the pinned IP — without it, pinning an https URL would
+ * fail certificate validation, so on other runtimes we fall back to a
+ * name-based connect. Verified against Bun 1.3.x: `tls.serverName` drives
+ * both the emitted SNI and the identity check (a mismatching serverName
+ * fails with ERR_TLS_CERT_ALTNAME_INVALID).
+ */
+const runtimeSupportsFetchTls = (globalThis as { Bun?: unknown }).Bun !== undefined;
 
 export class SsrfBlockedError extends Error {
   readonly reason: string;
@@ -94,8 +125,13 @@ function stripUserInfoAndFragment(url: URL): URL {
   return clean;
 }
 
-async function checkHost(url: URL, opts?: GuardedFetchOptions): Promise<void> {
-  if (opts?.allowHost?.(url.hostname)) return; // operator-trusted host — skip blocklist
+/**
+ * Run the per-hop host guard. Returns the address the hop MUST connect to,
+ * or `undefined` when there is nothing to pin (operator-trusted host).
+ * Throws {@link SsrfBlockedError} on a blocked host (fail closed).
+ */
+async function checkHost(url: URL, opts?: GuardedFetchOptions): Promise<string | undefined> {
+  if (opts?.allowHost?.(url.hostname)) return undefined; // operator-trusted host — skip blocklist
   const check = await resolveAndCheckHost(url.hostname, { resolve: opts?.resolve });
   if (check.blocked) {
     opts?.logger?.warn("guardedFetch blocked host", {
@@ -104,13 +140,15 @@ async function checkHost(url: URL, opts?: GuardedFetchOptions): Promise<void> {
     });
     throw new SsrfBlockedError(url.hostname, check.reason);
   }
+  return check.pinnedAddress;
 }
 
 /**
- * SSRF-guarded `fetch` with per-hop DNS re-checking. Signature-compatible with
- * `fetch` for the common `(url, init)` call shape. Manual redirect handling
- * means any `init.redirect` is ignored (always treated as "manual" internally);
- * the returned `Response` is the first non-3xx response.
+ * SSRF-guarded `fetch` with per-hop DNS re-checking and (under Bun) a real
+ * connection pin to the validated address. Signature-compatible with `fetch`
+ * for the common `(url, init)` call shape. Manual redirect handling means any
+ * `init.redirect` is ignored (always treated as "manual" internally); the
+ * returned `Response` is the first non-3xx response.
  */
 export async function guardedFetch(
   input: string | URL,
@@ -121,7 +159,7 @@ export async function guardedFetch(
 
   let current = stripUserInfoAndFragment(new URL(typeof input === "string" ? input : input.href));
   assertHttp(current);
-  await checkHost(current, opts);
+  let pinnedAddress = await checkHost(current, opts);
 
   // Apply a default deadline when the caller supplied no signal of its own, so
   // a single hostile hop cannot hang forever. A caller-provided signal takes
@@ -151,6 +189,17 @@ export async function guardedFetch(
   // forward the caller's `Authorization`/`Cookie` to a different origin — even
   // when that origin is a legitimate public host the SSRF host-check allows.
   const headers = new Headers(init?.headers ?? {});
+  // A caller-supplied Host header is honoured only on the first, unpinned hop
+  // (a virtual-host override for the URL the caller chose). On every later or
+  // pinned hop the logical URL owns the Host value.
+  const callerSetHost = headers.has("host");
+
+  // The address pin requires owning the socket semantics: Bun's `fetch` `tls`
+  // extension AND the global fetch (an injected transport seam cannot be
+  // assumed to honour either the URL rewrite or the tls option).
+  const pinningEnabled =
+    runtimeSupportsFetchTls && !opts?.fetchImpl && opts?.pinToResolvedAddress !== false;
+  const callerTls = (init as { tls?: Record<string, unknown> } | undefined)?.tls;
 
   // Drop the request body and the headers that describe it — used both for
   // the standard 303/301/302 → GET rewrite and for the cross-host secret
@@ -163,15 +212,39 @@ export async function guardedFetch(
 
   try {
     for (let hop = 0; hop <= maxRedirects; hop++) {
+      // Pin the hop: connect to the validated address, keep the logical
+      // hostname on the wire (`Host` header) and in the TLS handshake
+      // (`tls.serverName` → SNI + certificate identity). `current` stays the
+      // LOGICAL URL — redirect resolution and origin comparisons never see
+      // the pinned form.
+      const bareHost = current.hostname.replace(/^\[|\]$/g, "");
+      const pin = pinnedAddress;
+      const applyPin = pinningEnabled && pin !== undefined && pin !== bareHost;
+      let requestUrl = current;
+      let tlsOverride: Record<string, unknown> | undefined;
+      if (applyPin) {
+        requestUrl = new URL(current.toString());
+        requestUrl.hostname = pin.includes(":") ? `[${pin}]` : pin;
+        headers.set("host", current.host);
+        if (current.protocol === "https:") {
+          tlsOverride = { ...(callerTls ?? {}), serverName: current.hostname };
+        }
+      } else if (!(hop === 0 && callerSetHost)) {
+        // Unpinned hop: let the runtime derive Host from the URL — a Host
+        // value pinned for a previous hop must not leak onto this one.
+        headers.delete("host");
+      }
+
       const doFetch = opts?.fetchImpl ?? fetch;
-      const res = await doFetch(current, {
+      const res = await doFetch(requestUrl, {
         ...init,
         method,
         body,
         headers,
         signal,
         redirect: "manual",
-      });
+        ...(tlsOverride ? { tls: tlsOverride } : {}),
+      } as RequestInit);
 
       // `fetch` reports opaqueredirect / 3xx: follow manually so each hop is guarded.
       const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
@@ -184,7 +257,7 @@ export async function guardedFetch(
       const location = res.headers.get("location")!;
       const next = stripUserInfoAndFragment(new URL(location, current));
       assertHttp(next);
-      await checkHost(next, opts);
+      const nextPin = await checkHost(next, opts);
 
       if (next.origin !== current.origin) {
         for (const h of ["authorization", "cookie", "proxy-authorization"]) headers.delete(h);
@@ -218,6 +291,7 @@ export async function guardedFetch(
         dropBody();
       }
       current = next;
+      pinnedAddress = nextPin;
       // Drain the redirect response body so the connection can be reused.
       await res.body?.cancel().catch(() => {});
     }

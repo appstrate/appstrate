@@ -54,6 +54,7 @@ import {
 import {
   issuePendingClientCookie,
   clearPendingClientCookie,
+  headersWithAuthoritativePendingClient,
 } from "./services/pending-client-cookie.ts";
 import { isValidRedirectUri } from "./services/redirect-uri.ts";
 import { resolveBrandingForClient, PLATFORM_DEFAULT_BRANDING } from "./services/branding.ts";
@@ -74,7 +75,7 @@ import {
   SOCIAL_PROVIDER_IDS,
   type SocialProviderId,
 } from "./services/social.ts";
-import { isBlockedHost } from "@appstrate/core/ssrf";
+import { isBlockedHost, resolveAndCheckHost } from "@appstrate/core/ssrf";
 import { getOidcAuthApi } from "./auth/api.ts";
 import { withSmtpOverride } from "@appstrate/db/auth";
 import { getAppstrateScopes } from "./auth/scopes.ts";
@@ -643,7 +644,19 @@ export function createOidcRouter() {
       const data = await readJsonBody(c, smtpConfigUpsertSchema);
       // SSRF: block configurations that would make Appstrate bounce
       // email traffic off internal metadata endpoints / loopback relays.
+      // Literal floor — IP literals + known-internal hostnames.
       if (isBlockedHost(data.host)) {
+        throw invalidRequest("host resolves to a private/internal network", "host");
+      }
+      // Defense in depth: reject a public DNS name that RESOLVES to an internal
+      // address at write time too. This is best-effort early feedback — the
+      // authoritative, DNS-rebind-safe gate is the connect-time pin in
+      // `buildTransport` (services/smtp.ts). A transient/offline resolution
+      // failure is tolerated here (it does not prove the host is internal, and
+      // the send path fails closed regardless); only a positively-internal
+      // answer is rejected.
+      const hostCheck = await resolveAndCheckHost(data.host);
+      if (hostCheck.blocked && hostCheck.reason === "blocked-resolved") {
         throw invalidRequest("host resolves to a private/internal network", "host");
       }
       const saved = await upsertSmtpConfig(applicationId, data);
@@ -1198,6 +1211,18 @@ export function createOidcRouter() {
       // answer (per-app row for app-level clients, env SMTP for org/instance,
       // null when nothing is configured) and supersedes the boot-time
       // transport captured in `@appstrate/db/auth`.
+      // CRIT-15: bind the realm resolution + signup guard to the OAuth
+      // transaction the server actually validated (`ctx.client`), NOT to the
+      // browser-supplied `oidc_pending_client` cookie. `signUpEmail` triggers
+      // `databaseHooks.user.create.before`, where the realm resolver reads the
+      // pending client from these headers; a caller who strips or overwrites
+      // their own cookie could otherwise force an application flow to mint a
+      // full `platform`-realm user. Re-deriving the cookie here makes that
+      // impossible for the email-register create path.
+      const baHeaders = headersWithAuthoritativePendingClient(
+        c.req.raw.headers,
+        ctx.client.clientId,
+      );
       authResponse = (await withSmtpOverride(ctx.smtp, () =>
         authApi.signUpEmail({
           body: { email, password, name, callbackURL: verificationCallbackURL } as {
@@ -1205,7 +1230,7 @@ export function createOidcRouter() {
             password: string;
             name: string;
           },
-          headers: c.req.raw.headers,
+          headers: baHeaders,
           asResponse: true,
         }),
       )) as Response;

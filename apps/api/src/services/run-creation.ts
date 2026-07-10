@@ -157,6 +157,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   try {
     resolvedIntegrationVersions = await freezeRunSpawnDependencies({
       agent,
+      orgId,
       dependencyOverrides: input.dependencyOverrides ?? null,
       manifestCache,
     });

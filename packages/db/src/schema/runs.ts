@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   doublePrecision,
   check,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
@@ -268,6 +269,11 @@ export const runs = pgTable(
       .on(table.modelCredentialId)
       .where(sql`${table.modelCredentialId} IS NOT NULL`),
     index("idx_runs_org_id").on(table.orgId),
+    // Referenced target of the composite tenant-integrity FK on
+    // `llm_usage(run_id, org_id)` (CRIT-07): Postgres needs a unique index
+    // covering exactly these columns for the FK to attach. Trivially valid —
+    // `id` alone is the PK, so `(id, org_id)` can never collide.
+    uniqueIndex("uq_runs_id_org_id").on(table.id, table.orgId),
     // Reaper scans only active sinks — cheap partial index.
     index("idx_runs_sink_expires_at")
       .on(table.sinkExpiresAt)
@@ -493,6 +499,19 @@ export const llmUsage = pgTable(
     uniqueIndex("uq_llm_usage_runner_run_id")
       .on(table.runId)
       .where(sql`source = 'runner' AND run_id IS NOT NULL`),
+    // Tenant-integrity FK (CRIT-07): a ledger row's `run_id` is inseparable
+    // from its `org_id` — a row attributed to a run MUST carry that run's own
+    // org, so a caller-supplied run id can never bill spend onto another
+    // tenant's run. NULL `run_id` rows (un-attributed proxy calls) pass (MATCH
+    // SIMPLE). NOTE: created `NOT VALID` in migration 0019 (Drizzle cannot
+    // express NOT VALID) so existing rows are never scanned at apply time;
+    // enforcement applies to every INSERT/UPDATE from then on. Follow-up:
+    // audit legacy rows, then `ALTER TABLE ... VALIDATE CONSTRAINT`.
+    foreignKey({
+      name: "llm_usage_run_id_org_id_fk",
+      columns: [table.runId, table.orgId],
+      foreignColumns: [runs.id, runs.orgId],
+    }).onDelete("cascade"),
     // INSERT invariant: exactly one principal. After FK cleanup (api_key /
     // user deleted) both may become NULL — the row survives for audit /
     // billing retention, so we don't enforce "exactly one" forever.

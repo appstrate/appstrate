@@ -172,12 +172,17 @@ type PublishedManifestResolution =
  * empty pin resolves to the `"latest"` dist-tag. System packages short-circuit
  * to the in-memory boot registry (single version, served by id alone).
  *
- * Unscoped (no orgId filter) — callers already hold an auth context (run token
- * / service-internal call), matching {@link fetchMcpServerManifest}.
+ * Org-scoped: `orgId` is required and `orgOrSystemFilter` lands in the SQL
+ * WHERE of both the package lookup and the version lookup. Package ids are
+ * globally unique, so this is defense in depth against a cross-tenant
+ * REFERENCE — a run resolving a package id its org neither owns nor gets from
+ * the system registry must fail `not_found`, never feed the spawn path —
+ * rather than a collision fix (ids cannot collide across orgs).
  */
 async function resolvePublishedManifest(
   packageId: string,
   expectedType: "integration" | "mcp-server",
+  orgId: string,
   pin?: string | null,
 ): Promise<PublishedManifestResolution> {
   // System packages are loaded once at boot and served from the in-memory
@@ -192,7 +197,7 @@ async function resolvePublishedManifest(
   const [pkgRow] = await db
     .select({ type: packages.type })
     .from(packages)
-    .where(eq(packages.id, packageId))
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
     .limit(1);
   if (!pkgRow) return { ok: false, reason: "not_found" };
   if (pkgRow.type !== expectedType) return { ok: false, reason: "wrong_type" };
@@ -206,6 +211,13 @@ async function resolvePublishedManifest(
         manifest: packageVersions.manifest,
       })
       .from(packageVersions)
+      // Same tenant boundary on the version lookup itself (not just the
+      // package row above) so the two reads can never skew across a
+      // concurrent delete/recreate of the package id.
+      .innerJoin(
+        packages,
+        and(eq(packages.id, packageVersions.packageId), orgOrSystemFilter(orgId)),
+      )
       .where(eq(packageVersions.packageId, packageId))
       .orderBy(desc(packageVersions.createdAt)),
     db
@@ -263,12 +275,17 @@ export type McpServerResolution =
  * Resolve a referenced `mcp-server` package to a CONCRETE version, honoring the
  * `source.server.version` pin, and return that version's manifest. Thin wrapper
  * over {@link resolvePublishedManifest} + MCPB schema validation.
+ *
+ * `orgId` is the run's org — required so the spawn can only ever resolve a
+ * package the org owns or a system package (defense in depth against a
+ * cross-tenant reference).
  */
 export async function resolveMcpServerForSpawn(
   packageId: string,
+  orgId: string,
   pin?: string | null,
 ): Promise<McpServerResolution> {
-  const res = await resolvePublishedManifest(packageId, "mcp-server", pin);
+  const res = await resolvePublishedManifest(packageId, "mcp-server", orgId, pin);
   if (!res.ok) {
     const reason: McpServerResolveFailure =
       res.reason === "wrong_type" ? "not_mcp_server" : res.reason;
@@ -416,6 +433,12 @@ export type RunIntegrationVersionsResult =
  */
 export async function resolveRunIntegrationVersions(params: {
   agentManifest: Record<string, unknown>;
+  /**
+   * The run's org — required tenant boundary for published-version
+   * resolution (defense in depth against a cross-tenant reference): a run
+   * can only ever resolve a package its org owns or a system package.
+   */
+  orgId: string;
   dependencyOverrides?: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
 }): Promise<RunIntegrationVersionsResult> {
@@ -432,7 +455,7 @@ export async function resolveRunIntegrationVersions(params: {
     } else {
       // A non-draft override replaces the manifest pin; otherwise the pin wins.
       const spec = override ?? entry.version;
-      const res = await resolvePublishedManifest(entry.id, "integration", spec);
+      const res = await resolvePublishedManifest(entry.id, "integration", params.orgId, spec);
       if (res.ok) {
         descriptor =
           res.source === "system" ? { kind: "system" } : { kind: "version", version: res.version! };

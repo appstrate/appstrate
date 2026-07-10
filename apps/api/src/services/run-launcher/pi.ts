@@ -135,8 +135,12 @@ async function runPlatformContainerImpl(
   const { llmConfig } = plan;
 
   // Single source of truth for "what kind of credential is this and how is it
-  // delivered". An oauth-class credential is delivered via the sidecar `/llm`
-  // bearer-swap; everything else is a static API-key placeholder substitution.
+  // delivered". Classified by the provider's declared authMode: an oauth-class
+  // credential is delivered via the sidecar `/llm` bearer-swap; everything
+  // else is a static API-key placeholder substitution. Fail-closed: an OAuth
+  // provider that resolved WITHOUT a stored credential id throws here (invalid
+  // configuration — it must never downgrade to API-key handling, which would
+  // leak the raw token into the agent container and skip the sidecar).
   const delivery = resolveCredentialDelivery({
     providerId: llmConfig.providerId,
     hasCredentialId: !!llmConfig.credentialId,
@@ -229,11 +233,13 @@ async function runPlatformContainerImpl(
       : undefined;
 
     let sidecarLlm: LlmProxyConfig | undefined;
-    // M4 — pre-flight: an oauth run dereferences `credentialId` below. Assert it
-    // HERE (before any boundary/container is provisioned) so a missing credential
-    // fails fast with a clear message instead of the non-null `!` shipping
-    // `undefined`, which would otherwise surface as an opaque sidecar boot crash
-    // AFTER both containers were already launched.
+    // M4 — pre-flight: an oauth run dereferences `credentialId` below.
+    // `resolveCredentialDelivery` already rejects an oauth provider without a
+    // credential id, so this branch is normally unreachable — kept as the
+    // in-file assertion that keeps the non-null `!` below justified, and as a
+    // last belt so a future call-site regression fails fast with a clear
+    // message instead of shipping `undefined` into an opaque sidecar boot
+    // crash AFTER both containers were already launched.
     if (isOauthCredential && !llmConfig.credentialId) {
       throw new Error(
         `Run launcher: oauth-mode run for provider ` +

@@ -107,6 +107,7 @@ async function publishAndResolve(
     .limit(1);
 
   return resolveIntegrationSpawns({
+    orgId: ctx.orgId,
     applicationId: ctx.defaultAppId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: stored!.manifest as Record<string, unknown>,

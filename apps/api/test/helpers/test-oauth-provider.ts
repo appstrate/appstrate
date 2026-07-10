@@ -99,8 +99,31 @@ export function mintTestOAuthHooksToken(payload: { accountId?: string; email?: s
   return parts.join(";");
 }
 
+/**
+ * Synthetic API-key provider. `SYSTEM_PROVIDER_KEYS` entries may only bind
+ * providers whose `authMode` is `api-key` — the registry rejects an oauth2
+ * binding at boot, because a subscription bearer configured as a static key
+ * would be handed to the agent container verbatim. Registry tests that need a
+ * resolvable providerId for a static system key therefore seed against THIS
+ * provider, not `test-oauth`.
+ */
+export const TEST_API_KEY_PROVIDER_ID = "test-apikey";
+
+const testApiKeyProvider: ModelProviderDefinition = {
+  providerId: TEST_API_KEY_PROVIDER_ID,
+  displayName: "Test API Key Provider",
+  iconUrl: "openai",
+  description: "Synthetic static-API-key provider for core registry tests.",
+  apiShape: "openai-completions",
+  defaultBaseUrl: "https://example-apikey.test/v1",
+  baseUrlOverridable: true,
+  authMode: "api_key",
+  featuredModels: [],
+};
+
 let registered = false;
 let hooksRegistered = false;
+let apiKeyRegistered = false;
 
 /**
  * Idempotent — safe to call from `beforeEach` / `beforeAll`. The runtime
@@ -134,6 +157,13 @@ export function registerTestOAuthHooksProvider(): void {
   hooksRegistered = true;
 }
 
+/** Same as {@link registerTestOAuthProvider} for the static-API-key variant. */
+export function registerTestApiKeyProvider(): void {
+  if (apiKeyRegistered) return;
+  registerModelProvider(testApiKeyProvider);
+  apiKeyRegistered = true;
+}
+
 /**
  * Reset the registration flag — call from a `beforeEach` that also
  * calls `resetModelProviders()`, otherwise the next `register*` call
@@ -142,4 +172,5 @@ export function registerTestOAuthHooksProvider(): void {
 export function _resetTestOAuthProviderRegistration(): void {
   registered = false;
   hooksRegistered = false;
+  apiKeyRegistered = false;
 }

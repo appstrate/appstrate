@@ -170,6 +170,11 @@ export async function recordProxyUsage(inputs: RecordUsageInputs): Promise<void>
       orgId: inputs.principal.orgId,
       apiKeyId: inputs.principal.kind === "api_key" ? inputs.principal.apiKeyId : null,
       userId: inputs.principal.kind === "jwt_user" ? inputs.principal.userId : null,
+      // Attribution invariant: `runId` must reference a run in
+      // `principal.orgId` — the route validates the caller-supplied
+      // `X-Run-Id` before the upstream call (`assertRunAttributable`), and
+      // the composite FK `llm_usage(run_id, org_id) → runs(id, org_id)`
+      // enforces it structurally for every new row.
       runId: inputs.runId,
       model: inputs.presetId,
       realModel: inputs.resolved.modelId,

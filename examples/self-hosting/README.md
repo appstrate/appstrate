@@ -257,6 +257,7 @@ If you prefer to set up manually (or can't use the one-liner):
    # Generate secrets (run each command and paste the output into .env)
    openssl rand -hex 32      # BETTER_AUTH_SECRET
    openssl rand -hex 32      # RUN_TOKEN_SECRET
+   openssl rand -hex 32      # UPLOAD_SIGNING_SECRET
    openssl rand -base64 32   # CONNECTION_ENCRYPTION_KEY
    ```
 

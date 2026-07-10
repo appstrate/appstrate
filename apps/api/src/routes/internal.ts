@@ -273,10 +273,9 @@ export function createInternalRouter() {
   // Remote-origin runs execute on the customer's host with their own
   // model provider (e.g. local Claude Code subscription) — they have no
   // platform sidecar to consume these tokens, and `model_credential_id`
-  // is always NULL for that origin. Rejecting them up-front prevents a
-  // leaked remote run-token from being used to enumerate the org's
-  // OAuth credentials (the per-run pin check is bypassed when the
-  // pin is NULL).
+  // is always NULL for that origin. Rejecting them up-front is defense in
+  // depth: `assertOAuthModelCredential` already fails closed on a NULL
+  // pin, so no run without a pinned OAuth credential can read any token.
 
   router.get("/oauth-token/:credentialId", async (c) => {
     const { run } = await verifyRunToken(c);
@@ -533,9 +532,9 @@ export function createInternalRouter() {
  * Reject `/internal/oauth-token` traffic from remote-origin runs. They
  * execute on the customer's host with their own model provider and never
  * legitimately need a platform-stored OAuth token. The per-run pin
- * (`runs.model_credential_id`) is intentionally NULL for that origin,
- * which would otherwise let the run-token bearer enumerate every OAuth
- * credential in the org via `/internal/oauth-token/:credentialId`.
+ * (`runs.model_credential_id`) is intentionally NULL for that origin —
+ * `assertOAuthModelCredential` fails closed on a NULL pin, so this guard
+ * is defense in depth that also produces a clearer, origin-specific error.
  */
 function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void {
   if (runOrigin !== "platform") {
@@ -547,24 +546,34 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  * Verify a `model_provider_credentials` row exists and is reachable by
  * this run. Three layers of checks:
  *
- *   1. Per-run pinning: when `pinnedCredentialId` is set (platform-origin
- *      runs that resolved to an OAuth model), the requested credentialId
- *      MUST match. This prevents a leaked run token from enumerating any
- *      other OAuth credential the org might own.
+ *   1. Per-run pinning (fail-closed): only platform-origin runs that
+ *      resolved to an OAuth model carry a pin (`runs.model_credential_id`),
+ *      and the requested credentialId MUST equal it. A run with a NULL pin
+ *      (platform-origin API-key-model run) has NO legitimate reason to read
+ *      ANY OAuth credential, so it is rejected outright — a leaked run
+ *      token from such a run must not be able to enumerate the org's OAuth
+ *      credentials.
  *   2. Org-membership: the credential row exists and `orgId === runOrgId`.
  *   3. UUID well-formedness: malformed path params surface as 404 not 500.
  *
- * `pinnedCredentialId === null` is only reachable from platform-origin
- * runs that resolved to an API-key model (no OAuth credential to bind
- * against). Remote-origin runs (where the pin is structurally absent)
- * are rejected upstream by `assertPlatformOriginOAuthAccess`.
+ * Remote-origin runs (where the pin is structurally absent) are already
+ * rejected upstream by `assertPlatformOriginOAuthAccess`; the null-pin
+ * rejection here makes the surface fail-closed even without that guard.
  */
 async function assertOAuthModelCredential(
   credentialId: string,
   runOrgId: string,
   pinnedCredentialId: string | null,
 ): Promise<void> {
-  if (pinnedCredentialId !== null && pinnedCredentialId !== credentialId) {
+  // Fail closed: no pin ⇒ no OAuth credential access, ever. Narrowing the
+  // pin to a non-null string HERE (instead of an `!== null &&` short-circuit
+  // that silently skips the equality gate) means the lookup below can only
+  // ever be keyed by the run's own pinned credential.
+  if (pinnedCredentialId === null) {
+    throw forbidden("Run has no OAuth model provider credential pinned");
+  }
+  const pinned: string = pinnedCredentialId;
+  if (pinned !== credentialId) {
     throw forbidden(`Credential ${credentialId} not pinned to this run`);
   }
   let row: { orgId: string } | undefined;
@@ -572,7 +581,9 @@ async function assertOAuthModelCredential(
     [row] = await db
       .select({ orgId: modelProviderCredentials.orgId })
       .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, credentialId))
+      // Keyed by the (non-null) pin — equal to the requested credentialId by
+      // the gate above, so the run can only ever read its own credential.
+      .where(eq(modelProviderCredentials.id, pinned))
       .limit(1);
   } catch (err) {
     // PG `invalid_text_representation` (22P02) when the path param is not

@@ -6,6 +6,7 @@ import {
   assertOauthRunNotAliased,
   resolveCredentialDelivery,
   OauthAliasedModelUnsupportedError,
+  OauthProviderMissingCredentialError,
   OauthRunRequiresIsolationError,
   buildOauthSidecarLlm,
 } from "../../../src/services/run-launcher/subscription-run-policy.ts";
@@ -191,10 +192,13 @@ describe("resolveCredentialDelivery (oauth-class classification)", () => {
     ).toBe(false);
   });
 
-  it("is not oauth-class when no credential id is present (e.g. unconfigured)", () => {
-    expect(
-      resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: false })
-        .isOauthCredential,
-    ).toBe(false);
+  it("throws rather than downgrading an oauth provider that resolved no credential id", () => {
+    // Classification is by `authMode` FIRST. Treating a missing credential id
+    // as "not oauth-class" is what let the raw subscription bearer reach
+    // MODEL_API_KEY inside the agent container (skipSidecar requires
+    // !isOauthCredential). The invalid configuration must fail the run.
+    expect(() =>
+      resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: false }),
+    ).toThrow(OauthProviderMissingCredentialError);
   });
 });

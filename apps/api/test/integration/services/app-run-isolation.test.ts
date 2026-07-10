@@ -57,12 +57,36 @@ describe("Cross-app run isolation (service layer)", () => {
       const runsA = await getRecentRuns(
         { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         agentId,
-        null,
+        { type: "user", id: ctx.user.id },
       );
       expect(runsA).toHaveLength(1);
 
-      const runsB = await getRecentRuns({ orgId: ctx.orgId, applicationId: appBId }, agentId, null);
+      const runsB = await getRecentRuns({ orgId: ctx.orgId, applicationId: appBId }, agentId, {
+        type: "user",
+        id: ctx.user.id,
+      });
       expect(runsB).toHaveLength(1);
+    });
+
+    it("isolates the actor-less bucket from a user's runs", async () => {
+      // A null actor is the SHARED bucket (user_id IS NULL AND end_user_id IS
+      // NULL), never "any actor" — otherwise an actor-less run would read a
+      // member's private result/checkpoint out of its own history.
+      await seedRun({
+        packageId: agentId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        startedAt: new Date("2025-01-01"),
+      });
+
+      const shared = await getRecentRuns(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        agentId,
+        null,
+      );
+      expect(shared).toHaveLength(0);
     });
   });
 
@@ -128,7 +152,10 @@ describe("Cross-app run isolation (service layer)", () => {
       expect(deleted).toBe(1);
 
       // AppB run should survive
-      const runsB = await getRecentRuns({ orgId: ctx.orgId, applicationId: appBId }, agentId, null);
+      const runsB = await getRecentRuns({ orgId: ctx.orgId, applicationId: appBId }, agentId, {
+        type: "user",
+        id: ctx.user.id,
+      });
       expect(runsB).toHaveLength(1);
     });
   });

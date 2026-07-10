@@ -76,6 +76,12 @@ import {
 } from "./integration-manifest-helpers.ts";
 
 export interface ResolveIntegrationsInput {
+  /**
+   * The run's org — required tenant boundary for package resolution
+   * (defense in depth against a cross-tenant reference): a spawn may only
+   * resolve packages the org owns or system packages.
+   */
+  orgId: string;
   applicationId: string;
   /** The actor whose connections to lookup — `null` skips integration resolution entirely. */
   actor: Actor | null;
@@ -112,7 +118,7 @@ export interface ResolveIntegrationsInput {
 export async function resolveIntegrationSpawns(
   input: ResolveIntegrationsInput,
 ): Promise<IntegrationSpawnSpec[]> {
-  const { applicationId, actor, agentManifest, resolvedConnections } = input;
+  const { orgId, applicationId, actor, agentManifest, resolvedConnections } = input;
   // No actor → no actor-scoped connections to resolve. Scheduled runs are
   // fail-fasted upstream when actor-less + integrations are declared (#735,
   // scheduler.ts `scheduleCannotResolveIntegrations`); request-triggered runs
@@ -132,6 +138,7 @@ export async function resolveIntegrationSpawns(
       try {
         return await resolveOne(
           entry.id,
+          orgId,
           applicationId,
           actor,
           entry.tools,
@@ -161,6 +168,7 @@ export async function resolveIntegrationSpawns(
 
 async function resolveOne(
   integrationId: string,
+  orgId: string,
   applicationId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | "*" | undefined,
@@ -344,7 +352,7 @@ async function resolveOne(
     // draft overwrite (issue #588). An unsatisfiable pin / missing published
     // version skips the integration LOUDLY rather than silently falling back to
     // whatever bytes happen to be latest.
-    const resolution = await resolveMcpServerForSpawn(ref.name, ref.version);
+    const resolution = await resolveMcpServerForSpawn(ref.name, orgId, ref.version);
     if (!resolution.ok) {
       // A real `source.server.version` pin that cannot be met (unsatisfiable
       // range / never-published) fails the run LOUDLY (#686) — a pinned run

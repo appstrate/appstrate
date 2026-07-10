@@ -1822,7 +1822,7 @@ export interface paths {
         };
         /**
          * List the caller's connections across every org/app
-         * @description Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. Crosses orgs/applications by design — does NOT require `X-Org-Id`.
+         * @description Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For interactive user credentials (cookie session, dashboard/instance JWT) it crosses orgs/applications by design — does NOT require `X-Org-Id`. For an API key the list is scoped to the key's bound organization and application only.
          */
         get: operations["listMyConnections"];
         put?: never;
@@ -1845,7 +1845,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one of the caller's own connections (destructive)
-         * @description Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`).
+         * @description Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With an API key, only connections inside the key's bound organization and application can be deleted (204 with no effect otherwise).
          */
         delete: operations["deleteMyConnection"];
         options?: never;
@@ -3620,7 +3620,7 @@ export interface paths {
         };
         /**
          * SSE: agent run changes
-         * @description Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter.
+         * @description Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.
          *
          *     Event types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.
          *
@@ -3644,7 +3644,7 @@ export interface paths {
         };
         /**
          * SSE: all run status changes
-         * @description Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.
+         * @description Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.
          *
          *     Event format: `event: run_update\ndata: {"id":"run_...","status":"running","packageId":"@scope/name",...}\n\n`
          *
@@ -3670,7 +3670,7 @@ export interface paths {
         };
         /**
          * SSE: single run events
-         * @description Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.
+         * @description Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.
          *
          *     Event types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.
          *
@@ -17211,6 +17211,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     streamAllRuns: {
@@ -17241,6 +17242,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     streamRun: {
@@ -17273,6 +17275,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listRuns: {

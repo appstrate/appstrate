@@ -261,15 +261,28 @@ async function loadActorConnection(
  * by the spawn resolver to decrypt the connection chosen by the cascade
  * (admin pin / overrides / member pin / auto fallback) and return its
  * authKey for downstream delivery selection.
+ *
+ * SECURITY — `integrationId` is a REQUIRED filter: a connection id is
+ * caller-supplied on some paths (`X-Connection-Id` on the credential
+ * proxy), so without the integration binding a caller could pin
+ * integration B's connection while requesting integration A and have
+ * B's credentials injected under A's manifest + `authorized_uris`
+ * allowlist. The id must resolve to a row of the REQUESTED integration
+ * or not resolve at all. `expectedAuthKey` narrows further when the
+ * caller has pinned a specific auth (AFPS §4.1 `auth_key`); pass `null`
+ * when the connection's own authKey is authoritative.
  */
 async function loadAccessibleConnectionById(
   connectionId: string,
+  integrationId: string,
+  expectedAuthKey: string | null,
   context: { applicationId: string; actor: Actor },
 ): Promise<ResolvedConnectionRow | null> {
   const ownerPredicate = actorFilter(context.actor, integrationConnections);
   const [row] = await db
     .select({
       id: integrationConnections.id,
+      integrationId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
       expiresAt: integrationConnections.expiresAt,
@@ -280,12 +293,30 @@ async function loadAccessibleConnectionById(
     .where(
       and(
         eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.integrationId, integrationId),
+        ...(expectedAuthKey !== null ? [eq(integrationConnections.authKey, expectedAuthKey)] : []),
         eq(integrationConnections.applicationId, context.applicationId),
         or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
       ),
     )
     .limit(1);
-  return row ?? null;
+  if (!row) return null;
+
+  // Defence in depth: re-assert the binding on the loaded row before any
+  // caller decrypts it. The WHERE clause above already guarantees this —
+  // a mismatch here means the query drifted, so fail closed rather than
+  // hand integration B's credentials to integration A's delivery plan.
+  if (
+    row.integrationId !== integrationId ||
+    (expectedAuthKey !== null && row.authKey !== expectedAuthKey)
+  ) {
+    throw forbidden(
+      `Connection '${connectionId}' does not belong to integration '${integrationId}'` +
+        (expectedAuthKey !== null ? ` auth '${expectedAuthKey}'` : ""),
+    );
+  }
+  const { integrationId: _integrationId, ...resolved } = row;
+  return resolved;
 }
 
 /**
@@ -323,6 +354,12 @@ async function pickAnyAccessibleConnection(
  * back to the auto-pick. Shared by the spawn resolver (boot) and the live
  * credentials resolver (runtime) so the two paths can never diverge on
  * connection selection.
+ *
+ * Both branches are bound to `packageId`: the by-id branch filters on
+ * `integrationId` (and `requiredAuthKey` when set) so a pinned/overridden
+ * connection id belonging to a DIFFERENT integration never resolves —
+ * it returns `null` (or fails closed) instead of decrypting foreign
+ * credentials under this integration's manifest.
  */
 export async function selectAccessibleConnection(
   packageId: string,
@@ -331,7 +368,12 @@ export async function selectAccessibleConnection(
   context: { applicationId: string; actor: Actor; requiredAuthKey?: string },
 ): Promise<ResolvedConnectionRow | null> {
   return snapshotConnectionId
-    ? loadAccessibleConnectionById(snapshotConnectionId, context)
+    ? loadAccessibleConnectionById(
+        snapshotConnectionId,
+        packageId,
+        context.requiredAuthKey ?? null,
+        context,
+      )
     : pickAnyAccessibleConnection(packageId, declaredAuthKeys, context);
 }
 

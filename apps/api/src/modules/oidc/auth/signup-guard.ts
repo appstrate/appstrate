@@ -35,6 +35,18 @@
  *
  * Safe fallthrough: the guard is a no-op when no cookie is present, its
  * signature is invalid/expired, or the client is unknown / disabled.
+ *
+ * Transaction binding (CRIT-15): on the server-driven `POST
+ * /api/oauth/register` path the platform hands Better Auth an AUTHORITATIVE
+ * pending-client cookie re-derived from the validated `authorize` query
+ * (`headersWithAuthoritativePendingClient`), so both this guard and the realm
+ * resolver read the client the server authorized rather than a browser cookie
+ * the caller could strip to slip past a closed `allowSignup` policy — or to
+ * force an application flow into the `platform` realm. The social-callback and
+ * magic-link *verify* legs are driven by Better Auth directly and still read
+ * the browser cookie; the realm resolver fails closed on an inconsistent
+ * cookie there, but a fully transaction-bound fix for those legs needs the
+ * `RealmResolver`/hook signature to carry the request's OAuth `state`.
  */
 
 import { APIError } from "better-auth/api";

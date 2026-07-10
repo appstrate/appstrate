@@ -38,16 +38,77 @@ describe("guardedFetch — SSRF", () => {
     await expect(guardedFetch("file:///etc/passwd")).rejects.toBeInstanceOf(SsrfBlockedError);
   });
 
-  it("allows a public host and returns the response", async () => {
-    globalThis.fetch = (async (input: string | URL | Request) => {
+  it("allows a public host and pins the connection to the validated address", async () => {
+    let seenHost: string | null = null;
+    let seenTls: unknown;
+    globalThis.fetch = (async (input: string | URL | Request, reqInit?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      seenHost = new Headers(reqInit?.headers ?? {}).get("host");
+      seenTls = (reqInit as { tls?: unknown } | undefined)?.tls;
       return new Response(`ok:${url}`, { status: 200 });
     }) as unknown as typeof fetch;
     const res = await guardedFetch("https://public.example/data", undefined, {
       resolve: resolverFor({ "public.example": ["203.0.113.5"] }),
     });
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain("public.example");
+    // The wire connection goes to the DNS-validated address (TOCTOU closed) …
+    expect(await res.text()).toContain("203.0.113.5");
+    // … while the logical hostname is preserved on the wire (Host) and in the
+    // TLS handshake (SNI + certificate identity via serverName).
+    expect(seenHost as string | null).toBe("public.example");
+    expect(seenTls as { serverName?: string } | undefined).toEqual({
+      serverName: "public.example",
+    });
+  });
+
+  it("does not pin when a fetchImpl transport seam is injected", async () => {
+    let seenUrl = "";
+    const fetchImpl = (async (input: string | URL | Request) => {
+      seenUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+    const res = await guardedFetch("https://public.example/data", undefined, {
+      fetchImpl,
+      resolve: resolverFor({ "public.example": ["203.0.113.5"] }),
+    });
+    expect(res.status).toBe(200);
+    expect(seenUrl).toContain("public.example");
+  });
+
+  it("does not pin when pinToResolvedAddress is false", async () => {
+    let seenUrl = "";
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      seenUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+    await guardedFetch("https://public.example/data", undefined, {
+      pinToResolvedAddress: false,
+      resolve: resolverFor({ "public.example": ["203.0.113.5"] }),
+    });
+    expect(seenUrl).toContain("public.example");
+  });
+
+  it("re-pins each redirect hop to that hop's validated address", async () => {
+    const seen: Array<{ url: string; host: string | null }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, reqInit?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      seen.push({ url, host: new Headers(reqInit?.headers ?? {}).get("host") });
+      if (seen.length === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://second.example/final" },
+        });
+      }
+      return new Response("done", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await guardedFetch("https://first.example/start", undefined, {
+      resolve: resolverFor({ "first.example": ["203.0.113.1"], "second.example": ["203.0.113.2"] }),
+    });
+    expect(seen[0]!.url).toContain("203.0.113.1");
+    expect(seen[0]!.host).toBe("first.example");
+    expect(seen[1]!.url).toContain("203.0.113.2");
+    expect(seen[1]!.host).toBe("second.example");
   });
 
   it("re-checks each redirect hop and blocks a redirect to an internal host", async () => {

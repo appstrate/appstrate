@@ -417,9 +417,10 @@ describe("Internal API", () => {
   });
   // ─── GET /internal/oauth-token/:credentialId ───────────
   //
-  // The path param is a `model_provider_credentials.id`. These tests pin
-  // that contract so the bug that shipped pre-fix (validation against
-  // `userProviderConnections.id`, always 404) cannot reappear.
+  // The path param is a `model_provider_credentials.id`, and it MUST equal the
+  // run's own `modelCredentialId` pin. These tests pin two contracts: the old
+  // bug (validation against `userProviderConnections.id`, always 404) cannot
+  // reappear, and a run with no pin can never vend a sibling credential.
 
   describe("GET /internal/oauth-token/:credentialId", () => {
     async function seedOAuthCredential(orgId: string): Promise<string> {
@@ -427,28 +428,30 @@ describe("Internal API", () => {
       return row.id;
     }
 
+    /** A running run pinned to `credentialId`, plus its signed bearer. */
+    async function seedPinnedRun(credentialId: string): Promise<string> {
+      const run = await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+        modelCredentialId: credentialId,
+      });
+      return signRunToken(run.id);
+    }
+
     it("returns 401 without a run token", async () => {
       const res = await app.request("/internal/oauth-token/some-id");
       expect(res.status).toBe(401);
     });
 
-    it("returns 404 when the credentialId does not exist", async () => {
-      const res = await app.request("/internal/oauth-token/00000000-0000-0000-0000-000000000000", {
-        headers: { Authorization: `Bearer ${runningToken}` },
-      });
-      expect(res.status).toBe(404);
-    });
-
-    it("returns 404 (not 500) when the credentialId is not a valid UUID", async () => {
-      const res = await app.request("/internal/oauth-token/not-a-uuid", {
-        headers: { Authorization: `Bearer ${runningToken}` },
-      });
-      expect(res.status).toBe(404);
-    });
-
-    it("returns 403 when the credential belongs to another org", async () => {
-      const otherOrg = await createTestContext({ orgSlug: "otherorg" });
-      const credentialId = await seedOAuthCredential(otherOrg.orgId);
+    // CRIT-06 regression. `runningToken` belongs to a run with NO pinned
+    // credential (the platform-origin API-key-model shape). Before the fix the
+    // equality gate was skipped for a null pin, so a leaked run bearer could
+    // read or refresh ANY OAuth credential in the org.
+    it("returns 403 when the run has no pinned credential, even for a same-org credential", async () => {
+      const credentialId = await seedOAuthCredential(ctx.orgId);
 
       const res = await app.request(`/internal/oauth-token/${credentialId}`, {
         headers: { Authorization: `Bearer ${runningToken}` },
@@ -456,11 +459,58 @@ describe("Internal API", () => {
       expect(res.status).toBe(403);
     });
 
-    it("returns 200 with a resolved token when the credential matches the run org", async () => {
+    it("returns 403 on POST /refresh when the run has no pinned credential", async () => {
       const credentialId = await seedOAuthCredential(ctx.orgId);
 
-      const res = await app.request(`/internal/oauth-token/${credentialId}`, {
+      const res = await app.request(`/internal/oauth-token/${credentialId}/refresh`, {
+        method: "POST",
         headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 403 when the requested credential is not the run's pin", async () => {
+      const pinned = await seedOAuthCredential(ctx.orgId);
+      const sibling = await seedOAuthCredential(ctx.orgId);
+      const token = await seedPinnedRun(pinned);
+
+      const res = await app.request(`/internal/oauth-token/${sibling}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 403 (not 500) when the credentialId is not a valid UUID", async () => {
+      // The equality gate rejects before the row lookup, so a malformed param
+      // can no longer reach the driver and surface a 22P02 as a 500.
+      const pinned = await seedOAuthCredential(ctx.orgId);
+      const token = await seedPinnedRun(pinned);
+
+      const res = await app.request("/internal/oauth-token/not-a-uuid", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 403 when the pinned credential belongs to another org", async () => {
+      const otherOrg = await createTestContext({ orgSlug: "otherorg" });
+      const credentialId = await seedOAuthCredential(otherOrg.orgId);
+      // Pin the run to the foreign credential so the equality gate passes and
+      // the org-membership check is the assertion actually under test.
+      const token = await seedPinnedRun(credentialId);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 200 with a resolved token when the credential matches the run pin and org", async () => {
+      const credentialId = await seedOAuthCredential(ctx.orgId);
+      const token = await seedPinnedRun(credentialId);
+
+      const res = await app.request(`/internal/oauth-token/${credentialId}`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
       // The response wire shape (OAuthTokenResponse) deliberately omits
@@ -477,12 +527,14 @@ describe("Internal API", () => {
         apiKey: "sk-test",
         providerId: "anthropic",
       });
+      const token = await seedPinnedRun(apiKeyRow.id);
 
       const res = await app.request(`/internal/oauth-token/${apiKeyRow.id}`, {
-        headers: { Authorization: `Bearer ${runningToken}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
-      // assertOAuthModelCredential passes (orgId matches); resolveOAuthTokenForSidecar
-      // throws notFound because the provider isn't OAuth-enabled.
+      // assertOAuthModelCredential passes (pin + orgId match);
+      // resolveOAuthTokenForSidecar throws notFound because the provider
+      // isn't OAuth-enabled.
       expect(res.status).toBe(404);
     });
 

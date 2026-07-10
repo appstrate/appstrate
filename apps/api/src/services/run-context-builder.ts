@@ -131,6 +131,7 @@ export async function buildRunContext(params: {
   // reads the version from `dependencies.integrations[id]` (§4.1) and the
   // tool/scope selection from `integrations_configuration[id]` (§4.4).
   const integrationSpawnsPromise = resolveIntegrationSpawns({
+    orgId,
     applicationId,
     actor,
     agentManifest: agent.manifest as Record<string, unknown>,

@@ -49,10 +49,7 @@ const COOKIE_MAX_AGE = 10 * 60; // 10 minutes
  * overwrite by (name, path, domain)).
  */
 export function issuePendingClientCookie(c: Context<AppEnv>, clientId: string): void {
-  const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
-  const payload = `${clientId}.${exp}`;
-  const sig = signAuthHmac(payload);
-  const value = `${payload}.${sig}`;
+  const value = buildSignedPendingClientValue(clientId);
   const env = getEnv();
   const secure = env.APP_URL.startsWith("https://");
   if (!secure && process.env.NODE_ENV === "production" && !insecureCookieWarned) {
@@ -92,6 +89,60 @@ export function readPendingClientCookieFromHeaders(headers: Headers | null): str
 /** Remove the cookie. Called after a successful login/register POST. */
 export function clearPendingClientCookie(c: Context<AppEnv>): void {
   deleteCookie(c, COOKIE_NAME, { path: "/" });
+}
+
+/**
+ * Build the signed cookie value (`<clientId>.<exp>.<sig>`) — the exact string
+ * `issuePendingClientCookie` writes to `Set-Cookie`. Exposed so the
+ * server-driven OIDC handlers can mint an AUTHORITATIVE binding to feed into a
+ * Better-Auth call (see `headersWithAuthoritativePendingClient`) instead of
+ * trusting the browser-supplied cookie.
+ */
+export function buildSignedPendingClientValue(clientId: string): string {
+  const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
+  const payload = `${clientId}.${exp}`;
+  const sig = signAuthHmac(payload);
+  return `${payload}.${sig}`;
+}
+
+/**
+ * Return a clone of `source` whose `Cookie` header carries an authoritative
+ * `oidc_pending_client` binding for `clientId`, replacing any value the browser
+ * sent.
+ *
+ * WHY (CRIT-15): on the server-driven signup paths (`POST /api/oauth/register`,
+ * magic-link request) the platform calls Better Auth in-process and forwards
+ * `c.req.raw.headers`. The realm resolver + signup guard then read the pending
+ * client from THOSE headers. If they read the raw browser cookie, the caller —
+ * who fully controls their own request — can simply STRIP or overwrite the
+ * cookie (or race a second tab that clobbers the single global cookie) so the
+ * resolver sees "no pending client" and mints a full `platform`-realm user for
+ * what is really an application (`end_user:<appId>`) flow. That user then
+ * passes `requirePlatformRealm` on every platform route.
+ *
+ * By re-deriving the binding from the `client_id` that was already validated
+ * out of the OAuth `authorize` query (`ctx.client`), the realm is pinned to the
+ * transaction the server actually authorized, not to an ambient, forgeable
+ * cookie. All other cookies on the request (the BA session, CSRF, …) are
+ * preserved untouched.
+ *
+ * The value is percent-encoded to match what a browser round-trips through
+ * `Set-Cookie` → `Cookie`, so the out-of-band reader (`parseCookieHeader`,
+ * which `decodeURIComponent`s) recovers the identical signed string.
+ */
+export function headersWithAuthoritativePendingClient(source: Headers, clientId: string): Headers {
+  const headers = new Headers(source);
+  const encoded = encodeURIComponent(buildSignedPendingClientValue(clientId));
+  const existing = headers.get("cookie");
+  const others = existing
+    ? existing
+        .split(";")
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0 && !p.startsWith(`${COOKIE_NAME}=`))
+    : [];
+  others.push(`${COOKIE_NAME}=${encoded}`);
+  headers.set("cookie", others.join("; "));
+  return headers;
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────────

@@ -13,11 +13,13 @@ import {
   packages,
   orgInvitations,
   notifications,
+  schedules,
 } from "@appstrate/db/schema";
 import { and, eq, inArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { orgRunConcurrencyLockKey } from "./state/runs.ts";
+import { removeScheduleJobs } from "./scheduler.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -237,13 +239,17 @@ export async function addMember(
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {
-  // One transaction: the member row and the member's notifications are removed
-  // atomically. The member's runs stay in the org for history, so their
-  // notifications are not cascaded away — and since notifications carry the
-  // recipient as a polymorphic (recipientType, recipientId) tuple with NO
-  // foreign key, nothing else would clean them up (org/application FK cascades
-  // only fire on org/app deletion). A throw inside rolls both back.
-  await db.transaction(async (tx) => {
+  // One transaction: the member row, the member's notifications, AND the
+  // member's schedules in this org are handled atomically. The member's runs
+  // stay in the org for history, so their notifications are not cascaded away
+  // — and since notifications carry the recipient as a polymorphic
+  // (recipientType, recipientId) tuple with NO foreign key, nothing else would
+  // clean them up (org/application FK cascades only fire on org/app deletion).
+  // Schedules similarly only cascade on user-ACCOUNT or org deletion, and a
+  // removed member's user row survives (multi-org) — without the disable here
+  // their schedules would keep firing under the revoked identity (CRIT-13).
+  // A throw inside rolls everything back.
+  const disabledScheduleIds = await db.transaction(async (tx) => {
     const deleted = await tx
       .delete(organizationMembers)
       .where(
@@ -267,7 +273,24 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
           eq(notifications.recipientId, userId),
         ),
       );
+
+    // Disable (not delete — the row is org history) every schedule the
+    // removed member owns as its execution actor in THIS org.
+    const disabled = await tx
+      .update(schedules)
+      .set({ enabled: false, nextRunAt: null, updatedAt: new Date() })
+      .where(
+        and(eq(schedules.orgId, orgId), eq(schedules.userId, userId), eq(schedules.enabled, true)),
+      )
+      .returning({ id: schedules.id });
+    return disabled.map((row) => row.id);
   });
+
+  // Queue removal can't join the DB transaction; run it after commit,
+  // best-effort (errors logged inside). The fire-time actor revalidation in
+  // the scheduler is the backstop for any repeatable job that survives a
+  // crash between the commit and this call.
+  await removeScheduleJobs(disabledScheduleIds);
 }
 
 export async function updateMemberRole(

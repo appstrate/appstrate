@@ -129,6 +129,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
     );
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -155,6 +156,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
     );
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -179,6 +181,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
     );
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -202,6 +205,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
     );
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -226,6 +230,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
     );
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),

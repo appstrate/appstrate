@@ -253,7 +253,15 @@ export function createApplicationsRouter() {
       const data = await readJsonBody(c, updatePackageSchema);
 
       const { version_id, ...rest } = data;
-      await updateInstalledPackage(scope, packageId, { ...rest, versionId: version_id });
+      // `requireInstalled` — this route updates an EXISTING association; a
+      // packageId that is not installed (or not visible to the org) is a 404,
+      // never an implicit install via upsert.
+      await updateInstalledPackage(
+        scope,
+        packageId,
+        { ...rest, versionId: version_id },
+        { requireInstalled: true },
+      );
       const updated = await getInstalledPackage(scope, packageId);
       return c.json({ object: "application_package", ...updated });
     },
@@ -281,8 +289,9 @@ export function createApplicationsRouter() {
     requirePermission("agents", "read"),
     async (c) => {
       const applicationId = c.req.param("applicationId")!;
+      const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      const resolved = await getResolvedRunConfig(applicationId, packageId);
+      const resolved = await getResolvedRunConfig({ orgId, applicationId }, packageId);
       if (!resolved) {
         throw new ApiError({
           status: 404,

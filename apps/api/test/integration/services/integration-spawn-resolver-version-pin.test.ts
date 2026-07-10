@@ -108,6 +108,7 @@ async function seedServerVersion(version: string, entryPoint: string) {
 
 async function resolve(ctx: TestContext) {
   return resolveIntegrationSpawns({
+    orgId: ctx.orgId,
     applicationId: ctx.defaultAppId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(),

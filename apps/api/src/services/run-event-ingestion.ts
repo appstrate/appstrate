@@ -22,7 +22,7 @@
  * design.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, TERMINAL_RUN_EVENT_TYPES, type RunResultPayload } from "@appstrate/db/schema";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
@@ -50,6 +50,7 @@ import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
+import { gone } from "@appstrate/core/api-errors";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
 import { deleteRunWorkspace } from "./run-workspace-storage.ts";
 import { runResultSchema } from "../lib/jsonb-schemas.ts";
@@ -234,7 +235,15 @@ async function ingestInner(
 
   // 2. Fast path: contiguous sequence.
   if (sequence === run.lastEventSequence + 1) {
-    await persistEventAndAdvance(run, event, sequence);
+    const outcome = await persistEventAndAdvance(run, event, sequence);
+    if (outcome === "sink_closed") {
+      // The middleware's `assertSinkOpen` snapshot passed but finalize won
+      // the race before the CAS committed. Surface the same 410 wire code
+      // the snapshot check uses — distinct from a sequence lost-race (which
+      // stays an idempotent 200) so runner retry semantics stay correct:
+      // 410 means "stop sending", not "resend".
+      throw gone("run_sink_closed", `run ${run.id} sink was closed while the event was in flight`);
+    }
     await drainBufferedEvents(run);
     return { status: "persisted", sequence };
   }
@@ -461,7 +470,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     });
   }
 
-  const cost = await computeRunCost(run.id);
+  const cost = await computeRunCost(run.id, run.orgId);
   const now = new Date();
   const packageEphemeral = isInlineShadowPackageId(run.packageId);
   // Wall-clock duration as the authoritative value. Runners (PiRunner,
@@ -904,12 +913,24 @@ function envelopeToRunEvent(envelope: CloudEventEnvelope, runId: string): RunEve
   } as RunEvent;
 }
 
+/**
+ * Result of a sequence-claim attempt:
+ *   - `claimed`     — this caller won the CAS and dispatched the event.
+ *   - `lost_race`   — another concurrent ingestion path claimed the
+ *                     sequence; the in-memory snapshot was refreshed.
+ *   - `sink_closed` — the run's sink closed (finalize won) between the
+ *                     middleware's snapshot read and this CAS; nothing was
+ *                     written. Callers must not treat this as retryable
+ *                     ordering noise — the run is terminal.
+ */
+type AdvanceOutcome = "claimed" | "lost_race" | "sink_closed";
+
 async function persistEventAndAdvance(
   run: RunSinkContext,
   event: RunEvent,
   sequence: number,
   opts: { allowGap?: boolean } = {},
-): Promise<void> {
+): Promise<AdvanceOutcome> {
   // Claim the sequence atomically BEFORE dispatching. The CAS is the
   // single point of serialisation across concurrent ingestion paths
   // (fast-path POST + drain racing against a second POST whose drain
@@ -939,8 +960,14 @@ async function persistEventAndAdvance(
   const claimed = await db.transaction(async (tx) => {
     const rows = await tx
       .update(runs)
+      // `isNull(sinkClosedAt)` is load-bearing (CRIT-12): the middleware's
+      // `assertSinkOpen` runs on a SNAPSHOT, so a concurrent finalize can
+      // close the sink between that read and this commit. Putting the
+      // closure check inside the CAS WHERE makes a lost race a no-op —
+      // a closed run can never gain new events or be flipped back to
+      // `running` by the firstEvent branch below.
       .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
-      .where(and(eq(runs.id, run.id), predicate))
+      .where(and(eq(runs.id, run.id), isNull(runs.sinkClosedAt), predicate))
       .returning({ id: runs.id });
     if (rows.length === 0) return false;
 
@@ -948,7 +975,9 @@ async function persistEventAndAdvance(
 
     // No runner emits `run.started`, so flip status → running on the
     // first ingested sequence regardless of type. Terminal status is
-    // owned by finalizeRun.
+    // owned by finalizeRun. (`updateRun` additionally enforces the
+    // monotone status invariant — a terminal run can never re-enter
+    // `running` even from paths that bypass this CAS.)
     if (firstEvent) {
       await updateRun(scope, run.id, { status: "running" }, tx);
     }
@@ -956,13 +985,22 @@ async function persistEventAndAdvance(
   });
 
   if (!claimed) {
-    // Another concurrent path claimed this sequence. Refresh the
+    // Zero rows matched — distinguish WHY in one re-read: the sink closed
+    // (finalize won the race → surface a 410 upstream, not a silent write)
+    // vs another concurrent path claimed this sequence (refresh the
     // in-memory snapshot so the caller's drain loop recomputes `next`
-    // against the actual DB state — otherwise it bails out on a false
+    // against actual DB state — otherwise it bails out on a false
     // gap-at-head and strands every subsequent buffered event until
-    // finalize's gap_fill.
-    await refreshSequence(run);
-    return;
+    // finalize's gap_fill). A vanished row (deleted mid-flight) is
+    // reported as closed — the run can't accept events either way.
+    const [fresh] = await db
+      .select({ closed: runs.sinkClosedAt, seq: runs.lastEventSequence })
+      .from(runs)
+      .where(eq(runs.id, run.id))
+      .limit(1);
+    if (!fresh || fresh.closed !== null) return "sink_closed";
+    if (fresh.seq > run.lastEventSequence) run.lastEventSequence = fresh.seq;
+    return "lost_race";
   }
 
   run.lastEventSequence = sequence;
@@ -985,6 +1023,8 @@ async function persistEventAndAdvance(
       ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
     });
   }
+
+  return "claimed";
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {
@@ -1006,7 +1046,17 @@ async function drainBufferedEvents(
     const next = run.lastEventSequence + 1;
 
     if (head.sequence === next) {
-      await persistEventAndAdvance(run, head.event, head.sequence);
+      const outcome = await persistEventAndAdvance(run, head.event, head.sequence);
+      if (outcome === "sink_closed") {
+        // Finalize won mid-drain: the run is terminal, nothing more can be
+        // persisted. Stop without removing — the buffered rows expire via
+        // TTL and must never land as writes on a closed sink.
+        logger.debug("drain stopped — sink closed mid-drain", { runId: run.id });
+        return;
+      }
+      // `claimed` persisted the event; `lost_race` means another drainer
+      // claimed this exact sequence (its event is persisted) — in both
+      // cases the buffered copy is spent.
       await buffer.remove(run.id, head.sequence);
       continue;
     }
@@ -1017,7 +1067,13 @@ async function drainBufferedEvents(
         expectedSequence: next,
         actualSequence: head.sequence,
       });
-      await persistEventAndAdvance(run, head.event, head.sequence, { allowGap: true });
+      const outcome = await persistEventAndAdvance(run, head.event, head.sequence, {
+        allowGap: true,
+      });
+      if (outcome === "sink_closed") {
+        logger.debug("gap drain stopped — sink closed mid-drain", { runId: run.id });
+        return;
+      }
       await buffer.remove(run.id, head.sequence);
       continue;
     }
