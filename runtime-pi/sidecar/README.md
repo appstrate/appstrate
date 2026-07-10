@@ -169,9 +169,9 @@ Files larger than `MAX_REQUEST_BODY_SIZE` (default 10 MB) cannot fit in a single
 | `tus`              | Cloudflare Stream, Vimeo, tusd, IETF Resumable Drafts | PATCH with `Upload-Offset`; HEAD for resume (out of scope)         |
 | `ms-resumable`     | OneDrive, SharePoint, Microsoft Graph                 | Chunks must be 320-KiB aligned, ≤60 MiB                            |
 
-Critically, **the sidecar is not modified**: each chunk transits through the existing `{ns}__api_call` MCP tool. Credential injection, `authorizedUris` enforcement, and SSRF protection apply per chunk identically. The chunking state machine lives in [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/) — one ~150 LoC file per protocol — and never sees credentials.
+Critically, **the sidecar never reads the workspace file or owns the chunking state machine**: it advertises the upload descriptor, while each chunk transits through the existing `{ns}__api_call` MCP tool. Credential injection, `authorizedUris` enforcement, and SSRF protection apply per chunk identically. The chunking state machine lives in [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/) — one ~150 LoC file per protocol — and never sees credentials.
 
-An integration declares `source.api.upload_protocols: string[]` in its manifest (AFPS §7.1) to opt into `api_upload`. The tool is registered by the runtime only when ≥1 declared integration supports a known protocol; absent declarations, the tool isn't advertised.
+An integration declares `_meta["dev.appstrate/api"].auths.<key>.upload_protocols: string[]` in its manifest to opt an auth into `api_upload`. The sidecar advertises the descriptor for any non-empty declaration; the agent runtime registers the executable tool only when at least one declared protocol has a local adapter and rejects unknown identifiers at execution. Absent declarations, the tool isn't advertised.
 
 The resolver streams the file off disk via `Bun.file().stream()`, slices it into `partSizeBytes`-sized chunks, computes a streaming SHA-256 over the bytes committed to the wire, and surfaces it in the result so post-upload byte-equivalence is verifiable. End-to-end memory ceiling is one chunk in the runtime + one chunk in the sidecar — bounded by `MAX_REQUEST_BODY_SIZE` regardless of file size.
 

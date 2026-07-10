@@ -17,11 +17,12 @@
  *     already-shipped code paths.
  *
  * Tool gating:
- *   - The sidecar advertises a `{ns}__api_upload` tool only when the
- *     integration's `apiCall.uploadProtocols` is non-empty (see
+ *   - The sidecar advertises a `{ns}__api_upload` tool only when the auth's
+ *     `_meta["dev.appstrate/api"].auths.{key}.upload_protocols` is non-empty (see
  *     `makeApiUploadTool` in `sidecar/mcp.ts`). The descriptor's
- *     `uploadProtocol` enum is pinned to the integration's declared
- *     protocols, so the LLM can only call vetted combinations.
+ *     `uploadProtocol` enum carries the integration's declared protocols. The
+ *     agent registers the tool only when at least one declared protocol has a
+ *     local adapter and rejects unknown identifiers again at execution.
  *   - `direct.ts` discovers these advertised tools and routes each
  *     `{ns}__api_upload` to {@link buildApiUploadToolFactory} instead of
  *     forwarding verbatim to the sidecar (the sidecar has no workspace,
@@ -58,7 +59,7 @@ export interface BuildApiUploadFactoryOptions {
    * through. Resolved by `direct.ts` from the upload descriptor's
    * `dev.appstrate/api-upload` `_meta` payload — an identity match against the
    * api_call tool that declared the same key, never a rewrite of this tool's
-   * own name (which would break for the `api_upload__{authKey}` variants).
+   * own name (which would break for the `api_upload__{authToken}` variants).
    */
   apiCallToolName: string;
   mcp: AppstrateMcpClient;

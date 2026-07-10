@@ -28,7 +28,12 @@
  *     SubprocessTransport.
  */
 
-import { isValidToolName } from "@appstrate/core/naming";
+import {
+  allocateMcpToolNamespace,
+  isValidToolName,
+  normaliseMcpToolBody,
+  normaliseMcpToolNamespace,
+} from "@appstrate/core/naming";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
   sanitiseToolDescriptor,
@@ -134,6 +139,10 @@ export class McpHost {
   // client (e.g. a spawned server + the in-process `api_call`, see
   // `intoNamespace`). Dispatch routes by this map, never by namespace alone.
   private readonly toolToClient = new Map<string, AppstrateMcpClient>();
+  // Trust provenance for collision handling. A trusted first-party descriptor
+  // canonically replaces a same-named untrusted descriptor; trusted/trusted
+  // collisions remain fatal because they indicate a platform contract bug.
+  private readonly toolTrusted = new Map<string, boolean>();
   // Every distinct client registered, primary or merged — closed on dispose.
   private readonly clients = new Set<AppstrateMcpClient>();
   private readonly originalToolNames = new Map<string, string>();
@@ -229,6 +238,49 @@ export class McpHost {
     // the allowlist, so authors declare names exactly as the upstream
     // advertises them.
     const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
+    // Trusted descriptors participate in a platform/catalog contract. Validate
+    // their complete surface atomically before mutating any tool index: a
+    // fallback or collision suffix would create a runtime-only name, while a
+    // late throw after registering an earlier sibling would leak a partial
+    // capability from an integration whose boot is reported failed.
+    const trustedReplacements = new Set<string>();
+    if (upstream.trusted) {
+      const incomingNames = new Set<string>();
+      for (const tool of tools) {
+        if (allowlist && !allowlist.has(tool.name)) continue;
+        if (hiddenSet && hiddenSet.has(tool.name)) continue;
+        const candidate = `${normalisedNs}__${tool.name}`;
+        if (!isValidToolName(candidate)) {
+          throw new Error(
+            `McpHost: trusted tool ${JSON.stringify(tool.name)} produces invalid namespaced name ${JSON.stringify(candidate)}`,
+          );
+        }
+        if (incomingNames.has(candidate)) {
+          throw new Error(`McpHost: trusted tool name collision on ${JSON.stringify(candidate)}`);
+        }
+        incomingNames.add(candidate);
+        if (this.toolToNamespace.has(candidate)) {
+          if (this.toolTrusted.get(candidate) === false) {
+            trustedReplacements.add(candidate);
+          } else {
+            throw new Error(`McpHost: trusted tool name collision on ${JSON.stringify(candidate)}`);
+          }
+        }
+      }
+      for (const name of trustedReplacements) {
+        const index = this.toolDescriptors.findIndex((descriptor) => descriptor.name === name);
+        if (index >= 0) this.toolDescriptors.splice(index, 1);
+        this.toolToNamespace.delete(name);
+        this.toolToClient.delete(name);
+        this.originalToolNames.delete(name);
+        this.toolTrusted.delete(name);
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "warn",
+          data: { event: "untrusted_tool_replaced_by_trusted", name },
+        });
+      }
+    }
     for (const tool of tools) {
       if (allowlist && !allowlist.has(tool.name)) {
         this.options.onLog?.({
@@ -272,8 +324,25 @@ export class McpHost {
         });
         continue;
       }
-      const sanitisedToolBody = sanitiseToolBody(sanitised.name);
+      // Trusted first-party tools are already emitted in the canonical body
+      // form. Preserve it verbatim so auth-scoped synthetic names such as
+      // `api_call__primary` keep their auth-scoped token suffix. The third-party
+      // sanitiser deliberately treats the first `__` as an upstream namespace
+      // and strips it; applying that rule here would collapse the trusted name
+      // to `primary`, making the runtime surface diverge from the catalog.
+      // `isValidToolName` below still validates the fully namespaced result;
+      // malformed trusted descriptors fail loudly because an opaque fallback
+      // would diverge from the platform catalog. Untrusted names retain the
+      // defensive fallback below.
+      const sanitisedToolBody = upstream.trusted
+        ? sanitised.name
+        : normaliseMcpToolBody(sanitised.name);
       const namespacedName = sanitisedToolBody ? `${normalisedNs}__${sanitisedToolBody}` : "";
+      if (upstream.trusted && !isValidToolName(namespacedName)) {
+        throw new Error(
+          `McpHost: trusted tool ${JSON.stringify(sanitised.name)} produces invalid namespaced name ${JSON.stringify(namespacedName)}`,
+        );
+      }
       let finalName = isValidToolName(namespacedName)
         ? namespacedName
         : `${normalisedNs}__tool_${this.toolDescriptors.length}`;
@@ -286,6 +355,24 @@ export class McpHost {
       // duplicate name and the first tool would become unreachable. Suffix
       // `_2`, `_3`, … until free, mirroring namespace disambiguation.
       if (this.toolToNamespace.has(finalName)) {
+        // Trusted platform capabilities always own their canonical name,
+        // independent of registration order. When an untrusted upstream is
+        // registered after the synthetic tool, drop the colliding descriptor
+        // instead of inventing a suffixed capability that was never present in
+        // the integration catalog. The reverse order is handled atomically by
+        // `trustedReplacements` above.
+        if (!upstream.trusted && this.toolTrusted.get(finalName) === true) {
+          this.options.onLog?.({
+            source: `host:${normalisedNs}`,
+            level: "warn",
+            data: {
+              event: "untrusted_tool_shadowed_by_trusted",
+              originalName: tool.name,
+              name: finalName,
+            },
+          });
+          continue;
+        }
         const base = finalName;
         let suffix = 2;
         while (this.toolToNamespace.has(finalName)) {
@@ -305,6 +392,7 @@ export class McpHost {
       }
       this.toolToNamespace.set(finalName, normalisedNs);
       this.toolToClient.set(finalName, effectiveUpstream.client);
+      this.toolTrusted.set(finalName, upstream.trusted === true);
       this.originalToolNames.set(finalName, tool.name);
       this.toolDescriptors.push({ ...sanitised, name: finalName });
     }
@@ -322,14 +410,7 @@ export class McpHost {
    * {@link upstreams}) keys against.
    */
   private allocateNamespace(base: string): string {
-    if (!this.upstreams.has(base)) return base;
-    for (let suffix = 2; suffix < 1000; suffix += 1) {
-      const candidate = `${base}_${suffix}`;
-      if (!this.upstreams.has(candidate)) return candidate;
-    }
-    // 998 collisions on the same namespace is operator error, not a
-    // condition the host should silently paper over with a 4-digit suffix.
-    throw new Error(`McpHost: exhausted disambiguation suffixes for namespace '${base}'`);
+    return allocateMcpToolNamespace(base, new Set(this.upstreams.keys()));
   }
 
   /** Total number of upstream-advertised tools currently known. */
@@ -420,6 +501,7 @@ export class McpHost {
     this.upstreams.clear();
     this.toolToNamespace.clear();
     this.toolToClient.clear();
+    this.toolTrusted.clear();
     this.clients.clear();
     this.originalToolNames.clear();
     this.toolDescriptors.length = 0;
@@ -432,32 +514,5 @@ export class McpHost {
  * contains nothing usable.
  */
 export function normaliseNamespace(raw: string): string {
-  if (typeof raw !== "string") return "";
-  const out = raw
-    .replace(/^@/, "")
-    .replace(/[^a-zA-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .toLowerCase();
-  return out.slice(0, 20);
-}
-
-/**
- * Sanitise a third-party tool name into the snake_case body expected
- * after the `{ns}__` prefix. Strips any leading namespace the upstream
- * may have added itself (so re-namespacing doesn't double up), keeps
- * `_` separators intact.
- */
-function sanitiseToolBody(raw: string): string {
-  if (typeof raw !== "string") return "";
-  let out = raw
-    .replace(/[^a-zA-Z0-9_]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .toLowerCase();
-  // If the upstream already namespaced (e.g. `fs__read_file`), drop the
-  // upstream's prefix so the host's prefix doesn't double up.
-  const idx = out.indexOf("__");
-  if (idx >= 0 && idx < out.length - 2) {
-    out = out.slice(idx + 2);
-  }
-  return out;
+  return normaliseMcpToolNamespace(raw);
 }

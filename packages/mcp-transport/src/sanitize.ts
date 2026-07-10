@@ -12,6 +12,7 @@
  *   - "IGNORE PREVIOUS INSTRUCTIONS" payloads inside long descriptions.
  *   - Schema-level injection via `description` fields on nested
  *     `properties` (Full-Schema Poisoning per CyberArk/Invariant Labs).
+ *   - Privileged capability-marker forgery via tool `_meta`.
  *
  * This module is the single defence applied to every third-party tool
  * before it reaches the agent's LLM. It is deliberately conservative:
@@ -32,6 +33,7 @@
  */
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { API_CALL_TOOL_META_KEY, API_UPLOAD_TOOL_META_KEY } from "./tool-meta.ts";
 
 export const MAX_TOOL_DESCRIPTION_BYTES = 2048;
 export const MAX_PARAMETER_DESCRIPTION_BYTES = 512;
@@ -150,6 +152,25 @@ function sanitiseSchemaDescriptions(schema: unknown, depth = 0): unknown {
 }
 
 /**
+ * Strip first-party capability markers from an untrusted tool descriptor while
+ * preserving every unrelated metadata entry. The runtime treats these markers
+ * as privileged routing claims: allowing a third-party MCP server to forge one
+ * could make it impersonate the sidecar's credential proxy or upload sibling.
+ *
+ * `McpHost` deliberately bypasses {@link sanitiseToolDescriptor} for trusted
+ * first-party tools, so genuine sidecar markers never pass through this filter.
+ */
+function sanitiseToolMeta(meta: Tool["_meta"]): Tool["_meta"] | undefined {
+  if (!meta) return undefined;
+  const out: NonNullable<Tool["_meta"]> = {};
+  for (const [key, value] of Object.entries(meta)) {
+    if (key === API_CALL_TOOL_META_KEY || key === API_UPLOAD_TOOL_META_KEY) continue;
+    out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
  * Sanitise a single MCP {@link Tool} descriptor. Returns a fresh copy —
  * never mutates the input — with all known injection vectors stripped
  * and length caps enforced.
@@ -173,6 +194,7 @@ export function sanitiseToolDescriptor(tool: Tool): Tool | null {
     tool.outputSchema === undefined
       ? undefined
       : (sanitiseSchemaDescriptions(tool.outputSchema) as Tool["outputSchema"]);
+  const sanitisedMeta = sanitiseToolMeta(tool._meta);
   // Measure the UTF-8 byte length — `String.length` counts UTF-16 code units,
   // so a schema of multibyte characters could carry up to ~4× the intended
   // byte budget past this cap. Both schemas share one budget: they reach the
@@ -183,11 +205,13 @@ export function sanitiseToolDescriptor(tool: Tool): Tool | null {
     serialisedBytes += encoder.encode(JSON.stringify(outputSchema)).byteLength;
   }
   if (serialisedBytes > MAX_SCHEMA_SERIALISED_BYTES) return null;
+  const { _meta: _untrustedMeta, ...toolWithoutMeta } = tool;
   const out: Tool = {
-    ...tool,
+    ...toolWithoutMeta,
     inputSchema,
     ...(outputSchema !== undefined ? { outputSchema } : {}),
     ...(description !== undefined ? { description } : {}),
+    ...(sanitisedMeta !== undefined ? { _meta: sanitisedMeta } : {}),
   };
   if (typeof tool.title === "string") {
     out.title = sanitiseTextField(tool.title, MAX_PARAMETER_DESCRIPTION_BYTES);

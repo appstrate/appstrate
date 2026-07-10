@@ -32,9 +32,10 @@
  *     leave the platform.
  *
  * Tool surface: one AFPS `Tool` per opted-in auth, named `{ns}__api_call`
- * (single auth) or `{ns}__api_call__{authKey}` (several) to match the
- * platform's namespacing — NOT a single `api_call` dispatcher keyed by a
- * providerId enum.
+ * (single auth) or `{ns}__api_call__{authToken}` (several) to match the
+ * platform's namespacing. Short auth keys remain verbatim; long keys use the
+ * same stable bounded token as the platform catalog. This is NOT a single
+ * `api_call` dispatcher keyed by a providerId enum.
  */
 
 import type { Bundle, Tool } from "./types.ts";
@@ -45,10 +46,17 @@ import {
   applyTransportHeaders,
   isReproducibleBody,
   matchesAuthorizedUriSpec,
-  slugifyIntegrationId,
   type ApiCallFn,
   type ApiCallMeta,
 } from "./http-call-core.ts";
+import {
+  apiCallToolNameForAuth,
+  assertUniqueApiToolAuthTokens,
+} from "@appstrate/afps-shared/api-tool-naming";
+import {
+  allocateMcpToolNamespace,
+  normaliseMcpToolNamespace,
+} from "@appstrate/afps-shared/mcp-naming";
 import { guardedFetch, PreflightError, type HostResolver } from "./api-call-engine.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 import { resolveHttpDelivery, type HttpDeliveryConfig } from "./http-delivery.ts";
@@ -90,8 +98,8 @@ export interface ApiCallIntegrationMeta {
   namespace: string;
   /**
    * Bare agent-facing tool name (before the `{namespace}__` prefix).
-   * `api_call` when the integration opts in exactly one auth; `api_call__{authKey}`
-   * when several.
+   * `api_call` when the integration opts in exactly one auth;
+   * `api_call__{authToken}` when several.
    */
   toolName: string;
   /**
@@ -181,7 +189,14 @@ function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationM
   if (!metaAuths || typeof metaAuths !== "object" || Array.isArray(metaAuths)) return [];
   const authKeys = Object.keys(metaAuths).filter((k) => k in declaredAuths);
   if (authKeys.length === 0) return [];
-  const namespace = slugifyIntegrationId(name);
+  if (authKeys.length > 1) {
+    try {
+      assertUniqueApiToolAuthTokens(authKeys);
+    } catch {
+      return [];
+    }
+  }
+  const namespace = normaliseMcpToolNamespace(name);
   const single = authKeys.length === 1;
 
   const out: ApiCallIntegrationMeta[] = [];
@@ -195,7 +210,7 @@ function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationM
     out.push({
       name,
       namespace,
-      toolName: single ? "api_call" : `api_call__${authKey}`,
+      toolName: apiCallToolNameForAuth(authKey, !single),
       authKey,
       authType: typeof auth.type === "string" ? auth.type : "custom",
       authorizedUris,
@@ -340,16 +355,21 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
   async resolve(refs: IntegrationRef[], bundle: Bundle): Promise<Tool[]> {
     const creds = await this.loadCreds();
     const tools: Tool[] = [];
+    const usedNamespaces = new Set<string>();
     for (const ref of refs) {
       const metas = readApiCallIntegrationMetas(bundle, ref);
       if (metas.length === 0) continue; // not an apiCall integration — skip
+      const namespace = allocateMcpToolNamespace(metas[0]!.namespace, usedNamespaces);
+      usedNamespaces.add(namespace);
       const entry = creds.integrations[ref.name];
       if (!entry) {
         throw new Error(
           `LocalIntegrationResolver: no credentials found for ${ref.name} in the local creds file`,
         );
       }
-      for (const meta of metas) {
+      for (const projectedMeta of metas) {
+        const meta =
+          projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
         tools.push(
           makeApiCallTool(toApiCallMeta(meta), this.buildCall(meta, entry), {
             toolName: apiCallToolName(meta),
@@ -621,9 +641,15 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
 
   async resolve(refs: IntegrationRef[], bundle: Bundle): Promise<Tool[]> {
     const tools: Tool[] = [];
+    const usedNamespaces = new Set<string>();
     for (const ref of refs) {
       const metas = readApiCallIntegrationMetas(bundle, ref);
-      for (const meta of metas) {
+      if (metas.length === 0) continue;
+      const namespace = allocateMcpToolNamespace(metas[0]!.namespace, usedNamespaces);
+      usedNamespaces.add(namespace);
+      for (const projectedMeta of metas) {
+        const meta =
+          projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
         // The platform enforces `authorized_uris` server-side — allow all
         // locally so the tool dispatches and lets the proxy gate.
         const remoteMeta: ApiCallMeta = { name: meta.name, allowAllUris: true };

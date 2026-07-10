@@ -180,6 +180,69 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out.map((e) => e.name)).toEqual(["kv_set", "kv_get", API_CALL_TOOL_NAME]);
   });
 
+  it("gives a declared synthetic capability precedence over same-named native tools", () => {
+    const integration = localSourceManifest({});
+    (integration as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": {
+        auths: { primary: { upload_protocols: ["google-resumable"] } },
+      },
+    };
+    const out = resolveIntegrationToolCatalog({
+      integration,
+      mcpServerTools: [
+        { name: "api_call", description: "native collision" },
+        { name: "api-call", description: "normalised native collision" },
+        { name: "api_upload", description: "native collision" },
+        { name: "drive__api.upload", description: "namespaced native collision" },
+        { name: "kv_get" },
+      ],
+    });
+    expect(out).toEqual([
+      { name: "kv_get" },
+      { name: API_CALL_TOOL_NAME },
+      { name: API_UPLOAD_TOOL_NAME },
+    ]);
+  });
+
+  it("keeps native api-like names when no synthetic capability is declared", () => {
+    const out = resolveIntegrationToolCatalog({
+      integration: localSourceManifest({}),
+      mcpServerTools: [{ name: "api_call" }, { name: "api_upload" }],
+    });
+    expect(out.map((entry) => entry.name)).toEqual(["api_call", "api_upload"]);
+  });
+
+  it("reserves persisted long-key aliases against native MCP collisions", () => {
+    const longAuthKey = "authentication_key_that_is_valid_but_long";
+    const integration = localSourceManifest({});
+    (integration as unknown as { auths: Record<string, unknown> }).auths = {
+      short: apiKeyAuth(),
+      [longAuthKey]: apiKeyAuth(),
+    };
+    (integration as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": {
+        auths: {
+          short: {},
+          [longAuthKey]: { upload_protocols: ["google-resumable"] },
+        },
+      },
+    };
+    const out = resolveIntegrationToolCatalog({
+      integration,
+      mcpServerTools: [
+        { name: `api_call__${longAuthKey}`, description: "legacy native collision" },
+        { name: `api_upload__${longAuthKey}`, description: "legacy native collision" },
+        { name: "native_keep" },
+      ],
+    });
+    expect(out.map((entry) => entry.name)).toEqual([
+      "native_keep",
+      "api_call__short",
+      "api_call__h0a0593260c3968fd8",
+      "api_upload__h0a0593260c3968fd8",
+    ]);
+  });
+
   // Regression — issue #881. `@appstrate/google-drive` declares
   // `upload_protocols`, so the sidecar advertises `{ns}__api_upload` at runtime,
   // but the catalog only listed `api_call`. The picker couldn't show the tool
@@ -224,6 +287,30 @@ describe("resolveIntegrationToolCatalog", () => {
     });
     expect(resolveIntegrationToolCatalog({ integration }).map((e) => e.name)).toEqual([
       API_CALL_TOOL_NAME,
+    ]);
+  });
+
+  it("hidden_tools hiding api_call also hides its dependent api_upload companion", () => {
+    const integration = apiSourceManifest({
+      metaAuths: { primary: { upload_protocols: ["tus"] } },
+      hidden_tools: [API_CALL_TOOL_NAME],
+    });
+    expect(resolveIntegrationToolCatalog({ integration })).toEqual([]);
+  });
+
+  it("multi-auth hidden_tools cascades per pair without hiding the other auth's api_call", () => {
+    const integration = apiSourceManifest({
+      auths: { primary: apiKeyAuth(), backup: apiKeyAuth() },
+      metaAuths: {
+        primary: { upload_protocols: ["google-resumable"] },
+        backup: { upload_protocols: ["tus"] },
+      },
+      // Hiding the primary call removes its dependent upload. Hiding only the
+      // backup upload intentionally leaves the backup call available.
+      hidden_tools: ["api_call__primary", "api_upload__backup"],
+    });
+    expect(resolveIntegrationToolCatalog({ integration }).map((e) => e.name)).toEqual([
+      "api_call__backup",
     ]);
   });
 
@@ -331,9 +418,9 @@ describe("api_call / api_upload tool-name helpers", () => {
   });
 
   // Lockstep guard: `runtime-pi/sidecar/mcp.ts` derives the advertised upload
-  // tool name with this exact substitution, and the agent-side resolver walks
-  // back from `{ns}__api_upload` to `{ns}__api_call`. If the two drift, the
-  // extension dispatches chunks through a tool that doesn't exist.
+  // tool name with this exact substitution. If the two drift, the catalog and
+  // runtime advertise different names even though dispatch pairing itself is
+  // marker-driven and namespace-scoped.
   it("matches the sidecar's own derivation", () => {
     for (const name of [API_CALL_TOOL_NAME, "api_call__primary", "api_call__backup"]) {
       expect(apiUploadToolNameFor(name)).toBe(name.replace(/^api_call/, "api_upload"));

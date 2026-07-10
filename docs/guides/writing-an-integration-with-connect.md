@@ -75,7 +75,13 @@ reached. The authentication layer (`auths`) is applied on top, regardless of sou
 integration (`local`, `remote`, or `none`) can expose it by opting `auths` entries into
 the `_meta["dev.appstrate/api"]` extension. Each opted-in auth key (must exist in the
 top-level `auths`) yields one `api_call` tool; a single opted-in auth → `api_call`,
-multiple → `api_call__<authKey>`.
+multiple → `api_call__<authToken>`. Keys up to 17 characters remain verbatim;
+longer AFPS-valid keys use a stable bounded token so the final MCP name stays valid.
+Previously persisted raw long-key names remain accepted as aliases.
+When this extension declares a synthetic name, that name and any persisted
+long-key alias are reserved and take precedence over a same-named native MCP
+tool. Without the extension, native tools named `api_call` or `api_upload`
+remain ordinary tools.
 
 ```jsonc
 "_meta": {
@@ -93,11 +99,13 @@ identifiers (prefer reverse-DNS qualified strings such as
 `com.example/proprietary-resumable`); consumers MUST preserve unknown values.
 
 Declaring it also adds an `api_upload` companion tool to the integration's
-`tool_catalog` (`api_upload__<authKey>` in the multi-auth case) — a chunked/resumable
+`tool_catalog` (`api_upload__<authToken>` in the multi-auth case) — a chunked/resumable
 uploader for workspace files, orchestrated agent-side and dispatched through the
 sibling `api_call` tool. Agents get the pair from either name: selecting `api_call`
 grants `api_upload` and vice-versa. Hide the companion with
 `hidden_tools: ["api_upload"]` if the API's upload surface shouldn't be agent-facing.
+Hiding `api_call` also hides its dependent upload companion; an upload without that
+sibling is never advertised as callable.
 
 ---
 

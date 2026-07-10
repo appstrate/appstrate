@@ -1048,6 +1048,30 @@ export function pushUnavailableToolBreadcrumb(
 }
 
 /**
+ * Names hidden only from an integration's native MCP upstream. When a selected
+ * api capability is attached as a trusted in-process tool, its canonical
+ * name is reserved for that synthetic descriptor; otherwise a same-named
+ * native tool would take the name first and force the trusted tool onto an
+ * unselectable `_2` suffix. Manifest hidden_tools remain part of the set.
+ */
+export function hiddenToolsForNativeUpstream(
+  spec: IntegrationSpawnSpec,
+): readonly string[] | undefined {
+  const hidden = new Set(spec.hiddenTools ?? []);
+  for (const apiCall of spec.apiCalls ?? []) {
+    hidden.add(apiCall.toolName);
+    const legacyCallName =
+      apiCall.toolName === "api_call" ? "api_call" : `api_call__${apiCall.authKey}`;
+    hidden.add(legacyCallName);
+    if ((apiCall.uploadProtocols?.length ?? 0) > 0) {
+      hidden.add(apiCall.toolName.replace(/^api_call/, "api_upload"));
+      hidden.add(legacyCallName.replace(/^api_call/, "api_upload"));
+    }
+  }
+  return hidden.size > 0 ? [...hidden] : undefined;
+}
+
+/**
  * Breadcrumb for the serverless (`sourceKind: "none"`) branch, where the
  * in-process `api_call` server is the integration's entire surface.
  *
@@ -1239,6 +1263,7 @@ export async function bootIntegrations(
     // reaches operators instead of living only in `docker logs`.
     const stderrTail: string[] = [];
     try {
+      const nativeHiddenTools = hiddenToolsForNativeUpstream(spec);
       // ─── ONE shared credentials source per integration ───
       // The Source/Sink model (see integration-credentials-source.ts header):
       // a single source feeds every consumer of this integration's credentials
@@ -1299,6 +1324,14 @@ export async function bootIntegrations(
         // The SHARED source serves every auth; each api_call entry binds its own
         // auth via a per-auth adapter reading from that same source.
         let total = 0;
+        // A serverless multi-auth integration has no primary MCP upstream to
+        // allocate its namespace before these synthetic tools are attached.
+        // The first api_call registration therefore becomes the primary; all
+        // subsequent auth-scoped api_call servers must merge into the exact
+        // namespace it was allocated (which may already carry a collision
+        // suffix). Otherwise McpHost allocates `namespace_2` for the second
+        // auth and the runtime surface drifts from the integration catalog.
+        let sharedNamespace = intoNamespace;
         for (const apiCall of apiCalls) {
           const credAdapter = createApiCallCredentialAdapter({
             source,
@@ -1320,6 +1353,14 @@ export async function bootIntegrations(
               : {}),
           };
           const defs = createApiCallToolDefs(integ, apiCallDeps);
+          // `api_upload` cannot execute without its api_call sibling. Preserve
+          // the useful asymmetric hidden_tools semantics: hiding only upload
+          // leaves api_call available, while hiding api_call also hides every
+          // companion emitted by this auth-scoped definition set.
+          const effectiveHiddenTools = new Set(spec.hiddenTools ?? []);
+          if (effectiveHiddenTools.has(apiCall.toolName)) {
+            for (const def of defs) effectiveHiddenTools.add(def.descriptor.name);
+          }
           const pair = await createInProcessPair(defs, {
             serverInfo: {
               name: `appstrate-api-call-${spec.integrationId}-${apiCall.toolName}`,
@@ -1328,22 +1369,28 @@ export async function bootIntegrations(
           });
           const wrapped = wrapClient(pair.client, { close: () => pair.close() });
           const sizeBefore = host.size();
-          await host.register({
+          const merging = sharedNamespace !== undefined;
+          const allocatedNamespace = await host.register({
             namespace: spec.namespace,
             client: wrapped,
             trusted: true,
             allowedTools: defs.map((d) => d.descriptor.name),
-            ...(intoNamespace ? { intoNamespace } : {}),
+            // `hidden_tools` is a runtime boundary, not merely catalog/UI
+            // metadata. Synthetic api_call/api_upload descriptors go through
+            // the same defensive filter as spawned/remote MCP tools.
+            ...(effectiveHiddenTools.size > 0 ? { hiddenTools: [...effectiveHiddenTools] } : {}),
+            ...(sharedNamespace ? { intoNamespace: sharedNamespace } : {}),
           });
+          sharedNamespace ??= allocatedNamespace;
           const count = host.size() - sizeBefore;
           clients.push(wrapped);
           total += count;
           logger.info("integration api_call registered (in-process)", {
             integrationId: spec.integrationId,
-            namespace: intoNamespace ?? spec.namespace,
+            namespace: allocatedNamespace,
             authKey: apiCall.authKey,
             toolName: apiCall.toolName,
-            attached: intoNamespace !== undefined,
+            attached: merging,
             toolCount: count,
           });
         }
@@ -1401,7 +1448,7 @@ export async function bootIntegrations(
           // R8a defensive — `manifest.hidden_tools` is enforced at
           // runtime as well as at install-time, so a manifest-hidden
           // tool can never reach the agent via the remote MCP path.
-          ...((spec.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: spec.hiddenTools } : {}),
+          ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
         });
         const added = host.size() - sizeBefore;
         pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
@@ -1469,7 +1516,7 @@ export async function bootIntegrations(
         allowedTools: spec.toolAllowlist,
         // R8a — propagate `hidden_tools` so the host filters them out at
         // runtime, regardless of whether install-time validation removed them.
-        ...((spec.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: spec.hiddenTools } : {}),
+        ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
         logLabel: "integration",
         clients,
         mitmListeners,

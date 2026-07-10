@@ -53,7 +53,7 @@ function integManifest(opts: { uploadProtocols?: string[]; defaultTools?: string
   });
 }
 
-function agentManifest(tools?: string[] | "*"): Record<string, unknown> {
+function agentManifest(tools?: string[] | "*", authKey?: string): Record<string, unknown> {
   return {
     schema_version: "0.2",
     type: "agent",
@@ -61,14 +61,23 @@ function agentManifest(tools?: string[] | "*"): Record<string, unknown> {
     version: "0.1.0",
     display_name: "Agent",
     dependencies: { integrations: { [INTEG]: "^1.0.0" } },
-    ...(tools !== undefined ? { integrations_configuration: { [INTEG]: { tools } } } : {}),
+    ...(tools !== undefined || authKey !== undefined
+      ? {
+          integrations_configuration: {
+            [INTEG]: {
+              ...(tools !== undefined ? { tools } : {}),
+              ...(authKey !== undefined ? { auth_key: authKey } : {}),
+            },
+          },
+        }
+      : {}),
   };
 }
 
-async function seedConnection(ctx: TestContext) {
+async function seedConnection(ctx: TestContext, authKey = "primary") {
   await db.insert(integrationConnections).values({
     integrationId: INTEG,
-    authKey: "primary",
+    authKey,
     accountId: "default",
     applicationId: ctx.defaultAppId,
     userId: ctx.user.id,
@@ -165,5 +174,57 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
   it("without upload_protocols, api_call carries no uploadProtocols", async () => {
     const spec = await seedAndResolve(ctx, { tools: ["api_call"] });
     expect(spec.apiCalls![0]!.uploadProtocols).toBeUndefined();
+  });
+
+  it("canonicalizes persisted long-name selections and hidden_tools aliases", async () => {
+    const longAuthKey = "authentication_key_that_is_valid_but_long";
+    const legacyCall = `api_call__${longAuthKey}`;
+    const legacyUpload = `api_upload__${longAuthKey}`;
+    const canonicalCall = "api_call__h0a0593260c3968fd8";
+    const canonicalUpload = "api_upload__h0a0593260c3968fd8";
+    const manifest = apiIntegrationManifest({
+      name: INTEG,
+      version: "1.0.0",
+      auths: {
+        primary: {
+          type: "api_key",
+          authorizedUris: ["https://api.example.com/**"],
+          credentialFields: ["api_key"],
+        },
+        [longAuthKey]: {
+          type: "api_key",
+          authorizedUris: ["https://api.example.com/**"],
+          credentialFields: ["api_key"],
+        },
+      },
+    });
+    (manifest as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": {
+        auths: {
+          primary: {},
+          [longAuthKey]: { upload_protocols: PROTOCOLS },
+        },
+      },
+    };
+    (manifest as unknown as { hidden_tools: string[] }).hidden_tools = [legacyUpload];
+
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedConnection(ctx, longAuthKey);
+    const specs = await resolveIntegrationSpawns({
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest([legacyCall], longAuthKey),
+    });
+
+    expect(specs).toHaveLength(1);
+    expect(specs[0]!.apiCalls?.[0]?.toolName).toBe(canonicalCall);
+    expect(specs[0]!.hiddenTools).toEqual([legacyUpload, canonicalUpload]);
   });
 });

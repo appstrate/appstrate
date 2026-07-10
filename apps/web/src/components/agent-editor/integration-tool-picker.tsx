@@ -26,12 +26,16 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   apiUploadToolNameFor,
+  canonicalizeApiToolName,
   expandScopesGranted,
-  isApiCallToolName,
-  isApiUploadToolName,
+  getApiCallConfigs,
   readDefaultTools,
 } from "@appstrate/core/integration";
-import { toggleApiCallToolSelection } from "./tool-selection.ts";
+import {
+  isApiCallToolSelectionEnabled,
+  replaceNativeToolSelection,
+  toggleApiCallToolSelection,
+} from "./tool-selection.ts";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Spinner } from "../spinner";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
@@ -69,17 +73,32 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // `tools{}` policy table is no longer the source of truth for "what
   // exists" (it only carries per-tool policy when present).
   const fullCatalog = detail.tool_catalog ?? [];
+  const fullCatalogNames = new Set(fullCatalog.map((tool) => tool.name));
   // The api_call tool(s) have their own dedicated checkbox row(s); exclude
   // them from the native tools list so they don't render twice. Their
   // `api_upload` companions get no row of their own: the runtime grants the
   // pair together (each upload chunk is dispatched through the sibling
   // api_call tool), so a separate checkbox could only express a selection the
   // resolver refuses to honour.
-  const catalogToolNames = fullCatalog.map((t) => t.name);
-  const apiCallEntries = fullCatalog.filter((t) => isApiCallToolName(t.name));
+  const apiCallConfigs = getApiCallConfigs(detail.manifest);
+  const syntheticApiCallNames = new Set(apiCallConfigs.map((config) => config.toolName));
+  const derivedSyntheticApiUploadNames = new Set(
+    apiCallConfigs.flatMap((config) =>
+      config.uploadToolName === undefined ? [] : [config.uploadToolName],
+    ),
+  );
+  const visibleSyntheticApiUploadNames = new Set(
+    [...derivedSyntheticApiUploadNames].filter((name) => fullCatalogNames.has(name)),
+  );
+  const apiCallEntries = fullCatalog.filter((tool) => syntheticApiCallNames.has(tool.name));
   const apiCallToolNames = apiCallEntries.map((t) => t.name);
+  const visibleSyntheticToolNames = new Set([
+    ...apiCallToolNames,
+    ...visibleSyntheticApiUploadNames,
+  ]);
   const nativeCatalog = fullCatalog.filter(
-    (t) => !isApiCallToolName(t.name) && !isApiUploadToolName(t.name),
+    (tool) =>
+      !syntheticApiCallNames.has(tool.name) && !derivedSyntheticApiUploadNames.has(tool.name),
   );
   const declaredToolNames = nativeCatalog.map((t) => t.name);
   const hasToolCatalog = declaredToolNames.length > 0;
@@ -146,12 +165,14 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // array. The wildcard form `"*"` short-circuits the picker (see
   // `wildcardSelected` above) — fall back to an empty set so the checkbox
   // lookups below stay safe.
-  const arrayTools = Array.isArray(effectiveTools) ? effectiveTools : [];
+  const arrayTools = Array.isArray(effectiveTools)
+    ? [...new Set(effectiveTools.map((name) => canonicalizeApiToolName(detail.manifest, name)))]
+    : [];
   const selectedTools = new Set(arrayTools);
   const selectedScopes = new Set(entry.scopes ?? []);
   const allSelected =
-    selectedTools.size === declaredToolNames.length && declaredToolNames.length > 0;
-  const noneSelected = selectedTools.size === 0;
+    declaredToolNames.length > 0 && declaredToolNames.every((name) => selectedTools.has(name));
+  const noneSelected = declaredToolNames.every((name) => !selectedTools.has(name));
 
   // Inferred OAuth scopes — exactly what Phase 2 `computeRequiredScopes`
   // will union into the OAuth kickoff. Contributes the union of
@@ -216,7 +237,10 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // as a capability the agent doesn't have.
   const toggleApiCallTool = (name: string) => {
     if (wildcardSelected) return;
-    onChange({ ...entry, tools: toggleApiCallToolSelection(arrayTools, name, catalogToolNames) });
+    onChange({
+      ...entry,
+      tools: toggleApiCallToolSelection(arrayTools, name, visibleSyntheticApiUploadNames),
+    });
   };
 
   // Wildcard toggle (AFPS §4.4) — gated by `detail.allow_undeclared_tools`.
@@ -233,8 +257,26 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
     onChange({ ...entry, scopes: next.length > 0 ? next : undefined });
   };
 
-  const selectAllTools = () => onChange({ ...entry, tools: [...declaredToolNames] });
-  const selectNoTools = () => onChange({ ...entry, tools: [] });
+  const selectAllTools = () =>
+    onChange({
+      ...entry,
+      tools: replaceNativeToolSelection(
+        arrayTools,
+        declaredToolNames,
+        visibleSyntheticToolNames,
+        true,
+      ),
+    });
+  const selectNoTools = () =>
+    onChange({
+      ...entry,
+      tools: replaceNativeToolSelection(
+        arrayTools,
+        declaredToolNames,
+        visibleSyntheticToolNames,
+        false,
+      ),
+    });
 
   // Niveau 2 contract: when the integration manifest declares neither a
   // `tools` block nor any `scope_catalog` catalog, there is literally
@@ -354,11 +396,17 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
           // The `api_upload` companion has no checkbox of its own — it is
           // granted with its api_call sibling. Say so in the row's own label
           // rather than leaving the extra capability invisible.
-          const withUpload = catalogToolNames.includes(apiUploadToolNameFor(tool.name));
+          const uploadToolName = apiUploadToolNameFor(tool.name);
+          const withUpload = visibleSyntheticApiUploadNames.has(uploadToolName);
+          const pairSelected = isApiCallToolSelectionEnabled(
+            selectedTools,
+            tool.name,
+            visibleSyntheticApiUploadNames,
+          );
           return (
             <label key={tool.name} className="flex cursor-pointer items-start gap-2">
               <Checkbox
-                checked={selectedTools.has(tool.name)}
+                checked={pairSelected}
                 onCheckedChange={() => toggleApiCallTool(tool.name)}
                 data-testid={
                   apiCallEntries.length > 1

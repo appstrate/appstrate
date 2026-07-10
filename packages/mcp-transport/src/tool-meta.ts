@@ -5,17 +5,19 @@
  * MCP tool-descriptor `_meta` markers that identify a sidecar-hosted
  * capability tool by WHAT IT IS, not what it is named.
  *
- * The sidecar stamps these onto the `tools/list` descriptor (carried
- * through verbatim — trusted tools bypass sanitisation, and
- * `sanitiseToolDescriptor` spreads `...tool` so the key survives the
- * `{ns}__` rename either way). The agent runtime routes on the marker
- * instead of pattern-matching the `{ns}__api_call` / `{ns}__api_upload`
- * tool name — a name is an implicit contract that breaks on a rename and
- * mis-fires on a collision. The marker is explicit and rename-safe.
+ * The sidecar stamps these onto trusted `tools/list` descriptors, which
+ * bypass third-party sanitisation and retain the marker through the
+ * `{ns}__` rename. `sanitiseToolDescriptor` strips both keys from untrusted
+ * descriptors, because they are privileged routing claims rather than
+ * general-purpose metadata. The agent runtime routes on the surviving
+ * trusted marker instead of pattern-matching the `{ns}__api_call` /
+ * `{ns}__api_upload` tool name — a name is an implicit contract that breaks
+ * on a rename and mis-fires on a collision.
  *
  * Each marker's payload carries the auth-scoped tool key it belongs to
- * (`api_call`, or `api_call__{authKey}` when the integration opts several
- * auths into the vendor extension). An `api_upload` descriptor names the key
+ * (`api_call`, or `api_call__{authToken}` when the integration opts several
+ * auths into the vendor extension). Short auth keys remain verbatim; long
+ * keys use the platform's stable bounded token. An `api_upload` descriptor names the key
  * of the `api_call` sibling it dispatches its chunks through, so the agent
  * pairs the two by identity rather than by rewriting one name into the other.
  * Detection stays presence-only, so a descriptor whose payload predates this

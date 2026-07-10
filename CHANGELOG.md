@@ -27,13 +27,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Multi-auth `api_call` tools collided on one name (#881)** — an integration
   opting several auths into `_meta["dev.appstrate/api"]` exposes one tool per
-  auth (`api_call__{authKey}`), but the sidecar collapsed every def onto the
+  auth (`api_call__{authToken}`), but the sidecar collapsed every def onto the
   bare `api_call` name. The two registrations collided and `McpHost` silently
   disambiguated the second to `{ns}__api_call_2` — a name no catalog advertises
-  and no agent can select. The defs now keep the auth suffix. The agent-side
-  upload extension pairs an `api_upload` tool with its `api_call` sibling by
-  reading the key both stamp into their `_meta` markers, instead of rewriting
-  one tool name into the other (which never worked for the per-auth variants).
+  and no agent can select. Trusted defs now keep the auth suffix through
+  `McpHost`, and every auth of a serverless integration shares its allocated
+  namespace. The agent-side upload extension pairs an `api_upload` tool with
+  its `api_call` sibling by marker key scoped to that namespace, instead of a
+  globally ambiguous key or a tool-name rewrite. Privileged api capability
+  markers are stripped from non-trusted MCP descriptors so a third-party server
+  cannot impersonate the sibling and receive upload chunks. Long AFPS auth keys
+  now use one shared bounded token across the platform and portable runtime;
+  persisted raw long-key selections/defaults/hidden names remain accepted and
+  are canonicalised at the boundary. Declared synthetic names also take
+  canonical precedence over same-named native MCP tools, avoiding `_2`
+  runtime-only names that the catalog cannot select.
+
+- **`hidden_tools` bypassed synthetic API tools (#881)** — the in-process
+  `api_call`/`api_upload` registration now applies the same runtime
+  `hidden_tools` filter as local and remote MCP integrations. Hiding
+  `api_upload` therefore removes it from both the platform catalog and the
+  final agent-facing MCP surface; hiding `api_call` also removes its dependent
+  upload companion so no orphan capability is advertised.
 
 - **Phantom "selected tool unavailable" warning (#881)** — the sidecar's
   no-silent-degradation guard compared the agent's full tool allowlist against

@@ -5,7 +5,7 @@
  * the sidecar hands to the McpHost for one integration's api_call surface.
  *
  * Regression: the defs used to be forced onto the bare `api_call` /`api_upload`
- * names, dropping the `__{authKey}` suffix the spawn resolver had computed. A
+ * names, dropping the auth-scoped token suffix the spawn resolver had computed. A
  * multi-auth integration therefore registered two tools under one name and the
  * host silently disambiguated the second to `{ns}__api_call_2` — a name no
  * catalog advertises and no agent can select.
@@ -58,7 +58,7 @@ describe("createApiCallToolDefs — tool names", () => {
     expect(namesOf(defs)).toEqual(["api_call", "api_upload"]);
   });
 
-  it("multi-auth: preserves the __{authKey} suffix on both tools", () => {
+  it("multi-auth: preserves the auth-scoped token suffix on both tools", () => {
     const defs = createApiCallToolDefs(
       integ({ toolName: "api_call__primary", uploadProtocols: ["google-resumable"] }),
       deps,

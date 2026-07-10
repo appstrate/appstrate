@@ -28,7 +28,7 @@ import { RESERVED_INTEGRATION_UPLOAD_PROTOCOLS } from "@appstrate/core/integrati
 /**
  * Stable protocol identifier surfaced through the upload tool's
  * `uploadProtocol` enum and through integration manifests'
- * `source.api.upload_protocols[]`.
+ * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols[]`.
  *
  * AFPS dropped the closed enum in favour of an open string array; the
  * runtime treats the protocol as an opaque `string` and recognises the

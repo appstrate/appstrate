@@ -15,6 +15,7 @@ import {
   integrationManifestSchema,
   type IntegrationManifest,
   API_CALL_TOOL_NAME,
+  canonicalizeApiToolName,
   getConnectToolNames,
   getDeclaredToolNames,
   getApiCallConfigs,
@@ -28,8 +29,10 @@ import {
   RESERVED_INTEGRATION_UPLOAD_PROTOCOLS,
   readDefaultTools,
   resolveEffectiveToolSelection,
+  resolveIntegrationToolCatalog,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
+import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
 
 // ─────────────────────────────────────────────
 // Fixture helpers
@@ -1011,6 +1014,48 @@ describe("getApiCallConfigs", () => {
     expect(getApiCallConfigs(m).map((c) => c.uploadToolName)).toEqual([
       "api_upload__key",
       "api_upload__alt",
+    ]);
+  });
+
+  it("keeps valid long auth keys while deriving bounded stable multi-auth names", () => {
+    const longAuthKey = "authentication_key_that_is_valid_but_long";
+    const legacyCall = `api_call__${longAuthKey}`;
+    const auth = (envName: string) => ({
+      type: "api_key",
+      credentials: { schema: { type: "object", properties: {} } },
+      authorized_uris: ["https://api/**"],
+      delivery: { env: { [envName]: { value: "{$credential.k}" } } },
+    });
+    const manifest = parse(
+      baseManifest({
+        source: { kind: "none" },
+        default_tools: [legacyCall],
+        auths: { short: auth("SHORT"), [longAuthKey]: auth("LONG") },
+        _meta: {
+          "dev.appstrate/api": {
+            auths: {
+              short: {},
+              [longAuthKey]: { upload_protocols: ["google-resumable"] },
+            },
+          },
+        },
+      }),
+    );
+
+    const config = getApiCallConfigs(manifest).find((entry) => entry.authKey === longAuthKey)!;
+    expect(config.authKey).toBe(longAuthKey);
+    expect(config.toolName).toBe("api_call__h0a0593260c3968fd8");
+    expect(config.uploadToolName).toBe(config.toolName.replace(/^api_call/, "api_upload"));
+    expect(`${"n".repeat(24)}__${config.uploadToolName}`).toHaveLength(TOOL_NAME_MAX_LEN);
+    expect(canonicalizeApiToolName(manifest, legacyCall)).toBe(config.toolName);
+    expect(readDefaultTools(manifest)).toEqual([legacyCall]);
+
+    const hiddenLegacy = {
+      ...manifest,
+      hidden_tools: [legacyCall],
+    } as IntegrationManifest;
+    expect(resolveIntegrationToolCatalog({ integration: hiddenLegacy })).toEqual([
+      { name: "api_call__short" },
     ]);
   });
 

@@ -90,7 +90,7 @@
   },
   "dependencies": {
     "@afps-spec/schema": "^0.6.1",
-    "@appstrate/afps-shared": "^0.2.0",
+    "@appstrate/afps-shared": "^0.3.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fflate": "^0.8.3",
