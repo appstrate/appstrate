@@ -11,11 +11,14 @@
  * RFC 7592 management credentials).
  *
  * PURE — network I/O only, no DB. The orchestrator (apps/api) supplies the
- * endpoint (resolved via discovery), persists the result in
- * `integration_oauth_clients`, and is responsible for SSRF-guarding the
- * endpoint before calling here (same posture as the userinfo fetch).
+ * endpoint (resolved via discovery) and persists the result in
+ * `integration_oauth_clients`. The endpoint is attacker-influenced (it comes
+ * from the AS discovery metadata of an org-configured remote MCP server), so
+ * the default transport is the SSRF-guarded {@link guardedFetch} — same
+ * posture as `mcp-oauth-discovery.ts` — never raw global `fetch`.
  */
 
+import { guardedFetch } from "@appstrate/core/ssrf";
 import type { TokenEndpointAuthMethod } from "./types.ts";
 
 export interface RegisterDynamicClientInput {
@@ -43,7 +46,13 @@ export interface RegisterDynamicClientInput {
    * (Claude Code #7744), so the connection can't self-renew.
    */
   grantTypes?: string[];
-  /** Testing seam — defaults to global `fetch`. */
+  /**
+   * Testing seam — defaults to the SSRF-guarded {@link guardedFetch} (per-hop
+   * DNS + blocklist, manual redirects, non-http(s) rejection) with
+   * `maxRedirects: 0`. The registration endpoint comes from
+   * attacker-influencable discovery metadata, so the default MUST be guarded —
+   * never raw global `fetch`.
+   */
   fetchImpl?: typeof fetch;
 }
 
@@ -89,6 +98,15 @@ function parseOAuthErrorDescription(body: string): string | undefined {
 
 const FETCH_TIMEOUT_MS = 10_000;
 
+/**
+ * Default transport: {@link guardedFetch} with `maxRedirects: 0`. DCR is a
+ * one-shot POST to a discovered endpoint — a 3xx answer is either a
+ * misconfigured AS or an attempt to bounce the registration elsewhere, so no
+ * redirect is ever followed (the guard fails closed with `too-many-redirects`).
+ */
+const guardedDcrFetch = ((input: string | URL, init?: RequestInit) =>
+  guardedFetch(input, init, { maxRedirects: 0 })) as unknown as typeof fetch;
+
 interface RawRegistrationResponse {
   client_id?: unknown;
   client_secret?: unknown;
@@ -104,7 +122,7 @@ interface RawRegistrationResponse {
 export async function registerDynamicClient(
   input: RegisterDynamicClientInput,
 ): Promise<DynamicClientRegistration> {
-  const fetchImpl = input.fetchImpl ?? fetch;
+  const fetchImpl = input.fetchImpl ?? guardedDcrFetch;
   const tokenEndpointAuthMethod = input.tokenEndpointAuthMethod ?? "none";
 
   const body: Record<string, unknown> = {

@@ -285,6 +285,21 @@ export async function testProxyConnection(orgId: string, proxyId: string): Promi
 
   const start = performance.now();
   try {
+    // ACCEPTED RESIDUAL — the proxy HOP is not pinned to `egress.pinnedAddress`.
+    // Bun's `proxy:` option re-resolves the proxy hostname at connect time, so a
+    // check-then-connect DNS-rebind window remains on the proxy hop (the same
+    // TOCTOU `guardedFetch` closes for direct fetches — but `guardedFetch` does
+    // not cover the `proxy:` transport). We deliberately do NOT rewrite
+    // `proxy.url`'s host to the pinned address: for an `https://` proxy the TLS
+    // handshake to the proxy would then run against the bare IP with no way to
+    // set SNI/certificate identity for the PROXY hop (Bun's per-request `tls`
+    // option applies to the origin request, not the proxy connection), breaking
+    // every TLS proxy; pinning only `http://` proxies would be asymmetric,
+    // unverified coverage. Exposure is low: the target URL is fixed
+    // (cloudflare.com), no platform credential rides along (only the org's own
+    // proxy userinfo, sent to a host whose DNS the same org controls), and the
+    // worst case is delivering one fixed CONNECT/GET line to an internal
+    // address the org rebinds to.
     const res = await fetch("https://cloudflare.com/cdn-cgi/trace", {
       proxy: proxy.url,
       signal: AbortSignal.timeout(10_000),

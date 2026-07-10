@@ -14,8 +14,14 @@
 import { describe, expect, it, beforeEach, beforeAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedApplication } from "../../helpers/seed.ts";
+import {
+  createTestContext,
+  createTestUser,
+  addOrgMember,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedAgent, seedRun, seedApplication, seedApiKey } from "../../helpers/seed.ts";
 import { sql } from "drizzle-orm";
 import { initRealtime } from "../../../src/services/realtime.ts";
 import { collectSSEEvents } from "../../helpers/sse.ts";
@@ -646,6 +652,127 @@ describe("realtime SSE routes (integration)", () => {
     it("returns 401 with invalid API key", async () => {
       const res = await app.request(`/api/realtime/runs?token=ask_invalid_key`);
       expect(res.status).toBe(401);
+    });
+  });
+
+  // ── CRIT-04 — SSE auth: `runs:read` required, isAdmin derived (not hardcoded) ──
+  //
+  // `validateSSEAuth` (routes/realtime.ts) used to accept ANY valid `ask_`
+  // token without checking its scopes AND passed `isAdmin: true` to the
+  // subscriber filter unconditionally. The fix (a) resolves the key's
+  // effective permissions (scopes ∩ creator role) and requires `runs:read`,
+  // and (b) derives `isAdmin` from the resolved role — the only thing it
+  // gates is debug-level `run_log` visibility (services/realtime.ts).
+  describe("SSE API-key scope + admin derivation (CRIT-04)", () => {
+    async function seedSseKey(opts: { createdBy: string; scopes: string[] }): Promise<string> {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: opts.createdBy,
+        scopes: opts.scopes,
+      });
+      return key.rawKey;
+    }
+
+    it("rejects an ask_ token WITHOUT `runs:read` with 403 on all three stream routes", async () => {
+      // Valid key, valid scope — just not `runs:read`. Pre-fix, any valid
+      // key opened every stream, so all three requests below returned 200.
+      const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["agents:read"] });
+
+      const paths = [
+        `/api/realtime/runs/${run.id}`,
+        `/api/realtime/agents/${encodeURIComponent(agentPkg.id)}/runs`,
+        `/api/realtime/runs`,
+      ];
+      for (const path of paths) {
+        const res = await app.request(`${path}?token=${token}`);
+        expect(res.status).toBe(403);
+      }
+    });
+
+    it("accepts an ask_ token WITH `runs:read` on all three stream routes (feature intact)", async () => {
+      const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["runs:read"] });
+
+      const paths = [
+        `/api/realtime/runs/${run.id}`,
+        `/api/realtime/agents/${encodeURIComponent(agentPkg.id)}/runs`,
+        `/api/realtime/runs`,
+      ];
+      for (const path of paths) {
+        const res = await app.request(`${path}?token=${token}`);
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toContain("text/event-stream");
+        await res.body?.cancel();
+      }
+    });
+
+    it("a non-admin subscriber does NOT receive debug-level run_log frames", async () => {
+      // Key created by a plain MEMBER → creatorRole "member" → isAdmin false.
+      // Pre-fix, the routes passed `isAdmin: true` for every subscriber, so
+      // the debug frame below reached this stream and the first collected
+      // event would be "debug-secret" — failing the assertion.
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      const token = await seedSseKey({ createdBy: member.id, scopes: ["runs:read"] });
+
+      // `/api/realtime/runs` — no initial snapshot frame, keeps ordering simple.
+      const res = await app.request(`/api/realtime/runs?token=${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      // Debug frame first — must be filtered for a non-admin subscriber.
+      await pgNotify("run_log_insert", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        run_id: run.id,
+        level: "debug",
+        message: "debug-secret",
+      });
+      await wait();
+      // Info frame second — must be delivered (proves the stream works and
+      // the debug frame was dropped, not merely delayed).
+      await pgNotify("run_log_insert", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        run_id: run.id,
+        level: "info",
+        message: "info-visible",
+      });
+
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0]!.event).toBe("run_log");
+      expect(JSON.parse(events[0]!.data).message).toBe("info-visible");
+    });
+
+    it("an admin subscriber DOES receive debug-level run_log frames", async () => {
+      // Key created by the org OWNER → creatorRole "owner" → isAdmin true.
+      const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["runs:read"] });
+
+      const res = await app.request(`/api/realtime/runs?token=${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      await pgNotify("run_log_insert", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        run_id: run.id,
+        level: "debug",
+        message: "debug-for-admin",
+      });
+
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0]!.event).toBe("run_log");
+      expect(JSON.parse(events[0]!.data).message).toBe("debug-for-admin");
     });
   });
 

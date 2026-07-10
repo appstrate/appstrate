@@ -3,7 +3,8 @@
   "globalPassThroughEnv": [
     "BETTER_AUTH_SECRET",
     "CONNECTION_ENCRYPTION_KEY",
-    "UPLOAD_SIGNING_SECRET"
+    "UPLOAD_SIGNING_SECRET",
+    "RUN_TOKEN_SECRET"
   ],
   "tasks": {
     "build": {

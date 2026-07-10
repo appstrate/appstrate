@@ -1,0 +1,33 @@
+-- CRIT-07 completion: repair legacy `llm_usage` rows whose run attribution
+-- crosses a tenant boundary, then VALIDATE the composite FK added NOT VALID
+-- in 0019 so the invariant holds for EVERY row, not only new writes.
+--
+-- Repair semantics — `SET run_id = NULL`, deliberately NOT a DELETE and NOT
+-- an `org_id` rewrite:
+--   * The poisoned row records REAL spend by the *inserting* principal: its
+--     `org_id` came from the authenticated principal at insert time and is
+--     truthful. Deleting the row would erase real billing history.
+--   * Its `run_id`, by contrast, points at a *foreign* org's run (the
+--     caller-suppliable `X-Run-Id` proxy path, before the attribution guard).
+--     Rewriting `org_id` to match the run would move the spend onto the
+--     victim org's ledger — the opposite of a repair.
+--   * Detaching the false run attribution (`run_id = NULL`) preserves the
+--     payer's ledger and severs the cross-tenant link. `run_id` is nullable
+--     and the composite FK is MATCH SIMPLE, so a NULL-run_id row passes it.
+--
+-- Note on `llm_usage_runner_has_run_id` (source='runner' requires run_id):
+-- runner-source rows are platform-written with BOTH run_id and org_id taken
+-- from the run row itself, so they cannot be org-mismatched; only proxy-source
+-- rows (caller-supplied run id) can match this predicate. Were a mismatched
+-- runner row ever to exist, this UPDATE would abort loudly on that check —
+-- the correct fail-closed outcome for a state that indicates deeper
+-- corruption.
+--
+-- Replayable from scratch: on an empty database the UPDATE is a no-op and
+-- VALIDATE on a trivially-valid (empty) table succeeds.
+UPDATE llm_usage SET run_id = NULL WHERE run_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.id = llm_usage.run_id AND r.org_id = llm_usage.org_id);--> statement-breakpoint
+-- With the mismatched rows detached, validation cannot fail on legacy data.
+-- VALIDATE CONSTRAINT takes only a SHARE UPDATE EXCLUSIVE lock (no exclusive
+-- table lock, concurrent reads/writes proceed) — safe to run online in the
+-- boot migration pipeline.
+ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_run_id_org_id_fk";

@@ -167,22 +167,72 @@ export function setBeforeSignupHook(
 // driven by the platform itself (dashboard signup, org invitation, direct
 // BA sign-up). The OIDC module overrides this via `setRealmResolver()`
 // during its `init()` to return `"end_user:<applicationId>"` whenever the
-// in-flight signup carries an `oidc_pending_client` cookie pointing at an
-// application-level OAuth client — the single-user-pool isolation fix that
-// prevents end-user sessions from being replayed against platform routes.
+// in-flight signup is bound to an application-level OAuth client — the
+// single-user-pool isolation fix that prevents end-user sessions from
+// being replayed against platform routes.
 //
 // Async signature so the resolver can look up the OAuth client's policy
 // (which includes `applicationId`) in the short-TTL cache — same plumbing
-// as `oidcBeforeSignupGuard`. Headers are the only request-scoped state
-// BA exposes to hooks, which is enough because the cookie is present on
-// every OIDC entry path (login, register, magic-link, social callback).
+// as `oidcBeforeSignupGuard`.
+//
+// The resolver receives the full request-scoped view Better Auth exposes to
+// database hooks (CRIT-15): `headers` alone is NOT enough to bind the realm
+// to the OAuth transaction on the BA-driven create legs. The social
+// callback (`/callback/:id`) identifies its transaction by the OAuth
+// `state` (readable server-side via BA's request-scoped OAuth state), and
+// the magic-link verify leg (`/magic-link/verify`) identifies its
+// transaction by the single-use `token` in `query`. `path` + `query` let
+// the resolver key into server-side bindings the browser cannot strip or
+// forge, instead of trusting an ambient cookie.
 
-export type RealmResolver = (headers: Headers | null) => Promise<string>;
+export interface RealmResolutionContext {
+  /** Request headers — `null` when BA creates the user outside HTTP (seeds, scripts). */
+  headers: Headers | null;
+  /**
+   * Better Auth endpoint route pattern driving the user creation (e.g.
+   * `"/sign-up/email"`, `"/callback/:id"`, `"/magic-link/verify"`), when
+   * known.
+   */
+  path: string | null;
+  /** Concrete query params of that endpoint invocation, when known. */
+  query: Record<string, unknown> | null;
+}
+
+export type RealmResolver = (ctx: RealmResolutionContext) => Promise<string>;
 
 let _realmResolver: RealmResolver | null = null;
 
 export function setRealmResolver(resolver: RealmResolver): void {
   _realmResolver = resolver;
+}
+
+// ─── Magic-link issued hook (injected at boot by the OIDC module) ───
+//
+// Fired from the magic-link plugin's `sendMagicLink` callback BEFORE the
+// email leaves the transport, with the freshly minted single-use token and
+// the request headers of the `sign-in/magic-link` call. The OIDC module
+// uses it to persist a server-side `(token → OAuth client)` binding so the
+// later `/magic-link/verify` leg — driven entirely by Better Auth — can
+// resolve the user's realm from state the browser cannot strip or forge
+// (CRIT-15).
+//
+// FAIL CLOSED contract: if the hook throws, the email is NOT sent (the
+// surrounding try/catch in `sendMagicLink` aborts before `sendMail`). An
+// OIDC-initiated magic link must never go out without its binding.
+
+export interface MagicLinkIssuedInfo {
+  /** The single-use magic-link token embedded in the emailed URL. */
+  token: string;
+  /** Normalized (lowercased/trimmed) recipient email. */
+  email: string;
+  /** Headers of the `sign-in/magic-link` request — `null` outside HTTP. */
+  headers: Headers | null;
+}
+
+let _magicLinkIssuedHook: ((info: MagicLinkIssuedInfo) => Promise<void>) | null = null;
+
+export function setMagicLinkIssuedHook(hook: (info: MagicLinkIssuedInfo) => Promise<void>): void {
+  _magicLinkIssuedHook = hook;
 }
 
 // ─── SMTP override (per-request) ─────────────────────────────────────────────
@@ -382,9 +432,28 @@ function buildBasePlugins(
             // email prefetchers hit the URL without burning the token early.
             expiresIn: 15 * 60, // 15 minutes
             allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
-            sendMagicLink: async ({ email, url: rawUrl }) => {
+            sendMagicLink: async ({ email, url: rawUrl, token }, mlCtx) => {
               try {
                 const normalizedEmail = email.toLowerCase().trim();
+
+                // Give the OIDC module a chance to persist the server-side
+                // `(token → OAuth client)` transaction binding BEFORE the
+                // email is sent (see `setMagicLinkIssuedHook`). A throw here
+                // aborts the send via the surrounding catch — fail closed:
+                // an OIDC magic link must never leave without its binding,
+                // otherwise the verify leg would fall back to forgeable
+                // browser state for realm resolution (CRIT-15).
+                if (_magicLinkIssuedHook) {
+                  // `EndpointContext.headers` is typed `HeadersInit` — copy
+                  // into a real `Headers` so the hook contract stays uniform
+                  // with the other signup-hook channels.
+                  const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
+                  await _magicLinkIssuedHook({
+                    token,
+                    email: normalizedEmail,
+                    headers: rawHeaders ? new Headers(rawHeaders) : null,
+                  });
+                }
 
                 // Rewrite the verify URL to route through the OIDC module's
                 // confirmation interstitial so that one-shot token consumption
@@ -753,6 +822,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
                   headers?: Headers;
                   request?: { headers?: Headers };
                   path?: string;
+                  query?: Record<string, unknown>;
                 }
               | null
               | undefined;
@@ -825,8 +895,18 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
                 }
               }
             }
+            // Forward the transaction-scoped view (path + query, on top of
+            // headers) so module hooks can bind their decisions to the OAuth
+            // transaction rather than an ambient cookie — see
+            // `RealmResolutionContext`. The extra fields ride alongside the
+            // `BeforeSignupContext` contract; modules that only read
+            // `headers` are unaffected.
+            const signupHookCtx: BeforeSignupContext & {
+              path: string | null;
+              query: Record<string, unknown> | null;
+            } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
             if (_beforeSignupHook) {
-              await _beforeSignupHook(user.email, { headers });
+              await _beforeSignupHook(user.email, signupHookCtx);
             }
             // Merge realm resolution + email auto-verify into a single data
             // patch returned to BA. The realm resolver falls back to
@@ -841,7 +921,11 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
             const realm = bootstrapTokenBypass
               ? "platform"
               : _realmResolver
-                ? await _realmResolver(headers)
+                ? await _realmResolver({
+                    headers,
+                    path: ctx?.path ?? null,
+                    query: ctx?.query ?? null,
+                  })
                 : "platform";
             // Auto-verify ONLY when a trusted social provider produced the row
             // (the BA OAuth callback path) AND the provider itself asserted the
@@ -890,11 +974,23 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
             }
             if (_afterSignupHook) {
               const ctx = context as
-                | { headers?: Headers; request?: { headers?: Headers } }
+                | {
+                    headers?: Headers;
+                    request?: { headers?: Headers };
+                    path?: string;
+                    query?: Record<string, unknown>;
+                  }
                 | null
                 | undefined;
               const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
-              await _afterSignupHook({ id: user.id, email: user.email }, { headers });
+              // Same transaction-scoped extension as the before-hook — lets
+              // the OIDC after-signup handler resolve the in-flight OAuth
+              // client from the transaction binding instead of the cookie.
+              const afterCtx: AfterSignupContext & {
+                path: string | null;
+                query: Record<string, unknown> | null;
+              } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
+              await _afterSignupHook({ id: user.id, email: user.email }, afterCtx);
             }
           },
         },

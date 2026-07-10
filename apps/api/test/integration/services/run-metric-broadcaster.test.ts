@@ -32,7 +32,7 @@ import {
   type RealtimeEvent,
 } from "../../../src/services/realtime.ts";
 import { llmUsage, runs } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -292,6 +292,164 @@ describe("run-metric-broadcaster (integration)", () => {
       .where(eq(runs.id, runId))
       .limit(1);
     expect(row?.cost).toBeNull();
+  });
+
+  // ── CRIT-07 — the mid-run ledger SUM is org-scoped ──────────
+  //
+  // `llm_usage.run_id` is caller-suppliable on the proxy path (`X-Run-Id`),
+  // so the broadcaster sums the ledger on `(run_id, org_id)` — a row carrying
+  // another org's `org_id` must never inflate this run's `cost_so_far`. The
+  // composite FK `llm_usage(run_id, org_id) → runs(id, org_id)` (now
+  // VALIDATED) additionally rejects such a row at the DB level.
+
+  describe("org-scoped cost aggregation (CRIT-07)", () => {
+    it("the DB refuses a cross-tenant ledger row (composite FK)", async () => {
+      // Org B tries to attach a ledger row to org A's run — the poisoned
+      // shape the pre-fix SUM would have picked up. The validated composite
+      // FK has no runs row for (runId of A, orgId of B), so the INSERT
+      // itself is rejected. That rejection IS the regression assertion: if
+      // the FK is dropped/reverted, this insert succeeds and the org filter
+      // below becomes the only line of defence.
+      const intruder = await createTestContext({
+        orgSlug: "metric-intruder",
+        email: "intruder@metric.test",
+      });
+
+      const err = await db
+        .insert(llmUsage)
+        .values({
+          source: "runner",
+          orgId: intruder.orgId, // org B
+          runId, // org A's run
+          inputTokens: 999,
+          outputTokens: 999,
+          costUsd: 99.99,
+        })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      expect(err).toBeInstanceOf(Error);
+      // Drizzle wraps the driver error — the FK name lives on the cause.
+      const rootMessage = String(((err as Error).cause as Error | undefined)?.message ?? "");
+      expect(rootMessage).toContain("llm_usage_run_id_org_id_fk");
+    });
+
+    it("the broadcaster SUM itself excludes a poisoned same-run/foreign-org row (FK bypassed)", async () => {
+      // Direct regression for the `(run_id, org_id)` filter, independent of
+      // the FK: force the poisoned row past the constraint (FK enforcement is
+      // trigger-based; `session_replication_role = replica` skips it — the
+      // test role is superuser) exactly as a legacy/pre-FK row would exist,
+      // then prove the broadcaster's SUM ignores it. Reverting the org filter
+      // in `loadRunMetricPayload` makes this fail with 99.99 leaking in.
+      const send = mock((_e: RealtimeEvent) => {});
+      const subId = "sub-crit07-poison";
+      trackSubscriber(subId);
+      addSubscriber({
+        id: subId,
+        filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+        send,
+      });
+
+      const intruder = await createTestContext({
+        orgSlug: "metric-poison",
+        email: "poison@metric.test",
+      });
+
+      // Legitimate spend for run A in its own org.
+      await db.insert(llmUsage).values({
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        inputTokens: 100,
+        outputTokens: 50,
+        costUsd: 0.001,
+      });
+
+      // Poisoned row: org B's org_id on org A's run_id (proxy source so the
+      // per-run runner unique index doesn't interfere; request_id required).
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL session_replication_role = replica`);
+        await tx.insert(llmUsage).values({
+          source: "proxy",
+          orgId: intruder.orgId,
+          runId,
+          inputTokens: 9999,
+          outputTokens: 9999,
+          costUsd: 99.99,
+          requestId: `req_${crypto.randomUUID()}`,
+        });
+      });
+
+      scheduleRunMetricBroadcast(runId);
+      await wait(50);
+
+      expect(send).toHaveBeenCalledTimes(1);
+      const costSoFar = eventData(send.mock.calls[0]![0]!, "run_metric").costSoFar as number;
+      expect(costSoFar).toBeCloseTo(0.001, 5); // never 99.991
+    });
+
+    it("cost_so_far for run A never includes another org's spend", async () => {
+      const send = mock((_e: RealtimeEvent) => {});
+      const subId = "sub-crit07";
+      trackSubscriber(subId);
+      addSubscriber({
+        id: subId,
+        filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+        send,
+      });
+
+      // Same-org ledger row for run A — the only spend that may count.
+      await db.insert(llmUsage).values({
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        inputTokens: 100,
+        outputTokens: 50,
+        costUsd: 0.001,
+      });
+
+      // Foreign-org spend on a DIFFERENT run (the composite FK forbids the
+      // same-run/foreign-org shape — covered above): must never leak into
+      // run A's broadcast or persisted cost.
+      const intruder = await createTestContext({
+        orgSlug: "metric-foreign",
+        email: "foreign@metric.test",
+      });
+      const foreignAgent = "@metric-foreign/agent";
+      await seedAgent({ id: foreignAgent, orgId: intruder.orgId, createdBy: intruder.user.id });
+      const foreignRun = await seedRun({
+        packageId: foreignAgent,
+        orgId: intruder.orgId,
+        applicationId: intruder.defaultAppId,
+        userId: intruder.user.id,
+        status: "running",
+      });
+      await db.insert(llmUsage).values({
+        source: "runner",
+        orgId: intruder.orgId,
+        runId: foreignRun.id,
+        inputTokens: 5000,
+        outputTokens: 5000,
+        costUsd: 42.42,
+      });
+
+      scheduleRunMetricBroadcast(runId);
+      await wait(50);
+
+      expect(send).toHaveBeenCalledTimes(1);
+      const costSoFar = eventData(send.mock.calls[0]![0]!, "run_metric").costSoFar as number;
+      // Only org A's own row — never 42.42 (or 42.421).
+      expect(costSoFar).toBeCloseTo(0.001, 5);
+
+      // The persisted mid-run aggregate is equally scoped.
+      const [row] = await db
+        .select({ cost: runs.cost })
+        .from(runs)
+        .where(eq(runs.id, runId))
+        .limit(1);
+      expect(row?.cost).toBeCloseTo(0.001, 5);
+    });
   });
 
   it("a vanished run drops its throttle entry to bound the in-memory map", async () => {

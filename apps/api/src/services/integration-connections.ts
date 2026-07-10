@@ -1268,8 +1268,13 @@ export async function ensureIntegrationOAuthClient(
     };
   }
 
-  // SSRF guard — the endpoint is manifest/discovery-derived and we POST to it.
-  // Refuse loopback / RFC1918 / link-local / metadata targets.
+  // SSRF pre-check — the endpoint is manifest/discovery-derived and we POST to
+  // it. This LITERAL check (no DNS) exists to surface the friendly
+  // provisioningFailure below for obviously-internal targets; the authoritative
+  // guard is `registerDynamicClient` itself, whose default transport is
+  // `guardedFetch` (per-hop DNS resolution + blocklist, `maxRedirects: 0`), so
+  // a public hostname rebinding to an internal address is refused at connect
+  // time even though it passes this literal check.
   if (isBlockedUrl(registrationEndpoint)) {
     logger.warn("auto-DCR: registration_endpoint blocked by SSRF guard", {
       packageId,

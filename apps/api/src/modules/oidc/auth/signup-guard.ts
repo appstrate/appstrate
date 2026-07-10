@@ -13,12 +13,14 @@
  * `buildOrgLevelClaims` (which leaves a dangling BA user row with no org
  * membership).
  *
- * Mechanism: the OIDC entry pages (`/api/oauth/login`, `/api/oauth/register`,
- * `/api/oauth/magic-link`) issue a signed `oidc_pending_client` cookie that
- * pins the client_id context. This guard reads the cookie on the BA hook
- * path (the only state that survives the cross-site social redirect chain)
- * and applies a single, level-agnostic policy check via
- * `loadClientSignupPolicy`.
+ * Mechanism: the guard resolves the in-flight OAuth client through the
+ * TRANSACTION BINDING (`resolvePendingClientBinding`) — the same
+ * browser-unforgeable precedence chain the realm resolver uses (OAuth
+ * callback state → magic-link token binding → pending-client cookie) — and
+ * applies a single, level-agnostic policy check via
+ * `loadClientSignupPolicy`. Reading the binding rather than the raw cookie
+ * means a caller cannot strip their cookie on the social-callback or
+ * magic-link-verify legs to slip past a closed `allowSignup` policy.
  *
  * Level semantics:
  *   - `org`      → `allowSignup` gates the guard; on pass, `oidcAfterSignupHandler`
@@ -33,20 +35,16 @@
  *                     blocked here. `enduser-mapping.ts` surfaces the
  *                     same gate as `AppSignupClosedError` for direct calls.
  *
- * Safe fallthrough: the guard is a no-op when no cookie is present, its
- * signature is invalid/expired, or the client is unknown / disabled.
+ * Safe fallthrough: the guard is a no-op when no binding resolves or the
+ * client is unknown / disabled.
  *
- * Transaction binding (CRIT-15): on the server-driven `POST
- * /api/oauth/register` path the platform hands Better Auth an AUTHORITATIVE
- * pending-client cookie re-derived from the validated `authorize` query
- * (`headersWithAuthoritativePendingClient`), so both this guard and the realm
- * resolver read the client the server authorized rather than a browser cookie
- * the caller could strip to slip past a closed `allowSignup` policy — or to
- * force an application flow into the `platform` realm. The social-callback and
- * magic-link *verify* legs are driven by Better Auth directly and still read
- * the browser cookie; the realm resolver fails closed on an inconsistent
- * cookie there, but a fully transaction-bound fix for those legs needs the
- * `RealmResolver`/hook signature to carry the request's OAuth `state`.
+ * Transaction binding (CRIT-15): every create leg is bound server-side —
+ * `POST /api/oauth/register` re-mints an authoritative cookie header from
+ * the validated `authorize` query (`headersWithAuthoritativePendingClient`);
+ * the social callback is keyed by the single-use OAuth `state` Better Auth
+ * consumes itself; the magic-link verify leg is keyed by the single-use
+ * token whose `(token → client)` binding was persisted at issuance. See
+ * `services/oauth-transaction-binding.ts`.
  */
 
 import { APIError } from "better-auth/api";
@@ -56,19 +54,23 @@ import {
   resolveOrCreateOrgMembership,
   OrgSignupClosedError,
 } from "../services/orgmember-mapping.ts";
-import { readPendingClientCookieFromHeaders } from "../services/pending-client-cookie.ts";
+import { resolvePendingClientBinding } from "../services/oauth-transaction-binding.ts";
 
 /**
  * Input shape accepted by the guard. We intentionally keep it minimal (the
- * about-to-be-created Better Auth user + the request headers) so the function
- * has no coupling to BA's internal `GenericEndpointContext` type — the core
- * wiring in `packages/db/src/auth.ts` extracts and forwards the two pieces.
+ * about-to-be-created Better Auth user + the request-scoped pieces the core
+ * wiring in `packages/db/src/auth.ts` extracts and forwards) so the function
+ * has no coupling to BA's internal `GenericEndpointContext` type.
  */
 export interface BeforeSignupGuardInput {
   /** The user BA is about to create. Only `email` is required. */
   user: { email: string };
   /** Request headers — `null` if the signup is happening outside an HTTP context. */
   headers: Headers | null;
+  /** BA endpoint route pattern (e.g. `"/magic-link/verify"`), when known. */
+  path?: string | null;
+  /** Concrete query params of the BA endpoint invocation, when known. */
+  query?: Record<string, unknown> | null;
 }
 
 /**
@@ -78,12 +80,23 @@ export interface BeforeSignupGuardInput {
  * to `/api/oauth/login?...`) catches the redirect.
  */
 export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Promise<void> {
-  const pendingClientId = readPendingClientCookieFromHeaders(input.headers);
-  if (!pendingClientId) {
+  const binding = await resolvePendingClientBinding({
+    headers: input.headers,
+    path: input.path ?? null,
+    query: input.query ?? null,
+  });
+  if (binding.kind === "none") {
     // Signup outside an OIDC flow — defer to other modules (e.g. cloud
     // free-tier hook) and the core signup path.
     return;
   }
+  if (binding.kind === "invalid") {
+    // Incoherent OIDC transaction. The realm resolver — which runs right
+    // after this guard in `databaseHooks.user.create.before` — fails the
+    // creation closed with `oidc_realm_unresolved`; nothing to gate here.
+    return;
+  }
+  const pendingClientId = binding.clientId;
 
   const policy = await loadClientSignupPolicy(pendingClientId);
   // Pass-through cases:
@@ -121,11 +134,11 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
 /**
  * `databaseHooks.user.create.after` handler for the OIDC module.
  *
- * Symmetric to `oidcBeforeSignupGuard`: reads the same signed
- * `oidc_pending_client` cookie, and — if the request is a brand-new BA user
- * being provisioned through an org-level client with `allowSignup === true`
- * — inserts the `organization_members` row BEFORE the onward redirect back
- * through `/api/auth/oauth2/authorize`.
+ * Symmetric to `oidcBeforeSignupGuard`: resolves the same transaction
+ * binding, and — if the request is a brand-new BA user being provisioned
+ * through an org-level client with `allowSignup === true` — inserts the
+ * `organization_members` row BEFORE the onward redirect back through
+ * `/api/auth/oauth2/authorize`.
  *
  * Why it matters: the social sign-in flow bounces
  *   `/api/oauth/login` → BA sign-in/social → Google → BA callback → callbackURL
@@ -149,9 +162,21 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
 export async function oidcAfterSignupHandler(input: {
   user: { id: string; email: string };
   headers: Headers | null;
+  path?: string | null;
+  query?: Record<string, unknown> | null;
 }): Promise<void> {
-  const pendingClientId = readPendingClientCookieFromHeaders(input.headers);
-  if (!pendingClientId) return;
+  // Best-effort transaction resolution. `create.after` hooks may run after
+  // the BA transaction commits; if the request-scoped OAuth state is no
+  // longer readable there, the binding falls back to the cookie — benign,
+  // because the org auto-join is also performed at token-mint time by
+  // `buildOrgLevelClaims` (SELECT-first, idempotent).
+  const binding = await resolvePendingClientBinding({
+    headers: input.headers,
+    path: input.path ?? null,
+    query: input.query ?? null,
+  });
+  if (binding.kind !== "bound") return;
+  const pendingClientId = binding.clientId;
 
   const policy = await loadClientSignupPolicy(pendingClientId);
   if (!policy) return;

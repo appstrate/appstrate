@@ -16,6 +16,17 @@
  * - Follows redirects MANUALLY (`redirect: "manual"`) so every hop is checked.
  * - Runs `resolveAndCheckHost` on the initial host AND on every redirect target
  *   (per-hop DNS resolution + blocklist), failing closed.
+ * - Enforces the CALLER'S reachability contract on every hop when
+ *   `validateHop` is provided: the predicate runs on hop 0 and on every
+ *   redirect target BEFORE any request is sent to it, and a throw ABORTS the
+ *   whole exchange (an off-contract hop is treated as the attack, never
+ *   silently stripped-and-followed). This is how allowlist-scoped callers
+ *   (credential proxy `authorized_uris`) extend their allowlist to the full
+ *   redirect chain instead of only the initial URL.
+ * - Strips credential headers on any cross-origin hop: the builtin
+ *   `authorization`/`cookie`/`proxy-authorization` set UNIONED with the
+ *   caller's `sensitiveHeaders` (vendor-specific names like `X-Api-Key` that
+ *   the primitive cannot know about).
  * - Rejects non-http(s) schemes and strips userinfo/fragment from redirect
  *   targets (defeats `https://user:pass@…` credential-leak + fragment tricks).
  * - CONNECTS TO THE VALIDATED ADDRESS: under Bun with the global `fetch`, each
@@ -82,6 +93,28 @@ export interface GuardedFetchOptions {
    * HTTP proxy whose ACLs match on hostname rather than IP.
    */
   pinToResolvedAddress?: boolean;
+  /**
+   * Caller-owned per-hop reachability contract. Called for EVERY hop —
+   * INCLUDING hop 0 — with the logical (userinfo/fragment-stripped) URL,
+   * BEFORE any request is sent to that URL and before DNS resolution.
+   * Throw to abort the entire exchange: an off-contract redirect target must
+   * kill the request, not be followed with stripped credentials — for
+   * allowlist-scoped callers the allowlist IS the security boundary and a
+   * hop that leaves it is the attack. The thrown error propagates to the
+   * caller unwrapped, so callers keep their own error taxonomy and redaction
+   * (do NOT embed secrets in the message — the hop URL itself may carry an
+   * interpolated credential; redact before throwing).
+   */
+  validateHop?: (url: URL, hop: number) => void;
+  /**
+   * Additional header names (case-insensitive) treated as credentials for
+   * cross-origin redirect stripping. UNIONED with the builtin
+   * `authorization`/`cookie`/`proxy-authorization` set — never a
+   * replacement. Callers that inject vendor-specific credential headers
+   * (`X-Api-Key`, `X-Auth-Token`, …) MUST list them here, or a cross-origin
+   * redirect would carry them to the new origin.
+   */
+  sensitiveHeaders?: readonly string[];
   /** Structured logger for blocked/hop events. Values are never secrets. */
   logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void };
 }
@@ -159,6 +192,9 @@ export async function guardedFetch(
 
   let current = stripUserInfoAndFragment(new URL(typeof input === "string" ? input : input.href));
   assertHttp(current);
+  // Hop 0 runs the caller's reachability contract too — the initial URL is
+  // just the first hop of the chain, not a privileged one.
+  opts?.validateHop?.(current, 0);
   let pinnedAddress = await checkHost(current, opts);
 
   // Apply a default deadline when the caller supplied no signal of its own, so
@@ -188,7 +224,12 @@ export async function guardedFetch(
   // credential headers (browser behaviour) so a `302 → other-host` cannot
   // forward the caller's `Authorization`/`Cookie` to a different origin — even
   // when that origin is a legitimate public host the SSRF host-check allows.
+  // The strip set is the builtin trio UNIONED with the caller-declared
+  // `sensitiveHeaders` (vendor-specific credential names the primitive cannot
+  // know, e.g. an injected `X-Api-Key`).
   const headers = new Headers(init?.headers ?? {});
+  const sensitiveHeaderNames = new Set(["authorization", "cookie", "proxy-authorization"]);
+  for (const h of opts?.sensitiveHeaders ?? []) sensitiveHeaderNames.add(h.toLowerCase());
   // A caller-supplied Host header is honoured only on the first, unpinned hop
   // (a virtual-host override for the URL the caller chose). On every later or
   // pinned hop the logical URL owns the Host value.
@@ -257,10 +298,15 @@ export async function guardedFetch(
       const location = res.headers.get("location")!;
       const next = stripUserInfoAndFragment(new URL(location, current));
       assertHttp(next);
+      // Caller's reachability contract FIRST (cheap, sync, fail-closed): an
+      // off-contract hop aborts the exchange before we even resolve it. A
+      // same-origin redirect can walk off an allowlisted PATH while keeping
+      // every header and the body — only the caller's predicate can see that.
+      opts?.validateHop?.(next, hop + 1);
       const nextPin = await checkHost(next, opts);
 
       if (next.origin !== current.origin) {
-        for (const h of ["authorization", "cookie", "proxy-authorization"]) headers.delete(h);
+        for (const h of sensitiveHeaderNames) headers.delete(h);
         // A 307/308 preserves method+body by spec, but re-sending a
         // secret-bearing request body (OAuth `client_secret`/`refresh_token`,
         // a signed webhook payload) to a DIFFERENT HOST is the same
@@ -271,8 +317,17 @@ export async function guardedFetch(
         // IdPs) keeps the body, matching browser 307/308 behaviour; the one
         // same-host case still dropped is an https→http DOWNGRADE, which
         // would re-send the secret in cleartext.
+        //
+        // When the caller declared a `validateHop` contract the request is a
+        // credential-bearing exchange by definition (that is why the caller
+        // scoped it), so belt-and-braces: ANY origin change drops the body,
+        // including the same-host scheme/port cases kept above.
         const schemeDowngrade = current.protocol === "https:" && next.protocol === "http:";
-        if (body !== undefined && (next.hostname !== current.hostname || schemeDowngrade)) {
+        const hasHopContract = opts?.validateHop !== undefined;
+        if (
+          body !== undefined &&
+          (next.hostname !== current.hostname || schemeDowngrade || hasHopContract)
+        ) {
           opts?.logger?.warn("guardedFetch dropped request body on cross-host redirect", {
             status: res.status,
             fromHost: current.hostname,

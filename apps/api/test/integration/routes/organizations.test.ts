@@ -630,6 +630,160 @@ describe("Organizations API", () => {
     });
   });
 
+  // ── CRIT-02 — API keys must not reach org administration ─────────────────
+  //
+  // `requireOrgRole` (routes/organizations.ts) used to resolve the CREATOR's
+  // live membership row for API-key callers, so ANY key created by an owner —
+  // whatever its scopes (`runs:read` here) — inherited full org-admin rights.
+  // The fix rejects `authMethod === "api_key"` before the membership lookup.
+  //
+  // Unlike the issue-#172 suite above (foreign org → apiKeyOrgScopeGuard),
+  // these requests target the key's OWN org: if the fix is reverted, the
+  // membership lookup finds the creator's owner row and every gated request
+  // below succeeds — each 403 assertion here fails.
+  describe("API keys cannot administer their OWN org (CRIT-02)", () => {
+    async function setupOwnerKeyInOwnOrg() {
+      const ctx = await createTestContext({ orgSlug: "crit02-org" });
+      // A second, removable member — the target of remove/change-role.
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id, // creator is the org OWNER
+        scopes: ["runs:read"], // narrow scope — must NOT inherit owner rights
+      });
+      return {
+        ctx,
+        member,
+        bearer: { Authorization: `Bearer ${apiKey.rawKey}` },
+      };
+    }
+
+    it("PUT /api/orgs/:keyOrgId with an owner-created API key → 403, org not renamed", async () => {
+      const { ctx, bearer } = await setupOwnerKeyInOwnOrg();
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "PWNED-BY-KEY" }),
+      });
+
+      expect(res.status).toBe(403);
+      const [row] = await db
+        .select({ name: organizations.name })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId));
+      expect(row?.name).not.toBe("PWNED-BY-KEY");
+    });
+
+    it("DELETE /api/orgs/:keyOrgId with an owner-created API key → 403, org survives", async () => {
+      const { ctx, bearer } = await setupOwnerKeyInOwnOrg();
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "DELETE",
+        headers: bearer,
+      });
+
+      expect(res.status).toBe(403);
+      await assertDbHas(organizations, eq(organizations.id, ctx.orgId));
+    });
+
+    it("DELETE /api/orgs/:keyOrgId/members/:userId → 403, membership survives", async () => {
+      const { ctx, member, bearer } = await setupOwnerKeyInOwnOrg();
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members/${member.id}`, {
+        method: "DELETE",
+        headers: bearer,
+      });
+
+      expect(res.status).toBe(403);
+      await assertDbHas(
+        organizationMembers,
+        and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, member.id))!,
+      );
+    });
+
+    it("PUT /api/orgs/:keyOrgId/members/:userId → 403, role unchanged", async () => {
+      const { ctx, member, bearer } = await setupOwnerKeyInOwnOrg();
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members/${member.id}`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "admin" }),
+      });
+
+      expect(res.status).toBe(403);
+      const [row] = await db
+        .select({ role: organizationMembers.role })
+        .from(organizationMembers)
+        .where(
+          and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, member.id)),
+        );
+      expect(row?.role).toBe("member");
+    });
+
+    it("PUT /api/orgs/:keyOrgId/settings → 403, settings unchanged", async () => {
+      const { ctx, bearer } = await setupOwnerKeyInOwnOrg();
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ dashboard_sso_enabled: true }),
+      });
+
+      expect(res.status).toBe(403);
+      const settings = await getOrgSettings(ctx.orgId);
+      expect(settings.dashboard_sso_enabled).not.toBe(true);
+    });
+
+    it("the owner's COOKIE SESSION still performs every gated operation (feature intact)", async () => {
+      // The regression that proves the fix rejects the auth METHOD, not the
+      // operations themselves: the same human owner over a cookie session
+      // must keep full org administration.
+      const { ctx, member } = await setupOwnerKeyInOwnOrg();
+      const cookieHeaders = { Cookie: ctx.cookie, "Content-Type": "application/json" };
+
+      const rename = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PUT",
+        headers: cookieHeaders,
+        body: JSON.stringify({ name: "Renamed By Owner" }),
+      });
+      expect(rename.status).toBe(200);
+
+      const settings = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: cookieHeaders,
+        body: JSON.stringify({ dashboard_sso_enabled: true }),
+      });
+      expect(settings.status).toBe(200);
+
+      const roleChange = await app.request(`/api/orgs/${ctx.orgId}/members/${member.id}`, {
+        method: "PUT",
+        headers: cookieHeaders,
+        body: JSON.stringify({ role: "admin" }),
+      });
+      expect(roleChange.status).toBe(200);
+
+      const removal = await app.request(`/api/orgs/${ctx.orgId}/members/${member.id}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(removal.status).toBe(204);
+      await assertDbMissing(
+        organizationMembers,
+        and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, member.id))!,
+      );
+
+      const deletion = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(deletion.status).toBe(204);
+      await assertDbMissing(organizations, eq(organizations.id, ctx.orgId));
+    });
+  });
+
   describe("DELETE /api/orgs/:orgId", () => {
     it("deletes the org and persists an org.deleted audit event (issue #546)", async () => {
       const ctx = await createTestContext({ orgName: "Doomed Org", orgSlug: "doomed-org" });

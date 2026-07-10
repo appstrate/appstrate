@@ -1448,11 +1448,20 @@ export function createOidcRouter() {
     const errorCallbackURL = `${url.origin}/api/oauth/login${url.search}`;
 
     const authApi = getOidcAuthApi();
+    // CRIT-15: bind the magic link to the OAuth transaction the server
+    // actually validated (`ctx.client`), NOT to the browser-supplied
+    // `oidc_pending_client` cookie. `sendMagicLink` (packages/db/src/auth.ts)
+    // reads the pending client from THESE headers to persist the
+    // `(token → clientId)` binding that the BA-driven `/magic-link/verify`
+    // create leg later resolves the realm from — a caller who strips or
+    // clobbers their own cookie can no longer detach the link from its
+    // client. See `services/oauth-transaction-binding.ts`.
+    const baHeaders = headersWithAuthoritativePendingClient(c.req.raw.headers, ctx.client.clientId);
     try {
       await withSmtpOverride(ctx.smtp, () =>
         authApi.signInMagicLink({
           body: { email, callbackURL, errorCallbackURL },
-          headers: c.req.raw.headers,
+          headers: baHeaders,
           asResponse: true,
         }),
       );

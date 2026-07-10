@@ -27,7 +27,8 @@ import { parseProxyRequest } from "./helpers.ts";
 import { forwardMeteredResponse } from "./metering.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { checkEgressUrl } from "../../lib/egress-host-guard.ts";
+import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
+import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 
@@ -43,7 +44,13 @@ export interface ProxyCallInputs {
   upstreamPath: string;
   incomingHeaders: Headers;
   rawBody: Uint8Array;
-  /** Injected for tests; defaults to `globalThis.fetch`. */
+  /**
+   * Injected for tests; production omits it. The upstream call always goes
+   * through `egressGuardedFetch` — when this seam is injected, the guard
+   * still runs its per-hop host checks but delegates the connection to the
+   * injected fetch (the address pin is skipped, per the `guardedFetch`
+   * contract). The production default (no injection) is the pinned path.
+   */
   fetchImpl?: typeof fetch;
   /** Override the request-body cap. Defaults to 10 MiB. */
   maxRequestBytes?: number;
@@ -99,7 +106,6 @@ export class LlmProxyUnsupportedSubscriptionError extends Error {
 }
 
 export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
-  const fetchImpl = inputs.fetchImpl ?? fetch;
   const maxBytes = inputs.maxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES;
   if (inputs.rawBody.byteLength > maxBytes) {
     throw invalidRequest(`Request body exceeds LLM_PROXY_LIMITS.max_request_bytes (${maxBytes})`);
@@ -163,12 +169,14 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   const upstreamUrl = joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);
 
-  // SSRF defence-in-depth: an openai-compatible provider lets an org configure
-  // an arbitrary baseUrl. Route it through the canonical egress guard (parse +
-  // scheme floor + allowlist-aware literal + DNS-rebind host gate) so this site
-  // can't drift from the other platform egress paths. The resolved base URL is
-  // the real backing endpoint — server-log-only (logged here); the caller-facing
-  // message must not embed it or the block reason.
+  // SSRF pre-flight: an openai-compatible provider lets an org configure an
+  // arbitrary baseUrl. `checkEgressUrl` gives the richer non-throwing decision
+  // (URL parse → invalid-url, scheme floor, allowlist-aware literal + DNS
+  // host gate) so a bad baseUrl maps to a clean 400 with the block reason
+  // logged server-side. The resolved base URL is the real backing endpoint —
+  // server-log-only (logged here); the caller-facing message must not embed
+  // it or the block reason. The WIRE call below re-runs the same guard per
+  // hop and pins the connection — this check is UX/logging, not the defence.
   const egress = await checkEgressUrl(upstreamUrl);
   if (!egress.ok) {
     logger.error("llm-proxy: refused blocked upstream (SSRF)", {
@@ -188,12 +196,51 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   const started = Date.now();
   let upstream: Response;
   try {
-    upstream = await fetchImpl(upstreamUrl, {
-      method: "POST",
-      headers: upstreamHeaders,
-      body: rewrittenBody,
-    });
+    // Canonical SSRF-guarded transport (same primitive as the credential
+    // proxy): per-hop DNS re-validation and — on the production path (no
+    // injected fetchImpl) — a connection PINNED to the validated address
+    // while preserving `Host` + TLS SNI, closing the check-then-fetch
+    // DNS-rebind TOCTOU that a bare `fetch(upstreamUrl)` reopens after the
+    // pre-flight above.
+    //
+    // maxRedirects: 0 — an inference endpoint has no legitimate reason to
+    // redirect, and following one would replay the provider API key (in
+    // `upstreamHeaders`) against whatever host the redirect names.
+    //
+    // timeoutMs: 0 — disables the guard's 30 s first-byte default. A
+    // non-streaming completion legitimately holds the response headers past
+    // 30 s; the previous raw fetch here had no deadline either (behaviour
+    // preserved, the caller's disconnect remains the effective bound).
+    upstream = await egressGuardedFetch(
+      upstreamUrl,
+      {
+        method: "POST",
+        headers: upstreamHeaders,
+        body: rewrittenBody,
+      },
+      {
+        maxRedirects: 0,
+        timeoutMs: 0,
+        logger,
+        ...(inputs.fetchImpl ? { fetchImpl: inputs.fetchImpl } : {}),
+      },
+    );
   } catch (err) {
+    if (err instanceof SsrfBlockedError) {
+      // A hop the pre-flight passed got blocked at wire time (DNS rebind
+      // between check and connect, or an upstream redirect — refused
+      // outright via maxRedirects: 0). Same caller-facing message as the
+      // pre-flight: never leak the host or block reason.
+      logger.error("llm-proxy: refused blocked upstream (SSRF)", {
+        presetId,
+        upstreamUrl,
+        reason: err.reason,
+        host: err.host,
+      });
+      throw invalidRequest(
+        `Model "${presetId}" resolves to a blocked address — refusing to proxy.`,
+      );
+    }
     logger.error("llm-proxy: upstream fetch failed", {
       presetId,
       upstreamUrl,

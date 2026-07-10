@@ -43,7 +43,10 @@ import { logger } from "../../../lib/logger.ts";
 import { loadClientSignupPolicy } from "../services/orgmember-mapping.ts";
 import { markClientSelfService } from "../services/oauth-admin.ts";
 import { isProtectedResourceUri } from "../../../lib/protected-resources.ts";
-import { readPendingClientCookieFromHeaders } from "../services/pending-client-cookie.ts";
+import {
+  resolvePendingClientBinding,
+  MAGIC_LINK_VERIFY_PATH,
+} from "../services/oauth-transaction-binding.ts";
 import {
   assertUserRealm,
   expectedRealmForClient,
@@ -368,13 +371,6 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   context: { baseURL: string; internalAdapter?: unknown };
   redirect: (url: string) => unknown;
 }): Promise<void> {
-  const pendingClientId = readPendingClientCookieFromHeaders(ctx.request?.headers ?? null);
-  if (!pendingClientId) return;
-
-  const policy = await loadClientSignupPolicy(pendingClientId);
-  if (!policy) return;
-  if (policy.allowSignup) return;
-
   const query = (ctx.query ?? {}) as {
     token?: string;
     errorCallbackURL?: string;
@@ -382,6 +378,23 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   };
   const token = query.token;
   if (!token) return;
+
+  // Resolve the in-flight client from the TRANSACTION BINDING (the
+  // `(token → client)` record persisted at issuance), falling back to the
+  // pending-client cookie for links issued before the binding mechanism —
+  // same precedence as the realm resolver and the db-hook signup guard
+  // (see `services/oauth-transaction-binding.ts`, CRIT-15).
+  const binding = await resolvePendingClientBinding({
+    headers: ctx.request?.headers ?? null,
+    path: MAGIC_LINK_VERIFY_PATH,
+    query,
+  });
+  if (binding.kind !== "bound") return;
+  const pendingClientId = binding.clientId;
+
+  const policy = await loadClientSignupPolicy(pendingClientId);
+  if (!policy) return;
+  if (policy.allowSignup) return;
 
   const adapter = ctx.context.internalAdapter as
     | {

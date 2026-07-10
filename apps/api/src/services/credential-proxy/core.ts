@@ -282,18 +282,28 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // camelCase per the documented Zone 3 carve-out — see
   // docs/CASING_CONVENTIONS.md — but user-facing error strings refer
   // to the AFPS wire vocabulary.)
-  if (!resolved.allowAllUris) {
+  //
+  // ONE matcher for the whole chain: the same assertion runs on the initial
+  // target here AND — via `guardedFetch`'s `validateHop` — on EVERY redirect
+  // hop, so a 302 cannot walk the request off the allowlist (cross-host OR a
+  // same-host path escape like `/v1/me` → `/internal/dump`). The message is
+  // built from the REDACTED form only: a hop URL can itself embed an
+  // interpolated credential (vendor puts the token in a path, or echoes it
+  // in a Location header).
+  const assertHopAuthorized = (hopTarget: string): void => {
+    if (resolved.allowAllUris) return;
     const allowlist = resolved.authorizedUris ?? [];
-    const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, target));
+    const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
     if (!ok) {
       throw new ProxyAuthorizationError(
-        `Target ${redactedTarget} is not in the authorized_uris allowlist for ${input.integrationId}`,
+        `Target ${redactCredentialValues(hopTarget, fields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
       );
     }
     // Note: an empty allowlist can never reach here — `allowlist.some(...)` is
     // `false` for `[]`, so the `!ok` guard above already threw. (The former
     // `allowlist.length === 0 && isBlockedUrl(target)` branch was dead.)
-  }
+  };
+  assertHopAuthorized(target);
 
   // Canonical egress guard: parse + scheme floor + allowlist-aware literal +
   // DNS-rebind host gate, one decision shared with the other egress sites
@@ -311,6 +321,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // Resolve caller headers, then let the shared injector add the pinned
   // credential header server-side (mirror of the sidecar — single source
   // of truth in `@appstrate/connect/proxy-primitives`).
+  //
+  // Every header whose value carries a decrypted credential is recorded in
+  // `sensitiveHeaderNames`, collected AT INJECTION TIME (not guessed from a
+  // static list): the server-injected credential header can be any vendor
+  // name (`X-Api-Key`, `X-Auth-Token`, …) and a caller template can put a
+  // `{{field}}` in any header. The set is handed to the transport so a
+  // cross-origin redirect strips these exactly like `Authorization`.
+  const sensitiveHeaderNames = new Set<string>();
   const headers = new Headers();
   for (const [k, v] of Object.entries(input.headers ?? {})) {
     const substituted = substituteVars(v, fields);
@@ -320,9 +338,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         `Unresolved placeholders in header "${k}": {{${unresolved.join(",")}}}`,
       );
     }
+    if (substituted !== v) sensitiveHeaderNames.add(k);
     headers.set(k, substituted);
   }
   applyInjectedCredentialHeaderToHeaders(headers, resolved);
+  if (resolved.credentialHeaderName) sensitiveHeaderNames.add(resolved.credentialHeaderName);
   normalizeAuthSchemeOnHeaders(headers);
 
   // Body substitution (opt-in; body may be bytes). Bun's global fetch
@@ -370,23 +390,34 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
 
   // Single outbound transport: the SSRF-guarded platform egress primitive.
-  // Per-hop DNS re-validation + manual redirects (cross-origin hops drop the
-  // injected credential header) + connection pinned to the validated address.
-  // The previous raw `fetch` here followed redirects blindly — an upstream
-  // 302 to an internal address bypassed the pre-flight check entirely.
+  // Per-hop DNS re-validation + manual redirects + connection pinned to the
+  // validated address. The previous raw `fetch` here followed redirects
+  // blindly — an upstream 302 to an internal address bypassed the pre-flight
+  // check entirely.
+  //
+  // `validateHop` re-runs the authorized_uris assertion on EVERY hop
+  // (including hop 0), so a redirect that leaves the allowlist — cross-host
+  // OR same-host off-path — ABORTS the exchange instead of being followed.
+  // `sensitiveHeaders` extends the transport's cross-origin credential strip
+  // to the vendor-specific header names collected at injection time above.
   //
   // Every error leaving this transport is scrubbed: `SsrfBlockedError`
   // embeds the blocked hop's hostname (derived from the SUBSTITUTED target
   // on the first hop) and Bun's fetch errors embed the full request URL —
   // both would leak interpolated credential values into the 403 body / logs.
+  // `ProxyAuthorizationError` (thrown by `validateHop` on an off-allowlist
+  // hop) is already redacted at construction and passes through unwrapped.
   const performFetch = async (fetchArgs: RequestInit): Promise<Response> => {
     try {
-      return await egressGuardedFetch(
-        target,
-        fetchArgs,
-        input.fetch ? { fetchImpl: input.fetch } : undefined,
-      );
+      return await egressGuardedFetch(target, fetchArgs, {
+        ...(input.fetch ? { fetchImpl: input.fetch } : {}),
+        validateHop: (url) => assertHopAuthorized(url.toString()),
+        sensitiveHeaders: [...sensitiveHeaderNames],
+      });
     } catch (err) {
+      if (err instanceof ProxyAuthorizationError) {
+        throw err; // validateHop abort — message already redacted
+      }
       if (err instanceof SsrfBlockedError) {
         throw new ProxyAuthorizationError(
           `Target ${redactedTarget} was blocked by the egress guard (${err.reason})`,
@@ -434,6 +465,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         // would otherwise keep the stale Bearer).
         if (refreshed.credentialHeaderName) {
           headers.delete(refreshed.credentialHeaderName);
+          // Keep the strip set in sync — the refreshed payload may name a
+          // different header than the original resolution.
+          sensitiveHeaderNames.add(refreshed.credentialHeaderName);
         }
         applyInjectedCredentialHeaderToHeaders(headers, refreshed);
         normalizeAuthSchemeOnHeaders(headers);

@@ -3,10 +3,19 @@
 /**
  * Pending-client signed cookie — plumbs the OAuth `client_id` from the
  * server-rendered entry pages (`/api/oauth/login`, `/api/oauth/register`,
- * `/api/oauth/magic-link`) through the subsequent Better Auth round-trip
- * (social callback, magic-link verify) so the `databaseHooks.user.create.before`
- * guard can apply the per-client signup policy BEFORE a brand-new Better Auth
- * user row is committed.
+ * `/api/oauth/magic-link`) through the subsequent Better Auth round-trip.
+ *
+ * ROLE (post CRIT-15): the cookie is NOT the authority for realm/signup
+ * decisions on the BA-driven create legs anymore — the browser controls
+ * whether it presents the cookie, and the single global cookie is clobbered
+ * by a concurrent flow in a second tab. Authority lives in the transaction
+ * binding (`services/oauth-transaction-binding.ts`): OAuth `state` for the
+ * social callback, the single-use token binding for magic-link verify, and
+ * the server-authored authoritative cookie header
+ * (`headersWithAuthoritativePendingClient`) for the in-process register /
+ * magic-link-request paths. The browser cookie remains load-bearing for:
+ *   - the per-app social credential override (`ba-social-override-plugin`),
+ *   - UX fallbacks (deploy-window compatibility for in-flight magic links).
  *
  * Why a cookie and not AsyncLocalStorage: the social sign-in flow bounces the
  * browser off a third-party IdP (Google, GitHub) and lands on

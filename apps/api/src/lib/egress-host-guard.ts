@@ -142,6 +142,12 @@ export async function checkEgressUrl(
  * re-checked. Redirects are always followed manually with the full guard
  * re-run on every hop.
  *
+ * Allowlist-scoped callers (credential proxy `authorized_uris`) pass
+ * `validateHop` to extend their own reachability contract to every redirect
+ * hop (a throw aborts the exchange) and `sensitiveHeaders` to add
+ * vendor-specific credential header names to the cross-origin strip set —
+ * both flow through to {@link guardedFetch} unchanged.
+ *
  * Callers still run {@link checkEgressUrl} first when they need the richer
  * pre-flight decision (scheme floor options, non-throwing result shape); this
  * wrapper is the actual wire call.
