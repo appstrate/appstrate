@@ -167,11 +167,11 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      # Build the agent runtime image the e2e launches. linux/amd64 is native on
-      # ubuntu-latest, so no QEMU. Tag `appstrate-pi:latest` — the test's default
-      # `PI_IMAGE`, and the trigger for its `hasImage()` gate.
+      # Build the agent runtime image the e2e launches, on the runner's native
+      # platform — the test gates on the image matching the engine's platform
+      # (#882). Tag `appstrate-pi:latest` — the test's default `PI_IMAGE`.
       - name: Build appstrate-pi image
-        run: docker build --platform linux/amd64 -t appstrate-pi:latest -f runtime-pi/Dockerfile .
+        run: docker build -t appstrate-pi:latest -f runtime-pi/Dockerfile .
 
       # The root bunfig preload boots the test docker-compose stack
       # unconditionally; start it so the preload is satisfied (the e2e itself
