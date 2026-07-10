@@ -738,7 +738,7 @@ describe("POST /api/llm-proxy/* — X-Run-Id run-attribution guard (CRIT-07)", (
     return run.id;
   }
 
-  function callWithRunId(h: Harness, runId: string): Promise<Response> {
+  async function callWithRunId(h: Harness, runId: string): Promise<Response> {
     return app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
       method: "POST",
       headers: authHeaders(h, { "X-Run-Id": runId }),
