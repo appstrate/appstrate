@@ -15,19 +15,56 @@
 --     payer's ledger and severs the cross-tenant link. `run_id` is nullable
 --     and the composite FK is MATCH SIMPLE, so a NULL-run_id row passes it.
 --
--- Note on `llm_usage_runner_has_run_id` (source='runner' requires run_id):
--- runner-source rows are platform-written with BOTH run_id and org_id taken
--- from the run row itself, so they cannot be org-mismatched; only proxy-source
--- rows (caller-supplied run id) can match this predicate. Were a mismatched
--- runner row ever to exist, this UPDATE would abort loudly on that check —
--- the correct fail-closed outcome for a state that indicates deeper
--- corruption.
+-- Locking, honestly: `VALIDATE CONSTRAINT` alone takes only SHARE UPDATE
+-- EXCLUSIVE. But the boot migrator applies all pending migrations in ONE
+-- transaction, so when 0019 and 0020 land together the ACCESS EXCLUSIVE lock
+-- from 0019's `ADD CONSTRAINT` is still held across the scans below. On a
+-- single-instance deployment that is a short boot pause; for a rolling deploy
+-- against a large `llm_usage`, apply 0019 and 0020 in separate releases.
 --
--- Replayable from scratch: on an empty database the UPDATE is a no-op and
--- VALIDATE on a trivially-valid (empty) table succeeds.
+-- Re-runnable: the UPDATE is naturally idempotent (a detached row no longer
+-- matches), and the VALIDATE is guarded so a replay — or a database where
+-- 0019 was skipped by a corrupt `__drizzle_migrations` watermark — neither
+-- crashes nor silently claims success.
+
+-- Step 1: a `source='runner'` row can never be legitimately org-mismatched —
+-- the platform writes both columns from the run row itself. The
+-- `llm_usage_runner_has_run_id` check also forbids detaching it. So rather
+-- than let the UPDATE below abort on an opaque check violation, fail loudly
+-- with a message an operator can act on. This state means deeper corruption.
+DO $$
+DECLARE
+  bad_runner_rows bigint;
+BEGIN
+  SELECT count(*) INTO bad_runner_rows
+  FROM llm_usage u
+  WHERE u.source = 'runner'
+    AND u.run_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.id = u.run_id AND r.org_id = u.org_id);
+
+  IF bad_runner_rows > 0 THEN
+    RAISE EXCEPTION
+      'llm_usage has % runner-source row(s) whose org_id does not match their run. Runner rows are platform-written and cannot legitimately drift; this indicates corruption. Investigate before deploying: SELECT * FROM llm_usage u WHERE u.source = ''runner'' AND u.run_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.id = u.run_id AND r.org_id = u.org_id);',
+      bad_runner_rows;
+  END IF;
+END $$;--> statement-breakpoint
+-- Step 2: detach the false run attribution on the proxy-source rows.
 UPDATE llm_usage SET run_id = NULL WHERE run_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.id = llm_usage.run_id AND r.org_id = llm_usage.org_id);--> statement-breakpoint
--- With the mismatched rows detached, validation cannot fail on legacy data.
--- VALIDATE CONSTRAINT takes only a SHARE UPDATE EXCLUSIVE lock (no exclusive
--- table lock, concurrent reads/writes proceed) — safe to run online in the
--- boot migration pipeline.
-ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_run_id_org_id_fk";
+-- Step 3: with the mismatched rows detached, validation cannot fail on legacy
+-- data. Guarded so a replay is a no-op and a missing constraint (0019 skipped)
+-- surfaces as a loud error rather than a silently unvalidated invariant.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'llm_usage_run_id_org_id_fk'
+  ) THEN
+    RAISE EXCEPTION
+      'llm_usage_run_id_org_id_fk is missing — migration 0019 did not apply. Check the __drizzle_migrations watermark before retrying.';
+  END IF;
+
+  IF NOT (
+    SELECT convalidated FROM pg_constraint WHERE conname = 'llm_usage_run_id_org_id_fk'
+  ) THEN
+    ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_run_id_org_id_fk";
+  END IF;
+END $$;
