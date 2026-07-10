@@ -160,9 +160,10 @@ export async function truncateAll(): Promise<void> {
       // error underneath ("deadlock detected") is the useful line.
       const root = err instanceof Error && err.cause instanceof Error ? err.cause : err;
       const message = root instanceof Error ? root.message : String(root);
-      // Keep the count greppable in suite output (issue #883).
+      const code = (root as { code?: unknown } | null)?.code;
+      // Keep the SQLSTATE count greppable in suite output (issue #883).
       console.warn(
-        `[truncateAll] transient lock conflict (attempt ${attempt}), retrying: ${message}`,
+        `[truncateAll] transient lock conflict (attempt ${attempt}), retrying: ${message}${typeof code === "string" ? ` [${code}]` : ""}`,
       );
     },
   });
