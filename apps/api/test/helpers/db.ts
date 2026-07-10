@@ -11,6 +11,7 @@ import { sql } from "drizzle-orm";
 import type { Db } from "@appstrate/db/client";
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { withDeadlockRetry } from "./deadlock-retry.ts";
 
 export { db, closeDb };
 export type { Db };
@@ -136,13 +137,34 @@ function buildTruncateSql(): string {
  * Order is children → parents (module tables first, since they reference
  * core tables).
  *
+ * The single transaction narrows the FK-violation race but does not remove
+ * the concurrency: a background transaction inserting a child row takes a
+ * KEY SHARE lock on its parent `organizations` row while this block is
+ * deleting that same row — a lock cycle Postgres breaks with a 40P01
+ * deadlock at `deadlock_timeout` (issue #883, observed as one random red
+ * test at ~1005ms under load). The race is a harness artifact (unawaited
+ * fire-and-forget work), so the deadlock class is retried a couple of times
+ * via {@link withDeadlockRetry}; each retry is surfaced with a warning so
+ * the signal stays countable. Any other error still fails immediately.
+ *
  * Also resets the filesystem storage namespace (tier0 / FS mode) so storage
  * isolation between test files matches DB isolation — see {@link resetFsStorage}.
  *
  * Call this in beforeEach() for full test isolation.
  */
 export async function truncateAll(): Promise<void> {
-  cachedTruncateSql ??= buildTruncateSql();
-  await db.execute(sql.raw(cachedTruncateSql));
+  const truncateSql = (cachedTruncateSql ??= buildTruncateSql());
+  await withDeadlockRetry(() => db.execute(sql.raw(truncateSql)), {
+    onRetry: (err, attempt) => {
+      // Drizzle's wrapper message embeds the whole DO block — the driver
+      // error underneath ("deadlock detected") is the useful line.
+      const root = err instanceof Error && err.cause instanceof Error ? err.cause : err;
+      const message = root instanceof Error ? root.message : String(root);
+      // Keep the count greppable in suite output (issue #883).
+      console.warn(
+        `[truncateAll] transient lock conflict (attempt ${attempt}), retrying: ${message}`,
+      );
+    },
+  });
   resetFsStorage();
 }
