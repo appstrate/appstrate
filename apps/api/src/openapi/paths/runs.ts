@@ -215,9 +215,28 @@ export const runsPaths = {
             },
           },
         },
-        "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "422": {
+          description:
+            "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
+        "500": {
+          description:
+            "Unexpected server error (`internal_error`), or the stored bundle's bytes no longer match their recorded integrity hash (`bundle_integrity_mismatch`) — corruption or tampering at rest; retrying will not help, republish the version or contact the operator",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -500,9 +519,28 @@ export const runsPaths = {
             },
           },
         },
-        "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "422": {
+          description:
+            "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
+        "500": {
+          description:
+            "Unexpected server error (`internal_error`), or a stored bundle's bytes no longer match their recorded integrity hash (`bundle_integrity_mismatch`) — corruption or tampering at rest; retrying will not help, republish the version or contact the operator",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
