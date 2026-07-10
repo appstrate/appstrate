@@ -14,11 +14,12 @@ export const MCP_TOOL_NAMESPACE_BASE_MAX_LENGTH = 20;
  */
 export function normaliseMcpToolNamespace(raw: string): string {
   if (typeof raw !== "string") return "";
-  const out = raw
-    .replace(/^@/, "")
-    .replace(/[^a-zA-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .toLowerCase();
+  const out = trimUnderscores(
+    raw
+      .replace(/^@/, "")
+      .replace(/[^a-zA-Z0-9]+/g, "_")
+      .toLowerCase(),
+  );
   return out.slice(0, MCP_TOOL_NAMESPACE_BASE_MAX_LENGTH);
 }
 
@@ -29,15 +30,21 @@ export function normaliseMcpToolNamespace(raw: string): string {
  */
 export function normaliseMcpToolBody(raw: string): string {
   if (typeof raw !== "string") return "";
-  let out = raw
-    .replace(/[^a-zA-Z0-9_]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .toLowerCase();
+  let out = trimUnderscores(raw.replace(/[^a-zA-Z0-9_]+/g, "_").toLowerCase());
   const separator = out.indexOf("__");
   if (separator >= 0 && separator < out.length - 2) {
     out = out.slice(separator + 2);
   }
   return out;
+}
+
+/** Trim underscore runs in linear time without a backtracking expression. */
+function trimUnderscores(value: string): string {
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) === 95) start += 1;
+  let end = value.length;
+  while (end > start && value.charCodeAt(end - 1) === 95) end -= 1;
+  return value.slice(start, end);
 }
 
 /** Allocate the same `_2`…`_999` namespace suffix used by McpHost. */
