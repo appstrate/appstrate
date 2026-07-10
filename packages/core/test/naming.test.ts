@@ -172,8 +172,12 @@ describe("isValidToolName", () => {
     expect(isValidToolName("mcp-fs__read_file")).toBe(false);
   });
 
-  it("rejects digit-leading names on either side", () => {
-    expect(isValidToolName("1fs__read_file")).toBe(false);
+  it("accepts a digit-leading namespace (scopes like @1password are valid slugs)", () => {
+    expect(isValidToolName("1password_connect__api_call")).toBe(true);
+    expect(isValidToolName("1fs__read_file")).toBe(true);
+  });
+
+  it("rejects a digit-leading tool token", () => {
     expect(isValidToolName("fs__1file")).toBe(false);
   });
 

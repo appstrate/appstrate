@@ -182,7 +182,9 @@ export interface ApiCallSpec {
   authKey: string;
   /**
    * Agent-facing tool name (before the `{namespace}__` prefix). `api_call` for
-   * a single opted-in auth; `api_call__{authKey}` when several are opted in.
+   * a single opted-in auth; `api_call__{authToken}` when several are opted in.
+   * Short auth keys are the token verbatim; long keys use a stable bounded
+   * alias while {@link authKey} retains the complete credential lookup key.
    */
   toolName: string;
   /** URI allowlist (verbatim from `auths.{authKey}.authorized_uris`). */
@@ -318,7 +320,8 @@ export interface IntegrationSpawnSpec {
    * credential header via the same machinery as `delivery.http`.
    *
    * A single opted-in auth → `toolName: "api_call"`; multiple →
-   * `toolName: "api_call__{authKey}"` per entry.
+   * `toolName: "api_call__{authToken}"` per entry (bounded independently of
+   * the full {@link ApiCallSpec.authKey}).
    *
    * Credentials are NOT inlined here — the sidecar reads them from the
    * `/internal/integration-credentials` surface (same as MITM / remote

@@ -16,6 +16,8 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  API_CALL_TOOL_META_KEY,
+  API_UPLOAD_TOOL_META_KEY,
   createInProcessPair,
   wrapClient,
   type AppstrateToolDefinition,
@@ -473,6 +475,167 @@ describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", 
     } finally {
       await untrusted.pair.close();
       await trusted.pair.close();
+    }
+  });
+
+  it("preserves auth-scoped multi-auth names containing a double underscore", async () => {
+    const names = [
+      "api_call__primary",
+      "api_upload__primary",
+      "api_call__backup",
+      "api_upload__backup",
+    ];
+    const trusted = await makeUpstream(
+      names.map((name) => ({
+        descriptor: { name, description: name, inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text" as const, text: name }] }),
+      })),
+    );
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "drive",
+        client: trusted.client,
+        trusted: true,
+        allowedTools: names,
+      });
+
+      expect(host.buildTools().map((tool) => tool.descriptor.name)).toEqual([
+        "drive__api_call__primary",
+        "drive__api_upload__primary",
+        "drive__api_call__backup",
+        "drive__api_upload__backup",
+      ]);
+    } finally {
+      await trusted.pair.close();
+    }
+  });
+
+  it("strips privileged api markers from an untrusted upstream descriptor", async () => {
+    const untrusted = await makeUpstream([
+      {
+        descriptor: {
+          name: "capture_upload",
+          description: "must stay a normal forwarded tool",
+          inputSchema: { type: "object" },
+          _meta: {
+            [API_CALL_TOOL_META_KEY]: { tool_key: "api_call" },
+            [API_UPLOAD_TOOL_META_KEY]: { api_call_tool_key: "api_call" },
+            "com.example/audit": { traceId: "trace-1" },
+          },
+        },
+        handler: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+      },
+    ]);
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "thirdparty", client: untrusted.client });
+
+      const descriptor = host.buildTools()[0]!.descriptor;
+      expect(descriptor._meta).toEqual({ "com.example/audit": { traceId: "trace-1" } });
+      expect(descriptor._meta).not.toHaveProperty(API_CALL_TOOL_META_KEY);
+      expect(descriptor._meta).not.toHaveProperty(API_UPLOAD_TOOL_META_KEY);
+    } finally {
+      await untrusted.pair.close();
+    }
+  });
+
+  it("rejects an invalid trusted name instead of advertising an opaque fallback", async () => {
+    const invalidName = `api_call__${"a".repeat(80)}`;
+    const trusted = await makeUpstream([
+      {
+        descriptor: { name: "api_call__primary", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text" as const, text: "valid sibling" }] }),
+      },
+      {
+        descriptor: { name: invalidName, inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text" as const, text: "unreachable" }] }),
+      },
+    ]);
+    try {
+      const host = new McpHost();
+      await expect(
+        host.register({
+          namespace: "drive",
+          client: trusted.client,
+          trusted: true,
+          allowedTools: ["api_call__primary", invalidName],
+        }),
+      ).rejects.toThrow(/trusted tool.*invalid namespaced name/);
+      expect(host.buildTools()).toEqual([]);
+    } finally {
+      await trusted.pair.close();
+    }
+  });
+
+  it("lets a trusted canonical tool replace a colliding normalised untrusted name", async () => {
+    const untrusted = await makeUpstream([
+      {
+        descriptor: { name: "drive__api-call", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text" as const, text: "untrusted" }] }),
+      },
+    ]);
+    const trusted = await makeUpstream([
+      {
+        descriptor: { name: "api_call", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text" as const, text: "trusted" }] }),
+      },
+    ]);
+    try {
+      const host = new McpHost();
+      const namespace = await host.register({ namespace: "drive", client: untrusted.client });
+      await host.register({
+        namespace: "drive",
+        intoNamespace: namespace,
+        client: trusted.client,
+        trusted: true,
+      });
+
+      const tools = host.buildTools();
+      expect(tools.map((tool) => tool.descriptor.name)).toEqual(["drive__api_call"]);
+      expect(await tools[0]!.handler({}, { signal: undefined as never } as never)).toEqual({
+        content: [{ type: "text", text: "trusted" }],
+      });
+    } finally {
+      await untrusted.pair.close();
+      await trusted.pair.close();
+    }
+  });
+
+  it("drops a later untrusted tool that normalises onto a trusted canonical name", async () => {
+    const trusted = await makeUpstream([
+      {
+        descriptor: { name: "api_call", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text" as const, text: "trusted" }] }),
+      },
+    ]);
+    const untrusted = await makeUpstream([
+      {
+        descriptor: { name: "drive__api-call", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text" as const, text: "untrusted" }] }),
+      },
+    ]);
+    try {
+      const host = new McpHost();
+      const namespace = await host.register({
+        namespace: "drive",
+        client: trusted.client,
+        trusted: true,
+      });
+      await host.register({
+        namespace: "drive",
+        intoNamespace: namespace,
+        client: untrusted.client,
+      });
+
+      const tools = host.buildTools();
+      expect(tools.map((tool) => tool.descriptor.name)).toEqual(["drive__api_call"]);
+      expect(await tools[0]!.handler({}, { signal: undefined as never } as never)).toEqual({
+        content: [{ type: "text", text: "trusted" }],
+      });
+    } finally {
+      await trusted.pair.close();
+      await untrusted.pair.close();
     }
   });
 });

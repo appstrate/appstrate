@@ -17,16 +17,18 @@
  *     already-shipped code paths.
  *
  * Tool gating:
- *   - The sidecar advertises a `{ns}__api_upload` tool only when the
- *     integration's `apiCall.uploadProtocols` is non-empty (see
+ *   - The sidecar advertises a `{ns}__api_upload` tool only when the auth's
+ *     `_meta["dev.appstrate/api"].auths.{key}.upload_protocols` is non-empty (see
  *     `makeApiUploadTool` in `sidecar/mcp.ts`). The descriptor's
- *     `uploadProtocol` enum is pinned to the integration's declared
- *     protocols, so the LLM can only call vetted combinations.
+ *     `uploadProtocol` enum carries the integration's declared protocols. The
+ *     agent registers the tool only when at least one declared protocol has a
+ *     local adapter and rejects unknown identifiers again at execution.
  *   - `direct.ts` discovers these advertised tools and routes each
  *     `{ns}__api_upload` to {@link buildApiUploadToolFactory} instead of
  *     forwarding verbatim to the sidecar (the sidecar has no workspace,
  *     so it cannot execute the upload — it only ADVERTISES the tool so
- *     the gating + schema live in one place).
+ *     the gating + schema live in one place). It also resolves the sibling
+ *     api_call tool from the `_meta` marker payload and hands it in.
  */
 
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
@@ -34,23 +36,6 @@ import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import type { RuntimeEventEmitter } from "@appstrate/runner-pi";
 import { McpApiUploadResolver } from "./api-upload-resolver.ts";
 import { UPLOAD_PROTOCOLS, type UploadProtocol } from "./upload-adapters/index.ts";
-
-/** Suffix the sidecar appends to an integration namespace for its upload tool. */
-export const API_UPLOAD_TOOL_SUFFIX = "__api_upload";
-/** Suffix the sidecar appends to an integration namespace for its api_call tool. */
-export const API_CALL_TOOL_SUFFIX = "__api_call";
-
-/**
- * Map a `{ns}__api_upload` tool name to its sibling `{ns}__api_call`
- * tool name — the tool each chunk is dispatched through. This is a name
- * DERIVATION (the sidecar guarantees the sibling exists under this exact
- * name), not a capability guess — tool routing/detection is driven by the
- * `dev.appstrate/api-*` `_meta` markers (see `@appstrate/mcp-transport`).
- */
-export function apiCallToolNameFor(uploadToolName: string): string {
-  const ns = uploadToolName.slice(0, -API_UPLOAD_TOOL_SUFFIX.length);
-  return `${ns}${API_CALL_TOOL_SUFFIX}`;
-}
 
 /**
  * Extract the `uploadProtocol` enum the sidecar pinned into a
@@ -69,6 +54,14 @@ function readDeclaredProtocols(inputSchema: unknown): UploadProtocol[] {
 export interface BuildApiUploadFactoryOptions {
   /** The advertised `{ns}__api_upload` tool from the sidecar's `tools/list`. */
   tool: { name: string; description?: string; inputSchema?: unknown };
+  /**
+   * Advertised name of the sibling api_call tool each chunk is dispatched
+   * through. Resolved by `direct.ts` from the upload descriptor's
+   * `dev.appstrate/api-upload` `_meta` payload — an identity match against the
+   * api_call tool that declared the same key, never a rewrite of this tool's
+   * own name (which would break for the `api_upload__{authToken}` variants).
+   */
+  apiCallToolName: string;
   mcp: AppstrateMcpClient;
   runId: string;
   /** Workspace root the `fromFile` path is resolved against (symlink-safe). */
@@ -93,7 +86,7 @@ function makeExtension(
   opts: BuildApiUploadFactoryOptions,
 ): ExtensionFactory {
   const toolName = opts.tool.name;
-  const apiCallTool = apiCallToolNameFor(toolName);
+  const apiCallTool = opts.apiCallToolName;
   const allowed = new Set<UploadProtocol>(protocols);
 
   return (pi: ExtensionAPI) => {

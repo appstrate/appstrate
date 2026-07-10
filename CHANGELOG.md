@@ -15,6 +15,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`api_upload` never exposed on `@appstrate/google-drive` (#881)** — the
+  integration tool catalog listed only `api_call`, so the agent editor's tool
+  picker never offered `api_upload` and importing an agent that selected it
+  failed with `unknown_tool`, even though the sidecar advertises the tool at
+  runtime for every auth declaring `upload_protocols`. The catalog now surfaces
+  the companion, and the spawn resolver grants the `api_call`/`api_upload` pair
+  from either name (upload chunks are dispatched through the sibling api_call
+  tool, so a half-selection is never valid). No manifest change was required —
+  `upload_protocols` was already in its documented `_meta` location.
+
+- **Multi-auth `api_call` tools collided on one name (#881)** — an integration
+  opting several auths into `_meta["dev.appstrate/api"]` exposes one tool per
+  auth (`api_call__{authToken}`), but the sidecar collapsed every def onto the
+  bare `api_call` name. The two registrations collided and `McpHost` silently
+  disambiguated the second to `{ns}__api_call_2` — a name no catalog advertises
+  and no agent can select. Trusted defs now keep the auth suffix through
+  `McpHost`, and every auth of a serverless integration shares its allocated
+  namespace. The agent-side upload extension pairs an `api_upload` tool with
+  its `api_call` sibling by marker key scoped to that namespace, instead of a
+  globally ambiguous key or a tool-name rewrite. Privileged api capability
+  markers are stripped from non-trusted MCP descriptors so a third-party server
+  cannot impersonate the sibling and receive upload chunks. Long AFPS auth keys
+  now use one shared bounded token across the platform and portable runtime;
+  persisted raw long-key selections/defaults/hidden names remain accepted and
+  are canonicalised at the boundary. Declared synthetic names also take
+  canonical precedence over same-named native MCP tools, avoiding `_2`
+  runtime-only names that the catalog cannot select.
+
+- **`hidden_tools` bypassed synthetic API tools (#881)** — the in-process
+  `api_call`/`api_upload` registration now applies the same runtime
+  `hidden_tools` filter as local and remote MCP integrations. Hiding
+  `api_upload` therefore removes it from both the platform catalog and the
+  final agent-facing MCP surface; hiding `api_call` also removes its dependent
+  upload companion so no orphan capability is advertised.
+
+- **Digit-leading integration scopes aborted the run (#881)** — a package
+  published under a scope starting with a digit (`@1password/connect` is a
+  valid AFPS id) produced a `1password_connect__api_call` name that the MCP
+  tool-name pattern rejected, so the trusted registration path failed the
+  integration and killed the run. The namespace half of the pattern now
+  matches the slug alphabet (digit-leading allowed); the tool half is
+  unchanged.
+
+- **Phantom "selected tool unavailable" warning (#881)** — the sidecar's
+  no-silent-degradation guard compared the agent's full tool allowlist against
+  the count of the integration's own MCP tools that survived registration. The
+  synthetic `api_call`/`api_upload` tools are served by a separate in-process
+  server and were never counted, so any agent selecting them alongside a native
+  tool got a spurious warn breadcrumb. They are now discounted from the
+  requested set.
+
 - **Transparent egress for `delivery.env` integrations (#850, #779)** — the
   sidecar no longer drops egress for integrations that inject credentials via
   `delivery.env`; the per-run proxy path is applied transparently.

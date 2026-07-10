@@ -53,6 +53,8 @@ import {
   McpError,
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
+  type ApiCallToolMeta,
+  type ApiUploadToolMeta,
   type AppstrateToolDefinition,
   type CallToolResult,
   type ReadResourceResult,
@@ -866,7 +868,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   // Built lazily (per `/mcp` request) by `mountMcp` because the set of
   // integrations is only known after the background bootstrap finishes.
   const makeApiCallTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition => {
-    const toolName = integ.toolName ?? "api_call";
+    const toolName = apiCallToolKey(integ);
     const ctx = {
       proxyDeps: {
         ...proxyDeps,
@@ -889,8 +891,9 @@ function buildSidecarTools(options: MountMcpOptions): {
           CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as AppstrateToolDefinition["descriptor"]["inputSchema"],
         // Capability marker (read agent-side by `direct.ts`) — routes this
         // tool by an explicit, rename-safe flag instead of its
-        // `{ns}__api_call` name.
-        _meta: { [API_CALL_TOOL_META_KEY]: true },
+        // `{ns}__api_call` name. The payload names the auth-scoped key its
+        // `api_upload` sibling points back at.
+        _meta: { [API_CALL_TOOL_META_KEY]: { tool_key: toolName } satisfies ApiCallToolMeta },
       },
       handler: async (rawArgs) =>
         apiCallLimit
@@ -918,7 +921,8 @@ function buildSidecarTools(options: MountMcpOptions): {
       (p): p is string => typeof p === "string" && p.length > 0,
     );
     if (protocols.length === 0) return null;
-    const uploadToolName = (integ.toolName ?? "api_call").replace(/^api_call/, "api_upload");
+    const apiCallKey = apiCallToolKey(integ);
+    const uploadToolName = apiUploadToolKey(apiCallKey);
     return {
       descriptor: {
         name: `${integ.namespace}__${uploadToolName}`,
@@ -954,7 +958,8 @@ function buildSidecarTools(options: MountMcpOptions): {
               enum: protocols,
               description:
                 "Wire protocol the upstream API speaks. The integration manifest's " +
-                "`apiCall.uploadProtocols` gates which protocols are legal here.",
+                '`_meta["dev.appstrate/api"].auths.{key}.upload_protocols` gates which ' +
+                "protocols are legal here.",
             },
             metadata: {
               type: "object",
@@ -977,8 +982,14 @@ function buildSidecarTools(options: MountMcpOptions): {
         },
         // Capability marker (read agent-side by `direct.ts`) — routes this
         // tool by an explicit, rename-safe flag instead of its
-        // `{ns}__api_upload` name (protocols come from the schema enum).
-        _meta: { [API_UPLOAD_TOOL_META_KEY]: true },
+        // `{ns}__api_upload` name (protocols come from the schema enum). The
+        // payload names the api_call sibling each chunk is dispatched through,
+        // so the agent never has to rewrite one tool name into the other.
+        _meta: {
+          [API_UPLOAD_TOOL_META_KEY]: {
+            api_call_tool_key: apiCallKey,
+          } satisfies ApiUploadToolMeta,
+        },
       },
       // Advertise-only: the upload is executed agent-side (workspace
       // access), so a direct sidecar invocation cannot succeed.
@@ -1696,7 +1707,7 @@ export interface ApiCallIntegrationConfig {
   namespace: string;
   /**
    * Bare api_call tool name (before the `{namespace}__` prefix). `api_call`
-   * for an integration that opts in a single auth; `api_call__{authKey}` when
+   * for an integration that opts in a single auth; `api_call__{authToken}` when
    * it opts in several. Defaults to `api_call` when omitted. The companion
    * upload tool swaps the `api_call` prefix for `api_upload`.
    */
@@ -1708,8 +1719,8 @@ export interface ApiCallIntegrationConfig {
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */
   refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
   /**
-   * Resumable-upload protocols this integration's `apiCall` declared
-   * (`manifest.apiCall.uploadProtocols`). When non-empty the sidecar
+   * Resumable-upload protocols this integration auth declared under
+   * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. When non-empty the sidecar
    * ALSO advertises a `{ns}__api_upload` tool alongside `{ns}__api_call`.
    * The sidecar only ADVERTISES it (gating + schema live here); the
    * actual chunked upload is orchestrated agent-side by `direct.ts`'s
@@ -1749,12 +1760,14 @@ export function createApiCallToolDefs(
   deps: ApiCallToolDeps,
 ): AppstrateToolDefinition[] {
   const { makeApiCallTool, makeApiUploadTool } = buildSidecarTools(deps);
+  const apiCallKey = apiCallToolKey(integ);
   const out: AppstrateToolDefinition[] = [];
   const call = makeApiCallTool(integ);
-  out.push({ ...call, descriptor: { ...call.descriptor, name: API_CALL_TOOL_NAME } });
+  out.push({ ...call, descriptor: { ...call.descriptor, name: apiCallKey } });
   const upload = makeApiUploadTool(integ);
   if (upload) {
-    out.push({ ...upload, descriptor: { ...upload.descriptor, name: API_UPLOAD_TOOL_NAME } });
+    const name = apiUploadToolKey(apiCallKey);
+    out.push({ ...upload, descriptor: { ...upload.descriptor, name } });
   }
   return out;
 }
@@ -1762,6 +1775,49 @@ export function createApiCallToolDefs(
 /** Unprefixed tool names for the generic credential-injecting tools. */
 export const API_CALL_TOOL_NAME = "api_call";
 export const API_UPLOAD_TOOL_NAME = "api_upload";
+
+/**
+ * The auth-scoped, unprefixed tool key for an integration's api_call surface:
+ * `api_call` when a single auth opted into the vendor extension,
+ * `api_call__{authToken}` when several did. The spawn resolver already computes
+ * this and ships it as `spec.apiCalls[].toolName`; this is the fallback for the
+ * single-auth default. The McpHost applies the `{ns}__` prefix on registration.
+ *
+ * Keeping the auth suffix (rather than collapsing every auth onto the bare
+ * `api_call`) is what stops a multi-auth integration from registering two tools
+ * under one name — the host would disambiguate the second to `{ns}__api_call_2`,
+ * a name no catalog ever advertised and no agent could select.
+ */
+function apiCallToolKey(integ: ApiCallIntegrationConfig): string {
+  return integ.toolName ?? API_CALL_TOOL_NAME;
+}
+
+/**
+ * Derive the `api_upload` companion key from an api_call key, preserving the
+ * auth-scoped token suffix. Mirrors `apiUploadToolNameFor` in
+ * `@appstrate/core/integration` (which the platform catalog uses); the two are
+ * pinned in lockstep by a core test. Duplicated rather than imported because
+ * the sidecar bundle deliberately avoids the manifest schema stack.
+ */
+function apiUploadToolKey(apiCallToolName: string): string {
+  return `${API_UPLOAD_TOOL_NAME}${apiCallToolName.slice(API_CALL_TOOL_NAME.length)}`;
+}
+
+/**
+ * True for the synthetic `api_call` / `api_upload` tool names (bare, or the
+ * per-auth token variants). These are served by the in-process api_call
+ * server, never by the integration's own MCP server, so any accounting over the
+ * spawned server's tools must exclude them.
+ *
+ * Kept as a local predicate rather than importing `@appstrate/core/integration`
+ * — the sidecar bundle deliberately avoids pulling in the manifest schema stack.
+ */
+export function isSyntheticApiToolName(name: string): boolean {
+  for (const base of [API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME]) {
+    if (name === base || name.startsWith(`${base}__`)) return true;
+  }
+  return false;
+}
 
 export interface MountMcpOptions {
   /** Run-scoped blob store for `api_call` resource spillover. */

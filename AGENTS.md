@@ -143,7 +143,7 @@ appstrate/
 - The sidecar exposes `/mcp` (Streamable HTTP, stateless JSON-RPC) as the agent's exclusive cross-boundary surface
 - AFPS tool surface (registered as Pi tools at container boot, `runtime-pi/extensions/mcp-direct.ts`):
   - Per spawned integration: `{ns}__api_call({ method, target, headers?, body?, responseMode? })` — credential-injecting outbound proxy. Credentials are injected server-side; URLs validated against `auths.{key}.authorized_uris`.
-  - Per spawned integration (when the integration declares `source.api.upload_protocols`): `{ns}__api_upload` — multipart/resumable upload tool.
+  - Per spawned integration (when an auth declares `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`): `{ns}__api_upload` — multipart/resumable upload tool.
   - First-party: `run_history({ limit?, fields? })` (past-run metadata via per-run signed token) and `recall_memory({ query?, limit? })` (search the unified `package_persistence` archive).
 - The agent's primary completions are served by the `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API
 - Zero-knowledge enforcement: after MCP bootstrap, `runtime-pi` deletes `process.env.SIDECAR_URL` so the bash extension cannot discover the sidecar

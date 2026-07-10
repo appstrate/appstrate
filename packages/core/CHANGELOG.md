@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Release ordering.** This release bumps `@appstrate/afps-shared` to
+> `^0.3.0` (new `api-tool-naming` / `mcp-naming` subpaths). Publish
+> `afps-shared@0.3.0` to npm (tag `afps-shared@0.3.0`) **before** tagging the
+> next `core@` release, or `npm install @appstrate/core` will fail to resolve
+> the range for registry/cloud/portal.
+
 Collapses the multi-engine execution model onto the single Pi engine
 (`@mariozechner/pi-coding-agent`). API-key and OAuth subscription runs (Claude
 Pro/Max, ChatGPT Codex) all execute on Pi, whose SDK (`@mariozechner/pi-ai`)
@@ -16,6 +22,17 @@ of a provider-neutral bearer-swap.
 
 ### Added
 
+- **`api_upload` is a first-class catalog member (#881)** —
+  `resolveIntegrationToolCatalog` now appends the `api_upload` companion after
+  each `api_call` whose auth declares `_meta["dev.appstrate/api"].auths.<key>
+.upload_protocols`, matching the tool the sidecar already advertises at
+  runtime. New exports: `API_UPLOAD_TOOL_NAME`, `apiUploadToolNameFor()`,
+  `isApiUploadToolName()`. `ApiCallConfig` gains
+  an optional `uploadToolName`, present iff `uploadProtocols` is non-empty.
+  Previously the catalog listed only `api_call`, so
+  `validateAgentIntegrationScopes` rejected an agent that selected `api_upload`
+  with `unknown_tool` even though the runtime served it.
+
 - **`@appstrate/core/oauth-bearer-swap`** — `applyOauthBearerSwap(headers,
 accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
   real subscription bearer onto `authorization`, drops any `x-api-key`, and
@@ -23,6 +40,16 @@ accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
   provider-specific header, so the Pi SDK's own request fingerprint (user-agent,
   `anthropic-beta`, `chatgpt-account-id`, …) rides through unchanged. Pure (no
   credential lookup, no I/O); the caller owns SSRF + credential resolution.
+
+### Fixed
+
+- **`isValidToolName` accepts a digit-leading namespace.** The namespace token
+  of a `{namespace}__{tool}` MCP name derives from a package id, and both
+  `SLUG_PATTERN` and the AFPS name pattern allow a digit-leading scope
+  (`@1password/connect`). The old pattern rejected such names, which made the
+  sidecar's trusted registration path fail the whole integration — aborting
+  the run — for any integration published under a digit-leading scope. The
+  tool token keeps the stricter letter-leading alphabet.
 
 ### Removed (BREAKING)
 

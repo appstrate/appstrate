@@ -1,6 +1,15 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  allocateMcpToolNamespace,
+  MCP_TOOL_NAME_MAX_LENGTH,
+  normaliseMcpToolBody,
+  normaliseMcpToolNamespace,
+} from "@appstrate/afps-shared/mcp-naming";
+
+export { allocateMcpToolNamespace, normaliseMcpToolBody, normaliseMcpToolNamespace };
+
 /** Regex pattern string for a valid slug: lowercase alphanumeric with optional hyphens. */
 export const SLUG_PATTERN = "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
 /** Compiled regex for validating a single slug string. */
@@ -117,7 +126,7 @@ export function toSlug(value: string, maxLen?: number): string {
  * host re-prefixing (e.g. some CLI hosts add their own
  * `mcp__plugin_<plugin>_<server>__<tool>` super-prefix).
  */
-export const TOOL_NAME_MAX_LEN = 56;
+export const TOOL_NAME_MAX_LEN = MCP_TOOL_NAME_MAX_LENGTH;
 /**
  * Inner-token snake_case pattern shared by both halves of the namespaced MCP
  * tool name. Exposed so consumers that validate a *single* tool name (e.g.
@@ -130,7 +139,11 @@ export const TOOL_NAME_MAX_LEN = 56;
  * Same shape as {@link CREDENTIAL_KEY_RE} — aliased so the pattern lives once.
  */
 export const TOOL_NAME_INNER_PATTERN = CREDENTIAL_KEY_RE;
-const TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*$/;
+// The namespace token derives from a package id whose scope may start with a
+// digit (`SLUG_PATTERN` and the AFPS name pattern both allow `@1password/…`),
+// so it admits a leading digit. The tool token keeps the stricter
+// letter-leading alphabet of {@link TOOL_NAME_INNER_PATTERN}.
+const TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9_]*__[a-z][a-z0-9_]*$/;
 
 export function isValidToolName(name: string): boolean {
   if (typeof name !== "string") return false;

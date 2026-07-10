@@ -25,7 +25,13 @@
  * orchestration-only.
  */
 
-import { isApiCallTool, isApiUploadTool, type AppstrateMcpClient } from "@appstrate/mcp-transport";
+import {
+  isApiCallTool,
+  isApiUploadTool,
+  readApiCallToolKey,
+  readApiUploadSiblingKey,
+  type AppstrateMcpClient,
+} from "@appstrate/mcp-transport";
 import { Type, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolFactories,
@@ -138,6 +144,30 @@ function buildIntegrationToolFactories(
   opts: BuildMcpDirectFactoriesOptions,
 ): ExtensionFactory[] {
   const factories: ExtensionFactory[] = [];
+  // Index every advertised api_call tool by BOTH its McpHost namespace and
+  // the auth-scoped key stamped into its `_meta` marker. The key alone is not
+  // globally unique: every single-auth integration legitimately uses
+  // `api_call`, so a flat map would make Drive's upload dispatch through
+  // Slack (or whichever integration happened to appear last in tools/list).
+  //
+  // `null` records an ambiguous scoped identity. That should be impossible
+  // for trusted sidecar-generated descriptors, but can happen if an upstream
+  // marker survives the trust boundary or tools/list contains duplicates. In
+  // either case we fail closed and omit the upload tool instead of choosing a
+  // sibling by order. Built up-front because tools/list gives no ordering
+  // guarantee, so the upload tool may precede its sibling.
+  const apiCallToolsByScopedKey = new Map<string, string | null>();
+  for (const tool of advertised) {
+    if (!isApiCallTool(tool)) continue;
+    const key = readApiCallToolKey(tool);
+    const scopedKey = key !== undefined ? namespacedToolKey(tool.name, key) : undefined;
+    if (scopedKey === undefined) continue;
+    if (apiCallToolsByScopedKey.has(scopedKey)) {
+      apiCallToolsByScopedKey.set(scopedKey, null);
+    } else {
+      apiCallToolsByScopedKey.set(scopedKey, tool.name);
+    }
+  }
   for (const tool of advertised) {
     if (claimed.has(tool.name)) continue;
     // `api_upload` tools are advertised by the sidecar (so the gating +
@@ -148,9 +178,20 @@ function buildIntegrationToolFactories(
     // the sidecar's advertise-only error handler). Detected by the
     // `dev.appstrate/api-upload` `_meta` marker, not the tool name.
     if (isApiUploadTool(tool)) {
+      // Gate the tool off entirely when the sibling can't be resolved: an
+      // upload that cannot dispatch is a capability the LLM would call and
+      // watch fail. `buildApiUploadToolFactory` gates the same way on an
+      // undispatchable protocol.
+      const siblingKey = readApiUploadSiblingKey(tool);
+      const scopedKey =
+        siblingKey !== undefined ? namespacedToolKey(tool.name, siblingKey) : undefined;
+      const apiCallToolName =
+        scopedKey !== undefined ? apiCallToolsByScopedKey.get(scopedKey) : undefined;
+      if (typeof apiCallToolName !== "string") continue;
       factories.push(
         ...buildApiUploadToolFactory({
           tool,
+          apiCallToolName,
           mcp: opts.mcp,
           runId: opts.runId,
           workspace: opts.workspace,
@@ -299,4 +340,15 @@ function buildIntegrationToolFactories(
     });
   }
   return factories;
+}
+
+/**
+ * Pair a host-namespaced tool with an auth-scoped synthetic-tool key.
+ * McpHost owns the first `__` separator; the remainder may itself contain
+ * `__` for multi-auth names such as `api_call__primary`.
+ */
+function namespacedToolKey(toolName: string, authScopedKey: string): string | undefined {
+  const separator = toolName.indexOf("__");
+  if (separator <= 0) return undefined;
+  return `${toolName.slice(0, separator)}\0${authScopedKey}`;
 }

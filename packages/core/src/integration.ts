@@ -28,6 +28,14 @@ import {
   integrationManifestSchema as afpsIntegrationManifestSchema,
   type IntegrationManifest as AfpsIntegrationManifest,
 } from "@afps-spec/schema";
+import {
+  API_CALL_TOOL_NAME as SHARED_API_CALL_TOOL_NAME,
+  API_UPLOAD_TOOL_NAME as SHARED_API_UPLOAD_TOOL_NAME,
+  apiCallToolNameForAuth,
+  apiUploadToolNameFor as deriveApiUploadToolName,
+  assertUniqueApiToolAuthTokens,
+} from "@appstrate/afps-shared/api-tool-naming";
+import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
 // ─────────────────────────────────────────────
@@ -42,7 +50,8 @@ import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "
  *
  * Shape: `{ auths: { <authKey>: { upload_protocols?: string[] } } }`. Presence
  * of an `authKey` opts that auth into the `api_call` tool. Single opted-in auth
- * → the tool is named `api_call`; multiple → `api_call__{authKey}` per auth.
+ * → the tool is named `api_call`; multiple → `api_call__{authToken}` per auth
+ * (the raw key when short, otherwise a stable bounded alias).
  */
 export const API_META_KEY = "dev.appstrate/api";
 
@@ -332,6 +341,20 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
           }
         }
       }
+      const optedInAuthKeys = Object.keys(metaAuths as Record<string, unknown>).filter((key) =>
+        authKeys.includes(key),
+      );
+      if (optedInAuthKeys.length > 1) {
+        try {
+          assertUniqueApiToolAuthTokens(optedInAuthKeys);
+        } catch (error) {
+          ctx.addIssue({
+            code: "custom",
+            message: error instanceof Error ? error.message : "api tool auth-token collision",
+            path: ["_meta", API_META_KEY, "auths"],
+          });
+        }
+      }
     }
   }
 
@@ -368,7 +391,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
       );
       for (const name of defaultTools) {
-        if (!catalog.has(name)) {
+        if (!catalog.has(canonicalizeApiToolName(manifest, name))) {
           ctx.addIssue({
             code: "custom",
             message: `default_tools contains "${name}" which is not a tool this integration exposes`,
@@ -435,7 +458,30 @@ function collectDeliveryCredentialRefs(delivery: DeliveryView | undefined): stri
  * (before the `{namespace}__` prefix the sidecar's McpHost applies). Constant
  * so the spawn resolver, the McpHost allowlist, and the agent editor agree.
  */
-export const API_CALL_TOOL_NAME = "api_call";
+export const API_CALL_TOOL_NAME = SHARED_API_CALL_TOOL_NAME;
+
+/**
+ * Tool name the chunked/resumable upload capability is exposed under (before
+ * the sidecar's `{namespace}__` prefix). Companion of {@link API_CALL_TOOL_NAME}:
+ * the sidecar advertises it for every api_call auth whose
+ * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols` is non-empty, and
+ * the agent-side Pi extension drives it by dispatching each chunk through the
+ * sibling `api_call` tool.
+ */
+export const API_UPLOAD_TOOL_NAME = SHARED_API_UPLOAD_TOOL_NAME;
+
+/**
+ * Derive the `api_upload` companion name from an api_call tool name:
+ * `api_call` → `api_upload`, `api_call__{authToken}` →
+ * `api_upload__{authToken}`.
+ * This MUST stay in lockstep with the sidecar's own derivation
+ * (`runtime-pi/sidecar/mcp.ts` → `makeApiUploadTool`) so the platform catalog
+ * and the runtime advertise the same pair. Runtime dispatch resolves the
+ * sibling from trusted `_meta` identity within the tool's host namespace.
+ */
+export function apiUploadToolNameFor(apiCallToolName: string): string {
+  return deriveApiUploadToolName(apiCallToolName);
+}
 
 /**
  * Names of MCP tools the integration declares POLICY for in its top-level
@@ -558,8 +604,12 @@ export interface ResolveIntegrationToolCatalogInput {
  *      - local + mcpServerTools provided → MCPB-canonical entries
  *      - otherwise          → `integration.tools_policy` keys (sparse fallback)
  *   1b. Append api_call tool(s) from `_meta["dev.appstrate/api"]` (additive —
- *       orthogonal to source kind; a `none` source contributes only these)
- *   2. Subtract `integration.hidden_tools` (explicit opt-out)
+ *       orthogonal to source kind; a `none` source contributes only these),
+ *       each with its `api_upload` companion when the auth declared
+ *       `upload_protocols`
+ *   2. Subtract `integration.hidden_tools` (explicit opt-out). Hiding an
+ *      `api_call` also hides its dependent `api_upload` companion; hiding the
+ *      companion alone leaves `api_call` available.
  *   3. Subtract `getConnectToolNames` (auto-hide run-start primitives)
  *   4. Attach policy from `integration.tools_policy[name]` when present
  */
@@ -576,14 +626,59 @@ export function resolveIntegrationToolCatalog(
     base = getDeclaredToolNames(integration).map((name) => ({ name }));
   }
 
-  // Step 1b — append api_call tool(s) (vendor extension, additive)
-  base = [...base, ...getApiCallConfigs(integration).map((c) => ({ name: c.toolName }))];
+  // Step 1b — append api_call tool(s) (vendor extension, additive), each
+  // followed by its `api_upload` companion when the auth declared
+  // `upload_protocols`. The companion is what the sidecar actually advertises
+  // (`makeApiUploadTool`), so omitting it here would leave the catalog — and
+  // therefore the picker and the agent-import validator — narrower than the
+  // runtime surface.
+  const apiCallConfigs = getApiCallConfigs(integration);
+  const syntheticApiEntries = apiCallConfigs.flatMap((config) =>
+    config.uploadToolName
+      ? [{ name: config.toolName }, { name: config.uploadToolName }]
+      : [{ name: config.toolName }],
+  );
+  const syntheticApiNames = new Set(syntheticApiEntries.map((entry) => entry.name));
+  for (const config of apiCallConfigs) {
+    if (config.legacyToolName) syntheticApiNames.add(config.legacyToolName);
+    if (config.legacyUploadToolName) syntheticApiNames.add(config.legacyUploadToolName);
+  }
+  // Synthetic capability names (including persisted long-key aliases) are
+  // reserved only when the integration opts into that exact capability. Give
+  // the trusted surface canonical precedence over a same-named native MCP tool
+  // instead of advertising an ambiguous duplicate or an unselectable `_2`.
+  base = [
+    ...base.filter(
+      (entry) =>
+        !syntheticApiNames.has(entry.name) &&
+        !syntheticApiNames.has(normaliseMcpToolBody(entry.name)),
+    ),
+    ...syntheticApiEntries,
+  ];
 
   // Step 2+3 — hide set (explicit + auto)
   const hidden = new Set<string>([
     ...(integration.hidden_tools ?? []),
     ...getConnectToolNames(integration),
   ]);
+  // `api_upload` cannot execute without its sibling `api_call`: every chunk is
+  // dispatched through that credential-proxy tool. Preserve the useful
+  // asymmetric opt-out (authors may hide upload while keeping generic calls),
+  // but never leave an orphan upload in the catalog when its dependency is
+  // hidden.
+  for (const config of apiCallConfigs) {
+    const callHidden =
+      hidden.has(config.toolName) ||
+      (config.legacyToolName !== undefined && hidden.has(config.legacyToolName));
+    const uploadHidden =
+      config.uploadToolName !== undefined &&
+      (hidden.has(config.uploadToolName) ||
+        (config.legacyUploadToolName !== undefined && hidden.has(config.legacyUploadToolName)));
+    if (callHidden) hidden.add(config.toolName);
+    if (config.uploadToolName && (callHidden || uploadHidden)) {
+      hidden.add(config.uploadToolName);
+    }
+  }
 
   // Step 4 — attach policy from the sparse `tools_policy{}` table
   const policyTable = integration.tools_policy ?? {};
@@ -611,12 +706,27 @@ export interface ApiCallConfig {
   authKey: string;
   /**
    * Agent-facing tool name (before the sidecar's `{namespace}__` prefix).
-   * `api_call` when the integration opts in exactly one auth; `api_call__{authKey}`
-   * when it opts in several.
+   * `api_call` when the integration opts in exactly one auth;
+   * `api_call__{authToken}` when it opts in several.
    */
   toolName: string;
+  /**
+   * Pre-bounding `api_call__{authKey}` name accepted for manifests/selections
+   * persisted before long auth keys gained a transport-safe canonical token.
+   * Present only when it differs from {@link ApiCallConfig.toolName}.
+   */
+  legacyToolName?: string;
   /** Resumable upload protocols this auth's surface supports (open list). */
   uploadProtocols: IntegrationUploadProtocol[];
+  /**
+   * Agent-facing name of the `api_upload` companion tool, present iff
+   * {@link ApiCallConfig.uploadProtocols} is non-empty — i.e. exactly when the
+   * sidecar advertises it. Absent otherwise, so callers never surface a tool
+   * the runtime won't serve.
+   */
+  uploadToolName?: string;
+  /** Legacy upload alias corresponding to {@link ApiCallConfig.legacyToolName}. */
+  legacyUploadToolName?: string;
 }
 
 /** Read `_meta["dev.appstrate/api"].auths` as a raw record (or undefined). */
@@ -639,7 +749,9 @@ function readApiMetaAuths(
  * Each opted-in auth must reference a declared `auths.{key}`; unknown keys are
  * skipped (the install-time superRefine rejects them, so this is defence in
  * depth for already-stored manifests). Tool naming: a single opted-in auth →
- * `api_call`; multiple → `api_call__{authKey}` per auth.
+ * `api_call`; multiple → an auth-scoped `api_call__{token}` per auth. Short
+ * auth keys remain verbatim; long AFPS-valid keys use a stable bounded token
+ * so the fully namespaced MCP name never exceeds the transport limit.
  */
 export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[] {
   const metaAuths = readApiMetaAuths(manifest);
@@ -648,17 +760,51 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
   const authKeys = Object.keys(metaAuths).filter((k) => k in declaredAuths);
   if (authKeys.length === 0) return [];
   const single = authKeys.length === 1;
+  if (!single) {
+    try {
+      assertUniqueApiToolAuthTokens(authKeys);
+    } catch {
+      // The install-time schema reports the exact collision. Already-stored or
+      // hand-constructed manifests fail closed by exposing no synthetic tools.
+      return [];
+    }
+  }
   return authKeys.map((authKey) => {
     const raw = metaAuths[authKey]?.upload_protocols;
     const uploadProtocols = Array.isArray(raw)
-      ? raw.filter((v): v is string => typeof v === "string")
+      ? raw.filter((v): v is string => typeof v === "string" && v.length > 0)
       : [];
+    const legacyToolName = single ? API_CALL_TOOL_NAME : `${API_CALL_TOOL_NAME}__${authKey}`;
+    const toolName = apiCallToolNameForAuth(authKey, !single);
+    const uploadToolName = uploadProtocols.length > 0 ? apiUploadToolNameFor(toolName) : undefined;
+    const legacyUploadToolName =
+      uploadProtocols.length > 0 ? apiUploadToolNameFor(legacyToolName) : undefined;
     return {
       authKey,
-      toolName: single ? API_CALL_TOOL_NAME : `${API_CALL_TOOL_NAME}__${authKey}`,
+      toolName,
+      ...(legacyToolName !== toolName ? { legacyToolName } : {}),
       uploadProtocols,
+      ...(uploadToolName ? { uploadToolName } : {}),
+      ...(legacyUploadToolName && legacyUploadToolName !== uploadToolName
+        ? { legacyUploadToolName }
+        : {}),
     };
   });
+}
+
+/**
+ * Canonicalise a persisted synthetic API tool name without touching native
+ * tool names. Long multi-auth names used to embed the full auth key; accept
+ * those aliases indefinitely, but emit only the bounded canonical form.
+ */
+export function canonicalizeApiToolName(manifest: IntegrationManifest, name: string): string {
+  for (const config of getApiCallConfigs(manifest)) {
+    if (name === config.legacyToolName) return config.toolName;
+    if (name === config.legacyUploadToolName && config.uploadToolName) {
+      return config.uploadToolName;
+    }
+  }
+  return name;
 }
 
 /**
@@ -704,11 +850,21 @@ export function resolveEffectiveToolSelection(
 
 /**
  * True when `name` is an api_call tool name — the bare `api_call` or a
- * per-auth `api_call__{authKey}` variant. Used to recognise api_call selections
+ * per-auth `api_call__{authToken}` variant. Used to recognise api_call selections
  * that never appear in `tools_policy`.
  */
 export function isApiCallToolName(name: string): boolean {
   return name === API_CALL_TOOL_NAME || name.startsWith(`${API_CALL_TOOL_NAME}__`);
+}
+
+/**
+ * True when `name` is an api_upload tool name — the bare `api_upload` or a
+ * per-auth `api_upload__{authToken}` variant. Like {@link isApiCallToolName},
+ * these never appear in `tools_policy`: they are derived from the
+ * `_meta["dev.appstrate/api"]` extension, not declared.
+ */
+export function isApiUploadToolName(name: string): boolean {
+  return name === API_UPLOAD_TOOL_NAME || name.startsWith(`${API_UPLOAD_TOOL_NAME}__`);
 }
 
 /**
@@ -922,7 +1078,7 @@ export function validateAgentIntegrationScopes(
     if (catalog.length > 0) {
       const allowed = new Set(catalog.map((e) => e.name));
       for (const tool of selection.tools) {
-        if (allowed.has(tool)) continue;
+        if (allowed.has(canonicalizeApiToolName(integrationManifest, tool))) continue;
         errors.push({
           field: `integrations_configuration.${selection.id}.tools`,
           code: "unknown_tool",

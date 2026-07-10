@@ -32,7 +32,11 @@ import {
   resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
-import { getApiCallConfigs, resolveEffectiveToolSelection } from "@appstrate/core/integration";
+import {
+  canonicalizeApiToolName,
+  getApiCallConfigs,
+  resolveEffectiveToolSelection,
+} from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -225,10 +229,22 @@ async function resolveOne(
   // AFPS §4.4 wildcard — when the agent opted into all upstream tools, the
   // synthetic api_call tool(s) are auto-granted alongside the upstream surface.
   // Otherwise filter to what the agent explicitly picked.
+  //
+  // `api_call` and its `api_upload` companion are granted as a pair: the upload
+  // orchestration dispatches every chunk through the sibling api_call tool, so
+  // selecting one without the other would either expose a broken upload tool or
+  // silently drop a selected capability. Picking either name grants both.
   const wildcardSelection = isToolsWildcard(effectiveSelection);
   const selectedTools = wildcardSelection ? null : new Set(effectiveSelection ?? []);
   const apiCalls: ApiCallSpec[] = getApiCallConfigs(manifest)
-    .filter((cfg) => wildcardSelection || selectedTools!.has(cfg.toolName))
+    .filter(
+      (cfg) =>
+        wildcardSelection ||
+        selectedTools!.has(cfg.toolName) ||
+        (cfg.legacyToolName !== undefined && selectedTools!.has(cfg.legacyToolName)) ||
+        (cfg.uploadToolName !== undefined && selectedTools!.has(cfg.uploadToolName)) ||
+        (cfg.legacyUploadToolName !== undefined && selectedTools!.has(cfg.legacyUploadToolName)),
+    )
     .map((cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
       return {
@@ -443,6 +459,10 @@ async function resolveOne(
   //     (only then does the allowlist no longer filter it out)
   // Connect tools never reach the agent's LLM regardless of agent selection.
   const hiddenToolsUnion: string[] = [...(manifest.hidden_tools ?? [])];
+  for (const name of manifest.hidden_tools ?? []) {
+    const canonical = canonicalizeApiToolName(manifest, name);
+    if (!hiddenToolsUnion.includes(canonical)) hiddenToolsUnion.push(canonical);
+  }
   if (wildcardSelection && deliveries.connectLogin) {
     const loginName = deliveries.connectLogin.toolName;
     if (!hiddenToolsUnion.includes(loginName)) hiddenToolsUnion.push(loginName);

@@ -244,7 +244,7 @@ describe("readApiCallIntegrationMetas", () => {
     expect(metas[0]!.authKey).toBe("only");
   });
 
-  it("emits one meta per opted-in auth with api_call__{authKey} tool names (multi-auth)", () => {
+  it("emits one meta per opted-in auth with api_call__{authToken} tool names (multi-auth)", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/multi", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
@@ -278,6 +278,41 @@ describe("readApiCallIntegrationMetas", () => {
       "acme_multi__api_call__alt",
       "acme_multi__api_call__main",
     ]);
+  });
+
+  it("matches platform naming for long auth keys and long package namespaces", () => {
+    const packageName = "@scope-with-long-name/integration-with-long-name";
+    const longAuthKey = "authentication_key_that_is_valid_but_long";
+    const auth = (host: string) => ({
+      type: "api_key",
+      authorized_uris: [`https://${host}/**`],
+      delivery: {
+        http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+      },
+    });
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage(packageName, "1.0.0", "integration", {
+      "integration.json": JSON.stringify({
+        schema_version: "0.1",
+        type: "integration",
+        source: { kind: "none" },
+        _meta: {
+          "dev.appstrate/api": { auths: { short: {}, [longAuthKey]: {} } },
+        },
+        auths: {
+          short: auth("short.example.com"),
+          [longAuthKey]: auth("long.example.com"),
+        },
+      }),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const meta = readApiCallIntegrationMetas(bundle, { name: packageName, version: "^1" }).find(
+      (entry) => entry.authKey === longAuthKey,
+    )!;
+
+    expect(meta.namespace).toBe("scope_with_long_name");
+    expect(meta.toolName).toBe("api_call__h0a0593260c3968fd8");
+    expect(apiCallToolName(meta).length).toBeLessThanOrEqual(56);
   });
 
   // ── toHttpDeliveryConfig branches ──
@@ -361,6 +396,39 @@ describe("readApiCallIntegrationMetas", () => {
 });
 
 describe("LocalIntegrationResolver", () => {
+  it("allocates colliding projected namespaces with the same suffix contract as McpHost", async () => {
+    const first = "@scope-with-long-name/integration-one" as const;
+    const second = "@scope-with-long-name/integration-two" as const;
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const packages = [first, second].map((name) =>
+      makePackage(name, "1.0.0", "integration", {
+        "integration.json": JSON.stringify(apiKeyIntegrationManifest(name).integration),
+      }),
+    );
+    const bundle = makeBundle(root, packages);
+    const resolver = new LocalIntegrationResolver({
+      creds: {
+        version: 1,
+        integrations: {
+          [first]: { fields: { api_key: "first" } },
+          [second]: { fields: { api_key: "second" } },
+        },
+      },
+    });
+
+    const tools = await resolver.resolve(
+      [
+        { name: first, version: "^1" },
+        { name: second, version: "^1" },
+      ],
+      bundle,
+    );
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "scope_with_long_name__api_call",
+      "scope_with_long_name_2__api_call",
+    ]);
+  });
+
   it("injects the api_key header via the manifest delivery.http plan", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});

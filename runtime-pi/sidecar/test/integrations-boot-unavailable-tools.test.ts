@@ -68,4 +68,47 @@ describe("pushUnavailableToolBreadcrumb", () => {
     pushUnavailableToolBreadcrumb(specWith(undefined), 0, breadcrumbs);
     expect(breadcrumbs).toHaveLength(0);
   });
+
+  // The synthetic api_call/api_upload tools are registered by the in-process
+  // api_call server, not by the integration's own MCP server — `added` never
+  // counts them. Comparing against the raw allowlist therefore reported a
+  // phantom shortfall for every agent that selected them alongside a native tool.
+  it("discounts synthetic api_call/api_upload names from the requested set", () => {
+    const breadcrumbs: IntegrationBootBreadcrumb[] = [];
+    pushUnavailableToolBreadcrumb(
+      specWith(["list_issues", "api_call", "api_upload"]),
+      1,
+      breadcrumbs,
+    );
+    expect(breadcrumbs).toHaveLength(0);
+  });
+
+  it("discounts the per-auth variants too", () => {
+    const breadcrumbs: IntegrationBootBreadcrumb[] = [];
+    pushUnavailableToolBreadcrumb(
+      specWith(["api_call__primary", "api_upload__primary"]),
+      0,
+      breadcrumbs,
+    );
+    expect(breadcrumbs).toHaveLength(0);
+  });
+
+  it("still warns on a genuinely missing native tool when synthetics are selected", () => {
+    const breadcrumbs: IntegrationBootBreadcrumb[] = [];
+    pushUnavailableToolBreadcrumb(
+      specWith(["list_issues", "create_issue", "api_call"]),
+      1,
+      breadcrumbs,
+    );
+    expect(breadcrumbs).toHaveLength(1);
+    expect(breadcrumbs[0]!.message).toBe("@scope/gh: 1/2 selected tool(s) unavailable");
+    expect(breadcrumbs[0]!.data).toMatchObject({ requested: 2, surviving: 1, missing: 1 });
+  });
+
+  it("does not discount native tools that merely share the api_call prefix", () => {
+    const breadcrumbs: IntegrationBootBreadcrumb[] = [];
+    pushUnavailableToolBreadcrumb(specWith(["api_calls", "api_uploader"]), 0, breadcrumbs);
+    expect(breadcrumbs).toHaveLength(1);
+    expect(breadcrumbs[0]!.data).toMatchObject({ requested: 2, surviving: 0, missing: 2 });
+  });
 });

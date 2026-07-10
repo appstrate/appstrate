@@ -254,7 +254,7 @@ Agents inside the sandboxed container interact with the platform exclusively thr
 
 - `run_history({ limit?, fields? })` — past-run metadata via per-run signed token.
 - `recall_memory({ query?, limit? })` — search the agent's archive memories written via the `note(content)` built-in runtime tool.
-- Per spawned integration the sidecar exposes `{ns}__api_call({ method, target, headers?, body?, responseMode? })` — credentials injected server-side; URLs validated against the integration's `auths.{key}.authorized_uris`. Optional `{ns}__api_upload` when the integration declares `source.api.upload_protocols`.
+- Per spawned integration the sidecar exposes `{ns}__api_call({ method, target, headers?, body?, responseMode? })` — credentials injected server-side; URLs validated against the integration's `auths.{key}.authorized_uris`. Optional `{ns}__api_upload` when an auth declares `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`.
 - Integrations backed by an MCP server (`source.kind = local` or `remote`) additionally surface their own tools under the same `{ns}__{tool}` prefix.
 
 The agent's primary completions are served by the sidecar's `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API. The legacy HTTP `/proxy` and `/run-history` routes have been retired — runners 1.x are not compatible with the current platform. See `packages/mcp-transport/README.md` and `runtime-pi/sidecar/README.md`.

@@ -19,7 +19,11 @@ import {
   resolveIntegrationToolCatalog,
   getConnectToolNames,
   validateAgentIntegrationScopes,
+  apiUploadToolNameFor,
+  isApiCallToolName,
+  isApiUploadToolName,
   API_CALL_TOOL_NAME,
+  API_UPLOAD_TOOL_NAME,
   type IntegrationManifest,
 } from "../src/integration.ts";
 
@@ -59,32 +63,50 @@ function localSourceManifest(opts: {
   } as unknown as IntegrationManifest;
 }
 
-function apiSourceManifest(): IntegrationManifest {
+function apiKeyAuth(): Record<string, unknown> {
+  return {
+    type: "api_key",
+    authorized_uris: ["https://api.example.com/**"],
+    credentials: {
+      schema: {
+        type: "object",
+        required: ["api_key"],
+        properties: { api_key: { type: "string" } },
+      },
+    },
+    delivery: { http: { in: "header", name: "Authorization", value: "{$credential.api_key}" } },
+  };
+}
+
+/**
+ * Serverless integration: no MCP backing, api_call exposed via the
+ * `_meta["dev.appstrate/api"]` vendor extension (orthogonal to source.kind).
+ * `metaAuths` overrides the opted-in auth map — pass `upload_protocols` to
+ * reproduce `@appstrate/google-drive`'s shape.
+ */
+function apiSourceManifest(
+  opts: {
+    metaAuths?: Record<string, unknown>;
+    auths?: Record<string, unknown>;
+    hidden_tools?: string[];
+  } = {},
+): IntegrationManifest {
   return {
     schema_version: "0.1",
     type: "integration",
     name: "@me/api-integ",
     version: "1.0.0",
     display_name: "API",
-    // Serverless integration: no MCP backing, api_call exposed via the
-    // `_meta["dev.appstrate/api"]` vendor extension (orthogonal to source.kind).
     source: { kind: "none" },
-    _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
-    auths: {
-      primary: {
-        type: "api_key",
-        authorized_uris: ["https://api.example.com/**"],
-        credentials: {
-          schema: {
-            type: "object",
-            required: ["api_key"],
-            properties: { api_key: { type: "string" } },
-          },
-        },
-        delivery: { http: { in: "header", name: "Authorization", value: "{$credential.api_key}" } },
-      },
-    },
+    _meta: { "dev.appstrate/api": { auths: opts.metaAuths ?? { primary: {} } } },
+    auths: opts.auths ?? { primary: apiKeyAuth() },
+    ...(opts.hidden_tools ? { hidden_tools: opts.hidden_tools } : {}),
   } as unknown as IntegrationManifest;
+}
+
+/** The `@appstrate/google-drive` shape: one auth, one declared upload protocol. */
+function driveLikeManifest(): IntegrationManifest {
+  return apiSourceManifest({ metaAuths: { primary: { upload_protocols: ["google-resumable"] } } });
 }
 
 describe("resolveIntegrationToolCatalog", () => {
@@ -158,6 +180,152 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out.map((e) => e.name)).toEqual(["kv_set", "kv_get", API_CALL_TOOL_NAME]);
   });
 
+  it("gives a declared synthetic capability precedence over same-named native tools", () => {
+    const integration = localSourceManifest({});
+    (integration as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": {
+        auths: { primary: { upload_protocols: ["google-resumable"] } },
+      },
+    };
+    const out = resolveIntegrationToolCatalog({
+      integration,
+      mcpServerTools: [
+        { name: "api_call", description: "native collision" },
+        { name: "api-call", description: "normalised native collision" },
+        { name: "api_upload", description: "native collision" },
+        { name: "drive__api.upload", description: "namespaced native collision" },
+        { name: "kv_get" },
+      ],
+    });
+    expect(out).toEqual([
+      { name: "kv_get" },
+      { name: API_CALL_TOOL_NAME },
+      { name: API_UPLOAD_TOOL_NAME },
+    ]);
+  });
+
+  it("keeps native api-like names when no synthetic capability is declared", () => {
+    const out = resolveIntegrationToolCatalog({
+      integration: localSourceManifest({}),
+      mcpServerTools: [{ name: "api_call" }, { name: "api_upload" }],
+    });
+    expect(out.map((entry) => entry.name)).toEqual(["api_call", "api_upload"]);
+  });
+
+  it("reserves persisted long-key aliases against native MCP collisions", () => {
+    const longAuthKey = "authentication_key_that_is_valid_but_long";
+    const integration = localSourceManifest({});
+    (integration as unknown as { auths: Record<string, unknown> }).auths = {
+      short: apiKeyAuth(),
+      [longAuthKey]: apiKeyAuth(),
+    };
+    (integration as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": {
+        auths: {
+          short: {},
+          [longAuthKey]: { upload_protocols: ["google-resumable"] },
+        },
+      },
+    };
+    const out = resolveIntegrationToolCatalog({
+      integration,
+      mcpServerTools: [
+        { name: `api_call__${longAuthKey}`, description: "legacy native collision" },
+        { name: `api_upload__${longAuthKey}`, description: "legacy native collision" },
+        { name: "native_keep" },
+      ],
+    });
+    expect(out.map((entry) => entry.name)).toEqual([
+      "native_keep",
+      "api_call__short",
+      "api_call__h0a0593260c3968fd8",
+      "api_upload__h0a0593260c3968fd8",
+    ]);
+  });
+
+  // Regression — issue #881. `@appstrate/google-drive` declares
+  // `upload_protocols`, so the sidecar advertises `{ns}__api_upload` at runtime,
+  // but the catalog only listed `api_call`. The picker couldn't show the tool
+  // and `validateAgentIntegrationScopes` rejected it as `unknown_tool`.
+  it("none source with upload_protocols: appends the api_upload companion after api_call", () => {
+    const out = resolveIntegrationToolCatalog({ integration: driveLikeManifest() });
+    expect(out).toEqual([{ name: API_CALL_TOOL_NAME }, { name: API_UPLOAD_TOOL_NAME }]);
+  });
+
+  it("none source WITHOUT upload_protocols: no api_upload companion", () => {
+    const out = resolveIntegrationToolCatalog({ integration: apiSourceManifest() });
+    expect(out).toEqual([{ name: API_CALL_TOOL_NAME }]);
+  });
+
+  it("multi-auth: each opted-in auth gets its own api_call + api_upload pair", () => {
+    const integration = apiSourceManifest({
+      auths: { primary: apiKeyAuth(), backup: apiKeyAuth() },
+      metaAuths: {
+        primary: { upload_protocols: ["google-resumable"] },
+        // `backup` declares none → api_call only, no companion.
+        backup: {},
+      },
+    });
+    expect(resolveIntegrationToolCatalog({ integration }).map((e) => e.name)).toEqual([
+      "api_call__primary",
+      "api_upload__primary",
+      "api_call__backup",
+    ]);
+  });
+
+  it("an opted-in _meta auth with no matching auths.{key} contributes nothing", () => {
+    const integration = apiSourceManifest({
+      metaAuths: { ghost: { upload_protocols: ["tus"] } },
+    });
+    expect(resolveIntegrationToolCatalog({ integration })).toEqual([]);
+  });
+
+  it("hidden_tools can hide the api_upload companion without hiding api_call", () => {
+    const integration = apiSourceManifest({
+      metaAuths: { primary: { upload_protocols: ["tus"] } },
+      hidden_tools: [API_UPLOAD_TOOL_NAME],
+    });
+    expect(resolveIntegrationToolCatalog({ integration }).map((e) => e.name)).toEqual([
+      API_CALL_TOOL_NAME,
+    ]);
+  });
+
+  it("hidden_tools hiding api_call also hides its dependent api_upload companion", () => {
+    const integration = apiSourceManifest({
+      metaAuths: { primary: { upload_protocols: ["tus"] } },
+      hidden_tools: [API_CALL_TOOL_NAME],
+    });
+    expect(resolveIntegrationToolCatalog({ integration })).toEqual([]);
+  });
+
+  it("multi-auth hidden_tools cascades per pair without hiding the other auth's api_call", () => {
+    const integration = apiSourceManifest({
+      auths: { primary: apiKeyAuth(), backup: apiKeyAuth() },
+      metaAuths: {
+        primary: { upload_protocols: ["google-resumable"] },
+        backup: { upload_protocols: ["tus"] },
+      },
+      // Hiding the primary call removes its dependent upload. Hiding only the
+      // backup upload intentionally leaves the backup call available.
+      hidden_tools: ["api_call__primary", "api_upload__backup"],
+    });
+    expect(resolveIntegrationToolCatalog({ integration }).map((e) => e.name)).toEqual([
+      "api_call__backup",
+    ]);
+  });
+
+  it("local source WITH upload_protocols: the pair is appended after the mcp tools", () => {
+    const integration = localSourceManifest({});
+    (integration as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": { auths: { primary: { upload_protocols: ["s3-multipart"] } } },
+    };
+    const out = resolveIntegrationToolCatalog({
+      integration,
+      mcpServerTools: [{ name: "kv_set" }],
+    });
+    expect(out.map((e) => e.name)).toEqual(["kv_set", API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME]);
+  });
+
   it("local source without mcp-server tools: falls back to integration.tools_policy keys", () => {
     const out = resolveIntegrationToolCatalog({
       integration: localSourceManifest({
@@ -221,5 +389,59 @@ describe("validateAgentIntegrationScopes — uses the catalog, not the policy ta
       apiSourceManifest(),
     );
     expect(errors).toEqual([]);
+  });
+
+  // Regression — issue #881: importing an agent that selected `api_upload`
+  // failed with `unknown_tool` even though the runtime exposed the tool.
+  it("api source with upload_protocols: accepts api_upload", () => {
+    const errors = validateAgentIntegrationScopes(
+      { id: "@me/api-integ", tools: [API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME] },
+      driveLikeManifest(),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("api source without upload_protocols: still rejects api_upload", () => {
+    const errors = validateAgentIntegrationScopes(
+      { id: "@me/api-integ", tools: [API_UPLOAD_TOOL_NAME] },
+      apiSourceManifest(),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.code).toBe("unknown_tool");
+  });
+});
+
+describe("api_call / api_upload tool-name helpers", () => {
+  it("derives the companion name for the bare and per-auth forms", () => {
+    expect(apiUploadToolNameFor(API_CALL_TOOL_NAME)).toBe(API_UPLOAD_TOOL_NAME);
+    expect(apiUploadToolNameFor("api_call__primary")).toBe("api_upload__primary");
+  });
+
+  // Lockstep guard: `runtime-pi/sidecar/mcp.ts` derives the advertised upload
+  // tool name with this exact substitution. If the two drift, the catalog and
+  // runtime advertise different names even though dispatch pairing itself is
+  // marker-driven and namespace-scoped.
+  it("matches the sidecar's own derivation", () => {
+    for (const name of [API_CALL_TOOL_NAME, "api_call__primary", "api_call__backup"]) {
+      expect(apiUploadToolNameFor(name)).toBe(name.replace(/^api_call/, "api_upload"));
+    }
+  });
+
+  it("classifies both families without overlap", () => {
+    for (const name of [API_CALL_TOOL_NAME, "api_call__k"]) {
+      expect(isApiCallToolName(name)).toBe(true);
+      expect(isApiUploadToolName(name)).toBe(false);
+    }
+    for (const name of [API_UPLOAD_TOOL_NAME, "api_upload__k"]) {
+      expect(isApiUploadToolName(name)).toBe(true);
+      expect(isApiCallToolName(name)).toBe(false);
+    }
+  });
+
+  it("does not classify unrelated tools that merely share a prefix", () => {
+    for (const name of ["api_calls", "api_call_extra", "api_uploader", "kv_set"]) {
+      expect(isApiCallToolName(name)).toBe(false);
+      expect(isApiUploadToolName(name)).toBe(false);
+    }
   });
 });

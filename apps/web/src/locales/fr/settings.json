@@ -843,6 +843,8 @@
   "agentEditor.integrations.authKey.default": "Par défaut (selon l'intégration)",
   "agentEditor.integrations.apiCall.label": "Appel API générique (api_call)",
   "agentEditor.integrations.apiCall.description": "Autorise l'agent à effectuer des appels HTTP authentifiés vers cette intégration. Les identifiants sont injectés côté serveur ; les scopes ci-dessous délimitent l'accès.",
+  "agentEditor.integrations.apiCall.labelWithUpload": "Appel API générique + envoi de fichiers (api_call + api_upload)",
+  "agentEditor.integrations.apiCall.descriptionWithUpload": "Autorise l'agent à effectuer des appels HTTP authentifiés vers cette intégration, et à envoyer des fichiers volumineux de son espace de travail via un upload repris par morceaux (api_upload). Les deux outils s'activent ensemble : chaque morceau transite par api_call. Les identifiants sont injectés côté serveur ; les scopes ci-dessous délimitent l'accès.",
   "agentEditor.integrations.wildcard.label": "Inclure tous les outils du serveur (avancé)",
   "agentEditor.integrations.wildcard.description": "Expose à l'agent tous les outils annoncés par le serveur MCP distant, y compris ceux non listés dans le manifest. Disponible uniquement quand l'intégration l'autorise.",
   "agentEditor.integrations.wildcard.scopesNotice": "Les scopes OAuth utilisés seront les scopes par défaut déclarés sur la méthode d'authentification sélectionnée — la sélection outil par outil et l'inférence de scopes sont désactivées.",
