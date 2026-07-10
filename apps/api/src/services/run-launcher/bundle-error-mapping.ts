@@ -9,14 +9,14 @@
  * for its dependency closure. All of those steps fail on *stored state*, not
  * on the request — and each one throws.
  *
- * Before #878 only `DEPENDENCY_UNRESOLVED` was mapped. Everything else escaped
- * `prepareAndExecuteRun` untyped, and the global error handler collapsed it
- * into a bare `500 internal_error` with no `detail` — leaving the caller (and
- * support) with nothing to act on. A run that succeeded against `version=draft`
- * would 500 immediately after publish, because the draft path never crosses the
- * integrity/signature gate.
+ * Every bundle-layer throw must map here: anything left unmapped reaches the
+ * global handler as an opaque `500 internal_error` with no `detail`, leaving
+ * the caller (and support) with nothing to act on (#878). The draft path never
+ * crosses the integrity/signature gate, so these failures only ever surface on
+ * published runs. `bundle-error-mapping.test.ts` enforces exhaustiveness over
+ * the `BundleErrorCode` union.
  *
- * Status choice is deliberate, and splits on *whose* fault it is:
+ * Status choice splits on *whose* fault it is:
  *
  *   - `INTEGRITY_MISMATCH` → **500**. The bytes at rest no longer hash to the
  *     SRI recorded at publish time: corruption or tampering. That is an

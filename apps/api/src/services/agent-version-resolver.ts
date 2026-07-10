@@ -73,9 +73,8 @@ export interface ResolvedRunAgent {
  * Build the effective LoadedPackage for a resolved published version.
  *
  * A `LoadedPackage` carries only what the definition SAYS (manifest + prompt),
- * so swapping those two fields swaps the definition wholesale. Nothing derived
- * from the draft manifest rides along to be compared against the version's —
- * the invariant that `LoadedPackage.skills` used to break (#878).
+ * so swapping those two fields swaps the definition wholesale — nothing
+ * derived from the draft manifest rides along (#878).
  */
 function substituteVersion(
   agent: LoadedPackage,

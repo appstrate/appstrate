@@ -58,9 +58,9 @@ export async function downloadVersionZip(
         expected: expectedIntegrity,
         computed: result.computed,
       });
-      // Typed, not a bare Error: the run pipeline maps `BundleError` onto the
-      // RFC 9457 contract. A bare Error escaped every mapper and surfaced as
-      // an opaque `500 internal_error` with no detail (#878).
+      // Must be a typed `BundleError`: the run pipeline maps those onto the
+      // RFC 9457 contract; a bare Error would reach the global handler as an
+      // opaque `500 internal_error` with no detail (#878).
       throw new BundleError(
         "INTEGRITY_MISMATCH",
         `Integrity check failed for ${packageId}@${version}`,

@@ -121,11 +121,10 @@ export async function collectAgentReadinessErrors(
     });
   }
 
-  // Resolved HERE, from the manifest this call is about — never read off the
-  // package object. `agent.manifest` may be a draft or a published snapshot;
-  // deriving the projection at the point of use is what makes it impossible to
-  // compare one definition's declared skills against another's resolved closure
-  // (#878). The catalog query is skipped entirely when no skill is declared.
+  // Projected from the manifest this call is about — a draft or a published
+  // snapshot — never off the package object, so the declared skills and the
+  // resolved closure always describe the same definition (#878). The catalog
+  // query is skipped entirely when no skill is declared.
   const declaredSkills = await resolveDeclaredSkills(manifest, orgId);
   for (const skill of declaredSkills) {
     if (skill.resolved) continue;

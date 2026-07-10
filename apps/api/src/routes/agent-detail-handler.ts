@@ -72,21 +72,22 @@ export async function buildAgentDetailDto(
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
 
-  // Projected off the EFFECTIVE manifest, never off the package object (#878).
-  //
-  // The two branches below preserve a wire inconsistency that predates this
-  // refactor and that `resolved` now makes visible: the draft detail exposes
-  // only skills the org catalog can see (enriched with their display metadata),
-  // while a versioned detail exposes every DECLARED skill (bare id + range) so
-  // the dependency-override UI can offer a pin for one that is missing.
-  // `use-agent-readiness.ts` mirrors the server's missing-skill check against
-  // this array, so widening the draft branch here would silently make the
-  // client stop flagging a missing skill. Unifying the two — one array of
-  // declared skills carrying `resolved` — is a wire change, tracked separately.
-  const declaredSkills = await resolveDeclaredSkills(m, orgId);
+  // Both branches project off the EFFECTIVE manifest, never off the package
+  // object (#878), but they expose different sets — a wire inconsistency that
+  // predates this code: a versioned detail lists every DECLARED skill (bare
+  // id + range, straight from the manifest — no catalog read) so the
+  // dependency-override UI can offer a pin for one that is missing, while the
+  // draft detail lists only skills the org catalog resolves, enriched with
+  // display metadata. `use-agent-readiness.ts` mirrors the server's
+  // missing-skill check against the draft array, so widening it here would
+  // silently stop the client flagging a missing skill. Unifying the two — one
+  // array of declared skills carrying `resolved` — is a wire change, tracked
+  // separately.
   const skillDeps = versioned
-    ? declaredSkills.map((s) => ({ id: s.id, ...(s.version ? { version: s.version } : {}) }))
-    : declaredSkills
+    ? Object.entries(
+        (m as { dependencies?: { skills?: Record<string, string> } }).dependencies?.skills ?? {},
+      ).map(([id, version]) => ({ id, ...(version ? { version } : {}) }))
+    : (await resolveDeclaredSkills(m, orgId))
         .filter((s) => s.resolved)
         .map((s) => ({
           id: s.id,

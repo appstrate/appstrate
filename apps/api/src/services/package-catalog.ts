@@ -23,13 +23,10 @@ interface DbPackageRow {
  * One entry of a manifest's `dependencies.skills` map, paired with what the
  * org/system catalog knows about it.
  *
- * `resolved` is the whole point. Catalog resolution FILTERS (a declared skill
- * whose package is invisible to the org simply is not there), while display
- * surfaces need to ENRICH (show every declared skill, missing ones included).
- * Collapsing both into a single "here are the skills" array is what let a
- * manifest and a skill list from two different definitions travel together
- * inside one `LoadedPackage` (#878). Callers now state which semantics they
- * want by reading or ignoring this flag.
+ * Every DECLARED skill gets an entry — `resolved: false` marks one whose
+ * package is not visible to the org. Callers that filter (readiness, run
+ * paths) and callers that display (detail DTOs, missing ones included) read
+ * the same array; absence is a flag, never a shorter list (#878).
  */
 export interface DeclaredSkill {
   id: string;
@@ -53,13 +50,10 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
 
 /**
  * Project a manifest's declared skill dependencies against the org/system
- * catalog.
- *
- * Derived state with a single input: the manifest handed to it. Nothing caches
- * the result on a package object, so it cannot outlive the manifest it was
- * computed from — swap the manifest (draft ↔ published version) and the
- * projection is simply recomputed. Returns one entry per DECLARED skill, in
- * manifest order; `resolved: false` marks a declared skill the org cannot see.
+ * catalog. The manifest handed in is the single input — the projection is
+ * recomputed per call and never cached on a package object, so it cannot go
+ * stale when a caller swaps the draft manifest for a published snapshot
+ * (#878). Returns one entry per declared skill, in manifest order.
  *
  * No DB read happens when the manifest declares no skills.
  */
