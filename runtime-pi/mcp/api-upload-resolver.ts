@@ -89,6 +89,9 @@ export interface IntegrationUploadRequest {
   fromFile: string;
   uploadProtocol: UploadProtocol;
   metadata?: Record<string, unknown>;
+  /** MIME type of the source bytes (→ `X-Upload-Content-Type`). Distinct
+   *  from `metadata.mimeType`, which is the desired/target file type. */
+  sourceMimeType?: string;
   partSizeBytes?: number;
 }
 
@@ -227,6 +230,7 @@ export class McpApiUploadResolver {
       target: req.target,
       totalBytes,
       metadata: req.metadata ?? {},
+      sourceMimeType: req.sourceMimeType,
       partSizeBytes,
       apiCall: this.makeApiCall(ctx.signal),
       signal: ctx.signal,

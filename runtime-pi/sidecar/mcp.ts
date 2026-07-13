@@ -970,6 +970,16 @@ function buildSidecarTools(options: MountMcpOptions): {
                 "tus: free-form key/value (encoded as `Upload-Metadata`). " +
                 "MS Graph: `{ item: { ... } }` envelope.",
             },
+            sourceMimeType: {
+              type: "string",
+              description:
+                "MIME type of the SOURCE bytes being uploaded — sent as `X-Upload-Content-Type`. " +
+                "Distinct from `metadata.mimeType`, which is the DESIRED (target) file type. " +
+                "For a Google Drive conversion, set `sourceMimeType` to the upload's real type " +
+                "(e.g. `text/markdown`, `text/html`, `text/csv`) AND `metadata.mimeType` to the " +
+                "Google-native target (e.g. `application/vnd.google-apps.document`); Drive then " +
+                "converts. Omit it to upload the bytes verbatim (no conversion).",
+            },
             partSizeBytes: {
               type: "integer",
               minimum: 1,

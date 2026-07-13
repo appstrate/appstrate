@@ -87,11 +87,21 @@ export const googleResumableAdapter: UploadAdapter = {
       "Content-Type": "application/json; charset=UTF-8",
       "X-Upload-Content-Length": String(ctx.totalBytes),
     };
-    // Optional declared upstream MIME — Drive ranks this above the
-    // metadata-derived MIME for sniffing.
-    const upstreamMime = ctx.metadata?.["mimeType"];
-    if (typeof upstreamMime === "string" && upstreamMime.length > 0) {
-      headers["X-Upload-Content-Type"] = upstreamMime;
+    // `X-Upload-Content-Type` declares the MIME of the BYTES being uploaded
+    // (the source). For a conversion this differs from the desired file type
+    // in `metadata.mimeType` (the target — e.g. a Google-native
+    // `application/vnd.google-apps.*` type). Prefer the explicit source type;
+    // otherwise fall back to `metadata.mimeType` ONLY when it is not a
+    // Google-native type, since uploading native-type bytes is impossible and
+    // Drive rejects the chunk with a 400.
+    const targetMime = ctx.metadata?.["mimeType"];
+    const sourceMime =
+      ctx.sourceMimeType ??
+      (typeof targetMime === "string" && !targetMime.startsWith("application/vnd.google-apps.")
+        ? targetMime
+        : undefined);
+    if (typeof sourceMime === "string" && sourceMime.length > 0) {
+      headers["X-Upload-Content-Type"] = sourceMime;
     }
     const res = await ctx.apiCall({
       apiCallToolName: ctx.apiCallToolName,
