@@ -164,7 +164,10 @@ function ConversationRow({
             {relativeTime(session.updatedAt)}
           </span>
         )}
-        <div className="bg-background absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
+        {/* pointer-events must track visibility: opacity-0 alone keeps the
+            invisible buttons tappable — on touch devices (no hover) a tap on
+            the timestamp area would hit the hidden Delete. */}
+        <div className="bg-background pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
           <button
             type="button"
             aria-label="Renommer"
