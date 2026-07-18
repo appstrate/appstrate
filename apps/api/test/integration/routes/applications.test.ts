@@ -293,4 +293,33 @@ describe("Applications API", () => {
       await assertDbMissing(applicationPackages, installedRowWhere("@foreignorg/theirs"));
     });
   });
+
+  // ── CRIT-05 — a historical stray association must not leak on the list ──
+  //
+  // The old unconditional-upsert PUT could create an `application_packages`
+  // row pointing at ANOTHER org's package. Blocking new creations is not
+  // enough: `listInstalledPackages` must also refuse to resolve such a row,
+  // or the foreign package's draft_manifest leaks through
+  // `GET /api/applications/:id/packages`.
+  describe("GET /api/applications/:id/packages excludes stray cross-org associations (CRIT-05)", () => {
+    it("omits a foreign-org package attached by a corrupted association row", async () => {
+      const foreignCtx = await createTestContext({ orgSlug: "foreignorg" });
+      await seedPackage({ id: "@foreignorg/leaky", orgId: foreignCtx.orgId });
+      await seedPackage({ id: "@testorg/mine", orgId: ctx.orgId });
+      // Insert both associations directly in DB — the stray one simulates a
+      // row created by the pre-fix vulnerable PUT.
+      await seedInstalledPackage(ctx.defaultAppId, "@foreignorg/leaky");
+      await seedInstalledPackage(ctx.defaultAppId, "@testorg/mine");
+
+      const res = await app.request(`/api/applications/${ctx.defaultAppId}/packages`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ packageId: string }> };
+      const ids = body.data.map((row) => row.packageId);
+      expect(ids).toContain("@testorg/mine");
+      expect(ids).not.toContain("@foreignorg/leaky");
+    });
+  });
 });

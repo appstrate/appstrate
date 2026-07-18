@@ -17,10 +17,12 @@
 --
 -- Locking, honestly: `VALIDATE CONSTRAINT` alone takes only SHARE UPDATE
 -- EXCLUSIVE. But the boot migrator applies all pending migrations in ONE
--- transaction, so when 0020 and 0021 land together the ACCESS EXCLUSIVE lock
--- from 0020's `ADD CONSTRAINT` is still held across the scans below. On a
--- single-instance deployment that is a short boot pause; for a rolling deploy
--- against a large `llm_usage`, apply 0020 and 0021 in separate releases.
+-- transaction, so when 0020 and 0021 land together the SHARE ROW EXCLUSIVE
+-- locks from 0020's `ADD CONSTRAINT` (held on both `llm_usage` and `runs`,
+-- blocking writes but not reads until commit) are still held across the
+-- scans below. On a single-instance deployment that is a short boot pause;
+-- for a rolling deploy against a large `llm_usage`, apply 0020 and 0021 in
+-- separate releases.
 --
 -- Re-runnable: the UPDATE is naturally idempotent (a detached row no longer
 -- matches), and the VALIDATE is guarded so a replay — or a database where
@@ -56,14 +58,20 @@ UPDATE llm_usage SET run_id = NULL WHERE run_id IS NOT NULL AND NOT EXISTS (SELE
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'llm_usage_run_id_org_id_fk'
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'llm_usage_run_id_org_id_fk'
+      AND conrelid = 'public.llm_usage'::regclass
+      AND contype = 'f'
   ) THEN
     RAISE EXCEPTION
       'llm_usage_run_id_org_id_fk is missing — migration 0020 did not apply. Check the __drizzle_migrations watermark before retrying.';
   END IF;
 
   IF NOT (
-    SELECT convalidated FROM pg_constraint WHERE conname = 'llm_usage_run_id_org_id_fk'
+    SELECT convalidated FROM pg_constraint
+    WHERE conname = 'llm_usage_run_id_org_id_fk'
+      AND conrelid = 'public.llm_usage'::regclass
+      AND contype = 'f'
   ) THEN
     ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_run_id_org_id_fk";
   END IF;

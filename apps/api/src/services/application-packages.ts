@@ -118,7 +118,14 @@ const installedPackageSelect = {
 };
 
 export async function listInstalledPackages(scope: AppScope, type?: PackageType) {
-  const conditions = [eq(applicationPackages.applicationId, scope.applicationId)];
+  // `orgOrSystemFilter` for the same reason as `getInstalledPackage` below: a
+  // stray association row pointing at another org's package (writable before
+  // the atomic install/update checks existed) must not surface that package's
+  // draft_manifest in the listing.
+  const conditions = [
+    eq(applicationPackages.applicationId, scope.applicationId),
+    orgOrSystemFilter(scope.orgId),
+  ];
   if (type) {
     conditions.push(eq(packages.type, type));
   }

@@ -503,10 +503,10 @@ export const llmUsage = pgTable(
     // from its `org_id` — a row attributed to a run MUST carry that run's own
     // org, so a caller-supplied run id can never bill spend onto another
     // tenant's run. NULL `run_id` rows (un-attributed proxy calls) pass (MATCH
-    // SIMPLE). NOTE: created `NOT VALID` in migration 0019 (Drizzle cannot
+    // SIMPLE). NOTE: created `NOT VALID` in migration 0020 (Drizzle cannot
     // express NOT VALID) so existing rows are never scanned at apply time;
-    // enforcement applies to every INSERT/UPDATE from then on. Follow-up:
-    // audit legacy rows, then `ALTER TABLE ... VALIDATE CONSTRAINT`.
+    // enforcement applies to every INSERT/UPDATE from then on. Migration 0021
+    // detaches mismatched legacy rows, then `VALIDATE CONSTRAINT`s it.
     foreignKey({
       name: "llm_usage_run_id_org_id_fk",
       columns: [table.runId, table.orgId],

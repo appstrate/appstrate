@@ -30,7 +30,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_runs_id_org_id" ON "runs" USING btree ("id
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'llm_usage_run_id_org_id_fk'
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'llm_usage_run_id_org_id_fk'
+      AND conrelid = 'public.llm_usage'::regclass
+      AND contype = 'f'
   ) THEN
     ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_run_id_org_id_fk" FOREIGN KEY ("run_id","org_id") REFERENCES "public"."runs"("id","org_id") ON DELETE cascade ON UPDATE no action NOT VALID;
   END IF;
