@@ -141,17 +141,20 @@ const envSchema = z
       }),
     // Dedicated HMAC secret for hosted-connect-portal session tokens (issue
     // #769) — short-lived capability tokens that gate the unified integration
-    // connect flow. Optional: when unset, the hosted connect surface is
-    // disabled (the mint route 503s) and existing OAuth/fields paths are
-    // unaffected. Same comma-separated keyring rotation as the upload secret;
-    // each key ≥16 chars. Keep separate from BETTER_AUTH_SECRET / the upload
-    // secret so each can rotate independently.
+    // connect flow. Required: the hosted portal is the primary UI surface for
+    // connecting integrations, so a deployment without this secret would boot
+    // "successfully" with its main connect button dead (issue #905). The
+    // installer generates it, upgrades backfill it via `mergeEnv`, and the
+    // self-hosting compose templates loud-fail without it. Same comma-separated
+    // keyring rotation as the upload secret; each key ≥16 chars. Keep separate
+    // from BETTER_AUTH_SECRET / the upload secret so each can rotate
+    // independently.
     CONNECT_SESSION_SECRET: z
       .string()
+      .min(1, "CONNECT_SESSION_SECRET is required")
       .refine((v) => v.split(",").every((k) => k.length >= 16), {
         message: "CONNECT_SESSION_SECRET: each comma-separated key must be at least 16 chars",
-      })
-      .optional(),
+      }),
     // TTL for hosted-connect-portal session tokens, in milliseconds. Short by
     // design — a connect token is a one-shot capability, not a session.
     CONNECT_SESSION_TTL_MS: z.coerce.number().int().positive().default(600_000),

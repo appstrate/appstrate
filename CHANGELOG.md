@@ -15,6 +15,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Self-host: hosted connect portal broken out of the box (#905)** — no
+  distribution path ever provisioned `CONNECT_SESSION_SECRET`: the installer
+  didn't generate it and no compose template forwarded it, so the integration
+  "Connect" button 503'd on every `appstrate install` deployment (dev, which
+  reads `.env.example` directly, kept working). The installer now generates the
+  secret on every tier, upgrades backfill it into existing `.env` files via the
+  standard merge, all five compose templates forward it with a `:?` loud-fail,
+  and a lockstep guard test (`install-secret-lockstep.test.ts`) fails the build
+  if a generated secret is ever missing from a template again (both drift
+  directions). **BREAKING for hand-managed deployments**: the env schema now
+  requires `CONNECT_SESSION_SECRET` (boot fails without it — the hosted portal
+  is the primary connect surface, not an optional feature). CLI-managed
+  installs are migrated automatically on upgrade; operators who manage `.env`
+  by hand must add `CONNECT_SESSION_SECRET=$(openssl rand -hex 32)` before
+  deploying this version. The now-unreachable 503 response is removed from the
+  `initiateIntegrationConnect` OpenAPI contract.
+
 - **`api_upload` never exposed on `@appstrate/google-drive` (#881)** — the
   integration tool catalog listed only `api_call`, so the agent editor's tool
   picker never offered `api_upload` and importing an agent that selected it

@@ -7,6 +7,7 @@ const TRACKED = [
   "BETTER_AUTH_SECRETS",
   "CONNECTION_ENCRYPTION_KEY",
   "UPLOAD_SIGNING_SECRET",
+  "CONNECT_SESSION_SECRET",
   "RUN_TOKEN_SECRET",
   "APP_URL",
   "NODE_ENV",
@@ -31,6 +32,7 @@ function restore(s: Snap): void {
 function setBaseEnv(): void {
   process.env.BETTER_AUTH_SECRET = "x".repeat(32);
   process.env.UPLOAD_SIGNING_SECRET = "y".repeat(32);
+  process.env.CONNECT_SESSION_SECRET = "z".repeat(32);
   process.env.CONNECTION_ENCRYPTION_KEY = Buffer.alloc(32, 1).toString("base64");
   process.env.NODE_ENV = "test";
   delete process.env.APP_URL;
@@ -155,6 +157,21 @@ describe("signing-secret keyrings (comma-separated, per-key validation)", () => 
   it("UPLOAD_SIGNING_SECRET: rejects an empty segment (trailing comma)", () => {
     process.env.UPLOAD_SIGNING_SECRET = `${"a".repeat(16)},`;
     expect(() => getEnv()).toThrow(/UPLOAD_SIGNING_SECRET/);
+  });
+
+  it("CONNECT_SESSION_SECRET: required — unset fails boot (issue #905)", () => {
+    delete process.env.CONNECT_SESSION_SECRET;
+    expect(() => getEnv()).toThrow(/CONNECT_SESSION_SECRET/);
+  });
+
+  it("CONNECT_SESSION_SECRET: multiple ≥16-char keys pass (keyring rotation)", () => {
+    process.env.CONNECT_SESSION_SECRET = `${"a".repeat(16)},${"b".repeat(20)}`;
+    expect(getEnv().CONNECT_SESSION_SECRET).toBe(`${"a".repeat(16)},${"b".repeat(20)}`);
+  });
+
+  it("CONNECT_SESSION_SECRET: rejects a keyring containing a <16-char key", () => {
+    process.env.CONNECT_SESSION_SECRET = `${"a".repeat(16)},short`;
+    expect(() => getEnv()).toThrow(/CONNECT_SESSION_SECRET/);
   });
 
   it("RUN_TOKEN_SECRET: comma-separated keys pass", () => {
