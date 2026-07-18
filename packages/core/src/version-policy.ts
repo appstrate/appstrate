@@ -104,8 +104,7 @@ export function planCreateVersionOutcome(
 
 /** Instruction for reassigning or deleting a dist-tag after a version yank. */
 export type TagReassignment =
-  | { tag: string; action: "reassign"; newVersionId: number }
-  | { tag: string; action: "delete" };
+  { tag: string; action: "reassign"; newVersionId: number } | { tag: string; action: "delete" };
 
 /**
  * Plan dist-tag reassignments after a yank.

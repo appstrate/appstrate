@@ -104,11 +104,13 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
     })}
     <div class="footer-links">
       ${allowSignup ? html`<a href="${registerUrl}">Créer un compte</a>` : null}
-      ${allowSignup && props.smtpEnabled
-        ? html`<span class="sep">·</span><a href="${forgotPasswordUrl}">Mot de passe oublié ?</a>`
-        : props.smtpEnabled
-          ? html`<a href="${forgotPasswordUrl}">Mot de passe oublié ?</a>`
-          : null}
+      ${
+        allowSignup && props.smtpEnabled
+          ? html`<span class="sep">·</span><a href="${forgotPasswordUrl}">Mot de passe oublié ?</a>`
+          : props.smtpEnabled
+            ? html`<a href="${forgotPasswordUrl}">Mot de passe oublié ?</a>`
+            : null
+      }
     </div>
     ${google || github ? renderSocialSignInScript() : null}
   `;

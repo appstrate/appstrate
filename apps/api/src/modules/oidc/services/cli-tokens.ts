@@ -351,8 +351,7 @@ export async function exchangeDeviceCodeForTokens(params: {
 }
 
 type ExchangeOutcome =
-  | { kind: "ok"; pair: TokenPair }
-  | { kind: "error"; code: CliTokenErrorCode; description: string };
+  { kind: "ok"; pair: TokenPair } | { kind: "error"; code: CliTokenErrorCode; description: string };
 
 /**
  * Rotate a refresh token. On success returns a fresh pair and marks

@@ -91,9 +91,7 @@ export interface AfpsManifestAuth {
 
 /** The `token_endpoint_auth_method` values Appstrate's OAuth client implements. */
 export type SupportedTokenEndpointAuthMethod =
-  | "client_secret_basic"
-  | "client_secret_post"
-  | "none";
+  "client_secret_basic" | "client_secret_post" | "none";
 
 /**
  * Narrow an AFPS 0.1 `token_endpoint_auth_method` to the subset Appstrate

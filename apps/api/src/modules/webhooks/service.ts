@@ -141,9 +141,11 @@ function validateWebhookUrl(url: string): void {
   }
 
   if (parsed.protocol !== "https:") {
-    if (
-      !(parsed.protocol === "http:" && LOCALHOST_HOSTS.has(parsed.hostname) && isDevEnvironment())
-    ) {
+    if (!(
+      parsed.protocol === "http:" &&
+      LOCALHOST_HOSTS.has(parsed.hostname) &&
+      isDevEnvironment()
+    )) {
       throw invalidRequest("Only https:// URLs are allowed", "url");
     }
   }

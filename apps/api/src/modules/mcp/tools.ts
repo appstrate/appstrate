@@ -42,11 +42,7 @@ export type Dispatch = (req: Request) => Promise<Response>;
 
 /** The tools, named for telemetry/audit. */
 export type McpToolName =
-  | "search_operations"
-  | "describe_operation"
-  | "invoke_operation"
-  | "run_and_wait"
-  | "get_me";
+  "search_operations" | "describe_operation" | "invoke_operation" | "run_and_wait" | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
 export type McpInvokeOutcome =

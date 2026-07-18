@@ -192,13 +192,7 @@ const EXIT_REAP_AFTER_MS = 5 * 60_000;
  *                       longer reach the workload
  */
 export type TeardownReason =
-  | "finalize"
-  | "watchdog-kill"
-  | "orphan-sweep"
-  | "shutdown"
-  | "crash"
-  | "reaper"
-  | "max-lifetime";
+  "finalize" | "watchdog-kill" | "orphan-sweep" | "shutdown" | "crash" | "reaper" | "max-lifetime";
 /**
  * Minimum firecracker binary version. 1.16 is what the docs require, and
  * anything below 1.15.1 is exposed to CVE-2026-5747 (virtio-pci OOB

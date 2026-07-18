@@ -2334,8 +2334,7 @@ export async function getIntegrationAuthStatuses(
     // under `_meta["dev.appstrate/auth"].required`.
     const auth = rawAuth as AfpsManifestAuth;
     const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
-      | { required?: boolean }
-      | undefined;
+      { required?: boolean } | undefined;
     const resource = auth.resource ?? null;
     const keyConnections = allConnections.filter((c) => c.auth_key === key);
     return {

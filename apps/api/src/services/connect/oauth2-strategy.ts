@@ -61,8 +61,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // `code_challenge_methods_supported` (PKCE), `issuer` (discovery).
     // `scope_separator` lives under `_meta["dev.appstrate/oauth"]`.
     const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
-      | { scope_separator?: string }
-      | undefined;
+      { scope_separator?: string } | undefined;
     // AFPS §7.3: an oauth2 auth declares EITHER an `issuer` (discovery fills the
     // endpoints in) OR explicit `authorization_endpoint` + `token_endpoint`.
     // Today this holds for remote MCP connectors too — they declare an `issuer`

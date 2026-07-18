@@ -61,21 +61,27 @@ export function renderSocialButtons(opts: SocialButtonsOptions): RawHtml | null 
   return html`
     <div class="divider"><span>ou</span></div>
     <div class="social-buttons">
-      ${google
-        ? html`<button type="button" data-social-provider="google" class="social-btn google">
-            ${GOOGLE_ICON} Continuer avec Google
-          </button>`
-        : null}
-      ${github
-        ? html`<button type="button" data-social-provider="github" class="social-btn github">
-            ${GITHUB_ICON} Continuer avec GitHub
-          </button>`
-        : null}
-      ${magicLinkUrl
-        ? html`<a href="${magicLinkUrl}" class="social-btn magic-link">
-            ${MAGIC_LINK_ICON} Recevoir un lien de connexion
-          </a>`
-        : null}
+      ${
+        google
+          ? html`<button type="button" data-social-provider="google" class="social-btn google">
+              ${GOOGLE_ICON} Continuer avec Google
+            </button>`
+          : null
+      }
+      ${
+        github
+          ? html`<button type="button" data-social-provider="github" class="social-btn github">
+              ${GITHUB_ICON} Continuer avec GitHub
+            </button>`
+          : null
+      }
+      ${
+        magicLinkUrl
+          ? html`<a href="${magicLinkUrl}" class="social-btn magic-link">
+              ${MAGIC_LINK_ICON} Recevoir un lien de connexion
+            </a>`
+          : null
+      }
     </div>
   `;
 }

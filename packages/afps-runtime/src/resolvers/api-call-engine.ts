@@ -110,8 +110,7 @@ export class RedirectBlockedError extends Error {
  * `AuthorizedUrisError` / SSRF error).
  */
 export type PreflightResult =
-  | { ok: true }
-  | { ok: false; reason: "ssrf" | "not_authorized"; message: string };
+  { ok: true } | { ok: false; reason: "ssrf" | "not_authorized"; message: string };
 
 export interface PreflightOptions {
   /**

@@ -309,8 +309,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
   // auth key MUST reference a declared `auths.{key}`, and `upload_protocols`
   // (when present) MUST be an array of non-empty strings.
   const apiMeta = (manifest as { _meta?: Record<string, unknown> })._meta?.[API_META_KEY] as
-    | { auths?: unknown }
-    | undefined;
+    { auths?: unknown } | undefined;
   if (apiMeta !== undefined) {
     const metaAuths = apiMeta.auths;
     if (!metaAuths || typeof metaAuths !== "object" || Array.isArray(metaAuths)) {
