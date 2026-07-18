@@ -41,7 +41,7 @@ export type Tier = 0 | 1 | 2 | 3;
  */
 export type EnvVars = Record<string, string>;
 
-/** 32 random bytes → hex (64 chars). Used for Better Auth session signing, run-token HMAC, upload signing. */
+/** 32 random bytes → hex (64 chars). Used for Better Auth session signing, run-token HMAC, upload signing, connect-session signing. */
 function hex32(): string {
   return randomBytes(32).toString("hex");
 }
@@ -233,6 +233,7 @@ export function generateEnvForTier(
     TRUSTED_ORIGINS: appUrl,
     BETTER_AUTH_SECRET: hex32(),
     CONNECTION_ENCRYPTION_KEY: base64Key32(),
+    CONNECT_SESSION_SECRET: hex32(),
     RUN_TOKEN_SECRET: hex32(),
     UPLOAD_SIGNING_SECRET: hex32(),
   };

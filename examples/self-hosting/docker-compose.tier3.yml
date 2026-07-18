@@ -162,6 +162,7 @@ services:
       # ── Required secrets (loud-fail when missing) ────────────────
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
       - UPLOAD_SIGNING_SECRET=${UPLOAD_SIGNING_SECRET:?Set UPLOAD_SIGNING_SECRET in .env}
+      - CONNECT_SESSION_SECRET=${CONNECT_SESSION_SECRET:?Set CONNECT_SESSION_SECRET in .env}
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY:?Set CONNECTION_ENCRYPTION_KEY in .env}
       # ── Infra plumbing (refers to compose service hostnames) ─────
       - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@postgres:5432/appstrate

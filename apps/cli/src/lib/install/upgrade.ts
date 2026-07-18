@@ -265,14 +265,16 @@ const OVERRIDE_KEYS: readonly string[] = ["APPSTRATE_VERSION"];
  *     credential row in `provider_credentials` (AES-256-GCM auth tag
  *     check fails, tokens can't be decrypted, org is locked out of
  *     every connected service).
- *   - RUN_TOKEN_SECRET / UPLOAD_SIGNING_SECRET: rotating invalidates
- *     pending runs + signed upload URLs.
+ *   - RUN_TOKEN_SECRET / UPLOAD_SIGNING_SECRET / CONNECT_SESSION_SECRET:
+ *     rotating invalidates pending runs, signed upload URLs, and
+ *     in-flight hosted-connect links.
  *   - POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD: rotating requires a
  *     matching change on the server side too, which is out of scope
  *     for a re-run of `appstrate install`.
  *
  * Keys in `fresh` but not in `existing` are carried over (that's how
- * a tier-1 → tier-3 upgrade picks up the new MINIO_* entries). Keys
+ * a tier-1 → tier-3 upgrade picks up the new MINIO_* entries, and how
+ * pre-#905 installs get CONNECT_SESSION_SECRET backfilled). Keys
  * in `existing` but not in `fresh` are also preserved (user additions
  * like SMTP_HOST stay intact).
  */
