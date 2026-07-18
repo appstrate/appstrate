@@ -538,15 +538,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         });
       }
 
-      let createdItem;
-      try {
-        createdItem = await createOrgItem(
-          orgId,
-          { id: packageId, content, createdBy: user.id },
-          rcfg.cfg,
-          validatedManifest as Record<string, unknown>,
-        );
-      } catch (err) {
+      const createdItem = await createOrgItem(
+        orgId,
+        { id: packageId, content, createdBy: user.id },
+        rcfg.cfg,
+        validatedManifest as Record<string, unknown>,
+      ).catch((err: unknown) => {
         // The pre-check above narrows the common case, but a concurrent create
         // can still lose the race — map the persistence-layer collision to 409
         // instead of a 500 (mirrors the ZIP/skill create path below).
@@ -554,7 +551,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           throw conflict("name_collision", err.message);
         }
         throw err;
-      }
+      });
 
       // After-create hook (optional per-type post-create side-effect)
       if (rcfg.afterCreate) {
