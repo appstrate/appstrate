@@ -274,6 +274,40 @@ describe("formatCallerContext", () => {
     expect(out).toContain("Current date and time:");
     expect(out).toContain("## The user's recent runs");
   });
+
+  it("renders assistant skills with the getSkill load instruction", () => {
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      assistant_skills: [
+        {
+          package_id: "@appstrate/copilot",
+          display_name: "Copilote",
+          description: "Guide the user to a working agent.",
+        },
+      ],
+    });
+    expect(out).toContain("## Assistant skills");
+    expect(out).toContain("`@appstrate/copilot` — Copilote: Guide the user to a working agent.");
+    expect(out).toContain('`operation_id: "getSkill"`');
+    // Distinct from the attach-to-agent skills index, which is absent here.
+    expect(out).not.toContain("## Skills you can attach to an agent");
+  });
+
+  it("renders a context block from assistant_skills alone (caller without agents:run)", () => {
+    const out = formatCallerContext({
+      assistant_skills: [
+        { package_id: "@appstrate/copilot", display_name: "Copilote", description: "Guide." },
+      ],
+    });
+    expect(out).toContain("## Your context");
+    expect(out).toContain("## Assistant skills");
+  });
+
+  it("omits the assistant-skills section when the payload carries none", () => {
+    const out = formatCallerContext({ user: { name: "Ada" }, org: { role: "member" } });
+    expect(out).not.toContain("## Assistant skills");
+  });
 });
 
 describe("buildCallerContextBlock", () => {

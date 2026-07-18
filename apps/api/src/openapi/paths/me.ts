@@ -425,6 +425,7 @@ export const mePaths = {
                   "skills",
                   "skills_truncated",
                   "skills_total",
+                  "assistant_skills",
                 ],
                 properties: {
                   user: {
@@ -605,6 +606,31 @@ export const mePaths = {
                     type: "integer",
                     description: "Total installed skills before the cap.",
                   },
+                  assistant_skills: {
+                    type: "array",
+                    description:
+                      "Assistant skills — unlisted system skills carrying know-how for the " +
+                      "assistant itself (copilot interview, web-search recipe, …). Not gated on " +
+                      "`agents:run`: they serve callers who have nothing configured yet. Load a " +
+                      "skill's full instructions by exact id via `getSkill` " +
+                      "(GET /api/packages/skills/{scope}/{name}) and follow its `content`.",
+                    items: {
+                      type: "object",
+                      required: ["package_id", "display_name", "description"],
+                      properties: {
+                        package_id: {
+                          type: "string",
+                          description:
+                            'Exact identifier, e.g. "@appstrate/copilot". Split into scope/name for `getSkill`.',
+                        },
+                        display_name: { type: "string" },
+                        description: {
+                          type: "string",
+                          description: "When-to-use trigger for loading the skill.",
+                        },
+                      },
+                    },
+                  },
                 },
               },
               example: {
@@ -647,6 +673,13 @@ export const mePaths = {
                 ],
                 skills_truncated: false,
                 skills_total: 1,
+                assistant_skills: [
+                  {
+                    package_id: "@appstrate/copilot",
+                    display_name: "Copilot",
+                    description: "Guide the user from a vague automation wish to a working agent.",
+                  },
+                ],
               },
             },
           },

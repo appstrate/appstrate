@@ -58,6 +58,7 @@ import {
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
 import { listRunnableAgents, listInstalledSkills } from "../services/application-packages.ts";
+import { listAssistantSkills } from "../services/assistant-skills.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -380,6 +381,11 @@ router.get("/context", requireAppContext(), async (c) => {
     skills: installedSkills.skills,
     skills_truncated: installedSkills.truncated,
     skills_total: installedSkills.total,
+    // Assistant skills (unlisted system skills) are NOT gated on `agents:run`:
+    // they serve the assistant itself (copilot interview, web search recipe, …)
+    // — precisely for callers who have nothing configured yet. Loading one is a
+    // plain package-detail read, already open to every org member.
+    assistant_skills: listAssistantSkills(),
   });
 });
 
