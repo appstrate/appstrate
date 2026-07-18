@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/github-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "GitHub",
@@ -325,6 +325,11 @@
         "oauth": ["public_repo"]
       }
     },
+    "list_issue_fields": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
     "issue_write": {
       "required_scopes": {
         "oauth": ["repo"]
@@ -416,6 +421,11 @@
       }
     },
     "get_code_scanning_alert": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    },
+    "get_code_quality_finding": {
       "required_scopes": {
         "oauth": ["security_events"]
       }

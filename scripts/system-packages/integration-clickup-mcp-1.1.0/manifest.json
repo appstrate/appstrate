@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/clickup-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "ClickUp",
@@ -80,6 +80,7 @@
     "clickup_remove_task_dependency": {},
     "clickup_remove_task_from_list": {},
     "clickup_remove_task_link": {},
+    "clickup_request_attachment_upload": {},
     "clickup_resolve_assignees": {},
     "clickup_search": {},
     "clickup_search_reminders": {},
