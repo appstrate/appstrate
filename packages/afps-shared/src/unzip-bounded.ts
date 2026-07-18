@@ -27,10 +27,7 @@
 import { Unzip, UnzipInflate } from "fflate";
 
 export type DecompressionLimitReason =
-  | "decompressed-budget-exceeded"
-  | "file-too-large"
-  | "too-many-files"
-  | "corrupt-archive";
+  "decompressed-budget-exceeded" | "file-too-large" | "too-many-files" | "corrupt-archive";
 
 export class DecompressionLimitError extends Error {
   readonly reason: DecompressionLimitReason;

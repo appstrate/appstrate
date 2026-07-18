@@ -411,8 +411,7 @@ export async function buildIntegrationOAuthRefreshContext(
   const { clientId, clientSecret } = client;
   // AFPS: `scope_separator` moved under `_meta["dev.appstrate/oauth"]`.
   const oauthMeta = (afpsAuth._meta?.["dev.appstrate/oauth"] ?? undefined) as
-    | { scope_separator?: string }
-    | undefined;
+    { scope_separator?: string } | undefined;
   return {
     tokenEndpoint,
     clientId,

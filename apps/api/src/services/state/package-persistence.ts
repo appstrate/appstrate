@@ -63,9 +63,7 @@ export const MAX_PINNED_KEY_LENGTH = 64;
  * opting into app-wide behaviour.
  */
 export type PersistenceScope =
-  | { type: "user"; id: string }
-  | { type: "end_user"; id: string }
-  | { type: "shared" };
+  { type: "user"; id: string } | { type: "end_user"; id: string } | { type: "shared" };
 
 export type Memory = Pick<
   PackagePersistenceRow,

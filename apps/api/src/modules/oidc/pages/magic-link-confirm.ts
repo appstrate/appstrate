@@ -44,10 +44,13 @@ export function renderMagicLinkConfirmPage(props: MagicLinkConfirmPageProps): Ra
   const bodyHtml = html`
     <h1>Confirmer la connexion</h1>
     <p>
-      ${props.email
-        ? html`Vous êtes sur le point de vous connecter en tant que
-            <strong>${props.email}</strong>.`
-        : html`Vous êtes sur le point de vous connecter à <strong>${props.branding.name}</strong>.`}
+      ${
+        props.email
+          ? html`Vous êtes sur le point de vous connecter en tant que
+              <strong>${props.email}</strong>.`
+          : html`Vous êtes sur le point de vous connecter à
+              <strong>${props.branding.name}</strong>.`
+      }
     </p>
     <p class="muted">
       Cliquez sur le bouton ci-dessous pour finaliser votre connexion. Cette étape protège votre

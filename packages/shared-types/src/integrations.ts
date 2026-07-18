@@ -247,13 +247,7 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *  - `needs_reconnection` — the resolved connection is flagged for re-consent.
  */
 export type IntegrationPickStatus =
-  | "admin_locked"
-  | "pinned"
-  | "auto"
-  | "must_choose"
-  | "none"
-  | "stale"
-  | "needs_reconnection";
+  "admin_locked" | "pinned" | "auto" | "must_choose" | "none" | "stale" | "needs_reconnection";
 
 export interface IntegrationAgentResolution {
   status: IntegrationPickStatus;

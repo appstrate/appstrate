@@ -63,8 +63,7 @@ import { isVersioned } from "../../lib/version-selector";
  * the honest signal that the override would be ignored.
  */
 export type ConnectionPickerPersistence =
-  | { mode: "pin" }
-  | { mode: "override"; value: string; onChange: (connectionId: string) => void };
+  { mode: "pin" } | { mode: "override"; value: string; onChange: (connectionId: string) => void };
 
 /**
  * Per-integration connection picker, rendered as a rich dropdown. Lists every

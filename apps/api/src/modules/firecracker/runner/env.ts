@@ -70,8 +70,7 @@ export type RunnerEnv = z.infer<typeof runnerEnvSchema>;
 
 /** Where the daemon listens — a UDS (socket wins when set) or a TCP host:port. */
 export type RunnerListenConfig =
-  | { kind: "unix"; socketPath: string; mode: number }
-  | { kind: "tcp"; host: string; port: number };
+  { kind: "unix"; socketPath: string; mode: number } | { kind: "tcp"; host: string; port: number };
 
 /**
  * Resolve the daemon's listen configuration. Pure — the socket, when

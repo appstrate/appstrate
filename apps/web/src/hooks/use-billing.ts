@@ -78,14 +78,7 @@ export interface BillingInfo {
   credit_quota: number;
   period_end: string | null;
   status:
-    | "active"
-    | "trialing"
-    | "past_due"
-    | "unpaid"
-    | "paused"
-    | "canceling"
-    | "canceled"
-    | "none";
+    "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceling" | "canceled" | "none";
   upgrades: BillingPlanDetail[];
 }
 

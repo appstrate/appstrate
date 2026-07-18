@@ -77,11 +77,7 @@ import { isValidRedirectUri } from "./redirect-uri.ts";
 export type OAuthClientLevel = "instance" | "org" | "application";
 
 export type OAuthAdminValidationField =
-  | "scopes"
-  | "redirectUris"
-  | "referencedOrgId"
-  | "referencedApplicationId"
-  | "signupPolicy";
+  "scopes" | "redirectUris" | "referencedOrgId" | "referencedApplicationId" | "signupPolicy";
 
 export class OAuthAdminValidationError extends Error {
   readonly field: OAuthAdminValidationField;
@@ -345,9 +341,7 @@ export interface CreateInstanceClientInput {
 }
 
 export type CreateClientInput =
-  | CreateInstanceClientInput
-  | CreateOrgClientInput
-  | CreateApplicationClientInput;
+  CreateInstanceClientInput | CreateOrgClientInput | CreateApplicationClientInput;
 
 export async function createClient(input: CreateClientInput): Promise<OAuthClientWithSecret> {
   assertValidRedirectUris(input.redirectUris);

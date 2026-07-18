@@ -528,8 +528,7 @@ export interface CredentialValidationContext {
  * to keep the module contract dependency-free.
  */
 export type CredentialValidationResult =
-  | { ok: true }
-  | { ok: false; error: string; message: string };
+  { ok: true } | { ok: false; error: string; message: string };
 
 /**
  * Shared OFFLINE expiry gate for subscription-credential `validateCredential`

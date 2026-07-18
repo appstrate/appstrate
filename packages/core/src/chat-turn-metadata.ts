@@ -2,13 +2,7 @@
 
 export type ChatTurnEngine = "ai-sdk" | "subscription";
 export type ChatTurnFinishReason =
-  | "stop"
-  | "length"
-  | "content-filter"
-  | "tool-calls"
-  | "error"
-  | "other"
-  | "unknown";
+  "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" | "unknown";
 
 export const CHAT_MAX_STEPS = 16;
 export const CHAT_TOOL_STEP_BUDGET = CHAT_MAX_STEPS - 1;

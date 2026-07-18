@@ -1637,8 +1637,7 @@ export function createPackagesRouter() {
 
     // Force import: replace existing version content if integrity differs
     const importedVersionForReplace = (manifest as Record<string, unknown>).version as
-      | string
-      | undefined;
+      string | undefined;
     if (existing && force && importedVersionForReplace) {
       const existingVer = await getVersionForDownload(packageId, importedVersionForReplace);
       if (existingVer) {

@@ -31,9 +31,7 @@ export function isValidSessionId(sessionId: string): boolean {
 }
 
 export type SessionBindResult =
-  | { kind: "bound" }
-  | { kind: "reused" }
-  | { kind: "mismatch"; boundTo: string };
+  { kind: "bound" } | { kind: "reused" } | { kind: "mismatch"; boundTo: string };
 
 /**
  * Atomically bind a session to a principal, or confirm a pre-existing

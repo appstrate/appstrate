@@ -315,9 +315,7 @@ export async function resolveMcpServerForSpawn(
  *   - `version` → a published `package_versions` row (the pinned version).
  */
 export type SpawnVersionDescriptor =
-  | { kind: "draft" }
-  | { kind: "system" }
-  | { kind: "version"; version: string };
+  { kind: "draft" } | { kind: "system" } | { kind: "version"; version: string };
 
 /** Frozen resolution recorded on `runs.resolved_integration_versions`. */
 export interface ResolvedIntegrationVersion {

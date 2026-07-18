@@ -47,8 +47,7 @@ import { getPackageDisplayName } from "../lib/package-helpers.ts";
  *     application; the listing is filtered to that pair at the DB level.
  */
 export type MeConnectionAuthority =
-  | { kind: "user_global" }
-  | { kind: "app_scoped"; orgId: string; applicationId: string };
+  { kind: "user_global" } | { kind: "app_scoped"; orgId: string; applicationId: string };
 
 /**
  * Fetch every integration_connections row owned by the actor, joined with

@@ -151,8 +151,8 @@ let _beforeSignupHook: ((email: string, ctx: BeforeSignupContext) => void | Prom
   null;
 
 let _afterSignupHook:
-  | ((user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>)
-  | null = null;
+  ((user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>) | null =
+  null;
 
 export function setBeforeSignupHook(
   hook: (email: string, ctx: BeforeSignupContext) => void | Promise<void>,

@@ -21,8 +21,7 @@ interface OidcConfig {
 
 export function getOidcConfig(): OidcConfig | undefined {
   return (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc as
-    | OidcConfig
-    | undefined;
+    OidcConfig | undefined;
 }
 
 function base64url(bytes: Uint8Array): string {

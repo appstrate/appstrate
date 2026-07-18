@@ -165,9 +165,7 @@ async function readOAuthCallbackState(): Promise<{ callbackURL: string } | null>
 }
 
 export type CallbackURLAnalysis =
-  | { kind: "oidc"; clientId: string }
-  | { kind: "invalid" }
-  | { kind: "not-oidc" };
+  { kind: "oidc"; clientId: string } | { kind: "invalid" } | { kind: "not-oidc" };
 
 /**
  * Classify a social transaction's server-stored `callbackURL`.

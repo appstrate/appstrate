@@ -60,8 +60,7 @@ import { parseIpv4HttpUrl } from "../lib/install/os.ts";
 
 /** Result shape shared by the TCP (`RunnerHttp.getJson`) and UDS probes. */
 type GetJsonResult =
-  | { reachable: true; status: number; body: unknown }
-  | { reachable: false; error: string };
+  { reachable: true; status: number; body: unknown } | { reachable: false; error: string };
 
 /**
  * GET a JSON endpoint over a unix socket. Separate seam from

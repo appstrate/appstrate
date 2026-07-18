@@ -31,8 +31,7 @@ import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transpor
 import { RUNTIME_INJECTED_TOOLS, type RuntimeInjectedTool } from "./index.ts";
 
 type PiToolContent =
-  | { type: "text"; text: string }
-  | { type: "image"; data: string; mimeType: string };
+  { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
 interface PiToolResult {
   content: PiToolContent[];

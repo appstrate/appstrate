@@ -143,11 +143,9 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
   private readonly retryBaseMs: number;
   private readonly heartbeatIntervalMs: number;
   private readonly recordBootHeartbeat:
-    | ((runId: string) => Promise<BootHeartbeatOutcome>)
-    | undefined;
+    ((runId: string) => Promise<BootHeartbeatOutcome>) | undefined;
   private readonly recordConsoleExcerpt:
-    | ((runId: string, exitCode: number, excerpt: string) => Promise<void>)
-    | undefined;
+    ((runId: string, exitCode: number, excerpt: string) => Promise<void>) | undefined;
   /** resolvePlatformApiUrl cache — the answer is static per daemon. */
   private platformUrlPromise: Promise<string> | undefined;
 
