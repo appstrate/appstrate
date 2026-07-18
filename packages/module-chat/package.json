@@ -24,10 +24,10 @@
     "@appstrate/db": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
-    "@assistant-ui/react": "^0.14.16",
+    "@assistant-ui/react": "^0.14.27",
     "@assistant-ui/react-ai-sdk": "^1",
     "@iconify/react": "^6.0.2",
-    "@assistant-ui/react-markdown": "^0.14.2",
+    "@assistant-ui/react-markdown": "^0.14.6",
     "ai": "^6",
     "assistant-stream": "^0.3.21",
     "drizzle-orm": "^0.45.2",
@@ -43,6 +43,6 @@
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
-    "lucide-react": "^1.14.0"
+    "lucide-react": "^1.25.0"
   }
 }
