@@ -37,20 +37,6 @@ import {
  * which is acceptable because the run-time resolver gate enforces the
  * server-side truth anyway.
  */
-/**
- * Refetch the chat conversation list when the chat module signals a session
- * change (message persisted, read marker advanced on another device, rename,
- * delete, `generating` flip). Signal-only frame → invalidate, the list GET is
- * the single source of the session DTO. The key is the module's
- * `SESSIONS_QUERY_KEY` (re-exported from `@appstrate/module-chat/unread`,
- * already imported by the nav badge); importing the constant is harmless when
- * the chat feature is disabled — no chat query is mounted, the invalidation
- * matches nothing.
- */
-function handleChatSessionUpdate(qc: QueryClient) {
-  void qc.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
-}
-
 function handleConnectionUpdate(qc: QueryClient) {
   // Connections page (`/preferences/connections`) — the orange
   // "Reconnection required" badge reads off this typed query.
@@ -61,6 +47,22 @@ function handleConnectionUpdate(qc: QueryClient) {
   // dropdown). The typed keys are `[method, "/api/integrations…", init]`,
   // so the shared helper matches on the path element.
   void invalidateIntegrationQueries(qc);
+}
+
+/**
+ * Refetch the chat conversation list when the chat module signals a session
+ * change (message persisted, read marker advanced on another device, rename,
+ * delete, `generating` flip). Signal-only frame → invalidate, the list GET is
+ * the single source of the session DTO. Deliberately NOT routed through the
+ * debounced broad invalidator: chat emits a handful of frames per turn (not a
+ * per-log firehose like runs) and the unread badge / spinner should react
+ * instantly. The key is the module's `SESSIONS_QUERY_KEY` (re-exported from
+ * `@appstrate/module-chat/unread`, already imported by the nav badge);
+ * importing the constant is harmless when the chat feature is disabled — no
+ * chat query is mounted, the invalidation matches nothing.
+ */
+function handleChatSessionUpdate(qc: QueryClient) {
+  void qc.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
 }
 
 /**
