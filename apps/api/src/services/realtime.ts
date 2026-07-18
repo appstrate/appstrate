@@ -8,6 +8,7 @@ import {
   runLogEventSchema,
   runMetricEventSchema,
   connectionUpdateEventSchema,
+  chatSessionUpdateEventSchema,
   type RealtimeEvent,
 } from "@appstrate/shared-types";
 
@@ -201,6 +202,36 @@ export async function initRealtime(): Promise<void> {
       }
     } catch (err) {
       logger.error("Failed to parse connection_update payload", {
+        error: getErrorMessage(err),
+      });
+    }
+  });
+
+  // `chat_session_update` is an application-emitted change SIGNAL from the
+  // chat module (packages/module-chat/src/realtime.ts): the payload carries
+  // only the owner identity, and the client refetches the session list.
+  // Chat sessions are strictly user-owned (org+user scoped, no application
+  // dimension), so fan-out gates on org + exact user match. End-user
+  // subscriptions never receive chat frames (chat has no end-user surface);
+  // subscriptions without an actor are skipped rather than leaked to.
+  await listenClient.listen("chat_session_update", (payload) => {
+    try {
+      const raw = JSON.parse(payload) as Record<string, unknown>;
+      const parsed = chatSessionUpdateEventSchema.safeParse(snakeToCamel(raw));
+      if (!parsed.success) {
+        logger.error("chat_session_update payload failed schema validation", {
+          issues: parsed.error.issues,
+          raw,
+        });
+        return;
+      }
+      for (const sub of subscribers.values()) {
+        if (sub.filter.orgId !== raw.org_id) continue;
+        if (sub.filter.userId === undefined || sub.filter.userId !== raw.user_id) continue;
+        sub.send({ event: "chat_session_update", data: parsed.data });
+      }
+    } catch (err) {
+      logger.error("Failed to parse chat_session_update payload", {
         error: getErrorMessage(err),
       });
     }

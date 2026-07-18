@@ -1,6 +1,6 @@
 {
-  "id": "788aeb6b-d85a-4c95-bf37-3e8e2d6ad534",
-  "prevId": "a79881f3-470a-45ef-ab8f-9d04df50b7f7",
+  "id": "2f8af428-40b7-47d7-b41f-e2885a7ad548",
+  "prevId": "1562df3a-e78a-4b56-86f5-9ffb8bc96c64",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2968,6 +2968,15 @@
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "llm_usage_run_id_org_id_fk": {
+          "name": "llm_usage_run_id_org_id_fk",
+          "tableFrom": "llm_usage",
+          "tableTo": "runs",
+          "columnsFrom": ["run_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3867,6 +3876,27 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_runs_id_org_id": {
+          "name": "uq_runs_id_org_id",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}

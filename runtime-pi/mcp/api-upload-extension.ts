@@ -111,6 +111,7 @@ function makeExtension(
             fromFile: { type: "string" },
             uploadProtocol: { type: "string", enum: protocols },
             metadata: { type: "object", additionalProperties: true },
+            sourceMimeType: { type: "string" },
             partSizeBytes: { type: "integer", minimum: 1 },
           },
         },
@@ -121,6 +122,7 @@ function makeExtension(
           fromFile?: string;
           uploadProtocol?: string;
           metadata?: Record<string, unknown>;
+          sourceMimeType?: string;
           partSizeBytes?: number;
         };
 
@@ -171,6 +173,7 @@ function makeExtension(
             fromFile: args.fromFile,
             uploadProtocol: protocol as UploadProtocol,
             metadata: args.metadata,
+            ...(args.sourceMimeType !== undefined ? { sourceMimeType: args.sourceMimeType } : {}),
             ...(args.partSizeBytes !== undefined ? { partSizeBytes: args.partSizeBytes } : {}),
           },
           {

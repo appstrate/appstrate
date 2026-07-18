@@ -358,6 +358,74 @@ describe("buildBundleFromCatalog", () => {
     expect((err as BundleError).message).toMatch(/catalog\.fetch returned identity/);
   });
 
+  it("aggregates every INTEGRITY_MISMATCH fetch failure into one deterministic error (#896)", async () => {
+    // With several corrupted deps, the old `Promise.all` surfaced whichever
+    // rejection lost the I/O race — the package named in the error changed
+    // run to run, which operators read as corruption "moving around". The
+    // builder must settle all fetches and name every failing package, in
+    // declaration order, on every run.
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      { ...ROOT, dependencies: { skills: { "@me/a": "^1", "@me/b": "^1", "@me/ok": "^1" } } },
+      { "prompt.md": enc("p") },
+    );
+    const ok = makePkg(
+      "@me/ok@1.0.0" as PackageIdentity,
+      { name: "@me/ok", version: "1.0.0", type: "skill", schema_version: "0.1" },
+      { "SKILL.md": enc("fine") },
+    );
+    const corruptCatalog = {
+      resolve: async (name: string) => ({ identity: `${name}@1.0.0` as PackageIdentity }),
+      fetch: async (identity: PackageIdentity) => {
+        if (identity === ok.identity) return ok;
+        // Vary the rejection latency so a racing implementation would name
+        // @me/b (fastest failure) — the settled implementation must not.
+        await new Promise((r) => setTimeout(r, identity.startsWith("@me/a") ? 20 : 0));
+        throw new BundleError("INTEGRITY_MISMATCH", `Integrity check failed for ${identity}`);
+      },
+    };
+
+    for (let run = 0; run < 3; run++) {
+      const err = await buildBundleFromCatalog(root, corruptCatalog).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(BundleError);
+      expect((err as BundleError).code).toBe("INTEGRITY_MISMATCH");
+      expect((err as BundleError).message).toBe(
+        "Integrity check failed for @me/a@1.0.0, @me/b@1.0.0",
+      );
+      expect((err as BundleError).details).toEqual({
+        packages: ["@me/a@1.0.0", "@me/b@1.0.0"],
+      });
+    }
+  });
+
+  it("surfaces the first-declared failure when no fetch failure is an integrity mismatch", async () => {
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      { ...ROOT, dependencies: { skills: { "@me/a": "^1", "@me/b": "^1" } } },
+      { "prompt.md": enc("p") },
+    );
+    const failingCatalog = {
+      resolve: async (name: string) => ({ identity: `${name}@1.0.0` as PackageIdentity }),
+      fetch: async (identity: PackageIdentity) => {
+        // @me/b fails instantly, @me/a after a delay: declaration order must
+        // still win over completion order.
+        await new Promise((r) => setTimeout(r, identity.startsWith("@me/a") ? 20 : 0));
+        throw new BundleError("ARCHIVE_INVALID", `broken archive for ${identity}`);
+      },
+    };
+
+    const err = await buildBundleFromCatalog(root, failingCatalog).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(BundleError);
+    expect((err as BundleError).code).toBe("ARCHIVE_INVALID");
+    expect((err as BundleError).message).toBe("broken archive for @me/a@1.0.0");
+  });
+
   it("composes in-memory + fallback for inline-run-style ingestion", async () => {
     // Simulates a user posting a root manifest that references an
     // already-registered skill. Posted payload (in-memory) takes

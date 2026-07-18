@@ -7,6 +7,7 @@ import { useCurrentApplicationId } from "./use-current-application";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSseFrames } from "@appstrate/core/sse";
+import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
 import {
   runKeys,
   runsKeys,
@@ -46,6 +47,22 @@ function handleConnectionUpdate(qc: QueryClient) {
   // dropdown). The typed keys are `[method, "/api/integrations…", init]`,
   // so the shared helper matches on the path element.
   void invalidateIntegrationQueries(qc);
+}
+
+/**
+ * Refetch the chat conversation list when the chat module signals a session
+ * change (message persisted, read marker advanced on another device, rename,
+ * delete, `generating` flip). Signal-only frame → invalidate, the list GET is
+ * the single source of the session DTO. Deliberately NOT routed through the
+ * debounced broad invalidator: chat emits a handful of frames per turn (not a
+ * per-log firehose like runs) and the unread badge / spinner should react
+ * instantly. The key is the module's `SESSIONS_QUERY_KEY` (re-exported from
+ * `@appstrate/module-chat/unread`, already imported by the nav badge);
+ * importing the constant is harmless when the chat feature is disabled — no
+ * chat query is mounted, the invalidation matches nothing.
+ */
+function handleChatSessionUpdate(qc: QueryClient) {
+  void qc.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
 }
 
 /**
@@ -243,6 +260,8 @@ export function useGlobalRunSync() {
             handleSSEMessage(qcRef.current, broad, orgId, applicationId, data);
           } else if (event === "connection_update" && data) {
             handleConnectionUpdate(qcRef.current);
+          } else if (event === "chat_session_update" && data) {
+            handleChatSessionUpdate(qcRef.current);
           }
         }
       }

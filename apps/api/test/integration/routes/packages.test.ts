@@ -1763,12 +1763,16 @@ describe("Packages API", () => {
         }),
       });
       expect(create.status).toBe(201);
+      // Create already auto-published 0.1.0 with byte-identical content, so an
+      // explicit republish of the same version is a detected no-op (#896 made
+      // this deterministic — it used to silently overwrite the artifact).
       const pub = await app.request("/api/packages/agents/@forksrc/forkable-agent/versions", {
         method: "POST",
         headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ version: "0.1.0" }),
       });
-      expect(pub.status).toBe(201);
+      expect(pub.status).toBe(409);
+      expect(((await pub.json()) as any).code).toBe("no_changes");
 
       const res = await app.request("/api/packages/@forksrc/forkable-agent/fork", {
         method: "POST",
@@ -1806,12 +1810,15 @@ describe("Packages API", () => {
         }),
       });
       expect(create.status).toBe(201);
+      // Same as the agent arm: create auto-published 0.1.0, the republish is a
+      // detected no-op instead of a silent artifact overwrite (#896).
       const pub = await app.request("/api/packages/skills/@forksrc2/forkable-skill/versions", {
         method: "POST",
         headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ version: "0.1.0" }),
       });
-      expect(pub.status).toBe(201);
+      expect(pub.status).toBe(409);
+      expect(((await pub.json()) as any).code).toBe("no_changes");
 
       const res = await app.request("/api/packages/@forksrc2/forkable-skill/fork", {
         method: "POST",

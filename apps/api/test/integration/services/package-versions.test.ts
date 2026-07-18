@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packageVersions, packageVersionDependencies } from "@appstrate/db/schema";
+import { packages, packageVersions, packageVersionDependencies } from "@appstrate/db/schema";
 import type { DepEntry } from "@appstrate/core/dependencies";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser } from "../../helpers/auth.ts";
@@ -20,7 +20,7 @@ import {
   getVersionInfo,
   getLatestVersionCreatedAt,
 } from "../../../src/services/package-versions.ts";
-import { buildMinimalZip } from "../../../src/services/package-storage.ts";
+import { buildMinimalZip, downloadVersionZip } from "../../../src/services/package-storage.ts";
 describe("package-versions service", () => {
   let userId: string;
   let orgId: string;
@@ -519,6 +519,119 @@ describe("package-versions service", () => {
 
       // No version row created.
       expect(await getVersionCount(pkg.id)).toBe(0);
+    });
+  });
+
+  // ── #896 — published-artifact immutability at the publish gate ─────
+  //
+  // The old sequence uploaded the ZIP BEFORE deciding the version outcome, so
+  // a republish of an existing version overwrote the stored bytes while the
+  // row kept the integrity hash of the original publish — every subsequent
+  // run then failed `bundle_integrity_mismatch`, and republishing (201) never
+  // converged. These tests pin the invariant: whatever the publish outcome,
+  // the stored bytes for an existing version keep matching its recorded hash.
+  describe("createVersionAndUpload — published-artifact immutability (#896)", () => {
+    it("republishing an existing version with different bytes returns 'exists' and leaves the artifact untouched", async () => {
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/immutable` });
+      const manifest: Record<string, unknown> = { name: pkg.id, version: "1.0.0", type: "agent" };
+      const zipV1 = Buffer.from(buildMinimalZip(manifest, "original prompt"));
+
+      const first = await createVersionAndUpload({
+        packageId: pkg.id,
+        version: "1.0.0",
+        createdBy: userId,
+        zipBuffer: zipV1,
+        manifest,
+      });
+      expect(first!.outcome).toBe("created");
+
+      const zipChanged = Buffer.from(buildMinimalZip(manifest, "CHANGED prompt"));
+      const second = await createVersionAndUpload({
+        packageId: pkg.id,
+        version: "1.0.0",
+        createdBy: userId,
+        zipBuffer: zipChanged,
+        manifest,
+      });
+      expect(second!.outcome).toBe("exists");
+      expect(second!.id).toBe(first!.id);
+
+      // Stored bytes must still hash to the integrity recorded at first
+      // publish — downloadVersionZip re-verifies and throws on mismatch.
+      const [row] = await db
+        .select({ integrity: packageVersions.integrity })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, pkg.id), eq(packageVersions.version, "1.0.0")))
+        .limit(1);
+      const stored = await downloadVersionZip(pkg.id, "1.0.0", row!.integrity);
+      expect(stored).not.toBeNull();
+      expect(Buffer.compare(stored!, zipV1)).toBe(0);
+    });
+
+    it("a forward-only-rejected publish never touches storage", async () => {
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/forward-only` });
+      const m2: Record<string, unknown> = { name: pkg.id, version: "2.0.0", type: "agent" };
+      const created = await createVersionAndUpload({
+        packageId: pkg.id,
+        version: "2.0.0",
+        createdBy: userId,
+        zipBuffer: Buffer.from(buildMinimalZip(m2, "v2")),
+        manifest: m2,
+      });
+      expect(created!.outcome).toBe("created");
+
+      const m1: Record<string, unknown> = { name: pkg.id, version: "1.0.0", type: "agent" };
+      const rejected = await createVersionAndUpload({
+        packageId: pkg.id,
+        version: "1.0.0",
+        createdBy: userId,
+        zipBuffer: Buffer.from(buildMinimalZip(m1, "v1")),
+        manifest: m1,
+      });
+      expect(rejected).toBeNull();
+
+      // No orphan artifact for the rejected version, and 2.0.0 still verifies.
+      expect(await downloadVersionZip(pkg.id, "1.0.0")).toBeNull();
+      const [row] = await db
+        .select({ integrity: packageVersions.integrity })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, pkg.id), eq(packageVersions.version, "2.0.0")))
+        .limit(1);
+      expect(await downloadVersionZip(pkg.id, "2.0.0", row!.integrity)).not.toBeNull();
+    });
+
+    it("createVersionFromDraft answers version_exists when content changed without a version bump", async () => {
+      const id = `@${orgSlug}/needs-bump`;
+      const pkg = await seedPackage({
+        orgId,
+        id,
+        draftManifest: { name: id, version: "1.0.0", type: "agent" },
+        draftContent: "v1 prompt",
+      });
+
+      const first = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect("error" in first).toBe(false);
+
+      // Unchanged draft → still the dedup answer.
+      const unchanged = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect(unchanged).toEqual({ error: "no_changes" });
+
+      // Changed content, same version → refuse loudly instead of the old
+      // silent 201 that corrupted the stored artifact.
+      await db
+        .update(packages)
+        .set({ draftContent: "v2 prompt — changed" })
+        .where(eq(packages.id, pkg.id));
+      const republished = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect(republished).toEqual({ error: "version_exists" });
+
+      // Published artifact still matches its recorded integrity.
+      const [row] = await db
+        .select({ integrity: packageVersions.integrity })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, pkg.id), eq(packageVersions.version, "1.0.0")))
+        .limit(1);
+      expect(await downloadVersionZip(pkg.id, "1.0.0", row!.integrity)).not.toBeNull();
     });
   });
 });

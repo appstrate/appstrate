@@ -23,7 +23,6 @@ import {
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getCache } from "../../infra/index.ts";
-import { serviceUnavailable } from "../../lib/errors.ts";
 import type { AppEnv } from "../../types/index.ts";
 import type { AppScope } from "../../lib/scope.ts";
 import type { Actor } from "../../lib/actor.ts";
@@ -38,16 +37,12 @@ export const CONNECT_CSRF_HEADER = "x-connect-csrf";
 const JTI_PREFIX = "connect-jti:";
 
 /**
- * Resolve the connect-session signing keyring, or 503 when the feature is not
- * configured (`CONNECT_SESSION_SECRET` unset). Keeping the hosted surface off
- * by default means OSS/self-hosted deployments are unaffected until they opt in.
+ * Resolve the connect-session signing keyring. `CONNECT_SESSION_SECRET` is a
+ * required env var (boot fails without it — issue #905), so the hosted connect
+ * surface is always available once the platform is up.
  */
 export function connectSessionSecret(): string {
-  const secret = getEnv().CONNECT_SESSION_SECRET;
-  if (!secret) {
-    throw serviceUnavailable("Hosted connect portal is not configured (CONNECT_SESSION_SECRET)");
-  }
-  return secret;
+  return getEnv().CONNECT_SESSION_SECRET;
 }
 
 function nowSeconds(): number {

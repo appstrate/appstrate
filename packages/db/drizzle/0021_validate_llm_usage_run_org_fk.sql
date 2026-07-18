@@ -1,6 +1,6 @@
 -- CRIT-07 completion: repair legacy `llm_usage` rows whose run attribution
 -- crosses a tenant boundary, then VALIDATE the composite FK added NOT VALID
--- in 0019 so the invariant holds for EVERY row, not only new writes.
+-- in 0020 so the invariant holds for EVERY row, not only new writes.
 --
 -- Repair semantics — `SET run_id = NULL`, deliberately NOT a DELETE and NOT
 -- an `org_id` rewrite:
@@ -17,14 +17,14 @@
 --
 -- Locking, honestly: `VALIDATE CONSTRAINT` alone takes only SHARE UPDATE
 -- EXCLUSIVE. But the boot migrator applies all pending migrations in ONE
--- transaction, so when 0019 and 0020 land together the ACCESS EXCLUSIVE lock
--- from 0019's `ADD CONSTRAINT` is still held across the scans below. On a
+-- transaction, so when 0020 and 0021 land together the ACCESS EXCLUSIVE lock
+-- from 0020's `ADD CONSTRAINT` is still held across the scans below. On a
 -- single-instance deployment that is a short boot pause; for a rolling deploy
--- against a large `llm_usage`, apply 0019 and 0020 in separate releases.
+-- against a large `llm_usage`, apply 0020 and 0021 in separate releases.
 --
 -- Re-runnable: the UPDATE is naturally idempotent (a detached row no longer
 -- matches), and the VALIDATE is guarded so a replay — or a database where
--- 0019 was skipped by a corrupt `__drizzle_migrations` watermark — neither
+-- 0020 was skipped by a corrupt `__drizzle_migrations` watermark — neither
 -- crashes nor silently claims success.
 
 -- Step 1: a `source='runner'` row can never be legitimately org-mismatched —
@@ -51,7 +51,7 @@ END $$;--> statement-breakpoint
 -- Step 2: detach the false run attribution on the proxy-source rows.
 UPDATE llm_usage SET run_id = NULL WHERE run_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.id = llm_usage.run_id AND r.org_id = llm_usage.org_id);--> statement-breakpoint
 -- Step 3: with the mismatched rows detached, validation cannot fail on legacy
--- data. Guarded so a replay is a no-op and a missing constraint (0019 skipped)
+-- data. Guarded so a replay is a no-op and a missing constraint (0020 skipped)
 -- surfaces as a loud error rather than a silently unvalidated invariant.
 DO $$
 BEGIN
@@ -59,7 +59,7 @@ BEGIN
     SELECT 1 FROM pg_constraint WHERE conname = 'llm_usage_run_id_org_id_fk'
   ) THEN
     RAISE EXCEPTION
-      'llm_usage_run_id_org_id_fk is missing — migration 0019 did not apply. Check the __drizzle_migrations watermark before retrying.';
+      'llm_usage_run_id_org_id_fk is missing — migration 0020 did not apply. Check the __drizzle_migrations watermark before retrying.';
   END IF;
 
   IF NOT (

@@ -21,7 +21,12 @@ import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-tra
 import { Type, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
-import { redactConnectPayload } from "../platform-mcp.ts";
+import {
+  redactConnectPayload,
+  splitConnectPayload,
+  splitJsonText,
+  type ConnectOffer,
+} from "../connect-offer.ts";
 import { logger } from "../logger.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
@@ -30,19 +35,31 @@ const RUN_AND_WAIT_TOOL = "run_and_wait";
 interface PiToolResult {
   content: Array<{ type: "text"; text: string }>;
   details: unknown;
+  /**
+   * Typed connect offer for the UI card; pi-ai never serializes it upstream.
+   * CONTRACT: pi-agent-core forwards the execute return REFERENCE into
+   * `tool_execution_end` only while no `afterToolCall` hook is configured —
+   * that hook rebuilds the result as `{content, details, terminate}` and would
+   * silently strip this field (and `details` is redacted, so nothing would
+   * fall back). If a hook is ever added, it must carry `connectOffer` through.
+   */
+  connectOffer?: ConnectOffer;
 }
 
 /**
  * Wrap an arbitrary payload as a Pi tool result. Channel split mirrors the
- * ai-sdk path's `wrapToolModelOutputs`: `content` is what pi-ai serializes to
- * the MODEL, so connect links are redacted there; `details` never reaches the
- * model (pi-ai sends only `content` upstream) and carries the FULL payload for
- * the UI, whose connect-card extractor walks the whole tool output.
+ * ai-sdk path's `wrapToolConnectOffers`: `content` is what pi-ai serializes to
+ * the MODEL, so connect links are redacted there; the connect URL surfaces
+ * ONLY through the typed `connectOffer` field the connect card reads. `details`
+ * (UI JSON view) carries the redacted payload — the live URL lives in exactly
+ * one place.
  */
 export function toPiToolResult(payload: unknown): PiToolResult {
+  const { redacted, offer } = splitConnectPayload(payload);
   return {
-    content: [{ type: "text", text: JSON.stringify(redactConnectPayload(payload)) }],
-    details: payload,
+    content: [{ type: "text", text: JSON.stringify(redacted) }],
+    details: redacted,
+    ...(offer ? { connectOffer: offer } : {}),
   };
 }
 
@@ -51,13 +68,17 @@ export function mcpResultToPi(result: {
   content: Array<Record<string, unknown>>;
   structuredContent?: unknown;
 }): PiToolResult {
+  let offer: ConnectOffer | null = null;
   const content = result.content.map((c) => {
-    // MODEL-visible channel — scrub connect links from JSON text (same
-    // semantics as the ai-sdk path's redaction: valid JSON is redacted and
-    // re-stringified only when something changed; non-JSON text passes
-    // through byte-identical).
-    if (c.type === "text")
-      return { type: "text" as const, text: redactJsonText(String(c.text ?? "")) };
+    // MODEL-visible channel — scrub connect links from JSON text (valid JSON is
+    // redacted and re-stringified only when something changed; non-JSON text
+    // passes through byte-identical). The scrubbed URL is captured as the
+    // typed offer instead.
+    if (c.type === "text") {
+      const split = splitJsonText(String(c.text ?? ""));
+      offer ??= split.offer;
+      return { type: "text" as const, text: split.text };
+    }
     // Pi tool results the LLM reads are text/image; render anything else as a
     // text pointer so the model still sees it (parity with the runtime forwarder).
     if (c.type === "image") {
@@ -65,21 +86,18 @@ export function mcpResultToPi(result: {
     }
     return { type: "text" as const, text: JSON.stringify(redactConnectPayload(c)) };
   });
-  // `details` is UI-only (never serialized to the model): keep the FULL result
-  // so the connect card can extract the unredacted connect_url.
-  return { content, details: result.structuredContent ?? result };
-}
-
-/** Redact connect links inside a JSON text block; non-JSON text is untouched. */
-function redactJsonText(text: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return text; // Non-JSON text: leave byte-identical, never regex-mangle.
+  // `details` is UI-only (never serialized to the model) but persisted — so it
+  // is redacted too; the connect card reads the typed `connectOffer` field.
+  let details: unknown;
+  if (result.structuredContent !== undefined) {
+    const sc = splitConnectPayload(result.structuredContent);
+    // structuredContent is the canonical payload — its offer wins.
+    if (sc.offer) offer = sc.offer;
+    details = sc.redacted;
+  } else {
+    details = { ...result, content };
   }
-  const redacted = redactConnectPayload(parsed);
-  return redacted === parsed ? text : JSON.stringify(redacted);
+  return { content, details, ...(offer ? { connectOffer: offer } : {}) };
 }
 
 export interface PlatformMcpTools {

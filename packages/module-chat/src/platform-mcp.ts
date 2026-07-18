@@ -17,6 +17,7 @@
 
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
 import { runAndWaitSteps } from "@appstrate/core/run-and-wait-client";
+import { redactConnectLinks, splitConnectPayload, splitToolResult } from "./connect-offer.ts";
 import { logger } from "./logger.ts";
 
 type ToolSet = Awaited<ReturnType<MCPClient["tools"]>>;
@@ -70,6 +71,7 @@ export async function openPlatformMcp(args: {
   let tools: ToolSet;
   try {
     tools = await client.tools();
+    tools = wrapToolConnectOffers(tools);
     tools = wrapRunAndWaitTool(tools, {
       origin: args.origin,
       headers,
@@ -96,8 +98,12 @@ export async function openPlatformMcp(args: {
 }
 
 function callToolResult(payload: unknown, isError = false): unknown {
+  // Split at the source: the model channel (content text) is redacted, the UI
+  // gets the connect URL only through the typed `connectOffer` field.
+  const { redacted, offer } = splitConnectPayload(payload);
   return {
-    content: [{ type: "text", text: JSON.stringify(payload) }],
+    content: [{ type: "text", text: JSON.stringify(redacted) }],
+    ...(offer ? { connectOffer: offer } : {}),
     ...(isError ? { isError: true } : {}),
   };
 }
@@ -133,109 +139,41 @@ export function wrapRunAndWaitTool(
 }
 
 /**
- * Placeholder that replaces a connect/authorize URL in the MODEL-visible tool
- * output. The model can't paste a link it never receives; the UI still gets the
- * full `execute` result (untouched) and renders the native connect card from it.
+ * Wrap every tool's `execute` so its result — what the AI SDK persists and the
+ * UI renders — has connect links redacted at the source, with the captured URL
+ * attached as the typed `connectOffer` field the connect card reads
+ * ({@link ./connect-offer.ts}). Tools without an `execute` are left as-is;
+ * `run_and_wait` is replaced wholesale by {@link wrapRunAndWaitTool} afterwards
+ * (its streamed steps split inside `callToolResult`).
  */
-const REDACTED_CONNECT_LINK = "[connect link hidden — the chat renders the connect card]";
-
-/** Field names carrying a connect/authorize URL (snake + camel). */
-const CONNECT_URL_KEYS = new Set(["connect_url", "auth_url", "connectUrl", "authUrl"]);
-
-/** Depth bound for the redaction walk — MCP payloads are shallow. */
-const MAX_REDACT_DEPTH = 16;
-
-/**
- * Deep-walk `value`, replacing any `connect_url`/`auth_url`/`connectUrl`/`authUrl`
- * string with the placeholder. Returns the (possibly new) value plus whether
- * anything changed — when nothing changed the original reference is returned so
- * callers can keep text byte-identical (prompt caching).
- */
-function redactValue(value: unknown, depth: number): { value: unknown; changed: boolean } {
-  if (depth > MAX_REDACT_DEPTH || value == null || typeof value !== "object") {
-    return { value, changed: false };
+export function wrapToolConnectOffers(tools: ToolSet): ToolSet {
+  const next = { ...tools } as Record<string, unknown>;
+  for (const [name, tool] of Object.entries(next)) {
+    const t = tool as
+      | (Record<string, unknown> & {
+          execute?: (args: unknown, options: unknown) => unknown;
+        })
+      | undefined;
+    if (typeof t?.execute !== "function") continue;
+    const original = t.execute.bind(t);
+    next[name] = {
+      ...t,
+      async execute(args: unknown, options: unknown) {
+        return splitToolResult(await original(args, options));
+      },
+    };
   }
-
-  if (Array.isArray(value)) {
-    let changed = false;
-    const out = value.map((item) => {
-      const r = redactValue(item, depth + 1);
-      if (r.changed) changed = true;
-      return r.value;
-    });
-    return changed ? { value: out, changed: true } : { value, changed: false };
-  }
-
-  const obj = value as Record<string, unknown>;
-  let changed = false;
-  const out: Record<string, unknown> = {};
-  for (const [key, v] of Object.entries(obj)) {
-    if (CONNECT_URL_KEYS.has(key) && typeof v === "string") {
-      out[key] = REDACTED_CONNECT_LINK;
-      changed = true;
-      continue;
-    }
-    const r = redactValue(v, depth + 1);
-    if (r.changed) changed = true;
-    out[key] = r.value;
-  }
-  return changed ? { value: out, changed: true } : { value, changed: false };
-}
-
-/**
- * Deep-redact connect links from an arbitrary payload object. Returns the same
- * reference when nothing changed (prompt-cache friendly). Used by the Pi chat
- * engine's tool forwarder ({@link ../pi-chat/mcp-tools.ts}) to scrub the
- * MODEL-visible text channel — the same guarantee `wrapToolModelOutputs` gives
- * the ai-sdk path.
- */
-export function redactConnectPayload(payload: unknown): unknown {
-  return redactValue(payload, 0).value;
-}
-
-/**
- * Redact connect links from a `toModelOutput` result ({type:"json"|"content"}).
- * Pure. For `content` text parts we only touch valid JSON (re-stringified only
- * when something changed) — non-JSON text is passed through untouched. Anything
- * else is returned as-is.
- */
-export function redactConnectLinks(output: unknown): unknown {
-  if (output == null || typeof output !== "object") return output;
-  const o = output as Record<string, unknown>;
-
-  if (o.type === "json") {
-    const r = redactValue(o.value, 0);
-    return r.changed ? { ...o, value: r.value } : output;
-  }
-
-  if (o.type === "content" && Array.isArray(o.value)) {
-    let changed = false;
-    const nextValue = o.value.map((part) => {
-      if (part == null || typeof part !== "object") return part;
-      const p = part as Record<string, unknown>;
-      if (p.type !== "text" || typeof p.text !== "string") return part;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(p.text);
-      } catch {
-        return part; // Non-JSON text: leave byte-identical, never regex-mangle.
-      }
-      const r = redactValue(parsed, 0);
-      if (!r.changed) return part;
-      changed = true;
-      return { ...p, text: JSON.stringify(r.value) };
-    });
-    return changed ? { ...o, value: nextValue } : output;
-  }
-
-  return output;
+  return next as unknown as ToolSet;
 }
 
 /**
  * Wrap every tool's `toModelOutput` so the MODEL-visible channel has connect
- * links redacted. `execute` results (what the UI renders) are untouched. Tools
- * without a `toModelOutput` are left as-is; tool object identity is otherwise
- * preserved via spread.
+ * links redacted. Belt-and-braces on top of {@link wrapToolConnectOffers}
+ * (execute results are already split at the source): it also covers a
+ * `toModelOutput` that re-serializes the whole output — the offer's inner key
+ * is `connect_url`, so the redactor scrubs it too. Tools without a
+ * `toModelOutput` are left as-is; tool object identity is otherwise preserved
+ * via spread.
  */
 export function wrapToolModelOutputs(tools: ToolSet): ToolSet {
   const next = { ...tools } as Record<string, unknown>;

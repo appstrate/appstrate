@@ -136,7 +136,14 @@ export async function buildBundleFromCatalog(
     // Fetch the deduped level in parallel — fetch is read-only against the
     // catalog; all shared-state mutation (packages/visiting/missing) stays
     // in the sequential sections of this frame.
-    const fetched = await Promise.all(
+    //
+    // Settle ALL fetches instead of racing on the first rejection: with
+    // several broken deps, `Promise.all` surfaced whichever rejection lost
+    // the I/O race, so the package named in the error changed run to run —
+    // read as "the corruption moves around" by operators (#896). Failures
+    // are folded back in declaration order, and integrity failures are
+    // aggregated so one error names every corrupted package at once.
+    const settled = await Promise.allSettled(
       toFetch.map(async (resolved) => {
         const depPkg = await catalog.fetch(resolved.identity);
         if (depPkg.identity !== resolved.identity) {
@@ -149,6 +156,31 @@ export async function buildBundleFromCatalog(
         return depPkg;
       }),
     );
+
+    const failures: Array<{ identity: PackageIdentity; reason: unknown }> = [];
+    const fetched: BundlePackage[] = [];
+    for (let i = 0; i < settled.length; i++) {
+      const outcome = settled[i]!;
+      if (outcome.status === "fulfilled") {
+        fetched.push(outcome.value);
+      } else {
+        failures.push({ identity: toFetch[i]!.identity, reason: outcome.reason });
+      }
+    }
+    if (failures.length > 0) {
+      const mismatches = failures.filter(
+        (f) => f.reason instanceof BundleError && f.reason.code === "INTEGRITY_MISMATCH",
+      );
+      if (mismatches.length > 0) {
+        const identities = mismatches.map((f) => f.identity);
+        throw new BundleError(
+          "INTEGRITY_MISMATCH",
+          `Integrity check failed for ${identities.join(", ")}`,
+          { packages: identities },
+        );
+      }
+      throw failures[0]!.reason;
+    }
 
     // Recurse sequentially (DFS) — child walks mutate the shared maps, so
     // they must not interleave. A deeper walk may have loaded a sibling's

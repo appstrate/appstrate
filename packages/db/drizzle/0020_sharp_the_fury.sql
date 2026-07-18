@@ -24,7 +24,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_runs_id_org_id" ON "runs" USING btree ("id
 -- Follow-up (deliberate, out of band): audit legacy rows for
 -- run/org mismatches, repair or delete them, then run
 --   ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_run_id_org_id_fk";
--- in a maintenance window. (Migration 0020 does exactly that.)
+-- in a maintenance window. (Migration 0021 does exactly that.)
 --
 -- Postgres has no `ADD CONSTRAINT IF NOT EXISTS`, hence the plpgsql guard.
 DO $$

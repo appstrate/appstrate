@@ -94,6 +94,12 @@ export interface AdapterContext {
   totalBytes: number;
   /** Caller-supplied metadata (Drive file name, MIME type, …). */
   metadata: Record<string, unknown>;
+  /** MIME type of the SOURCE bytes being uploaded → `X-Upload-Content-Type`.
+   *  Distinct from `metadata.mimeType`, which is the DESIRED (target) file
+   *  type — e.g. a Google-native `application/vnd.google-apps.*` type that
+   *  triggers server-side conversion. When absent, adapters fall back to a
+   *  safe default and never declare a native type as the source. */
+  sourceMimeType?: string;
   /** Suggested chunk size; the adapter may clamp to its own protocol-
    *  level minimum/alignment requirements. */
   partSizeBytes: number;

@@ -91,6 +91,22 @@ export const connectionUpdateEventSchema = z.object({
 export type ConnectionUpdateEvent = z.infer<typeof connectionUpdateEventSchema>;
 
 /**
+ * `chat_session_update` — application-emitted by the chat module whenever a
+ * session row changes (message persisted, read-marker advanced, rename,
+ * delete, create, `generating` flip). A change SIGNAL, not event-carried
+ * state: the payload identifies the owner for fan-out filtering and the
+ * consumer refetches the session list (stale-while-revalidate), so the DTO
+ * stays single-sourced in the chat routes. The payload deliberately omits
+ * `application_id` — `chat_sessions` is org+user scoped, not app scoped.
+ */
+export const chatSessionUpdateEventSchema = z.object({
+  sessionId: z.string(),
+  orgId: z.string(),
+  userId: z.string(),
+});
+export type ChatSessionUpdateEvent = z.infer<typeof chatSessionUpdateEventSchema>;
+
+/**
  * Discriminated union of every typed SSE frame. (`ping` is intentionally
  * absent — its `data` is an empty string, not JSON, and no consumer parses
  * it; it exists only as a keep-alive.)
@@ -99,7 +115,8 @@ export type RealtimeEvent =
   | { event: "run_update"; data: RunUpdateEvent }
   | { event: "run_log"; data: RunLogEvent }
   | { event: "run_metric"; data: RunMetricEvent }
-  | { event: "connection_update"; data: ConnectionUpdateEvent };
+  | { event: "connection_update"; data: ConnectionUpdateEvent }
+  | { event: "chat_session_update"; data: ChatSessionUpdateEvent };
 
 /**
  * Translate a `run_update` SSE frame into a `RunWireDto` patch.

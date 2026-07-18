@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/gmail-mcp",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Gmail",
@@ -96,6 +96,11 @@
       }
     },
     "get_thread": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.readonly"]
+      }
+    },
+    "get_message": {
       "required_scopes": {
         "primary": ["https://www.googleapis.com/auth/gmail.readonly"]
       }

@@ -18,7 +18,7 @@
 
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { requireModulePermission } from "@appstrate/core/permissions";
@@ -28,6 +28,7 @@ import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
 import { getResumableContext } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
+import { notifySessionUpdate } from "./realtime.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 /** Page size for the session list — one row past this is fetched to derive `hasMore`. */
@@ -53,6 +54,12 @@ function toSessionDto(row: SessionRow) {
     // conversation the user has left, and detect when it finishes. Never leaks
     // the raw stream id.
     generating: row.activeStreamId != null,
+    // Computed server-side from the two message-pointer watermarks so only a
+    // boolean crosses the wire — no clock anywhere. Unread = an assistant
+    // message landed past the owner's read marker.
+    unread:
+      row.lastAssistantSeq != null &&
+      (row.lastReadSeq == null || row.lastReadSeq < row.lastAssistantSeq),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -140,6 +147,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
           title: data.title ?? null,
         })
         .returning();
+      await notifySessionUpdate(row!.id, row!.orgId, row!.userId);
       return c.json(toSessionDto(row!), 201);
     },
   );
@@ -159,13 +167,38 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       .update(chatSessions)
       .set({ title, updatedAt: new Date() })
       .where(eq(chatSessions.id, session.id));
+    await notifySessionUpdate(session.id, session.orgId, session.userId);
     return c.body(null, 204);
   });
+
+  // PUT /api/chat/sessions/:id/read — mark the session read (idempotent).
+  // Advances the read marker up to the latest known watermark, monotonically
+  // (GREATEST) so a late/replayed call can never regress it — and deliberately
+  // NOT `updatedAt`, so opening a conversation never reorders the sidebar.
+  // Mirrors PUT /notifications/:id/read. The SSE signal syncs the cleared
+  // badge to the owner's other devices instantly.
+  router.put(
+    "/api/chat/sessions/:id/read",
+    rateLimited(120),
+    requireModulePermission("chat", "write"),
+    async (c) => {
+      const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+      await db
+        .update(chatSessions)
+        .set({
+          lastReadSeq: sql`GREATEST(coalesce(${chatSessions.lastReadSeq}, 0), coalesce(${chatSessions.lastAssistantSeq}, 0))`,
+        })
+        .where(eq(chatSessions.id, session.id));
+      await notifySessionUpdate(session.id, session.orgId, session.userId);
+      return c.body(null, 204);
+    },
+  );
 
   // DELETE /api/chat/sessions/:id — delete a session (entries cascade)
   router.delete("/api/chat/sessions/:id", requireModulePermission("chat", "write"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
     await db.delete(chatSessions).where(eq(chatSessions.id, session.id));
+    await notifySessionUpdate(session.id, session.orgId, session.userId);
     return c.body(null, 204);
   });
 
