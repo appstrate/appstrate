@@ -138,7 +138,12 @@ export function ChatPage({
               />
               <aside
                 className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
-                onClickCapture={(e) => {
+                // Bubble phase, NOT capture: a capture handler would flush
+                // `setMobileOpen(false)` synchronously (discrete event) and
+                // unmount this subtree BEFORE the bubble dispatch, swallowing
+                // the row button's own onClick (select/navigate). In bubble
+                // order the child's handler runs first, then this closes.
+                onClick={(e) => {
                   if ((e.target as HTMLElement).closest("button")) setMobileOpen(false);
                 }}
               >
