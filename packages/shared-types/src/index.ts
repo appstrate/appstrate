@@ -877,6 +877,7 @@ export {
   runLogEventSchema,
   runMetricEventSchema,
   connectionUpdateEventSchema,
+  chatSessionUpdateEventSchema,
   runUpdateToRunPatch,
 } from "./realtime-events.ts";
 export type {
@@ -884,5 +885,6 @@ export type {
   RunLogEvent,
   RunMetricEvent,
   ConnectionUpdateEvent,
+  ChatSessionUpdateEvent,
   RealtimeEvent,
 } from "./realtime-events.ts";

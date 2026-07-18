@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, timestamp, jsonb, uuid, index, serial, unique } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  timestamp,
+  jsonb,
+  uuid,
+  index,
+  integer,
+  serial,
+  unique,
+} from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
 import { user } from "./auth.ts";
 
@@ -27,13 +37,16 @@ export const chatSessions = pgTable(
     // a reloaded client to the live stream by this id; a stale/orphaned id (no
     // live producer in the store) is treated as "no active stream" (204).
     activeStreamId: text("active_stream_id"),
-    // Read-state watermarks. `lastAssistantAt` advances only when an assistant
-    // message persists; `lastReadAt` advances when the owner marks the session
-    // read (or sends a message — sending implies having seen the thread). A
-    // session is unread when lastAssistantAt > lastReadAt; the comparison lives
-    // server-side in the DTO so no timestamps cross the wire.
-    lastAssistantAt: timestamp("last_assistant_at", { withTimezone: true }),
-    lastReadAt: timestamp("last_read_at", { withTimezone: true }),
+    // Read-state watermarks as MESSAGE POINTERS (`chat_messages.seq`), the
+    // read-marker model used by Slack/Discord/Matrix: ordering comes from
+    // message insertion, never from a clock. `lastAssistantSeq` advances only
+    // when an assistant message persists; `lastReadSeq` advances monotonically
+    // (GREATEST) when the owner marks the session read — or sends a message,
+    // since sending implies having seen the thread. A session is unread when
+    // lastAssistantSeq > lastReadSeq; the comparison lives server-side in the
+    // DTO so only a boolean crosses the wire.
+    lastAssistantSeq: integer("last_assistant_seq"),
+    lastReadSeq: integer("last_read_seq"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

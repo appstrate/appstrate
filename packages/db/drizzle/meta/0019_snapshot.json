@@ -1,5 +1,5 @@
 {
-  "id": "43308b77-5bce-42de-82d4-d9dbdeea4234",
+  "id": "788aeb6b-d85a-4c95-bf37-3e8e2d6ad534",
   "prevId": "a79881f3-470a-45ef-ab8f-9d04df50b7f7",
   "version": "7",
   "dialect": "postgresql",
@@ -7300,15 +7300,15 @@
           "primaryKey": false,
           "notNull": false
         },
-        "last_assistant_at": {
-          "name": "last_assistant_at",
-          "type": "timestamp with time zone",
+        "last_assistant_seq": {
+          "name": "last_assistant_seq",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
-        "last_read_at": {
-          "name": "last_read_at",
-          "type": "timestamp with time zone",
+        "last_read_seq": {
+          "name": "last_read_seq",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },

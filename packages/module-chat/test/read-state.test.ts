@@ -3,11 +3,13 @@
 /**
  * Server-side read-state for chat sessions.
  *
- * `unread` is computed server-side from two watermarks on `chat_sessions`:
- * `lastAssistantAt` (advanced only when an assistant message persists) and
- * `lastReadAt` (advanced by `PUT /sessions/:id/read` and by persisting a user
- * message — sending implies having seen the thread). Only the boolean crosses
- * the wire, so read-state is shared across devices and immune to client clocks.
+ * `unread` is computed server-side from two MESSAGE-POINTER watermarks on
+ * `chat_sessions` (`chat_messages.seq`, the Slack/Discord read-marker model):
+ * `lastAssistantSeq` advances only when an assistant message persists;
+ * `lastReadSeq` advances monotonically via `PUT /sessions/:id/read` and when a
+ * user message persists (sending implies having seen the thread). Only the
+ * boolean crosses the wire — no clock is involved anywhere, which is why these
+ * tests need no sleeps between persists.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -26,9 +28,6 @@ const app = getTestApp();
 function uiMessage(id: string, role: "user" | "assistant", text: string): UIMessage {
   return { id, role, parts: [{ type: "text", text }] } as UIMessage;
 }
-
-/** Watermarks are timestamps — keep consecutive persists strictly ordered. */
-const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
 describe("chat session read-state", () => {
   let ctx: TestContext;
@@ -67,7 +66,6 @@ describe("chat session read-state", () => {
     expect((await getSession(id)).unread).toBe(false);
 
     await persistUserMessage(id, uiMessage("u1", "user", "hello"));
-    await tick();
     await persistAssistantMessage(id, uiMessage("a1", "assistant", "hi"), "u1");
 
     expect((await getSession(id)).unread).toBe(true);
@@ -80,14 +78,14 @@ describe("chat session read-state", () => {
   it("PUT /read clears unread and is idempotent", async () => {
     const id = await createSession();
     await persistUserMessage(id, uiMessage("u1", "user", "hello"));
-    await tick();
     await persistAssistantMessage(id, uiMessage("a1", "assistant", "hi"), "u1");
     expect((await getSession(id)).unread).toBe(true);
 
     expect(await markRead(id)).toBe(204);
     expect((await getSession(id)).unread).toBe(false);
 
-    // Idempotent — repeating is a 204 no-op.
+    // Idempotent — repeating is a 204 no-op, and the monotonic marker
+    // (GREATEST) means a replayed call can never regress the read state.
     expect(await markRead(id)).toBe(204);
     expect((await getSession(id)).unread).toBe(false);
   });
@@ -95,11 +93,10 @@ describe("chat session read-state", () => {
   it("sending a user message marks the thread seen; renaming does not unread it", async () => {
     const id = await createSession();
     await persistUserMessage(id, uiMessage("u1", "user", "hello"));
-    await tick();
     await persistAssistantMessage(id, uiMessage("a1", "assistant", "hi"), "u1");
-    await tick();
 
-    // Sending a follow-up implies the sender saw the reply.
+    // Sending a follow-up implies the sender saw the reply: the user message's
+    // seq is necessarily past the assistant's.
     await persistUserMessage(id, uiMessage("u2", "user", "thanks"));
     expect((await getSession(id)).unread).toBe(false);
 
@@ -115,24 +112,32 @@ describe("chat session read-state", () => {
   it("a reply landing after a read makes the session unread again", async () => {
     const id = await createSession();
     await persistUserMessage(id, uiMessage("u1", "user", "hello"));
-    await tick();
     await persistAssistantMessage(id, uiMessage("a1", "assistant", "hi"), "u1");
     expect(await markRead(id)).toBe(204);
     expect((await getSession(id)).unread).toBe(false);
-    await tick();
 
     await persistAssistantMessage(id, uiMessage("a2", "assistant", "one more thing"), "a1");
     expect((await getSession(id)).unread).toBe(true);
   });
 
+  it("a retried assistant persist (same message) does not re-unread a read session", async () => {
+    const id = await createSession();
+    await persistUserMessage(id, uiMessage("u1", "user", "hello"));
+    await persistAssistantMessage(id, uiMessage("a1", "assistant", "hi"), "u1");
+    expect(await markRead(id)).toBe(204);
+
+    // Idempotent finalize retry: the upsert returns the EXISTING row's seq, so
+    // the watermark does not advance past the read marker.
+    await persistAssistantMessage(id, uiMessage("a1", "assistant", "hi"), "u1");
+    expect((await getSession(id)).unread).toBe(false);
+  });
+
   it("PUT /read does not bump updatedAt (opening never reorders the sidebar)", async () => {
     const id = await createSession();
     await persistUserMessage(id, uiMessage("u1", "user", "hello"));
-    await tick();
     await persistAssistantMessage(id, uiMessage("a1", "assistant", "hi"), "u1");
 
     const before = (await getSession(id)).updatedAt;
-    await tick();
     expect(await markRead(id)).toBe(204);
     expect((await getSession(id)).updatedAt).toBe(before);
   });
