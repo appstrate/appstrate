@@ -25,6 +25,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
+import { notifySessionUpdate } from "./realtime.ts";
 import {
   createResumableStreamContext,
   createInMemoryResumableStreamStore,
@@ -72,12 +73,18 @@ export function getResumableContext(): ResumableStreamContext {
   return context;
 }
 
-/** Mark a session's in-flight stream so a reloaded client can reconnect to it. */
+/**
+ * Mark a session's in-flight stream so a reloaded client can reconnect to it.
+ * Signals the change (`generating` flipped true) so connected clients update
+ * the spinner without polling.
+ */
 export async function setActiveStream(sessionId: string, streamId: string): Promise<void> {
-  await db
+  const [row] = await db
     .update(chatSessions)
     .set({ activeStreamId: streamId })
-    .where(eq(chatSessions.id, sessionId));
+    .where(eq(chatSessions.id, sessionId))
+    .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
+  if (row) await notifySessionUpdate(sessionId, row.orgId, row.userId);
 }
 
 /**
@@ -90,8 +97,11 @@ export async function setActiveStream(sessionId: string, streamId: string): Prom
  * in that race.
  */
 export async function clearActiveStream(sessionId: string, streamId: string): Promise<void> {
-  await db
+  const [row] = await db
     .update(chatSessions)
     .set({ activeStreamId: null })
-    .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.activeStreamId, streamId)));
+    .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.activeStreamId, streamId)))
+    .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
+  // No-op race (a newer turn already owns the marker) → no row, no signal.
+  if (row) await notifySessionUpdate(sessionId, row.orgId, row.userId);
 }

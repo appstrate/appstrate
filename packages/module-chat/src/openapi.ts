@@ -15,7 +15,7 @@ const stdHeaders = {
 export const chatComponentSchemas = {
   ChatSession: {
     type: "object",
-    required: ["object", "id", "generating", "createdAt", "updatedAt"],
+    required: ["object", "id", "generating", "unread", "createdAt", "updatedAt"],
     properties: {
       object: { type: "string", enum: ["chat_session"] },
       id: { type: "string", description: "Session ID (chs_ prefix)" },
@@ -23,6 +23,11 @@ export const chatComponentSchemas = {
       generating: {
         type: "boolean",
         description: "Whether a turn is currently generating in this conversation.",
+      },
+      unread: {
+        type: "boolean",
+        description:
+          "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -190,6 +195,25 @@ export const chatPaths = {
         "204": { description: "Session deleted (messages cascade)" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/chat/sessions/{id}/read": {
+    put: {
+      operationId: "markChatSessionRead",
+      tags: ["Chat"],
+      summary: "Mark a chat session read",
+      description:
+        "Records that the caller has seen the conversation up to now (clears `unread`). Idempotent. Does not affect the session's `updatedAt` ordering.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Session marked read" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { description: "Rate limited (120/min per caller)" },
       },
     },
   },

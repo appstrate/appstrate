@@ -17,11 +17,12 @@
  * `message_id`), `format` = `"ai-sdk/v6"`, `parent_id` chains messages linearly.
  */
 
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
+import { notifySessionUpdate } from "./realtime.ts";
 import type { UIMessage } from "ai";
 
 /** assistant-ui ai-sdk MessageFormatAdapter id — keep in sync with the client. */
@@ -94,7 +95,7 @@ async function upsertMessage(
   sessionId: string,
   message: UIMessage,
   parentId: string | null,
-): Promise<string> {
+): Promise<{ messageId: string; seq: number }> {
   // The row is keyed by (sessionId, messageId). The assistant UIMessage parsed
   // from the stream can arrive WITHOUT an id (the engine's start chunk may omit
   // `messageId`); an empty id would collide across turns and silently overwrite
@@ -104,7 +105,9 @@ async function upsertMessage(
   // stable, content-addressed id when one is missing.
   const content = toContent(message) as typeof chatMessages.$inferInsert.content;
   const messageId = message.id || (await deterministicMessageId(sessionId, parentId, content));
-  await db
+  // `seq` feeds the read-state watermark. On a retried finalize the conflict
+  // UPDATE returns the EXISTING row's seq, so the watermark stays idempotent.
+  const [row] = await db
     .insert(chatMessages)
     .values({
       sessionId,
@@ -116,8 +119,9 @@ async function upsertMessage(
     .onConflictDoUpdate({
       target: [chatMessages.sessionId, chatMessages.messageId],
       set: { parentId, content, format: CHAT_MESSAGE_FORMAT },
-    });
-  return messageId;
+    })
+    .returning({ seq: chatMessages.seq });
+  return { messageId, seq: row!.seq };
 }
 
 /**
@@ -126,8 +130,8 @@ async function upsertMessage(
  */
 export async function persistUserMessage(sessionId: string, message: UIMessage): Promise<string> {
   const parentId = await lastMessageId(sessionId);
-  const messageId = await upsertMessage(sessionId, message, parentId);
-  await touchSession(sessionId);
+  const { messageId, seq } = await upsertMessage(sessionId, message, parentId);
+  await touchSession(sessionId, "user", seq);
   return messageId;
 }
 
@@ -142,15 +146,28 @@ export async function persistAssistantMessage(
   message: UIMessage,
   parentId: string | null,
 ): Promise<string> {
-  const messageId = await upsertMessage(sessionId, message, parentId);
-  await touchSession(sessionId);
+  const { messageId, seq } = await upsertMessage(sessionId, message, parentId);
+  await touchSession(sessionId, "assistant", seq);
   return messageId;
 }
 
-/** Bump `updatedAt` and derive a title from the first user message if still unset. */
-async function touchSession(sessionId: string): Promise<void> {
+/**
+ * Bump `updatedAt`, derive a title from the first user message if still unset,
+ * and advance the read-state watermark matching the persisted turn: an
+ * assistant turn advances `lastAssistantSeq` (the session becomes unread until
+ * its owner looks at it), a user turn advances `lastReadSeq` (sending a message
+ * implies having seen the thread — keeps headless/API senders from accruing
+ * phantom unread). Watermarks are message pointers, monotonic via GREATEST —
+ * a replayed/late write can never regress them. Ends by signalling the change
+ * over SSE so connected clients refetch instead of polling.
+ */
+async function touchSession(
+  sessionId: string,
+  kind: "user" | "assistant",
+  seq: number,
+): Promise<void> {
   const [session] = await db
-    .select({ title: chatSessions.title })
+    .select({ title: chatSessions.title, orgId: chatSessions.orgId, userId: chatSessions.userId })
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
@@ -158,8 +175,15 @@ async function touchSession(sessionId: string): Promise<void> {
   const title = session.title ?? (await deriveTitle(sessionId));
   await db
     .update(chatSessions)
-    .set({ updatedAt: new Date(), ...(title !== session.title ? { title } : {}) })
+    .set({
+      updatedAt: new Date(),
+      ...(kind === "assistant"
+        ? { lastAssistantSeq: sql`GREATEST(coalesce(${chatSessions.lastAssistantSeq}, 0), ${seq})` }
+        : { lastReadSeq: sql`GREATEST(coalesce(${chatSessions.lastReadSeq}, 0), ${seq})` }),
+      ...(title !== session.title ? { title } : {}),
+    })
     .where(eq(chatSessions.id, sessionId));
+  await notifySessionUpdate(sessionId, session.orgId, session.userId);
 }
 
 /** First user message's text, trimmed to 60 chars (57 + ellipsis). */

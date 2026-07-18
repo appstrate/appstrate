@@ -17,6 +17,8 @@ export interface SessionSummary {
   title: string | null;
   /** True while a turn is generating — drives the poll cadence + unread badge. */
   generating: boolean;
+  /** Server-computed: an assistant reply landed after the caller last read it. */
+  unread: boolean;
   /** ISO timestamp of the last activity — surfaced as a relative time in the list. */
   updatedAt: string;
 }
@@ -63,6 +65,19 @@ export async function deleteSession(
     headers: headers(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to delete session (HTTP ${res.status})`);
+}
+
+/** Mark the session read server-side (clears `unread`). Idempotent. */
+export async function markSessionRead(
+  getHeaders: GetHeaders | null | undefined,
+  id: string,
+): Promise<void> {
+  const res = await fetch(`/api/chat/sessions/${id}/read`, {
+    method: "PUT",
+    credentials: "include",
+    headers: headers(getHeaders),
+  });
+  if (!res.ok) throw new Error(`Failed to mark session read (HTTP ${res.status})`);
 }
 
 /** A stored message node as returned by `GET /sessions/:id`. */

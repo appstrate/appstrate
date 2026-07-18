@@ -8,7 +8,7 @@
  * selection through a stable function: `useChat` recreates its `Chat` instance
  * only when the conversation id changes, so a transport rebuilt over fresh
  * state is silently ignored and every send would keep the model captured at
- * mount. Same pattern as `unread-store.ts`.
+ * mount.
  */
 
 const KEY = "appstrate.chat.model";

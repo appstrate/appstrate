@@ -30,10 +30,25 @@ import type { GetHeaders, SelectConversation } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
-import { loadHistory, mintSessionId, SESSIONS_QUERY_KEY, type SessionSummary } from "./sessions.ts";
+import {
+  loadHistory,
+  markSessionRead,
+  mintSessionId,
+  SESSIONS_QUERY_KEY,
+  type SessionSummary,
+} from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
-import { subscribeSeen, getSeen, markSeen, isUnread } from "./unread-store.ts";
 import { subscribeModel, getSelectedModel, setSelectedModel } from "./model-store.ts";
+
+// Tab visibility as an external store — the mark-read effect must not fire
+// while the tab is hidden: SSE-driven invalidations refetch the list even in
+// background tabs, and marking a conversation read the user is not looking at
+// would silently clear the unread badge on every device.
+const subscribeVisibility = (cb: () => void) => {
+  document.addEventListener("visibilitychange", cb);
+  return () => document.removeEventListener("visibilitychange", cb);
+};
+const getVisible = () => document.visibilityState === "visible";
 
 export interface ChatPageProps {
   getHeaders?: GetHeaders;
@@ -100,26 +115,37 @@ export function ChatPage({
     });
   }, [getHeaders]);
 
-  // Unread replies for conversations the user left mid-generation. The list
-  // query polls (fast while generating); the seen watermark is an external store
-  // so the unread pill stays reactive without React state (no setState-in-effect,
-  // no render loop). There is no toast — the pill is the only notification.
+  // Unread replies for conversations the user left mid-generation. `unread` is
+  // server-computed (read-state lives in `chat_sessions`, shared across
+  // devices); the list stays fresh via the `chat_session_update` SSE signal.
+  // There is no toast — the pill is the only notification.
   const sessions = useSessions();
-  const seen = useSyncExternalStore(subscribeSeen, getSeen, getSeen);
+  const queryClient = useQueryClient();
+  const visible = useSyncExternalStore(subscribeVisibility, getVisible, getVisible);
 
-  // Keep the OPEN conversation marked read up to its latest activity, so a reply
-  // that lands while the user is watching it never counts as unread.
+  // Self-healing mark-read: whenever the server reports the OPEN conversation
+  // unread (on open, or when a reply finalizes while the user is watching),
+  // patch the cache read immediately (clears badge + dots, and guards against
+  // re-firing) then persist via PUT. Gated on tab visibility — a background
+  // tab receives SSE-driven refetches too, and must not mark read what the
+  // user is not looking at; `visible` flipping true re-runs the effect. A
+  // failed PUT self-heals on the next signal/refetch; a duplicate PUT from a
+  // refetch landing mid-flight is idempotent (monotonic marker) server-side.
+  // External-system sync in an effect (no setState) — React Compiler-safe.
   useEffect(() => {
+    if (!visible) return;
     const active = sessions.data?.find((s) => s.id === activeId);
-    if (active) markSeen(active.id, active.updatedAt);
-  }, [sessions.data, activeId]);
+    if (!active?.unread) return;
+    queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) =>
+      prev?.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+    );
+    void markSessionRead(getHeaders, activeId).catch(() => {});
+  }, [sessions.data, activeId, getHeaders, queryClient, visible]);
 
   const unreadIds = useMemo(() => {
     const list = sessions.data ?? [];
-    return new Set(
-      list.filter((s) => s.id !== activeId && isUnread(seen, s.id, s.updatedAt)).map((s) => s.id),
-    );
-  }, [sessions.data, activeId, seen]);
+    return new Set(list.filter((s) => s.id !== activeId && s.unread).map((s) => s.id));
+  }, [sessions.data, activeId]);
 
   return (
     <ChatHeadersProvider value={getHeaders ?? null}>
@@ -318,6 +344,7 @@ function ConversationInner({
           id,
           title: null,
           generating: true,
+          unread: false,
           updatedAt: new Date().toISOString(),
         };
         return [optimistic, ...list];
