@@ -48,6 +48,7 @@ describe("generateEnvForTier — tier envelope", () => {
         "APP_URL",
         "BETTER_AUTH_SECRET",
         "CONNECTION_ENCRYPTION_KEY",
+        "CONNECT_SESSION_SECRET",
         "RUN_TOKEN_SECRET",
         "TRUSTED_ORIGINS",
         "UPLOAD_SIGNING_SECRET",
@@ -99,11 +100,12 @@ describe("generateEnvForTier — tier envelope", () => {
 });
 
 describe("generateEnvForTier — value formats", () => {
-  it("BETTER_AUTH_SECRET / RUN_TOKEN_SECRET / UPLOAD_SIGNING_SECRET are 64-char hex", () => {
+  it("BETTER_AUTH_SECRET / RUN_TOKEN_SECRET / UPLOAD_SIGNING_SECRET / CONNECT_SESSION_SECRET are 64-char hex", () => {
     const env = generateEnvForTier(0);
     expect(env.BETTER_AUTH_SECRET).toMatch(HEX_64);
     expect(env.RUN_TOKEN_SECRET).toMatch(HEX_64);
     expect(env.UPLOAD_SIGNING_SECRET).toMatch(HEX_64);
+    expect(env.CONNECT_SESSION_SECRET).toMatch(HEX_64);
   });
 
   it("CONNECTION_ENCRYPTION_KEY is base64-encoded 32 bytes (44 chars with padding)", () => {
