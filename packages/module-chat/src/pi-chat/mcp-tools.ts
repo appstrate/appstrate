@@ -35,7 +35,14 @@ const RUN_AND_WAIT_TOOL = "run_and_wait";
 interface PiToolResult {
   content: Array<{ type: "text"; text: string }>;
   details: unknown;
-  /** Typed connect offer for the UI card; pi-ai never serializes it upstream. */
+  /**
+   * Typed connect offer for the UI card; pi-ai never serializes it upstream.
+   * CONTRACT: pi-agent-core forwards the execute return REFERENCE into
+   * `tool_execution_end` only while no `afterToolCall` hook is configured —
+   * that hook rebuilds the result as `{content, details, terminate}` and would
+   * silently strip this field (and `details` is redacted, so nothing would
+   * fall back). If a hook is ever added, it must carry `connectOffer` through.
+   */
   connectOffer?: ConnectOffer;
 }
 

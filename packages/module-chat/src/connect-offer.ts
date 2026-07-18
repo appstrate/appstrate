@@ -187,10 +187,11 @@ export function redactConnectLinks(output: unknown): unknown {
 /**
  * Split a tool `execute` result for the UI/persistence channel: redact every
  * connect link in place and attach the captured offer as a typed top-level
- * `connectOffer` field. Handles the envelopes an execute result arrives in —
- * MCP `CallToolResult` `{content:[…], structuredContent?}`, the AI SDK bridge
- * `{type:"content"|"json", value}`, or a plain payload object. Returns the
- * original reference when nothing changed.
+ * `connectOffer` field. Handles the two shapes `@ai-sdk/mcp` `execute` returns —
+ * the raw MCP `CallToolResult` `{content:[…], structuredContent?}` (also on
+ * `isError`), or a bare `structuredContent` payload object when an
+ * `outputSchema` is configured. Returns the original reference when nothing
+ * changed.
  */
 export function splitToolResult(result: unknown): unknown {
   if (result == null || typeof result !== "object") return result;
@@ -224,29 +225,6 @@ export function splitToolResult(result: unknown): unknown {
       ...(o.structuredContent !== undefined ? { structuredContent } : {}),
       ...(offer ? { connectOffer: offer } : {}),
     };
-  }
-
-  if (o.type === "json" && "value" in o) {
-    const r = splitConnectPayload(o.value);
-    if (r.redacted === o.value) return result;
-    return { ...o, value: r.redacted, ...(r.offer ? { connectOffer: r.offer } : {}) };
-  }
-
-  if (o.type === "content" && Array.isArray(o.value)) {
-    let changed = false;
-    let offer: ConnectOffer | null = null;
-    const nextValue = o.value.map((part) => {
-      if (part == null || typeof part !== "object") return part;
-      const p = part as Record<string, unknown>;
-      if (p.type !== "text" || typeof p.text !== "string") return part;
-      const r = splitJsonText(p.text);
-      offer ??= r.offer;
-      if (r.text === p.text) return part;
-      changed = true;
-      return { ...p, text: r.text };
-    });
-    if (!changed) return result;
-    return { ...o, value: nextValue, ...(offer ? { connectOffer: offer } : {}) };
   }
 
   const r = splitConnectPayload(result);

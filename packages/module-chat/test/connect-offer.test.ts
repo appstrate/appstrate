@@ -95,19 +95,10 @@ describe("splitToolResult", () => {
     expect(out.connectOffer).toEqual({ connect_url: URL_ });
   });
 
-  it("handles the AI SDK bridge envelopes ({type:'content'|'json'})", () => {
-    const contentEnv = {
-      type: "content",
-      value: [{ type: "text", text: JSON.stringify({ auth_url: URL_, state: "s" }) }],
-    };
-    const outContent = splitToolResult(contentEnv) as Record<string, unknown>;
-    expect(JSON.stringify(outContent.value)).not.toContain("token=SECRET");
-    expect(outContent.connectOffer).toEqual({ connect_url: URL_, state: "s" });
-
-    const jsonEnv = { type: "json", value: { connect_url: URL_ } };
-    const outJson = splitToolResult(jsonEnv) as Record<string, unknown>;
-    expect((outJson.value as { connect_url: string }).connect_url).toBe(REDACTED_CONNECT_LINK);
-    expect(outJson.connectOffer).toEqual({ connect_url: URL_ });
+  it("handles a bare structuredContent payload (outputSchema-configured tools)", () => {
+    const out = splitToolResult({ connect_url: URL_, state: "s" }) as Record<string, unknown>;
+    expect(out.connect_url).toBe(REDACTED_CONNECT_LINK);
+    expect(out.connectOffer).toEqual({ connect_url: URL_, state: "s" });
   });
 
   it("returns the original reference for a result without connect links", () => {
