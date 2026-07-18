@@ -10,11 +10,10 @@
  * Pauses when the tab is hidden.
  */
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useChatHeaders, type GetHeaders } from "./runtime-context.ts";
 import { fetchSessions, SESSIONS_QUERY_KEY } from "./sessions.ts";
-import { subscribeSeen, getSeen, isUnread } from "./unread-store.ts";
 
 const refetchInterval = (q: { state: { data?: { generating: boolean }[] } }) =>
   q.state.data?.some((s) => s.generating) ? 2000 : 8000;
@@ -31,13 +30,13 @@ export function useSessions() {
 
 /**
  * Count of conversations with an unread reply, for the app-shell nav badge.
- * Shares the sessions query (same key → one request) and the seen watermark with
- * the in-chat list, so the badge and the sidebar dots stay consistent. The
- * conversation the user is currently viewing is kept read by ChatPage, so it is
- * not counted. Pass `enabled: false` when the chat feature is off.
+ * `unread` is server-computed per session; this shares the sessions query (same
+ * key → one request) with the in-chat list, so the badge and the sidebar dots
+ * stay consistent. The conversation the user is currently viewing is kept read
+ * by ChatPage (server mark-read), so it is not counted. Pass `enabled: false`
+ * when the chat feature is off.
  */
 export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): number {
-  const seen = useSyncExternalStore(subscribeSeen, getSeen, getSeen);
   const { data } = useQuery({
     queryKey: SESSIONS_QUERY_KEY,
     queryFn: () => fetchSessions(getHeaders),
@@ -45,8 +44,5 @@ export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): num
     refetchIntervalInBackground: false,
     enabled,
   });
-  return useMemo(
-    () => (data ?? []).filter((s) => isUnread(seen, s.id, s.updatedAt)).length,
-    [data, seen],
-  );
+  return useMemo(() => (data ?? []).filter((s) => s.unread).length, [data]);
 }

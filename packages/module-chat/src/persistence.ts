@@ -127,7 +127,7 @@ async function upsertMessage(
 export async function persistUserMessage(sessionId: string, message: UIMessage): Promise<string> {
   const parentId = await lastMessageId(sessionId);
   const messageId = await upsertMessage(sessionId, message, parentId);
-  await touchSession(sessionId);
+  await touchSession(sessionId, "user");
   return messageId;
 }
 
@@ -143,22 +143,34 @@ export async function persistAssistantMessage(
   parentId: string | null,
 ): Promise<string> {
   const messageId = await upsertMessage(sessionId, message, parentId);
-  await touchSession(sessionId);
+  await touchSession(sessionId, "assistant");
   return messageId;
 }
 
-/** Bump `updatedAt` and derive a title from the first user message if still unset. */
-async function touchSession(sessionId: string): Promise<void> {
+/**
+ * Bump `updatedAt` and derive a title from the first user message if still
+ * unset. Also advances the read-state watermark matching the persisted turn:
+ * an assistant turn advances `lastAssistantAt` (the session becomes unread
+ * until its owner looks at it), a user turn advances `lastReadAt` (sending a
+ * message implies having seen the thread — keeps headless/API senders from
+ * accruing phantom unread).
+ */
+async function touchSession(sessionId: string, kind: "user" | "assistant"): Promise<void> {
   const [session] = await db
     .select({ title: chatSessions.title })
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
   if (!session) return;
+  const now = new Date();
   const title = session.title ?? (await deriveTitle(sessionId));
   await db
     .update(chatSessions)
-    .set({ updatedAt: new Date(), ...(title !== session.title ? { title } : {}) })
+    .set({
+      updatedAt: now,
+      ...(kind === "assistant" ? { lastAssistantAt: now } : { lastReadAt: now }),
+      ...(title !== session.title ? { title } : {}),
+    })
     .where(eq(chatSessions.id, sessionId));
 }
 

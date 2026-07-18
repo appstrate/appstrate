@@ -53,6 +53,12 @@ function toSessionDto(row: SessionRow) {
     // conversation the user has left, and detect when it finishes. Never leaks
     // the raw stream id.
     generating: row.activeStreamId != null,
+    // Computed server-side from the two watermarks so only a boolean crosses
+    // the wire — no client clock involved. Unread = an assistant reply advanced
+    // past the owner's last read.
+    unread:
+      row.lastAssistantAt != null &&
+      (row.lastReadAt == null || row.lastReadAt < row.lastAssistantAt),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -161,6 +167,23 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       .where(eq(chatSessions.id, session.id));
     return c.body(null, 204);
   });
+
+  // PUT /api/chat/sessions/:id/read — mark the session read (idempotent).
+  // Advances `lastReadAt` only — deliberately NOT `updatedAt`, so opening a
+  // conversation never reorders the sidebar. Mirrors PUT /notifications/:id/read.
+  router.put(
+    "/api/chat/sessions/:id/read",
+    rateLimited(120),
+    requireModulePermission("chat", "write"),
+    async (c) => {
+      const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+      await db
+        .update(chatSessions)
+        .set({ lastReadAt: new Date() })
+        .where(eq(chatSessions.id, session.id));
+      return c.body(null, 204);
+    },
+  );
 
   // DELETE /api/chat/sessions/:id — delete a session (entries cascade)
   router.delete("/api/chat/sessions/:id", requireModulePermission("chat", "write"), async (c) => {

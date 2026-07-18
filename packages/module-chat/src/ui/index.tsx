@@ -30,9 +30,14 @@ import type { GetHeaders, SelectConversation } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
-import { loadHistory, mintSessionId, SESSIONS_QUERY_KEY, type SessionSummary } from "./sessions.ts";
+import {
+  loadHistory,
+  markSessionRead,
+  mintSessionId,
+  SESSIONS_QUERY_KEY,
+  type SessionSummary,
+} from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
-import { subscribeSeen, getSeen, markSeen, isUnread } from "./unread-store.ts";
 import { subscribeModel, getSelectedModel, setSelectedModel } from "./model-store.ts";
 
 export interface ChatPageProps {
@@ -100,26 +105,32 @@ export function ChatPage({
     });
   }, [getHeaders]);
 
-  // Unread replies for conversations the user left mid-generation. The list
-  // query polls (fast while generating); the seen watermark is an external store
-  // so the unread pill stays reactive without React state (no setState-in-effect,
-  // no render loop). There is no toast — the pill is the only notification.
+  // Unread replies for conversations the user left mid-generation. `unread` is
+  // server-computed (read-state lives in `chat_sessions`, shared across
+  // devices); the list query polls (fast while generating). There is no toast —
+  // the pill is the only notification.
   const sessions = useSessions();
-  const seen = useSyncExternalStore(subscribeSeen, getSeen, getSeen);
+  const queryClient = useQueryClient();
 
-  // Keep the OPEN conversation marked read up to its latest activity, so a reply
-  // that lands while the user is watching it never counts as unread.
+  // Self-healing mark-read: whenever the server reports the OPEN conversation
+  // unread (on open, or when a reply finalizes while the user is watching),
+  // patch the cache read immediately (clears badge + dots, and guards against
+  // re-firing) then persist via PUT. A failed PUT self-heals on the next poll;
+  // a duplicate PUT from a poll landing mid-flight is idempotent server-side.
+  // External-system sync in an effect (no setState) — React Compiler-safe.
   useEffect(() => {
     const active = sessions.data?.find((s) => s.id === activeId);
-    if (active) markSeen(active.id, active.updatedAt);
-  }, [sessions.data, activeId]);
+    if (!active?.unread) return;
+    queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) =>
+      prev?.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+    );
+    void markSessionRead(getHeaders, activeId).catch(() => {});
+  }, [sessions.data, activeId, getHeaders, queryClient]);
 
   const unreadIds = useMemo(() => {
     const list = sessions.data ?? [];
-    return new Set(
-      list.filter((s) => s.id !== activeId && isUnread(seen, s.id, s.updatedAt)).map((s) => s.id),
-    );
-  }, [sessions.data, activeId, seen]);
+    return new Set(list.filter((s) => s.id !== activeId && s.unread).map((s) => s.id));
+  }, [sessions.data, activeId]);
 
   return (
     <ChatHeadersProvider value={getHeaders ?? null}>
@@ -313,6 +324,7 @@ function ConversationInner({
           id,
           title: null,
           generating: true,
+          unread: false,
           updatedAt: new Date().toISOString(),
         };
         return [optimistic, ...list];

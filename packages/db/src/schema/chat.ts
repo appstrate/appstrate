@@ -27,6 +27,13 @@ export const chatSessions = pgTable(
     // a reloaded client to the live stream by this id; a stale/orphaned id (no
     // live producer in the store) is treated as "no active stream" (204).
     activeStreamId: text("active_stream_id"),
+    // Read-state watermarks. `lastAssistantAt` advances only when an assistant
+    // message persists; `lastReadAt` advances when the owner marks the session
+    // read (or sends a message — sending implies having seen the thread). A
+    // session is unread when lastAssistantAt > lastReadAt; the comparison lives
+    // server-side in the DTO so no timestamps cross the wire.
+    lastAssistantAt: timestamp("last_assistant_at", { withTimezone: true }),
+    lastReadAt: timestamp("last_read_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
