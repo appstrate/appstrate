@@ -123,6 +123,62 @@ describe("platform MCP run_and_wait wrapper", () => {
     expect(calls).toHaveLength(1);
   });
 
+  test("splits connect links out of streamed step payloads (typed connectOffer)", async () => {
+    const url = "https://test.local/api/integrations/connect/start?token=SECRET";
+    const responses = [
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" }),
+      jsonResponse({
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "success",
+        result: { status: "auth_required", connect_url: url },
+      }),
+    ];
+    const fetchImpl: typeof fetch = async () => {
+      const res = responses.shift();
+      if (!res) throw new Error("unexpected fetch");
+      return res;
+    };
+
+    let originalCalled = false;
+    const tools = wrapRunAndWaitTool(
+      {
+        run_and_wait: {
+          inputSchema: { type: "object", properties: {} },
+          execute: () => {
+            originalCalled = true;
+            return { content: [{ type: "text", text: "{}" }] };
+          },
+        },
+      } as never,
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    ) as {
+      run_and_wait: {
+        execute: (
+          rawArgs: unknown,
+          options: { abortSignal?: AbortSignal },
+        ) => AsyncIterable<unknown>;
+      };
+    };
+
+    const outputs: Array<Record<string, unknown>> = [];
+    for await (const output of tools.run_and_wait.execute(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      {},
+    )) {
+      outputs.push(output as Record<string, unknown>);
+    }
+
+    expect(originalCalled).toBe(false);
+    const terminal = outputs.at(-1)!;
+    // Model channel (content text) never carries the URL…
+    const text = (terminal.content as Array<{ text: string }>)[0]!.text;
+    expect(text).not.toContain("token=SECRET");
+    expect(text).toContain("connect link hidden");
+    // …the typed offer does.
+    expect(terminal.connectOffer).toEqual({ connect_url: url });
+  });
+
   test("validates arguments before dispatching", async () => {
     const fetchImpl: typeof fetch = async () => {
       throw new Error("should not fetch");

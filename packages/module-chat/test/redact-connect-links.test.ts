@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { redactConnectLinks, wrapToolModelOutputs } from "../src/platform-mcp.ts";
+import { redactConnectLinks } from "../src/connect-offer.ts";
+import { wrapToolModelOutputs } from "../src/platform-mcp.ts";
 
 const PLACEHOLDER = "[connect link hidden — the chat renders the connect card]";
 

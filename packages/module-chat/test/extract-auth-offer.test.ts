@@ -95,4 +95,56 @@ describe("extractAuthOffer", () => {
     expect(extractAuthOffer({ content: [{ type: "text", text: "an error happened" }] })).toBeNull();
     expect(extractAuthOffer({ type: "content", value: [{ type: "text", text: "{}" }] })).toBeNull();
   });
+
+  it("prefers the typed connectOffer channel over anything in the payload", () => {
+    const result = {
+      content: [{ type: "text", text: JSON.stringify({ connect_url: "https://stale/other" }) }],
+      connectOffer: { connect_url: "https://app/connect/start?token=t", state: "st" },
+    };
+    expect(extractAuthOffer(result)).toEqual({
+      authUrl: "https://app/connect/start?token=t",
+      state: "st",
+    });
+  });
+
+  it("never renders the redaction placeholder as a URL (issue #906)", () => {
+    // Exact persisted shape from the bug report: the model channel (`content`)
+    // carries the placeholder, the legacy UI channel (`details`) the real URL.
+    const placeholder = "[connect link hidden — the chat renders the connect card]";
+    const stored = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            status: 200,
+            body: { connect_url: placeholder, expires_at: 1784142529000 },
+          }),
+        },
+      ],
+      details: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: 200,
+              body: {
+                connect_url: "http://localhost:3001/api/integrations/connect/start?token=eyJREAL",
+                expires_at: 1784142529000,
+              },
+            }),
+          },
+        ],
+        isError: false,
+      },
+    };
+    expect(extractAuthOffer(stored)).toEqual({
+      authUrl: "http://localhost:3001/api/integrations/connect/start?token=eyJREAL",
+      state: undefined,
+    });
+  });
+
+  it("rejects a relative or non-http string under a connect key (legacy walk)", () => {
+    expect(extractAuthOffer({ connect_url: "/api/integrations/connect/start" })).toBeNull();
+    expect(extractAuthOffer({ auth_url: "javascript:alert(1)" })).toBeNull();
+  });
 });
