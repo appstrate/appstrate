@@ -538,14 +538,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         });
       }
 
-      try {
-        await createOrgItem(
-          orgId,
-          { id: packageId, content, createdBy: user.id },
-          rcfg.cfg,
-          validatedManifest as Record<string, unknown>,
-        );
-      } catch (err) {
+      const createdItem = await createOrgItem(
+        orgId,
+        { id: packageId, content, createdBy: user.id },
+        rcfg.cfg,
+        validatedManifest as Record<string, unknown>,
+      ).catch((err: unknown) => {
         // The pre-check above narrows the common case, but a concurrent create
         // can still lose the race — map the persistence-layer collision to 409
         // instead of a 500 (mirrors the ZIP/skill create path below).
@@ -553,7 +551,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           throw conflict("name_collision", err.message);
         }
         throw err;
-      }
+      });
 
       // After-create hook (optional per-type post-create side-effect)
       if (rcfg.afterCreate) {
@@ -574,12 +572,18 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
 
-      // Create initial version (non-fatal)
+      // Create initial version (non-fatal). Snapshot the STORED draft
+      // manifest (not the pre-normalization request body): `createOrgItem`
+      // injects `$schema`/`type`/… and the jsonb round-trip reorders keys, so
+      // snapshotting `validatedManifest` produced a version whose bytes could
+      // never match a later rebuild from the draft. That byte drift defeated
+      // the publish dedup and, before #896, made every create-then-republish
+      // silently overwrite the artifact while keeping the stale integrity row.
       await createVersionSafe({
         packageId,
         orgId,
         userId: user.id,
-        manifest: validatedManifest,
+        manifest: asRecord(createdItem.draftManifest),
         normalizedFiles,
       });
 
@@ -1150,6 +1154,12 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     if ("error" in result) {
       if (result.error === "no_changes") {
         throw conflict("no_changes", "No changes since the last version");
+      }
+      if (result.error === "version_exists") {
+        throw conflict(
+          "version_exists",
+          "This version is already published and immutable — bump the version to publish the changed content",
+        );
       }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
