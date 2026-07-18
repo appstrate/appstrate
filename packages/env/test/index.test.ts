@@ -32,7 +32,8 @@ function restore(s: Snap): void {
 function setBaseEnv(): void {
   process.env.BETTER_AUTH_SECRET = "x".repeat(32);
   process.env.UPLOAD_SIGNING_SECRET = "y".repeat(32);
-  process.env.CONNECT_SESSION_SECRET = "z".repeat(32);
+  process.env.RUN_TOKEN_SECRET = "z".repeat(32);
+  process.env.CONNECT_SESSION_SECRET = "w".repeat(32);
   process.env.CONNECTION_ENCRYPTION_KEY = Buffer.alloc(32, 1).toString("base64");
   process.env.NODE_ENV = "test";
   delete process.env.APP_URL;
@@ -174,19 +175,24 @@ describe("signing-secret keyrings (comma-separated, per-key validation)", () => 
     expect(() => getEnv()).toThrow(/CONNECT_SESSION_SECRET/);
   });
 
-  it("RUN_TOKEN_SECRET: comma-separated keys pass", () => {
-    process.env.RUN_TOKEN_SECRET = "new-key,old-key";
-    expect(getEnv().RUN_TOKEN_SECRET).toBe("new-key,old-key");
+  it("RUN_TOKEN_SECRET: comma-separated ≥16-char keys pass", () => {
+    process.env.RUN_TOKEN_SECRET = `${"a".repeat(16)},${"b".repeat(20)}`;
+    expect(getEnv().RUN_TOKEN_SECRET).toBe(`${"a".repeat(16)},${"b".repeat(20)}`);
   });
 
   it("RUN_TOKEN_SECRET: rejects an empty segment", () => {
-    process.env.RUN_TOKEN_SECRET = "new-key,,old-key";
+    process.env.RUN_TOKEN_SECRET = `${"a".repeat(16)},,${"b".repeat(16)}`;
     expect(() => getEnv()).toThrow(/RUN_TOKEN_SECRET/);
   });
 
-  it("RUN_TOKEN_SECRET: unset stays optional", () => {
+  it("RUN_TOKEN_SECRET: rejects a keyring containing a <16-char key", () => {
+    process.env.RUN_TOKEN_SECRET = `${"a".repeat(16)},short`;
+    expect(() => getEnv()).toThrow(/RUN_TOKEN_SECRET/);
+  });
+
+  it("RUN_TOKEN_SECRET: unset is rejected (required)", () => {
     delete process.env.RUN_TOKEN_SECRET;
-    expect(getEnv().RUN_TOKEN_SECRET).toBeUndefined();
+    expect(() => getEnv()).toThrow(/RUN_TOKEN_SECRET/);
   });
 });
 

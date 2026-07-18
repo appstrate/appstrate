@@ -38,4 +38,5 @@ jobs:
           BETTER_AUTH_SECRET: ci-dummy-secret
           CONNECTION_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
           UPLOAD_SIGNING_SECRET: ci-dummy-upload-signing-secret
+          RUN_TOKEN_SECRET: ci-dummy-run-token-secret
           CONNECT_SESSION_SECRET: ci-dummy-connect-session-secret

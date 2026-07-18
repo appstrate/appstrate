@@ -259,6 +259,7 @@ Import from workspace packages using their published subpaths:
 | `DATABASE_URL`                   | No       | PostgreSQL connection. Absent = PGlite (embedded)                                        |
 | `BETTER_AUTH_SECRET`             | Yes      | Session signing secret                                                                   |
 | `UPLOAD_SIGNING_SECRET`          | Yes      | HMAC secret for FS upload-sink tokens (rotates independently of `BETTER_AUTH_SECRET`)    |
+| `RUN_TOKEN_SECRET`               | Yes      | HMAC secret for run bearer tokens (rotates independently)                                |
 | `CONNECT_SESSION_SECRET`         | Yes      | HMAC secret for hosted-connect-portal session tokens (issues #769/#905)                  |
 | `CONNECTION_ENCRYPTION_KEY`      | Yes      | 32 bytes base64, primary key for v1 credential envelope                                  |
 | `CONNECTION_ENCRYPTION_KEY_ID`   | No       | Active kid embedded in newly-encrypted blobs (default `k1`)                              |

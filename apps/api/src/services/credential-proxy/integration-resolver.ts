@@ -217,6 +217,10 @@ async function resolveConnection(
   // Single source of truth for connection selection (snapshot-pin-by-id vs
   // auto-pick over declared auths) — shared with the spawn + credentials
   // resolvers so the proxy can't drift on which connection it picks.
+  // The by-id branch (caller-supplied `X-Connection-Id`) is bound to
+  // `input.integrationId` inside the selector: a connection id belonging
+  // to another integration resolves to null (→ 404) instead of leaking
+  // that integration's credentials into this integration's payload.
   return selectAccessibleConnection(
     input.integrationId,
     declaredAuthKeys,

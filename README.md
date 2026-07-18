@@ -310,7 +310,7 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `S3_PUBLIC_ENDPOINT`                  | No       | —                                             | Browser-facing S3 endpoint for presigned URLs (falls back to `S3_ENDPOINT`)                           |
 | `FS_STORAGE_PATH`                     | No       | `./data/storage`                              | Filesystem storage path (used when `S3_BUCKET` is absent)                                             |
 | `PGLITE_DATA_DIR`                     | No       | `./data/pglite`                               | PGlite data directory (used when `DATABASE_URL` is absent)                                            |
-| `RUN_TOKEN_SECRET`                    | No       | —                                             | Run token signing secret                                                                              |
+| `RUN_TOKEN_SECRET`                    | Yes      | —                                             | HMAC secret for run bearer tokens (rotates independently)                                             |
 | `APP_URL`                             | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                                                        |
 | `TRUSTED_ORIGINS`                     | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                                                                        |
 | `TRUST_PROXY`                         | No       | `false`                                       | `false` (XFF ignored) \| `true` (1 hop) \| `N` trusted proxy hops — critical for per-IP rate limiters |

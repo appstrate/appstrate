@@ -141,6 +141,27 @@
       "when": 1784377072940,
       "tag": "0019_flat_iron_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784385084021,
+      "tag": "0020_sharp_the_fury",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784385085021,
+      "tag": "0021_validate_llm_usage_run_org_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784385086021,
+      "tag": "0022_prune_cross_org_application_packages",
+      "breakpoints": true
     }
   ]
 }

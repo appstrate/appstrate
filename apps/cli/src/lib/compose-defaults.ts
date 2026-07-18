@@ -73,9 +73,9 @@ export const CODE_DEFAULTS: Record<string, string> = {
   SYSTEM_PROXIES: "[]",
   TRUST_PROXY: "false",
   WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: "300",
-  // `RUN_TOKEN_SECRET` is `.optional()` — its absence equals empty
-  // string in compose, so a `${RUN_TOKEN_SECRET:-}` is a duplication.
-  RUN_TOKEN_SECRET: "",
+  // `RUN_TOKEN_SECRET` is required (no code default) — like
+  // `UPLOAD_SIGNING_SECRET` it is intentionally absent from this table;
+  // compose declares it with a loud-fail `${RUN_TOKEN_SECRET:?…}`.
   // `PORT` default is the number 3000; compose stores strings.
   PORT: "3000",
   // `DOCKER_SOCKET` is a code default but compose mirrors the YAML

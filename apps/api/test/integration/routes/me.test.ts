@@ -28,6 +28,7 @@ import {
   seedInstalledPackage,
 } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
+import { assertDbHas } from "../../helpers/assertions.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -538,6 +539,116 @@ describe("Me API (/api/me)", () => {
         method: "DELETE",
       });
       expect(res.status).toBe(401);
+    });
+  });
+
+  // ── CRIT-03 — /me/connections is (org, application)-scoped for an API key ──
+  //
+  // An API key authenticates as its CREATOR, but the key itself is bound to
+  // one org + one application. `listMeConnections(actor, authority)` now takes
+  // a required authority: `api_key` → `app_scoped` with the key's own
+  // orgId/applicationId. Pre-fix, the key inherited the creator's cross-org
+  // `user_global` view — a leaked key could enumerate (and destructively
+  // delete) the creator's connections in EVERY org they belong to.
+  describe("/api/me/connections API-key authority scoping (CRIT-03)", () => {
+    type Group = {
+      source_id: string;
+      connections: Array<{ connection_id: string; org: { id: string } }>;
+    };
+
+    async function setupTwoOrgConnections() {
+      const user = await createTestUser();
+      const { org: orgA, defaultAppId: appA } = await createTestOrg(user.id, {
+        slug: "crit03-org-a",
+      });
+      const { org: orgB, defaultAppId: appB } = await createTestOrg(user.id, {
+        slug: "crit03-org-b",
+      });
+      const connA = await seedConnectionFor({
+        orgId: orgA.id,
+        applicationId: appA,
+        integrationId: "@crit03/conn-a",
+        userId: user.id,
+      });
+      const connB = await seedConnectionFor({
+        orgId: orgB.id,
+        applicationId: appB,
+        integrationId: "@crit03/conn-b",
+        userId: user.id,
+      });
+      // Key bound to org A's default application, created by the same user.
+      const apiKey = await seedApiKey({
+        orgId: orgA.id,
+        applicationId: appA,
+        createdBy: user.id,
+        scopes: [],
+      });
+      return { user, orgA, orgB, connA, connB, bearer: `Bearer ${apiKey.rawKey}` };
+    }
+
+    it("cookie session lists connections from BOTH orgs (cross-org dashboard intact)", async () => {
+      const { user, connA, connB } = await setupTwoOrgConnections();
+
+      const res = await app.request("/api/me/connections", {
+        headers: { Cookie: user.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Group[] };
+      const connectionIds = body.data.flatMap((g) => g.connections.map((c) => c.connection_id));
+      expect(connectionIds).toContain(connA);
+      expect(connectionIds).toContain(connB);
+    });
+
+    it("an API key bound to org A lists ONLY the org-A connection", async () => {
+      const { orgA, connA, connB, bearer } = await setupTwoOrgConnections();
+
+      const res = await app.request("/api/me/connections", {
+        headers: { Authorization: bearer },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Group[] };
+      const connectionIds = body.data.flatMap((g) => g.connections.map((c) => c.connection_id));
+      expect(connectionIds).toContain(connA);
+      // Pre-fix, the creator's cross-org view leaked the org-B connection here.
+      expect(connectionIds).not.toContain(connB);
+      for (const group of body.data) {
+        for (const conn of group.connections) {
+          expect(conn.org.id).toBe(orgA.id);
+        }
+      }
+    });
+
+    it("an org-A API key cannot delete the org-B connection (row survives)", async () => {
+      const { connB, bearer } = await setupTwoOrgConnections();
+
+      const res = await app.request(`/api/me/connections/${connB}`, {
+        method: "DELETE",
+        headers: { Authorization: bearer },
+      });
+
+      // 204 by design — non-disclosure: a probing key must not learn whether
+      // the id exists outside its boundary. The security assertion is the DB
+      // state, not the status code.
+      expect(res.status).toBe(204);
+      await assertDbHas(integrationConnections, eq(integrationConnections.id, connB));
+    });
+
+    it("an org-A API key CAN delete a connection inside its own (org, application)", async () => {
+      const { connA, bearer } = await setupTwoOrgConnections();
+
+      const res = await app.request(`/api/me/connections/${connA}`, {
+        method: "DELETE",
+        headers: { Authorization: bearer },
+      });
+
+      expect(res.status).toBe(204);
+      const after = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connA));
+      expect(after).toHaveLength(0);
     });
   });
 });

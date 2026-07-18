@@ -185,6 +185,23 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
         return null;
       }
 
+      // ENFORCED INVARIANT: SYSTEM_PROVIDER_KEYS entries are static API keys.
+      // An OAuth provider's token must never be configured here — a system
+      // model carries no `credentialId`, so the raw subscription token would
+      // bypass the sidecar bearer-swap and land in MODEL_API_KEY inside the
+      // agent container. Declared-but-invalid = boot crash (throw, not skip):
+      // silently dropping the entry would leave the operator believing the
+      // model exists while runs mysteriously fall through the cascade.
+      if (provider.authMode === "oauth2") {
+        throw new Error(
+          `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" binds providerId ` +
+            `"${validCredential.providerId}", which declares authMode "oauth2". OAuth ` +
+            `subscription tokens cannot be configured as static system API keys — the token ` +
+            `would leak into agent containers. Store it as an org model provider credential ` +
+            `instead and remove this entry from SYSTEM_PROVIDER_KEYS.`,
+        );
+      }
+
       if (validCredential.baseUrlOverride && !provider.baseUrlOverridable) {
         logger.error(
           "[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — baseUrlOverride supplied " +
@@ -219,8 +236,9 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           // alias would leak its backing rather than hide it, so skip it
           // (loud) instead of registering a half-working alias.
           if (validM.aliased === true) {
-            // SYSTEM_PROVIDER_KEYS entries are static API keys by construction,
-            // so the oauth_provider violation is unreachable here.
+            // SYSTEM_PROVIDER_KEYS entries are static API keys — ENFORCED by
+            // the authMode !== "oauth2" boot check above, so the
+            // oauth_provider violation is unreachable here.
             const violation = checkAliasInvariants({
               label: validM.label,
               apiShape,

@@ -105,8 +105,11 @@ export function createCredentialProxyRouter() {
       const runIdHeader = c.req.header("X-Run-Id");
       const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
       // X-Connection-Id is optional — when set the route narrows to that
-      // connection (validated against the actor's accessible set in the
-      // resolver); when absent the implicit default chain still applies.
+      // connection (validated in the resolver against the actor's accessible
+      // set AND against `X-Integration-Id`: an id belonging to a different
+      // integration never resolves, so this header cannot be used to inject
+      // another integration's credentials under this integration's manifest);
+      // when absent the implicit default chain still applies.
       const explicitConnectionHeader = c.req.header("X-Connection-Id");
       const explicitConnectionId =
         explicitConnectionHeader && explicitConnectionHeader.length > 0

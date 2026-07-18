@@ -592,7 +592,7 @@ jobs:
           fi
           # Must NOT fail on the platform env schema — that would mean the
           # daemon closure re-coupled to @appstrate/env (env-decoupling broke).
-          if echo "$OUT" | grep -qE "BETTER_AUTH_SECRET|CONNECTION_ENCRYPTION_KEY|UPLOAD_SIGNING_SECRET|CONNECT_SESSION_SECRET"; then
+          if echo "$OUT" | grep -qE "BETTER_AUTH_SECRET|CONNECTION_ENCRYPTION_KEY|UPLOAD_SIGNING_SECRET|RUN_TOKEN_SECRET|CONNECT_SESSION_SECRET"; then
             echo "::error::Daemon required a platform env var — env decoupling regressed."
             exit 1
           fi

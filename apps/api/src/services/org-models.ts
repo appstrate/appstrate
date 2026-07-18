@@ -9,7 +9,8 @@ import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { notFound } from "../lib/errors.ts";
-import { checkEgressUrl } from "../lib/egress-host-guard.ts";
+import { checkEgressUrl, egressGuardedFetch } from "../lib/egress-host-guard.ts";
+import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
@@ -922,10 +923,21 @@ export async function testModelConfig(config: {
 
   const start = performance.now();
   try {
-    const res = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(10_000),
-    });
+    // SSRF-guarded transport (per-hop DNS + blocklist, connection pinned to
+    // the validated address) — the pre-flight `checkEgressUrl` above cannot by
+    // itself stop a DNS-rebind between check and connect, so the wire call
+    // must own the pin. `maxRedirects: 0`: the request carries the provider
+    // API key and a model endpoint has no legitimate reason to redirect — a
+    // 3xx here is either a misconfigured baseUrl or an attempt to replay the
+    // key elsewhere, so refuse to follow rather than follow-and-strip.
+    const res = await egressGuardedFetch(
+      url,
+      {
+        headers,
+        signal: AbortSignal.timeout(10_000),
+      },
+      { maxRedirects: 0, logger },
+    );
     const latency = Math.round(performance.now() - start);
 
     if (res.ok) return { ok: true, latency, status: res.status };
@@ -946,7 +958,30 @@ export async function testModelConfig(config: {
       status: res.status,
     };
   } catch (err) {
-    return mapFetchErrorToTestResult(err, Math.round(performance.now() - start));
+    const latency = Math.round(performance.now() - start);
+    // Guard verdicts map to the same structured results the route already
+    // returns — never the resolved host/address (`checkEgressUrl` above sets
+    // the precedent: the block reason stays server-side).
+    if (err instanceof SsrfBlockedError) {
+      if (err.reason === "too-many-redirects") {
+        // `maxRedirects: 0` — the endpoint answered with a 3xx we refuse to
+        // follow (the request carries the API key). Surface it as a provider
+        // problem, not a blocked network.
+        return {
+          ok: false,
+          latency,
+          error: "PROVIDER_ERROR",
+          message: "Provider endpoint redirected; use the final URL as base URL",
+        };
+      }
+      return {
+        ok: false,
+        latency,
+        error: "BLOCKED_URL",
+        message: "URL targets a blocked network",
+      };
+    }
+    return mapFetchErrorToTestResult(err, latency);
   }
 }
 

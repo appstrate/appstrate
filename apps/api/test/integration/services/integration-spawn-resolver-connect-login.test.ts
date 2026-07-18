@@ -124,6 +124,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     });
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -187,6 +188,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     });
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -253,6 +255,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     });
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -339,6 +342,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     };
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: wildcardAgent,

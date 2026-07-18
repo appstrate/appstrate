@@ -106,6 +106,7 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
 
     const cache: IntegrationManifestCache = new Map();
     const res = await resolveRunIntegrationVersions({
+      orgId: ctx.orgId,
       agentManifest: agentManifest("^1.0.0"),
       manifestCache: cache,
     });
@@ -127,7 +128,10 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
     await seedPublished("1.0.0");
     await seedPublished("1.5.0");
 
-    const res = await resolveRunIntegrationVersions({ agentManifest: agentManifest("1.0.0") });
+    const res = await resolveRunIntegrationVersions({
+      orgId: ctx.orgId,
+      agentManifest: agentManifest("1.0.0"),
+    });
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.versions[INTEG]).toEqual({ version: "1.0.0", source: "version" });
   });
@@ -138,6 +142,7 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
 
     const cache: IntegrationManifestCache = new Map();
     const res = await resolveRunIntegrationVersions({
+      orgId: ctx.orgId,
       agentManifest: agentManifest("^1.0.0"),
       dependencyOverrides: { [INTEG]: "draft" },
       manifestCache: cache,
@@ -159,6 +164,7 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
 
     // Manifest pins `^1.0.0` (would pick 1.0.0), override forces 2.0.0.
     const res = await resolveRunIntegrationVersions({
+      orgId: ctx.orgId,
       agentManifest: agentManifest("^1.0.0"),
       dependencyOverrides: { [INTEG]: "2.0.0" },
     });
@@ -170,7 +176,10 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
     await seedDraft(ctx);
     await seedPublished("1.0.0"); // only 1.0.0; pin wants ^3.0.0
 
-    const res = await resolveRunIntegrationVersions({ agentManifest: agentManifest("^3.0.0") });
+    const res = await resolveRunIntegrationVersions({
+      orgId: ctx.orgId,
+      agentManifest: agentManifest("^3.0.0"),
+    });
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.unresolved).toEqual([{ name: INTEG, versionSpec: "^3.0.0" }]);
@@ -179,7 +188,10 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
   it("a never-published integration with a pin is unresolved", async () => {
     await seedDraft(ctx); // draft only, no published versions
 
-    const res = await resolveRunIntegrationVersions({ agentManifest: agentManifest("^1.0.0") });
+    const res = await resolveRunIntegrationVersions({
+      orgId: ctx.orgId,
+      agentManifest: agentManifest("^1.0.0"),
+    });
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.unresolved[0]?.name).toBe(INTEG);
@@ -199,7 +211,10 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
       await seedPublished("1.0.0");
       await seedPublished("1.5.0");
 
-      const versions = await freezeRunSpawnDependencies({ agent: agentPkg("^1.0.0") });
+      const versions = await freezeRunSpawnDependencies({
+        orgId: ctx.orgId,
+        agent: agentPkg("^1.0.0"),
+      });
       expect(versions[INTEG]).toEqual({ version: "1.5.0", source: "version" });
     });
 
@@ -207,7 +222,10 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
       await seedDraft(ctx);
       await seedPublished("1.0.0");
 
-      const err = await freezeRunSpawnDependencies({ agent: agentPkg("^3.0.0") }).catch((e) => e);
+      const err = await freezeRunSpawnDependencies({
+        orgId: ctx.orgId,
+        agent: agentPkg("^3.0.0"),
+      }).catch((e) => e);
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).status).toBe(422);
       expect((err as ApiError).code).toBe("dependency_unresolved");
@@ -218,6 +236,7 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
       await seedPublished("1.0.0");
 
       const err = await freezeRunSpawnDependencies({
+        orgId: ctx.orgId,
         agent: agentPkg("^1.0.0"),
         dependencyOverrides: { "@pinorg/not-declared": "draft" },
       }).catch((e) => e);
@@ -231,7 +250,10 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
     await seedPublished("1.0.0");
     await seedPublished("1.5.0");
 
-    const res = await resolveRunIntegrationVersions({ agentManifest: agentManifest("^1.0.0") });
+    const res = await resolveRunIntegrationVersions({
+      orgId: ctx.orgId,
+      agentManifest: agentManifest("^1.0.0"),
+    });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     const frozen = res.versions[INTEG]!;

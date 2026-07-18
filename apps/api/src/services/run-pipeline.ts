@@ -227,6 +227,11 @@ export async function resolveRunPreflight(params: {
  */
 export async function freezeRunSpawnDependencies(params: {
   agent: LoadedPackage;
+  /**
+   * The run's org — required tenant boundary for published-version
+   * resolution (defense in depth against a cross-tenant reference).
+   */
+  orgId: string;
   dependencyOverrides?: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
 }): Promise<ResolvedIntegrationVersionMap> {
@@ -249,6 +254,7 @@ export async function freezeRunSpawnDependencies(params: {
 
   const resolved = await resolveRunIntegrationVersions({
     agentManifest: params.agent.manifest as Record<string, unknown>,
+    orgId: params.orgId,
     dependencyOverrides: params.dependencyOverrides ?? null,
     manifestCache: params.manifestCache,
   });
@@ -338,6 +344,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     () =>
       freezeRunSpawnDependencies({
         agent,
+        orgId,
         dependencyOverrides: params.dependencyOverrides ?? null,
         manifestCache,
       }),

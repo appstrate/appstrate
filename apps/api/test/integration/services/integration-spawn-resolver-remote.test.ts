@@ -99,6 +99,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
   it("emits sourceKind=remote with a { url, transport } server spec and drops httpDeliveryAuths", async () => {
     await seed(true);
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -117,6 +118,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
   it("yields no spawn when a remote source omits source.remote.url", async () => {
     await seed(false);
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -198,6 +200,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
     await seedConnection();
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: localAgent(),
@@ -235,6 +238,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
     await seedConnection();
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: localAgent(),

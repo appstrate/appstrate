@@ -32,6 +32,7 @@ import { createTransport, type Transporter } from "nodemailer";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
+import { resolveAndCheckHost } from "@appstrate/core/ssrf";
 import { getEnv } from "@appstrate/env";
 import type { SmtpConfigView } from "@appstrate/shared-types";
 import { applicationSmtpConfigs } from "@appstrate/db/schema";
@@ -119,7 +120,7 @@ function mapRow(row: SmtpRow): SmtpConfigView {
   };
 }
 
-function buildTransport(row: SmtpRow): Transporter | null {
+async function buildTransport(row: SmtpRow): Promise<Transporter | null> {
   if (row.host === "__test_json__") {
     return createTransport({ jsonTransport: true });
   }
@@ -133,11 +134,37 @@ function buildTransport(row: SmtpRow): Transporter | null {
     });
     return null;
   }
+  // SSRF hardening (connect-time, fail-closed). `isBlockedHost` at config-write
+  // time is a LITERAL check only — a public DNS name whose A/AAAA record points
+  // at loopback / a metadata IP / an internal range sails through it, and
+  // nodemailer would otherwise re-resolve the raw hostname itself at connect
+  // time (DNS-rebind window). Resolve the host NOW, refuse anything that lands
+  // in a blocked range or cannot be resolved, and pin the socket to the vetted
+  // IP so nodemailer connects to that address rather than re-resolving the
+  // name. `tls.servername` preserves the original hostname for SNI + TLS
+  // certificate validation (both the implicit-TLS `secure:true` and the
+  // STARTTLS upgrade paths honour it), so pinning to an IP does not break cert
+  // verification. The transport is cached (see `resolvePerAppSmtp`), so the pin
+  // holds for every send until the cache entry is evicted — a name repointed
+  // after resolution cannot redirect an already-built transport. Residual: the
+  // gap between resolving here and the first TCP connect is not zero, but the
+  // socket targets the pinned IP, so a rebind cannot steer it to a fresh,
+  // unvetted address.
+  const hostCheck = await resolveAndCheckHost(row.host);
+  if (hostCheck.blocked) {
+    logger.error("oidc smtp: host failed SSRF check, treating as unconfigured", {
+      applicationId: row.applicationId,
+      host: row.host,
+      reason: hostCheck.reason,
+    });
+    return null;
+  }
   return createTransport({
-    host: row.host,
+    host: hostCheck.pinnedAddress,
     port: row.port,
     secure: resolveSecure(row.secureMode, row.port),
     auth: { user: row.username, pass },
+    tls: { servername: row.host },
   });
 }
 
@@ -149,7 +176,7 @@ async function resolvePerAppSmtp(applicationId: string): Promise<ResolvedSmtpCon
       .where(eq(applicationSmtpConfigs.applicationId, applicationId))
       .limit(1);
     if (!row) return null;
-    const transport = buildTransport(row);
+    const transport = await buildTransport(row);
     if (!transport) return null;
     return {
       transport: wrapForSpy(transport, "per-app"),

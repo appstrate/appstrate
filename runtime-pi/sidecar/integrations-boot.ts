@@ -513,6 +513,12 @@ export async function connectRemoteHttpIntegration(
           { ...init, headers },
           {
             allowHost: isOperatorTrustedEgressHost,
+            // The injected credential header is arbitrarily NAMED by the
+            // manifest's delivery plan (e.g. `X-Api-Key`), so guardedFetch's
+            // builtin authorization/cookie strip set cannot know about it —
+            // declare it, or a hostile server 302ing cross-origin would carry
+            // the credential to another origin.
+            ...(h ? { sensitiveHeaders: [h.name] } : {}),
             ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
           },
         );

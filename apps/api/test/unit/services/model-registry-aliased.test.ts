@@ -26,12 +26,12 @@ describe("initSystemModelProviderKeys — aliased flag", () => {
   });
 
   it("parses `aliased: true` into ModelDefinition and defaults absent/false to false", () => {
-    seedTestModelProviders(); // ensures the `test-oauth` providerId resolves
+    seedTestModelProviders(); // ensures the `test-apikey` providerId resolves
 
     initSystemModelProviderKeys([
       {
         id: "vanity-key",
-        providerId: "test-oauth",
+        providerId: "test-apikey",
         apiKey: "sk-secret",
         models: [
           // Public alias — real backing hidden. An alias MUST carry an explicit
@@ -68,7 +68,7 @@ describe("initSystemModelProviderKeys — aliased flag", () => {
     initSystemModelProviderKeys([
       {
         id: "vanity-key-2",
-        providerId: "test-oauth",
+        providerId: "test-apikey",
         apiKey: "sk-secret",
         models: [
           // aliased but no label → the derived label would name the backing →

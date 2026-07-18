@@ -181,12 +181,19 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
   // missing package id.
   if (!runRow.packageId) return null;
 
+  // CRIT-07: scope the ledger SUM by (run_id, org_id) — `llm_usage.run_id`
+  // is caller-suppliable on the proxy path (`X-Run-Id`), so a legacy row
+  // whose org_id doesn't match the run's org must never inflate this run's
+  // broadcast/persisted cost. Mirrors `computeRunCost` (the finalize-time
+  // read path); the composite FK `(run_id, org_id) → runs(id, org_id)`
+  // enforces the same invariant at the DB level for new rows. `runRow.orgId`
+  // is already loaded above — no extra query.
   const [costRow] = await db
     .select({
       total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
     })
     .from(llmUsage)
-    .where(eq(llmUsage.runId, runId));
+    .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, runRow.orgId)));
 
   return {
     run_id: runId,

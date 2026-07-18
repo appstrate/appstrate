@@ -34,47 +34,53 @@ export async function installPackage(
 ) {
   await assertApplicationInScope(scope);
 
-  // Verify the package exists in the org catalog (or is a system package).
-  // Ephemeral shadow packages are never installable.
-  const [pkg] = await db
-    .select({ id: packages.id, type: packages.type })
-    .from(packages)
-    .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
-    .limit(1);
+  // The org-visibility check and the insert run in ONE transaction so the
+  // tenant boundary is atomic with the write — a separate preflight would
+  // leave a window where an `application_packages` row could be grafted onto
+  // a package the org cannot see.
+  return db.transaction(async (tx) => {
+    // Verify the package exists in the org catalog (or is a system package).
+    // Ephemeral shadow packages are never installable.
+    const [pkg] = await tx
+      .select({ id: packages.id, type: packages.type })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
+      .limit(1);
 
-  if (!pkg) {
-    throw notFound(`Package '${packageId}' not found in organization catalog`);
-  }
+    if (!pkg) {
+      throw notFound(`Package '${packageId}' not found in organization catalog`);
+    }
 
-  // Check not already installed
-  const [existing] = await db
-    .select({ packageId: applicationPackages.packageId })
-    .from(applicationPackages)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, scope.applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
-    .limit(1);
+    // Check not already installed
+    const [existing] = await tx
+      .select({ packageId: applicationPackages.packageId })
+      .from(applicationPackages)
+      .where(
+        and(
+          eq(applicationPackages.applicationId, scope.applicationId),
+          eq(applicationPackages.packageId, packageId),
+        ),
+      )
+      .limit(1);
 
-  if (existing) {
-    throw conflict(
-      "already_installed",
-      `Package '${packageId}' is already installed in this application`,
-    );
-  }
+    if (existing) {
+      throw conflict(
+        "already_installed",
+        `Package '${packageId}' is already installed in this application`,
+      );
+    }
 
-  const [row] = await db
-    .insert(applicationPackages)
-    .values({
-      applicationId: scope.applicationId,
-      packageId,
-      config: config ?? {},
-    })
-    .returning();
+    const [row] = await tx
+      .insert(applicationPackages)
+      .values({
+        applicationId: scope.applicationId,
+        packageId,
+        config: config ?? {},
+      })
+      .returning();
 
-  return row!;
+    return row!;
+  });
 }
 
 export async function uninstallPackage(scope: AppScope, packageId: string): Promise<void> {
@@ -112,7 +118,14 @@ const installedPackageSelect = {
 };
 
 export async function listInstalledPackages(scope: AppScope, type?: PackageType) {
-  const conditions = [eq(applicationPackages.applicationId, scope.applicationId)];
+  // `orgOrSystemFilter` for the same reason as `getInstalledPackage` below: a
+  // stray association row pointing at another org's package (writable before
+  // the atomic install/update checks existed) must not surface that package's
+  // draft_manifest in the listing.
+  const conditions = [
+    eq(applicationPackages.applicationId, scope.applicationId),
+    orgOrSystemFilter(scope.orgId),
+  ];
   if (type) {
     conditions.push(eq(packages.type, type));
   }
@@ -125,6 +138,10 @@ export async function listInstalledPackages(scope: AppScope, type?: PackageType)
 }
 
 export async function getInstalledPackage(scope: AppScope, packageId: string) {
+  // `orgOrSystemFilter` lands in the SQL WHERE so this can never act as a
+  // cross-tenant existence/type oracle: a stray association row pointing at
+  // another org's package id resolves to `null`, exactly like a package that
+  // does not exist.
   const [row] = await db
     .select(installedPackageSelect)
     .from(applicationPackages)
@@ -133,6 +150,7 @@ export async function getInstalledPackage(scope: AppScope, packageId: string) {
       and(
         eq(applicationPackages.applicationId, scope.applicationId),
         eq(applicationPackages.packageId, packageId),
+        orgOrSystemFilter(scope.orgId),
       ),
     )
     .limit(1);
@@ -412,9 +430,12 @@ export async function getPackageConfig(
  * for the pair — the caller (route or CLI) decides whether that is a
  * 404 or a "no inheritance, fall back to flags + defaults" signal.
  *
+ * The org filter lands in the SQL WHERE (`orgOrSystemFilter`) so a stray
+ * association row pointing at another org's package id resolves to `null`
+ * instead of leaking its config/model/proxy/version pin.
  */
 export async function getResolvedRunConfig(
-  applicationId: string,
+  scope: AppScope,
   packageId: string,
 ): Promise<ResolvedRunConfig | null> {
   const [row] = await db
@@ -429,8 +450,9 @@ export async function getResolvedRunConfig(
     .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
     .where(
       and(
-        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.applicationId, scope.applicationId),
         eq(applicationPackages.packageId, packageId),
+        orgOrSystemFilter(scope.orgId),
       ),
     )
     .limit(1);
@@ -439,10 +461,13 @@ export async function getResolvedRunConfig(
 
   let versionPin: string | null = null;
   if (row.versionId !== null && row.versionId !== undefined) {
+    // Constrain the pin lookup to THIS package's versions — a client-supplied
+    // `versionId` pointing at another package's version row must not resolve
+    // (and must never reveal a foreign package's version string).
     const [versionRow] = await db
       .select({ version: packageVersions.version })
       .from(packageVersions)
-      .where(eq(packageVersions.id, row.versionId))
+      .where(and(eq(packageVersions.id, row.versionId), eq(packageVersions.packageId, packageId)))
       .limit(1);
     versionPin = versionRow?.version ?? null;
   }
@@ -455,6 +480,26 @@ export async function getResolvedRunConfig(
   };
 }
 
+/**
+ * Update the per-app settings row for `(applicationId, packageId)`.
+ *
+ * The org-visibility check runs in the SAME transaction as the write — never
+ * as a separate preflight — so the write can never graft an
+ * `application_packages` row onto a package id the org cannot see (another
+ * org's package, or an ephemeral shadow row).
+ *
+ * Two modes:
+ *   - `requireInstalled: true` (the public
+ *     `PUT /applications/:id/packages/:packageId` route): the association row
+ *     MUST already exist — an update that would create a new row is a client
+ *     error (404), never an implicit install.
+ *   - default (agent config/proxy/model routes, integration activate /
+ *     deactivate): upsert. A SYSTEM package legitimately has no
+ *     `application_packages` row until its first per-app setting is written,
+ *     so create-on-first-write is intended there. Those routes preflight the
+ *     package via `requireAgent()` / `assertIsIntegration()`; the in-transaction
+ *     check below re-enforces the same boundary atomically.
+ */
 export async function updateInstalledPackage(
   scope: AppScope,
   packageId: string,
@@ -465,28 +510,66 @@ export async function updateInstalledPackage(
     versionId?: number | null;
     enabled?: boolean;
   },
+  opts?: { requireInstalled?: boolean },
 ): Promise<void> {
-  const set: Record<string, unknown> = { updatedAt: new Date() };
+  const set: Partial<{
+    updatedAt: Date;
+    config: Record<string, unknown>;
+    modelId: string | null;
+    proxyId: string | null;
+    versionId: number | null;
+    enabled: boolean;
+  }> = { updatedAt: new Date() };
   if (updates.config !== undefined) set.config = updates.config;
   if (updates.modelId !== undefined) set.modelId = updates.modelId;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
   if (updates.versionId !== undefined) set.versionId = updates.versionId;
   if (updates.enabled !== undefined) set.enabled = updates.enabled;
 
-  await db
-    .insert(applicationPackages)
-    .values({
-      applicationId: scope.applicationId,
-      packageId,
-      config: updates.config ?? {},
-      ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
-      ...(updates.proxyId !== undefined ? { proxyId: updates.proxyId } : {}),
-      ...(updates.versionId !== undefined ? { versionId: updates.versionId } : {}),
-      ...(updates.enabled !== undefined ? { enabled: updates.enabled } : {}),
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: [applicationPackages.applicationId, applicationPackages.packageId],
-      set,
-    });
+  await db.transaction(async (tx) => {
+    // Tenant boundary, atomic with the write: the target package must be
+    // visible to the org (own or system) and not an ephemeral shadow row.
+    const [pkg] = await tx
+      .select({ id: packages.id })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
+      .limit(1);
+    if (!pkg) {
+      throw notFound(`Package '${packageId}' not found in organization catalog`);
+    }
+
+    if (opts?.requireInstalled) {
+      const updated = await tx
+        .update(applicationPackages)
+        .set(set)
+        .where(
+          and(
+            eq(applicationPackages.applicationId, scope.applicationId),
+            eq(applicationPackages.packageId, packageId),
+          ),
+        )
+        .returning({ packageId: applicationPackages.packageId });
+      if (updated.length === 0) {
+        throw notFound(`Package '${packageId}' is not installed in this application`);
+      }
+      return;
+    }
+
+    await tx
+      .insert(applicationPackages)
+      .values({
+        applicationId: scope.applicationId,
+        packageId,
+        config: updates.config ?? {},
+        ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
+        ...(updates.proxyId !== undefined ? { proxyId: updates.proxyId } : {}),
+        ...(updates.versionId !== undefined ? { versionId: updates.versionId } : {}),
+        ...(updates.enabled !== undefined ? { enabled: updates.enabled } : {}),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [applicationPackages.applicationId, applicationPackages.packageId],
+        set,
+      });
+  });
 }

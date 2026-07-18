@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { apiKeyOrgScopeGuard } from "../middleware/guards.ts";
@@ -59,13 +60,29 @@ export const updateRoleSchema = z.object({
   role: z.enum(ASSIGNABLE_ROLES),
 });
 
+/**
+ * Gate an org-administration route on the caller's org role.
+ *
+ * API keys are rejected outright: none of the operations gated here
+ * (org update/delete, member removal, role changes, settings writes) map
+ * to an API-key-grantable scope — `org:*` / `members:*` are deliberately
+ * absent from `API_KEY_ALLOWED_SCOPES` (lib/permissions.ts). Checking the
+ * creator's LIVE membership row for a key would therefore let ANY key,
+ * whatever its scopes (e.g. `runs:read`), inherit its creator's full
+ * org-admin rights — a privilege escalation past the scope intersection
+ * computed by the auth pipeline. Cookie sessions (and any other
+ * human-session auth method) keep the plain membership-role check.
+ */
 async function requireOrgRole(
+  c: Context<AppEnv>,
   orgId: string,
-  userId: string,
   roles: string[],
   message: string,
 ): Promise<void> {
-  const member = await getOrgMember(orgId, userId);
+  if (c.get("authMethod") === "api_key") {
+    throw forbidden("API keys cannot perform organization administration");
+  }
+  const member = await getOrgMember(orgId, c.get("user").id);
   if (!member || !roles.includes(member.role)) {
     throw forbidden(message);
   }
@@ -218,10 +235,9 @@ router.get("/:orgId", async (c) => {
 
 // PUT /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
 router.put("/:orgId", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
 
-  await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can modify the organization");
+  await requireOrgRole(c, orgId, ["owner"], "Only the owner can modify the organization");
 
   const data = await readJsonBody(c, updateOrgSchema);
 
@@ -255,10 +271,9 @@ router.put("/:orgId", async (c) => {
 
 // DELETE /api/orgs/:orgId — delete organization and all related data (owner only)
 router.delete("/:orgId", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
 
-  await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can delete the organization");
+  await requireOrgRole(c, orgId, ["owner"], "Only the owner can delete the organization");
 
   try {
     // Notify modules of org deletion (non-fatal — errors isolated per module, FK CASCADE handles cleanup)
@@ -294,12 +309,7 @@ router.post("/:orgId/members", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
 
-  await requireOrgRole(
-    orgId,
-    user.id,
-    ["owner", "admin"],
-    "Admin access required to invite members",
-  );
+  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to invite members");
 
   const data = await readJsonBody(c, addMemberSchema);
   const role = data.role;
@@ -346,11 +356,10 @@ router.post("/:orgId/members", async (c) => {
 
 // DELETE /api/orgs/:orgId/invitations/:invitationId — cancel an invitation (admin+)
 router.delete("/:orgId/invitations/:invitationId", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
   const invitationId = c.req.param("invitationId");
 
-  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Admin access required");
+  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required");
   await cancelInvitation(invitationId, orgId);
   await recordAuditFromContext(c, {
     action: "org.invitation_cancelled",
@@ -363,11 +372,10 @@ router.delete("/:orgId/invitations/:invitationId", async (c) => {
 
 // PUT /api/orgs/:orgId/invitations/:invitationId — change invitation role (owner only)
 router.put("/:orgId/invitations/:invitationId", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
   const invitationId = c.req.param("invitationId");
 
-  await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can change roles");
+  await requireOrgRole(c, orgId, ["owner"], "Only the owner can change roles");
 
   const data = await readJsonBody(c, updateRoleSchema);
 
@@ -399,16 +407,10 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
 
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin+)
 router.delete("/:orgId/members/:userId", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
   const targetUserId = c.req.param("userId");
 
-  await requireOrgRole(
-    orgId,
-    user.id,
-    ["owner", "admin"],
-    "Admin access required to remove members",
-  );
+  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to remove members");
 
   const target = await getOrgMember(orgId, targetUserId);
   if (!target) {
@@ -434,7 +436,7 @@ router.put("/:orgId/members/:userId", async (c) => {
   const orgId = c.req.param("orgId");
   const targetUserId = c.req.param("userId");
 
-  await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can change roles");
+  await requireOrgRole(c, orgId, ["owner"], "Only the owner can change roles");
 
   const data = await readJsonBody(c, updateRoleSchema);
 
@@ -489,15 +491,9 @@ router.get("/:orgId/settings", async (c) => {
 
 // PUT /api/orgs/:orgId/settings — update org settings (owner/admin)
 router.put("/:orgId/settings", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
 
-  await requireOrgRole(
-    orgId,
-    user.id,
-    ["owner", "admin"],
-    "Admin access required to update settings",
-  );
+  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to update settings");
 
   const data = await readJsonBody(c, orgSettingsSchema.partial());
 

@@ -36,7 +36,14 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
-import { seedApiKey, seedOrgModelProviderKey, seedOrgModel } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedOrgModelProviderKey,
+  seedOrgModel,
+  seedPackage,
+  seedRun,
+  seedApplication,
+} from "../../helpers/seed.ts";
 import {
   resetResponseCacheConfigForTesting,
   setResponseCacheConfig,
@@ -709,6 +716,113 @@ describe("POST /api/llm-proxy/* — response cache", () => {
     });
     expect(second.headers.get("x-llm-proxy-cache-status")).toBeNull();
     expect(upstreamCalls).toBe(2);
+  });
+});
+
+// CRIT-07 — `X-Run-Id` is caller-supplied and feeds `llm_usage.run_id` →
+// `computeRunCost` → `runs.cost`. Pre-fix the header was persisted verbatim,
+// so any principal holding `llm-proxy:call` could inflate the cost of ANY run
+// whose id it knew — including another tenant's. The fix validates the run
+// against the principal's org + application BEFORE the upstream call.
+describe("POST /api/llm-proxy/* — X-Run-Id run-attribution guard (CRIT-07)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+  });
+  afterEach(() => restoreFetch());
+
+  /** Seed an agent package + run inside the given (org, application). */
+  async function seedRunIn(orgId: string, applicationId: string): Promise<string> {
+    const pkg = await seedPackage({ orgId });
+    const run = await seedRun({ packageId: pkg.id, orgId, applicationId });
+    return run.id;
+  }
+
+  async function callWithRunId(h: Harness, runId: string): Promise<Response> {
+    return app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h, { "X-Run-Id": runId }),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+  }
+
+  it("404s an X-Run-Id of another tenant's run — same status/shape as a nonexistent id, no upstream call, no usage row", async () => {
+    const h = await buildHarness();
+    // Victim tenant with a real run the attacker knows the id of.
+    const victim = await createTestContext({ orgSlug: "crit07-victim" });
+    const victimRunId = await seedRunIn(victim.orgId, victim.defaultAppId);
+
+    let upstreamHit = false;
+    mockUpstream(async () => {
+      upstreamHit = true;
+      return new Response("must not be reached", { status: 599 });
+    });
+
+    const crossTenant = await callWithRunId(h, victimRunId);
+    expect(crossTenant.status).toBe(404);
+
+    // No existence oracle: a run id that exists in another org and a run id
+    // that exists nowhere must be indistinguishable to the caller.
+    const nonexistent = await callWithRunId(h, "run_00000000000000ff");
+    expect(nonexistent.status).toBe(404);
+    const crossBody = (await crossTenant.json()) as Record<string, unknown>;
+    const missingBody = (await nonexistent.json()) as Record<string, unknown>;
+    expect(crossBody.status).toBe(missingBody.status);
+    expect(crossBody.title).toBe(missingBody.title);
+    expect(Object.keys(crossBody).sort()).toEqual(Object.keys(missingBody).sort());
+
+    // Rejected before the upstream call — no forwarding, no metering.
+    expect(upstreamHit).toBe(false);
+    const usageRows = await db.select().from(llmUsage);
+    expect(usageRows).toHaveLength(0);
+  });
+
+  it("404s an X-Run-Id of a run in ANOTHER application of the key's own org, and mints no usage row", async () => {
+    const h = await buildHarness();
+    // Same org, different application — API keys are app-bound, so the
+    // application boundary must hold even inside the key's own tenant.
+    const otherApp = await seedApplication({ orgId: h.ctx.orgId, name: "CRIT07 Other App" });
+    const foreignAppRunId = await seedRunIn(h.ctx.orgId, otherApp.id);
+
+    let upstreamHit = false;
+    mockUpstream(async () => {
+      upstreamHit = true;
+      return new Response("must not be reached", { status: 599 });
+    });
+
+    const res = await callWithRunId(h, foreignAppRunId);
+    expect(res.status).toBe(404);
+    expect(upstreamHit).toBe(false);
+    const usageRows = await db.select().from(llmUsage);
+    expect(usageRows).toHaveLength(0);
+  });
+
+  it("accepts an X-Run-Id of a run in the key's own application and pins the usage row to it", async () => {
+    const h = await buildHarness();
+    const ownRunId = await seedRunIn(h.ctx.orgId, h.ctx.defaultAppId);
+
+    mockUpstream(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl_run",
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+            usage: { prompt_tokens: 11, completion_tokens: 3 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    const res = await callWithRunId(h, ownRunId);
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.runId, ownRunId));
+    expect(row).toBeDefined();
+    expect(row!.orgId).toBe(h.ctx.orgId);
+    expect(row!.inputTokens).toBe(11);
   });
 });
 

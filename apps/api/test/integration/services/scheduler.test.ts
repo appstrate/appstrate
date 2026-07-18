@@ -12,12 +12,12 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 // Catch stale fire-and-forget rejections from previous test cycles
 // (e.g., ensureDefaultProfile racing with truncateAll)
 process.on("unhandledRejection", () => {});
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { organizationMembers, runs, schedules } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { createTestUser, createTestOrg, addOrgMember } from "../../helpers/auth.ts";
+import { seedPackage, seedApplication, seedEndUser } from "../../helpers/seed.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { describeRequiresRedis } from "../../helpers/tier.ts";
@@ -646,6 +646,119 @@ describeRequiresRedis("scheduler service", () => {
       expect(failed[0]!.status).toBe("failed");
       const err = (failed[0]!.error ?? "").toLowerCase();
       expect(err).toContain("no such package");
+    });
+  });
+
+  // ── triggerScheduledRun — fire-time actor revalidation (CRIT-13) ──
+  //
+  // The BullMQ job payload freezes the actor at schedule create/update, and a
+  // removed member keeps their `user` row (multi-org) — so a job surviving the
+  // removeMember queue cleanup would keep firing under the revoked identity.
+  // The fire path must revalidate the frozen actor on EVERY fire and, when
+  // invalid, disable the schedule and record a VISIBLE FAILED run — never a
+  // silent skip and never a false-positive `success`.
+
+  describe("triggerScheduledRun fire-time actor revalidation (CRIT-13)", () => {
+    it("a schedule whose user actor is no longer a member fires into a FAILED run and is disabled", async () => {
+      // Member M owns the schedule as its execution actor.
+      const member = await createTestUser({ email: "revoked-member@test.com" });
+      await addOrgMember(orgId, member.id, "member");
+      const actorM: Actor = { type: "user", id: member.id };
+
+      const schedule = await createSchedule(
+        { orgId, applicationId: defaultAppId },
+        packageId,
+        actorM,
+        { cronExpression: "0 * * * *" },
+      );
+      expect(schedule.enabled).toBe(true);
+
+      // Revoke the membership DIRECTLY (bypassing removeMember's own schedule
+      // disable) — this simulates the backstop case: a queued job that
+      // survived the revocation path and now fires with the frozen actor.
+      await db
+        .delete(organizationMembers)
+        .where(
+          and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, member.id)),
+        );
+
+      await triggerScheduledRun(schedule.id, packageId, actorM, orgId, defaultAppId, undefined, {});
+
+      // VISIBLE failed run — never a silent skip, never `success`.
+      const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(fired).toHaveLength(1);
+      expect(fired[0]!.status).toBe("failed");
+      expect((fired[0]!.error ?? "").toLowerCase()).toContain("no longer a member");
+
+      // The schedule is disabled so the revoked identity never fires again.
+      const [row] = await db
+        .select({ enabled: schedules.enabled, nextRunAt: schedules.nextRunAt })
+        .from(schedules)
+        .where(eq(schedules.id, schedule.id));
+      expect(row!.enabled).toBe(false);
+      expect(row!.nextRunAt).toBeNull();
+    });
+
+    it("a schedule whose end-user actor does not exist in the application fires into a FAILED run and is disabled", async () => {
+      // The end user exists — but in a DIFFERENT application of the same org,
+      // so the fire-time revalidation (end user must exist in the SCHEDULE's
+      // application) fails.
+      const otherApp = await seedApplication({ orgId });
+      const foreignEndUser = await seedEndUser({ applicationId: otherApp.id, orgId });
+      const actorEu: Actor = { type: "end_user", id: foreignEndUser.id };
+
+      const schedule = await createSchedule(
+        { orgId, applicationId: defaultAppId },
+        packageId,
+        actorEu,
+        { cronExpression: "0 * * * *" },
+      );
+
+      await triggerScheduledRun(
+        schedule.id,
+        packageId,
+        actorEu,
+        orgId,
+        defaultAppId,
+        undefined,
+        {},
+      );
+
+      const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(fired).toHaveLength(1);
+      expect(fired[0]!.status).toBe("failed");
+      expect((fired[0]!.error ?? "").toLowerCase()).toContain("end-user");
+
+      const [row] = await db
+        .select({ enabled: schedules.enabled, nextRunAt: schedules.nextRunAt })
+        .from(schedules)
+        .where(eq(schedules.id, schedule.id));
+      expect(row!.enabled).toBe(false);
+      expect(row!.nextRunAt).toBeNull();
+    });
+
+    it("a valid member actor does NOT trip the revalidation (control — fails later, not on membership)", async () => {
+      // The seeded agent is a never-published draft, so an inheriting
+      // schedule fails on version resolution — NOT on actor validity, and the
+      // schedule stays ENABLED (revalidation only disables on invalid actor).
+      const schedule = await createSchedule(
+        { orgId, applicationId: defaultAppId },
+        packageId,
+        actor,
+        { cronExpression: "0 * * * *" },
+      );
+
+      await triggerScheduledRun(schedule.id, packageId, actor, orgId, defaultAppId, undefined, {});
+
+      const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(fired).toHaveLength(1);
+      expect((fired[0]!.error ?? "").toLowerCase()).not.toContain("no longer a member");
+
+      const [row] = await db
+        .select({ enabled: schedules.enabled })
+        .from(schedules)
+        .where(eq(schedules.id, schedule.id));
+      expect(row!.enabled).toBe(true);
     });
   });
 });

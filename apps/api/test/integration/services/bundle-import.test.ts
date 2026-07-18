@@ -24,13 +24,18 @@ import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import {
   detectBundleConflicts,
+  handleImportBundle,
+  importBundle,
   readOrBuildBundle,
   reconstructPackageZip,
 } from "../../../src/services/bundle-import.ts";
 import { db } from "@appstrate/db/client";
-import { packages } from "@appstrate/db/schema";
+import { packages, packageVersions } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext } from "../../helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
+import { describeRequiresPostgres } from "../../helpers/tier.ts";
 
 const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 
@@ -250,5 +255,134 @@ describe("detectBundleConflicts", () => {
       applicationId: ctx.defaultAppId,
     });
     expect(conflicts).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CRIT-08 — cross-tenant ownership claim inside `importBundle`
+// ---------------------------------------------------------------------------
+//
+// The packages row is now claimed ATOMICALLY (advisory-locked transaction +
+// `FOR UPDATE` re-read of the survivor's owner) BEFORE any version row or
+// storage byte is written. If the fix is reverted, a second org importing the
+// same package id either GRAFTS its version + bytes onto the first org's row
+// (the TOCTOU: both pass the read-only preflight) or silently "reuses" a
+// foreign org's package. These regressions FAIL against the pre-fix code.
+
+describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
+  const PKG = "@raceorg/agent";
+
+  function agentAfps(version: string): Uint8Array {
+    return buildRawAfps(
+      {
+        schema_version: "0.2",
+        name: PKG,
+        type: "agent",
+        version,
+        display_name: "Race Agent",
+        description: "race agent",
+      },
+      `Prompt v${version}.`,
+    );
+  }
+
+  async function packageOwner(id: string): Promise<string | null | undefined> {
+    const [row] = await db
+      .select({ orgId: packages.orgId })
+      .from(packages)
+      .where(eq(packages.id, id))
+      .limit(1);
+    return row?.orgId;
+  }
+
+  async function versionsOf(id: string): Promise<string[]> {
+    const rows = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, id));
+    return rows.map((r) => r.version).sort();
+  }
+
+  let ctxA: TestContext;
+  let ctxB: TestContext;
+  let scopeA: { orgId: string; applicationId: string };
+  let scopeB: { orgId: string; applicationId: string };
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctxA = await createTestContext({ orgSlug: "raceorg", email: "owner-a@race.test" });
+    ctxB = await createTestContext({ orgSlug: "raceorgb", email: "owner-b@race.test" });
+    scopeA = { orgId: ctxA.orgId, applicationId: ctxA.defaultAppId };
+    scopeB = { orgId: ctxB.orgId, applicationId: ctxB.defaultAppId };
+  });
+
+  it("sequential: org B importing a package owned by org A gets a 409 — never a silent graft", async () => {
+    // Org A owns the package with version 1.0.0.
+    const first = await handleImportBundle(agentAfps("1.0.0"), scopeA, ctxA.user.id);
+    expect(first.imported[0]!.status).toBe("inserted");
+    expect(await packageOwner(PKG)).toBe(ctxA.orgId);
+
+    // Route path (preflight): same identity → 409.
+    const viaPreflight = await handleImportBundle(agentAfps("1.0.0"), scopeB, ctxB.user.id).catch(
+      (e: unknown) => e,
+    );
+    expect(viaPreflight).toBeInstanceOf(ApiError);
+    expect((viaPreflight as ApiError).status).toBe(409);
+    expect((viaPreflight as ApiError).code).toBe("bundle_conflict");
+
+    // Enforcement point (bypasses the UX preflight — the security boundary):
+    // org B imports a NEW version 2.0.0 of A's package. Pre-fix this fell
+    // through the reuse check (no (pkg, 2.0.0) row) and grafted org B's
+    // version + bytes onto org A's row. Post-fix: 409 at the atomic claim.
+    const bundleV2 = await readOrBuildBundle(agentAfps("2.0.0"), scopeB);
+    const direct = await importBundle(bundleV2, scopeB, ctxB.user.id).catch((e: unknown) => e);
+    expect(direct).toBeInstanceOf(ApiError);
+    expect((direct as ApiError).status).toBe(409);
+    expect((direct as ApiError).code).toBe("bundle_conflict");
+
+    // The loser left NOTHING behind: still org A's row, still only 1.0.0.
+    expect(await packageOwner(PKG)).toBe(ctxA.orgId);
+    expect(await versionsOf(PKG)).toEqual(["1.0.0"]);
+  });
+
+  // Real concurrency needs two independent DB sessions holding the advisory
+  // lock — external PostgreSQL only (PGlite is single-connection).
+  describeRequiresPostgres("concurrent imports (advisory-locked claim)", () => {
+    it("two orgs importing the SAME packageId concurrently: exactly one wins, the loser leaves no rows", async () => {
+      const bytes = agentAfps("1.0.0");
+
+      const [a, b] = await Promise.allSettled([
+        handleImportBundle(bytes, scopeA, ctxA.user.id),
+        handleImportBundle(bytes, scopeB, ctxB.user.id),
+      ]);
+
+      const settled = [
+        { outcome: a, org: ctxA.orgId },
+        { outcome: b, org: ctxB.orgId },
+      ];
+      const winners = settled.filter((s) => s.outcome.status === "fulfilled");
+      const losers = settled.filter((s) => s.outcome.status === "rejected");
+
+      // Exactly one succeeds; the race loser rejects with the typed conflict.
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(1);
+      const loserErr = (losers[0]!.outcome as PromiseRejectedResult).reason as unknown;
+      expect(loserErr).toBeInstanceOf(ApiError);
+      expect((loserErr as ApiError).status).toBe(409);
+      expect((loserErr as ApiError).code).toBe("bundle_conflict");
+
+      // The surviving row belongs to the WINNER, and the loser attached no
+      // version row (pre-fix: both calls succeeded and the loser grafted its
+      // version onto the winner's package).
+      expect(await packageOwner(PKG)).toBe(winners[0]!.org);
+      expect(await versionsOf(PKG)).toEqual(["1.0.0"]);
+
+      const won = (
+        winners[0]!.outcome as PromiseFulfilledResult<
+          Awaited<ReturnType<typeof handleImportBundle>>
+        >
+      ).value;
+      expect(won.imported[0]!.status).toBe("inserted");
+    });
   });
 });

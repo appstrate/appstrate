@@ -4,12 +4,20 @@
  * Unified user-scope connection aggregator backing `GET /api/me/connections`.
  *
  * Returns integration connections in a single shape, grouped by their
- * "source" (the package they connect to). Crosses orgs and applications —
- * the connection list belongs to the user, not to any single org context.
+ * "source" (the package they connect to).
+ *
+ * Scope depends on the caller's AUTHORITY, not just their identity:
+ *   - Interactive user credentials (dashboard cookie session, OAuth
+ *     dashboard/instance JWT) cross orgs and applications — the connection
+ *     list belongs to the user, not to any single org context.
+ *   - An API key authenticates as its CREATOR but is bound to one org +
+ *     one application; its listing is hard-scoped to that (org, app) pair
+ *     at the SQL level so a leaked key can never enumerate the creator's
+ *     connections in other orgs/apps ({@link MeConnectionAuthority}).
  */
 
 import { db, toRows } from "@appstrate/db/client";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   applicationPackages,
   integrationConnections,
@@ -25,13 +33,44 @@ import { toISORequired } from "../lib/date-helpers.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
 
 /**
+ * The authority boundary of the credential presented on `/api/me/connections`.
+ *
+ * REQUIRED on every read/delete path of this module so the scoping decision
+ * is made explicitly at the callsite and lands in the SQL `WHERE` — a caller
+ * cannot "forget" to scope an API key.
+ *
+ *   - `user_global`: an interactive user credential (cookie session, OAuth
+ *     dashboard/instance JWT). Cross-org, cross-app by design — that is the
+ *     dashboard connections-management feature.
+ *   - `app_scoped`: an application-bound credential (API key). The key
+ *     authenticates as its creator, but its blast radius is one org + one
+ *     application; the listing is filtered to that pair at the DB level.
+ */
+export type MeConnectionAuthority =
+  | { kind: "user_global" }
+  | { kind: "app_scoped"; orgId: string; applicationId: string };
+
+/**
  * Fetch every integration_connections row owned by the actor, joined with
- * its application + integration package. Cross-app, cross-org.
+ * its application + integration package. Cross-app, cross-org for a
+ * `user_global` authority; pinned to the authority's (org, application)
+ * pair for `app_scoped` callers.
  */
 async function listAllActorIntegrationConnections(
   actor: Actor,
+  authority: MeConnectionAuthority,
 ): Promise<MeConnectionSourceGroup[]> {
   const ownerPredicate = actorFilter(actor, integrationConnections);
+  // Authority scope lands in the WHERE clause itself (not a post-filter):
+  // an app-scoped credential can only ever SELECT rows of its own
+  // (org, application) pair.
+  const authorityPredicates =
+    authority.kind === "app_scoped"
+      ? [
+          eq(integrationConnections.applicationId, authority.applicationId),
+          eq(applications.orgId, authority.orgId),
+        ]
+      : [];
 
   const rows = await db
     .select({
@@ -52,7 +91,7 @@ async function listAllActorIntegrationConnections(
     })
     .from(integrationConnections)
     .innerJoin(applications, eq(integrationConnections.applicationId, applications.id))
-    .where(ownerPredicate);
+    .where(and(ownerPredicate, ...authorityPredicates));
 
   if (rows.length === 0) return [];
 
@@ -188,10 +227,16 @@ async function listAllActorIntegrationConnections(
 
 /**
  * Unified user-scope listing of integration connection groups, sorted
- * alphabetically by display name.
+ * alphabetically by display name. `authority` is required — the route
+ * derives it from the authentication method so an application-bound
+ * credential (API key) is scoped to its own (org, application) pair
+ * while interactive user credentials keep the cross-org dashboard view.
  */
-export async function listMeConnections(actor: Actor): Promise<MeConnectionSourceGroup[]> {
-  const integrations = await listAllActorIntegrationConnections(actor);
+export async function listMeConnections(
+  actor: Actor,
+  authority: MeConnectionAuthority,
+): Promise<MeConnectionSourceGroup[]> {
+  const integrations = await listAllActorIntegrationConnections(actor, authority);
   integrations.sort((a, b) => a.display_name.localeCompare(b.display_name));
   return integrations;
 }

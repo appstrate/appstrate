@@ -31,19 +31,19 @@ describe("initSystemModelProviderKeys — duplicate id dedupe (pre-side-effect)"
   });
 
   it("drops the duplicate entry whole — its models never reach systemModels", () => {
-    seedTestModelProviders(); // ensures the `test-oauth` providerId resolves
+    seedTestModelProviders(); // ensures the `test-apikey` providerId resolves
 
     initSystemModelProviderKeys([
       {
         id: "dup",
-        providerId: "test-oauth",
+        providerId: "test-apikey",
         apiKey: "key-winner",
         models: [{ id: "model-winner", modelId: "m1" }],
       },
       {
         // Same id → must be skipped BEFORE its models are parsed.
         id: "dup",
-        providerId: "test-oauth",
+        providerId: "test-apikey",
         apiKey: "key-loser",
         models: [{ id: "model-loser", modelId: "m2" }],
       },

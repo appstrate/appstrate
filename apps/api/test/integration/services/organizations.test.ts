@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { truncateAll } from "../../helpers/db.ts";
-import { createTestUser } from "../../helpers/auth.ts";
+import { eq } from "drizzle-orm";
+import { db, truncateAll } from "../../helpers/db.ts";
+import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
+import { seedPackage, seedSchedule } from "../../helpers/seed.ts";
+import { schedules } from "@appstrate/db/schema";
 import {
   createOrganization,
   getUserOrganizations,
@@ -209,6 +212,102 @@ describe("organizations service", () => {
       await expect(removeMember(org.id, "00000000-0000-0000-0000-000000000000")).rejects.toThrow(
         /not found/i,
       );
+    });
+
+    // ── CRIT-13 — removeMember disables the member's schedules ──
+    //
+    // A removed member keeps their `user` row (multi-org), and schedules only
+    // cascade on user-ACCOUNT or org deletion — without the transactional
+    // disable inside removeMember, their schedules would keep firing under
+    // the revoked identity. These regressions FAIL if that disable is
+    // reverted.
+
+    it("removeMember disables the member's enabled schedules in that org (CRIT-13)", async () => {
+      const { org, defaultAppId } = await createTestOrg(userId, { slug: "sched-revoke" });
+      const member = await createTestUser({ email: "sched-owner@test.com" });
+      await addMember(org.id, member.id, "member");
+
+      const pkg = await seedPackage({ orgId: org.id, id: "@sched-revoke/agent" });
+      const memberSchedule = await seedSchedule({
+        packageId: pkg.id,
+        orgId: org.id,
+        applicationId: defaultAppId,
+        userId: member.id,
+        enabled: true,
+        nextRunAt: new Date(Date.now() + 3600_000),
+      });
+      // The OWNER's schedule must be untouched by the member's removal.
+      const ownerSchedule = await seedSchedule({
+        packageId: pkg.id,
+        orgId: org.id,
+        applicationId: defaultAppId,
+        userId,
+        enabled: true,
+        nextRunAt: new Date(Date.now() + 3600_000),
+      });
+
+      await removeMember(org.id, member.id);
+
+      const [revoked] = await db
+        .select({ enabled: schedules.enabled, nextRunAt: schedules.nextRunAt })
+        .from(schedules)
+        .where(eq(schedules.id, memberSchedule.id));
+      // Disabled, not deleted — the row stays as org history.
+      expect(revoked).toBeDefined();
+      expect(revoked!.enabled).toBe(false);
+      expect(revoked!.nextRunAt).toBeNull();
+
+      const [untouched] = await db
+        .select({ enabled: schedules.enabled, nextRunAt: schedules.nextRunAt })
+        .from(schedules)
+        .where(eq(schedules.id, ownerSchedule.id));
+      expect(untouched!.enabled).toBe(true);
+      expect(untouched!.nextRunAt).not.toBeNull();
+    });
+
+    it("removeMember only disables schedules in THAT org — the member's other-org schedules keep firing (CRIT-13)", async () => {
+      const member = await createTestUser({ email: "multi-org-sched@test.com" });
+
+      const { org: org1, defaultAppId: app1 } = await createTestOrg(userId, { slug: "rev-org1" });
+      await addMember(org1.id, member.id, "member");
+      const { org: org2, defaultAppId: app2 } = await createTestOrg(member.id, {
+        slug: "rev-org2",
+      });
+
+      const pkg1 = await seedPackage({ orgId: org1.id, id: "@rev-org1/agent" });
+      const pkg2 = await seedPackage({ orgId: org2.id, id: "@rev-org2/agent" });
+
+      const inOrg1 = await seedSchedule({
+        packageId: pkg1.id,
+        orgId: org1.id,
+        applicationId: app1,
+        userId: member.id,
+        enabled: true,
+        nextRunAt: new Date(Date.now() + 3600_000),
+      });
+      const inOrg2 = await seedSchedule({
+        packageId: pkg2.id,
+        orgId: org2.id,
+        applicationId: app2,
+        userId: member.id,
+        enabled: true,
+        nextRunAt: new Date(Date.now() + 3600_000),
+      });
+
+      await removeMember(org1.id, member.id);
+
+      const [revoked] = await db
+        .select({ enabled: schedules.enabled })
+        .from(schedules)
+        .where(eq(schedules.id, inOrg1.id));
+      expect(revoked!.enabled).toBe(false);
+
+      const [surviving] = await db
+        .select({ enabled: schedules.enabled, nextRunAt: schedules.nextRunAt })
+        .from(schedules)
+        .where(eq(schedules.id, inOrg2.id));
+      expect(surviving!.enabled).toBe(true);
+      expect(surviving!.nextRunAt).not.toBeNull();
     });
 
     it("updateMemberRole changes the role", async () => {

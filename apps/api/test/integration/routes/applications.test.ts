@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedApiKey, seedApplication } from "../../helpers/seed.ts";
-import { applications } from "@appstrate/db/schema";
+import {
+  seedApiKey,
+  seedApplication,
+  seedPackage,
+  seedInstalledPackage,
+} from "../../helpers/seed.ts";
+import { assertDbMissing } from "../../helpers/assertions.ts";
+import { applications, applicationPackages } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -224,6 +230,96 @@ describe("Applications API", () => {
         headers: bearer,
       });
       expect(res.status).not.toBe(403);
+    });
+  });
+
+  // ── CRIT-05 — PUT on a not-installed package must NOT implicitly install ──
+  //
+  // `updateInstalledPackage` used to upsert unconditionally, so a
+  // `PUT /applications/:id/packages/:packageId` for a package with no
+  // `application_packages` row silently CREATED the association (an implicit
+  // install bypassing the POST install path). The public route now passes
+  // `requireInstalled: true`: no pre-existing row → 404, no row created.
+  describe("PUT /api/applications/:id/packages/:packageId requires a prior install (CRIT-05)", () => {
+    function putPackage(packageId: string, body: Record<string, unknown> = { config: { k: "v" } }) {
+      return app.request(`/api/applications/${ctx.defaultAppId}/packages/${packageId}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    }
+
+    function installedRowWhere(packageId: string) {
+      return and(
+        eq(applicationPackages.applicationId, ctx.defaultAppId),
+        eq(applicationPackages.packageId, packageId),
+      )!;
+    }
+
+    it("404s for an org-owned package that is NOT installed, and creates no association row", async () => {
+      // The package exists and is visible to the org — only the install is missing.
+      await seedPackage({ id: "@testorg/not-installed", orgId: ctx.orgId });
+
+      const res = await putPackage("@testorg/not-installed");
+
+      expect(res.status).toBe(404);
+      // The regression: pre-fix this PUT upserted the row (implicit install).
+      await assertDbMissing(applicationPackages, installedRowWhere("@testorg/not-installed"));
+    });
+
+    it("succeeds on the exact same PUT once the package IS installed (feature intact)", async () => {
+      await seedPackage({ id: "@testorg/installed-pkg", orgId: ctx.orgId });
+      await seedInstalledPackage(ctx.defaultAppId, "@testorg/installed-pkg");
+
+      const res = await putPackage("@testorg/installed-pkg", { config: { hello: "world" } });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { object: string; config?: Record<string, unknown> };
+      expect(body.object).toBe("application_package");
+      const [row] = await db
+        .select({ config: applicationPackages.config })
+        .from(applicationPackages)
+        .where(installedRowWhere("@testorg/installed-pkg"));
+      expect(row?.config).toEqual({ hello: "world" });
+    });
+
+    it("404s for a package owned by ANOTHER org, and creates no association row", async () => {
+      const foreignCtx = await createTestContext({ orgSlug: "foreignorg" });
+      await seedPackage({ id: "@foreignorg/theirs", orgId: foreignCtx.orgId });
+
+      const res = await putPackage("@foreignorg/theirs");
+
+      expect(res.status).toBe(404);
+      await assertDbMissing(applicationPackages, installedRowWhere("@foreignorg/theirs"));
+    });
+  });
+
+  // ── CRIT-05 — a historical stray association must not leak on the list ──
+  //
+  // The old unconditional-upsert PUT could create an `application_packages`
+  // row pointing at ANOTHER org's package. Blocking new creations is not
+  // enough: `listInstalledPackages` must also refuse to resolve such a row,
+  // or the foreign package's draft_manifest leaks through
+  // `GET /api/applications/:id/packages`.
+  describe("GET /api/applications/:id/packages excludes stray cross-org associations (CRIT-05)", () => {
+    it("omits a foreign-org package attached by a corrupted association row", async () => {
+      const foreignCtx = await createTestContext({ orgSlug: "foreignorg" });
+      await seedPackage({ id: "@foreignorg/leaky", orgId: foreignCtx.orgId });
+      await seedPackage({ id: "@testorg/mine", orgId: ctx.orgId });
+      // Insert both associations directly in DB — the stray one simulates a
+      // row created by the pre-fix vulnerable PUT.
+      await seedInstalledPackage(ctx.defaultAppId, "@foreignorg/leaky");
+      await seedInstalledPackage(ctx.defaultAppId, "@testorg/mine");
+
+      const res = await app.request(`/api/applications/${ctx.defaultAppId}/packages`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ packageId: string }> };
+      const ids = body.data.map((row) => row.packageId);
+      expect(ids).toContain("@testorg/mine");
+      expect(ids).not.toContain("@foreignorg/leaky");
     });
   });
 });

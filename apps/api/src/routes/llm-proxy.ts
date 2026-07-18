@@ -41,7 +41,9 @@
  *
  * Observability:
  *   - `X-Run-Id` request header (optional; Phase 4 populates it) pins
- *     a call to a specific `runs` row so cost rolls up per-run.
+ *     a call to a specific `runs` row so cost rolls up per-run. The id is
+ *     validated against the principal (org + application + actor for JWT
+ *     users) before the upstream call — see {@link assertRunAttributable}.
  *   - Audit log on every call (authMethod, principalId, preset, status,
  *     duration).
  */
@@ -51,8 +53,9 @@ import type { Context } from "hono";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { invalidRequest } from "../lib/errors.ts";
+import { invalidRequest, forbidden, notFound } from "../lib/errors.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { getRunAttribution } from "../services/state/runs.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
 import {
   proxyLlmCall,
@@ -63,7 +66,7 @@ import {
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
-import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
+import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -122,6 +125,45 @@ export function createLlmProxyRouter() {
   return router;
 }
 
+/**
+ * Validate a caller-supplied `X-Run-Id` against the calling principal
+ * (CRIT-07). The header pins the call's `llm_usage` row to a run, and
+ * `computeRunCost` rolls those rows up into `runs.cost` — so an unvalidated
+ * id would let any principal holding `llm-proxy:call` inflate the cost of
+ * any run whose id it knows, including runs of other tenants.
+ *
+ * Checks, in order:
+ *   1. The run exists inside the principal's org (`getRunAttribution` is
+ *      org-scoped) — unknown and cross-org ids both map to the same 404 so
+ *      a foreign tenant's run id cannot be probed for existence.
+ *   2. The run belongs to the same application as the auth context, when the
+ *      context carries one (always true for API keys — they are app-bound;
+ *      JWT strategies may resolve without an application, in which case the
+ *      org boundary plus the actor check below is the enforced scope).
+ *   3. For an actor-bound identity (`jwt_user`), the run must belong to that
+ *      same user — a JWT user cannot attribute spend to another actor's run.
+ *      API-key principals are app-scoped infrastructure identities (the run
+ *      may legitimately carry a user/end-user actor or a sibling key), so the
+ *      org + application boundary is their enforcement line.
+ */
+async function assertRunAttributable(
+  c: Context<AppEnv>,
+  runId: string,
+  principal: LlmProxyPrincipal,
+): Promise<void> {
+  const run = await getRunAttribution(principal.orgId, runId);
+  if (!run) {
+    throw notFound(`run ${runId} not found`);
+  }
+  const applicationId = c.get("applicationId");
+  if (applicationId && run.applicationId !== applicationId) {
+    throw notFound(`run ${runId} not found`);
+  }
+  if (principal.kind === "jwt_user" && run.userId !== principal.userId) {
+    throw forbidden("X-Run-Id does not reference a run owned by the calling user");
+  }
+}
+
 async function handleProxy(
   c: Context<AppEnv>,
   adapter: LlmProxyAdapter,
@@ -138,6 +180,13 @@ async function handleProxy(
 
   const runIdHeader = c.req.header("X-Run-Id");
   const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
+  // CRIT-07 guard — `X-Run-Id` is caller-supplied and feeds
+  // `llm_usage.run_id` → `computeRunCost` → `runs.cost`. Validate it against
+  // the principal BEFORE the upstream call so a caller with `llm-proxy:call`
+  // cannot bill LLM cost onto an arbitrary (even cross-tenant) run.
+  if (runId) {
+    await assertRunAttributable(c, runId, principal);
+  }
 
   const buf = await c.req.arrayBuffer();
   if (buf.byteLength === 0) {

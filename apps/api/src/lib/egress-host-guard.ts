@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { resolveAndCheckHost, isBlockedUrl, type ResolvedHostCheck } from "@appstrate/core/ssrf";
+import {
+  resolveAndCheckHost,
+  isBlockedUrl,
+  guardedFetch,
+  type GuardedFetchOptions,
+  type ResolvedHostCheck,
+} from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 
 /**
@@ -42,7 +48,20 @@ export function isBlockedEgressUrl(url: string): boolean {
 export type EgressUrlBlockReason = "invalid-url" | "blocked-scheme" | "blocked-host";
 
 export type EgressUrlCheck =
-  | { ok: true; hostname: string }
+  | {
+      ok: true;
+      hostname: string;
+      /**
+       * The DNS-validated address the caller MUST connect to. Connecting by
+       * name instead re-resolves at connect time and reopens the DNS-rebind
+       * TOCTOU the guard just closed. For an operator-trusted host
+       * (`EGRESS_ALLOW_INTERNAL_HOSTS`) this is the hostname itself —
+       * name-based connect is the trusted-by-design path there. Callers that
+       * fetch (rather than own a raw socket) should use
+       * {@link egressGuardedFetch}, which pins each hop itself.
+       */
+      pinnedAddress: string;
+    }
   | { ok: false; reason: EgressUrlBlockReason; hostname: string | null; detail?: string };
 
 export interface CheckEgressUrlOptions {
@@ -109,5 +128,34 @@ export async function checkEgressUrl(
   if (hostCheck.blocked) {
     return { ok: false, reason: "blocked-host", hostname, detail: hostCheck.reason };
   }
-  return { ok: true, hostname };
+  return { ok: true, hostname, pinnedAddress: hostCheck.pinnedAddress };
+}
+
+/**
+ * Canonical platform-egress TRANSPORT for a fetch to an operator/agent-supplied
+ * URL: {@link guardedFetch} pre-wired with the operator internal-host allowlist
+ * so runtime egress sites (credential proxy, webhook delivery, …) share ONE
+ * outbound primitive. Per hop it DNS-resolves + blocklist-checks the host and —
+ * under Bun with the global fetch — connects to the validated address while
+ * preserving the logical `Host` header and TLS SNI/certificate identity, so
+ * the check-then-fetch DNS-rebind TOCTOU is closed rather than merely
+ * re-checked. Redirects are always followed manually with the full guard
+ * re-run on every hop.
+ *
+ * Allowlist-scoped callers (credential proxy `authorized_uris`) pass
+ * `validateHop` to extend their own reachability contract to every redirect
+ * hop (a throw aborts the exchange) and `sensitiveHeaders` to add
+ * vendor-specific credential header names to the cross-origin strip set —
+ * both flow through to {@link guardedFetch} unchanged.
+ *
+ * Callers still run {@link checkEgressUrl} first when they need the richer
+ * pre-flight decision (scheme floor options, non-throwing result shape); this
+ * wrapper is the actual wire call.
+ */
+export function egressGuardedFetch(
+  input: string | URL,
+  init?: RequestInit,
+  opts?: Omit<GuardedFetchOptions, "allowHost">,
+): Promise<Response> {
+  return guardedFetch(input, init, { ...opts, allowHost: isAllowedInternalIdpHost });
 }

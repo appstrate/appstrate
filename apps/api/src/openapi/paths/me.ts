@@ -86,8 +86,10 @@ export const mePaths = {
       summary: "List the caller's connections across every org/app",
       description:
         "Unified user-scope view of the caller's integration connections under a " +
-        "single shape, grouped by source package. Crosses orgs/applications by " +
-        "design — does NOT require `X-Org-Id`.",
+        "single shape, grouped by source package. For interactive user credentials " +
+        "(cookie session, dashboard/instance JWT) it crosses orgs/applications by " +
+        "design — does NOT require `X-Org-Id`. For an API key the list is scoped " +
+        "to the key's bound organization and application only.",
       responses: {
         "200": {
           description: "Connection groups",
@@ -333,7 +335,9 @@ export const mePaths = {
         "every reference (admin pins, member pins, run snapshots, schedule overrides). " +
         "Intent is destructive: 'I never want to use this credential anywhere again'. " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
-        "drop the member pin instead (see `DELETE /api/me/integration-pins`).",
+        "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
+        "With an API key, only connections inside the key's bound organization and " +
+        "application can be deleted (204 with no effect otherwise).",
       parameters: [
         {
           name: "connectionId",

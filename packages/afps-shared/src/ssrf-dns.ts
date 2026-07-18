@@ -7,12 +7,13 @@
  * `isBlockedHost` alone is literal-only: a DNS name whose A/AAAA record
  * points at an internal address (10.x, 169.254.169.254, …) passes it, and
  * a consumer that re-resolves the name at connect time is open to a
- * DNS-rebind bypass. Consumers that control the raw connection (sidecar
- * egress listeners) close that gap fully by connecting to the returned
- * `pinnedAddress`; consumers that delegate the connection to `fetch`
- * (platform CIMD guard, MITM upstream, credential proxy, CLI api_call
- * engine) use it as fail-closed defence-in-depth with a documented
- * residual TOCTOU.
+ * DNS-rebind bypass. Consumers that control the connection close that gap
+ * fully by connecting to the returned `pinnedAddress`: sidecar egress
+ * listeners own the raw socket, and `guardedFetch` (./guarded-fetch.ts)
+ * rewrites the request URL to the pin while preserving Host + TLS SNI
+ * (Bun). A consumer that instead delegates the connection to a plain
+ * name-based `fetch` only gets fail-closed defence-in-depth with a
+ * residual re-resolve TOCTOU — prefer `guardedFetch`.
  *
  * Kept in its own subpath (not `./ssrf`) so the literal module stays free
  * of node builtins — this module needs `node:dns` + `node:net` and is

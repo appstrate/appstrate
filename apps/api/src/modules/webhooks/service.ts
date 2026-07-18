@@ -25,7 +25,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
  */
 type WebhookRow = InferSelectModel<typeof webhooks>;
 type WebhookDeliveryRow = InferSelectModel<typeof webhookDeliveries>;
-import { isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
+import { isBlockedUrl, guardedFetch, SsrfBlockedError } from "@appstrate/core/ssrf";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
@@ -661,57 +661,67 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   let statusCode: number | undefined;
   let errorMessage: string | undefined;
 
-  // SSRF at DELIVERY time. `validateWebhookUrl` runs only at create/update with
-  // the literal `isBlockedUrl` (no DNS) — a hostname whose A record points at
-  // 169.254.169.254 / RFC1918 passes it and then resolves to the internal
-  // address here. Re-resolve + block on EVERY delivery (fail closed). Webhooks
-  // are HTTPS-only (validateWebhookUrl), so we cannot pin the connection to
-  // `pinnedAddress` without breaking TLS SNI/cert validation; the residual
-  // re-resolve TOCTOU is the same documented, accepted window as every other
-  // `fetch`-delegating guard (see ssrf-dns.ts). `redirect: "manual"` below
-  // still prevents redirect-based rebind.
-  const hostCheck = await resolveAndCheckHost(new URL(wh.url).hostname);
-  if (hostCheck.blocked) {
-    logger.warn("Webhook delivery blocked by SSRF guard", {
-      webhookId,
-      eventId,
-      attempt,
-      reason: hostCheck.reason,
-    });
-    await db.insert(webhookDeliveries).values({
-      webhookId,
-      eventId,
-      eventType,
-      status: "failed",
-      statusCode: null,
-      latency: 0,
-      attempt,
-      error: `Delivery target resolves to a blocked address (${hostCheck.reason})`,
-    });
-    throw new PermanentJobError(
-      `Delivery target resolves to a blocked address (${hostCheck.reason})`,
-    );
-  }
-
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
 
-    const res = await fetch(wh.url, {
-      method: "POST",
-      headers,
-      body: payload,
-      signal: controller.signal,
-      redirect: "manual", // Do NOT follow redirects (SSRF protection)
-    });
+    try {
+      // SSRF at DELIVERY time through the single guarded egress primitive.
+      // `validateWebhookUrl` runs only at create/update with the literal
+      // `isBlockedUrl` (no DNS) — a hostname whose A record points at
+      // 169.254.169.254 / RFC1918 passes it; `guardedFetch` re-resolves and
+      // blocks HERE, on every delivery (fail closed), and CONNECTS to the
+      // validated address while preserving the Host header and TLS SNI —
+      // the old re-resolve TOCTOU window is closed, not just re-checked.
+      // `maxRedirects: 0` — a signed payload must never be re-sent to a
+      // Location target (guardedFetch never auto-follows anyway; 0 turns any
+      // 3xx answer into an error instead of a hop).
+      const res = await guardedFetch(
+        wh.url,
+        {
+          method: "POST",
+          headers,
+          body: payload,
+          signal: controller.signal,
+        },
+        { maxRedirects: 0, logger },
+      );
+      statusCode = res.status;
 
-    clearTimeout(timeout);
-    statusCode = res.status;
-
-    // Drain body to free resources
-    await res.text().catch(() => {});
+      // Drain body to free resources
+      await res.text().catch(() => {});
+    } finally {
+      clearTimeout(timeout);
+    }
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
+    if (err instanceof SsrfBlockedError && err.reason === "too-many-redirects") {
+      // The endpoint answered with a redirect. Transient-failure semantics —
+      // same retry behaviour as the former `redirect: "manual"` 3xx response.
+      errorMessage = "Delivery endpoint responded with a redirect (redirects are not followed)";
+    } else if (err instanceof SsrfBlockedError) {
+      // blocked-literal / blocked-resolved / resolution-failed — permanent,
+      // same as the former pre-delivery host check.
+      logger.warn("Webhook delivery blocked by SSRF guard", {
+        webhookId,
+        eventId,
+        attempt,
+        reason: err.reason,
+      });
+      await db.insert(webhookDeliveries).values({
+        webhookId,
+        eventId,
+        eventType,
+        status: "failed",
+        statusCode: null,
+        latency: Date.now() - start,
+        attempt,
+        error: `Delivery target resolves to a blocked address (${err.reason})`,
+      });
+      throw new PermanentJobError(`Delivery target resolves to a blocked address (${err.reason})`);
+    } else if (
+      err instanceof DOMException &&
+      (err.name === "AbortError" || err.name === "TimeoutError")
+    ) {
       errorMessage = "Delivery timeout (15s)";
     } else {
       errorMessage = getErrorMessage(err);

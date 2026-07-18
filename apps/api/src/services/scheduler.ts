@@ -3,9 +3,9 @@
 import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { getCache } from "../infra/index.ts";
-import { eq, asc, inArray, sql } from "drizzle-orm";
+import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { schedules, endUsers } from "@appstrate/db/schema";
+import { schedules, endUsers, organizationMembers } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
@@ -158,6 +158,78 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
 }
 
 /**
+ * Remove the repeatable BullMQ jobs for a batch of schedules whose rows were
+ * just disabled by a membership-revocation path (e.g. `removeMember`).
+ * Best-effort per id: the DB row is the source of truth (already disabled,
+ * atomically with the revocation), and the fire-time actor revalidation in
+ * {@link triggerScheduledRun} is the backstop for any job that survives a
+ * removal failure — so an error here is logged, never rethrown.
+ */
+export async function removeScheduleJobs(scheduleIds: readonly string[]): Promise<void> {
+  for (const scheduleId of scheduleIds) {
+    try {
+      await removeScheduleJob(scheduleId);
+    } catch (err) {
+      logger.error("Failed to remove schedule job after membership revocation", {
+        scheduleId,
+        error: getErrorMessage(err),
+      });
+    }
+  }
+}
+
+/**
+ * Fire-time actor revalidation (CRIT-13). The BullMQ job payload freezes the
+ * actor at schedule create/update, and the schedule row only cascades on
+ * user-ACCOUNT or org deletion — a member removed from the org keeps their
+ * `user` row (multi-org), so their schedules would otherwise keep firing as
+ * them. Re-check on EVERY fire that the frozen actor still holds the
+ * identity the schedule runs as: a member must still belong to the
+ * schedule's org, an end-user must still exist in the schedule's application.
+ */
+async function isScheduleActorValid(
+  actor: Actor,
+  orgId: string,
+  applicationId: string,
+): Promise<boolean> {
+  if (actor.type === "user") {
+    const [row] = await db
+      .select({ userId: organizationMembers.userId })
+      .from(organizationMembers)
+      .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, actor.id)))
+      .limit(1);
+    return row !== undefined;
+  }
+  const [row] = await db
+    .select({ id: endUsers.id })
+    .from(endUsers)
+    .where(and(eq(endUsers.id, actor.id), eq(endUsers.applicationId, applicationId)))
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * Disable a schedule whose frozen actor failed fire-time revalidation:
+ * DB row first (source of truth for the UI and the boot sync), then the
+ * repeatable queue job (best-effort — a failure here just means the next
+ * fire hits the same revalidation and retries the removal).
+ */
+async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
+  await db
+    .update(schedules)
+    .set({ enabled: false, nextRunAt: null, updatedAt: new Date() })
+    .where(eq(schedules.id, scheduleId));
+  try {
+    await removeScheduleJob(scheduleId);
+  } catch (err) {
+    logger.error("Failed to remove schedule job for invalid actor", {
+      scheduleId,
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+/**
  * Same-instance in-flight guard: the set of schedule-fire occurrence keys this
  * process is currently executing. Prevents a second concurrent delivery of the
  * SAME occurrence on this instance from double-triggering (belt-and-suspenders
@@ -246,9 +318,11 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
       dependencyOverrides,
     });
 
-    // Update schedule timestamps
+    // Update schedule timestamps. `enabled` is re-read here because the
+    // trigger may have just disabled the schedule (invalid actor) — a
+    // disabled schedule must not get a fresh nextRunAt re-armed onto it.
     const schedule = await getSchedule(scheduleId, { orgId, applicationId });
-    const nextRun = schedule
+    const nextRun = schedule?.enabled
       ? computeNextRun(schedule.cron_expression, schedule.timezone ?? "UTC")
       : null;
 
@@ -401,6 +475,31 @@ export async function triggerScheduledRun(
   }
 
   try {
+    // Revalidate the frozen actor BEFORE any preflight (CRIT-13): the job
+    // payload carries the actor as it was at schedule create/update, and a
+    // removed org member / deleted end-user must not keep executing runs
+    // under that identity. On failure the schedule is disabled, its queue
+    // job removed, and a VISIBLE failed run is recorded — never a silent
+    // skip, and never a false-positive `success` (see the actor-less
+    // schedule incident, issue #735).
+    if (!(await isScheduleActorValid(actor, orgId, applicationId))) {
+      logger.warn("Schedule actor is no longer valid — disabling schedule", {
+        scheduleId,
+        packageId,
+        orgId,
+        applicationId,
+        actorType: actor.type,
+        actorId: actor.id,
+      });
+      await disableScheduleForInvalidActor(scheduleId);
+      await failSchedule(
+        actor.type === "user"
+          ? "Schedule disabled: its actor is no longer a member of this organization"
+          : "Schedule disabled: its end-user actor no longer exists in this application",
+      );
+      return;
+    }
+
     const draftAgent = await getPackage(packageId, orgId);
     if (!draftAgent) {
       logger.warn("Package not found, skipping schedule", { packageId, scheduleId });

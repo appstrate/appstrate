@@ -93,6 +93,7 @@ async function seedAndResolve(
   await seedInstalledPackage(ctx.defaultAppId, INTEG);
   await seedConnection(ctx);
   return resolveIntegrationSpawns({
+    orgId: ctx.orgId,
     applicationId: ctx.defaultAppId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(opts.integrationsConfiguration),

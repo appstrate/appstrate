@@ -30,7 +30,11 @@
  */
 
 import { z } from "zod";
-import type { AppstrateModule } from "@appstrate/core/module";
+import type {
+  AppstrateModule,
+  BeforeSignupContext,
+  AfterSignupContext,
+} from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
 // Register module-owned RBAC resources. OAuth client registration /
@@ -67,7 +71,8 @@ import {
 import { ensureCliClient } from "./services/ensure-cli-client.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
-import { setRealmResolver } from "@appstrate/db/auth";
+import { bindIssuedMagicLink } from "./services/oauth-transaction-binding.ts";
+import { setRealmResolver, setMagicLinkIssuedHook } from "@appstrate/db/auth";
 import { setRunnerResolver } from "../../lib/runner-resolver.ts";
 import { lookupCliDeviceName } from "./services/cli-tokens.ts";
 
@@ -91,6 +96,11 @@ const oidcModule: AppstrateModule = {
     // keep the default "platform" realm. See the resolver file header and
     // `packages/db/src/auth.ts::setRealmResolver` for the full contract.
     setRealmResolver(oidcRealmResolver);
+    // Persist the server-side `(magic-link token → OAuth client)` binding at
+    // issuance time so the BA-driven `/magic-link/verify` create leg can
+    // resolve the realm from state the browser cannot strip or forge —
+    // see `services/oauth-transaction-binding.ts` (CRIT-15).
+    setMagicLinkIssuedHook(bindIssuedMagicLink);
     // Auto-provision the instance-level first-party OIDC client for the
     // platform dashboard SPA. Idempotent — skips if one already exists.
     const env = getEnv();
@@ -275,13 +285,26 @@ const oidcModule: AppstrateModule = {
   hooks: {
     // Blocks the creation of orphan Better Auth users when a visitor tries
     // to sign up through an org-level OAuth client with `allow_signup=false`.
-    // The guard reads the signed `oidc_pending_client` cookie set by the
-    // OIDC entry pages (`GET /api/oauth/{login,register,magic-link}`) to
-    // identify which client is in play — the cookie survives the social
-    // round-trip that BA's native `/api/auth/sign-in/social` bounces through.
+    // The guard resolves the in-flight client from the OAuth TRANSACTION
+    // BINDING (state-keyed for social, token-keyed for magic-link,
+    // server-authored cookie for the register path) — see
+    // `services/oauth-transaction-binding.ts`. The core wiring forwards the
+    // BA endpoint's `path` + `query` alongside the typed
+    // `BeforeSignupContext.headers`; narrow to read them.
     // Pass-through on every signup that is not gated by an org-level client.
     beforeSignup: async (email, ctx) => {
-      await oidcBeforeSignupGuard({ user: { email }, headers: ctx?.headers ?? null });
+      const tx = ctx as
+        | (BeforeSignupContext & {
+            path?: string | null;
+            query?: Record<string, unknown> | null;
+          })
+        | undefined;
+      await oidcBeforeSignupGuard({
+        user: { email },
+        headers: ctx?.headers ?? null,
+        path: tx?.path ?? null,
+        query: tx?.query ?? null,
+      });
     },
     // Symmetric post-signup: on a BA user freshly created through an
     // org-level client with `allowSignup=true`, auto-join them to the org
@@ -289,7 +312,18 @@ const oidcModule: AppstrateModule = {
     // `oidcAfterSignupHandler` docstring for why `buildOrgLevelClaims` alone
     // isn't enough for the social code path.
     afterSignup: async (user, ctx) => {
-      await oidcAfterSignupHandler({ user, headers: ctx?.headers ?? null });
+      const tx = ctx as
+        | (AfterSignupContext & {
+            path?: string | null;
+            query?: Record<string, unknown> | null;
+          })
+        | undefined;
+      await oidcAfterSignupHandler({
+        user,
+        headers: ctx?.headers ?? null,
+        path: tx?.path ?? null,
+        query: tx?.query ?? null,
+      });
     },
   },
 };

@@ -120,6 +120,7 @@ describe("resolveIntegrationSpawns — env-delivery egress signal (#543)", () =>
     await seedAll(ctx, integManifest());
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -144,6 +145,7 @@ describe("resolveIntegrationSpawns — env-delivery egress signal (#543)", () =>
     await seedAll(ctx, integManifest({ allowAllUris: true }));
 
     const specs = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),

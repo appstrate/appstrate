@@ -36,6 +36,7 @@
  */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
@@ -43,11 +44,11 @@ import { listOrgModels } from "../services/org-models.ts";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { listMeConnections } from "../services/me-connections.ts";
+import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
 import { getActor } from "../lib/actor.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { requireAppContext } from "../middleware/app-context.ts";
-import { getAppScope, type ActorScope } from "../lib/scope.ts";
+import { getAppScope, type ActorScope, type AppScope } from "../lib/scope.ts";
 import {
   upsertMemberPin,
   deleteMemberPin,
@@ -66,6 +67,30 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 
 const router = new Hono<AppEnv>();
+
+/**
+ * Derive the authority boundary of the presented credential for the
+ * `/me/connections` surface (list + delete).
+ *
+ * An API key authenticates as its CREATOR (`c.get("user")` is the key's
+ * creator), but the key itself is bound to one org + one application and its
+ * bearer is a long-lived secret that may be handed to a third-party
+ * application. The cross-org/cross-app view is an interactive-dashboard
+ * feature — it must never be reachable with an API key, or a leaked key
+ * could enumerate (and destructively delete) the creator's connections in
+ * every org they belong to. The API-key auth branch always pins both ids
+ * on the context; their absence under `api_key` is an auth-pipeline bug,
+ * so fail closed rather than fall back to the global view.
+ */
+function getMeConnectionAuthority(c: Context<AppEnv>): MeConnectionAuthority {
+  if (c.get("authMethod") !== "api_key") return { kind: "user_global" };
+  const orgId = c.get("orgId");
+  const applicationId = c.get("applicationId");
+  if (!orgId || !applicationId) {
+    throw unauthorized("API key is missing its org/application binding");
+  }
+  return { kind: "app_scoped", orgId, applicationId };
+}
 
 /**
  * GET /api/me/orgs — list orgs the authenticated caller belongs to.
@@ -151,14 +176,21 @@ router.get("/models", requirePermission("models", "read"), async (c) => {
 /**
  * GET /api/me/connections — unified user-scope connection list.
  *
- * Returns every integration connection the caller owns across all orgs/apps
- * they're a member of. Source-grouped (one group per package).
- * Skips org context entirely: the connection list belongs to the user, not
- * to any org/application.
+ * For interactive user credentials (cookie session, OAuth dashboard/instance
+ * JWT): every integration connection the caller owns across all orgs/apps
+ * they're a member of — the connection list belongs to the user, not to any
+ * org/application, so org context is skipped entirely.
+ *
+ * For an API key: hard-scoped to the key's bound (org, application) pair —
+ * the key authenticates as its creator, but its bearer must not be able to
+ * enumerate the creator's connections in other orgs/apps
+ * (see {@link getMeConnectionAuthority}). Source-grouped (one group per
+ * package) in both cases.
  */
 router.get("/connections", async (c) => {
   const actor = getActor(c);
-  const groups = await listMeConnections(actor);
+  const authority = getMeConnectionAuthority(c);
+  const groups = await listMeConnections(actor, authority);
   return c.json(listResponse(groups));
 });
 
@@ -264,11 +296,15 @@ router.delete("/integration-pins", requireAppContext(), async (c) => {
  *
  * App context is implicit — the connection row carries `application_id`,
  * we re-derive scope from it instead of asking the SPA to send a header
- * for a per-row operation.
+ * for a per-row operation. EXCEPT for API-key callers: the key is bound to
+ * one (org, application) and a delete outside that boundary is refused (a
+ * leaked key must not be able to destroy the creator's credentials in other
+ * orgs/apps), so the key's own scope is used instead of the row-derived one.
  */
 router.delete("/connections/:connectionId", async (c) => {
   const connectionId = c.req.param("connectionId")!;
   const actor = getActor(c);
+  const authority = getMeConnectionAuthority(c);
 
   // The id hits a `uuid` column — a non-UUID would raise PG `22P02` and surface
   // as a 500. Validate first and short-circuit to 204: same non-disclosure
@@ -294,17 +330,35 @@ router.delete("/connections/:connectionId", async (c) => {
     return c.body(null, 204);
   }
 
-  // Pass an `ActorScope` (applicationId only, no orgId) deliberately.
-  // `/me/connections` is an actor-ownership boundary, not an app∈org one: a
-  // connection belongs to its owner regardless of which org the caller is
-  // currently scoped to. The absence of `orgId` tells the service to skip its
-  // app∈org assertion and rely solely on the (userId | endUserId) ownership
-  // predicate. Passing the caller's live `c.get("orgId")` here (populated for
-  // API-key/OIDC callers, empty for cookie sessions) would wrongly run that
-  // assertion and 404 a self-owned connection whose application lives in a
-  // different org. Ownership is still fully enforced downstream by the actor
-  // filter.
-  const scope: ActorScope = { applicationId: row.applicationId };
+  // Scope selection depends on the credential's authority:
+  //
+  //   - API key (`app_scoped`): the key is bound to one (org, application).
+  //     A connection outside that application short-circuits to 204 (same
+  //     non-disclosure as the "row not found" branch — a probing key learns
+  //     nothing), and the delete itself runs under the KEY'S `AppScope`, so
+  //     the service's app∈org assertion and its `applicationId` WHERE filter
+  //     both enforce the boundary in SQL.
+  //
+  //   - Interactive user credential (`user_global`): pass an `ActorScope`
+  //     (applicationId only, no orgId) deliberately. `/me/connections` is an
+  //     actor-ownership boundary, not an app∈org one: a connection belongs to
+  //     its owner regardless of which org the caller is currently scoped to.
+  //     The absence of `orgId` tells the service to skip its app∈org
+  //     assertion and rely solely on the (userId | endUserId) ownership
+  //     predicate. Passing the caller's live `c.get("orgId")` here (populated
+  //     for OIDC callers, empty for cookie sessions) would wrongly run that
+  //     assertion and 404 a self-owned connection whose application lives in
+  //     a different org. Ownership is still fully enforced downstream by the
+  //     actor filter.
+  let scope: AppScope | ActorScope;
+  if (authority.kind === "app_scoped") {
+    if (row.applicationId !== authority.applicationId) {
+      return c.body(null, 204);
+    }
+    scope = { orgId: authority.orgId, applicationId: authority.applicationId };
+  } else {
+    scope = { applicationId: row.applicationId } satisfies ActorScope;
+  }
   await deleteIntegrationConnection(scope, connectionId, actor);
   await recordAuditFromContext(c, {
     action: "integration.connection.deleted",
