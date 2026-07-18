@@ -16,9 +16,9 @@
     "test": "bun test test/"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^2",
+    "@ai-sdk/anthropic": "^3",
     "@ai-sdk/mcp": "^1.0.46",
-    "@ai-sdk/openai-compatible": "^1",
+    "@ai-sdk/openai-compatible": "^2",
     "@ai-sdk/react": "^3",
     "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",
