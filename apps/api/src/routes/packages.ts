@@ -538,8 +538,9 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         });
       }
 
+      let createdItem;
       try {
-        await createOrgItem(
+        createdItem = await createOrgItem(
           orgId,
           { id: packageId, content, createdBy: user.id },
           rcfg.cfg,
@@ -574,12 +575,18 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
 
-      // Create initial version (non-fatal)
+      // Create initial version (non-fatal). Snapshot the STORED draft
+      // manifest (not the pre-normalization request body): `createOrgItem`
+      // injects `$schema`/`type`/… and the jsonb round-trip reorders keys, so
+      // snapshotting `validatedManifest` produced a version whose bytes could
+      // never match a later rebuild from the draft. That byte drift defeated
+      // the publish dedup and, before #896, made every create-then-republish
+      // silently overwrite the artifact while keeping the stale integrity row.
       await createVersionSafe({
         packageId,
         orgId,
         userId: user.id,
-        manifest: validatedManifest,
+        manifest: asRecord(createdItem.draftManifest),
         normalizedFiles,
       });
 
@@ -1150,6 +1157,12 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     if ("error" in result) {
       if (result.error === "no_changes") {
         throw conflict("no_changes", "No changes since the last version");
+      }
+      if (result.error === "version_exists") {
+        throw conflict(
+          "version_exists",
+          "This version is already published and immutable — bump the version to publish the changed content",
+        );
       }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }

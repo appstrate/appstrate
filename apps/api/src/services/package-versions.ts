@@ -48,6 +48,17 @@ interface CreateVersionParams {
    * partial index.
    */
   deps?: DepEntry[];
+  /**
+   * Artifact upload, invoked INSIDE the transaction and ONLY when the outcome
+   * is `created` — i.e. strictly after the forward-only/exists decision, while
+   * the per-package advisory lock is held. This ordering is the #896 fix:
+   * uploading before the decision let an `exists` republish overwrite the
+   * published bytes while the row kept the old integrity hash (a permanent
+   * `bundle_integrity_mismatch` at run time), and let a `rejected` republish
+   * clobber-then-delete a perfectly good artifact. An upload failure rolls the
+   * version row back, so a committed row always had a successful upload.
+   */
+  uploadZip?: () => Promise<void>;
 }
 
 /**
@@ -57,15 +68,17 @@ interface CreateVersionParams {
  * Returns `null` ONLY for the legitimate no-op cases — an invalid semver, a
  * version that already exists (with no row to return), or a forward-only
  * rejection. A genuine DB failure THROWS so callers can distinguish a real
- * error from a benign skip (e.g. so the ZIP-cleanup path in
- * {@link createVersionAndUpload} fires and the import doesn't commit an
- * orphaned packages row without a version).
+ * error from a benign skip. A returned row carries `outcome` so callers can
+ * tell a fresh publish (`created`) from an already-existing version
+ * (`exists`) — the latter never touches the stored artifact.
  */
 export async function createPackageVersion(params: CreateVersionParams): Promise<{
   id: number;
   version: string;
+  outcome: "created" | "exists";
 } | null> {
-  const { packageId, version, integrity, artifactSize, manifest, createdBy, deps } = params;
+  const { packageId, version, integrity, artifactSize, manifest, createdBy, deps, uploadZip } =
+    params;
 
   if (!isValidVersion(version)) {
     logger.error("Invalid semver version", { packageId, version });
@@ -95,13 +108,16 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
     );
 
     if (outcome.action === "exists") {
+      // Published versions are immutable: return the existing row WITHOUT
+      // touching the stored artifact. Overwriting the bytes here while keeping
+      // the row's integrity hash is exactly the corruption reported in #896.
       logger.warn("Version already exists", { packageId, version });
       const [existingRow] = await tx
         .select({ id: packageVersions.id, version: packageVersions.version })
         .from(packageVersions)
         .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
         .limit(1);
-      return existingRow ?? null;
+      return existingRow ? { ...existingRow, outcome: "exists" as const } : null;
     }
     if (outcome.action === "rejected") {
       logger.warn("Version rejected", {
@@ -135,7 +151,17 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
         });
     }
 
-    return { id: row!.id, version: row!.version };
+    // Upload the artifact only now that the outcome is decided as `created`,
+    // still inside the transaction: an upload failure rolls the row back, so
+    // a committed row is never left pointing at absent bytes, and a rejected
+    // or already-existing version never has its published bytes overwritten
+    // (#896). Holding the per-package advisory lock across the upload is the
+    // accepted cost — it only serializes publishes of the SAME package.
+    if (uploadZip) {
+      await uploadZip();
+    }
+
+    return { id: row!.id, version: row!.version, outcome: "created" as const };
   });
 }
 
@@ -506,12 +532,15 @@ export async function getLatestVersionIntegrity(packageId: string): Promise<stri
   return row?.integrity ?? null;
 }
 
-type CreateVersionError = "invalid_version" | "no_changes";
+type CreateVersionError = "invalid_version" | "no_changes" | "version_exists";
 type CreateVersionResult = { id: number; version: string } | { error: CreateVersionError };
 
 /** Create an immutable version snapshot from the current draft (packages table).
  *  Uses manifest.version as-is — no auto-bump. Returns an error object if version is missing,
- *  invalid, fails forward-only validation, or content is identical to the latest version. */
+ *  invalid, fails forward-only validation, or content is identical to the latest version.
+ *  A draft whose content changed but whose version was not bumped yields `version_exists`
+ *  (published versions are immutable — the old silent-success path overwrote the stored
+ *  bytes while keeping the stale integrity row, #896). */
 export async function createVersionFromDraft(params: {
   packageId: string;
   orgId: string;
@@ -606,7 +635,12 @@ export async function createVersionFromDraft(params: {
     zipBuffer,
     manifest: finalManifest,
   });
-  return result ?? { error: "invalid_version" };
+  if (!result) return { error: "invalid_version" };
+  // Same version, different content (the identical-content case returned
+  // `no_changes` above): refuse loudly instead of silently keeping the old
+  // artifact — the caller must bump the version to publish the new content.
+  if (result.outcome === "exists") return { error: "version_exists" };
+  return { id: result.id, version: result.version };
 }
 
 // ─────────────────────────────────────────────
@@ -680,6 +714,19 @@ export async function replaceVersionContent(params: {
   const deps = extractDependencies(manifest);
   await assertNoCycle(packageId, deps);
 
+  // Bail before touching storage when the version row doesn't exist: the old
+  // order uploaded first, so a bad `version` overwrote the artifact of... a
+  // version nobody had, or worse raced a concurrent publish (#896-adjacent).
+  const [existingRow] = await db
+    .select({ id: packageVersions.id })
+    .from(packageVersions)
+    .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+    .limit(1);
+  if (!existingRow) {
+    logger.warn("replaceVersionContent: version row not found", { packageId, version });
+    return;
+  }
+
   // Upload ZIP first to avoid integrity mismatch if upload fails after DB update
   await uploadPackageZip(packageId, version, zipBuffer);
 
@@ -714,14 +761,21 @@ export async function replaceVersionContent(params: {
 // Convenience: create version + upload ZIP
 // ─────────────────────────────────────────────
 
-/** Create a version snapshot and upload the ZIP to Storage in one call. */
+/** Create a version snapshot and upload the ZIP to Storage in one call.
+ *
+ *  The upload happens INSIDE `createPackageVersion`'s transaction, strictly
+ *  after the forward-only/exists decision (#896): an `exists` or `rejected`
+ *  outcome never touches storage, so a republish of an existing version can
+ *  no longer overwrite published bytes (leaving the row's stale integrity
+ *  hash to fail every subsequent run) or delete a good artifact via the old
+ *  upload-then-clean-up sequence. */
 export async function createVersionAndUpload(params: {
   packageId: string;
   version: string;
   createdBy: string | null;
   zipBuffer: Buffer;
   manifest: Record<string, unknown>;
-}): Promise<{ id: number; version: string } | null> {
+}): Promise<{ id: number; version: string; outcome: "created" | "exists" } | null> {
   const { packageId, version, createdBy, zipBuffer, manifest } = params;
 
   const integrity = computeIntegrity(new Uint8Array(zipBuffer));
@@ -734,13 +788,11 @@ export async function createVersionAndUpload(params: {
   const deps = extractDependencies(manifest);
   await assertNoCycle(packageId, deps);
 
-  // Upload ZIP first — a ZIP without a DB row is safer than a DB row without a ZIP
-  await uploadPackageZip(packageId, version, zipBuffer);
-
   try {
     // The version row + its derived dependency index commit atomically inside
-    // createPackageVersion's transaction (deps passed through here).
-    const result = await createPackageVersion({
+    // createPackageVersion's transaction; the artifact upload runs in there
+    // too, only on a `created` outcome, so row and bytes commit together.
+    return await createPackageVersion({
       packageId,
       version,
       integrity,
@@ -748,26 +800,25 @@ export async function createVersionAndUpload(params: {
       manifest,
       createdBy,
       deps,
+      uploadZip: () => uploadPackageZip(packageId, version, zipBuffer),
     });
-
-    // `null` = no row created (invalid semver / forward-only rejection — NOT
-    // the "exists" case, which returns the existing row). The ZIP was already
-    // uploaded above, so clean it up rather than leave it orphaned in storage.
-    if (!result) {
-      try {
-        await deleteVersionZip(packageId, version);
-      } catch {
-        logger.warn("Failed to clean up ZIP after no-op version create", { packageId, version });
-      }
-    }
-
-    return result;
   } catch (err) {
-    // Clean up uploaded ZIP on DB failure (best-effort — don't mask original error)
+    // The transaction rolled back. If the upload itself went through (or
+    // partially) before a later step failed, the bytes sit at a path no
+    // version row references. Best-effort cleanup — but ONLY when no row
+    // exists for this version: if one does, the artifact at that path is the
+    // published one from an earlier publish and must not be deleted.
     try {
-      await deleteVersionZip(packageId, version);
+      const [existingRow] = await db
+        .select({ id: packageVersions.id })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+        .limit(1);
+      if (!existingRow) {
+        await deleteVersionZip(packageId, version);
+      }
     } catch {
-      logger.warn("Failed to clean up ZIP after DB error", { packageId, version });
+      logger.warn("Failed to clean up ZIP after version create error", { packageId, version });
     }
     throw err;
   }
