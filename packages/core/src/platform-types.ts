@@ -94,6 +94,23 @@ export interface WorkloadResources {
   pidsLimit?: number;
 }
 
+/**
+ * A platform-resolved companion capability that must exist inside the run
+ * boundary. Values are computed from validated package metadata and operator
+ * policy; orchestrators never trust raw manifest resource requests.
+ */
+export type ExecutionCapabilityRequirement = {
+  readonly kind: "browser";
+  readonly profile: "standard";
+  readonly instances: number;
+};
+
+export interface ExecutionRequirements {
+  readonly capabilities: readonly ExecutionCapabilityRequirement[];
+  /** Additional boundary-wide resources beyond the agent and sidecar. */
+  readonly supplementalResources: WorkloadResources;
+}
+
 export interface WorkloadSpec {
   runId: string;
   role: string;
@@ -207,6 +224,13 @@ export interface IsolationBoundaryOptions {
    * `sidecarEndpoints` are then placeholders that must not be dialled.
    */
   skipSidecar?: boolean;
+  /**
+   * Capabilities and supplemental resources resolved before the boundary is
+   * created. Backends must fail closed when a required capability cannot be
+   * provisioned; silently dropping this object would under-size Firecracker
+   * guests and break browser isolation.
+   */
+  requirements?: ExecutionRequirements;
 }
 
 // ---------------------------------------------------------------------------

@@ -210,6 +210,19 @@ const envSchema = z
       })
       .pipe(z.record(z.string(), z.string())),
     SYSTEM_PROXIES: jsonEnv<unknown[]>("[]"),
+    // Chromium companion capability. Disabled by default so a package cannot
+    // enlarge the execution and egress surface until the operator opts in.
+    BROWSER_ENABLED: boolEnv("false"),
+    // Secret-aware browser connect is a separate, narrower permission.
+    BROWSER_CONNECT_ENABLED: boolEnv("false"),
+    // Explicit package/version grants for trusted connection-acquisition
+    // drivers. Signature identity alone never grants secret access.
+    BROWSER_DRIVER_GRANTS: jsonEnv<unknown[]>("[]"),
+    BROWSER_MAX_CONCURRENT: z.coerce.number().int().positive().max(128).default(4),
+    BROWSER_EXECUTABLE_PATH: z.string().min(1).optional(),
+    BROWSER_WORKER_EXECUTABLE_PATH: z.string().min(1).optional(),
+    BROWSER_WORKER_IMAGE: z.string().min(1).default("appstrate-browser-worker:latest"),
+    BROWSER_CONNECT_RUN_ADAPTER: z.string().min(1).optional(),
     SYSTEM_PROVIDER_KEYS: jsonEnv<unknown[]>("[]"),
     // System-level integrations offered by the deployment out of the box.
     // Membership = the "auto-active" policy (on by default until an org opts

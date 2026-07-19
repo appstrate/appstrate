@@ -2,6 +2,33 @@
 
 Runtime detail beyond the architecture diagram in `CLAUDE.md`. Complements `docs/architecture/INTEGRATIONS_RUNTIME.md`.
 
+## Browser companion plane
+
+Browser-enabled integrations add two sidecar-owned private resources: a scoped
+blind CONNECT gateway and a first-party Chromium worker. The gateway accepts
+only a random bearer token, exact normalized origins, and DNS-pinned public
+destinations. It never terminates upstream TLS. If the run has an organization
+proxy, every tunnel is chained through it and proxy failure returns 502 without
+direct fallback.
+
+The worker control listener has its own random bearer token. General automation
+receives that endpoint only in the matching integration runner. Trusted browser
+connection acquisition instead receives endpoint, token, and bootstrap inputs
+inside a private sidecar-initiated MCP call; those values are absent from the
+agent tool surface, runner environment, argv, URLs, and logs. Worker policy owns
+Chromium flags, one-context/four-page limits, ephemeral profiles, state
+validation, and process-group cleanup.
+
+Docker uses a dedicated non-root, read-only, cap-drop-ALL worker container with
+memory/CPU/PID/shared-memory limits and `no-new-privileges`. Its seccomp policy
+is vendored from Moby `seccomp/v0.2.1` and adds only the namespace/chroot
+syscalls Chromium requires for its own renderer sandbox; neither
+`seccomp=unconfined` nor Chromium `--no-sandbox` is used. Process mode is
+development parity and cannot claim kernel isolation. Firecracker uses the
+process provider inside the guest, but fixed per-slot ports, distinct
+driver/browser UID pairs, proc `hidepid=2`, and nftables rules enforce the
+isolation boundary.
+
 ### Sidecar Protocol (details beyond the architecture diagram)
 
 - **Sidecar lifecycle**: One fresh sidecar container per run, spawned in parallel with the agent. `DockerOrchestrator.initialize()` calls `ensureImage()` for the PI + sidecar images at boot to amortise cold-pull (20–45 s) off the first run's critical path. There is no sidecar pool — empirical measurement showed the agent's own Bun cold start (~1 s) already masks warm-image sidecar boot, so pre-warming offered no user-visible latency win while carrying meaningful complexity (`/configure` endpoint, `CONFIG_SECRET`, standby network, replenish loop).

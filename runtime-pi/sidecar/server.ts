@@ -11,12 +11,14 @@ import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
   bootIntegrations,
   readIntegrationSpecsFromEnv,
+  runBrowserConnectOnce,
   runConnectOnce,
 } from "./integrations-boot.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
+import { browserSafeErrorCode } from "./browser-connect.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -150,10 +152,11 @@ const config = {
 // line; the launcher holds the key and decrypts. The wire payload is
 // base64(iv‖authTag‖ciphertext). Error messages are NOT secrets and stay
 // plaintext so a boot failure is diagnosable from logs.
-if (process.env.CONNECT_LOGIN_JSON) {
+if (process.env.CONNECT_LOGIN_JSON || process.env.BROWSER_CONNECT_JSON) {
   const platformApiUrl = process.env.PLATFORM_API_URL || "http://localhost:3000";
   const runToken = process.env.RUN_TOKEN || "";
   const resultKeyB64 = process.env.CONNECT_RESULT_KEY || "";
+  const browserMode = process.env.BROWSER_CONNECT_JSON !== undefined;
   try {
     // Fail closed: without the ephemeral key we cannot emit the bundle without
     // leaking it, so refuse rather than fall back to a plaintext sentinel.
@@ -164,8 +167,17 @@ if (process.env.CONNECT_LOGIN_JSON) {
     if (resultKey.length !== 32) {
       throw new Error("connect-run: CONNECT_RESULT_KEY must decode to 32 bytes (AES-256 key)");
     }
-    const spec = JSON.parse(process.env.CONNECT_LOGIN_JSON) as IntegrationSpawnSpec;
-    const bundle = await runConnectOnce(spec, { platformApiUrl, runToken });
+    const rawSpec = browserMode ? process.env.BROWSER_CONNECT_JSON : process.env.CONNECT_LOGIN_JSON;
+    if (!rawSpec) throw new Error("connect-run: acquisition spec is missing");
+    const spec = JSON.parse(rawSpec) as IntegrationSpawnSpec;
+    const fetchOptions = {
+      platformApiUrl,
+      runToken,
+      ...(config.proxyUrl ? { proxyUrl: config.proxyUrl } : {}),
+    };
+    const bundle = browserMode
+      ? await runBrowserConnectOnce(spec, fetchOptions)
+      : await runConnectOnce(spec, fetchOptions);
     // Encrypt the bundle JSON — plaintext credentials never reach stdout.
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", resultKey, iv);
@@ -177,7 +189,11 @@ if (process.env.CONNECT_LOGIN_JSON) {
     process.stdout.write(`APPSTRATE_CONNECT_RESULT:${payload}\n`);
     process.exit(0);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = browserMode
+      ? browserSafeErrorCode(err)
+      : err instanceof Error
+        ? err.message
+        : String(err);
     process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
     process.exit(1);
   }
@@ -304,6 +320,7 @@ const integrationBootPromise =
         {
           platformApiUrl: config.platformApiUrl,
           runToken: config.runToken,
+          ...(config.proxyUrl ? { proxyUrl: config.proxyUrl } : {}),
         },
         runtimeDeps,
       )

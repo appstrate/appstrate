@@ -80,6 +80,12 @@ export interface SpawnIntegrationOptions {
    * a plain CONNECT egress listener.
    */
   readonly egress: RuntimeEgressContext | null;
+  /** Scoped browser broker credentials for this integration only. */
+  readonly browser?: {
+    readonly endpoint: string;
+    readonly authToken: string;
+    readonly protocolVersion: number;
+  };
   /**
    * Per-run shared workspace handle decoded from the sidecar's
    * `WORKSPACE_HANDLE_JSON` env var. Adapters mount/expose it under

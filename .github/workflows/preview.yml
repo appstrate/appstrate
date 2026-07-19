@@ -1,6 +1,6 @@
 name: Preview Images
 
-# Official preview channel (issue #819, phase 6). Builds the full 8-image
+# Official preview channel (issue #819, phase 6). Builds the full image
 # stack from a PR (or an arbitrary ref) and publishes it to GHCR under a
 # `pr-<n>` / `preview-<ref-slug>` tag so a reviewer can deploy the change on
 # Coolify BEFORE merge — no CLI binaries, no GH Release, no `latest`.
@@ -31,6 +31,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  CHROMIUM_VERSION: 149.0.7827.53-r0
 
 jobs:
   # Gate on the `preview` label (pull_request) and resolve the tag + the ref
@@ -85,6 +86,9 @@ jobs:
           - name: appstrate-sidecar
             context: .
             dockerfile: ./runtime-pi/sidecar/Dockerfile
+          - name: appstrate-browser-worker
+            context: .
+            dockerfile: ./runtime-pi/browser-worker/Dockerfile
           - name: appstrate-mcp-runner-node
             context: ./runtime-pi/runners/node
             dockerfile: ./runtime-pi/runners/node/Dockerfile
@@ -126,6 +130,9 @@ jobs:
           # staging/prod server — skipping arm64 roughly halves build time.
           platforms: linux/amd64
           push: true
+          build-args: |
+            CHROMIUM_VERSION=${{ env.CHROMIUM_VERSION }}
+            APPSTRATE_BROWSER_WORKER_BUILD_ID=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}-${{ github.sha }}

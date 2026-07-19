@@ -214,9 +214,14 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
-      const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
+      const { runId, spec, bundleRoot, egress, browser, workspaceHandle, onStderrLine } = options;
       const plan = planSubprocess(spec, bundleRoot);
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
+      if (browser) {
+        procEnv.APPSTRATE_BROWSER_ENDPOINT = browser.endpoint;
+        procEnv.APPSTRATE_BROWSER_TOKEN = browser.authToken;
+        procEnv.APPSTRATE_BROWSER_PROTOCOL = String(browser.protocolVersion);
+      }
       if (egress) {
         // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
         Object.assign(procEnv, buildProxyEnvBlock(egress.proxyUrl));
@@ -273,10 +278,23 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
       // inheriting the sidecar's — the sidecar's environ (credentials)
       // stays unreadable. Unset in host process mode: runners remain
       // plain children.
-      const runnerExec = process.env.APPSTRATE_RUNNER_EXEC;
+      const browserDriverExec = spec.browser
+        ? process.env.APPSTRATE_BROWSER_DRIVER_EXEC
+        : undefined;
+      const runnerExec = browserDriverExec ?? process.env.APPSTRATE_RUNNER_EXEC;
+      if (browserDriverExec && !Number.isInteger(spec.browser?.isolationSlot)) {
+        throw new Error(
+          `integration '${spec.integrationId}' has no platform-assigned browser isolation slot`,
+        );
+      }
+      const wrapperArgs = browserDriverExec
+        ? [String(spec.browser!.isolationSlot), plan.command, ...plan.args]
+        : runnerExec
+          ? [plan.command, ...plan.args]
+          : plan.args;
       const transport = new SubprocessTransport({
         command: runnerExec ?? plan.command,
-        args: runnerExec ? [plan.command, ...plan.args] : plan.args,
+        args: wrapperArgs,
         cwd: plan.cwd,
         env: procEnv,
         envPassthrough: ["PATH", "HOME", "NODE_OPTIONS"],

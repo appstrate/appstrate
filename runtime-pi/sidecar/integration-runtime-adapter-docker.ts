@@ -474,7 +474,7 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
-      const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
+      const { runId, spec, bundleRoot, egress, browser, workspaceHandle, onStderrLine } = options;
       const plan = planContainer(spec, bundleRoot);
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
       const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
@@ -571,8 +571,18 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       // container sees exactly the same env vars as before.
       const envFileFlags: string[] = [];
       let secretEnvDir: string | null = null;
-      if (Object.keys(spec.spawnEnv).length > 0) {
-        const written = await writeSecretEnvFile(spec.spawnEnv);
+      const secretEnv = {
+        ...spec.spawnEnv,
+        ...(browser
+          ? {
+              APPSTRATE_BROWSER_ENDPOINT: browser.endpoint,
+              APPSTRATE_BROWSER_TOKEN: browser.authToken,
+              APPSTRATE_BROWSER_PROTOCOL: String(browser.protocolVersion),
+            }
+          : {}),
+      };
+      if (Object.keys(secretEnv).length > 0) {
+        const written = await writeSecretEnvFile(secretEnv);
         secretEnvDir = written.dir;
         envFileFlags.push("--env-file", written.path);
       }

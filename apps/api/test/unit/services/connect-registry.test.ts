@@ -10,6 +10,10 @@ import {
   OrchestratedStrategy,
   type ConnectToolExecutor,
 } from "../../../src/services/connect/orchestrated-strategy.ts";
+import {
+  BrowserConnectStrategy,
+  type BrowserConnectExecutor,
+} from "../../../src/services/connect/browser-strategy.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { connectToolBlock } from "../../helpers/integration-manifests.ts";
 
@@ -19,6 +23,12 @@ const auth = (type: AuthDef["type"]): AuthDef => ({ type }) as AuthDef;
 
 const fakeExecutor: ConnectToolExecutor = {
   run: async () => ({ outputs: { JSESSIONID: "x" }, expiresAt: null }),
+};
+const fakeBrowserExecutor: BrowserConnectExecutor = {
+  run: async () => ({
+    outputs: { cookie: "session=x" },
+    proof: { kind: "authenticated-endpoint", succeeded: true },
+  }),
 };
 
 describe("resolveStrategy", () => {
@@ -62,6 +72,27 @@ describe("resolveStrategy", () => {
     } as unknown as AuthDef;
     const s = resolveStrategy(a, { connectToolExecutor: fakeExecutor });
     expect(s).toBeInstanceOf(OrchestratedStrategy);
+  });
+
+  it("maps an explicit browser executor only to the trusted browser strategy", () => {
+    const a = {
+      type: "custom",
+      connect: connectToolBlock({
+        tool: "login",
+        runAt: "link",
+        produces: ["cookie"],
+        browserExecutor: { sessionMode: "exportable" },
+      }),
+    } as unknown as AuthDef;
+    expect(
+      resolveStrategy(a, {
+        connectToolExecutor: fakeExecutor,
+        browserConnectExecutor: fakeBrowserExecutor,
+      }),
+    ).toBeInstanceOf(BrowserConnectStrategy);
+    expect(() => resolveStrategy(a, { connectToolExecutor: fakeExecutor })).toThrow(
+      /trusted browser connect executor/,
+    );
   });
 
   it("throws for custom + connect.tool + link with no executor (no silent half-acquisition)", () => {

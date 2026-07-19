@@ -128,8 +128,21 @@ describe("runner protocol round-trip (real client ↔ real server)", () => {
     const client = makeClient(fake);
     await client.initialize();
 
-    const boundary = await client.createIsolationBoundary("run-1", { skipSidecar: false });
+    const requirements = {
+      capabilities: [{ kind: "browser" as const, profile: "standard" as const, instances: 1 }],
+      supplementalResources: {
+        memoryBytes: 1024 * 1024 * 1024,
+        nanoCpus: 1_000_000_000,
+        pidsLimit: 256,
+      },
+    };
+    const boundary = await client.createIsolationBoundary("run-1", {
+      skipSidecar: false,
+      requirements,
+    });
     expect(boundary).toEqual(BOUNDARY);
+    const boundaryCall = fake.calls.find(([name]) => name === "createIsolationBoundary");
+    expect(boundaryCall?.[1]).toEqual(["run-1", { skipSidecar: false, requirements }]);
 
     const sidecarSpec = {
       runToken: "tok_secret",

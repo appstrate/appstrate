@@ -284,12 +284,16 @@ export function connectToolBlock(opts: {
   produces?: string[];
   persistLoginSecret?: boolean;
   reauthOn?: number[];
+  browserExecutor?: { sessionMode: "exportable" | "browser-bound" };
 }): Record<string, unknown> {
   const meta: Record<string, unknown> = { tool: opts.tool };
   if (opts.runAt !== undefined) meta.run_at = opts.runAt;
   if (opts.produces !== undefined) meta.produces = opts.produces;
   if (opts.persistLoginSecret !== undefined) meta.persist_login_secret = opts.persistLoginSecret;
   if (opts.reauthOn !== undefined) meta.reauth_on = opts.reauthOn;
+  if (opts.browserExecutor !== undefined) {
+    meta.executor = { kind: "browser", session_mode: opts.browserExecutor.sessionMode };
+  }
   return { tool: {}, _meta: { "dev.appstrate/connect": meta } };
 }
 

@@ -7,7 +7,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { toolTimeoutMsFromEnv, scrubStderrLine } from "../integrations-boot.ts";
+import {
+  toolTimeoutMsFromEnv,
+  scrubStderrLine,
+  shouldSuppressIntegrationStderr,
+} from "../integrations-boot.ts";
 
 describe("toolTimeoutMsFromEnv", () => {
   it("returns undefined when the var is absent", () => {
@@ -72,5 +76,23 @@ describe("scrubStderrLine (#779)", () => {
 
   it("caps line length", () => {
     expect(scrubStderrLine("x".repeat(2000)).length).toBeLessThanOrEqual(500);
+  });
+});
+
+describe("browser integration stderr policy", () => {
+  it("suppresses every browser runner because it can contain CDP or bootstrap secrets", () => {
+    expect(shouldSuppressIntegrationStderr({ browser: undefined })).toBe(false);
+    expect(
+      shouldSuppressIntegrationStderr({
+        browser: {
+          purpose: "connection-acquisition",
+          protocol: "cdp-v1",
+          profile: "standard",
+          allowedOrigins: ["https://example.com"],
+          sessionMode: "exportable",
+          trustedDriver: true,
+        },
+      }),
+    ).toBe(true);
   });
 });

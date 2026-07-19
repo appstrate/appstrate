@@ -25,6 +25,7 @@
 
 import { z } from "zod";
 import type {
+  ExecutionRequirements,
   IsolationBoundary,
   SidecarEndpoints,
   WorkloadResources,
@@ -36,7 +37,7 @@ import type {
  * Bumped on any wire-incompatible change. The client refuses to start
  * against a daemon speaking a different major protocol.
  */
-export const RUNNER_PROTOCOL_VERSION = 1;
+export const RUNNER_PROTOCOL_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Platform-type mirrors
@@ -139,7 +140,27 @@ export const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,127}$/;
 
 export const createBoundaryBodySchema = z.object({
   runId: z.string().min(1).regex(RUN_ID_RE, "runId contains unsafe characters"),
-  opts: z.object({ skipSidecar: z.boolean().optional() }).optional(),
+  opts: z
+    .looseObject({
+      skipSidecar: z.boolean().optional(),
+      requirements: z
+        .looseObject({
+          capabilities: z.array(
+            z.looseObject({
+              kind: z.literal("browser"),
+              profile: z.literal("standard"),
+              instances: z.number().int().positive(),
+            }),
+          ),
+          supplementalResources: z.looseObject({
+            memoryBytes: z.number().nonnegative(),
+            nanoCpus: z.number().nonnegative(),
+            pidsLimit: z.number().int().nonnegative().optional(),
+          }),
+        })
+        .optional() as unknown as z.ZodOptional<z.ZodType<ExecutionRequirements>>,
+    })
+    .optional(),
 });
 
 /**

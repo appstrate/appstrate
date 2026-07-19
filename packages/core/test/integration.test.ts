@@ -735,6 +735,63 @@ describe("integrationManifestSchema — connect.login", () => {
     );
     expect(r.success).toBe(true);
   });
+
+  it("accepts a strict browser executor on a local orchestrated connect tool", () => {
+    const m = customWithConnect(
+      {
+        tool: {},
+        _meta: {
+          "dev.appstrate/connect": {
+            tool: "acquire_session",
+            run_at: "link",
+            produces: ["cookie"],
+            executor: { kind: "browser", session_mode: "exportable" },
+          },
+        },
+      },
+      { http: { in: "header", name: "Cookie", value: "{$credential.cookie}" } },
+    );
+    m.source = {
+      kind: "local",
+      server: { name: "@official/browser-driver", version: "^1.0.0" },
+    };
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("rejects browser executors on non-local sources and unknown policy fields", () => {
+    const m = customWithConnect({
+      tool: {},
+      _meta: {
+        "dev.appstrate/connect": {
+          tool: "acquire_session",
+          produces: ["cookie"],
+          executor: { kind: "browser", session_mode: "exportable", flags: ["--unsafe"] },
+        },
+      },
+    });
+    const paths = errorPaths(m);
+    expect(paths).toContain("source.kind");
+    expect(paths.some((path) => path.endsWith("executor.flags"))).toBe(true);
+  });
+
+  it("requires an output allowlist for exportable browser acquisition", () => {
+    const m = customWithConnect({
+      tool: {},
+      _meta: {
+        "dev.appstrate/connect": {
+          tool: "acquire_session",
+          executor: { kind: "browser", session_mode: "exportable" },
+        },
+      },
+    });
+    m.source = {
+      kind: "local",
+      server: { name: "@official/browser-driver", version: "^1.0.0" },
+    };
+    expect(errorPaths(m).some((path) => path.endsWith("dev.appstrate/connect.produces"))).toBe(
+      true,
+    );
+  });
 });
 
 // ─────────────────────────────────────────────

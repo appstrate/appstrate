@@ -30,6 +30,10 @@ interface VmRecordView {
   stopping: boolean;
   teardownReason?: string;
   exitedAt?: number;
+  requirements?: {
+    capabilities: readonly unknown[];
+    supplementalResources: { memoryBytes: number; nanoCpus: number; pidsLimit?: number };
+  };
 }
 
 /** Typed view over the shared Reflect accessor for this file's assertions. */
@@ -74,6 +78,56 @@ describe("createIsolationBoundary rollback", () => {
     const boundary = await orch.createIsolationBoundary("run_2");
     expect(boundary.name).toBe("firecracker-run_2");
     expect(reservedIndexes(orch).size).toBe(1);
+  });
+});
+
+describe("browser capability admission", () => {
+  const oneBrowser = {
+    capabilities: [{ kind: "browser" as const, profile: "standard" as const, instances: 1 }],
+    supplementalResources: {
+      memoryBytes: 1024 * 1024 * 1024,
+      nanoCpus: 1_000_000_000,
+      pidsLimit: 256,
+    },
+  };
+
+  it("persists admitted requirements until VM boot", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_browser", { requirements: oneBrowser });
+    expect(vmsOf(orch).get("run_browser")?.requirements).toEqual(oneBrowser);
+  });
+
+  it("fails before allocation when browser resources are under-provisioned", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await expect(
+      orch.createIsolationBoundary("run_browser", {
+        requirements: {
+          ...oneBrowser,
+          supplementalResources: { memoryBytes: 1, nanoCpus: 1, pidsLimit: 1 },
+        },
+      }),
+    ).rejects.toThrow(/under-provision/);
+    expect(reservedIndexes(orch).size).toBe(0);
+  });
+
+  it("fails closed above the supported per-run instance bound", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await expect(
+      orch.createIsolationBoundary("run_browser", {
+        requirements: {
+          capabilities: [{ kind: "browser", profile: "standard", instances: 5 }],
+          supplementalResources: {
+            memoryBytes: 5 * 1024 * 1024 * 1024,
+            nanoCpus: 5_000_000_000,
+            pidsLimit: 1280,
+          },
+        },
+      }),
+    ).rejects.toThrow(/maximum is 4/);
+    expect(reservedIndexes(orch).size).toBe(0);
   });
 });
 

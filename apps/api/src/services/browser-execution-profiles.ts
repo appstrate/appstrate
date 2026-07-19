@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import type { ExecutionRequirements, WorkloadResources } from "@appstrate/core/platform-types";
+
+export interface BrowserResourceProfile extends WorkloadResources {
+  readonly id: "standard";
+  readonly shmBytes: number;
+  readonly maxContexts: number;
+  readonly maxPages: number;
+}
+
+export const MAX_BROWSER_INSTANCES_PER_RUN = 4;
+
+const MIB = 1024 * 1024;
+
+const PROFILES: Readonly<Record<BrowserResourceProfile["id"], BrowserResourceProfile>> = {
+  standard: {
+    id: "standard",
+    memoryBytes: 1024 * MIB,
+    nanoCpus: 1_000_000_000,
+    pidsLimit: 256,
+    shmBytes: 256 * MIB,
+    maxContexts: 1,
+    maxPages: 4,
+  },
+};
+
+export function getBrowserResourceProfile(id: string): BrowserResourceProfile {
+  const profile = PROFILES[id as BrowserResourceProfile["id"]];
+  if (!profile) {
+    throw new Error(`unsupported browser execution profile '${id}'`);
+  }
+  return profile;
+}
+
+function addResources(a: WorkloadResources, b: WorkloadResources): WorkloadResources {
+  return {
+    memoryBytes: a.memoryBytes + b.memoryBytes,
+    nanoCpus: a.nanoCpus + b.nanoCpus,
+    pidsLimit: (a.pidsLimit ?? 0) + (b.pidsLimit ?? 0),
+  };
+}
+
+/**
+ * Aggregate platform-owned browser requirements before isolation-boundary
+ * creation. One browser companion is provisioned per browser-enabled
+ * integration; duplicate package ids still count because each spawn spec owns
+ * an independent trust and session boundary.
+ */
+export function resolveBrowserExecutionRequirements(
+  integrations: readonly IntegrationSpawnSpec[],
+): ExecutionRequirements {
+  const browserSpecs = integrations.flatMap((spec) => (spec.browser ? [spec.browser] : []));
+  if (browserSpecs.length > MAX_BROWSER_INSTANCES_PER_RUN) {
+    throw new Error(
+      `run requests ${browserSpecs.length} browser instances; maximum is ${MAX_BROWSER_INSTANCES_PER_RUN}`,
+    );
+  }
+
+  let supplementalResources: WorkloadResources = {
+    memoryBytes: 0,
+    nanoCpus: 0,
+    pidsLimit: 0,
+  };
+  const instancesByProfile = new Map<BrowserResourceProfile["id"], number>();
+
+  for (const spec of browserSpecs) {
+    const profile = getBrowserResourceProfile(spec.profile);
+    supplementalResources = addResources(supplementalResources, profile);
+    instancesByProfile.set(profile.id, (instancesByProfile.get(profile.id) ?? 0) + 1);
+  }
+
+  return {
+    capabilities: [...instancesByProfile.entries()].map(([profile, instances]) => ({
+      kind: "browser" as const,
+      profile,
+      instances,
+    })),
+    supplementalResources,
+  };
+}
+
+export function hasExecutionRequirements(requirements: ExecutionRequirements): boolean {
+  return requirements.capabilities.length > 0;
+}

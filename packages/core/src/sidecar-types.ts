@@ -112,9 +112,11 @@ export interface SidecarLaunchSpec {
    * is the decrypted login secret) and never logged.
    */
   connectLoginSpec?: IntegrationSpawnSpec;
+  /** Trusted browser acquisition mode; mutually exclusive with connectLoginSpec. */
+  browserConnectSpec?: IntegrationSpawnSpec;
   /**
    * P4 — connect-run result-channel key. Set only alongside
-   * {@link connectLoginSpec}. A base64-encoded 32-byte AES-256 key the
+   * {@link connectLoginSpec} or {@link browserConnectSpec}. A base64-encoded 32-byte AES-256 key the
    * launcher generates per connect-run and hands the sidecar (as the
    * `CONNECT_RESULT_KEY` env var) so the sidecar can encrypt the captured
    * credential bundle before writing it to its `APPSTRATE_CONNECT_RESULT:`
@@ -198,6 +200,49 @@ export interface ApiCallSpec {
   uploadProtocols?: readonly string[];
 }
 
+export type BrowserExecutionPurpose = "automation" | "connection-acquisition";
+export type BrowserExecutionProtocol = "cdp-v1";
+export type BrowserExecutionProfile = "standard";
+export type BrowserSessionMode = "none" | "exportable" | "browser-bound";
+
+/**
+ * Platform-normalized browser capability for one local integration runner.
+ * This is derived from the referenced mcp-server manifest and policy grants;
+ * the sidecar never interprets raw package metadata.
+ */
+export interface BrowserExecutionSpec {
+  purpose: BrowserExecutionPurpose;
+  protocol: BrowserExecutionProtocol;
+  profile: BrowserExecutionProfile;
+  allowedOrigins: readonly string[];
+  sessionMode: BrowserSessionMode;
+  trustedDriver: boolean;
+  /**
+   * Platform-assigned slot in the per-run browser isolation range. It is not
+   * package-controlled. Firecracker uses it to select the dedicated driver /
+   * browser UID pair and fixed loopback ports; other providers ignore it.
+   */
+  isolationSlot?: number;
+  driverGrantId?: string;
+  connectionId?: string;
+}
+
+/**
+ * Private, secret-aware acquisition command consumed only by the sidecar's
+ * trusted browser controller. It is never registered as an agent-facing MCP
+ * tool and is intentionally separate from the secret-blind connectLogin path.
+ */
+export interface BrowserConnectSpec {
+  readonly toolName: string;
+  readonly produces: readonly string[];
+  readonly authKey: string;
+  readonly authType: string;
+  readonly authorizedUris: readonly string[];
+  readonly sessionMode: Exclude<BrowserSessionMode, "none">;
+  readonly inputs: Record<string, string>;
+  readonly deliveryHttp?: ManifestDeliveryHttp;
+}
+
 export interface IntegrationSpawnSpec {
   /** Integration package id (e.g. `@appstrate/gmail-mcp`). */
   integrationId: string;
@@ -228,6 +273,13 @@ export interface IntegrationSpawnSpec {
    * integration can also carry {@link apiCalls} entries.
    */
   sourceKind: "local" | "remote" | "none";
+  /**
+   * Optional Chromium companion capability for a local mcp-server. Browser is
+   * intentionally orthogonal to manifest.server.type: the package still runs
+   * under its declared Node, Bun, Python, UV, or binary runtime.
+   */
+  browser?: BrowserExecutionSpec;
+  browserConnect?: BrowserConnectSpec;
   /** Validated `type: integration` manifest (server, auths). */
   manifest: {
     name: string;

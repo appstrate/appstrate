@@ -85,6 +85,8 @@ function buildSpec(llm: LlmProxyConfig): SidecarLaunchSpec {
     runtimeTools: ["output", "log"],
     outputSchema: { type: "object" },
     connectLoginSpec: integrationSpec,
+    browserConnectSpec: integrationSpec,
+    connectResultKey: "ephemeral-result-key",
   };
 }
 
@@ -151,7 +153,9 @@ describe("sidecar env key classification (MMDS broker coverage)", () => {
     expect(dead).toEqual([]);
     // Pin the exact expected set so a silent shrink is also caught.
     expect([...SIDECAR_SECRET_KEYS].sort()).toEqual([
+      "BROWSER_CONNECT_JSON",
       "CONNECT_LOGIN_JSON",
+      "CONNECT_RESULT_KEY",
       "INTEGRATIONS_TO_SPAWN_JSON",
       "PI_API_KEY",
       "PI_LLM_OAUTH_CONFIG_JSON",

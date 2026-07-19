@@ -202,21 +202,27 @@ export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown
 export function vmSizing(
   agent: { memoryBytes: number; nanoCpus: number },
   hasSidecar: boolean,
+  supplemental: { memoryBytes: number; nanoCpus: number } = {
+    memoryBytes: 0,
+    nanoCpus: 0,
+  },
 ): {
   vcpuCount: number;
   memSizeMib: number;
 } {
   const agentMib = Math.ceil(agent.memoryBytes / (1024 * 1024));
+  const supplementalMib = Math.ceil(supplemental.memoryBytes / (1024 * 1024));
   const sidecarMib = hasSidecar ? 256 : 0;
   const systemMib = 256; // kernel + init + tmpfs overlay headroom
   const vcpuFromSpec = Math.ceil(agent.nanoCpus / 1_000_000_000);
+  const supplementalVcpus = Math.ceil(supplemental.nanoCpus / 1_000_000_000);
   return {
     // The sidecar and the agent cold-start concurrently — on a single
     // vCPU they starve each other and the agent's first sink event can
     // slip past the platform's heartbeat deadline. Budget one extra
     // vCPU for the sidecar (when there is one) and never go below two.
-    vcpuCount: Math.min(8, Math.max(2, vcpuFromSpec + (hasSidecar ? 1 : 0))),
-    memSizeMib: agentMib + sidecarMib + systemMib,
+    vcpuCount: Math.min(8, Math.max(2, vcpuFromSpec + (hasSidecar ? 1 : 0) + supplementalVcpus)),
+    memSizeMib: agentMib + sidecarMib + systemMib + supplementalMib,
   };
 }
 

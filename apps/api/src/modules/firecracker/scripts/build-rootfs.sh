@@ -17,6 +17,7 @@
 # Env overrides:
 #   PI_IMAGE / SIDECAR_IMAGE   base image refs (default local :latest)
 #   ROOTFS_SIZE_MB             ext4 size (default: content + 40% headroom)
+#   CHROMIUM_VERSION           exact Alpine repository version (required)
 #   SKIP_BASE_BUILD=1          reuse existing pi/sidecar images
 set -euo pipefail
 
@@ -26,6 +27,7 @@ PI_IMAGE="${PI_IMAGE:-appstrate-pi:latest}"
 SIDECAR_IMAGE="${SIDECAR_IMAGE:-appstrate-sidecar:latest}"
 ROOTFS_IMAGE_TAG="appstrate-fc-rootfs:latest"
 ARCH="$(uname -m)"
+: "${CHROMIUM_VERSION:?CHROMIUM_VERSION must be the exact pinned Alpine Chromium version}"
 
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 1; }
 command -v mkfs.ext4 >/dev/null || { echo "mkfs.ext4 (e2fsprogs) is required" >&2; exit 1; }
@@ -42,6 +44,7 @@ echo "==> Building merged guest image"
 docker build \
   --build-arg "PI_IMAGE=$PI_IMAGE" \
   --build-arg "SIDECAR_IMAGE=$SIDECAR_IMAGE" \
+  --build-arg "CHROMIUM_VERSION=$CHROMIUM_VERSION" \
   -t "$ROOTFS_IMAGE_TAG" -f apps/api/src/modules/firecracker/scripts/Dockerfile.rootfs .
 
 echo "==> Exporting filesystem"

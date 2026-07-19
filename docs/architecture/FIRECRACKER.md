@@ -5,6 +5,42 @@ hardware virtualization boundary (KVM) around the whole run — stronger host
 protection than a container: a workload escape compromises a throwaway guest
 kernel, not the host.
 
+## Browser companions
+
+Browser requirements cross runner protocol v2 as part of
+`createIsolationBoundary`. The daemon validates the supported profile and
+platform-owned minimum resource envelope, persists it until boot, and adds it
+to `vmSizing`; the resulting guest memory/vCPU total also drives the jailer
+cgroup ceiling. Silently ignoring a browser requirement is a protocol error.
+
+Guest protocol v3 standardizes browser support in the normal rootfs: an exact
+Alpine Chromium version, the compiled authenticated worker, and two setuid
+wrappers. Browser-enabled integrations receive deterministic slots 0–3. Slot
+`n` maps to driver UID `1100 + 2n`, browser UID `1101 + 2n`, gateway port
+`18080 + 2n`, and worker port `18081 + 2n`. The sidecar supplies the normalized
+slot; package code cannot select an arbitrary identity or executable.
+
+The guest firewall allows a driver UID to reach its matching worker plus normal
+non-reserved loopback helpers, and a browser UID to reach its matching gateway
+plus internal DevTools sockets. Reserved ports belonging to other slots are
+denied, browser/driver external egress is denied, and the agent can dial only
+the sidecar's 8080/8081 listeners in restricted mode. Even when agent egress is
+operator-unrestricted, the reserved browser ports remain denied. Ordinary
+runner UID 1002 retains legacy egress but is denied every reserved browser
+port. Chromium profiles live on the guest tmpfs/overlay and disappear with the
+VM.
+
+The pinned guest kernel explicitly enables unprivileged user/PID/network
+namespaces and seccomp filtering. Chromium therefore keeps its namespace
+sandbox after the rootfs-wide setuid strip; Firecracker browser launch never
+falls back to `--no-sandbox`.
+
+Build the v3 rootfs with `CHROMIUM_VERSION` set to the exact version present in
+the PI image's Alpine repository. The release workflow keeps this pin separate
+from the dedicated browser-worker image because their base Alpine releases may
+differ. A floating install or an implicit base-distribution upgrade is
+intentionally rejected.
+
 ## One topology — platform → `appstrate-runner` daemon
 
 The platform is always containerized (Coolify / docker-compose) — it cannot
@@ -674,6 +710,10 @@ boots on a bare KVM host with only these variables.
 | `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present                                                                                                    |
 | `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)                                                                                                         |
 | `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot guest→platform path probe: `warn` logs a drop, `strict` fails boot                                                                             |
+
+`CHROMIUM_VERSION` is a rootfs-build input rather than a daemon runtime
+variable. `build-rootfs.sh` requires the exact Alpine package version and
+refuses a floating browser install.
 
 ## Development on macOS
 

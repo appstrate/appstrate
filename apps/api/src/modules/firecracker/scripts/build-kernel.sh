@@ -89,23 +89,38 @@ docker run --rm \
     echo "${CONFIG_SHA256}  .config" | sha256sum -c - >/dev/null \
       || { echo "FATAL: base kernel config checksum mismatch" >&2; exit 1; }
 
-    # Netfilter delta over the CI config:
+    # Netfilter + Chromium sandbox delta over the CI config:
     #  - NF_TABLES/NF_TABLES_INET: the guest supervisor uid firewall
     #    (meta skuid / ip daddr / tcp dport are nf_tables core
     #    expressions, no extra NFT_* options needed for filter rules).
     #  - NETFILTER_XT_MATCH_OWNER: iptables-legacy `-m owner` fallback.
+    #  - namespace + seccomp options: the Chromium unprivileged namespace
+    #    sandbox. The rootfs strips the setuid bit from chromium-sandbox, so silently
+    #    shipping a kernel without these would make every browser worker fail
+    #    (or tempt callers to add --no-sandbox).
     ./scripts/config \
       --enable CONFIG_NETFILTER \
       --enable CONFIG_NETFILTER_ADVANCED \
       --enable CONFIG_NETFILTER_NETLINK \
       --enable CONFIG_NF_TABLES \
       --enable CONFIG_NF_TABLES_INET \
-      --enable CONFIG_NETFILTER_XT_MATCH_OWNER
+      --enable CONFIG_NETFILTER_XT_MATCH_OWNER \
+      --enable CONFIG_NAMESPACES \
+      --enable CONFIG_UTS_NS \
+      --enable CONFIG_IPC_NS \
+      --enable CONFIG_USER_NS \
+      --enable CONFIG_PID_NS \
+      --enable CONFIG_NET_NS \
+      --enable CONFIG_SECCOMP \
+      --enable CONFIG_SECCOMP_FILTER
     make olddefconfig
 
     # Confirm the delta survived olddefconfig (a missing dependency would
     # silently drop an option and we would only find out at smoke time).
-    for opt in CONFIG_NF_TABLES CONFIG_NF_TABLES_INET CONFIG_NETFILTER_XT_MATCH_OWNER; do
+    for opt in \
+      CONFIG_NF_TABLES CONFIG_NF_TABLES_INET CONFIG_NETFILTER_XT_MATCH_OWNER \
+      CONFIG_NAMESPACES CONFIG_UTS_NS CONFIG_IPC_NS CONFIG_USER_NS CONFIG_PID_NS CONFIG_NET_NS \
+      CONFIG_SECCOMP CONFIG_SECCOMP_FILTER; do
       grep -q "^${opt}=y" .config || { echo "FATAL: ${opt} not enabled after olddefconfig" >&2; exit 1; }
     done
 

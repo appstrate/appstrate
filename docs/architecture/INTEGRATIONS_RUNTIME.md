@@ -2,6 +2,56 @@
 
 Operational narrative for the integration runtime (env-delivery, container-per-integration, MITM credential injection, niveau-2 scope model, remote HTTP MCP). AFPS wire spec (canonical): <https://github.com/appstrate/afps-spec/blob/main/spec.md>.
 
+## Browser capability
+
+Chromium is an optional capability of a referenced `mcp-server`, not a new
+`server.type`. A package opts in through
+`_meta["dev.appstrate/mcp-server"].capabilities.browser` with an exact HTTPS
+origin list, purpose (`automation` or `connection-acquisition`), protocol
+`cdp-v1`, and platform profile `standard`. The platform parses that declaration,
+resolves the concrete server version, applies operator policy, and adds a
+normalized `browser` block to the integration spawn spec before the isolation
+boundary is created.
+
+The sidecar provisions one first-party browser worker per enabled integration:
+
+1. create a token-authenticated, origin-scoped blind CONNECT gateway;
+2. start the process or Docker browser provider with the platform resource profile;
+3. enforce the worker protocol and record the worker build id plus exact Chromium revision;
+4. give the matching integration runner only its worker endpoint and token;
+5. start the MCP runner and expose only its selected tools to the agent;
+6. close runner, worker, gateway, and ephemeral profile in that order.
+
+The agent never receives the endpoint or token. Browser TLS stays end-to-end;
+the gateway does not reuse the credential-injecting MITM. When an organization
+proxy is configured, the gateway resolves and pins the approved destination,
+then uses CONNECT through that proxy and never falls back to direct egress.
+The worker relays only read-only DevTools discovery endpoints; target creation,
+context ownership, cookie access, lifecycle, message size, pending-command and
+page limits are enforced by its authenticated CDP broker. Browser integration
+stderr content is suppressed wholesale because it may contain CDP credentials,
+bootstrap inputs, or page data.
+
+Capacity is admitted at three layers: the existing per-organization run gate,
+a four-browser per-run requirement ceiling, and `BROWSER_MAX_CONCURRENT` host
+slots. Docker claims those slots atomically through daemon-owned container
+names, so concurrent sidecars cannot each consume the full host budget. Its
+memory and memory-plus-swap ceilings are identical, preventing the worker from
+escaping the profile through Docker's implicit extra swap allowance.
+
+`connection-acquisition` is a separate trust tier. It requires both
+`BROWSER_CONNECT_ENABLED=true` and a matching `BROWSER_DRIVER_GRANTS` entry for
+the exact package/version/origin ceiling. Bootstrap inputs are sent in the
+private sidecar-to-driver tool call, never runner environment or argv. The
+driver must return a successful authenticated proof and only keys declared by
+`connect.produces` can be persisted. Exportable link sessions are supported;
+exportable `run-start` sessions additionally require `delivery.http`, because
+the proven value is installed into the already-running MITM credential source
+after acquisition (runner environment and files are immutable at that point).
+Browser-bound link persistence remains fail-closed until the separate runtime
+state/lease subsystem is enabled. Browser-bound `run-start` acquisition remains
+ephemeral inside the current run.
+
 ### AFPS Integrations runtime (Phase 1.4, env-delivery + container-per-integration)
 
 AFPS integrations with `source.kind: "local"` declare `source.server.{name, version}` pointing to an `mcp-server` package. The mcp-server's `server.type` (`node` | `python` | `binary` | `uv`, all MCPB-vocabulary values) and `server.entry_point` (snake_case per AFPS §3.4) determine the runtime image. The Bun runtime selection uses an MCPB-vocabulary `server.type: "node"` (since MCPB's `server.type` enum is `node|python|binary|uv` — no `bun`) + an Appstrate `_meta["dev.appstrate/mcp-server"].runtime: "bun"` override read by `integration-spawn-resolver` on the mcp-server manifest. The platform validates the agent's `dependencies.integrations[id]`, looks up the installed package + the per-application `integration_connections` row, decrypts the credential blob, and builds a `spawnEnv` from `manifest.auths.{key}.delivery.env` (`apps/api/src/services/integration-spawn-resolver.ts`). The resolved spawn plan is serialized into `INTEGRATIONS_TO_SPAWN_JSON` on the sidecar container's env at create time — the sidecar fetches each bundle via the internal `GET /internal/mcp-server-bundle/:scope/:name` endpoint (authenticated with the run token, dep + install double-check) so we don't fight Linux env-var size limits.
@@ -45,7 +95,7 @@ Key invariants:
 
 - **Sidecar minimal by design**: no `node`, no `python`, no `bun` baked in. Adding a new language is one `runtime-pi/runners/<lang>/Dockerfile` + one entry in `RUNNER_IMAGE_BY_TYPE` (in `integration-runtime-adapter-docker.ts`) — the sidecar image (132 MB) doesn't grow.
 - **Bun runtime via `_meta` (MCPB-vocabulary `server.type` preserved)**: MCPB's `server.type` enum is `node|python|binary|uv` — no `bun`. The mcp-server manifest is AFPS-native at the root with MCPB-vocabulary fields (`server` / `tools` / `user_config`) carried verbatim — NOT a strict-MCPB manifest (AFPS dropped that interoperability claim; a publish-time projection to strict-MCPB is reserved for a future minor, see AFPS §3.4 + §10.2). A bun-native server therefore keeps an MCPB-vocabulary `server.type: "node"` and declares the real runtime under `_meta["dev.appstrate/mcp-server"].runtime: "bun"`. `integration-spawn-resolver` reads the override (`getMcpServerRuntime` in `@appstrate/core/mcp-server`) and falls back to `server.type` when absent — so the effective runtime drives both `HOST_INTERPRETER_BY_TYPE["bun"]` (process mode, host subprocess, no Docker) and `RUNNER_IMAGE_BY_TYPE["bun"]` (docker mode, dedicated `appstrate-mcp-runner-bun` container with full cgroup/cap-drop/network isolation). The override lives on the mcp-server manifest only — the integration manifest carries auth/policy + the `source.server` reference, never server/runtime fields. There is deliberately NO in-process-bun-inside-the-docker-sidecar path: the sidecar runs as root with the Docker socket mounted when integrations are present, so running third-party bun code in its process tree would hand it root + socket → host-escape surface. Containerising bun in tier 3 keeps the security boundary intact.
-- **Pluggable runtime adapter** (`integration-runtime-adapter.ts`): the sidecar's `bootIntegrations` is orchestrator-agnostic. `selectIntegrationRuntimeAdapter()` picks the adapter purely by `id` from `INTEGRATION_RUNTIME_ADAPTER` — **no availability probing / auto-detection**. The platform orchestrator that launches the sidecar sets it to mirror its own `RUN_ADAPTER` (`docker-orchestrator` → `docker`, `process-orchestrator` → `process`), so the integration runtime deterministically matches the run runtime and the sidecar never guesses its backend (an earlier `docker info` auto-probe selected Docker for a process-mode run whenever a daemon was reachable — removed). Each adapter owns: how to spawn the runner, what host the MITM listener should bind to (`listenerBindHost`), what URL the runner uses to reach it (`proxyUrlFor(port)`), where the CA cert lands inside the runtime, and how to tear down. Adding Firecracker is one new `integration-runtime-adapter-firecracker.ts` that calls `registerIntegrationRuntimeAdapter({ id, create })` plus teaching the orchestrators to emit that id — nothing in `integrations-boot.ts` changes. The var is also an operator override (both orchestrators honour a value already in the environment).
+- **Pluggable runtime adapter** (`integration-runtime-adapter.ts`): the sidecar's `bootIntegrations` is orchestrator-agnostic. `selectIntegrationRuntimeAdapter()` picks the adapter purely by `id` from `INTEGRATION_RUNTIME_ADAPTER` — **no availability probing / auto-detection**. Docker selects `docker`; process selects `process`; Firecracker deliberately selects `process` inside its per-run guest. Browser provisioning is orthogonal and is selected through the matching `BrowserProvider` registry. Each adapter owns runner spawn, listener addressing, CA delivery, and teardown; each browser provider owns the companion worker lifecycle.
 - **Docker socket gated by need**: `docker-orchestrator.createSidecar` only adds `binds: ["/var/run/docker.sock"]` + `user: "0:0"` when `spec.integrations.length > 0`. Runs without integrations keep the default `nobody:nobody` user with no socket.
 - **Bundle delivery is HTTP, not env**: `INTEGRATIONS_TO_SPAWN_JSON` carries only manifest metadata + decrypted spawn env. Bundle bytes (potentially several MB) ship out-of-band via `GET /internal/mcp-server-bundle/:scope/:name`.
 - **mcp-server resolves to ONE concrete version — manifest and bytes never skew (#588)**: `integration-spawn-resolver` resolves `source.server.version` to a single published version via the canonical exact → dist-tag → semver-range resolution (`resolveMcpServerForSpawn` in `integration-service.ts`), reads THAT version's manifest from `package_versions.manifest`, and stamps the resolved version onto `spec.manifest.server.version` (alongside `server.packageId`). The sidecar forwards it as `GET /internal/mcp-server-bundle/:scope/:name?version=…`, so the runnable bytes come from the same version as the manifest the resolver read. This closes the prior split where the manifest was read from `packages.draft_manifest` (version-blind) while the bytes came from the latest non-yanked version (pin-blind, and independent of the manifest) — a `publish` that didn't also overwrite the draft left the run executing one version's bytes under another version's manifest ("publish ≠ deploy" footgun). An unsatisfiable pin or an mcp-server with no published version **skips the integration with a loud structured warning** rather than silently running on whatever bytes are latest. System mcp-servers (boot registry, single version) carry no `server.version` and are served by id alone. When `?version=` is absent (older sidecars), the route falls back to the latest non-yanked version (back-compat).

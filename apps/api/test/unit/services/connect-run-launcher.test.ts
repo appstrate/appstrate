@@ -68,7 +68,22 @@ const MANIFEST: IntegrationManifest = localIntegrationManifest({
 // The local-source integration references an mcp-server package; the launcher
 // resolves its runnable server config. Injected here so the unit test needs no DB.
 const fakeMcpResolver: McpServerResolver = async () => ({
-  server: { type: "python", entry_point: "./server.py" },
+  ok: true,
+  execution: {
+    packageId: "@scope/connect-server",
+    version: "1.2.3",
+    source: "version",
+    runtime: "python",
+    entryPoint: "./server.py",
+    manifest: {
+      manifest_version: "0.3",
+      name: "@scope/connect-server",
+      version: "1.2.3",
+      type: "mcp-server",
+      schema_version: "0.1",
+      server: { type: "python", entry_point: "./server.py" },
+    } as never,
+  },
 });
 
 /**
@@ -205,7 +220,12 @@ describe("buildConnectLoginSpec", () => {
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
     // The runnable server config comes from the referenced mcp-server package.
-    expect(spec.manifest.server).toEqual({ type: "python", entry_point: "./server.py" });
+    expect(spec.manifest.server).toEqual({
+      type: "python",
+      entry_point: "./server.py",
+      packageId: "@scope/connect-server",
+      version: "1.2.3",
+    });
     expect(spec.connectLogin).toBeDefined();
     expect(spec.connectLogin!).toMatchObject({
       toolName: "login",
@@ -248,8 +268,32 @@ describe("buildConnectLoginSpec", () => {
 
   it("throws when the referenced mcp-server cannot be resolved", async () => {
     const ex = execution();
-    const missing: McpServerResolver = async () => null;
+    const missing: McpServerResolver = async () => ({ ok: false, reason: "not_found" });
     await expect(buildConnectLoginSpec(ex, missing)).rejects.toThrow(/mcp-server/);
+  });
+
+  it("does not silently drop a declared browser capability on the secret-blind path", async () => {
+    const browserServer: McpServerResolver = async () => {
+      const base = await fakeMcpResolver("@scope/connect-server", "o");
+      if (!base.ok) return base;
+      return {
+        ok: true,
+        execution: {
+          ...base.execution,
+          browser: {
+            purpose: "automation",
+            protocol: "cdp-v1",
+            profile: "standard",
+            allowedOrigins: ["https://example.com"],
+            sessionMode: "none",
+            trustedDriver: false,
+          },
+        },
+      };
+    };
+    await expect(buildConnectLoginSpec(execution(), browserServer)).rejects.toThrow(
+      /explicit trusted browser executor marker/,
+    );
   });
 });
 

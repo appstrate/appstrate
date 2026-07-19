@@ -81,6 +81,7 @@ import {
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
+import { createBrowserConnectRunExecutor } from "../services/connect/browser-run-launcher.ts";
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import {
@@ -610,6 +611,7 @@ export function createIntegrationsRouter() {
         // paste-the-bag / declarative paths don't construct an executor.
         const conn = await resolveStrategy(auth, {
           connectToolExecutor: createConnectRunExecutor(),
+          browserConnectExecutor: createBrowserConnectRunExecutor(),
         }).complete(
           {
             scope,
@@ -868,6 +870,7 @@ export function createIntegrationsRouter() {
       }
       const conn = await resolveStrategy(auth, {
         connectToolExecutor: createConnectRunExecutor(),
+        browserConnectExecutor: createBrowserConnectRunExecutor(),
       }).complete(
         {
           scope,

@@ -43,7 +43,10 @@ import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import { fetchMcpServerManifest } from "../integration-service.ts";
+import {
+  resolveLocalMcpServerExecution,
+  type LocalMcpServerExecutionResolution,
+} from "../resolved-mcp-server-execution.ts";
 import {
   getIntegrationSourceKind,
   getLocalServerRef,
@@ -128,11 +131,14 @@ export interface ConnectRunExecutorOptions {
  */
 export type McpServerResolver = (
   packageId: string,
-) => Promise<{ server?: { type?: string; entry_point?: string } } | null>;
+  orgId: string,
+  pin?: string | null,
+) => Promise<LocalMcpServerExecutionResolution>;
 
 export async function buildConnectLoginSpec(
   execution: ConnectToolExecution,
-  resolveMcpServer: McpServerResolver = fetchMcpServerManifest,
+  resolveMcpServer: McpServerResolver = (packageId, orgId, pin) =>
+    resolveLocalMcpServerExecution({ packageId, orgId, pin }),
 ): Promise<IntegrationSpawnSpec> {
   const auths = (execution.manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   const auth = auths[execution.authKey];
@@ -164,11 +170,16 @@ export async function buildConnectLoginSpec(
       `connect-run: integration '${execution.integrationId}' local source is missing source.server`,
     );
   }
-  const mcpServer = await resolveMcpServer(ref.name);
-  const run = mcpServer?.server;
-  if (!mcpServer || !run?.type || !run.entry_point) {
+  const resolution = await resolveMcpServer(ref.name, execution.scope.orgId, ref.version);
+  if (!resolution.ok) {
     throw new Error(
-      `connect-run: referenced mcp-server '${ref.name}' could not be resolved (missing or invalid)`,
+      `connect-run: referenced mcp-server '${ref.name}@${ref.version}' could not be resolved (${resolution.reason})`,
+    );
+  }
+  const resolvedServer = resolution.execution;
+  if (resolvedServer.browser) {
+    throw new Error(
+      "connect-run: a browser-capable mcp-server requires the explicit trusted browser executor marker",
     );
   }
 
@@ -189,8 +200,10 @@ export async function buildConnectLoginSpec(
       name: execution.manifest.name,
       version: execution.manifest.version,
       server: {
-        type: run.type,
-        entry_point: run.entry_point,
+        type: resolvedServer.runtime,
+        entry_point: resolvedServer.entryPoint,
+        packageId: resolvedServer.packageId,
+        ...(resolvedServer.source === "version" ? { version: resolvedServer.version } : {}),
       },
     },
     spawnEnv: {},
@@ -209,6 +222,7 @@ export async function buildConnectLoginSpec(
     },
     // No agent — expose nothing.
     toolAllowlist: [],
+    ...(resolvedServer.workspaceMount ? { workspaceMount: resolvedServer.workspaceMount } : {}),
     connectLogin: {
       toolName: execution.toolName,
       ...(execution.produces ? { produces: execution.produces } : {}),
@@ -300,7 +314,9 @@ class ConnectRunExecutor implements ConnectToolExecutor {
   constructor(opts: ConnectRunExecutorOptions = {}) {
     this.orchestrator = opts.orchestrator;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
-    this.resolveMcpServer = opts.resolveMcpServer ?? fetchMcpServerManifest;
+    this.resolveMcpServer =
+      opts.resolveMcpServer ??
+      ((packageId, orgId, pin) => resolveLocalMcpServerExecution({ packageId, orgId, pin }));
   }
 
   async run(execution: ConnectToolExecution): Promise<CredentialBundle> {
@@ -320,7 +336,6 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     const resultKey = randomBytes(32);
 
     const spec = await buildConnectLoginSpec(execution, this.resolveMcpServer);
-
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;
 

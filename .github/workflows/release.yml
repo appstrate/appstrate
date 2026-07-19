@@ -23,6 +23,8 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/appstrate
+  CHROMIUM_VERSION: 149.0.7827.53-r0
+  FIRECRACKER_CHROMIUM_VERSION: 142.0.7444.59-r0
 
 permissions:
   contents: write
@@ -49,6 +51,9 @@ jobs:
           - name: appstrate-sidecar
             context: .
             dockerfile: ./runtime-pi/sidecar/Dockerfile
+          - name: appstrate-browser-worker
+            context: .
+            dockerfile: ./runtime-pi/browser-worker/Dockerfile
           # Per-integration MCP runner images. Spawned by the sidecar via
           # `docker create` when an AFPS integration declares a local
           # `server.type` — the sidecar resolves the GHCR ref from
@@ -148,6 +153,8 @@ jobs:
           build-args: |
             APP_VERSION=${{ github.ref_name }}
             GIT_SHA=${{ github.sha }}
+            CHROMIUM_VERSION=${{ env.CHROMIUM_VERSION }}
+            APPSTRATE_BROWSER_WORKER_BUILD_ID=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -459,6 +466,8 @@ jobs:
         run: bash apps/api/src/modules/firecracker/scripts/build-kernel.sh ./data/firecracker/vmlinux
 
       - name: Build guest rootfs
+        env:
+          CHROMIUM_VERSION: ${{ env.FIRECRACKER_CHROMIUM_VERSION }}
         run: bash apps/api/src/modules/firecracker/scripts/build-rootfs.sh ./data/firecracker/rootfs.ext4
 
       - name: Compress rootfs + compute checksums

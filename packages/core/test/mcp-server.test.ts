@@ -12,9 +12,11 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  getMcpServerBrowserCapability,
   getMcpServerRuntime,
   getMcpServerWorkspaceMount,
   mcpServerManifestSchema,
+  MCP_SERVER_APPSTRATE_META_KEY,
   MCP_SERVER_WORKSPACE_META_KEY,
   type McpServerManifest,
 } from "../src/mcp-server.ts";
@@ -234,5 +236,149 @@ describe("getMcpServerRuntime", () => {
     expect(
       getMcpServerRuntime(manifest({ "dev.appstrate/mcp-server": { runtime: 42 } })),
     ).toBeUndefined();
+  });
+});
+
+describe("getMcpServerBrowserCapability", () => {
+  it("returns undefined when no browser capability is declared", () => {
+    expect(getMcpServerBrowserCapability(manifest())).toBeUndefined();
+    expect(
+      getMcpServerBrowserCapability(
+        manifest({ [MCP_SERVER_APPSTRATE_META_KEY]: { runtime: "bun" } }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("parses, defaults, canonicalizes, and deduplicates exact HTTPS origins", () => {
+    const m = manifest({
+      [MCP_SERVER_APPSTRATE_META_KEY]: {
+        runtime: "bun",
+        capabilities: {
+          browser: {
+            purpose: "automation",
+            origins: ["https://Example.com/", "https://example.com"],
+          },
+        },
+      },
+    });
+
+    expect(getMcpServerRuntime(m)).toBe("bun");
+    expect(getMcpServerBrowserCapability(m)).toEqual({
+      purpose: "automation",
+      protocol: "cdp-v1",
+      profile: "standard",
+      origins: ["https://example.com"],
+    });
+  });
+
+  it("accepts a strict connection-acquisition declaration", () => {
+    const m = manifest({
+      [MCP_SERVER_APPSTRATE_META_KEY]: {
+        capabilities: {
+          browser: {
+            purpose: "connection-acquisition",
+            protocol: "cdp-v1",
+            profile: "standard",
+            origins: ["https://www.leboncoin.fr", "https://auth.leboncoin.fr"],
+          },
+        },
+      },
+    });
+
+    expect(getMcpServerBrowserCapability(m)?.purpose).toBe("connection-acquisition");
+  });
+
+  it("rejects unsafe, non-origin, wildcard, and credential-bearing URLs", () => {
+    const invalidOrigins = [
+      "http://example.com",
+      "https://localhost",
+      "https://127.0.0.1",
+      "https://169.254.169.254",
+      "https://metadata.google.internal",
+      "https://*.example.com",
+      "https://user:secret@example.com",
+      "https://example.com/login",
+      "https://example.com?token=x",
+      "not a URL",
+    ];
+
+    for (const origin of invalidOrigins) {
+      const m = manifest({
+        [MCP_SERVER_APPSTRATE_META_KEY]: {
+          capabilities: { browser: { purpose: "automation", origins: [origin] } },
+        },
+      });
+      expect(() => getMcpServerBrowserCapability(m), origin).toThrow();
+    }
+  });
+
+  it("rejects unknown policy fields instead of silently ignoring them", () => {
+    const m = manifest({
+      [MCP_SERVER_APPSTRATE_META_KEY]: {
+        capabilities: {
+          browser: {
+            purpose: "automation",
+            origins: ["https://example.com"],
+            allowDirectEgress: true,
+          },
+        },
+      },
+    });
+    expect(() => getMcpServerBrowserCapability(m)).toThrow(/Unrecognized key/);
+  });
+});
+
+describe("mcpServerManifestSchema — browser capability install-time validation", () => {
+  it("accepts a valid browser capability", () => {
+    const m = {
+      ...manifest({
+        [MCP_SERVER_APPSTRATE_META_KEY]: {
+          capabilities: {
+            browser: {
+              purpose: "automation",
+              origins: ["https://example.com"],
+            },
+          },
+        },
+      }),
+      server: {
+        type: "node",
+        entry_point: "./server.ts",
+        mcp_config: { command: "node", args: ["./server.ts"] },
+      },
+    };
+    expect(mcpServerManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("rejects an unsafe browser origin at package validation time", () => {
+    const m = {
+      ...manifest({
+        [MCP_SERVER_APPSTRATE_META_KEY]: {
+          capabilities: {
+            browser: {
+              purpose: "automation",
+              origins: ["http://127.0.0.1"],
+            },
+          },
+        },
+      }),
+      server: {
+        type: "node",
+        entry_point: "./server.ts",
+        mcp_config: { command: "node", args: ["./server.ts"] },
+      },
+    };
+    const parsed = mcpServerManifestSchema.safeParse(m);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(
+        parsed.error.issues.some(
+          (issue) =>
+            issue.path[0] === "_meta" &&
+            issue.path[1] === MCP_SERVER_APPSTRATE_META_KEY &&
+            issue.path.includes("browser"),
+        ),
+      ).toBe(true);
+    }
   });
 });

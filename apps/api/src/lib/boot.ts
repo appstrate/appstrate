@@ -27,6 +27,7 @@ import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
+import { initBrowserCapabilityGrants } from "../services/browser-capability-grants.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
 import { initSystemIntegrations } from "../services/integration-client-registry.ts";
 import { registerModelProviders } from "../services/model-providers/registry.ts";
@@ -161,6 +162,12 @@ export async function boot(): Promise<void> {
   // Load system proxies from SYSTEM_PROXIES env var
   initSystemProxies();
   logger.info("System proxies loaded");
+
+  // Browser connection drivers are privileged independently of package
+  // signatures. Parse grants fail-closed before any run or connect flow can
+  // resolve a secret-aware browser capability.
+  initBrowserCapabilityGrants();
+  logger.info("Browser capability grants loaded");
 
   // Load system provider keys + models from SYSTEM_PROVIDER_KEYS env var
   initSystemModelProviderKeys();

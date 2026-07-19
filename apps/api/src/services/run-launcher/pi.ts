@@ -48,6 +48,10 @@ import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrat
 import { getEnv } from "@appstrate/env";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
+import {
+  hasExecutionRequirements,
+  resolveBrowserExecutionRequirements,
+} from "../browser-execution-profiles.ts";
 
 /**
  * Grace added to the platform's container watchdog on top of the agent's
@@ -213,9 +217,14 @@ async function runPlatformContainerImpl(
       !plan.proxyUrl &&
       !llmConfig.aliased;
 
+    const requirements = resolveBrowserExecutionRequirements(plan.integrations ?? []);
+
     // Resolved BEFORE the boundary so port-allocating backends don't
     // reserve a sidecar port this run will never bind.
-    boundary = await orch.createIsolationBoundary(runId, { skipSidecar });
+    boundary = await orch.createIsolationBoundary(runId, {
+      skipSidecar,
+      ...(hasExecutionRequirements(requirements) ? { requirements } : {}),
+    });
 
     // The placeholder is what actually lands in MODEL_API_KEY inside the
     // agent container. Provider-specific shape (e.g. a structured JWT) is
@@ -364,9 +373,14 @@ async function runPlatformContainerImpl(
       traceparent: currentTraceparent() ?? context.traceparent,
     });
 
-    await orch.ensureImages(
-      skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
-    );
+    const requiredImages = skipSidecar
+      ? [getEnv().PI_IMAGE]
+      : [
+          getEnv().PI_IMAGE,
+          getEnv().SIDECAR_IMAGE,
+          ...(hasExecutionRequirements(requirements) ? [getEnv().BROWSER_WORKER_IMAGE] : []),
+        ];
+    await orch.ensureImages(requiredImages);
 
     // Sidecar + agent + bundle upload in parallel. The AFPS bundle is uploaded
     // to run-scoped storage; the agent container fetches and extracts it itself

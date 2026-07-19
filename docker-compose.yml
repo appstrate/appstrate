@@ -276,6 +276,11 @@ services:
       # Set it only if you need to point sidecars at a different host.
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.36}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - BROWSER_ENABLED=${BROWSER_ENABLED:-false}
+      - BROWSER_CONNECT_ENABLED=${BROWSER_CONNECT_ENABLED:-false}
+      - BROWSER_DRIVER_GRANTS=${BROWSER_DRIVER_GRANTS:-[]}
+      - BROWSER_WORKER_IMAGE=ghcr.io/appstrate/appstrate-browser-worker:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - BROWSER_MAX_CONCURRENT=${BROWSER_MAX_CONCURRENT:-4}
       # Runner images forwarded to the sidecar (SIDECAR_OPERATOR_ENV_KEYS) so
       # it spawns integration runners from GHCR instead of bare `:latest` tags
       # (which the daemon would try — and fail — to pull from Docker Hub).

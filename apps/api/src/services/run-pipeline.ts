@@ -12,6 +12,7 @@ import {
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
+import { toBrowserCapabilityApiError } from "./browser-capability-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
@@ -466,6 +467,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     // `500 internal_error` with no detail (#878).
     const mapped = toBundleApiError(err);
     if (mapped) throw mapped;
+    const browserMapped = toBrowserCapabilityApiError(err);
+    if (browserMapped) throw browserMapped;
     throw err;
   }
 

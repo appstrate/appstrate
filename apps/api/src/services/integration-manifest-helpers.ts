@@ -167,6 +167,12 @@ export interface AppstrateConnectMeta {
   reauth_on?: number[];
   produces?: string[];
   persist_login_secret?: boolean;
+  executor?: BrowserConnectExecutorMeta;
+}
+
+export interface BrowserConnectExecutorMeta {
+  kind: "browser";
+  session_mode: "exportable" | "browser-bound";
 }
 
 const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
@@ -302,4 +308,30 @@ export function getAppstrateConnectMeta(
 ): AppstrateConnectMeta | undefined {
   const meta = connect?._meta?.[APPSTRATE_CONNECT_META_KEY];
   return meta && typeof meta === "object" ? (meta as AppstrateConnectMeta) : undefined;
+}
+
+/**
+ * Return the strictly-shaped browser executor marker. Install-time validation
+ * rejects malformed metadata; this runtime guard remains fail-closed for rows
+ * written directly to the database or created by old fixtures.
+ */
+export function getBrowserConnectExecutor(
+  connect: AfpsManifestConnect | undefined,
+): BrowserConnectExecutorMeta | undefined {
+  const raw = getAppstrateConnectMeta(connect)?.executor;
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("browser connect executor must be an object");
+  }
+  const record = raw as unknown as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== "kind" && key !== "session_mode")) {
+    throw new Error("browser connect executor contains unknown fields");
+  }
+  if (record.kind !== "browser") {
+    throw new Error("unsupported connect executor kind");
+  }
+  if (record.session_mode !== "exportable" && record.session_mode !== "browser-bound") {
+    throw new Error("unsupported browser session mode");
+  }
+  return { kind: "browser", session_mode: record.session_mode };
 }
