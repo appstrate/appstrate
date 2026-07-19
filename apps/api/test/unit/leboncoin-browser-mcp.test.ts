@@ -54,7 +54,7 @@ describe("Leboncoin browser driver safety helpers", () => {
         url: "https://www.leboncoin.fr/recherche?text=velo",
         title: "Annonces vélo d'occasion",
         bodyText: "Vélos d'occasion partout en France",
-        frameUrls: [],
+        frameUrls: ["https://geo.captcha-delivery.com.evil.example/captcha/"],
       }),
     ).toBe(false);
   });

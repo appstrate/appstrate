@@ -220,7 +220,7 @@ export function normalizeListingUrl(raw: string): string {
 
 function isLeboncoinCookie(
   cookie: BrowserCookie,
-): cookie is Required<Pick<BrowserCookie, "name" | "value" | "domain">> & BrowserCookie {
+): cookie is BrowserCookie & { name: string; value: string; domain: string } {
   if (
     typeof cookie.name !== "string" ||
     typeof cookie.value !== "string" ||
@@ -271,17 +271,26 @@ export function hasLeboncoinSession(cookies: readonly BrowserCookie[]): boolean 
 export function detectDataDomeChallenge(
   snapshot: Pick<PageSnapshot, "url" | "title" | "bodyText" | "frameUrls">,
 ): boolean {
-  const haystack = [snapshot.url, snapshot.title, snapshot.bodyText, ...snapshot.frameUrls]
-    .join("\n")
-    .toLowerCase();
+  const dataDomeHosts = new Set([
+    "ct.captcha-delivery.com",
+    "geo.captcha-delivery.com",
+    "static.captcha-delivery.com",
+  ]);
+  const hasDataDomeUrl = [snapshot.url, ...snapshot.frameUrls].some((raw) => {
+    try {
+      return dataDomeHosts.has(new URL(raw).hostname.toLowerCase());
+    } catch {
+      return false;
+    }
+  });
+  const visibleText = [snapshot.title, snapshot.bodyText].join("\n").toLowerCase();
   return (
-    haystack.includes("captcha-delivery.com") ||
-    haystack.includes("datadome") ||
-    haystack.includes("pardon the interruption") ||
-    haystack.includes("verify you are human") ||
-    haystack.includes("vérifiez que vous êtes humain") ||
-    haystack.includes("confirmez que vous n'êtes pas un robot") ||
-    haystack.includes("/captcha/")
+    hasDataDomeUrl ||
+    visibleText.includes("datadome") ||
+    visibleText.includes("pardon the interruption") ||
+    visibleText.includes("verify you are human") ||
+    visibleText.includes("vérifiez que vous êtes humain") ||
+    visibleText.includes("confirmez que vous n'êtes pas un robot")
   );
 }
 
