@@ -18,7 +18,7 @@
  */
 
 import * as clack from "@clack/prompts";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, normalize } from "node:path";
 import { intro, outro, askText, confirm, exitWithError } from "../lib/ui.ts";
 import { CLI_VERSION, DEV_CLI_VERSION } from "../lib/version.ts";
 import {
@@ -360,6 +360,21 @@ function parsePort(raw: string | undefined): number {
   return n;
 }
 
+/**
+ * Promote the verified staged daemon onto `RUNNER_BIN_PATH`. On a failed
+ * promotion (chmod/rename), the staged file is removed — otherwise the ~70 MB
+ * verified binary would be left behind as a hidden orphan in the bin dir.
+ * Exported for tests; both `install` and `update` route through it.
+ */
+export async function promoteStagedDaemon(d: { fs: RunnerFs }, stagedPath: string): Promise<void> {
+  try {
+    await d.fs.promoteFile(stagedPath, RUNNER_BIN_PATH, 0o755);
+  } catch (err) {
+    await d.fs.remove(stagedPath).catch(() => {});
+    throw err;
+  }
+}
+
 async function downloadAndInstallBinaries(
   config: RunnerConfig,
   version: string,
@@ -381,7 +396,7 @@ async function downloadAndInstallBinaries(
     destPath: RUNNER_BIN_PATH,
     onProgress: (p) => daemonSpin.message(`${daemonLabel} — ${formatProgress(p)}`),
   });
-  await d.fs.promoteFile(stagedPath, RUNNER_BIN_PATH, 0o755);
+  await promoteStagedDaemon(d, stagedPath);
   daemonSpin.stop(`Installed daemon → ${RUNNER_BIN_PATH}`);
 
   const fcSpin = clack.spinner();
@@ -757,7 +772,7 @@ export async function runnerUpdateCommand(opts: RunnerUpdateOptions = {}): Promi
     });
     // Atomic swap over the live binary — rename(2) keeps the running
     // process's fd valid; the restart below picks up the new inode.
-    await d.fs.promoteFile(stagedPath, RUNNER_BIN_PATH, 0o755);
+    await promoteStagedDaemon(d, stagedPath);
     spin.stop(`Installed daemon → ${RUNNER_BIN_PATH}`);
 
     // Re-pin the guest artifacts to the new daemon version BEFORE the restart:
@@ -827,22 +842,43 @@ export interface RunnerUninstallOptions {
 }
 
 /**
+ * Refuse any data dir a recursive root `rm -rf` must never target: relative
+ * paths (cwd-dependent) and anything shallower than two path segments. Guards
+ * `uninstall` against a corrupted env file (`FIRECRACKER_KERNEL_PATH=/vmlinux`
+ * → `dirname` = `/`) or a typo'd `--data-dir /` recursing the filesystem root
+ * as root. Every resolution branch below flows through it. Exported for tests.
+ */
+export function assertSaneDataDir(dir: string): string {
+  const normalized = normalize(dir);
+  const segments = normalized.split("/").filter(Boolean);
+  if (!isAbsolute(normalized) || segments.length < 2) {
+    throw new Error(
+      `Refusing to use "${dir}" as the runner data dir: expected an absolute path at ` +
+        `least two segments deep (e.g. ${RUNNER_DATA_DIR}). A shallower target would let ` +
+        `uninstall recursively delete far beyond the runner's state.`,
+    );
+  }
+  return normalized;
+}
+
+/**
  * Recover the install's state root: an explicit `--data-dir` wins, else the
  * `FIRECRACKER_KERNEL_PATH` pin in the env file (`<dataDir>/vmlinux`), else the
  * compiled default. This makes `uninstall` remove the SAME dir a non-default
- * `install --data-dir` created.
+ * `install --data-dir` created. Every branch is gated by `assertSaneDataDir`
+ * — the result feeds a recursive root `rm`. Exported for tests.
  */
-async function resolveUninstallDataDir(
+export async function resolveUninstallDataDir(
   explicit: string | undefined,
-  d: ResolvedDeps,
+  d: { fs: RunnerFs },
 ): Promise<string> {
-  if (explicit) return explicit;
+  if (explicit) return assertSaneDataDir(explicit);
   const envText = await d.fs.readFile(RUNNER_ENV_PATH);
   if (envText) {
     const kernel = parseRunnerEnvFile(envText).FIRECRACKER_KERNEL_PATH;
-    if (kernel && kernel.endsWith("/vmlinux")) return dirname(kernel);
+    if (kernel && kernel.endsWith("/vmlinux")) return assertSaneDataDir(dirname(kernel));
   }
-  return RUNNER_DATA_DIR;
+  return assertSaneDataDir(RUNNER_DATA_DIR);
 }
 
 /**

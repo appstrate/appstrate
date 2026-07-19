@@ -98,7 +98,11 @@ export async function downloadDaemon(opts: {
 }): Promise<{ stagedPath: string }> {
   const urls = daemonUrls(opts.version, opts.arch);
   const asset = daemonAssetName(opts.arch);
-  const stagedPath = join(dirname(opts.destPath), `.${asset}.download-${process.pid}`);
+  // Fixed staged name (no pid suffix): a retry after a crash/SIGKILL simply
+  // overwrites the previous partial file instead of accumulating hidden ~70 MB
+  // orphans next to the binary. The SHA-256 gate below fails closed if two
+  // concurrent installs ever interleave writes.
+  const stagedPath = join(dirname(opts.destPath), `.${asset}.download`);
 
   // 1. Fetch + verify the small signed manifest BEFORE the large binary
   //    stream: it fails fast on a bad/missing signature without pulling the

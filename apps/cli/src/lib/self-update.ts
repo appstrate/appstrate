@@ -459,8 +459,11 @@ export async function performCurlUpdate(
   const workDir = await deps.makeWorkDir();
   // Stage the (large) binary in the SAME directory as `dest` so the final
   // promotion is an atomic same-filesystem rename over the running binary.
-  // The small checksums + signature live in the throwaway work dir.
-  const staged = join(dirname(dest), `.appstrate.download.${process.pid}`);
+  // The small checksums + signature live in the throwaway work dir. Fixed
+  // staged name (no pid suffix): a retry after a crash/SIGKILL overwrites the
+  // previous partial file instead of accumulating hidden ~113 MB orphans;
+  // the SHA-256 gate fails closed on interleaved writes.
+  const staged = join(dirname(dest), ".appstrate.download");
   try {
     const urls = releaseUrls(target, opts.platform);
     const asset = assetName(opts.platform);
