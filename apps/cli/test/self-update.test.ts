@@ -370,6 +370,29 @@ describe("runSelfUpdate — curl flow", () => {
     expect(state.replaced).toEqual([{ dest: "/home/user/.local/bin/appstrate" }]);
   });
 
+  it("stages the download under a fixed hidden name (retry overwrites a crashed partial)", async () => {
+    const state = freshState();
+    const deps = makeFakeDeps(state);
+    let stagedSeen: string | undefined;
+    const basePromote = deps.promoteFile;
+    deps.promoteFile = async (staged, dest) => {
+      stagedSeen = staged;
+      await basePromote(staged, dest);
+    };
+    const out = await runSelfUpdate({
+      source: "curl",
+      platform: { platform: "linux", arch: "x64" },
+      log: () => {},
+      version: "1.2.3",
+      currentVersion: "1.0.0",
+      deps,
+    });
+    expect(out.exitCode).toBe(SELF_UPDATE_EXIT.OK);
+    // No pid suffix: a retry after crash/SIGKILL overwrites the previous
+    // partial file instead of accumulating hidden ~113 MB orphans.
+    expect(stagedSeen).toBe("/home/user/.local/bin/.appstrate.download");
+  });
+
   it("reports already-up-to-date and skips replace when versions match", async () => {
     const state = freshState();
     const out = await runSelfUpdate({

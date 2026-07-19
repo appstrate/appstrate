@@ -48,6 +48,9 @@ import {
   runnerDoctor,
   pollHealth,
   enableService,
+  assertSaneDataDir,
+  resolveUninstallDataDir,
+  promoteStagedDaemon,
 } from "../src/commands/runner.ts";
 import type { RunnerExec, RunnerFs, RunnerHttp } from "../src/lib/runner/exec.ts";
 
@@ -522,9 +525,10 @@ describe("downloadDaemon", () => {
       arch: "x86_64",
       destPath: TEST_DAEMON_DEST,
     });
-    // Staged next to the destination (same dir → atomic promote).
-    expect(out.stagedPath.startsWith("/usr/local/bin/")).toBe(true);
-    expect(out.stagedPath).toContain("appstrate-runner-x86_64");
+    // Staged next to the destination (same dir → atomic promote), under a
+    // FIXED hidden name — no pid suffix, so a retry after a crash overwrites
+    // the previous partial file instead of accumulating hidden orphans.
+    expect(out.stagedPath).toBe("/usr/local/bin/.appstrate-runner-x86_64.download");
   });
 
   it("throws on a sha256 mismatch and removes the staged file", async () => {
@@ -1027,5 +1031,88 @@ describe("runnerUninstallCommand", () => {
     await runnerUninstallCommand({ yes: true, deps: { getuid: () => 0, fs, exec } });
     // Still targets the canonical paths (remove is rm -rf → no-op on missing).
     expect(removed).toContain(RUNNER_BIN_PATH);
+  });
+});
+
+// ─── uninstall data-dir guard ───────────────────────────────────────────────
+
+describe("assertSaneDataDir", () => {
+  it("accepts absolute paths at least two segments deep", () => {
+    expect(assertSaneDataDir("/var/lib/appstrate-runner")).toBe("/var/lib/appstrate-runner");
+    expect(assertSaneDataDir("/srv/runner")).toBe("/srv/runner");
+    expect(assertSaneDataDir(RUNNER_DATA_DIR)).toBe(RUNNER_DATA_DIR);
+    // Dot segments normalize before the depth check (trailing slash is kept).
+    expect(assertSaneDataDir("/srv/./runner/")).toBe("/srv/runner/");
+  });
+
+  it("refuses relative paths", () => {
+    expect(() => assertSaneDataDir("srv/runner")).toThrow(/Refusing to use/);
+    expect(() => assertSaneDataDir("./data")).toThrow(/Refusing to use/);
+  });
+
+  it("refuses the filesystem root", () => {
+    expect(() => assertSaneDataDir("/")).toThrow(/Refusing to use/);
+    // `..` climbing must not sneak past the depth check either.
+    expect(() => assertSaneDataDir("/srv/runner/../..")).toThrow(/Refusing to use/);
+  });
+
+  it("refuses single-segment paths", () => {
+    expect(() => assertSaneDataDir("/srv")).toThrow(/Refusing to use/);
+    expect(() => assertSaneDataDir("/vmlinux")).toThrow(/Refusing to use/);
+  });
+});
+
+describe("resolveUninstallDataDir", () => {
+  it("refuses an explicit --data-dir / (would rm -rf the filesystem root)", async () => {
+    const { fs } = fakeFs();
+    await expect(resolveUninstallDataDir("/", { fs })).rejects.toThrow(/Refusing to use/);
+  });
+
+  it("refuses a kernel pin at the root (FIRECRACKER_KERNEL_PATH=/vmlinux → dirname /)", async () => {
+    const { fs } = fakeFs({ [RUNNER_ENV_PATH]: "FIRECRACKER_KERNEL_PATH=/vmlinux\n" });
+    await expect(resolveUninstallDataDir(undefined, { fs })).rejects.toThrow(/Refusing to use/);
+  });
+
+  it("accepts a sane kernel pin and returns its directory", async () => {
+    const { fs } = fakeFs({ [RUNNER_ENV_PATH]: "FIRECRACKER_KERNEL_PATH=/srv/runner/vmlinux\n" });
+    expect(await resolveUninstallDataDir(undefined, { fs })).toBe("/srv/runner");
+  });
+
+  it("falls back to the compiled default (itself guard-checked)", async () => {
+    const { fs } = fakeFs();
+    expect(await resolveUninstallDataDir(undefined, { fs })).toBe(RUNNER_DATA_DIR);
+  });
+});
+
+// ─── staged daemon promotion ────────────────────────────────────────────────
+
+describe("promoteStagedDaemon", () => {
+  const staged = "/usr/local/bin/.appstrate-runner-x86_64.download";
+
+  it("promotes the staged binary onto the daemon path", async () => {
+    const { fs, installed, removed } = fakeFs({ [staged]: "<staged>" });
+    await promoteStagedDaemon({ fs }, staged);
+    expect(installed).toEqual([{ dest: RUNNER_BIN_PATH, bytes: new Uint8Array(), mode: 0o755 }]);
+    expect(removed).toEqual([]);
+  });
+
+  it("removes the staged file when promotion fails (no ~70 MB orphan)", async () => {
+    const { fs, removed } = fakeFs({ [staged]: "<staged>" });
+    fs.promoteFile = async () => {
+      throw new Error("EACCES: chmod failed");
+    };
+    await expect(promoteStagedDaemon({ fs }, staged)).rejects.toThrow(/EACCES/);
+    expect(removed).toEqual([staged]);
+  });
+
+  it("rethrows the promotion error even if the staged cleanup itself fails", async () => {
+    const { fs } = fakeFs({ [staged]: "<staged>" });
+    fs.promoteFile = async () => {
+      throw new Error("rename failed");
+    };
+    fs.remove = async () => {
+      throw new Error("rm failed");
+    };
+    await expect(promoteStagedDaemon({ fs }, staged)).rejects.toThrow(/rename failed/);
   });
 });
