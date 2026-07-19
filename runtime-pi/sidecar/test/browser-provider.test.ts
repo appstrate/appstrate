@@ -208,6 +208,13 @@ describe("process browser provider", () => {
 });
 
 describe("docker browser provider", () => {
+  it("keeps the bundled seccomp profile reachable by the non-root sidecar user", async () => {
+    const dockerfile = await readFile(new URL("../Dockerfile", import.meta.url), "utf8");
+    expect(dockerfile).toContain(
+      "RUN install -d -o root -g root -m 0555 /usr/local/share/appstrate",
+    );
+  });
+
   it("keeps the vendored Chromium profile fail-closed and narrowly extended", async () => {
     const profile = JSON.parse(
       await readFile(new URL("../browser-seccomp.json", import.meta.url), "utf8"),
