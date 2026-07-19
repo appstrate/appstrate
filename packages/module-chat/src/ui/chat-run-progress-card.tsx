@@ -119,8 +119,11 @@ export function ChatRunProgressCard({
   const line = terminal ? { id: -1, text: terminalRunLineText(effectiveStatus) } : current;
   const effectiveRunHref = runHref ?? (runId ? buildRunPageHref(packageId, runId) : undefined);
 
+  // `isolate` scopes the internal z-0/z-10 layering to this card — without it
+  // the z-10 content escapes into the thread's stacking context and paints
+  // over the sticky composer when the card scrolls behind it.
   return (
-    <div className="bg-card text-card-foreground relative my-3 w-full rounded-lg border">
+    <div className="bg-card text-card-foreground relative isolate my-3 w-full rounded-lg border">
       {/* Full-card click target (opens the detail modal). Behind the content so
           the run-page link can re-enable pointer events for itself — avoids
           nesting interactive elements. */}
