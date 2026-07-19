@@ -152,6 +152,7 @@
   "schedules.emptyHint": "Ajoutez une planification pour exécuter un agent automatiquement.",
   "schedules.agentLabel": "Agent",
   "preferences.title": "Préférences",
+  "preferences.sectionAccount": "Compte",
   "preferences.tabGeneral": "Général",
   "preferences.tabSecurity": "Sécurité",
   "preferences.tabConnections": "Mes connexions",

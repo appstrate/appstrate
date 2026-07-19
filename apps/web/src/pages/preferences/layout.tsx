@@ -17,6 +17,7 @@ export function PreferencesLayout() {
       ]}
       sections={[
         {
+          label: t("preferences.sectionAccount"),
           items: [
             { to: "/preferences/general", icon: User, label: t("preferences.tabGeneral") },
             {

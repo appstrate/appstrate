@@ -71,7 +71,7 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
     <SidebarProvider
       disableKeyboardShortcut
       defaultOpen
-      className="min-h-0! w-auto flex-1"
+      className="min-h-0! w-auto flex-1 overflow-hidden"
       style={{ "--sidebar-width": "14rem" } as React.CSSProperties}
     >
       {/* Desktop: real sidebar flush against the global AppSidebar */}
@@ -110,7 +110,7 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
         </SidebarContent>
       </Sidebar>
 
-      <SidebarInset className="bg-background min-w-0 p-6">
+      <SidebarInset className="bg-background min-w-0 overflow-y-auto p-6">
         <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs} />
 
         {/* Mobile: dropdown selector (sidebar hidden) */}
