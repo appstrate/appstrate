@@ -109,5 +109,30 @@ describe("browser connect private result parser", () => {
     expect(browserSafeErrorCode(new Error("driver failed with password=hunter2"))).toBe(
       "BROWSER_UNAVAILABLE",
     );
+    expect(() =>
+      parseBrowserAcquisitionResult(
+        {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "BROWSER_INTERACTION_REQUIRED: challenge details must stay private",
+            },
+          ],
+        },
+        ["cookie"],
+        "exportable",
+      ),
+    ).toThrow(/^BROWSER_INTERACTION_REQUIRED$/);
+    expect(() =>
+      parseBrowserAcquisitionResult(
+        {
+          isError: true,
+          content: [{ type: "text", text: "driver failed with password=hunter2" }],
+        },
+        ["cookie"],
+        "exportable",
+      ),
+    ).toThrow(/^BROWSER_UNAVAILABLE$/);
   });
 });

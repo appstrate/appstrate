@@ -64,7 +64,14 @@ export function parseBrowserAcquisitionResult(
   sessionMode: BrowserConnectSpec["sessionMode"],
 ): BrowserAcquisitionResult {
   const first = result.content?.[0];
-  if (result.isError || !first || first.type !== "text" || typeof first.text !== "string") {
+  if (result.isError) {
+    const safeCode =
+      first?.type === "text" && typeof first.text === "string"
+        ? browserSafeErrorCode(first.text)
+        : "BROWSER_UNAVAILABLE";
+    throw new Error(safeCode);
+  }
+  if (!first || first.type !== "text" || typeof first.text !== "string") {
     throw new Error("browser-connect: driver returned an error or no text result");
   }
   if (Buffer.byteLength(first.text) > MAX_BROWSER_RESULT_BYTES) {
