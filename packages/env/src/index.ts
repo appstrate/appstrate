@@ -326,6 +326,14 @@ const envSchema = z
     // wiring from a running instance.
     OAUTH_REFRESH_WORKER_ENABLED: boolEnv("false"),
 
+    // Platform update-availability check (#694) — the API polls the GitHub
+    // Releases API (cached server-side, a few requests per day at most) so
+    // the SPA can show a "update available" badge. Notification only; the
+    // upgrade itself stays host-orchestrated. Set to false for zero outbound
+    // calls (air-gapped / privacy-sensitive deployments). Also implicitly
+    // inactive when APP_VERSION is absent (source/dev runs).
+    UPDATE_CHECK_ENABLED: boolEnv("true"),
+
     // Integration connection refresh-failure escalation. When an OAuth token
     // refresh fails *transiently* (not `invalid_grant`) this many times in a
     // row AND the token is already expired past the grace window below, the

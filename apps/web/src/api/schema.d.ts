@@ -4099,6 +4099,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Running version and update availability
+         * @description Returns the running platform build identity (release version + git commit, stamped into the image at build time) and whether a newer release is published on GitHub. The GitHub check is cached server-side (hours-long TTL, rate-limit safe) and can be disabled entirely with `UPDATE_CHECK_ENABLED=false`; it is also inactive on source/dev runs where no release version is stamped. Notification only — upgrading is a host-side operation.
+         */
+        get: operations["getVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/webhooks": {
         parameters: {
             query?: never;
@@ -18807,6 +18827,62 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    getVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Running version and update-check status */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "version": {
+                     *         "app": "1.0.0-beta.38",
+                     *         "commit": "5bbe1d9"
+                     *       },
+                     *       "update": {
+                     *         "check_enabled": true,
+                     *         "update_available": true,
+                     *         "latest_version": "1.0.0-beta.40",
+                     *         "checked_at": "2026-07-19T08:00:00.000Z"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @description Deployed build identity ('dev' on source runs). */
+                        version: {
+                            app: string;
+                            commit?: string;
+                        };
+                        /** @description Update availability, from the cached GitHub release check. */
+                        update: {
+                            /** @description False when opted out via UPDATE_CHECK_ENABLED=false or when the running version is unknown (dev). */
+                            check_enabled: boolean;
+                            update_available: boolean;
+                            /** @description Latest published release (no 'v' prefix). Null until a check succeeds. */
+                            latest_version: string | null;
+                            /**
+                             * Format: date-time
+                             * @description Timestamp of the last successful GitHub check. Null until one succeeds.
+                             */
+                            checked_at: string | null;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     listWebhooks: {

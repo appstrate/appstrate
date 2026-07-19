@@ -57,6 +57,7 @@ export const CODE_DEFAULTS: Record<string, string> = {
   OTEL_TRUST_INCOMING_TRACE: "false",
   MODULES: "oidc,webhooks,mcp,core-providers,@appstrate/module-chat",
   OAUTH_REFRESH_WORKER_ENABLED: "false",
+  UPDATE_CHECK_ENABLED: "true",
   INTEGRATION_REFRESH_MAX_FAILURES: "5",
   INTEGRATION_REFRESH_GRACE_SECONDS: "3600",
   REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS: "7200",

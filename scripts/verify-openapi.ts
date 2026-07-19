@@ -292,6 +292,7 @@ const expectedEndpoints = [
   // Meta
   "GET /api/openapi.json",
   "GET /api/docs",
+  "GET /api/version",
 
   // Notifications
   "GET /api/notifications",
@@ -657,8 +658,7 @@ function getOpenApiRequestBodySchema(
   if (!operation?.requestBody) return undefined;
 
   let schema = operation.requestBody?.content?.["application/json"]?.schema as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
 
   // Resolve top-level $ref
   if (schema && typeof schema.$ref === "string") {

@@ -37,6 +37,7 @@ import { invitationsPaths } from "./paths/invitations.ts";
 import { internalPaths } from "./paths/internal.ts";
 import { welcomePaths } from "./paths/welcome.ts";
 import { metaPaths } from "./paths/meta.ts";
+import { versionPaths } from "./paths/version.ts";
 import { notificationsPaths } from "./paths/notifications.ts";
 import { packagesPaths } from "./paths/packages.ts";
 import { applicationsPaths } from "./paths/applications.ts";
@@ -66,6 +67,7 @@ const corePaths = {
   ...internalPaths,
   ...welcomePaths,
   ...metaPaths,
+  ...versionPaths,
   ...notificationsPaths,
   ...packagesPaths,
   ...applicationsPaths,

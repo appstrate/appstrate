@@ -43,6 +43,7 @@ import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
+import { createVersionRouter } from "./routes/version.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { buildOpenApiSpec } from "./openapi/index.ts";
 import {
@@ -343,6 +344,9 @@ app.route("/invite", invitationsRouter);
 
 // Welcome route (authenticated, cookie-based — org context not required)
 app.route("/api", welcomeRouter);
+
+// Version + update availability (authenticated — org context not required)
+app.route("/api", createVersionRouter());
 
 // Internal routes (container-to-host, auth via run token — no JWT)
 const internalRouter = createInternalRouter();

@@ -31,6 +31,8 @@
   "nav.library": "Bibliothèque",
   "nav.appSettings": "Paramètres app",
   "nav.credits": "Crédits",
+  "nav.updateAvailable": "Mise à jour disponible : {{version}}",
+  "nav.updateAvailableTooltip": "Une nouvelle version d'Appstrate est disponible — ouvrir le guide de mise à jour",
   "btn.cancel": "Annuler",
   "btn.save": "Enregistrer",
   "btn.delete": "Supprimer",
