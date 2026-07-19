@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 
 import {
   browserCommandDenial,
+  DEFAULT_BROWSER_CONTEXT,
   hasValidCdpCommandEnvelope,
   isCookieDomainAllowed,
   isReadOnlyDevtoolsDiscoveryRequest,
@@ -28,7 +29,8 @@ describe("browser worker CDP envelope policy", () => {
     expect(hasValidCdpCommandEnvelope("Browser.close", undefined)).toBe(false);
     expect(hasValidCdpCommandEnvelope("Browser.close", "1")).toBe(false);
     expect(hasValidCdpCommandEnvelope("Browser.close", Number.MAX_SAFE_INTEGER + 1)).toBe(false);
-    expect(hasValidCdpCommandEnvelope(undefined, undefined)).toBe(true);
+    expect(hasValidCdpCommandEnvelope(undefined, undefined)).toBe(false);
+    expect(hasValidCdpCommandEnvelope("", 1)).toBe(false);
   });
 });
 
@@ -68,6 +70,16 @@ describe("browser worker CDP policy", () => {
     }
   });
 
+  it("blocks CDP tunnelling primitives that could bypass the broker", () => {
+    for (const method of [
+      "Target.attachToBrowserTarget",
+      "Target.exposeDevToolsProtocol",
+      "Target.sendMessageToTarget",
+    ]) {
+      expect(browserCommandDenial({ ...base, method })).toMatch(/nested DevTools/);
+    }
+  });
+
   it("forces pages and cookie access into the one managed context", () => {
     expect(browserCommandDenial({ ...base, method: "Target.createTarget" })).toMatch(
       /Appstrate-owned browser context/,
@@ -98,6 +110,24 @@ describe("browser worker CDP policy", () => {
         pendingPageCreations: 1,
       }),
     ).toBe("browser page limit reached");
+  });
+
+  it("allows Playwright's omitted context id only for the owned default profile", () => {
+    expect(
+      browserCommandDenial({
+        ...base,
+        activeContext: DEFAULT_BROWSER_CONTEXT,
+        method: "Target.createTarget",
+      }),
+    ).toBeNull();
+    expect(
+      browserCommandDenial({
+        ...base,
+        activeContext: DEFAULT_BROWSER_CONTEXT,
+        browserContextId: "foreign",
+        method: "Target.createTarget",
+      }),
+    ).toMatch(/Appstrate-owned/);
   });
 });
 

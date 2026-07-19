@@ -1,0 +1,83 @@
+name: Browser worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "runtime-pi/browser-worker/**"
+      - "runtime-pi/sidecar/browser-*.ts"
+      - "runtime-pi/sidecar/integrations-boot.ts"
+      - "runtime-pi/sidecar/integration-runtime-adapter-*.ts"
+      - "e2e/browser-worker-smoke.mjs"
+      - ".github/workflows/browser-worker.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "runtime-pi/browser-worker/**"
+      - "runtime-pi/sidecar/browser-*.ts"
+      - "runtime-pi/sidecar/integrations-boot.ts"
+      - "runtime-pi/sidecar/integration-runtime-adapter-*.ts"
+      - "e2e/browser-worker-smoke.mjs"
+      - ".github/workflows/browser-worker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-worker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  playwright-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build browser worker
+        run: >-
+          docker build
+          --build-arg CHROMIUM_VERSION=149.0.7827.53-r0
+          --build-arg APPSTRATE_BROWSER_WORKER_BUILD_ID=${{ github.sha }}
+          -t appstrate-browser-worker:e2e
+          -f runtime-pi/browser-worker/Dockerfile .
+
+      - name: Start hardened browser worker
+        run: |
+          docker run -d --name appstrate-browser-worker-e2e \
+            -p 127.0.0.1:18090:8080 \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --security-opt "seccomp=${PWD}/runtime-pi/sidecar/browser-seccomp.json" \
+            --memory 1g --memory-swap 1g --cpus 1 --pids-limit 256 --shm-size 256m \
+            --tmpfs /tmp:rw,noexec,nosuid,size=268435456 \
+            -e BROWSER_WORKER_TOKEN=browser-worker-e2e-token-0123456789 \
+            -e BROWSER_GATEWAY_URL=http://127.0.0.1:9 \
+            -e BROWSER_GATEWAY_TOKEN=browser-gateway-e2e-token-012345678 \
+            -e 'BROWSER_ALLOWED_ORIGINS_JSON=["https://example.com"]' \
+            -e BROWSER_MAX_PAGES=4 \
+            appstrate-browser-worker:e2e
+          for _ in $(seq 1 100); do
+            curl -fsS -H 'Authorization: Bearer browser-worker-e2e-token-0123456789' \
+              http://127.0.0.1:18090/health >/dev/null && exit 0
+            sleep 0.1
+          done
+          docker logs appstrate-browser-worker-e2e
+          exit 1
+
+      - name: Exercise Playwright over authenticated CDP
+        working-directory: e2e
+        env:
+          APPSTRATE_BROWSER_ENDPOINT: http://127.0.0.1:18090
+          APPSTRATE_BROWSER_TOKEN: browser-worker-e2e-token-0123456789
+        run: node browser-worker-smoke.mjs
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f appstrate-browser-worker-e2e 2>/dev/null || true

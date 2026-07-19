@@ -26,9 +26,14 @@ The agent never receives the endpoint or token. Browser TLS stays end-to-end;
 the gateway does not reuse the credential-injecting MITM. When an organization
 proxy is configured, the gateway resolves and pins the approved destination,
 then uses CONNECT through that proxy and never falls back to direct egress.
-The worker relays only read-only DevTools discovery endpoints; target creation,
-context ownership, cookie access, lifecycle, message size, pending-command and
-page limits are enforced by its authenticated CDP broker. Browser integration
+The worker relays only read-only DevTools discovery endpoints. Because each
+integration already owns an ephemeral worker/profile, `/v1/context` activates
+that worker's default Chromium context; this is compatible with Playwright's
+`connectOverCDP()` + `browser.contexts()[0]` flow. Activation is one-shot:
+after DELETE the profile cannot be reactivated and provider teardown removes
+it completely. Context creation/disposal,
+protocol-tunnelling methods, cookie access, lifecycle, message size,
+pending-command and page limits are enforced by its authenticated CDP broker. Browser integration
 stderr content is suppressed wholesale because it may contain CDP credentials,
 bootstrap inputs, or page data.
 
@@ -40,9 +45,13 @@ memory and memory-plus-swap ceilings are identical, preventing the worker from
 escaping the profile through Docker's implicit extra swap allowance.
 
 `connection-acquisition` is a separate trust tier. It requires both
-`BROWSER_CONNECT_ENABLED=true` and a matching `BROWSER_DRIVER_GRANTS` entry for
-the exact package/version/origin ceiling. Bootstrap inputs are sent in the
-private sidecar-to-driver tool call, never runner environment or argv. The
+`BROWSER_CONNECT_ENABLED=true`, a system-package source, and a matching
+`BROWSER_DRIVER_GRANTS` entry for the exact package/version/origin ceiling.
+Org-owned packages can use ordinary automation but can never become
+secret-aware drivers, even if their id/version matches an operator grant. The
+connect tool is removed from both the agent allowlist and runtime `hiddenTools`
+surface; the sidecar invokes it only through the raw trusted upstream client.
+Bootstrap inputs are sent in the private sidecar-to-driver tool call, never runner environment or argv. The
 driver must return a successful authenticated proof and only keys declared by
 `connect.produces` can be persisted. Exportable link sessions are supported;
 exportable `run-start` sessions additionally require `delivery.http`, because
@@ -51,6 +60,13 @@ after acquisition (runner environment and files are immutable at that point).
 Browser-bound link persistence remains fail-closed until the separate runtime
 state/lease subsystem is enabled. Browser-bound `run-start` acquisition remains
 ephemeral inside the current run.
+
+Exact-origin enforcement is intentionally strict for anti-bot-protected sites:
+every CDN, API, consent, and detector origin needed by the live page must be
+declared. A staging canary must record denied origins before production rollout.
+The capability does not attempt to evade DataDome or CAPTCHA challenges; an
+operator-visible challenge is a compliant failure/manual gate, not a signal to
+weaken Chromium or spoof detection attributes.
 
 ### AFPS Integrations runtime (Phase 1.4, env-delivery + container-per-integration)
 

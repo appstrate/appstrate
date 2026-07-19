@@ -30,7 +30,12 @@ describe("browser capability grants", () => {
   it("gates every browser capability behind the general operator switch", () => {
     try {
       authorizeBrowserCapability(
-        { packageId: "@appstrate/browser", version: "1.0.0", capability: automation },
+        {
+          packageId: "@appstrate/browser",
+          version: "1.0.0",
+          source: "system",
+          capability: automation,
+        },
         { browserEnabled: false, browserConnectEnabled: false },
       );
       throw new Error("expected browser policy denial");
@@ -44,7 +49,12 @@ describe("browser capability grants", () => {
   it("allows ordinary automation without granting secret access", () => {
     expect(
       authorizeBrowserCapability(
-        { packageId: "@third-party/browser", version: "2.0.0", capability: automation },
+        {
+          packageId: "@third-party/browser",
+          version: "2.0.0",
+          source: "version",
+          capability: automation,
+        },
         enabled,
       ),
     ).toEqual({ trustedDriver: false });
@@ -53,7 +63,12 @@ describe("browser capability grants", () => {
   it("requires initialization and a matching package/version grant for connection acquisition", () => {
     expect(() =>
       authorizeBrowserCapability(
-        { packageId: "@appstrate/leboncoin-browser", version: "1.2.0", capability: connection },
+        {
+          packageId: "@appstrate/leboncoin-browser",
+          version: "1.2.0",
+          source: "system",
+          capability: connection,
+        },
         enabled,
       ),
     ).toThrow(/not initialized/);
@@ -68,14 +83,24 @@ describe("browser capability grants", () => {
 
     expect(
       authorizeBrowserCapability(
-        { packageId: "@appstrate/leboncoin-browser", version: "1.2.0", capability: connection },
+        {
+          packageId: "@appstrate/leboncoin-browser",
+          version: "1.2.0",
+          source: "system",
+          capability: connection,
+        },
         enabled,
       ),
     ).toEqual({ trustedDriver: true, driverGrantId: "leboncoin" });
 
     expect(() =>
       authorizeBrowserCapability(
-        { packageId: "@appstrate/leboncoin-browser", version: "2.0.0", capability: connection },
+        {
+          packageId: "@appstrate/leboncoin-browser",
+          version: "2.0.0",
+          source: "system",
+          capability: connection,
+        },
         enabled,
       ),
     ).toThrow(/no matching operator grant/);
@@ -93,10 +118,37 @@ describe("browser capability grants", () => {
 
     expect(() =>
       authorizeBrowserCapability(
-        { packageId: "@appstrate/leboncoin-browser", version: "1.0.0", capability: connection },
+        {
+          packageId: "@appstrate/leboncoin-browser",
+          version: "1.0.0",
+          source: "system",
+          capability: connection,
+        },
         enabled,
       ),
     ).toThrow(/no matching operator grant/);
+  });
+
+  it("never grants bootstrap-secret access to an org-owned package", () => {
+    initBrowserCapabilityGrants([
+      {
+        id: "reserved-driver",
+        packageId: "@appstrate/leboncoin-browser",
+        versionRange: "*",
+      },
+    ]);
+
+    expect(() =>
+      authorizeBrowserCapability(
+        {
+          packageId: "@appstrate/leboncoin-browser",
+          version: "1.0.0",
+          source: "version",
+          capability: connection,
+        },
+        enabled,
+      ),
+    ).toThrow(/restricted to system packages/);
   });
 
   it("fails boot-time parsing on malformed or duplicate grants", () => {

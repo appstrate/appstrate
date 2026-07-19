@@ -3,6 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import {
+  browserSupplementalResources,
   getBrowserResourceProfile,
   hasExecutionRequirements,
   MAX_BROWSER_INSTANCES_PER_RUN,
@@ -84,5 +85,20 @@ describe("browser execution profiles", () => {
       integration(`@test/browser-${index}`),
     );
     expect(() => resolveBrowserExecutionRequirements(specs)).toThrow(/maximum/);
+  });
+
+  it("recomputes and bounds remote supplemental resources from capabilities", () => {
+    expect(
+      browserSupplementalResources([{ kind: "browser", profile: "standard", instances: 2 }]),
+    ).toEqual({
+      memoryBytes: 2 * 1024 * 1024 * 1024,
+      nanoCpus: 2_000_000_000,
+      pidsLimit: 512,
+    });
+    expect(() =>
+      browserSupplementalResources([
+        { kind: "browser", profile: "standard", instances: MAX_BROWSER_INSTANCES_PER_RUN + 1 },
+      ]),
+    ).toThrow(/maximum/);
   });
 });

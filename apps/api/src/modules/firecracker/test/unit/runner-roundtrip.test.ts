@@ -183,6 +183,26 @@ describe("runner protocol round-trip (real client ↔ real server)", () => {
     expect(await client.resolvePlatformApiUrl()).toBe("http://192.168.1.10:3000");
   });
 
+  it("rejects inflated supplemental resources at the daemon ingress", async () => {
+    const fake = makeFakeOrchestrator();
+    const client = makeClient(fake);
+    await client.initialize();
+
+    await expect(
+      client.createIsolationBoundary("run-1", {
+        requirements: {
+          capabilities: [{ kind: "browser", profile: "standard", instances: 1 }],
+          supplementalResources: {
+            memoryBytes: 64 * 1024 * 1024 * 1024,
+            nanoCpus: 64_000_000_000,
+            pidsLimit: 65_535,
+          },
+        },
+      }),
+    ).rejects.toThrow(/400|invalid/i);
+    expect(fake.calls.find(([name]) => name === "createIsolationBoundary")).toBeUndefined();
+  });
+
   it("client shutdown never reaches the daemon's orchestrator", async () => {
     const fake = makeFakeOrchestrator();
     const client = makeClient(fake);

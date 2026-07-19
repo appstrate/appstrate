@@ -32,6 +32,7 @@ import type {
   WorkloadSpec,
   WorkspaceHandle,
 } from "@appstrate/core/platform-types";
+import { browserSupplementalResources } from "../../../services/browser-execution-profiles.ts";
 
 /**
  * Bumped on any wire-incompatible change. The client refuses to start
@@ -138,27 +139,59 @@ export const sidecarLaunchSpecSchema = z.looseObject({
  */
 export const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,127}$/;
 
+const executionRequirementsSchema = z
+  .looseObject({
+    capabilities: z
+      .array(
+        z.looseObject({
+          kind: z.literal("browser"),
+          profile: z.literal("standard"),
+          instances: z.number().int().positive().max(4),
+        }),
+      )
+      .max(1),
+    supplementalResources: z.looseObject({
+      memoryBytes: z
+        .number()
+        .int()
+        .nonnegative()
+        .max(4 * 1024 * 1024 * 1024),
+      nanoCpus: z.number().int().nonnegative().max(4_000_000_000),
+      pidsLimit: z.number().int().nonnegative().max(1024).optional(),
+    }),
+  })
+  .superRefine((requirements, ctx) => {
+    try {
+      const expected = browserSupplementalResources(requirements.capabilities);
+      const actual = requirements.supplementalResources;
+      if (
+        actual.memoryBytes !== expected.memoryBytes ||
+        actual.nanoCpus !== expected.nanoCpus ||
+        (actual.pidsLimit ?? 0) !== (expected.pidsLimit ?? 0)
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["supplementalResources"],
+          message: "must exactly match platform-owned capability profiles",
+        });
+      }
+    } catch (error) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["capabilities"],
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
 export const createBoundaryBodySchema = z.object({
   runId: z.string().min(1).regex(RUN_ID_RE, "runId contains unsafe characters"),
   opts: z
     .looseObject({
       skipSidecar: z.boolean().optional(),
-      requirements: z
-        .looseObject({
-          capabilities: z.array(
-            z.looseObject({
-              kind: z.literal("browser"),
-              profile: z.literal("standard"),
-              instances: z.number().int().positive(),
-            }),
-          ),
-          supplementalResources: z.looseObject({
-            memoryBytes: z.number().nonnegative(),
-            nanoCpus: z.number().nonnegative(),
-            pidsLimit: z.number().int().nonnegative().optional(),
-          }),
-        })
-        .optional() as unknown as z.ZodOptional<z.ZodType<ExecutionRequirements>>,
+      requirements: executionRequirementsSchema.optional() as unknown as z.ZodOptional<
+        z.ZodType<ExecutionRequirements>
+      >,
     })
     .optional(),
 });

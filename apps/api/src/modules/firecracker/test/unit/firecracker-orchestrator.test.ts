@@ -98,7 +98,7 @@ describe("browser capability admission", () => {
     expect(vmsOf(orch).get("run_browser")?.requirements).toEqual(oneBrowser);
   });
 
-  it("fails before allocation when browser resources are under-provisioned", async () => {
+  it("fails before allocation when browser resources differ from the owned profile", async () => {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec);
     await expect(
@@ -108,7 +108,25 @@ describe("browser capability admission", () => {
           supplementalResources: { memoryBytes: 1, nanoCpus: 1, pidsLimit: 1 },
         },
       }),
-    ).rejects.toThrow(/under-provision/);
+    ).rejects.toThrow(/do not match/);
+    expect(reservedIndexes(orch).size).toBe(0);
+  });
+
+  it("rejects client-requested resource inflation before allocation", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await expect(
+      orch.createIsolationBoundary("run_browser", {
+        requirements: {
+          ...oneBrowser,
+          supplementalResources: {
+            memoryBytes: 64 * 1024 * 1024 * 1024,
+            nanoCpus: 64_000_000_000,
+            pidsLimit: 65_535,
+          },
+        },
+      }),
+    ).rejects.toThrow(/do not match/);
     expect(reservedIndexes(orch).size).toBe(0);
   });
 

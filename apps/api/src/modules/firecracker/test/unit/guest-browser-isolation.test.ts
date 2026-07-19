@@ -23,10 +23,12 @@ describe("Firecracker guest browser isolation policy", () => {
     const rules = buildGuestFirewallScript(config());
     expect(rules).toContain('meta skuid 1100 oifname "lo" tcp dport 18081 accept');
     expect(rules).toContain('meta skuid 1101 oifname "lo" tcp dport 18080 accept');
-    expect(rules).toContain('meta skuid 1102 oifname "lo" tcp dport 18083 accept');
-    expect(rules).toContain('meta skuid 1103 oifname "lo" tcp dport 18082 accept');
-    expect(rules).toContain('meta skuid 1106 oifname "lo" tcp dport 18087 accept');
-    expect(rules).toContain('meta skuid 1107 oifname "lo" tcp dport 18086 accept');
+    expect(rules).toContain('meta skuid 1101 oifname "lo" tcp dport 18082 accept');
+    expect(rules).toContain('meta skuid 1101 oifname "lo" tcp dport 18083 accept');
+    expect(rules).toContain('meta skuid 1102 oifname "lo" tcp dport 18085 accept');
+    expect(rules).toContain('meta skuid 1103 oifname "lo" tcp dport 18084 accept');
+    expect(rules).toContain('meta skuid 1106 oifname "lo" tcp dport 18093 accept');
+    expect(rules).toContain('meta skuid 1107 oifname "lo" tcp dport 18092 accept');
   });
 
   it("blocks reserved browser ports before legacy runner egress and narrows agent loopback", () => {
@@ -43,6 +45,14 @@ describe("Firecracker guest browser isolation policy", () => {
     const rules = buildGuestFirewallScript(config());
     for (const uid of [1100, 1101, 1102, 1103, 1104, 1105, 1106, 1107]) {
       expect(rules).not.toContain(`meta skuid ${uid} accept`);
+    }
+  });
+
+  it("drops every non-owned loopback port for each browser uid", () => {
+    const rules = buildGuestFirewallScript(config());
+    for (const uid of [1101, 1103, 1105, 1107]) {
+      expect(rules).toContain(`meta skuid ${uid} oifname "lo" drop`);
+      expect(rules).not.toContain(`meta skuid ${uid} oifname "lo" accept`);
     }
   });
 

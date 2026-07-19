@@ -154,6 +154,7 @@ export async function buildBrowserConnectSpec(
     },
     spawnEnv: {},
     toolAllowlist: [],
+    hiddenTools: [execution.toolName],
     browser: { ...server.browser, isolationSlot: 0 },
     browserConnect: {
       toolName: execution.toolName,

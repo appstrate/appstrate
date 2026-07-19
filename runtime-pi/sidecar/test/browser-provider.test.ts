@@ -182,7 +182,7 @@ describe("process browser provider", () => {
             start(controller) {
               controller.enqueue(
                 new TextEncoder().encode(
-                  'APPSTRATE_BROWSER_WORKER_READY:{"endpoint":"http://127.0.0.1:18083","workerBuildId":"build-abc","protocolVersion":1,"browserRevision":"Chromium/1"}\n',
+                  'APPSTRATE_BROWSER_WORKER_READY:{"endpoint":"http://127.0.0.1:18085","workerBuildId":"build-abc","protocolVersion":1,"browserRevision":"Chromium/1"}\n',
                 ),
               );
               controller.close();
@@ -200,8 +200,10 @@ describe("process browser provider", () => {
       spec: { ...spawnOptions.spec, isolationSlot: 1 },
     });
     expect(command).toEqual(["/usr/local/bin/appstrate-browser-exec", "1"]);
-    expect(workerEnv.PORT).toBe("18083");
+    expect(workerEnv.PORT).toBe("18085");
     expect(workerEnv.BROWSER_WORKER_HOST).toBe("127.0.0.1");
+    expect(workerEnv.BROWSER_GATEWAY_AUTH_PROXY_PORT).toBe("18086");
+    expect(workerEnv.BROWSER_DEVTOOLS_PORT).toBe("18087");
   });
 });
 

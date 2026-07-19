@@ -15,9 +15,13 @@ The worker control listener has its own random bearer token. General automation
 receives that endpoint only in the matching integration runner. Trusted browser
 connection acquisition instead receives endpoint, token, and bootstrap inputs
 inside a private sidecar-initiated MCP call; those values are absent from the
-agent tool surface, runner environment, argv, URLs, and logs. Worker policy owns
-Chromium flags, one-context/four-page limits, ephemeral profiles, state
-validation, and process-group cleanup.
+agent tool surface, runner environment, argv, URLs, and logs. The connect tool
+name is always hidden from `tools/list` and agent dispatch even when the agent
+selected `"*"`; the sidecar calls it through the trusted upstream client.
+Worker policy owns Chromium flags, one-context/four-page limits, ephemeral
+profiles, state validation, and process-group cleanup. The one context is the
+ephemeral worker's default profile, so standard Playwright
+`connectOverCDP()`/`context.newPage()` works without a proprietary context API.
 
 Docker uses a dedicated non-root, read-only, cap-drop-ALL worker container with
 memory/CPU/PID/shared-memory limits and `no-new-privileges`. Its seccomp policy
@@ -25,9 +29,9 @@ is vendored from Moby `seccomp/v0.2.1` and adds only the namespace/chroot
 syscalls Chromium requires for its own renderer sandbox; neither
 `seccomp=unconfined` nor Chromium `--no-sandbox` is used. Process mode is
 development parity and cannot claim kernel isolation. Firecracker uses the
-process provider inside the guest, but fixed per-slot ports, distinct
-driver/browser UID pairs, proc `hidepid=2`, and nftables rules enforce the
-isolation boundary.
+process provider inside the guest, but four fixed per-slot ports (gateway,
+worker, gateway-auth shim, DevTools), distinct driver/browser UID pairs, proc
+`hidepid=2`, and nftables rules enforce the isolation boundary.
 
 ### Sidecar Protocol (details beyond the architecture diagram)
 

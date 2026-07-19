@@ -6,6 +6,8 @@ import type { BrowserHandle, BrowserProvider, SpawnBrowserOptions } from "./brow
 import { registerBrowserProvider } from "./browser-provider.ts";
 import {
   assertBrowserIsolationSlot,
+  browserAuthProxyPort,
+  browserDevtoolsPort,
   browserWorkerPort,
   isFirecrackerBrowserIsolation,
 } from "./browser-guest-isolation.ts";
@@ -164,6 +166,12 @@ export function createProcessBrowserProvider(
           TMPDIR: env.TMPDIR ?? "/tmp",
           PORT: String(slot === undefined ? 0 : browserWorkerPort(slot)),
           BROWSER_WORKER_HOST: "127.0.0.1",
+          ...(slot === undefined
+            ? {}
+            : {
+                BROWSER_GATEWAY_AUTH_PROXY_PORT: String(browserAuthProxyPort(slot)),
+                BROWSER_DEVTOOLS_PORT: String(browserDevtoolsPort(slot)),
+              }),
           BROWSER_WORKER_TOKEN: authToken,
           BROWSER_GATEWAY_URL: options.egress.proxyUrl,
           BROWSER_GATEWAY_TOKEN: options.egress.authToken,

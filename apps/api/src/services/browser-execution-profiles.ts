@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import type { ExecutionRequirements, WorkloadResources } from "@appstrate/core/platform-types";
+import type {
+  ExecutionCapabilityRequirement,
+  ExecutionRequirements,
+  WorkloadResources,
+} from "@appstrate/core/platform-types";
 
 export interface BrowserResourceProfile extends WorkloadResources {
   readonly id: "standard";
@@ -43,6 +47,41 @@ function addResources(a: WorkloadResources, b: WorkloadResources): WorkloadResou
 }
 
 /**
+ * Recompute the only valid supplemental envelope from platform-owned profile
+ * ids. Remote orchestrator inputs are checked against this result rather than
+ * trusting client-supplied memory/CPU/PID totals.
+ */
+export function browserSupplementalResources(
+  capabilities: readonly ExecutionCapabilityRequirement[],
+): WorkloadResources {
+  let instances = 0;
+  let resources: WorkloadResources = { memoryBytes: 0, nanoCpus: 0, pidsLimit: 0 };
+  for (const capability of capabilities) {
+    if (
+      capability.kind !== "browser" ||
+      capability.profile !== "standard" ||
+      !Number.isInteger(capability.instances) ||
+      capability.instances <= 0
+    ) {
+      throw new Error("unsupported browser capability requirement");
+    }
+    instances += capability.instances;
+    if (instances > MAX_BROWSER_INSTANCES_PER_RUN) {
+      throw new Error(
+        `browser capability requests ${instances} instances; maximum is ${MAX_BROWSER_INSTANCES_PER_RUN}`,
+      );
+    }
+    const profile = getBrowserResourceProfile(capability.profile);
+    resources = addResources(resources, {
+      memoryBytes: profile.memoryBytes * capability.instances,
+      nanoCpus: profile.nanoCpus * capability.instances,
+      pidsLimit: (profile.pidsLimit ?? 0) * capability.instances,
+    });
+  }
+  return resources;
+}
+
+/**
  * Aggregate platform-owned browser requirements before isolation-boundary
  * creation. One browser companion is provisioned per browser-enabled
  * integration; duplicate package ids still count because each spawn spec owns
@@ -58,26 +97,22 @@ export function resolveBrowserExecutionRequirements(
     );
   }
 
-  let supplementalResources: WorkloadResources = {
-    memoryBytes: 0,
-    nanoCpus: 0,
-    pidsLimit: 0,
-  };
   const instancesByProfile = new Map<BrowserResourceProfile["id"], number>();
 
   for (const spec of browserSpecs) {
     const profile = getBrowserResourceProfile(spec.profile);
-    supplementalResources = addResources(supplementalResources, profile);
     instancesByProfile.set(profile.id, (instancesByProfile.get(profile.id) ?? 0) + 1);
   }
 
+  const capabilities = [...instancesByProfile.entries()].map(([profile, instances]) => ({
+    kind: "browser" as const,
+    profile,
+    instances,
+  }));
+
   return {
-    capabilities: [...instancesByProfile.entries()].map(([profile, instances]) => ({
-      kind: "browser" as const,
-      profile,
-      instances,
-    })),
-    supplementalResources,
+    capabilities,
+    supplementalResources: browserSupplementalResources(capabilities),
   };
 }
 

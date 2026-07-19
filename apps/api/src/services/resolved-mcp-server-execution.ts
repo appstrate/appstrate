@@ -71,6 +71,7 @@ export async function resolveLocalMcpServerExecution(
     const authorization = authorizeCapability({
       packageId: input.packageId,
       version,
+      source: resolution.source,
       capability,
     });
     browser = {

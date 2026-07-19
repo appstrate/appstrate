@@ -65,6 +65,7 @@ import type {
   RunOrchestrator,
   WorkloadHandle,
   WorkloadSpec,
+  WorkloadResources,
   IsolationBoundary,
   SidecarLaunchSpec,
   CleanupReport,
@@ -74,10 +75,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import { logger } from "./runner/logger.ts";
 import { buildBaseSidecarEnv } from "../../services/orchestrator/sidecar-env.ts";
-import {
-  getBrowserResourceProfile,
-  MAX_BROWSER_INSTANCES_PER_RUN,
-} from "../../services/browser-execution-profiles.ts";
+import { browserSupplementalResources } from "../../services/browser-execution-profiles.ts";
 import {
   drainStream,
   spawnCollect,
@@ -900,42 +898,24 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     requirements: ExecutionRequirements | undefined,
   ): void {
     if (!requirements) return;
-    let browserInstances = 0;
-    let minimumMemoryBytes = 0;
-    let minimumNanoCpus = 0;
-    let minimumPids = 0;
-    for (const capability of requirements.capabilities) {
-      if (capability.kind !== "browser" || capability.profile !== "standard") {
-        throw new Error(
-          `Firecracker orchestrator: unsupported required capability for run ${runId}`,
-        );
-      }
-      if (!Number.isInteger(capability.instances) || capability.instances <= 0) {
-        throw new Error(
-          `Firecracker orchestrator: invalid browser instance count for run ${runId}`,
-        );
-      }
-      browserInstances += capability.instances;
-      const profile = getBrowserResourceProfile(capability.profile);
-      minimumMemoryBytes += profile.memoryBytes * capability.instances;
-      minimumNanoCpus += profile.nanoCpus * capability.instances;
-      minimumPids += (profile.pidsLimit ?? 0) * capability.instances;
-    }
-    if (browserInstances > MAX_BROWSER_INSTANCES_PER_RUN) {
+    let expected: WorkloadResources;
+    try {
+      expected = browserSupplementalResources(requirements.capabilities);
+    } catch (error) {
       throw new Error(
-        `Firecracker orchestrator: run ${runId} requests ${browserInstances} browser ` +
-          `instances; maximum is ${MAX_BROWSER_INSTANCES_PER_RUN}`,
+        `Firecracker orchestrator: invalid capability requirements for run ${runId}: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
       );
     }
     const supplemental = requirements.supplementalResources;
     if (
-      supplemental.memoryBytes < minimumMemoryBytes ||
-      supplemental.nanoCpus < minimumNanoCpus ||
-      (supplemental.pidsLimit ?? 0) < minimumPids
+      supplemental.memoryBytes !== expected.memoryBytes ||
+      supplemental.nanoCpus !== expected.nanoCpus ||
+      (supplemental.pidsLimit ?? 0) !== (expected.pidsLimit ?? 0)
     ) {
       throw new Error(
-        `Firecracker orchestrator: supplemental resources under-provision required ` +
-          `browser capability for run ${runId}`,
+        `Firecracker orchestrator: supplemental resources do not match the platform-owned ` +
+          `browser profile for run ${runId}`,
       );
     }
   }

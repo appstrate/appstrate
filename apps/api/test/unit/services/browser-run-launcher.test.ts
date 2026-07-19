@@ -108,8 +108,8 @@ const driverManifest = {
 const resolveDriver = async () => ({
   ok: true as const,
   manifest: driverManifest,
-  version: "1.2.0",
-  source: "version" as const,
+  version: null,
+  source: "system" as const,
 });
 
 function encryptedResult(result: BrowserAcquisitionResult, key: Buffer): string {
@@ -125,8 +125,8 @@ describe("buildBrowserConnectSpec", () => {
     expect(spec.manifest.server).toMatchObject({
       type: "bun",
       packageId: "@scope/browser-driver",
-      version: "1.2.0",
     });
+    expect(spec.manifest.server?.version).toBeUndefined();
     expect(spec.browser).toMatchObject({
       purpose: "connection-acquisition",
       trustedDriver: true,
@@ -134,6 +134,8 @@ describe("buildBrowserConnectSpec", () => {
       sessionMode: "exportable",
     });
     expect(spec.spawnEnv).toEqual({});
+    expect(spec.toolAllowlist).toEqual([]);
+    expect(spec.hiddenTools).toEqual(["acquire_session"]);
     expect(spec.browserConnect?.inputs).toEqual({
       email: "user@example.com",
       password: "canary-secret",
@@ -147,6 +149,17 @@ describe("buildBrowserConnectSpec", () => {
     await expect(buildBrowserConnectSpec(execution(), resolveDriver)).rejects.toThrow(
       /no matching operator grant/,
     );
+  });
+
+  it("rejects an org-owned driver even when its id and version match a grant", async () => {
+    await expect(
+      buildBrowserConnectSpec(execution(), async () => ({
+        ok: true,
+        manifest: driverManifest,
+        version: "1.2.0",
+        source: "version",
+      })),
+    ).rejects.toThrow(/restricted to system packages/);
   });
 
   it("rejects bootstrap values that cannot cross the bounded private channel", async () => {

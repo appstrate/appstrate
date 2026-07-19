@@ -36,10 +36,13 @@ const GUEST_AGENT_UID = "1001";
 const GUEST_RUNNER_UID = "1002";
 const BROWSER_DRIVER_UID_BASE = 1100;
 const BROWSER_UID_BASE = 1101;
-const BROWSER_SLOT_STRIDE = 2;
+const BROWSER_UID_SLOT_STRIDE = 2;
+const BROWSER_PORT_SLOT_STRIDE = 4;
 const BROWSER_MAX_SLOTS = 4;
 const BROWSER_GATEWAY_PORT_BASE = 18_080;
 const BROWSER_WORKER_PORT_BASE = 18_081;
+const BROWSER_AUTH_PROXY_PORT_BASE = 18_082;
+const BROWSER_DEVTOOLS_PORT_BASE = 18_083;
 const GUEST_AGENT_USER = "pi"; // uid 1001, baked into the rootfs
 const SIDECAR_BIN = "/usr/local/bin/sidecar";
 /** setuid(1002) wrapper the sidecar uses to spawn integration runners. */
@@ -110,15 +113,19 @@ function readConfig(): GuestConfig {
  */
 export function buildGuestFirewallScript(cfg: GuestConfig): string {
   const reservedBrowserPorts = Array.from({ length: BROWSER_MAX_SLOTS }, (_unused, slot) => [
-    BROWSER_GATEWAY_PORT_BASE + slot * BROWSER_SLOT_STRIDE,
-    BROWSER_WORKER_PORT_BASE + slot * BROWSER_SLOT_STRIDE,
+    BROWSER_GATEWAY_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE,
+    BROWSER_WORKER_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE,
+    BROWSER_AUTH_PROXY_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE,
+    BROWSER_DEVTOOLS_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE,
   ]).flat();
   const reservedPortSet = `{ ${reservedBrowserPorts.join(", ")} }`;
   const browserIsolationRules = Array.from({ length: BROWSER_MAX_SLOTS }, (_unused, slot) => {
-    const driverUid = BROWSER_DRIVER_UID_BASE + slot * BROWSER_SLOT_STRIDE;
-    const browserUid = BROWSER_UID_BASE + slot * BROWSER_SLOT_STRIDE;
-    const gatewayPort = BROWSER_GATEWAY_PORT_BASE + slot * BROWSER_SLOT_STRIDE;
-    const workerPort = BROWSER_WORKER_PORT_BASE + slot * BROWSER_SLOT_STRIDE;
+    const driverUid = BROWSER_DRIVER_UID_BASE + slot * BROWSER_UID_SLOT_STRIDE;
+    const browserUid = BROWSER_UID_BASE + slot * BROWSER_UID_SLOT_STRIDE;
+    const gatewayPort = BROWSER_GATEWAY_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE;
+    const workerPort = BROWSER_WORKER_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE;
+    const authProxyPort = BROWSER_AUTH_PROXY_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE;
+    const devtoolsPort = BROWSER_DEVTOOLS_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE;
     return [
       // The driver can reach only its own authenticated control endpoint
       // among the reserved browser ports. Other loopback remains available
@@ -126,12 +133,15 @@ export function buildGuestFirewallScript(cfg: GuestConfig): string {
       `    meta skuid ${driverUid} oifname "lo" tcp dport ${workerPort} accept`,
       `    meta skuid ${driverUid} oifname "lo" tcp dport ${reservedPortSet} drop`,
       `    meta skuid ${driverUid} oifname "lo" accept`,
-      // Chromium and its broker share one uid and need arbitrary loopback
-      // for DevTools + the auth shim, but only the matching gateway in the
-      // fixed reserved range. There is deliberately no external accept.
+      // Chromium and its broker share one uid. Their three loopback peers are
+      // fixed per slot (gateway, auth shim, DevTools); everything else on lo,
+      // including the sidecar's 8080/8081 listeners, is denied. There is no
+      // external accept for this uid either.
       `    meta skuid ${browserUid} oifname "lo" tcp dport ${gatewayPort} accept`,
+      `    meta skuid ${browserUid} oifname "lo" tcp dport ${authProxyPort} accept`,
+      `    meta skuid ${browserUid} oifname "lo" tcp dport ${devtoolsPort} accept`,
       `    meta skuid ${browserUid} oifname "lo" tcp dport ${reservedPortSet} drop`,
-      `    meta skuid ${browserUid} oifname "lo" accept`,
+      `    meta skuid ${browserUid} oifname "lo" drop`,
     ];
   }).flat();
   const agentEgress = cfg.agent.unrestricted_egress

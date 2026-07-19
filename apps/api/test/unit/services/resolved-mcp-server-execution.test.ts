@@ -67,6 +67,7 @@ describe("resolveLocalMcpServerExecution", () => {
       resolver,
       (input) => {
         expect(input.version).toBe("1.3.2");
+        expect(input.source).toBe("version");
         return { trustedDriver: true, driverGrantId: "system-driver" };
       },
     );

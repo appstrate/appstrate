@@ -45,6 +45,24 @@ export interface BrowserCommandPolicyInput {
   readonly maxPages: number;
 }
 
+/** One worker is already the isolation boundary, so its default profile is owned. */
+export const DEFAULT_BROWSER_CONTEXT = "__appstrate_default_browser_context__";
+
+function usesOwnedContext(
+  requestedContext: string | undefined,
+  activeContext: string | null,
+): boolean {
+  return activeContext === DEFAULT_BROWSER_CONTEXT
+    ? requestedContext === undefined
+    : !!activeContext && requestedContext === activeContext;
+}
+
+const CDP_TUNNEL_METHODS = new Set([
+  "Target.attachToBrowserTarget",
+  "Target.exposeDevToolsProtocol",
+  "Target.sendMessageToTarget",
+]);
+
 /**
  * Restored cookies must name a host explicitly authorized by the manifest.
  * Accepting arbitrary parent domains would make `.com` match `example.com`;
@@ -88,12 +106,19 @@ export function isReadOnlyDevtoolsDiscoveryRequest(
 /** CDP commands are request/response messages and require a bounded numeric id. */
 export function hasValidCdpCommandEnvelope(method: unknown, id: unknown): boolean {
   return (
-    typeof method !== "string" || (Number.isSafeInteger(id) && typeof id === "number" && id >= 0)
+    typeof method === "string" &&
+    method.length > 0 &&
+    Number.isSafeInteger(id) &&
+    typeof id === "number" &&
+    id >= 0
   );
 }
 
 /** Return an agent-safe denial message, or null when the CDP call may pass. */
 export function browserCommandDenial(input: BrowserCommandPolicyInput): string | null {
+  if (CDP_TUNNEL_METHODS.has(input.method)) {
+    return "nested DevTools protocol channels are forbidden";
+  }
   if (
     input.method === "Target.createBrowserContext" ||
     input.method === "Target.disposeBrowserContext" ||
@@ -102,7 +127,7 @@ export function browserCommandDenial(input: BrowserCommandPolicyInput): string |
     return "browser contexts are owned by the Appstrate worker";
   }
   if (input.method === "Target.createTarget") {
-    if (!input.activeContext || input.browserContextId !== input.activeContext) {
+    if (!usesOwnedContext(input.browserContextId, input.activeContext)) {
       return "pages must use the Appstrate-owned browser context";
     }
     if (input.pageTargets + input.pendingPageCreations >= input.maxPages) {
@@ -114,7 +139,7 @@ export function browserCommandDenial(input: BrowserCommandPolicyInput): string |
     input.method === "Storage.setCookies" ||
     input.method === "Storage.clearCookies"
   ) {
-    if (!input.activeContext || input.browserContextId !== input.activeContext) {
+    if (!usesOwnedContext(input.browserContextId, input.activeContext)) {
       return "cookie access must use the Appstrate-owned browser context";
     }
   }

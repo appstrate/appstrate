@@ -12,6 +12,7 @@ import { join } from "node:path";
 
 import {
   browserCommandDenial,
+  DEFAULT_BROWSER_CONTEXT,
   hasValidCdpCommandEnvelope,
   isCookieDomainAllowed,
   isReadOnlyDevtoolsDiscoveryRequest,
@@ -28,6 +29,8 @@ const WORKER_TOKEN = process.env.BROWSER_WORKER_TOKEN ?? "";
 const GATEWAY_URL = process.env.BROWSER_GATEWAY_URL ?? "";
 const GATEWAY_TOKEN = process.env.BROWSER_GATEWAY_TOKEN ?? "";
 const MAX_PAGES = Number(process.env.BROWSER_MAX_PAGES ?? 4);
+const GATEWAY_AUTH_PROXY_PORT = Number(process.env.BROWSER_GATEWAY_AUTH_PROXY_PORT ?? 0);
+const DEVTOOLS_PORT = Number(process.env.BROWSER_DEVTOOLS_PORT ?? 0);
 const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.BROWSER_ALLOWED_ORIGINS_JSON);
 
 if (
@@ -36,6 +39,13 @@ if (
   !Number.isInteger(MAX_PAGES) ||
   MAX_PAGES < 1 ||
   MAX_PAGES > 16 ||
+  !Number.isInteger(GATEWAY_AUTH_PROXY_PORT) ||
+  GATEWAY_AUTH_PROXY_PORT < 0 ||
+  GATEWAY_AUTH_PROXY_PORT > 65_535 ||
+  !Number.isInteger(DEVTOOLS_PORT) ||
+  DEVTOOLS_PORT < 0 ||
+  DEVTOOLS_PORT > 65_535 ||
+  (GATEWAY_AUTH_PROXY_PORT !== 0 && GATEWAY_AUTH_PROXY_PORT === DEVTOOLS_PORT) ||
   !/^[A-Za-z0-9._@/+:-]{1,128}$/.test(WORKER_BUILD_ID)
 ) {
   throw new Error("browser worker authentication or page-limit configuration is invalid");
@@ -76,7 +86,7 @@ interface GatewayAuthProxy {
 }
 
 /** Local-only shim that adds gateway authentication on Chromium's behalf. */
-async function createGatewayAuthProxy(): Promise<GatewayAuthProxy> {
+async function createGatewayAuthProxy(port: number): Promise<GatewayAuthProxy> {
   const gateway = new URL(GATEWAY_URL);
   if (gateway.protocol !== "http:")
     throw new Error("browser gateway control channel must use http");
@@ -133,7 +143,7 @@ async function createGatewayAuthProxy(): Promise<GatewayAuthProxy> {
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
+    server.listen(port, "127.0.0.1", resolve);
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("gateway shim did not bind");
@@ -146,7 +156,29 @@ async function createGatewayAuthProxy(): Promise<GatewayAuthProxy> {
   };
 }
 
-async function waitForDevtools(profile: string): Promise<{ port: number; browserPath: string }> {
+async function waitForDevtools(
+  profile: string,
+  configuredPort: number,
+): Promise<{ port: number; browserPath: string }> {
+  if (configuredPort !== 0) {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      try {
+        const version = (await fetch(`http://127.0.0.1:${configuredPort}/json/version`).then(
+          (response) => response.json(),
+        )) as { webSocketDebuggerUrl?: string };
+        if (version.webSocketDebuggerUrl) {
+          return {
+            port: configuredPort,
+            browserPath: new URL(version.webSocketDebuggerUrl).pathname,
+          };
+        }
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    throw new Error("BROWSER_UNAVAILABLE: Chromium did not bind the fixed DevTools endpoint");
+  }
   const path = join(profile, "DevToolsActivePort");
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
@@ -227,14 +259,14 @@ async function readJsonBody(req: Request): Promise<Record<string, unknown>> {
 }
 
 const executable = await findChromium();
-const gatewayProxy = await createGatewayAuthProxy();
+const gatewayProxy = await createGatewayAuthProxy(GATEWAY_AUTH_PROXY_PORT);
 const profile = await mkdtemp(join(tmpdir(), "appstrate-browser-profile-"));
 const chromium: ChildProcess = spawn(
   executable,
   [
     "--headless=new",
     "--remote-debugging-address=127.0.0.1",
-    "--remote-debugging-port=0",
+    `--remote-debugging-port=${DEVTOOLS_PORT}`,
     `--user-data-dir=${profile}`,
     `--proxy-server=http://127.0.0.1:${gatewayProxy.port}`,
     "--proxy-bypass-list=<-loopback>",
@@ -257,6 +289,7 @@ const chromiumExited = new Promise<void>((resolve) => {
 });
 
 let activeContext: string | null = null;
+let contextRetired = false;
 const pageTargets = new Set<string>();
 let pendingPageCreations = 0;
 
@@ -290,7 +323,7 @@ async function initializeChromiumControl(): Promise<{
   version: { Browser?: string; "User-Agent"?: string };
   targetMonitor: WebSocket;
 }> {
-  const devtools = await waitForDevtools(profile);
+  const devtools = await waitForDevtools(profile, DEVTOOLS_PORT);
   const browserWs = `ws://127.0.0.1:${devtools.port}${devtools.browserPath}`;
   const version = (await fetch(`http://127.0.0.1:${devtools.port}/json/version`).then((res) =>
     res.json(),
@@ -434,12 +467,15 @@ const server = Bun.serve<BrokerData>({
     }
     if (url.pathname === "/v1/context" && req.method === "POST") {
       if (activeContext) return Response.json({ error: "context already exists" }, { status: 409 });
-      const result = await cdpCall<{ browserContextId: string }>(
-        browserWs,
-        "Target.createBrowserContext",
-      );
-      activeContext = result.browserContextId;
-      return Response.json({ contextId: activeContext, endpoint: url.origin });
+      if (contextRetired) {
+        return Response.json({ error: "context lifecycle is complete" }, { status: 410 });
+      }
+      // One ephemeral worker exists per integration, so the Chromium default
+      // profile is already the isolation boundary. Owning it here keeps the
+      // public CDP endpoint compatible with Playwright's default context;
+      // Playwright cannot attach to an incognito context created out-of-band.
+      activeContext = DEFAULT_BROWSER_CONTEXT;
+      return Response.json({ contextId: null, defaultContext: true, endpoint: url.origin });
     }
     if (url.pathname === "/v1/context/state" && req.method === "PUT") {
       if (!activeContext)
@@ -460,18 +496,13 @@ const server = Bun.serve<BrokerData>({
           );
         }
       }
-      await cdpCall(browserWs, "Storage.setCookies", {
-        cookies,
-        browserContextId: activeContext,
-      });
+      await cdpCall(browserWs, "Storage.setCookies", { cookies });
       return Response.json({ restored: true });
     }
     if (url.pathname === "/v1/context/state" && req.method === "GET") {
       if (!activeContext)
         return Response.json({ error: "context does not exist" }, { status: 409 });
-      const state = await cdpCall<{ cookies: unknown[] }>(browserWs, "Storage.getCookies", {
-        browserContextId: activeContext,
-      });
+      const state = await cdpCall<{ cookies: unknown[] }>(browserWs, "Storage.getCookies");
       return Response.json({
         cookies: state.cookies,
         localStorage: {},
@@ -484,10 +515,16 @@ const server = Bun.serve<BrokerData>({
     }
     if (url.pathname === "/v1/context" && req.method === "DELETE") {
       if (activeContext) {
-        await cdpCall(browserWs, "Target.disposeBrowserContext", {
-          browserContextId: activeContext,
-        });
+        for (const targetId of [...pageTargets]) {
+          await cdpCall(browserWs, "Target.closeTarget", { targetId }).catch(() => {});
+        }
+        await cdpCall(browserWs, "Storage.clearCookies");
         activeContext = null;
+        // Default-context DOM storage cannot be synchronously cleared for an
+        // origin that never created a storage key (Chromium returns -32603).
+        // Retire the one-shot lifecycle instead: no later driver can reactivate
+        // this profile, and provider teardown deletes the whole profile.
+        contextRetired = true;
       }
       return Response.json({ closed: true });
     }
@@ -586,7 +623,8 @@ const server = Bun.serve<BrokerData>({
           });
         }
       } catch {
-        // Chromium will validate malformed CDP messages itself.
+        ws.close(1008, "invalid CDP command");
+        return;
       }
       if (ws.data.upstream?.readyState === WebSocket.OPEN) ws.data.upstream.send(outgoing);
       else if (ws.data.pending.length < MAX_PENDING_CDP_MESSAGES) ws.data.pending.push(outgoing);

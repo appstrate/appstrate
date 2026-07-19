@@ -104,6 +104,7 @@ export function authorizeBrowserCapability(
   input: {
     packageId: string;
     version: string;
+    source: "system" | "version";
     capability: McpServerBrowserCapability;
   },
   policy: BrowserCapabilityPolicy = currentPolicy(),
@@ -119,6 +120,11 @@ export function authorizeBrowserCapability(
   if (!policy.browserConnectEnabled) {
     throw new BrowserCapabilityPolicyError(
       "browser connection acquisition is disabled by operator policy",
+    );
+  }
+  if (input.source !== "system") {
+    throw new BrowserCapabilityPolicyError(
+      "browser connection acquisition is restricted to system packages",
     );
   }
   if (!grants) {

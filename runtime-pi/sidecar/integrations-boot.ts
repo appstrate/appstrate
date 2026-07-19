@@ -2119,6 +2119,7 @@ export async function runBrowserConnectOnce(
       wantsEgress: false,
       browser,
       allowedTools: [],
+      hiddenTools: spec.hiddenTools,
       logLabel: "browser-connect-run",
       clients,
       mitmListeners: listeners,

@@ -153,6 +153,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     // The login tool is NEVER exposed to the agent, even though the author
     // listed it in the selection.
     expect(spec.toolAllowlist).toEqual(["fetch_invoices"]);
+    expect(spec.hiddenTools).toContain("login");
 
     // A MITM placeholder exists so the sidecar creates the listener + source;
     // the value is empty at rest (the real session is minted at boot).

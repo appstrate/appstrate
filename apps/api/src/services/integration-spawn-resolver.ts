@@ -112,6 +112,31 @@ export interface ResolveIntegrationsInput {
 }
 
 /**
+ * Compute the two independent agent-surface filters for credential-acquisition
+ * tools. The sidecar may still call the raw upstream client by name, but the
+ * agent must neither list nor invoke these tools through McpHost.
+ */
+export function privateConnectToolExposure(input: {
+  wildcardSelection: boolean;
+  effectiveSelection: readonly string[];
+  manifestHiddenTools: readonly string[];
+  privateToolNames: readonly (string | undefined)[];
+}): { toolAllowlist: readonly string[] | undefined; hiddenTools: string[] } {
+  const privateTools = new Set(
+    input.privateToolNames.filter(
+      (name): name is string => typeof name === "string" && name !== "",
+    ),
+  );
+  const hiddenTools = [...new Set([...input.manifestHiddenTools, ...privateTools])];
+  return {
+    toolAllowlist: input.wildcardSelection
+      ? undefined
+      : input.effectiveSelection.filter((tool) => !privateTools.has(tool)),
+    hiddenTools,
+  };
+}
+
+/**
  * Return one `IntegrationSpawnSpec` per integration that's (a) declared
  * on the agent, (b) installed in the application, AND (c) connected by
  * the actor. Other integrations are dropped with a warning.
@@ -455,43 +480,20 @@ async function resolveOne(
   // the slug + length cap.
   const namespace = integrationId;
 
-  // The connect-login tool is a credential-acquisition primitive, never an
-  // agent-facing capability — exclude it from the allowlist so the agent's
-  // LLM can never invoke it directly. (It is normally not in the selection
-  // anyway, but defence-in-depth: an author could have listed it.)
-  //
-  // AFPS §4.4 wildcard — when the effective selection is `"*"`, emit `undefined`
-  // so the sidecar's McpHost passes every upstream tool through (legacy
-  // "all tools allowed" path). The connect-login tool would otherwise reach
-  // the agent surface under that passthrough, so we append its name to
-  // `hiddenTools` below (the McpHost belt-and-suspenders filter that runs
-  // AFTER the allowlist). Without this, an integration with a `connect.tool`
-  // login primitive would expose the credential-acquisition tool to the
-  // agent's LLM whenever an agent opted into the wildcard.
-  let toolAllowlist: readonly string[] | undefined;
-  if (wildcardSelection) {
-    toolAllowlist = undefined;
-  } else {
-    const baseAllowlist = effectiveSelection ?? [];
-    toolAllowlist = deliveries.connectLogin
-      ? (baseAllowlist as readonly string[]).filter((t) => t !== deliveries.connectLogin!.toolName)
-      : baseAllowlist;
-  }
-
-  // R8a hidden-tools sidecar filter. Union of:
-  //   - `manifest.hidden_tools` (explicit opt-out)
-  //   - the connect-login `toolName` when the wildcard branch is in effect
-  //     (only then does the allowlist no longer filter it out)
-  // Connect tools never reach the agent's LLM regardless of agent selection.
-  const hiddenToolsUnion: string[] = [...(manifest.hidden_tools ?? [])];
+  // Canonicalize manifest-hidden names first, then apply the single policy
+  // kernel that removes every private connect hook from both agent-facing
+  // surfaces: the selection allowlist and the sidecar's defensive hidden set.
+  const manifestHiddenTools: string[] = [...(manifest.hidden_tools ?? [])];
   for (const name of manifest.hidden_tools ?? []) {
     const canonical = canonicalizeApiToolName(manifest, name);
-    if (!hiddenToolsUnion.includes(canonical)) hiddenToolsUnion.push(canonical);
+    if (!manifestHiddenTools.includes(canonical)) manifestHiddenTools.push(canonical);
   }
-  if (wildcardSelection && deliveries.connectLogin) {
-    const loginName = deliveries.connectLogin.toolName;
-    if (!hiddenToolsUnion.includes(loginName)) hiddenToolsUnion.push(loginName);
-  }
+  const { toolAllowlist, hiddenTools: hiddenToolsUnion } = privateConnectToolExposure({
+    wildcardSelection,
+    effectiveSelection: wildcardSelection ? [] : ((effectiveSelection ?? []) as readonly string[]),
+    manifestHiddenTools,
+    privateToolNames: [deliveries.connectLogin?.toolName, deliveries.browserConnect?.toolName],
+  });
 
   // Peer discriminant for the sidecar's spawn-mode dispatch. Mirrors
   // `source.kind`; defaults to `"none"` when the manifest didn't declare a
@@ -543,9 +545,9 @@ async function resolveOne(
     // independent of whether the install-time catalog resolver already
     // removed them. This guards against fixtures / direct DB writes that
     // bypass `resolveIntegrationToolCatalog`. Under the wildcard branch
-    // we also union in the connect-login tool name so the agent's LLM
-    // can never see the credential-acquisition primitive. Omitted when
-    // both sources are empty.
+    // we also union in every connect tool name so the agent's LLM can never
+    // see a credential-acquisition primitive. Omitted when both sources are
+    // empty.
     ...(hiddenToolsUnion.length > 0 ? { hiddenTools: hiddenToolsUnion } : {}),
     spawnEnv: deliveries.spawnEnv,
     // For remote HTTP MCP we deliberately drop `httpDeliveryAuths`: the
