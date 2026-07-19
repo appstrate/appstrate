@@ -862,6 +862,8 @@ async function spawnAndConnectLocalIntegration(params: {
    * `docker logs` on the sidecar host.
    */
   stderrTail?: string[];
+  /** Secret-free stage marker used to diagnose browser boot failures. */
+  onStage?: (stage: string) => void;
 }): Promise<SpawnAndConnectResult> {
   const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
 
@@ -950,17 +952,20 @@ async function spawnAndConnectLocalIntegration(params: {
   // server code), NOT the integration's own bundle. Local-source integrations
   // always carry `server.packageId`; fall back to the integration id only
   // if a spec somehow omits it (defensive).
+  params.onStage?.("bundle-fetch");
   const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
   const bytes = await fetchBundleBytes(
     serverPackageId,
     spec.manifest.server?.version,
     bundleFetchOpts,
   );
+  params.onStage?.("bundle-extract");
   const root = await extractBundle(bytes, spec.namespace);
 
   const spawnStart = performance.now();
   const suppressStderr = shouldSuppressIntegrationStderr(spec);
   let suppressedStderrObserved = false;
+  params.onStage?.("runner-spawn");
   const spawnedIntegration = await adapter.spawn({
     runId,
     spec,
@@ -997,6 +1002,7 @@ async function spawnAndConnectLocalIntegration(params: {
   const spawnMs = performance.now() - spawnStart;
 
   const connectStart = performance.now();
+  params.onStage?.("mcp-connect");
   const client = new Client(
     { name: "appstrate-sidecar-integration-host", version: "0.1.0" },
     // Advertise MCP Roots capability when the spec declares a workspace
@@ -1060,6 +1066,7 @@ async function spawnAndConnectLocalIntegration(params: {
   const wrapped = wrapClient(client, spawnedIntegration.transport, toolTimeoutMsFromEnv());
   params.clients.push(wrapped);
 
+  params.onStage?.("tool-register");
   const sizeBefore = host.size();
   const allocatedNs = await host.register({
     namespace: spec.namespace,
@@ -1360,6 +1367,7 @@ export async function bootIntegrations(
     const specStart = performance.now();
     let pendingBrowser: { handle: BrowserHandle; gateway: BrowserEgressGatewayHandle } | undefined;
     let pendingGateway: BrowserEgressGatewayHandle | undefined;
+    let browserStage = "preflight";
     // #779 — bounded tail of the runner's stderr, folded into the failure
     // report below so the real cause (an OAuth 405, a crashed module, …)
     // reaches operators instead of living only in `docker logs`.
@@ -1602,6 +1610,7 @@ export async function bootIntegrations(
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
       const wantsEgress = spec.needsEgress === true;
       if (spec.browser) {
+        browserStage = "gateway";
         if (!browserProvider) {
           throw new Error("BROWSER_UNAVAILABLE: no browser provider was selected");
         }
@@ -1625,6 +1634,7 @@ export async function bootIntegrations(
         });
         await gateway.ready;
         pendingGateway = gateway;
+        browserStage = "worker-spawn";
         const handle = await browserProvider.spawn({
           runId,
           integrationId: spec.integrationId,
@@ -1679,6 +1689,7 @@ export async function bootIntegrations(
         clients,
         mitmListeners,
         stderrTail,
+        ...(spec.browser ? { onStage: (stage: string) => (browserStage = stage) } : {}),
       });
       pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
 
@@ -1698,6 +1709,7 @@ export async function bootIntegrations(
         await runConnectLoginHook(spec, host, mitmSource, allocatedNs);
       }
       if (spec.browserConnect) {
+        browserStage = "session-acquisition";
         if (!pendingBrowser || !spec.browser) {
           throw new Error("browser-connect: browser worker was not provisioned");
         }
@@ -1790,7 +1802,12 @@ export async function bootIntegrations(
       breadcrumbs.push({
         message: `${spec.integrationId}: failed after ${ms}ms — ${msg}${stderrSuffix}`,
         level: "error",
-        data: { integrationId: spec.integrationId, durationMs: ms, error: msg },
+        data: {
+          integrationId: spec.integrationId,
+          durationMs: ms,
+          error: msg,
+          ...(spec.browser ? { stage: browserStage } : {}),
+        },
       });
     }
   }
