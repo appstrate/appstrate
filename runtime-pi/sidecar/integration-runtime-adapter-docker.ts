@@ -474,7 +474,16 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
-      const { runId, spec, bundleRoot, egress, browser, workspaceHandle, onStderrLine } = options;
+      const {
+        runId,
+        spec,
+        bundleRoot,
+        egress,
+        browser,
+        browserProxyBypassEndpoint,
+        workspaceHandle,
+        onStderrLine,
+      } = options;
       const plan = planContainer(spec, bundleRoot);
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
       const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
@@ -487,9 +496,14 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       // create's lifetime.
       const envFlags: string[] = [];
       if (egress) {
+        const browserNoProxyHosts = browserProxyBypassEndpoint
+          ? [new URL(browserProxyBypassEndpoint).hostname]
+          : [];
         // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
         // The proxy URL is `http://sidecar:<port>` (non-secret routing info).
-        for (const [k, v] of Object.entries(buildProxyEnvBlock(egress.proxyUrl))) {
+        for (const [k, v] of Object.entries(
+          buildProxyEnvBlock(egress.proxyUrl, browserNoProxyHosts),
+        )) {
           envFlags.push("-e", `${k}=${v}`);
         }
         // CA trust ONLY for a TLS-terminating MITM listener; a plain CONNECT

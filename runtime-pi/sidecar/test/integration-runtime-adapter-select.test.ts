@@ -104,6 +104,13 @@ describe("buildProxyEnvBlock", () => {
     // egress listener uses this block alone, with no cert mint.
     expect(env.NODE_EXTRA_CA_CERTS).toBeUndefined();
   });
+
+  it("can bypass only the provisioned browser worker without exposing credentials", () => {
+    const env = buildProxyEnvBlock("http://sidecar:39472", ["appstrate-browser-slot-0"]);
+    expect(env.NO_PROXY).toBe("127.0.0.1,localhost,appstrate-browser-slot-0");
+    expect(env.no_proxy).toBe(env.NO_PROXY);
+    expect(JSON.stringify(env)).not.toContain("token");
+  });
 });
 
 describe("buildCaEnvBlock", () => {

@@ -167,7 +167,10 @@ export async function runBrowserConnect(options: {
   source?: IntegrationCredentialsSource | null;
   /** Link-time acquisition returns the bundle to the API instead of installing it in-run. */
   installExportedSession?: boolean;
+  /** Secret-free stage marker for operator diagnostics. */
+  onStage?: (stage: string) => void;
 }): Promise<BrowserAcquisitionResult> {
+  options.onStage?.("session-driver-call");
   const client = options.host.getUpstreamClient(options.namespace);
   if (!client) throw new Error("browser-connect: trusted driver client is unavailable");
   if (!options.browserSpec.trustedDriver || !options.browserSpec.driverGrantId) {
@@ -192,6 +195,7 @@ export async function runBrowserConnect(options: {
     },
     {},
   );
+  options.onStage?.("session-result-parse");
   const result = parseBrowserAcquisitionResult(
     raw,
     options.connect.produces,
@@ -199,6 +203,7 @@ export async function runBrowserConnect(options: {
   );
 
   if (options.connect.sessionMode === "exportable" && options.installExportedSession !== false) {
+    options.onStage?.("session-install");
     if (!options.source || !options.connect.deliveryHttp) {
       throw new Error("browser-connect: exportable acquisition has no injectable delivery source");
     }

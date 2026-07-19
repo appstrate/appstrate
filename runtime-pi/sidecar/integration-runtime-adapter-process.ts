@@ -214,7 +214,16 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
-      const { runId, spec, bundleRoot, egress, browser, workspaceHandle, onStderrLine } = options;
+      const {
+        runId,
+        spec,
+        bundleRoot,
+        egress,
+        browser,
+        browserProxyBypassEndpoint,
+        workspaceHandle,
+        onStderrLine,
+      } = options;
       const plan = planSubprocess(spec, bundleRoot);
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
       if (browser) {
@@ -223,8 +232,11 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
         procEnv.APPSTRATE_BROWSER_PROTOCOL = String(browser.protocolVersion);
       }
       if (egress) {
+        const browserNoProxyHosts = browserProxyBypassEndpoint
+          ? [new URL(browserProxyBypassEndpoint).hostname]
+          : [];
         // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
-        Object.assign(procEnv, buildProxyEnvBlock(egress.proxyUrl));
+        Object.assign(procEnv, buildProxyEnvBlock(egress.proxyUrl, browserNoProxyHosts));
         // CA trust ONLY for a TLS-terminating MITM listener. Subprocess sees
         // the host fs directly; pass the CA path through unchanged (no docker
         // cp). A plain CONNECT egress listener has a null caCertHostPath.

@@ -971,6 +971,7 @@ async function spawnAndConnectLocalIntegration(params: {
     spec,
     bundleRoot: root,
     egress: egressCtx,
+    ...(params.browser ? { browserProxyBypassEndpoint: params.browser.endpoint } : {}),
     ...(params.browser && spec.browser?.purpose === "automation"
       ? {
           browser: {
@@ -1720,6 +1721,7 @@ export async function bootIntegrations(
           browserSpec: spec.browser,
           browser: pendingBrowser.handle,
           source,
+          onStage: (stage) => (browserStage = stage),
         });
         breadcrumbs.push({
           message: `${spec.integrationId}: browser connection proof succeeded`,
