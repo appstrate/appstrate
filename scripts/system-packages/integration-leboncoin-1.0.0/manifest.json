@@ -1,0 +1,105 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/integration.schema.json",
+  "schema_version": "0.1",
+  "type": "integration",
+  "name": "@appstrate/leboncoin",
+  "version": "1.0.0",
+  "display_name": "Leboncoin",
+  "icon": "simple-icons:leboncoin",
+  "description": "Unofficial, read-only Leboncoin integration backed by Appstrate's isolated Chromium capability. A trusted system driver signs in at run start, exports the resulting Leboncoin cookie session for HTTP delivery, and keeps the same ephemeral browser context available to search and listing-inspection tools. DataDome challenges are detected and reported for human intervention; this package does not bypass CAPTCHAs or anti-bot controls.",
+  "license": "Apache-2.0",
+  "keywords": ["leboncoin", "classifieds", "marketplace", "browser", "france"],
+  "source": {
+    "kind": "local",
+    "server": {
+      "name": "@appstrate/leboncoin-browser",
+      "version": "^1.0.0"
+    }
+  },
+  "default_tools": ["search_listings", "get_listing", "session_status"],
+  "hidden_tools": ["acquire_session"],
+  "auths": {
+    "session": {
+      "type": "custom",
+      "authorized_uris": [
+        "https://www.leboncoin.fr/**",
+        "https://auth.leboncoin.fr/**",
+        "https://api.leboncoin.fr/**"
+      ],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["email", "password"],
+          "properties": {
+            "email": {
+              "type": "string",
+              "format": "email",
+              "description": "Leboncoin account email. Stored encrypted as a non-injectable bootstrap input and delivered only to the granted system browser driver."
+            },
+            "password": {
+              "type": "string",
+              "format": "password",
+              "minLength": 1,
+              "description": "Leboncoin account password. Stored encrypted as a non-injectable bootstrap input and delivered only to the granted system browser driver."
+            }
+          }
+        }
+      },
+      "connect": {
+        "tool": {},
+        "_meta": {
+          "dev.appstrate/connect": {
+            "tool": "acquire_session",
+            "run_at": "run-start",
+            "persist_login_secret": true,
+            "produces": ["cookie_header"],
+            "reauth_on": [401, 403],
+            "executor": {
+              "kind": "browser",
+              "session_mode": "exportable"
+            }
+          }
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Cookie",
+          "value": "{$credential.cookie_header}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "acquire_session": {
+      "required_auth_key": "session",
+      "url_patterns": [
+        { "pattern": "https://www.leboncoin.fr/**" },
+        { "pattern": "https://auth.leboncoin.fr/**" }
+      ]
+    },
+    "search_listings": {
+      "required_auth_key": "session",
+      "url_patterns": [{ "pattern": "https://www.leboncoin.fr/recherche**" }]
+    },
+    "get_listing": {
+      "required_auth_key": "session",
+      "url_patterns": [{ "pattern": "https://www.leboncoin.fr/ad/**" }]
+    },
+    "session_status": {
+      "required_auth_key": "session",
+      "url_patterns": [{ "pattern": "https://www.leboncoin.fr/**" }]
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

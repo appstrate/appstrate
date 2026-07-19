@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/mcp-server.schema.json",
+  "schema_version": "0.1",
+  "manifest_version": "0.3",
+  "type": "mcp-server",
+  "name": "@appstrate/leboncoin-browser",
+  "version": "1.0.0",
+  "display_name": "Leboncoin Browser Driver",
+  "description": "First-party, dependency-free MCP driver for the @appstrate/leboncoin integration. It uses Appstrate's isolated CDP browser worker for session acquisition and read-only listing tools, and fails closed when Leboncoin presents a DataDome or CAPTCHA challenge.",
+  "author": "Appstrate",
+  "license": "Apache-2.0",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.ts",
+    "mcp_config": {
+      "command": "bun",
+      "args": ["server/index.ts"]
+    }
+  },
+  "tools": [
+    {
+      "name": "acquire_session",
+      "description": "Private Appstrate connect hook. Signs in through the isolated browser and returns a proven exportable Leboncoin cookie session. Never exposed to the agent."
+    },
+    {
+      "name": "search_listings",
+      "description": "Search Leboncoin in the authenticated isolated browser and return a bounded list of listing summaries. Read-only."
+    },
+    {
+      "name": "get_listing",
+      "description": "Open one canonical leboncoin.fr/ad URL in the authenticated isolated browser and return its visible details. Read-only."
+    },
+    {
+      "name": "session_status",
+      "description": "Report whether the isolated browser currently holds a Leboncoin login cookie. Cookie values are never returned."
+    }
+  ],
+  "_meta": {
+    "dev.appstrate/mcp-server": {
+      "runtime": "bun",
+      "capabilities": {
+        "browser": {
+          "purpose": "connection-acquisition",
+          "protocol": "cdp-v1",
+          "profile": "standard",
+          "origins": [
+            "https://www.leboncoin.fr",
+            "https://leboncoin.fr",
+            "https://auth.leboncoin.fr",
+            "https://api.leboncoin.fr",
+            "https://dd.leboncoin.fr",
+            "https://static-rav.leboncoin.fr",
+            "https://assets.leboncoin.fr",
+            "https://api-js.datadome.co",
+            "https://js.datadome.co",
+            "https://ct.captcha-delivery.com",
+            "https://geo.captcha-delivery.com",
+            "https://static.captcha-delivery.com"
+          ]
+        }
+      }
+    },
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

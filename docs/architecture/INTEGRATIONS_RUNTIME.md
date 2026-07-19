@@ -68,6 +68,30 @@ The capability does not attempt to evade DataDome or CAPTCHA challenges; an
 operator-visible challenge is a compliant failure/manual gate, not a signal to
 weaken Chromium or spoof detection attributes.
 
+### Built-in Leboncoin integration
+
+`@appstrate/leboncoin` is the reference system integration for the
+`connection-acquisition` tier. It resolves the system-only
+`@appstrate/leboncoin-browser@1.0.0` driver, performs browser login at run
+start, exports a cookie session, and exposes only read-only search, listing,
+and session-status tools. Its private `acquire_session` tool is declared in
+`hidden_tools` in addition to the platform's automatic private-tool filter.
+
+The deployment must offer the integration and explicitly grant the driver:
+
+```env
+SYSTEM_INTEGRATIONS=[{"id":"@appstrate/leboncoin"}]
+BROWSER_ENABLED=true
+BROWSER_CONNECT_ENABLED=true
+BROWSER_DRIVER_GRANTS=[{"id":"leboncoin","packageId":"@appstrate/leboncoin-browser","versionRange":"^1.0.0","origins":["https://www.leboncoin.fr","https://leboncoin.fr","https://auth.leboncoin.fr","https://api.leboncoin.fr","https://dd.leboncoin.fr","https://static-rav.leboncoin.fr","https://assets.leboncoin.fr","https://api-js.datadome.co","https://js.datadome.co","https://ct.captcha-delivery.com","https://geo.captcha-delivery.com","https://static.captcha-delivery.com"]}]
+```
+
+Docker deployments also need the sidecar, browser-worker, and Bun MCP-runner
+images. Configure an organization egress proxy through the normal proxy path
+when required. A DataDome or CAPTCHA page still fails closed as
+`BROWSER_INTERACTION_REQUIRED`; the driver does not weaken the browser profile
+or automate challenge solving.
+
 ### AFPS Integrations runtime (Phase 1.4, env-delivery + container-per-integration)
 
 AFPS integrations with `source.kind: "local"` declare `source.server.{name, version}` pointing to an `mcp-server` package. The mcp-server's `server.type` (`node` | `python` | `binary` | `uv`, all MCPB-vocabulary values) and `server.entry_point` (snake_case per AFPS §3.4) determine the runtime image. The Bun runtime selection uses an MCPB-vocabulary `server.type: "node"` (since MCPB's `server.type` enum is `node|python|binary|uv` — no `bun`) + an Appstrate `_meta["dev.appstrate/mcp-server"].runtime: "bun"` override read by `integration-spawn-resolver` on the mcp-server manifest. The platform validates the agent's `dependencies.integrations[id]`, looks up the installed package + the per-application `integration_connections` row, decrypts the credential blob, and builds a `spawnEnv` from `manifest.auths.{key}.delivery.env` (`apps/api/src/services/integration-spawn-resolver.ts`). The resolved spawn plan is serialized into `INTEGRATIONS_TO_SPAWN_JSON` on the sidecar container's env at create time — the sidecar fetches each bundle via the internal `GET /internal/mcp-server-bundle/:scope/:name` endpoint (authenticated with the run token, dep + install double-check) so we don't fight Linux env-var size limits.
