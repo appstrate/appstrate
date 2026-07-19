@@ -152,6 +152,7 @@
   "schedules.emptyHint": "Add a schedule to run an agent automatically.",
   "schedules.agentLabel": "Agent",
   "preferences.title": "Preferences",
+  "preferences.sectionAccount": "Account",
   "preferences.tabGeneral": "General",
   "preferences.tabSecurity": "Security",
   "preferences.tabConnections": "My connections",

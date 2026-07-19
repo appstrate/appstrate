@@ -189,7 +189,7 @@ function MainLayout() {
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
       <AppSidebar />
-      <SidebarInset>
+      <SidebarInset className="h-svh">
         <header className="flex h-16 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
           {/* Mobile-only trigger — desktop collapse lives in the sidebar header */}
           <SidebarTrigger className="ml-2 md:hidden" />
@@ -199,7 +199,7 @@ function MainLayout() {
             <NavUser />
           </div>
         </header>
-        <div className="flex flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <Outlet />
         </div>
       </SidebarInset>
