@@ -60,7 +60,10 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       </AuiIf>
 
       <AuiIf condition={(s) => !s.thread.isEmpty}>
-        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto scroll-smooth px-4 pt-6">
+        {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
+            instant — smoothing turns every content append into a visible glide
+            and amplifies any residual layout shift. */}
+        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
           <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
           <div className="min-h-6 flex-grow" />
@@ -227,10 +230,14 @@ function UserMessage() {
 // branches that aren't persisted — corrupting history on reload — so they're
 // intentionally absent.
 
-/** Shown while the model hasn't produced anything visible yet. */
+/**
+ * Shown while the model hasn't produced anything visible yet. Height is pinned
+ * to h-6 (24px) — exactly one prose-sm text line — so the dots→first-text swap
+ * is a 0px layout change.
+ */
 function ThinkingIndicator() {
   return (
-    <div className="flex items-center gap-1 py-2" role="status" aria-label="L'assistant réfléchit…">
+    <div className="flex h-6 items-center gap-1" role="status" aria-label="L'assistant réfléchit…">
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.15s]" />
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full" />
@@ -267,13 +274,14 @@ function AssistantMessage() {
         <TurnLimitNotice />
       </div>
       <MessageError />
-      <div className="mt-1 flex items-center gap-1">
-        {/* Always mounted (space reserved), revealed by opacity — `autohide`
-            would unmount it and shift the layout on hover. */}
-        <ActionBarPrimitive.Root
-          hideWhenRunning
-          className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-        >
+      <div className="mt-1 flex h-7 items-center gap-1">
+        {/* Space permanently reserved (fixed h-7 wrapper) and the bar ALWAYS
+            mounted, revealed by opacity only. `hideWhenRunning`/`autohide`
+            would unmount it and collapse every assistant message by the bar's
+            height at each inference start/finish — the whole transcript would
+            visibly jump. Copy stays usable mid-stream (copies the current
+            snapshot), which is the seamless behavior we want. */}
+        <ActionBarPrimitive.Root className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <ActionBarPrimitive.Copy asChild>
             <IconButton label="Copier">
               <MessagePrimitive.If copied>

@@ -147,7 +147,10 @@ function ConversationRow({
           {session.title ?? "Nouvelle conversation"}
         </span>
       </button>
-      <div className="relative flex shrink-0 items-center">
+      {/* Fixed-width right slot: spinner / unread dot / timestamp have different
+          natural widths — without w-14 the title's truncation point reflows on
+          every generating↔idle transition. */}
+      <div className="relative flex w-14 shrink-0 items-center justify-end">
         {session.generating ? (
           <Loader2Icon
             className="text-muted-foreground size-3.5 animate-spin"

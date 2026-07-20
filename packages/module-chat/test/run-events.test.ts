@@ -17,7 +17,6 @@ import {
   parseRunResource,
   parseRunUpdateFrame,
   safeJsonParse,
-  shouldRenderRunLaunchPanel,
   terminalRunLineText,
   visibleLogEntries,
   type RunLogLine,
@@ -49,14 +48,6 @@ describe("run-events helpers", () => {
     expect(extractRunStatus({ status: 201, body: { status: "running" } })).toBe("running");
     expect(extractRunStatus({ id: "run_x", status: "success" })).toBe("success");
     expect(extractRunStatus({ status: 201 })).toBeUndefined();
-  });
-
-  it("renders the live run panel only while launching or once a run exists", () => {
-    expect(shouldRenderRunLaunchPanel("pending", undefined)).toBe(true);
-    expect(shouldRenderRunLaunchPanel("running", undefined)).toBe(true);
-    expect(shouldRenderRunLaunchPanel("error", undefined)).toBe(false);
-    expect(shouldRenderRunLaunchPanel("success", undefined)).toBe(false);
-    expect(shouldRenderRunLaunchPanel("error", "run_1")).toBe(true);
   });
 
   it("extracts display labels and run links", () => {

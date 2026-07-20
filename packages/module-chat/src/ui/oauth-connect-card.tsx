@@ -21,6 +21,12 @@
  *
  * The callback page contract lives in `apps/api/src/lib/oauth-popup-html.ts`
  * (channel name + message type must match the literals below).
+ *
+ * Layout invariant: the card is mounted from the FIRST frame of the initiate
+ * tool call (before the auth url exists) and keeps the SAME two-row geometry
+ * across every state — preparing (no `authUrl` yet), idle, pending, error
+ * (including `errorText` when the initiate call itself failed), and connected.
+ * No state may change the card's height: the transcript must never jump.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -89,10 +95,14 @@ export function OAuthConnectCard({
   authUrl,
   state,
   packageId,
+  errorText,
 }: {
-  authUrl: string;
+  /** Absent while the initiate call is still streaming — renders "Préparation…". */
+  authUrl?: string;
   state?: string;
   packageId?: string;
+  /** Set when the initiate call itself failed (no auth url will ever arrive). */
+  errorText?: string;
 }) {
   const thread = useThreadRuntime();
   const getHeaders = useChatHeaders();
@@ -219,6 +229,7 @@ export function OAuthConnectCard({
   }, [phase, state, packageId, getHeaders, complete]);
 
   const start = () => {
+    if (!authUrl) return;
     setErrMsg(null);
     setPhase("pending");
     // Keep the opener (no `noopener`) so the callback can postMessage us back.
@@ -230,35 +241,64 @@ export function OAuthConnectCard({
     }
   };
 
-  if (phase === "done" || phase === "connected") {
-    return (
-      <div className="bg-card text-card-foreground my-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm">
-        <IntegrationIcon src={meta?.icon} className="size-4 shrink-0" />
-        <span className="flex-1 truncate">{label} connectée</span>
-        <CheckIcon className="text-primary size-4 shrink-0" />
-      </div>
-    );
-  }
+  const connected = phase === "done" || phase === "connected";
+  const initiateFailed = !authUrl && !!errorText;
+  const preparing = !authUrl && !initiateFailed;
 
+  // One shell for every state: row 1 (h-5, sentence) + row 2 (h-9, action or
+  // outcome). Fixed row heights so state transitions — preparing → idle →
+  // pending → connected/error — are 0px layout changes.
   return (
     <div className="bg-card text-card-foreground my-3 flex w-full flex-col gap-2 rounded-lg border px-3 py-3 text-sm">
-      <div className="flex items-center gap-2">
+      <div className="flex h-5 items-center gap-2">
         <IntegrationIcon src={meta?.icon} className="size-4 shrink-0" />
-        <span className="flex-1">
-          Connecte <span className="font-medium">{label}</span> pour continuer.
+        <span className="min-w-0 flex-1 truncate">
+          {connected ? (
+            <>
+              <span className="font-medium">{label}</span> connectée.
+            </>
+          ) : initiateFailed ? (
+            <>
+              Connexion de <span className="font-medium">{label}</span> impossible.
+            </>
+          ) : (
+            <>
+              Connecte <span className="font-medium">{label}</span> pour continuer.
+            </>
+          )}
         </span>
       </div>
-      <div className="flex items-center gap-2">
-        <Button onClick={start} disabled={phase === "pending"} className="gap-2">
-          {phase === "pending" ? <Loader2Icon className="size-4 animate-spin" /> : null}
-          {phase === "pending" ? "En attente de connexion…" : "Connecter"}
-        </Button>
-        {phase === "error" && errMsg ? (
-          <span className="text-destructive flex items-center gap-1 text-xs">
-            <AlertTriangleIcon className="size-3.5" />
-            {errMsg}
+      <div className="flex h-9 items-center gap-2">
+        {connected ? (
+          <span className="text-primary flex items-center gap-1.5 text-xs">
+            <CheckIcon className="size-3.5 shrink-0" />
+            Connexion active
           </span>
-        ) : null}
+        ) : initiateFailed ? (
+          <span className="text-destructive flex min-w-0 items-center gap-1 text-xs">
+            <AlertTriangleIcon className="size-3.5 shrink-0" />
+            <span className="truncate">{errorText}</span>
+          </span>
+        ) : (
+          <>
+            <Button onClick={start} disabled={preparing || phase === "pending"} className="gap-2">
+              {preparing || phase === "pending" ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : null}
+              {preparing
+                ? "Préparation…"
+                : phase === "pending"
+                  ? "En attente de connexion…"
+                  : "Connecter"}
+            </Button>
+            {phase === "error" && errMsg ? (
+              <span className="text-destructive flex min-w-0 items-center gap-1 text-xs">
+                <AlertTriangleIcon className="size-3.5 shrink-0" />
+                <span className="truncate">{errMsg}</span>
+              </span>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );

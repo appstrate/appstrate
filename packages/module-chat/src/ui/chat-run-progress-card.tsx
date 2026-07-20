@@ -18,6 +18,10 @@
  * the card opens the raw input/output detail modal (`details`).
  *
  * Before the tool returns a `run_…` id there is no SSE yet: status glyph falls back to the tool-call phase.
+ *
+ * A launch failure (tool errored before a run id exists) renders INSIDE this
+ * card — error glyph + `errorText` on line 2 — never as a swap to another
+ * component, so the block's height stays constant for the call's whole life.
  */
 
 import * as React from "react";
@@ -75,6 +79,7 @@ export function ChatRunProgressCard({
   runHref,
   initialPackageId,
   phase,
+  errorText,
   modalTitle,
   details,
 }: {
@@ -84,6 +89,8 @@ export function ChatRunProgressCard({
   runHref?: string;
   initialPackageId?: string;
   phase: ToolPhase;
+  /** Launch-failure message shown on line 2 when the tool errored without a run id. */
+  errorText?: string;
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
@@ -115,8 +122,15 @@ export function ChatRunProgressCard({
   // Once the run is terminal, the live log line is replaced by a fixed status
   // label so the card settles on the actual outcome instead of freezing on
   // whatever the last log happened to be. A stable key (-1) lets it animate in.
+  // A launch failure (tool errored, no run ever existed) settles on the error
+  // message instead — same slot, same height.
   const terminal = isTerminalStatus(effectiveStatus);
-  const line = terminal ? { id: -1, text: terminalRunLineText(effectiveStatus) } : current;
+  const launchFailed = !runId && phase === "error";
+  const line = terminal
+    ? { id: -1, text: terminalRunLineText(effectiveStatus) }
+    : launchFailed
+      ? { id: -1, text: errorText ?? "Échec du lancement" }
+      : current;
   const effectiveRunHref = runHref ?? (runId ? buildRunPageHref(packageId, runId) : undefined);
 
   // `isolate` scopes the internal z-0/z-10 layering to this card — without it
@@ -165,7 +179,7 @@ export function ChatRunProgressCard({
             {line ? (
               <span
                 key={line.id}
-                className="text-muted-foreground animate-in fade-in slide-in-from-bottom-1 col-start-1 row-start-1 truncate duration-300"
+                className={`${launchFailed ? "text-destructive" : "text-muted-foreground"} animate-in fade-in slide-in-from-bottom-1 col-start-1 row-start-1 truncate duration-300`}
               >
                 {line.text}
               </span>

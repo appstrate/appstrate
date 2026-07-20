@@ -140,10 +140,6 @@ export function extractRunId(result: unknown): string | undefined {
   return undefined;
 }
 
-export function shouldRenderRunLaunchPanel(phase: string, runId: string | undefined): boolean {
-  return !!runId || phase === "running" || phase === "pending";
-}
-
 /**
  * Pull the run status out of a launch result, when present (`body.status` for
  * the invoke envelope, top-level `status` for `run_and_wait`). Returns the raw
