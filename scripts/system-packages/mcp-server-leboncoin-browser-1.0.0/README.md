@@ -12,3 +12,5 @@ BROWSER_DRIVER_GRANTS=[{"id":"leboncoin","packageId":"@appstrate/leboncoin-brows
 ```
 
 For Docker execution, `appstrate-sidecar`, `appstrate-browser-worker`, and `appstrate-mcp-runner-browser-use` must be available. Local headless Chromium can still receive a DataDome challenge. Operators can select `BROWSER_PROVIDER=browser-use-cloud` with `BROWSER_USE_API_KEY` to use Browser Use's remote browser and a French residential proxy; this improves anti-detection but does not guarantee a bypass. A challenge is surfaced as `BROWSER_INTERACTION_REQUIRED` without stopping the rest of the agent run.
+
+An authenticated session is accepted only after the driver reaches Leboncoin's account area with the expected login cookie. Merely restoring a non-empty cookie snapshot is not considered proof of authentication.

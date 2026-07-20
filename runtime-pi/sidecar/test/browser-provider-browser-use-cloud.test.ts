@@ -109,6 +109,15 @@ describe("Browser Use Cloud provider", () => {
     });
     expect(discovery.status).toBe(200);
     expect(await discovery.json()).toMatchObject({ Browser: "Browser Use Cloud" });
+    const context = await fetch(`${handle.endpoint}/v1/context`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${handle.authToken}` },
+    });
+    expect(context.status).toBe(200);
+    expect(await context.json()).toMatchObject({
+      defaultContext: true,
+      fileUploadMode: "unsupported",
+    });
     await provider.stop(handle);
 
     expect(requests).toHaveLength(3);

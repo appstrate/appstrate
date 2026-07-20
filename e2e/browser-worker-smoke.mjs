@@ -17,6 +17,10 @@ const contextResponse = await fetch(`${endpoint}/v1/context`, { method: "POST", 
 assert(contextResponse.status === 200, `context activation returned ${contextResponse.status}`);
 const activation = await contextResponse.json();
 assert(activation.defaultContext === true, "worker did not activate its default context");
+assert(
+  activation.fileUploadMode === "shared-filesystem",
+  "worker did not advertise shared-filesystem uploads",
+);
 
 const mutation = await fetch(`${endpoint}/json/new`, { method: "PUT", headers });
 assert(mutation.status === 403, `DevTools HTTP mutation returned ${mutation.status}`);

@@ -21,6 +21,7 @@ from appstrate_browser_use import (
 )
 
 LEBONCOIN_ORIGIN = "https://www.leboncoin.fr"
+LEBONCOIN_ACCOUNT_URL = f"{LEBONCOIN_ORIGIN}/compte/part/mes-annonces"
 LOGIN_COOKIE = "__Secure-login"
 
 TOOLS = [
@@ -80,6 +81,7 @@ def normalize_listing_url(value: object) -> str:
     if (
         parsed.scheme != "https"
         or parsed.hostname != "www.leboncoin.fr"
+        or parsed.netloc != "www.leboncoin.fr"
         or not parsed.path.startswith("/ad/")
         or parsed.username is not None
         or parsed.password is not None
@@ -88,13 +90,23 @@ def normalize_listing_url(value: object) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
 
 
+def cookie_domain_matches(value: object, root: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    domain = value.casefold()
+    if domain.startswith("."):
+        domain = domain[1:]
+    if not domain or domain.startswith(".") or domain.endswith("."):
+        return False
+    return domain == root or domain.endswith(f".{root}")
+
+
 def has_session(cookies: list[dict[str, object]]) -> bool:
     return any(
         cookie.get("name") == LOGIN_COOKIE
         and isinstance(cookie.get("value"), str)
         and bool(cookie.get("value"))
-        and isinstance(cookie.get("domain"), str)
-        and str(cookie["domain"]).lower().lstrip(".").endswith("leboncoin.fr")
+        and cookie_domain_matches(cookie.get("domain"), "leboncoin.fr")
         for cookie in cookies
     )
 
@@ -124,10 +136,7 @@ class LeboncoinDriver:
         stored_state = inputs.get("browser_state")
         if isinstance(stored_state, str):
             await self.browser.restore_storage_state_json(stored_state)
-            snapshot = await self.browser.navigate(LEBONCOIN_ORIGIN)
-            self._assert_no_challenge(snapshot)
-            cookies = await self.browser.cookies()
-            if not has_session(cookies):
+            if not await self._prove_session():
                 raise RuntimeError("BROWSER_AUTH_REQUIRED: stored Leboncoin session expired")
             return await self._result(None)
 
@@ -183,7 +192,9 @@ class LeboncoinDriver:
         while asyncio.get_running_loop().time() < deadline:
             cookies = await self.browser.cookies()
             if has_session(cookies):
-                return await self._result(email)
+                if await self._prove_session():
+                    return await self._result(email)
+                raise RuntimeError("BROWSER_AUTH_REQUIRED: Leboncoin did not establish an account session")
             snapshot = await self.browser.snapshot()
             self._assert_no_challenge(snapshot)
             if credentials_rejected(snapshot.body_text):
@@ -238,22 +249,33 @@ class LeboncoinDriver:
         return result if isinstance(result, dict) else {}
 
     async def status(self) -> dict[str, object]:
+        authenticated = await self._prove_session()
         cookies = await self.browser.cookies()
         names = sorted(
             {
                 str(cookie["name"])
                 for cookie in cookies
                 if isinstance(cookie.get("name"), str)
-                and isinstance(cookie.get("domain"), str)
-                and str(cookie["domain"]).lower().lstrip(".").endswith("leboncoin.fr")
+                and cookie_domain_matches(cookie.get("domain"), "leboncoin.fr")
             }
         )
         return {
-            "authenticated": has_session(cookies),
+            "authenticated": authenticated,
             "cookie_names": names,
             "current_url": await self.browser.current_url(),
             "engine": "browser-use",
         }
+
+    async def _prove_session(self) -> bool:
+        snapshot = await self.browser.navigate(LEBONCOIN_ACCOUNT_URL)
+        self._assert_no_challenge(snapshot)
+        parsed = urlsplit(snapshot.url)
+        return (
+            parsed.scheme == "https"
+            and parsed.hostname == "www.leboncoin.fr"
+            and parsed.path.startswith("/compte/")
+            and has_session(await self.browser.cookies())
+        )
 
     async def _wait_for_field(
         self, labels: tuple[str, ...], timeout: float, input_types: tuple[str, ...]

@@ -78,7 +78,10 @@ drivers, keeps its paid CDP URL behind a sidecar bearer broker, and is an
 anti-detection improvement rather than a guarantee that any challenge will pass.
 Because remote browser subresources do not traverse Appstrate's local egress
 gateway, local Docker/process remains the default and the cloud path must not be
-enabled for org-owned automation.
+enabled for org-owned automation. The cloud broker also advertises that it cannot
+address Appstrate's local workspace paths. Drivers that need file inputs fail
+before submission; built-in Vinted publication therefore requires a local
+Docker, process, or Firecracker browser provider.
 
 ### Built-in Leboncoin integration
 

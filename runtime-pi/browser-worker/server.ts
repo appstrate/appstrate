@@ -466,7 +466,12 @@ const server = Bun.serve<BrokerData>({
       return Response.json(rewriteWebSocketUrls(body, url.origin), { status: response.status });
     }
     if (url.pathname === "/v1/context" && req.method === "POST") {
-      if (activeContext) return Response.json({ error: "context already exists" }, { status: 409 });
+      if (activeContext) {
+        return Response.json(
+          { error: "context already exists", fileUploadMode: "shared-filesystem" },
+          { status: 409 },
+        );
+      }
       if (contextRetired) {
         return Response.json({ error: "context lifecycle is complete" }, { status: 410 });
       }
@@ -475,7 +480,12 @@ const server = Bun.serve<BrokerData>({
       // public CDP endpoint compatible with Playwright's default context;
       // Playwright cannot attach to an incognito context created out-of-band.
       activeContext = DEFAULT_BROWSER_CONTEXT;
-      return Response.json({ contextId: null, defaultContext: true, endpoint: url.origin });
+      return Response.json({
+        contextId: null,
+        defaultContext: true,
+        endpoint: url.origin,
+        fileUploadMode: "shared-filesystem",
+      });
     }
     if (url.pathname === "/v1/context/state" && req.method === "PUT") {
       if (!activeContext)

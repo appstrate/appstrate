@@ -19,6 +19,14 @@ from .validation import (
 )
 
 MAX_STORAGE_STATE_BYTES = 480_000
+FILE_UPLOAD_MODES = frozenset({"shared-filesystem", "unsupported"})
+
+
+def context_file_upload_mode(value: object) -> str:
+    mode = value.get("fileUploadMode") if isinstance(value, dict) else None
+    if mode not in FILE_UPLOAD_MODES:
+        raise RuntimeError("BROWSER_UNAVAILABLE: browser context upload mode is unsupported")
+    return str(mode)
 
 
 @dataclass(frozen=True)
@@ -62,7 +70,7 @@ class AppstrateBrowser:
         self._configuration: BrowserConfiguration | None = None
         self._session: Any | None = None
         self._tools: Any | None = None
-        self._lock = asyncio.Lock()
+        self._file_upload_mode: str | None = None
 
     @property
     def configured(self) -> bool:
@@ -88,6 +96,11 @@ class AppstrateBrowser:
             raise RuntimeError(
                 f"BROWSER_UNAVAILABLE: browser context creation returned {response.status_code}"
             )
+        try:
+            context_metadata = response.json()
+        except (ValueError, TypeError) as error:
+            raise RuntimeError("BROWSER_UNAVAILABLE: browser context metadata was malformed") from error
+        file_upload_mode = context_file_upload_mode(context_metadata)
         BrowserSession, Tools = _load_browser_use()
         domains = [urlsplit(origin).hostname for origin in configuration.allowed_origins]
         try:
@@ -114,10 +127,12 @@ class AppstrateBrowser:
             raise RuntimeError("BROWSER_UNAVAILABLE: Browser Use could not attach to CDP") from error
         self._session = session
         self._tools = Tools(exclude_actions=["search", "done"])
+        self._file_upload_mode = file_upload_mode
 
     async def close(self) -> None:
         session, self._session = self._session, None
         self._tools = None
+        self._file_upload_mode = None
         if session is not None:
             try:
                 await session.stop()
@@ -403,6 +418,10 @@ class AppstrateBrowser:
         """Set one visible file input using Browser Use's attached CDP session."""
 
         await self.start()
+        if self._file_upload_mode != "shared-filesystem":
+            raise RuntimeError(
+                "BROWSER_UNAVAILABLE: selected browser provider cannot access workspace files"
+            )
         selector_map = await self._session.get_selector_map()
         node = next(
             (

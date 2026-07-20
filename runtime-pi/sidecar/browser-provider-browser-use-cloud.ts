@@ -116,7 +116,16 @@ export async function createBrowserUseCloudBroker(input: {
         });
       }
       if (url.pathname === "/v1/context" && request.method === "POST") {
-        return Response.json({ contextId: null, defaultContext: true, endpoint: url.origin });
+        return Response.json({
+          contextId: null,
+          defaultContext: true,
+          endpoint: url.origin,
+          // Browser Use Cloud runs Chromium on a remote host. Appstrate's
+          // read-only workspace mount is therefore not addressable by raw CDP
+          // file-input paths. Keep search/login available, but make upload
+          // support explicit so publication drivers can fail before submit.
+          fileUploadMode: "unsupported",
+        });
       }
       if (url.pathname === "/json/version" || url.pathname === "/json/version/") {
         if (!isReadOnlyDevtoolsDiscoveryRequest(request.method, url.pathname, url.search)) {

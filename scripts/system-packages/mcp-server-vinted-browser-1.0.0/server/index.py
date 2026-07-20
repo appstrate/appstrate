@@ -110,12 +110,24 @@ TOOLS = [
 ]
 
 
+def cookie_domain_matches(value: object, root: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    domain = value.casefold()
+    if domain.startswith("."):
+        domain = domain[1:]
+    if not domain or domain.startswith(".") or domain.endswith("."):
+        return False
+    return domain == root or domain.endswith(f".{root}")
+
+
 def normalize_item_url(value: object) -> str:
     raw = required_string(value, "url", 2048)
     parsed = urlsplit(raw)
     if (
         parsed.scheme != "https"
         or parsed.hostname != "www.vinted.fr"
+        or parsed.netloc != "www.vinted.fr"
         or re.fullmatch(r"/items/\d+(?:-[^/]+)?/?", parsed.path) is None
         or parsed.username is not None
         or parsed.password is not None
@@ -358,19 +370,19 @@ class VintedDriver:
         raise RuntimeError("BROWSER_NAVIGATION_TIMEOUT: Vinted did not confirm listing publication")
 
     async def status(self) -> dict[str, object]:
+        authenticated = await self._wait_for_listing_form(5.0)
         cookies = await self.browser.cookies()
         names = sorted(
             {
                 str(cookie["name"])
                 for cookie in cookies
                 if isinstance(cookie.get("name"), str)
-                and isinstance(cookie.get("domain"), str)
-                and str(cookie["domain"]).lower().lstrip(".").endswith("vinted.fr")
+                and cookie_domain_matches(cookie.get("domain"), "vinted.fr")
             }
         )
         current = await self.browser.current_url()
         return {
-            "authenticated": bool(names) and "/member/" not in current,
+            "authenticated": authenticated and bool(names),
             "cookie_names": names,
             "current_url": current,
             "engine": "browser-use",
