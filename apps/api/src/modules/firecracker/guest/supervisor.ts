@@ -380,6 +380,8 @@ async function main(): Promise<void> {
         APPSTRATE_BROWSER_EXEC: BROWSER_EXEC_WRAPPER,
         APPSTRATE_BROWSER_EXECUTABLE: BROWSER_EXECUTABLE,
         APPSTRATE_BROWSER_GUEST_ISOLATION: "1",
+        APPSTRATE_BROWSER_USE_PYTHON: "/opt/appstrate-browser-use/.venv/bin/python",
+        APPSTRATE_BROWSER_USE_BRIDGE: "/opt/appstrate-browser-use-bridge",
       },
       "/tmp",
       { harden: false },

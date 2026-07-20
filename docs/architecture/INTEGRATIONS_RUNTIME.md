@@ -57,23 +57,36 @@ driver must return a successful authenticated proof and only keys declared by
 exportable `run-start` sessions additionally require `delivery.http`, because
 the proven value is installed into the already-running MITM credential source
 after acquisition (runner environment and files are immutable at that point).
-Browser-bound link persistence remains fail-closed until the separate runtime
-state/lease subsystem is enabled. Browser-bound `run-start` acquisition remains
-ephemeral inside the current run.
+The built-in exportable drivers persist a bounded cookie/local-storage snapshot in
+the encrypted connection output plane. At run boot the private driver restores
+and re-proves that state before its tools become ready; account passwords are
+used only during the link job and are not persisted. True browser-bound link
+sessions remain disabled until the runtime-state store and exclusive lease
+service exist; a portable storage snapshot must not pretend to provide those
+concurrency semantics.
 
 Exact-origin enforcement is intentionally strict for anti-bot-protected sites:
 every CDN, API, consent, and detector origin needed by the live page must be
 declared. A staging canary must record denied origins before production rollout.
-The capability does not attempt to evade DataDome or CAPTCHA challenges; an
-operator-visible challenge is a compliant failure/manual gate, not a signal to
-weaken Chromium or spoof detection attributes.
+Local Chromium does not attempt to solve DataDome or CAPTCHA challenges. A
+challenge degrades only the affected integration to
+`BROWSER_INTERACTION_REQUIRED`; the agent run remains alive so it can use other
+tools or report that verification is required. Operators may explicitly select
+`BROWSER_PROVIDER=browser-use-cloud` for a remote stealth browser with a French
+residential proxy. That provider is restricted to granted system connection
+drivers, keeps its paid CDP URL behind a sidecar bearer broker, and is an
+anti-detection improvement rather than a guarantee that any challenge will pass.
+Because remote browser subresources do not traverse Appstrate's local egress
+gateway, local Docker/process remains the default and the cloud path must not be
+enabled for org-owned automation.
 
 ### Built-in Leboncoin integration
 
 `@appstrate/leboncoin` is the reference system integration for the
 `connection-acquisition` tier. It resolves the system-only
-`@appstrate/leboncoin-browser@1.0.0` driver, performs browser login at run
-start, exports a cookie session, and exposes only read-only search, listing,
+`@appstrate/leboncoin-browser@1.0.0` Browser Use driver, performs browser login
+once when the connection is linked, persists only bounded browser state, and
+re-proves that state at every run. It exposes only read-only search, listing,
 and session-status tools. Its private `acquire_session` tool is declared in
 `hidden_tools` in addition to the platform's automatic private-tool filter.
 
@@ -86,11 +99,11 @@ BROWSER_CONNECT_ENABLED=true
 BROWSER_DRIVER_GRANTS=[{"id":"leboncoin","packageId":"@appstrate/leboncoin-browser","versionRange":"^1.0.0","origins":["https://www.leboncoin.fr","https://leboncoin.fr","https://auth.leboncoin.fr","https://api.leboncoin.fr","https://dd.leboncoin.fr","https://static-rav.leboncoin.fr","https://assets.leboncoin.fr","https://api-js.datadome.co","https://js.datadome.co","https://ct.captcha-delivery.com","https://geo.captcha-delivery.com","https://static.captcha-delivery.com"]}]
 ```
 
-Docker deployments also need the sidecar, browser-worker, and Bun MCP-runner
-images. Configure an organization egress proxy through the normal proxy path
-when required. A DataDome or CAPTCHA page still fails closed as
-`BROWSER_INTERACTION_REQUIRED`; the driver does not weaken the browser profile
-or automate challenge solving.
+Docker deployments also need the sidecar, browser-worker, and
+`appstrate-mcp-runner-browser-use` images. Configure an organization egress
+proxy through the normal proxy path when required. Local headless Chromium can
+still receive `BROWSER_INTERACTION_REQUIRED`; Browser Use Cloud is the optional
+stealth/residential path, not a challenge-solving API.
 
 ### AFPS Integrations runtime (Phase 1.4, env-delivery + container-per-integration)
 
@@ -113,6 +126,7 @@ sidecar (Bun, +docker-cli, /var/run/docker.sock mounted, runs as root only when 
   │     │     RUNNER_IMAGE_BY_TYPE[server.type]:
   │     │       node   → appstrate-mcp-runner-node:latest    (75 MB)
   │     │       python → appstrate-mcp-runner-python:latest  (49 MB)
+  │     │       browser-use → appstrate-mcp-runner-browser-use:latest
   │     │       binary → appstrate-mcp-runner-binary:latest  (11 MB)
   │     │     docker create --rm -i --cap-drop ALL --memory 256m --pids-limit 128 \
   │     │         --network appstrate-exec-<runId> -e <spawnEnv...> \
@@ -123,7 +137,7 @@ sidecar (Bun, +docker-cli, /var/run/docker.sock mounted, runs as root only when 
   │     │     → SubprocessTransport(["docker","start","-ai",<id>])
   │     │     ── process adapter (dev / tests) ──
   │     │     HOST_INTERPRETER_BY_TYPE[server.type]:
-  │     │       node → "node", python → "python3 -u", binary → exec entry directly
+  │     │       node → "node", python → "python3 -u", browser-use → pinned Python, binary → exec directly
   │     │     → SubprocessTransport({ command, args, cwd, env: { ...spawnEnv, ...mitmEnv } })
   │     ├─ Client.connect → initialize → tools/list   ← MCP handshake
   │     └─ McpHost.register({ namespace, client })    ← tools exposed to the agent as {ns}__{tool}
@@ -133,7 +147,7 @@ sidecar (Bun, +docker-cli, /var/run/docker.sock mounted, runs as root only when 
 
 Key invariants:
 
-- **Sidecar minimal by design**: no `node`, no `python`, no `bun` baked in. Adding a new language is one `runtime-pi/runners/<lang>/Dockerfile` + one entry in `RUNNER_IMAGE_BY_TYPE` (in `integration-runtime-adapter-docker.ts`) — the sidecar image (132 MB) doesn't grow.
+- **Sidecar minimal by design**: no `node`, no `python`, no `bun` baked in. Adding a new language is one `runtime-pi/runners/<lang>/Dockerfile` + one entry in `RUNNER_IMAGE_BY_TYPE` (in `integration-runtime-adapter-docker.ts`) — the sidecar image (132 MB) doesn't grow. The Browser Use runtime follows this rule in Docker; Firecracker bakes the same pinned Python environment into the guest because its runners are uid-isolated subprocesses rather than sibling containers.
 - **Bun runtime via `_meta` (MCPB-vocabulary `server.type` preserved)**: MCPB's `server.type` enum is `node|python|binary|uv` — no `bun`. The mcp-server manifest is AFPS-native at the root with MCPB-vocabulary fields (`server` / `tools` / `user_config`) carried verbatim — NOT a strict-MCPB manifest (AFPS dropped that interoperability claim; a publish-time projection to strict-MCPB is reserved for a future minor, see AFPS §3.4 + §10.2). A bun-native server therefore keeps an MCPB-vocabulary `server.type: "node"` and declares the real runtime under `_meta["dev.appstrate/mcp-server"].runtime: "bun"`. `integration-spawn-resolver` reads the override (`getMcpServerRuntime` in `@appstrate/core/mcp-server`) and falls back to `server.type` when absent — so the effective runtime drives both `HOST_INTERPRETER_BY_TYPE["bun"]` (process mode, host subprocess, no Docker) and `RUNNER_IMAGE_BY_TYPE["bun"]` (docker mode, dedicated `appstrate-mcp-runner-bun` container with full cgroup/cap-drop/network isolation). The override lives on the mcp-server manifest only — the integration manifest carries auth/policy + the `source.server` reference, never server/runtime fields. There is deliberately NO in-process-bun-inside-the-docker-sidecar path: the sidecar runs as root with the Docker socket mounted when integrations are present, so running third-party bun code in its process tree would hand it root + socket → host-escape surface. Containerising bun in tier 3 keeps the security boundary intact.
 - **Pluggable runtime adapter** (`integration-runtime-adapter.ts`): the sidecar's `bootIntegrations` is orchestrator-agnostic. `selectIntegrationRuntimeAdapter()` picks the adapter purely by `id` from `INTEGRATION_RUNTIME_ADAPTER` — **no availability probing / auto-detection**. Docker selects `docker`; process selects `process`; Firecracker deliberately selects `process` inside its per-run guest. Browser provisioning is orthogonal and is selected through the matching `BrowserProvider` registry. Each adapter owns runner spawn, listener addressing, CA delivery, and teardown; each browser provider owns the companion worker lifecycle.
 - **Docker socket gated by need**: `docker-orchestrator.createSidecar` only adds `binds: ["/var/run/docker.sock"]` + `user: "0:0"` when `spec.integrations.length > 0`. Runs without integrations keep the default `nobody:nobody` user with no socket.
@@ -143,7 +157,7 @@ Key invariants:
 - **Process mode**: when the run is launched by `process-orchestrator` (`RUN_ADAPTER=process`, sidecar a host subprocess), it pins `INTEGRATION_RUNTIME_ADAPTER=process` and the process adapter spawns integrations via `Bun.spawn(["node"|"python3", entry])` against the host PATH — same MCP wire, no container isolation. Tests run in this mode (they set the var explicitly).
 - **MCPB-vocabulary `server.type` preserved**: the `server.type` field uses the MCPB vocabulary exactly (`node|python|binary|uv`). The mcp-server manifest as a whole is AFPS-native, not strict-MCPB, so `.afps` bundles are NOT drop-in installable as `.mcpb` extensions in strict-MCPB hosts; a publish-time projection to a strict-MCPB bundle is reserved for a future AFPS minor (§3.4 + §10.2).
 - **Tools surfaced to the LLM**: the sidecar's `McpHost` multiplexes spawned tools under a namespaced prefix (`{namespace}__{tool}`). The agent's `runtime-pi/mcp/direct.ts` discovers them via `tools/list` and registers one Pi extension per advertised non-first-party tool that forwards verbatim to `mcp.callTool`.
-- **Boot is a hard gate — a declared integration that doesn't start aborts the run, every tier**: `bootIntegrations` no longer degrades silently. It records an `IntegrationBootReport` (`@appstrate/core/sidecar-types`) — `ok`, `declared`, `adapter`, `spawned[]`, `failed[]`, and an ordered, timed `breadcrumbs[]` trail (runtime adapter, MITM CA, per-integration `spawn Xms · connect Yms · ready` / `failed`). The sidecar serves it at `GET /integrations/boot-report` (no inbound auth — like `/mcp`; the agent container holds no run token, so the per-run network is the boundary — and it awaits the boot promise so the answer is final). After the MCP handshake the agent (`runtime-pi/entrypoint.ts`) fetches the report, relays every breadcrumb into `run_logs` as `appstrate.progress` events (`emitBootProgress` in `@appstrate/runner-pi`), and **`die()`s the run** (`failed`) when `ok` is false or the report can't be fetched within `BOOT_REPORT_DEADLINE_MS` (60 s). This replaces the old "missing python3 → empty toolset → LLM cheerfully says the integration isn't connected" silent-degradation failure mode. The agent also emits `bundle loaded` + `MCP connected` breadcrumbs of its own; `emitRuntimeReady`'s `runtime ready in Xms` stays the terminal line.
+- **Boot is a hard gate, except for an explicit human browser gate**: a declared integration that fails to start aborts the run in every tier. The sole degraded case is a granted browser driver that has already registered safely and returns `BROWSER_INTERACTION_REQUIRED` during private session proof; its browser and deterministic tools remain alive, the breadcrumb is a warning, and the rest of the agent can continue. `bootIntegrations` records the authoritative `IntegrationBootReport` (`ok`, `declared`, `adapter`, `spawned[]`, `failed[]`, ordered timed `breadcrumbs[]`), served at `GET /integrations/boot-report` and relayed into run logs by the agent. All non-interaction failures remain hard failures.
 
 ### AFPS Integrations MITM credential injection (Phase 1.5, `delivery.http`)
 
@@ -295,7 +309,7 @@ Sidecar (integrations-boot)
 
 **MCP Roots contract** (`runtime-pi/sidecar/integrations-boot.ts`): the sidecar IS the MCP Roots provider for spawned runners. `listChanged: false` because the root is fixed for the run lifetime — there's no UI surface to add/remove roots mid-run. Reference compatible servers: the modelcontextprotocol `filesystem` server and the cyanheads `git-mcp-server` both consume roots via this exact protocol.
 
-**UID 1001 invariant** (cross-cuts security + workspace writes): the agent's `pi` user and ALL five runner images (`runtime-pi/runners/{bun,node,python,binary,uv}`) ship as UID 1001 / GID 1001. The init step that chowns the empty volume on first mount uses a marker file (Docker resets `uid:gid` on first mount of a fresh named volume to the daemon's defaults, typically root:root, which would 403 the agent). Adding a new runner image MUST keep this alignment or workspace writes silently fail with `Permission denied`. The github-git MCP server additionally prepends `-c safe.directory='*'` to every `git` invocation because git refuses to operate on a working tree whose uid differs from the EUID, even when the uid is correct — a defensive belt against ownership drift across image rebuilds.
+**UID 1001 invariant** (cross-cuts security + workspace writes): the agent's `pi` user and every Docker runner image (`runtime-pi/runners/{bun,node,python,binary,uv,browser-use}`) ship as UID 1001 / GID 1001. Firecracker runners instead use the guest-dedicated uid 1002 behind the fixed-target setuid wrapper. The init step that chowns the empty volume on first mount uses a marker file (Docker resets `uid:gid` on first mount of a fresh named volume to the daemon's defaults, typically root:root, which would 403 the agent). Adding a new runner image MUST keep this alignment or workspace writes silently fail with `Permission denied`. The github-git MCP server additionally prepends `-c safe.directory='*'` to every `git` invocation because git refuses to operate on a working tree whose uid differs from the EUID, even when the uid is correct — a defensive belt against ownership drift across image rebuilds.
 
 **Cleanup**: `cleanupOrphanedVolumes()` mirrors the network reaper — runs at platform boot, removes any `appstrate-ws-*` volume whose corresponding run has terminated. Sidecar shutdown does NOT explicitly remove the volume (the platform owns the lifecycle), only the runner containers. Boundary creation (`DockerOrchestrator.createIsolationBoundary`) races the network + volume create via `Promise.allSettled` and tears down whichever side succeeded if the other rejects, so a partial create never orphans a resource ahead of the boot reaper.
 

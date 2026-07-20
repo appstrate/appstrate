@@ -131,4 +131,65 @@ describe("resolveLocalMcpServerExecution", () => {
       });
     }
   });
+
+  it("allows the browser-use runtime only for system browser packages", async () => {
+    const resolvedManifest = manifest({
+      [MCP_SERVER_APPSTRATE_META_KEY]: {
+        runtime: "browser-use",
+        capabilities: {
+          browser: {
+            purpose: "automation",
+            protocol: "cdp-v1",
+            profile: "standard",
+            origins: ["https://example.com"],
+          },
+        },
+      },
+    });
+
+    await expect(
+      resolveLocalMcpServerExecution(
+        { packageId: "@appstrate/browser-driver", orgId: "org" },
+        async () => ({
+          ok: true,
+          manifest: resolvedManifest,
+          version: "1.4.0",
+          source: "version",
+        }),
+        () => ({ trustedDriver: false }),
+      ),
+    ).rejects.toThrow(/browser-use runtime is restricted to system browser packages/);
+
+    const systemResult = await resolveLocalMcpServerExecution(
+      { packageId: "@appstrate/browser-driver", orgId: "org" },
+      async () => ({
+        ok: true,
+        manifest: resolvedManifest,
+        version: null,
+        source: "system",
+      }),
+      () => ({ trustedDriver: false }),
+    );
+
+    expect(systemResult.ok).toBe(true);
+    if (systemResult.ok) expect(systemResult.execution.runtime).toBe("browser-use");
+  });
+
+  it("refuses the browser-use runtime without a browser capability", async () => {
+    const resolvedManifest = manifest({
+      [MCP_SERVER_APPSTRATE_META_KEY]: { runtime: "browser-use" },
+    });
+
+    await expect(
+      resolveLocalMcpServerExecution(
+        { packageId: "@appstrate/browser-driver", orgId: "org" },
+        async () => ({
+          ok: true,
+          manifest: resolvedManifest,
+          version: null,
+          source: "system",
+        }),
+      ),
+    ).rejects.toThrow(/browser-use runtime is restricted to system browser packages/);
+  });
 });

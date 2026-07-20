@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { WorkspaceHandle } from "@appstrate/core/platform-types";
 import type { BrowserExecutionSpec } from "@appstrate/core/sidecar-types";
 
 export interface BrowserResourceProfile {
@@ -26,6 +27,15 @@ export interface SpawnBrowserOptions {
   readonly spec: BrowserExecutionSpec;
   readonly egress: BrowserEgressContext;
   readonly resources: BrowserResourceProfile;
+  /**
+   * Optional read-only view of the run workspace. This is forwarded only
+   * when the referenced mcp-server explicitly opted into the workspace and
+   * lets Chromium resolve paths used by `DOM.setFileInputFiles`.
+   */
+  readonly workspace?: {
+    readonly handle: WorkspaceHandle;
+    readonly mount: string;
+  };
 }
 
 export interface BrowserHandle {

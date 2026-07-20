@@ -3,7 +3,10 @@
 import { describe, expect, it } from "bun:test";
 
 import { _test } from "../../../src/services/connect/browser-strategy.ts";
-import { buildBrowserRunStartHttpPlaceholder } from "../../../src/services/integration-spawn-resolver.ts";
+import {
+  buildBrowserRunStartHttpPlaceholder,
+  selectPersistedBrowserState,
+} from "../../../src/services/integration-spawn-resolver.ts";
 
 describe("browser acquisition result policy", () => {
   it("requires an authenticated proof before exposing outputs", () => {
@@ -53,7 +56,7 @@ describe("browser acquisition result policy", () => {
     ).toThrow(/invalid expiration/);
   });
 
-  it("allows an output-free browser-bound proof but not an empty exportable session", () => {
+  it("requires injectable output only for exportable sessions", () => {
     const result = {
       outputs: {},
       proof: { kind: "account-page", succeeded: true as const },
@@ -64,7 +67,20 @@ describe("browser acquisition result policy", () => {
     );
   });
 
-  it("fails closed for link-time browser-bound sessions until state leases exist", () => {
+  it("accepts a declared bounded browser state", () => {
+    expect(
+      _test.validateAcquisitionResult(
+        {
+          outputs: { browser_state: '{"version":1,"cookies":[],"origins":[]}' },
+          proof: { kind: "browser-state", succeeded: true },
+        },
+        ["browser_state"],
+        "exportable",
+      ),
+    ).toEqual({ outputs: { browser_state: '{"version":1,"cookies":[],"origins":[]}' } });
+  });
+
+  it("keeps link-time browser-bound sessions disabled without a lease service", () => {
     expect(() => _test.assertSupportedLinkSessionMode("browser-bound")).toThrow(
       /runtime-state store and lease service/,
     );
@@ -96,5 +112,18 @@ describe("run-start exportable delivery", () => {
         expiresAtEpochMs: null,
       },
     });
+  });
+});
+
+describe("link-time exportable browser state", () => {
+  it("passes only declared non-empty state back to the private driver", () => {
+    expect(
+      selectPersistedBrowserState(
+        { browser_state: "encrypted-output", unexpected: "must-not-cross" },
+        ["browser_state"],
+      ),
+    ).toEqual({ browser_state: "encrypted-output" });
+    expect(selectPersistedBrowserState({}, ["browser_state"])).toBeNull();
+    expect(selectPersistedBrowserState({ browser_state: "" }, ["browser_state"])).toBeNull();
   });
 });

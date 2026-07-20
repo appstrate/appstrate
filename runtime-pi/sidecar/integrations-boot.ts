@@ -105,6 +105,7 @@ import "./integration-runtime-adapter-docker.ts";
 import "./integration-runtime-adapter-process.ts";
 import "./browser-provider-docker.ts";
 import "./browser-provider-process.ts";
+import "./browser-provider-browser-use-cloud.ts";
 
 const STANDARD_BROWSER_PROFILE: BrowserResourceProfile = {
   memoryBytes: 1024 * 1024 * 1024,
@@ -114,6 +115,20 @@ const STANDARD_BROWSER_PROFILE: BrowserResourceProfile = {
   maxContexts: 1,
   maxPages: 4,
 };
+
+export function canKeepBrowserInteractionDegraded(input: {
+  errorCode: string;
+  hasPrivateConnect: boolean;
+  browserProvisioned: boolean;
+  driverRegistered: boolean;
+}): boolean {
+  return (
+    input.errorCode === "BROWSER_INTERACTION_REQUIRED" &&
+    input.hasPrivateConnect &&
+    input.browserProvisioned &&
+    input.driverRegistered
+  );
+}
 
 /**
  * Re-export the canonical spawn-spec type from `@appstrate/core/sidecar-types`
@@ -1369,6 +1384,9 @@ export async function bootIntegrations(
     let pendingBrowser: { handle: BrowserHandle; gateway: BrowserEgressGatewayHandle } | undefined;
     let pendingGateway: BrowserEgressGatewayHandle | undefined;
     let browserStage = "preflight";
+    let registeredBrowserDriver:
+      | { toolCount: number; diagnosticId: string | null; spawnMs: number; connectMs: number }
+      | undefined;
     // #779 — bounded tail of the runner's stderr, folded into the failure
     // report below so the real cause (an OAuth 405, a crashed module, …)
     // reaches operators instead of living only in `docker logs`.
@@ -1645,6 +1663,14 @@ export async function bootIntegrations(
             authToken: gatewayToken,
           },
           resources: STANDARD_BROWSER_PROFILE,
+          ...(spec.workspaceMount && workspaceHandle
+            ? {
+                workspace: {
+                  handle: workspaceHandle,
+                  mount: spec.workspaceMount.mount,
+                },
+              }
+            : {}),
         });
         pendingBrowser = { handle, gateway };
         assertBrowserWorkerCompatible(spec.browser.protocol, handle);
@@ -1692,6 +1718,14 @@ export async function bootIntegrations(
         stderrTail,
         ...(spec.browser ? { onStage: (stage: string) => (browserStage = stage) } : {}),
       });
+      if (spec.browser) {
+        registeredBrowserDriver = {
+          toolCount: added,
+          diagnosticId: diagnosticId ?? null,
+          spawnMs,
+          connectMs,
+        };
+      }
       pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
 
       // ─── P2 — connect.tool `runAt: "run-start"` session acquisition ───
@@ -1721,6 +1755,7 @@ export async function bootIntegrations(
           browserSpec: spec.browser,
           browser: pendingBrowser.handle,
           source,
+          installExportedSession: spec.browserConnect.deliveryHttp !== undefined,
           onStage: (stage) => (browserStage = stage),
         });
         breadcrumbs.push({
@@ -1774,6 +1809,53 @@ export async function bootIntegrations(
         },
       });
     } catch (err) {
+      const msg = spec.browser
+        ? browserSafeErrorCode(err)
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      const ms = Math.round(performance.now() - specStart);
+      // A site challenge is not a platform boot failure. The browser and its
+      // deterministic tools are already registered and remain isolated for
+      // the rest of the run, so keep them alive and let the agent use another
+      // integration or report that human verification is required. Other
+      // browser errors still fail closed and tear down every resource below.
+      if (
+        canKeepBrowserInteractionDegraded({
+          errorCode: msg,
+          hasPrivateConnect: !!spec.browserConnect,
+          browserProvisioned: !!pendingBrowser,
+          driverRegistered: !!registeredBrowserDriver,
+        }) &&
+        pendingBrowser &&
+        registeredBrowserDriver
+      ) {
+        spawned.push({
+          integrationId: spec.integrationId,
+          namespace: spec.namespace,
+          toolCount: registeredBrowserDriver.toolCount,
+          ...(typeof spec.manifest.server?.vendored === "boolean"
+            ? { vendored: spec.manifest.server.vendored }
+            : {}),
+        });
+        logger.warn("browser integration requires user interaction; keeping degraded tools alive", {
+          integrationId: spec.integrationId,
+          stage: browserStage,
+          diagnosticId: registeredBrowserDriver.diagnosticId,
+        });
+        breadcrumbs.push({
+          message: `${spec.integrationId}: browser verification required; tools remain available`,
+          level: "warn",
+          data: {
+            integrationId: spec.integrationId,
+            durationMs: ms,
+            error: msg,
+            stage: browserStage,
+            degraded: true,
+          },
+        });
+        continue;
+      }
       if (pendingBrowser && browserProvider) {
         await browserProvider.stop(pendingBrowser.handle).catch(() => {});
         await pendingBrowser.gateway.close().catch(() => {});
@@ -1782,12 +1864,6 @@ export async function bootIntegrations(
       } else if (pendingGateway) {
         await pendingGateway.close().catch(() => {});
       }
-      const msg = spec.browser
-        ? browserSafeErrorCode(err)
-        : err instanceof Error
-          ? err.message
-          : String(err);
-      const ms = Math.round(performance.now() - specStart);
       // #779 — append the runner's stderr tail so the boot report carries
       // the actual upstream cause, not just the transport-level symptom
       // (e.g. "MCP connect timeout (30s)" hiding an OAuth 405 underneath).

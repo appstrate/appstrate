@@ -9,7 +9,10 @@ import {
 } from "@appstrate/core/mcp-server";
 import type { BrowserExecutionSpec, BrowserSessionMode } from "@appstrate/core/sidecar-types";
 
-import { authorizeBrowserCapability } from "./browser-capability-grants.ts";
+import {
+  authorizeBrowserCapability,
+  BrowserCapabilityPolicyError,
+} from "./browser-capability-grants.ts";
 import {
   resolveMcpServerForSpawn,
   type McpServerResolution,
@@ -65,7 +68,20 @@ export async function resolveLocalMcpServerExecution(
   const version = resolution.version ?? manifest.version;
   const capability = getMcpServerBrowserCapability(manifest);
   const workspaceMount = getMcpServerWorkspaceMount(manifest);
+  const runtime = getMcpServerRuntime(manifest) ?? run.type;
   let browser: BrowserExecutionSpec | undefined;
+
+  // The Browser Use image is deliberately a platform-owned execution
+  // profile rather than a general MCP runtime. It contains a privileged
+  // browser automation dependency graph and is only useful together with an
+  // Appstrate browser capability. Refuse org-published manifests here so a
+  // package cannot opt itself into the larger first-party image merely by
+  // spelling a vendor metadata string.
+  if (runtime === "browser-use" && (resolution.source !== "system" || !capability)) {
+    throw new BrowserCapabilityPolicyError(
+      "the browser-use runtime is restricted to system browser packages",
+    );
+  }
 
   if (capability) {
     const authorization = authorizeCapability({
@@ -92,7 +108,7 @@ export async function resolveLocalMcpServerExecution(
       packageId: input.packageId,
       version,
       source: resolution.source,
-      runtime: getMcpServerRuntime(manifest) ?? run.type,
+      runtime,
       entryPoint: run.entry_point,
       manifest,
       ...(workspaceMount ? { workspaceMount } : {}),

@@ -6,7 +6,7 @@
   "version": "1.0.0",
   "display_name": "Leboncoin",
   "icon": "simple-icons:leboncoin",
-  "description": "Unofficial, read-only Leboncoin integration backed by Appstrate's isolated Chromium capability. A trusted system driver signs in at run start, exports the resulting Leboncoin cookie session for HTTP delivery, and keeps the same ephemeral browser context available to search and listing-inspection tools. DataDome challenges are detected and reported for human intervention; this package does not bypass CAPTCHAs or anti-bot controls.",
+  "description": "Unofficial, read-only Leboncoin integration backed by Appstrate's Browser Use capability. A trusted system driver signs in once when the connection is linked, persists only bounded encrypted browser state, and re-proves the session at run boot. Local DataDome challenges are reported for human intervention; operators may opt into Browser Use Cloud for a stealth browser and French residential proxy, without any guarantee that a challenge will pass.",
   "license": "Apache-2.0",
   "keywords": ["leboncoin", "classifieds", "marketplace", "browser", "france"],
   "source": {
@@ -21,6 +21,7 @@
   "auths": {
     "session": {
       "type": "custom",
+      "delivery": { "env": {} },
       "authorized_uris": [
         "https://www.leboncoin.fr/**",
         "https://auth.leboncoin.fr/**",
@@ -35,13 +36,13 @@
             "email": {
               "type": "string",
               "format": "email",
-              "description": "Leboncoin account email. Stored encrypted as a non-injectable bootstrap input and delivered only to the granted system browser driver."
+              "description": "Leboncoin account email. Delivered only to the granted system browser driver during connection and not persisted after browser state is proven."
             },
             "password": {
               "type": "string",
               "format": "password",
               "minLength": 1,
-              "description": "Leboncoin account password. Stored encrypted as a non-injectable bootstrap input and delivered only to the granted system browser driver."
+              "description": "Leboncoin account password. Delivered only to the granted system browser driver during connection and not persisted after browser state is proven."
             }
           }
         }
@@ -51,22 +52,15 @@
         "_meta": {
           "dev.appstrate/connect": {
             "tool": "acquire_session",
-            "run_at": "run-start",
-            "persist_login_secret": true,
-            "produces": ["cookie_header"],
+            "run_at": "link",
+            "persist_login_secret": false,
+            "produces": ["browser_state"],
             "reauth_on": [401, 403],
             "executor": {
               "kind": "browser",
               "session_mode": "exportable"
             }
           }
-        }
-      },
-      "delivery": {
-        "http": {
-          "in": "header",
-          "name": "Cookie",
-          "value": "{$credential.cookie_header}"
         }
       },
       "_meta": {

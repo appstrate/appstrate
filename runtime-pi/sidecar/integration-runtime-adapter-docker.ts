@@ -58,6 +58,10 @@ const DEFAULT_RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
   // so `uv run` is on PATH and can materialise per-bundle venvs from
   // pyproject.toml / requirements.txt / PEP-723 inline metadata.
   uv: "appstrate-mcp-runner-uv:latest",
+  // First-party Browser Use drivers attach to the Appstrate-provisioned CDP
+  // worker. The dedicated image pins the large Python dependency graph and
+  // deliberately contains no Chromium binary of its own.
+  "browser-use": "appstrate-mcp-runner-browser-use:latest",
   binary: "appstrate-mcp-runner-binary:latest",
 };
 
@@ -78,6 +82,7 @@ const RUNNER_IMAGE_ENV_BY_TYPE: Record<string, string> = {
   bun: "RUNNER_IMAGE_BUN",
   python: "RUNNER_IMAGE_PYTHON",
   uv: "RUNNER_IMAGE_UV",
+  "browser-use": "RUNNER_IMAGE_BROWSER_USE",
   binary: "RUNNER_IMAGE_BINARY",
 };
 
@@ -592,6 +597,9 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
               APPSTRATE_BROWSER_ENDPOINT: browser.endpoint,
               APPSTRATE_BROWSER_TOKEN: browser.authToken,
               APPSTRATE_BROWSER_PROTOCOL: String(browser.protocolVersion),
+              APPSTRATE_BROWSER_ALLOWED_ORIGINS_JSON: JSON.stringify(
+                spec.browser?.allowedOrigins ?? [],
+              ),
             }
           : {}),
       };

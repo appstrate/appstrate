@@ -201,5 +201,6 @@ async function runVendor(
 export { BundlerError } from "./npm-vendor.ts";
 export { rewriteManifestForDistribution, suggestBundleFileName } from "./manifest-rewriter.ts";
 export { packDeterministicZip, DOS_EPOCH_MS } from "./packager.ts";
-export { probeBunCompat } from "./bun-probe.ts";
+export { probeBunCompat, probeStdioCompat } from "./bun-probe.ts";
+export type { StdioProbeOptions } from "./bun-probe.ts";
 export type * from "./types.ts";

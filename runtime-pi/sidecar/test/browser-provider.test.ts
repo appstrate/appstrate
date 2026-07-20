@@ -289,6 +289,36 @@ describe("docker browser provider", () => {
     expect(calls.some((args) => args[0] === "rm" && args[1] === "-f")).toBe(true);
   });
 
+  it("mounts an explicitly shared workspace read-only for Chromium uploads", async () => {
+    const calls: string[][] = [];
+    const provider = createDockerBrowserProvider({
+      env: { RUN_ID: "run-1", BROWSER_WORKER_IMAGE: "worker:test" },
+      exec: async (args) => {
+        calls.push(args);
+        return args[0] === "create" ? "container-id-workspace" : "";
+      },
+      fetchFn: async () =>
+        Response.json({
+          workerBuildId: "build-abc",
+          protocolVersion: 1,
+          browserRevision: "Chromium/1",
+        }),
+    });
+    await provider.prepare("run-1");
+    await provider.spawn({
+      ...spawnOptions,
+      workspace: {
+        handle: { kind: "volume", name: "appstrate-workspace-run-1" },
+        mount: "/workspace",
+      },
+    });
+    const create = calls.find((args) => args[0] === "create")!;
+    expect(create.slice(create.indexOf("--mount"), create.indexOf("--mount") + 2)).toEqual([
+      "--mount",
+      "type=volume,src=appstrate-workspace-run-1,dst=/workspace,readonly",
+    ]);
+  });
+
   it("removes a partially-created worker when container start fails", async () => {
     const calls: string[][] = [];
     const provider = createDockerBrowserProvider({

@@ -6,21 +6,21 @@
   "name": "@appstrate/leboncoin-browser",
   "version": "1.0.0",
   "display_name": "Leboncoin Browser Driver",
-  "description": "First-party, dependency-free MCP driver for the @appstrate/leboncoin integration. It uses Appstrate's isolated CDP browser worker for session acquisition and read-only listing tools, and fails closed when Leboncoin presents a DataDome or CAPTCHA challenge.",
+  "description": "First-party deterministic Browser Use MCP driver for the @appstrate/leboncoin integration. It attaches to Appstrate's isolated CDP worker for session acquisition and read-only listing tools, and surfaces DataDome or account-verification challenges without exposing credentials.",
   "author": "Appstrate",
   "license": "Apache-2.0",
   "server": {
-    "type": "node",
-    "entry_point": "server/index.ts",
+    "type": "python",
+    "entry_point": "server/index.py",
     "mcp_config": {
-      "command": "bun",
-      "args": ["server/index.ts"]
+      "command": "python",
+      "args": ["-u", "server/index.py"]
     }
   },
   "tools": [
     {
       "name": "acquire_session",
-      "description": "Private Appstrate connect hook. Signs in through the isolated browser and returns a proven exportable Leboncoin cookie session. Never exposed to the agent."
+      "description": "Private Appstrate connect hook. Signs in or restores bounded Leboncoin browser state and returns an authenticated proof. Never exposed to the agent."
     },
     {
       "name": "search_listings",
@@ -37,7 +37,7 @@
   ],
   "_meta": {
     "dev.appstrate/mcp-server": {
-      "runtime": "bun",
+      "runtime": "browser-use",
       "capabilities": {
         "browser": {
           "purpose": "connection-acquisition",

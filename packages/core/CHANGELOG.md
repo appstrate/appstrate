@@ -27,7 +27,11 @@ of a provider-neutral bearer-swap.
   platform-resolved companion requirements, and `sidecar-types` carries the
   normalized worker/connection-acquisition contract. Secret-aware drivers are
   authorized by the platform after concrete system-package resolution; raw
-  manifest metadata is never treated as an execution grant.
+  manifest metadata is never treated as an execution grant. The new
+  `@appstrate/core/browser-cdp-policy` subpath is the single shared policy for
+  exact origins, read-only DevTools discovery, owned contexts, cookie domains,
+  command envelopes, nested-channel denial, and page ceilings across local and
+  cloud browser brokers.
 
 - **`api_upload` is a first-class catalog member (#881)** —
   `resolveIntegrationToolCatalog` now appends the `api_upload` companion after

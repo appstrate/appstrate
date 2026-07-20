@@ -6,7 +6,7 @@ ARG ALPINE_IMAGE=alpine:3.23.2
 FROM ${BUN_IMAGE} AS builder
 WORKDIR /build
 COPY runtime-pi/browser-worker/server.ts ./server.ts
-COPY runtime-pi/browser-worker/policy.ts ./policy.ts
+COPY packages/core/src/browser-cdp-policy.ts ./policy.ts
 RUN bun build --compile --minify server.ts --outfile appstrate-browser-worker
 
 FROM ${ALPINE_IMAGE} AS runtime

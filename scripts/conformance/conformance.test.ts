@@ -2,7 +2,7 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { classify } from "./load.ts";
-import { declaredTools, serverEntryPoint, diffTools } from "./mcp-local-parity.ts";
+import { declaredTools, serverEntryPoint, serverRuntime, diffTools } from "./mcp-local-parity.ts";
 import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache } from "./creds.ts";
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
@@ -73,6 +73,14 @@ describe("declaredTools / serverEntryPoint", () => {
     );
     expect(serverEntryPoint({ server: {} })).toBeUndefined();
     expect(serverEntryPoint({})).toBeUndefined();
+  });
+
+  it("reads only the Appstrate MCP runtime override", () => {
+    expect(
+      serverRuntime({ _meta: { "dev.appstrate/mcp-server": { runtime: "browser-use" } } }),
+    ).toBe("browser-use");
+    expect(serverRuntime({ _meta: { runtime: "browser-use" } })).toBeUndefined();
+    expect(serverRuntime({})).toBeUndefined();
   });
 });
 

@@ -101,6 +101,13 @@ export function createDockerBrowserProvider(
       });
       let containerId: string | undefined;
       let name: string | undefined;
+      const workspaceFlags =
+        options.workspace?.handle.kind === "volume"
+          ? [
+              "--mount",
+              `type=volume,src=${options.workspace.handle.name},dst=${options.workspace.mount},readonly`,
+            ]
+          : [];
       try {
         // The daemon arbitrates these fixed names atomically across every
         // sidecar on the host. A per-process Map alone would make the limit
@@ -145,6 +152,7 @@ export function createDockerBrowserProvider(
               "appstrate.adapter=browser",
               "--label",
               `appstrate.integration=${options.integrationId}`,
+              ...workspaceFlags,
               "--env-file",
               workerEnv.path,
               image,

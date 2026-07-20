@@ -101,6 +101,9 @@ jobs:
           - name: appstrate-mcp-runner-uv
             context: ./runtime-pi/runners/uv
             dockerfile: ./runtime-pi/runners/uv/Dockerfile
+          - name: appstrate-mcp-runner-browser-use
+            context: ./runtime-pi/runners/browser-use
+            dockerfile: ./runtime-pi/runners/browser-use/Dockerfile
           - name: appstrate-mcp-runner-binary
             context: ./runtime-pi/runners/binary
             dockerfile: ./runtime-pi/runners/binary/Dockerfile

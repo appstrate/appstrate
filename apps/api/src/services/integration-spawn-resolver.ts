@@ -646,6 +646,18 @@ export function buildBrowserRunStartHttpPlaceholder(input: {
   };
 }
 
+export function selectPersistedBrowserState(
+  fields: Readonly<Record<string, string>>,
+  produces: readonly string[],
+): Record<string, string> | null {
+  const selected: Record<string, string> = {};
+  for (const field of produces) {
+    const value = fields[field];
+    if (typeof value === "string" && value.length > 0) selected[field] = value;
+  }
+  return Object.keys(selected).length > 0 ? selected : null;
+}
+
 /**
  * Resolve the delivery plan (env + http) for ONE connection on this
  * integration. Returns `null` when the connection can't be loaded or
@@ -854,6 +866,43 @@ async function resolveDeliveries(
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
+  }
+
+  // Link-time exportable browser connections persist an encrypted, driver-owned
+  // storage-state blob rather than a cookie/header credential. Rehydrate that
+  // state into a fresh isolated browser at run boot through the same private
+  // sidecar→trusted-driver channel used for acquisition. The blob never enters
+  // runner env, argv, logs, delivery templates, or the agent-visible surface.
+  if (
+    auth.type === "custom" &&
+    auth.connect?.tool !== undefined &&
+    connectMeta?.tool &&
+    connectMeta.run_at !== "run-start" &&
+    browserExecutor?.session_mode === "exportable"
+  ) {
+    const produces = connectMeta.produces ?? [];
+    const browserState = selectPersistedBrowserState(fields, produces);
+    if (!browserState) {
+      logger.warn("exportable browser connection has no restorable state; skipping", {
+        integrationId,
+        authKey: row.authKey,
+        connectionId: row.id,
+      });
+      return null;
+    }
+    return {
+      spawnEnv: {},
+      connectionId: row.id,
+      browserConnect: {
+        toolName: connectMeta.tool,
+        produces: [...produces],
+        authKey: row.authKey,
+        authType: auth.type,
+        authorizedUris: [...(auth.authorized_uris ?? [])],
+        sessionMode: "exportable",
+        inputs: browserState,
+      },
+    };
   }
 
   const spawnEnv: Record<string, string> = {};

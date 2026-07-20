@@ -23,7 +23,7 @@ FROM ${SIDECAR_IMAGE} AS sidecar
 FROM ${BUN_IMAGE} AS browser-worker
 WORKDIR /build
 COPY runtime-pi/browser-worker/server.ts ./server.ts
-COPY runtime-pi/browser-worker/policy.ts ./policy.ts
+COPY packages/core/src/browser-cdp-policy.ts ./policy.ts
 RUN bun build --compile --minify server.ts --outfile /tmp/appstrate-browser-worker
 
 # Astral's official uv build — same source as the docker uv runner image
@@ -74,6 +74,17 @@ RUN test -n "${CHROMIUM_VERSION}" \
 
 # `server.type: "uv"` runners (uvx alongside, same as the docker runner).
 COPY --from=uv /uv /uvx /usr/local/bin/
+
+# First-party Browser Use drivers run as uid 1002 subprocesses inside the
+# microVM. Keep their pinned dependency graph separate from the agent venv,
+# and ship only the shared bridge here: Chromium remains the separately
+# provisioned uid 1101 companion reached over the authenticated CDP broker.
+COPY runtime-pi/runners/browser-use/pyproject.toml runtime-pi/runners/browser-use/uv.lock /opt/appstrate-browser-use/
+RUN cd /opt/appstrate-browser-use \
+ && uv sync --frozen --no-dev --no-install-project
+COPY runtime-pi/runners/browser-use/appstrate_browser_use /opt/appstrate-browser-use-bridge/appstrate_browser_use
+RUN PYTHONPATH=/opt/appstrate-browser-use-bridge /opt/appstrate-browser-use/.venv/bin/python -c 'import browser_use; from appstrate_browser_use import AppstrateBrowser' \
+ && chmod -R a+rX /opt/appstrate-browser-use /opt/appstrate-browser-use-bridge
 
 # The sidecar ships as one compiled binary — no sources, no node_modules.
 COPY --from=sidecar /usr/local/bin/sidecar /usr/local/bin/sidecar

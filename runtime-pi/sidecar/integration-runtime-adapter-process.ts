@@ -51,6 +51,14 @@ const HOST_INTERPRETER_BY_TYPE: Record<string, { command: string; argsBefore: st
   // `planSubprocess`). The `-u` would only apply to a direct Python
   // invocation; `uv run` forwards stdout/stderr unbuffered by default.
   uv: { command: "uv", argsBefore: ["run"] },
+  // Development-only fallback. The package entry point imports Browser Use
+  // from the host interpreter; production always selects the dedicated
+  // docker image above. A clear import failure is preferable to downloading
+  // dependencies implicitly from inside a running integration.
+  "browser-use": {
+    command: process.env.APPSTRATE_BROWSER_USE_PYTHON ?? "python3",
+    argsBefore: ["-u"],
+  },
   // `binary` is a no-op: exec the bundle entry directly.
   binary: { command: "", argsBefore: [] },
 };
@@ -230,6 +238,18 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
         procEnv.APPSTRATE_BROWSER_ENDPOINT = browser.endpoint;
         procEnv.APPSTRATE_BROWSER_TOKEN = browser.authToken;
         procEnv.APPSTRATE_BROWSER_PROTOCOL = String(browser.protocolVersion);
+        procEnv.APPSTRATE_BROWSER_ALLOWED_ORIGINS_JSON = JSON.stringify(
+          spec.browser?.allowedOrigins ?? [],
+        );
+        if (spec.manifest.server?.type === "browser-use") {
+          // Development-only process mode imports the same bridge that is
+          // baked into the dedicated production runner image. Firecracker
+          // pins both paths to its immutable guest rootfs; host development
+          // falls back to the repository checkout plus the active Python.
+          procEnv.PYTHONPATH =
+            process.env.APPSTRATE_BROWSER_USE_BRIDGE ??
+            join(import.meta.dir, "../runners/browser-use");
+        }
       }
       if (egress) {
         const browserNoProxyHosts = browserProxyBypassEndpoint
