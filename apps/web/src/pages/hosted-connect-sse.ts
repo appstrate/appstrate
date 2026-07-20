@@ -22,6 +22,12 @@ export function browserUseInteractionUrl(value: unknown): string {
   return url.toString();
 }
 
+export function browserCompanionObservationUrl(value: string): string {
+  const url = new URL(value);
+  url.searchParams.set("observe", "1");
+  return url.toString();
+}
+
 function parseSseFrame(frame: string): ConnectStreamEvent | null {
   let event = "message";
   const data: string[] = [];

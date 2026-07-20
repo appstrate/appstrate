@@ -95,6 +95,7 @@ import {
 import {
   BrowserAttemptUnauthorizedError,
   createBrowserConnectionAttempt,
+  failBrowserConnectionAttemptFromCompanion,
   storeBrowserAttemptHandoff,
 } from "../services/browser-connection-state.ts";
 import {
@@ -192,6 +193,10 @@ export const companionHandoffSchema = z.object({
     .string()
     .min(1)
     .max(900 * 1024),
+});
+
+export const companionFailureSchema = z.object({
+  reason: z.enum(["closed", "timeout", "failed"]),
 });
 
 export const setDefaultClientSchema = z.object({
@@ -1001,7 +1006,9 @@ export function createIntegrationsRouter(options: IntegrationsRouterOptions = {}
       const context = await readBrowserCompanionContext(
         c.req.param("attemptId")!,
         readCompanionBearer(c),
-        { claim: true },
+        // The hosted page observes with `?observe=1`; only a real companion
+        // read is allowed to move pending -> claimed.
+        { claim: c.req.query("observe") !== "1" },
       );
       return c.json({
         attempt_id: context.attempt.id,
@@ -1016,6 +1023,27 @@ export function createIntegrationsRouter(options: IntegrationsRouterOptions = {}
         error_code: context.attempt.errorCode,
         expires_at: context.attempt.expiresAt.toISOString(),
       });
+    } catch (error) {
+      throwCompanionUnauthorized(error);
+    }
+  });
+
+  router.post("/connect/companion/attempts/:attemptId/failure", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const body = await readJsonBody(c, companionFailureSchema);
+    const errorCode =
+      body.reason === "closed"
+        ? "BROWSER_COMPANION_CLOSED"
+        : body.reason === "timeout"
+          ? "BROWSER_COMPANION_TIMEOUT"
+          : "BROWSER_UNAVAILABLE";
+    try {
+      await failBrowserConnectionAttemptFromCompanion({
+        attemptId: c.req.param("attemptId")!,
+        token: readCompanionBearer(c),
+        errorCode,
+      });
+      return c.json({ accepted: true }, 202);
     } catch (error) {
       throwCompanionUnauthorized(error);
     }

@@ -287,6 +287,76 @@ describe("local browser companion handoff", () => {
     expect(await drainBrowserProfileDeletions(profileManager)).toEqual({ removed: 1, failed: 0 });
   });
 
+  it("keeps observer polling passive and surfaces a closed local browser immediately", async () => {
+    const { cookie, csrf } = await openHostedConnect(ctx);
+    const created = await app.request("/api/integrations/connect/companion/attempts", {
+      method: "POST",
+      headers: { Cookie: cookie, "x-connect-csrf": csrf, "Content-Type": "application/json" },
+      body: JSON.stringify({ target_provider: "process" }),
+    });
+    const payload = (await created.json()) as { companion_url: string };
+    const link = new URL(payload.companion_url);
+    const endpoint = new URL(link.searchParams.get("endpoint")!);
+    const token = link.searchParams.get("token")!;
+    const headers = { Authorization: `Bearer ${token}` };
+
+    const observedPending = await app.request(`${endpoint.pathname}?observe=1`, { headers });
+    expect(observedPending.status).toBe(200);
+    expect(((await observedPending.json()) as { status: string }).status).toBe("pending");
+
+    const claimed = await app.request(endpoint.pathname, { headers });
+    expect(((await claimed.json()) as { status: string }).status).toBe("claimed");
+
+    const failed = await app.request(`${endpoint.pathname}/failure`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "closed" }),
+    });
+    expect(failed.status).toBe(202);
+    expect(await failed.json()).toEqual({ accepted: true });
+
+    const observedFailure = await app.request(`${endpoint.pathname}?observe=1`, { headers });
+    expect(observedFailure.status).toBe(200);
+    expect(await observedFailure.json()).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        error_code: "BROWSER_COMPANION_CLOSED",
+      }),
+    );
+    expect(await db.select().from(browserProfileDeletions)).toHaveLength(1);
+  });
+
+  it("does not let a late companion failure abort accepted handoff state", async () => {
+    const { cookie, csrf } = await openHostedConnect(ctx);
+    const created = await app.request("/api/integrations/connect/companion/attempts", {
+      method: "POST",
+      headers: { Cookie: cookie, "x-connect-csrf": csrf, "Content-Type": "application/json" },
+      body: JSON.stringify({ target_provider: "process" }),
+    });
+    const payload = (await created.json()) as { companion_url: string };
+    const link = new URL(payload.companion_url);
+    const endpoint = new URL(link.searchParams.get("endpoint")!);
+    const token = link.searchParams.get("token")!;
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const handoff = await app.request(`${endpoint.pathname}/handoff`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        browser_state: JSON.stringify({ version: 1, cookies: [], origins: [] }),
+      }),
+    });
+    expect(handoff.status).toBe(202);
+
+    const lateFailure = await app.request(`${endpoint.pathname}/failure`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ reason: "closed" }),
+    });
+    expect(lateFailure.status).toBe(202);
+    const observed = await app.request(`${endpoint.pathname}?observe=1`, { headers });
+    expect(((await observed.json()) as { status: string }).status).toBe("state_received");
+  });
+
   it("serializes profile use with fenced, expiring leases", async () => {
     const { cookie, csrf } = await openHostedConnect(ctx);
     const created = await app.request("/api/integrations/connect/companion/attempts", {

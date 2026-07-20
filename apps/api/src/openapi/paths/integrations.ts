@@ -1037,6 +1037,14 @@ export const integrationsPaths = {
           required: true,
           schema: { type: "string", format: "uuid" },
         },
+        {
+          name: "observe",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["1"] },
+          description:
+            "Read without claiming the attempt. Used by the hosted page so pending means the local companion has not connected yet.",
+        },
       ],
       responses: {
         "200": {
@@ -1093,6 +1101,55 @@ export const integrationsPaths = {
             },
           },
         },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
+  "/api/integrations/connect/companion/attempts/{attemptId}/failure": {
+    post: {
+      operationId: "failBrowserCompanionAttempt",
+      security: [{ companionBearer: [] }],
+      tags: ["Integrations"],
+      summary: "Report that local browser acquisition stopped",
+      description:
+        "Allows the authenticated local companion to end a pending or claimed attempt immediately. This transition cannot interrupt a handoff that has already entered provider provisioning.",
+      parameters: [
+        {
+          name: "attemptId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["reason"],
+              properties: {
+                reason: { type: "string", enum: ["closed", "timeout", "failed"] },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "202": {
+          description: "Failure accepted or ignored because handoff already started",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["accepted"],
+                properties: { accepted: { type: "boolean", const: true } },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },

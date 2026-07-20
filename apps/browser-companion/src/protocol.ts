@@ -214,3 +214,27 @@ export async function submitBrowserState(
   });
   if (!response.ok) throw new Error(await readApiError(response));
 }
+
+export type CompanionFailureReason = "closed" | "timeout" | "failed";
+
+/**
+ * Tell the platform that local acquisition stopped before a handoff was
+ * accepted. This prevents the hosted page from polling a dead process until
+ * the full attempt TTL elapses.
+ */
+export async function reportCompanionFailure(
+  capability: CompanionCapability,
+  reason: CompanionFailureReason,
+): Promise<void> {
+  const response = await fetch(`${capability.endpoint.href}/failure`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${capability.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ reason }),
+    redirect: "error",
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+}

@@ -2,9 +2,23 @@
 
 import { describe, expect, it } from "bun:test";
 
-import { browserUseInteractionUrl, readConnectEventStream } from "./hosted-connect-sse";
+import {
+  browserCompanionObservationUrl,
+  browserUseInteractionUrl,
+  readConnectEventStream,
+} from "./hosted-connect-sse";
 
 describe("hosted connect browser event stream", () => {
+  it("observes companion state without claiming the attempt", () => {
+    expect(
+      browserCompanionObservationUrl(
+        "https://app.example/api/integrations/connect/companion/attempts/018f0c67-98ab-7def-8123-123456789abc",
+      ),
+    ).toBe(
+      "https://app.example/api/integrations/connect/companion/attempts/018f0c67-98ab-7def-8123-123456789abc?observe=1",
+    );
+  });
+
   it("parses interaction and completion frames split across chunks", async () => {
     const encoder = new TextEncoder();
     const body = new ReadableStream<Uint8Array>({

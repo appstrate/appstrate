@@ -524,6 +524,53 @@ export async function failBrowserConnectionAttempt(
   }
 }
 
+/**
+ * Fail only the local-acquisition portion of an attempt. The bearer is
+ * authenticated first, and the guarded transition cannot abort a handoff that
+ * has already moved into durable provider provisioning.
+ */
+export async function failBrowserConnectionAttemptFromCompanion(input: {
+  attemptId: string;
+  token: string;
+  errorCode: string;
+}): Promise<boolean> {
+  await authenticateBrowserConnectionAttempt(input.attemptId, input.token);
+  const safeCode = /^BROWSER_[A-Z_]{1,64}$/.test(input.errorCode)
+    ? input.errorCode
+    : "BROWSER_UNAVAILABLE";
+  const now = new Date();
+  const rows = await db
+    .update(browserConnectionAttempts)
+    .set({
+      status: "failed",
+      errorCode: safeCode,
+      handoffEncrypted: null,
+      interactionEncrypted: null,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(browserConnectionAttempts.id, input.attemptId),
+        eq(browserConnectionAttempts.tokenHash, hashToken(input.token)),
+        or(
+          eq(browserConnectionAttempts.status, "pending"),
+          eq(browserConnectionAttempts.status, "claimed"),
+        ),
+        gt(browserConnectionAttempts.expiresAt, now),
+      ),
+    )
+    .returning({
+      provider: browserConnectionAttempts.targetProvider,
+      profileRef: browserConnectionAttempts.profileRef,
+    });
+  const row = rows[0];
+  if (row?.profileRef) {
+    await enqueueBrowserProfileDeletion(row.provider as BrowserProviderId, row.profileRef);
+  }
+  return row !== undefined;
+}
+
 export async function finalizeBrowserConnectionBinding(input: {
   attemptId: string;
   connectionId: string;

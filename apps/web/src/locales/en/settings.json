@@ -828,6 +828,7 @@
   "integration.connect.hosted.browserWaiting": "Keep this window open. The connection will resume automatically when the check is complete.",
   "integration.connect.hosted.companionBody": "Recommended: sign in with Chrome on this computer. Your password stays on your machine; only session data limited to authorized domains is transferred and verified.",
   "integration.connect.hosted.companionOpen": "Open local companion",
+  "integration.connect.hosted.companionReopen": "Reopen local companion",
   "integration.connect.hosted.companionWaiting": "Waiting for local companion…",
   "integration.connect.hosted.companionAlternative": "or use the hosted browser",
   "integration.connect.fields.client_cert.label": "Client certificate (PEM)",

@@ -71,6 +71,8 @@ async function waitForDebuggingPort(port: number): Promise<void> {
 
 export interface LocalChrome {
   debuggingOrigin: string;
+  /** Resolves when the user closes the isolated Chrome process. */
+  exited: Promise<number>;
   close(): Promise<void>;
 }
 
@@ -102,12 +104,17 @@ export async function launchLocalChrome(
   );
   try {
     await waitForDebuggingPort(debuggingPort);
+    let closePromise: Promise<void> | undefined;
     return {
       debuggingOrigin: `http://127.0.0.1:${debuggingPort}`,
-      async close() {
-        processHandle.kill();
-        await processHandle.exited.catch(() => undefined);
-        await rm(userDataDir, { recursive: true, force: true });
+      exited: processHandle.exited,
+      close() {
+        closePromise ??= (async () => {
+          processHandle.kill();
+          await processHandle.exited.catch(() => undefined);
+          await rm(userDataDir, { recursive: true, force: true });
+        })();
+        return closePromise;
       },
     };
   } catch (error) {

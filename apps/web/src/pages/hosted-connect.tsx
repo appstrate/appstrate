@@ -6,7 +6,11 @@ import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
 import { IntegrationIcon } from "../components/integration-icon";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
-import { browserUseInteractionUrl, readConnectEventStream } from "./hosted-connect-sse";
+import {
+  browserCompanionObservationUrl,
+  browserUseInteractionUrl,
+  readConnectEventStream,
+} from "./hosted-connect-sse";
 
 /**
  * Standalone hosted connect form (issue #769) — the non-OAuth half of the
@@ -45,6 +49,7 @@ type Phase = "loading" | "form" | "submitting" | "companion" | "done" | "error";
 interface CompanionAttempt {
   endpoint: string;
   token: string;
+  url: string;
 }
 
 function signalSuccess(packageId: string): void {
@@ -112,7 +117,7 @@ export function HostedConnectPage() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const response = await fetch(companionAttempt.endpoint, {
+        const response = await fetch(browserCompanionObservationUrl(companionAttempt.endpoint), {
           headers: { Authorization: `Bearer ${companionAttempt.token}` },
           cache: "no-store",
         });
@@ -175,7 +180,7 @@ export function HostedConnectPage() {
       const endpoint = link.searchParams.get("endpoint");
       const token = link.searchParams.get("token");
       if (!endpoint || !token) throw new Error("Malformed companion capability");
-      setCompanionAttempt({ endpoint, token });
+      setCompanionAttempt({ endpoint, token, url: result.companion_url });
       setPhase("companion");
       window.location.assign(result.companion_url);
     } catch (err) {
@@ -304,13 +309,25 @@ export function HostedConnectPage() {
                     type="button"
                     variant="outline"
                     className="w-full"
-                    disabled={phase !== "form"}
-                    onClick={() => void startCompanion()}
+                    disabled={phase === "submitting"}
+                    onClick={() => {
+                      if (phase === "companion" && companionAttempt) {
+                        window.location.assign(companionAttempt.url);
+                        return;
+                      }
+                      void startCompanion();
+                    }}
                   >
                     {phase === "companion"
-                      ? t("integration.connect.hosted.companionWaiting")
+                      ? t("integration.connect.hosted.companionReopen")
                       : t("integration.connect.hosted.companionOpen")}
                   </Button>
+                  {phase === "companion" && (
+                    <div className="text-muted-foreground flex items-center gap-2 text-xs">
+                      <Spinner />
+                      <span>{t("integration.connect.hosted.companionWaiting")}</span>
+                    </div>
+                  )}
                 </div>
               )}
               {context.companion && (

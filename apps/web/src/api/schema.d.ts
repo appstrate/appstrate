@@ -1371,6 +1371,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/connect/companion/attempts/{attemptId}/failure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report that local browser acquisition stopped
+         * @description Allows the authenticated local companion to end a pending or claimed attempt immediately. This transition cannot interrupt a handoff that has already entered provider provisioning.
+         */
+        post: operations["failBrowserCompanionAttempt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/connect/companion/attempts/{attemptId}/handoff": {
         parameters: {
             query?: never;
@@ -9980,7 +10000,10 @@ export interface operations {
     };
     getBrowserCompanionAttempt: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Read without claiming the attempt. Used by the hosted page so pending means the local companion has not connected yet. */
+                observe?: "1";
+            };
             header?: never;
             path: {
                 attemptId: string;
@@ -10018,6 +10041,42 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    failBrowserCompanionAttempt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attemptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    reason: "closed" | "timeout" | "failed";
+                };
+            };
+        };
+        responses: {
+            /** @description Failure accepted or ignored because handoff already started */
+            202: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        accepted: true;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
         };
     };

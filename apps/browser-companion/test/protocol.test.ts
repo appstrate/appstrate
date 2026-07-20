@@ -3,12 +3,46 @@
 import { describe, expect, it } from "bun:test";
 
 import { _test as stateTest } from "../src/browser-state.ts";
-import { parseCompanionCapability, validateCompanionContext } from "../src/protocol.ts";
+import {
+  parseCompanionCapability,
+  reportCompanionFailure,
+  validateCompanionContext,
+} from "../src/protocol.ts";
 
 const ID = "018f0c67-98ab-7def-8123-123456789abc";
 const TOKEN = "a".repeat(43);
 
 describe("companion capability protocol", () => {
+  it("reports a bounded failure reason to the attempt endpoint", async () => {
+    let request: { method: string; url: string; body: unknown } | undefined;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(value) {
+        request = {
+          method: value.method,
+          url: value.url,
+          body: await value.json(),
+        };
+        return new Response(null, { status: 202 });
+      },
+    });
+    try {
+      const endpoint = `${server.url.origin}/api/integrations/connect/companion/attempts/${ID}`;
+      const capability = parseCompanionCapability(
+        `appstrate-browser://connect?endpoint=${encodeURIComponent(endpoint)}&token=${TOKEN}`,
+      );
+      await reportCompanionFailure(capability, "closed");
+      expect(request?.method).toBe("POST");
+      expect(new URL(request!.url).pathname).toBe(
+        `/api/integrations/connect/companion/attempts/${ID}/failure`,
+      );
+      expect(request!.body).toEqual({ reason: "closed" });
+    } finally {
+      server.stop(true);
+    }
+  });
+
   it("accepts HTTPS and loopback endpoints", () => {
     const value = parseCompanionCapability(
       `appstrate-browser://connect?endpoint=${encodeURIComponent(`https://app.example/api/integrations/connect/companion/attempts/${ID}`)}&token=${TOKEN}`,
