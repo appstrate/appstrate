@@ -180,9 +180,19 @@ class AppstrateBrowser:
     async def navigate(self, url: str, timeout_seconds: float = 30.0) -> BrowserSnapshot:
         self._assert_allowed_url(url)
         await self.start()
+        page = await self._session.get_current_page()
+        if page is None:
+            raise RuntimeError("BROWSER_UNAVAILABLE: browser page is unavailable")
         try:
             async with asyncio.timeout(timeout_seconds):
-                await self._session.navigate_to(url)
+                # BrowserSession.navigate_to() waits on Browser Use's full
+                # event bus. Remote cloud pages can already be interactive
+                # while that event remains pending until its fixed 30-second
+                # timeout, turning a successful login handoff into a false
+                # BROWSER_UNAVAILABLE. The attached Page API issues the same
+                # guarded CDP Page.navigate command without that second
+                # lifecycle, then wait_ready() verifies the document itself.
+                await page.goto(url)
                 return await self.wait_ready(timeout_seconds=min(timeout_seconds, 15.0))
         except TimeoutError as error:
             raise RuntimeError("BROWSER_NAVIGATION_TIMEOUT: page did not become ready") from error
