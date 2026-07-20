@@ -369,6 +369,27 @@ describe("pickOperatorSidecarEnv", () => {
     );
   });
 
+  it("forwards Browser Use Cloud proxy credentials only to the sidecar allowlist", () => {
+    withEnv(
+      {
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: "proxy.example",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT: "8443",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME: "proxy-user",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD: "proxy-password",
+        BROWSER_USE_CLOUD_PROFILE_ID: "018f0c67-98ab-7def-8123-123456789abc",
+      },
+      () => {
+        expect(pickOperatorSidecarEnv()).toEqual({
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: "proxy.example",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT: "8443",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME: "proxy-user",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD: "proxy-password",
+          BROWSER_USE_CLOUD_PROFILE_ID: "018f0c67-98ab-7def-8123-123456789abc",
+        });
+      },
+    );
+  });
+
   it("omits empty-string values (would crash sidecar boot)", () => {
     withEnv(
       { SIDECAR_MAX_REQUEST_BODY_BYTES: "", SIDECAR_MAX_MCP_ENVELOPE_BYTES: "33554432" },

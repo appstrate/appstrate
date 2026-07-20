@@ -135,6 +135,106 @@ describe("Browser Use Cloud provider", () => {
     expect(requests[2]?.init?.method).toBe("PATCH");
   });
 
+  it("uses one operator profile through an authenticated custom proxy", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      if (init?.method === "POST") {
+        return Response.json(
+          {
+            id: "018f0c67-98ab-7def-8123-123456789abc",
+            status: "active",
+            cdpUrl: "https://018f0c67.cdp.browser-use.com",
+            liveUrl: "https://live.browser-use.com/live/public-id",
+          },
+          { status: 201 },
+        );
+      }
+      if (init?.method === "GET") {
+        return Response.json({
+          webSocketDebuggerUrl: "wss://connect.browser-use.com/devtools?token=cloud-secret",
+        });
+      }
+      return Response.json({ status: "stopped" });
+    }) as typeof fetch;
+    const provider = createBrowserUseCloudProvider({
+      env: {
+        BROWSER_USE_API_KEY: "operator-cloud-key-value",
+        BROWSER_USE_CLOUD_TIMEOUT_MINUTES: "20",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: "residential-proxy.example",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT: "8443",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME: "proxy-user",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD: "proxy-password",
+        BROWSER_USE_CLOUD_PROFILE_ID: "018f0c67-98ab-7def-8123-123456789abc",
+      },
+      fetchFn,
+    });
+
+    await provider.prepare("run_cloud_test");
+    const handle = await provider.spawn(options);
+    await provider.stop(handle);
+
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+      timeout: 20,
+      customProxy: {
+        host: "residential-proxy.example",
+        port: 8443,
+        username: "proxy-user",
+        password: "proxy-password",
+        ignoreCertErrors: false,
+      },
+      profileId: "018f0c67-98ab-7def-8123-123456789abc",
+    });
+  });
+
+  it("rejects partial, ambiguous, or malformed operator cloud routing", () => {
+    expect(() =>
+      createBrowserUseCloudProvider({
+        env: {
+          BROWSER_USE_API_KEY: "operator-cloud-key-value",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: "proxy.example",
+        },
+      }),
+    ).toThrow(/valid host and port/);
+    expect(() =>
+      createBrowserUseCloudProvider({
+        env: {
+          BROWSER_USE_API_KEY: "operator-cloud-key-value",
+          BROWSER_USE_CLOUD_PROXY_COUNTRY: "fr",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: "proxy.example",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT: "8080",
+        },
+      }),
+    ).toThrow(/cannot be combined/);
+    expect(() =>
+      createBrowserUseCloudProvider({
+        env: {
+          BROWSER_USE_API_KEY: "operator-cloud-key-value",
+          BROWSER_USE_CLOUD_PROFILE_ID: "not-a-profile-id",
+        },
+      }),
+    ).toThrow(/must be a UUID/);
+    expect(() =>
+      createBrowserUseCloudProvider({
+        env: {
+          BROWSER_USE_API_KEY: "operator-cloud-key-value",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: "proxy.example",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT: "70000",
+        },
+      }),
+    ).toThrow(/integer from 1 to 65535/);
+    expect(() =>
+      createBrowserUseCloudProvider({
+        env: {
+          BROWSER_USE_API_KEY: "operator-cloud-key-value",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: "proxy.example",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT: "8080",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME: "proxy-user",
+        },
+      }),
+    ).toThrow(/must be set together/);
+  });
+
   it("rejects unsafe cloud CDP endpoints and stops the paid session", async () => {
     const methods: string[] = [];
     const fetchFn = (async (_url: string | URL | Request, init?: RequestInit) => {

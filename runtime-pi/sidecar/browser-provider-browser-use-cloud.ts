@@ -23,6 +23,70 @@ interface CloudSession {
   liveUrl: string | null;
 }
 
+interface CloudCustomProxy {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  ignoreCertErrors: false;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseCloudProfileId(env: NodeJS.ProcessEnv): string | undefined {
+  const value = env.BROWSER_USE_CLOUD_PROFILE_ID;
+  if (value === undefined || value === "") return undefined;
+  if (!UUID_PATTERN.test(value)) {
+    throw new Error("BROWSER_USE_CLOUD_PROFILE_ID must be a UUID");
+  }
+  return value;
+}
+
+function parseCloudCustomProxy(env: NodeJS.ProcessEnv): CloudCustomProxy | undefined {
+  const keys = [
+    "BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST",
+    "BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT",
+    "BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME",
+    "BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD",
+  ] as const;
+  const configured = keys.some((key) => env[key] !== undefined && env[key] !== "");
+  if (!configured) return undefined;
+
+  const host = env.BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST?.trim();
+  const portRaw = env.BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT?.trim();
+  if (!host || host.length > 253 || /[\u0000-\u0020\u007f/?#@]/u.test(host) || !portRaw) {
+    throw new Error("Browser Use Cloud custom proxy requires a valid host and port");
+  }
+  const port = Number(portRaw);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT must be an integer from 1 to 65535");
+  }
+
+  const username = env.BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME;
+  const password = env.BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD;
+  if ((username === undefined) !== (password === undefined)) {
+    throw new Error("Browser Use Cloud custom proxy username and password must be set together");
+  }
+  if (
+    username !== undefined &&
+    (username.length === 0 ||
+      username.length > 512 ||
+      password!.length === 0 ||
+      password!.length > 4096)
+  ) {
+    throw new Error("Browser Use Cloud custom proxy credentials are invalid");
+  }
+
+  return {
+    host,
+    port,
+    ...(username !== undefined ? { username, password } : {}),
+    // The remote proxy is an operator trust boundary. Never make certificate
+    // errors invisible to the cloud browser merely to accommodate a proxy.
+    ignoreCertErrors: false,
+  };
+}
+
 function isBrowserUseHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
   return host === "browser-use.com" || host.endsWith(".browser-use.com");
@@ -363,7 +427,15 @@ export function createBrowserUseCloudProvider(
   const apiKey = env.BROWSER_USE_API_KEY;
   const maxConcurrent = Number(env.BROWSER_MAX_CONCURRENT ?? 4);
   const timeoutMinutes = Number(env.BROWSER_USE_CLOUD_TIMEOUT_MINUTES ?? 15);
-  const proxyCountryCode = env.BROWSER_USE_CLOUD_PROXY_COUNTRY ?? "fr";
+  const customProxy = parseCloudCustomProxy(env);
+  const configuredProxyCountryCode = env.BROWSER_USE_CLOUD_PROXY_COUNTRY || undefined;
+  if (customProxy && configuredProxyCountryCode) {
+    throw new Error(
+      "BROWSER_USE_CLOUD_PROXY_COUNTRY cannot be combined with a Browser Use Cloud custom proxy",
+    );
+  }
+  const proxyCountryCode = configuredProxyCountryCode ?? "fr";
+  const profileId = parseCloudProfileId(env);
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 128) {
     throw new Error("BROWSER_MAX_CONCURRENT must be an integer from 1 to 128");
   }
@@ -416,7 +488,8 @@ export function createBrowserUseCloudProvider(
         headers: { "Content-Type": "application/json", "X-Browser-Use-API-Key": apiKey },
         body: JSON.stringify({
           timeout: timeoutMinutes,
-          proxyCountryCode,
+          ...(customProxy ? { customProxy } : { proxyCountryCode }),
+          ...(profileId ? { profileId } : {}),
         }),
         signal: AbortSignal.timeout(20_000),
       });

@@ -291,7 +291,14 @@ services:
       - BROWSER_PROVIDER=${BROWSER_PROVIDER:-}
       - BROWSER_USE_API_KEY=${BROWSER_USE_API_KEY:-}
       - BROWSER_USE_CLOUD_TIMEOUT_MINUTES=${BROWSER_USE_CLOUD_TIMEOUT_MINUTES:-15}
-      - BROWSER_USE_CLOUD_PROXY_COUNTRY=${BROWSER_USE_CLOUD_PROXY_COUNTRY:-fr}
+      # Leave country empty here so the sidecar can apply its `fr` default
+      # only when no custom proxy is configured.
+      - BROWSER_USE_CLOUD_PROXY_COUNTRY=${BROWSER_USE_CLOUD_PROXY_COUNTRY:-}
+      - BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST=${BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST:-}
+      - BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT=${BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT:-}
+      - BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME=${BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME:-}
+      - BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD=${BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD:-}
+      - BROWSER_USE_CLOUD_PROFILE_ID=${BROWSER_USE_CLOUD_PROFILE_ID:-}
       # Runner images forwarded to the sidecar (SIDECAR_OPERATOR_ENV_KEYS) so
       # it spawns integration runners from GHCR instead of bare `:latest` tags
       # (which the daemon would try — and fail — to pull from Docker Hub).

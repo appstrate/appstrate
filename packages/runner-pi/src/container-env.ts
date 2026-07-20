@@ -299,6 +299,11 @@ export const SIDECAR_OPERATOR_ENV_KEYS = [
   "BROWSER_USE_API_KEY",
   "BROWSER_USE_CLOUD_TIMEOUT_MINUTES",
   "BROWSER_USE_CLOUD_PROXY_COUNTRY",
+  "BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST",
+  "BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT",
+  "BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME",
+  "BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD",
+  "BROWSER_USE_CLOUD_PROFILE_ID",
   // Per-call MCP tool timeout override (#779 annex). Consumed sidecar-side
   // (integration clients, `integrations-boot.toolTimeoutMsFromEnv`) and
   // agent-side (`runtime-pi/env.ts` → entrypoint's sidecar client), so a

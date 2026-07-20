@@ -13,4 +13,18 @@ BROWSER_DRIVER_GRANTS=[{"id":"leboncoin","packageId":"@appstrate/leboncoin-brows
 
 For Docker execution, `appstrate-sidecar`, `appstrate-browser-worker`, and `appstrate-mcp-runner-browser-use` must be available. Local headless Chromium can still receive a DataDome challenge. Operators can select `BROWSER_PROVIDER=browser-use-cloud` with `BROWSER_USE_API_KEY` to use Browser Use's remote browser and a French residential proxy; this improves anti-detection but does not guarantee a bypass. A challenge is surfaced as `BROWSER_INTERACTION_REQUIRED` without stopping the rest of the agent run.
 
+For a single-account POC that needs a stable operator-controlled egress, Browser Use Cloud can load one persistent profile through one custom proxy:
+
+```env
+BROWSER_PROVIDER=browser-use-cloud
+BROWSER_USE_API_KEY=...
+BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST=proxy.example.com
+BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT=8443
+BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME=...
+BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD=...
+BROWSER_USE_CLOUD_PROFILE_ID=018f0c67-98ab-7def-8123-123456789abc
+```
+
+Leave `BROWSER_USE_CLOUD_PROXY_COUNTRY` unset when using a custom proxy. The profile is operator-wide and must not be shared across production tenants. Custom proxy availability depends on the Browser Use plan, and neither a profile nor a proxy guarantees that an upstream anti-abuse challenge will accept automation.
+
 An authenticated session is accepted only after the driver reaches Leboncoin's account area with the expected login cookie. Merely restoring a non-empty cookie snapshot is not considered proof of authentication.
