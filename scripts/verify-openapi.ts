@@ -263,6 +263,7 @@ const expectedEndpoints = [
   // Profile
   "GET /api/profile",
   "PATCH /api/profile",
+  "POST /api/profile/password",
   "POST /api/profiles/batch",
   "GET /api/me/orgs",
   "GET /api/me/context",
@@ -657,8 +658,7 @@ function getOpenApiRequestBodySchema(
   if (!operation?.requestBody) return undefined;
 
   let schema = operation.requestBody?.content?.["application/json"]?.schema as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
 
   // Resolve top-level $ref
   if (schema && typeof schema.$ref === "string") {

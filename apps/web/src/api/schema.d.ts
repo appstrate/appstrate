@@ -3523,6 +3523,26 @@ export interface paths {
         patch: operations["updateProfile"];
         trace?: never;
     };
+    "/api/profile/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set an initial password
+         * @description Set a password for the current user when none exists yet (account created via social sign-in). Creates the email/password credential so the user can also sign in with email. Fails with 409 when a password is already set — use the Better Auth change-password flow instead. Session authentication only; API keys are rejected.
+         */
+        post: operations["setProfilePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profiles/batch": {
         parameters: {
             query?: never;
@@ -16942,6 +16962,63 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    setProfilePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    newPassword: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Password set — the credential account was created */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": true
+                     *     }
+                     */
+                    "application/json": {
+                        status: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Conflict — a password is already set for this account */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "https://docs.appstrate.dev/errors/password-already-set",
+                     *       "title": "Conflict",
+                     *       "status": 409,
+                     *       "detail": "A password is already set for this account. Use the change password form instead.",
+                     *       "code": "password_already_set",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     batchGetProfiles: {

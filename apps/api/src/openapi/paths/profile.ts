@@ -79,6 +79,73 @@ export const profilePaths = {
       },
     },
   },
+  "/api/profile/password": {
+    post: {
+      operationId: "setProfilePassword",
+      tags: ["Profile"],
+      summary: "Set an initial password",
+      description:
+        "Set a password for the current user when none exists yet (account created via social sign-in). " +
+        "Creates the email/password credential so the user can also sign in with email. " +
+        "Fails with 409 when a password is already set — use the Better Auth change-password flow instead. " +
+        "Session authentication only; API keys are rejected.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["newPassword"],
+              properties: {
+                newPassword: { type: "string", minLength: 8, maxLength: 128 },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Password set — the credential account was created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["status"],
+                properties: {
+                  status: { type: "boolean" },
+                },
+              },
+              example: { status: true },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description: "Conflict — a password is already set for this account",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "https://docs.appstrate.dev/errors/password-already-set",
+                title: "Conflict",
+                status: 409,
+                detail:
+                  "A password is already set for this account. Use the change password form instead.",
+                code: "password_already_set",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
+      },
+    },
+  },
   "/api/profiles/batch": {
     post: {
       operationId: "batchGetProfiles",

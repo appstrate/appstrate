@@ -4,10 +4,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { getAuth } from "@appstrate/db/auth";
 import { profiles, user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
-import { forbidden, internalError, notFound } from "../lib/errors.ts";
+import { conflict, forbidden, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
@@ -21,6 +22,13 @@ export const profileUpdateSchema = z.object({
 
 export const batchLookupSchema = z.object({
   ids: z.array(z.string()).max(100),
+});
+
+// Bounds mirror the Better Auth password config (`minPasswordLength: 8` in
+// packages/db/src/auth.ts) so validation fails here with a proper RFC 9457
+// response instead of surfacing a BA APIError.
+export const setPasswordSchema = z.object({
+  newPassword: z.string().min(8).max(128),
 });
 
 const profileRouter = new Hono<AppEnv>();
@@ -103,6 +111,45 @@ profileRouter.patch("/profile", async (c) => {
   }
 
   return c.json(profile);
+});
+
+// POST /api/profile/password — set an initial password for accounts created
+// via social sign-in (Google/GitHub) that have no `credential` account yet.
+// Delegates to Better Auth's server-only `setPassword`, which creates the
+// credential account or rejects with PASSWORD_ALREADY_SET when one exists —
+// existing passwords can only be changed via `changePassword` (requires the
+// current password), never overwritten here.
+profileRouter.post("/profile/password", async (c) => {
+  if (c.get("authMethod") === "api_key") {
+    throw forbidden("API keys cannot set the dashboard user password");
+  }
+  const user = c.get("user");
+  const { newPassword } = await readJsonBody(c, setPasswordSchema);
+
+  try {
+    await getAuth().api.setPassword({
+      body: { newPassword },
+      headers: c.req.raw.headers,
+    });
+  } catch (err) {
+    const code =
+      typeof err === "object" && err !== null && "body" in err
+        ? (err as { body?: { code?: string } }).body?.code
+        : undefined;
+    if (code === "PASSWORD_ALREADY_SET") {
+      throw conflict(
+        "password_already_set",
+        "A password is already set for this account. Use the change password form instead.",
+      );
+    }
+    logger.error("Failed to set password", {
+      userId: user.id,
+      error: getErrorMessage(err),
+    });
+    throw internalError();
+  }
+
+  return c.json({ status: true });
 });
 
 // POST /api/profiles/batch — batch lookup display names by user IDs (scoped to org members)

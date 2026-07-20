@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
-import { user as userTable } from "@appstrate/db/schema";
+import { user as userTable, account as accountTable } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -157,6 +157,113 @@ describe("Profile API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.data).toHaveLength(0);
+    });
+  });
+
+  describe("POST /api/profile/password", () => {
+    // Simulate a social-sign-in-only account: createTestContext seeds a
+    // `credential` account row (email/password), which a Google/GitHub
+    // signup never creates — drop it so the user has no password.
+    async function removeCredentialAccount(userId: string) {
+      await db
+        .delete(accountTable)
+        .where(and(eq(accountTable.userId, userId), eq(accountTable.providerId, "credential")));
+    }
+
+    async function getCredentialAccount(userId: string) {
+      const rows = await db
+        .select()
+        .from(accountTable)
+        .where(and(eq(accountTable.userId, userId), eq(accountTable.providerId, "credential")));
+      return rows[0];
+    }
+
+    it("creates the credential account for a user without a password", async () => {
+      await removeCredentialAccount(ctx.user.id);
+
+      const res = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: "NewPassword123!" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.status).toBe(true);
+
+      const account = await getCredentialAccount(ctx.user.id);
+      expect(account).toBeDefined();
+      expect(account!.password).toBeTruthy();
+    });
+
+    it("allows email/password sign-in after setting the password", async () => {
+      await removeCredentialAccount(ctx.user.id);
+
+      const setRes = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: "NewPassword123!" }),
+      });
+      expect(setRes.status).toBe(200);
+
+      const signInRes = await app.request("/api/auth/sign-in/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: ctx.user.email, password: "NewPassword123!" }),
+      });
+      expect(signInRes.status).toBe(200);
+    });
+
+    it("returns 409 when a password is already set", async () => {
+      const res = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: "NewPassword123!" }),
+      });
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("password_already_set");
+    });
+
+    it("returns 400 for a password shorter than 8 characters", async () => {
+      await removeCredentialAccount(ctx.user.id);
+
+      const res = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: "short" }),
+      });
+
+      expect(res.status).toBe(400);
+      // No credential account must have been created on the failed attempt.
+      expect(await getCredentialAccount(ctx.user.id)).toBeUndefined();
+    });
+
+    it("returns 403 for API key auth", async () => {
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+      });
+      const res = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey.rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ newPassword: "NewPassword123!" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 401 without auth", async () => {
+      const res = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: "NewPassword123!" }),
+      });
+      expect(res.status).toBe(401);
     });
   });
 
