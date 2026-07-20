@@ -1,4 +1,4 @@
-CREATE TABLE "browser_connection_attempts" (
+CREATE TABLE IF NOT EXISTS "public"."browser_connection_attempts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"application_id" text NOT NULL,
 	"integration_package_id" text NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE "browser_connection_attempts" (
 	CONSTRAINT "browser_connection_attempts_token_hash_valid" CHECK ("browser_connection_attempts"."token_hash" ~ '^[a-f0-9]{64}$')
 );
 --> statement-breakpoint
-CREATE TABLE "browser_connection_bindings" (
+CREATE TABLE IF NOT EXISTS "public"."browser_connection_bindings" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"connection_id" uuid NOT NULL,
 	"provider" text NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE "browser_connection_bindings" (
 	CONSTRAINT "browser_connection_bindings_state_version_positive" CHECK ("browser_connection_bindings"."state_version" > 0)
 );
 --> statement-breakpoint
-CREATE TABLE "browser_profile_deletions" (
+CREATE TABLE IF NOT EXISTS "public"."browser_profile_deletions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"provider" text NOT NULL,
 	"profile_ref" text NOT NULL,
@@ -57,7 +57,7 @@ CREATE TABLE "browser_profile_deletions" (
 	CONSTRAINT "browser_profile_deletions_attempts_valid" CHECK ("browser_profile_deletions"."attempts" >= 0)
 );
 --> statement-breakpoint
-CREATE TABLE "browser_session_leases" (
+CREATE TABLE IF NOT EXISTS "public"."browser_session_leases" (
 	"binding_id" uuid PRIMARY KEY NOT NULL,
 	"owner_id" text NOT NULL,
 	"fencing_token" bigint DEFAULT 1 NOT NULL,
@@ -67,22 +67,50 @@ CREATE TABLE "browser_session_leases" (
 	CONSTRAINT "browser_session_leases_fencing_positive" CHECK ("browser_session_leases"."fencing_token" > 0)
 );
 --> statement-breakpoint
-ALTER TABLE "browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_application_id_applications_id_fk" FOREIGN KEY ("application_id") REFERENCES "public"."applications"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_integration_package_id_packages_id_fk" FOREIGN KEY ("integration_package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_connection_id_integration_connections_id_fk" FOREIGN KEY ("connection_id") REFERENCES "public"."integration_connections"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "browser_connection_bindings" ADD CONSTRAINT "browser_connection_bindings_connection_id_integration_connections_id_fk" FOREIGN KEY ("connection_id") REFERENCES "public"."integration_connections"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "browser_session_leases" ADD CONSTRAINT "browser_session_leases_binding_id_browser_connection_bindings_id_fk" FOREIGN KEY ("binding_id") REFERENCES "public"."browser_connection_bindings"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "browser_connection_attempts_token_hash_unique" ON "browser_connection_attempts" USING btree ("token_hash");--> statement-breakpoint
-CREATE INDEX "browser_connection_attempts_expiry_idx" ON "browser_connection_attempts" USING btree ("status","expires_at");--> statement-breakpoint
-CREATE INDEX "browser_connection_attempts_actor_user_idx" ON "browser_connection_attempts" USING btree ("user_id") WHERE "browser_connection_attempts"."user_id" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX "browser_connection_attempts_actor_end_user_idx" ON "browser_connection_attempts" USING btree ("end_user_id") WHERE "browser_connection_attempts"."end_user_id" IS NOT NULL;--> statement-breakpoint
-CREATE UNIQUE INDEX "browser_connection_bindings_connection_unique" ON "browser_connection_bindings" USING btree ("connection_id");--> statement-breakpoint
-CREATE INDEX "browser_connection_bindings_provider_status_idx" ON "browser_connection_bindings" USING btree ("provider","status");--> statement-breakpoint
-CREATE UNIQUE INDEX "browser_profile_deletions_provider_ref_unique" ON "browser_profile_deletions" USING btree ("provider","profile_ref");--> statement-breakpoint
-CREATE INDEX "browser_profile_deletions_due_idx" ON "browser_profile_deletions" USING btree ("next_attempt_at");--> statement-breakpoint
-CREATE INDEX "browser_session_leases_expiry_idx" ON "browser_session_leases" USING btree ("expires_at");--> statement-breakpoint
+DO $do$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.browser_connection_attempts'::regclass AND conname = left('browser_connection_attempts_application_id_applications_id_fk', current_setting('max_identifier_length')::integer)) THEN
+		ALTER TABLE "public"."browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_application_id_applications_id_fk" FOREIGN KEY ("application_id") REFERENCES "public"."applications"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+END $do$;--> statement-breakpoint
+DO $do$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.browser_connection_attempts'::regclass AND conname = left('browser_connection_attempts_integration_package_id_packages_id_fk', current_setting('max_identifier_length')::integer)) THEN
+		ALTER TABLE "public"."browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_integration_package_id_packages_id_fk" FOREIGN KEY ("integration_package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+END $do$;--> statement-breakpoint
+DO $do$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.browser_connection_attempts'::regclass AND conname = left('browser_connection_attempts_user_id_user_id_fk', current_setting('max_identifier_length')::integer)) THEN
+		ALTER TABLE "public"."browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+END $do$;--> statement-breakpoint
+DO $do$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.browser_connection_attempts'::regclass AND conname = left('browser_connection_attempts_end_user_id_end_users_id_fk', current_setting('max_identifier_length')::integer)) THEN
+		ALTER TABLE "public"."browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+END $do$;--> statement-breakpoint
+DO $do$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.browser_connection_attempts'::regclass AND conname = left('browser_connection_attempts_connection_id_integration_connections_id_fk', current_setting('max_identifier_length')::integer)) THEN
+		ALTER TABLE "public"."browser_connection_attempts" ADD CONSTRAINT "browser_connection_attempts_connection_id_integration_connections_id_fk" FOREIGN KEY ("connection_id") REFERENCES "public"."integration_connections"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+END $do$;--> statement-breakpoint
+DO $do$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.browser_connection_bindings'::regclass AND conname = left('browser_connection_bindings_connection_id_integration_connections_id_fk', current_setting('max_identifier_length')::integer)) THEN
+		ALTER TABLE "public"."browser_connection_bindings" ADD CONSTRAINT "browser_connection_bindings_connection_id_integration_connections_id_fk" FOREIGN KEY ("connection_id") REFERENCES "public"."integration_connections"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+END $do$;--> statement-breakpoint
+DO $do$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.browser_session_leases'::regclass AND conname = left('browser_session_leases_binding_id_browser_connection_bindings_id_fk', current_setting('max_identifier_length')::integer)) THEN
+		ALTER TABLE "public"."browser_session_leases" ADD CONSTRAINT "browser_session_leases_binding_id_browser_connection_bindings_id_fk" FOREIGN KEY ("binding_id") REFERENCES "public"."browser_connection_bindings"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+END $do$;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "browser_connection_attempts_token_hash_unique" ON "public"."browser_connection_attempts" USING btree ("token_hash");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "browser_connection_attempts_expiry_idx" ON "public"."browser_connection_attempts" USING btree ("status","expires_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "browser_connection_attempts_actor_user_idx" ON "public"."browser_connection_attempts" USING btree ("user_id") WHERE "browser_connection_attempts"."user_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "browser_connection_attempts_actor_end_user_idx" ON "public"."browser_connection_attempts" USING btree ("end_user_id") WHERE "browser_connection_attempts"."end_user_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "browser_connection_bindings_connection_unique" ON "public"."browser_connection_bindings" USING btree ("connection_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "browser_connection_bindings_provider_status_idx" ON "public"."browser_connection_bindings" USING btree ("provider","status");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "browser_profile_deletions_provider_ref_unique" ON "public"."browser_profile_deletions" USING btree ("provider","profile_ref");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "browser_profile_deletions_due_idx" ON "public"."browser_profile_deletions" USING btree ("next_attempt_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "browser_session_leases_expiry_idx" ON "public"."browser_session_leases" USING btree ("expires_at");--> statement-breakpoint
 CREATE OR REPLACE FUNCTION "public"."enqueue_browser_binding_profile_deletion_fn"()
 RETURNS trigger AS $$
 BEGIN
@@ -103,10 +131,14 @@ BEGIN
 	RETURN OLD;
 END;
 $$ LANGUAGE plpgsql;--> statement-breakpoint
-CREATE TRIGGER enqueue_browser_binding_profile_deletion
-	BEFORE DELETE ON "public"."browser_connection_bindings"
-	FOR EACH ROW
-	EXECUTE FUNCTION "public"."enqueue_browser_binding_profile_deletion_fn"();--> statement-breakpoint
+DO $do$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.browser_connection_bindings'::regclass AND tgname = 'enqueue_browser_binding_profile_deletion' AND NOT tgisinternal) THEN
+		CREATE TRIGGER enqueue_browser_binding_profile_deletion
+			BEFORE DELETE ON "public"."browser_connection_bindings"
+			FOR EACH ROW
+			EXECUTE FUNCTION "public"."enqueue_browser_binding_profile_deletion_fn"();
+	END IF;
+END $do$;--> statement-breakpoint
 CREATE OR REPLACE FUNCTION "public"."enqueue_browser_attempt_profile_deletion_fn"()
 RETURNS trigger AS $$
 BEGIN
@@ -118,7 +150,11 @@ BEGIN
 	RETURN OLD;
 END;
 $$ LANGUAGE plpgsql;--> statement-breakpoint
-CREATE TRIGGER enqueue_browser_attempt_profile_deletion
-	BEFORE DELETE ON "public"."browser_connection_attempts"
-	FOR EACH ROW
-	EXECUTE FUNCTION "public"."enqueue_browser_attempt_profile_deletion_fn"();
+DO $do$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.browser_connection_attempts'::regclass AND tgname = 'enqueue_browser_attempt_profile_deletion' AND NOT tgisinternal) THEN
+		CREATE TRIGGER enqueue_browser_attempt_profile_deletion
+			BEFORE DELETE ON "public"."browser_connection_attempts"
+			FOR EACH ROW
+			EXECUTE FUNCTION "public"."enqueue_browser_attempt_profile_deletion_fn"();
+	END IF;
+END $do$;
