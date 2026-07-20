@@ -10,7 +10,7 @@
  */
 
 import { db } from "@appstrate/db/client";
-import { organizationMembers, user } from "@appstrate/db/schema";
+import { organizationMembers, organizations, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
@@ -131,6 +131,7 @@ export function buildModuleInitContext(): ModuleInitContext {
       return sendMail;
     },
     getOrgAdminEmails,
+    getOrgName,
     services: buildPlatformServices(),
   };
   return ctx;
@@ -153,4 +154,18 @@ async function getOrgAdminEmails(orgId: string): Promise<string[]> {
     );
 
   return admins.map((a) => a.email);
+}
+
+// ---------------------------------------------------------------------------
+// DI: org display-name query
+// ---------------------------------------------------------------------------
+
+async function getOrgName(orgId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+
+  return row?.name ?? null;
 }
