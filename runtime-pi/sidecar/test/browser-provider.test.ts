@@ -35,6 +35,9 @@ const spawnOptions = {
 describe("browser provider registry", () => {
   it("selects only the explicitly requested backend", () => {
     expect(selectBrowserProvider({ BROWSER_PROVIDER: "process" }).id).toBe("process");
+    expect(selectBrowserProvider({ BROWSER_PROVIDER: "process" }, "browser-use-cloud").id).toBe(
+      "browser-use-cloud",
+    );
     expect(() => selectBrowserProvider({ BROWSER_PROVIDER: "unknown" })).toThrow(/not registered/);
   });
 });

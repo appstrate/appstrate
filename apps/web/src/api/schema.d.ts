@@ -1331,6 +1331,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/connect/companion/attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a local browser companion handoff
+         * @description Authenticated by the hosted-connect page cookie plus CSRF. Allocates a connection-scoped target browser profile and returns a one-time local-app capability. The capability response is non-cacheable.
+         */
+        post: operations["createBrowserCompanionAttempt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/connect/companion/attempts/{attemptId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a browser companion attempt
+         * @description Polled by the local companion and hosted connect page using the attempt bearer. Live provider URLs remain encrypted at rest and are returned only here.
+         */
+        get: operations["getBrowserCompanionAttempt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/connect/companion/attempts/{attemptId}/handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit local browser state for target-provider proof
+         * @description Accepts a bounded browser state from the local companion. The state is encrypted immediately and asynchronously restored into the allocated target profile; callers poll the attempt resource for completion.
+         */
+        post: operations["submitBrowserCompanionHandoff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/connect/context": {
         parameters: {
             query?: never;
@@ -9875,6 +9935,129 @@ export interface operations {
             };
         };
     };
+    createBrowserCompanionAttempt: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-connect-csrf": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Optional echo of the operator-selected provider. A different value is rejected.
+                     * @enum {string}
+                     */
+                    target_provider?: "browser-use-cloud" | "process";
+                };
+            };
+        };
+        responses: {
+            /** @description Companion attempt created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        attempt_id: string;
+                        /** Format: uri */
+                        companion_url: string;
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getBrowserCompanionAttempt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attemptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Companion attempt state */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        attempt_id: string;
+                        package_id: string;
+                        display_name: string;
+                        icon: string | null;
+                        /** Format: uri */
+                        start_url: string;
+                        allowed_origins: string[];
+                        /** @enum {string} */
+                        target_provider: "browser-use-cloud" | "process";
+                        /** @enum {string} */
+                        status: "pending" | "claimed" | "state_received" | "provisioning" | "interaction_required" | "complete" | "failed";
+                        /** Format: uri */
+                        interaction_url: string | null;
+                        error_code: string | null;
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    submitBrowserCompanionHandoff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attemptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    browser_state: string;
+                };
+            };
+        };
+        responses: {
+            /** @description State accepted for asynchronous proof */
+            202: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        attempt_id: string;
+                        /** @enum {string} */
+                        status: "state_received";
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     getIntegrationConnectContext: {
         parameters: {
             query?: never;
@@ -9900,8 +10083,14 @@ export interface operations {
                         auth: {
                             [key: string]: unknown;
                         };
-                        connection_id?: string | null;
-                        csrf?: string | null;
+                        connection_id: string | null;
+                        csrf: string | null;
+                        companion: null | {
+                            /** @constant */
+                            available: true;
+                            /** @enum {string} */
+                            target_provider: "browser-use-cloud" | "process";
+                        };
                     };
                 };
             };

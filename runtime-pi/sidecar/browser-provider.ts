@@ -92,8 +92,11 @@ export function registerBrowserProvider(entry: BrowserProviderEntry): void {
   registry.push(entry);
 }
 
-export function selectBrowserProvider(env: NodeJS.ProcessEnv = process.env): BrowserProvider {
-  const requested = env.BROWSER_PROVIDER ?? env.INTEGRATION_RUNTIME_ADAPTER;
+export function selectBrowserProvider(
+  env: NodeJS.ProcessEnv = process.env,
+  providerOverride?: string,
+): BrowserProvider {
+  const requested = providerOverride ?? env.BROWSER_PROVIDER ?? env.INTEGRATION_RUNTIME_ADAPTER;
   if (!requested) {
     throw new Error("BROWSER_PROVIDER is not set and no integration runtime adapter is available");
   }

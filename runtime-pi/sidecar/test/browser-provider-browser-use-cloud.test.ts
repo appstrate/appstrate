@@ -187,6 +187,55 @@ describe("Browser Use Cloud provider", () => {
     });
   });
 
+  it("uses the connection-scoped profile instead of the legacy operator profile", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      if (init?.method === "POST") {
+        return Response.json(
+          {
+            id: "018f0c67-98ab-7def-8123-123456789abc",
+            cdpUrl: "https://018f0c67.cdp.browser-use.com",
+            liveUrl: null,
+          },
+          { status: 201 },
+        );
+      }
+      if (init?.method === "GET") {
+        return Response.json({
+          webSocketDebuggerUrl: "wss://connect.browser-use.com/devtools?token=cloud-secret",
+        });
+      }
+      return Response.json({ status: "stopped" });
+    }) as typeof fetch;
+    const provider = createBrowserUseCloudProvider({
+      env: {
+        BROWSER_USE_API_KEY: "operator-cloud-key-value",
+        BROWSER_USE_CLOUD_PROFILE_ID: "018f0c67-98ab-7def-8123-123456789abc",
+      },
+      fetchFn,
+    });
+    const bindingProfile = "019f0c67-98ab-7def-8123-123456789abc";
+    const handle = await provider.spawn({
+      ...options,
+      spec: {
+        ...options.spec,
+        providerBinding: {
+          bindingId: "029f0c67-98ab-7def-8123-123456789abc",
+          provider: "browser-use-cloud",
+          profileRef: bindingProfile,
+          stateVersion: 4,
+          proxy: { kind: "country", countryCode: "de" },
+        },
+      },
+    });
+    await provider.stop(handle);
+    expect(JSON.parse(String(requests[0]?.init?.body))).toMatchObject({
+      profileId: bindingProfile,
+      proxyCountryCode: "de",
+    });
+  });
+
   it("rejects partial, ambiguous, or malformed operator cloud routing", () => {
     expect(() =>
       createBrowserUseCloudProvider({

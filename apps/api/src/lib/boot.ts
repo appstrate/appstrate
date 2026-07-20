@@ -42,6 +42,7 @@ import { initOAuthModelRefreshWorker } from "../services/model-providers/refresh
 import { initPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { startRunWatchdog } from "../services/run-watchdog.ts";
+import { startBrowserConnectionMaintenance } from "../services/browser-connection-maintenance.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
@@ -345,6 +346,9 @@ export async function boot(): Promise<void> {
 
   // Kick off the recurring upload sweep once initial cleanup is scheduled.
   startUploadGc();
+  // Resume companion handoffs whose originating HTTP client or API process
+  // disappeared, and expire abandoned provider profiles.
+  startBrowserConnectionMaintenance();
 }
 
 /**

@@ -153,6 +153,14 @@ export function createProcessBrowserProvider(
           `BROWSER_RESOURCE_LIMIT: browser worker capacity reached (${workers.size}/${maxConcurrent})`,
         );
       }
+      if (options.spec.providerBinding?.provider === "browser-use-cloud") {
+        throw new Error("BROWSER_STATE_CONFLICT: browser binding targets a different provider");
+      }
+      if (options.spec.providerBinding?.proxy) {
+        throw new Error(
+          "BROWSER_STATE_CONFLICT: process browser binding cannot carry cloud proxy routing",
+        );
+      }
       const id = `browser_${randomBytes(12).toString("hex")}`;
       const authToken = randomBytes(32).toString("base64url");
       const guestIsolation = isFirecrackerBrowserIsolation(env);

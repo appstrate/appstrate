@@ -12,6 +12,9 @@ const boolEnv = (defaultValue: "true" | "false") =>
     .default(defaultValue)
     .transform((s) => s.toLowerCase() === "true" || s === "1");
 
+const optionalEnv = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
+
 // JSON-from-string env transform: parses a JSON-valued env var, failing fast
 // at boot with a clear Zod issue (path = the variable name) instead of a raw
 // `SyntaxError` bubbling out of `getEnv()`. Empty string == unset (compose's
@@ -223,6 +226,16 @@ const envSchema = z
     BROWSER_WORKER_EXECUTABLE_PATH: z.string().min(1).optional(),
     BROWSER_WORKER_IMAGE: z.string().min(1).default("appstrate-browser-worker:latest"),
     BROWSER_CONNECT_RUN_ADAPTER: z.string().min(1).optional(),
+    // The API uses the same operator selection when allocating a durable
+    // per-connection profile for local-companion handoffs. The key remains
+    // server-side and is forwarded only to trusted sidecars.
+    BROWSER_PROVIDER: optionalEnv(z.enum(["browser-use-cloud", "process"])),
+    BROWSER_USE_API_KEY: optionalEnv(z.string().min(16)),
+    BROWSER_USE_CLOUD_PROXY_COUNTRY: optionalEnv(z.string().regex(/^[a-z]{2}$/)),
+    BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: optionalEnv(z.string().min(1)),
+    BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT: optionalEnv(z.coerce.number().int().min(1).max(65_535)),
+    BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME: optionalEnv(z.string()),
+    BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD: optionalEnv(z.string()),
     SYSTEM_PROVIDER_KEYS: jsonEnv<unknown[]>("[]"),
     // System-level integrations offered by the deployment out of the box.
     // Membership = the "auto-active" policy (on by default until an org opts

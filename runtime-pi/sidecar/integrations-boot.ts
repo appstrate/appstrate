@@ -116,6 +116,23 @@ const STANDARD_BROWSER_PROFILE: BrowserResourceProfile = {
   maxPages: 4,
 };
 
+export function requiredBrowserProviders(specs: readonly IntegrationSpawnSpec[]): {
+  needsDefault: boolean;
+  overrides: string[];
+} {
+  const browserSpecs = specs.flatMap((spec) => (spec.browser ? [spec.browser] : []));
+  return {
+    needsDefault: browserSpecs.some((browser) => browser.providerBinding === undefined),
+    overrides: [
+      ...new Set(
+        browserSpecs.flatMap((browser) =>
+          browser.providerBinding ? [browser.providerBinding.provider] : [],
+        ),
+      ),
+    ].sort(),
+  };
+}
+
 export function canKeepBrowserInteractionDegraded(input: {
   errorCode: string;
   hasPrivateConnect: boolean;
@@ -1252,6 +1269,7 @@ export async function bootIntegrations(
   const browserResources: Array<{
     handle: BrowserHandle;
     gateway: BrowserEgressGatewayHandle;
+    provider: BrowserProvider;
   }> = [];
 
   // The sidecar receives RUN_TOKEN but not always RUN_ID directly — we
@@ -1264,9 +1282,19 @@ export async function bootIntegrations(
   // isn't available — orphan-cleanup is best-effort either way.
   const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
   const browserCount = specs.filter((spec) => spec.browser !== undefined).length;
-  let browserProvider: BrowserProvider | null = null;
+  const browserProviders = new Map<string, BrowserProvider>();
+  let defaultBrowserProvider: BrowserProvider | null = null;
   if (browserCount > 0) {
-    browserProvider = selectBrowserProvider();
+    const providerRequirements = requiredBrowserProviders(specs);
+    if (providerRequirements.needsDefault) {
+      defaultBrowserProvider = selectBrowserProvider();
+      browserProviders.set(defaultBrowserProvider.id, defaultBrowserProvider);
+    }
+    for (const requested of providerRequirements.overrides) {
+      if (!browserProviders.has(requested)) {
+        browserProviders.set(requested, selectBrowserProvider(process.env, requested));
+      }
+    }
   }
 
   // Pick the runtime backend deterministically from `INTEGRATION_RUNTIME_ADAPTER`
@@ -1303,11 +1331,13 @@ export async function bootIntegrations(
   const adapterPrepareStart = performance.now();
   const [adapterPreparation, browserPreparation] = await Promise.allSettled([
     adapter.prepare(runId),
-    browserProvider?.prepare(runId) ?? Promise.resolve(null),
+    Promise.all([...browserProviders.values()].map((provider) => provider.prepare(runId))),
   ]);
   if (adapterPreparation.status === "rejected" || browserPreparation.status === "rejected") {
     await adapter.shutdown().catch(() => {});
-    await browserProvider?.shutdown().catch(() => {});
+    await Promise.all(
+      [...browserProviders.values()].map((provider) => provider.shutdown().catch(() => {})),
+    );
     if (runCaPromise) {
       const pendingCa = await runCaPromise.catch(() => null);
       if (pendingCa) await disposeRunCa(pendingCa);
@@ -1388,7 +1418,14 @@ export async function bootIntegrations(
 
   for (const spec of specs) {
     const specStart = performance.now();
-    let pendingBrowser: { handle: BrowserHandle; gateway: BrowserEgressGatewayHandle } | undefined;
+    let pendingBrowser:
+      | {
+          handle: BrowserHandle;
+          gateway: BrowserEgressGatewayHandle;
+          provider: BrowserProvider;
+        }
+      | undefined;
+    let selectedBrowserProvider: BrowserProvider | undefined;
     let pendingGateway: BrowserEgressGatewayHandle | undefined;
     let browserStage = "preflight";
     let registeredBrowserDriver:
@@ -1637,7 +1674,10 @@ export async function bootIntegrations(
       const wantsEgress = spec.needsEgress === true;
       if (spec.browser) {
         browserStage = "gateway";
-        if (!browserProvider) {
+        selectedBrowserProvider = spec.browser.providerBinding
+          ? browserProviders.get(spec.browser.providerBinding.provider)
+          : (defaultBrowserProvider ?? undefined);
+        if (!selectedBrowserProvider) {
           throw new Error("BROWSER_UNAVAILABLE: no browser provider was selected");
         }
         const gatewayToken = randomBytes(32).toString("base64url");
@@ -1661,7 +1701,7 @@ export async function bootIntegrations(
         await gateway.ready;
         pendingGateway = gateway;
         browserStage = "worker-spawn";
-        const handle = await browserProvider.spawn({
+        const handle = await selectedBrowserProvider.spawn({
           runId,
           integrationId: spec.integrationId,
           spec: spec.browser,
@@ -1679,7 +1719,7 @@ export async function bootIntegrations(
               }
             : {}),
         });
-        pendingBrowser = { handle, gateway };
+        pendingBrowser = { handle, gateway, provider: selectedBrowserProvider };
         assertBrowserWorkerCompatible(spec.browser.protocol, handle);
         browserResources.push(pendingBrowser);
         breadcrumbs.push({
@@ -1687,7 +1727,7 @@ export async function bootIntegrations(
           level: "info",
           data: {
             integrationId: spec.integrationId,
-            provider: browserProvider.id,
+            provider: selectedBrowserProvider.id,
             workerBuildId: handle.workerBuildId,
             protocolVersion: handle.protocolVersion,
             browserRevision: handle.browserRevision,
@@ -1863,8 +1903,8 @@ export async function bootIntegrations(
         });
         continue;
       }
-      if (pendingBrowser && browserProvider) {
-        await browserProvider.stop(pendingBrowser.handle).catch(() => {});
+      if (pendingBrowser) {
+        await pendingBrowser.provider.stop(pendingBrowser.handle).catch(() => {});
         await pendingBrowser.gateway.close().catch(() => {});
         const index = browserResources.indexOf(pendingBrowser);
         if (index !== -1) browserResources.splice(index, 1);
@@ -1945,16 +1985,18 @@ export async function bootIntegrations(
       // Browser workers outlive their integration runner during the run, then
       // stop before their gateways so Chromium cannot escape through a stale
       // listener while teardown races.
-      if (browserProvider) {
+      if (browserProviders.size > 0) {
         for (const resource of browserResources) {
-          await browserProvider.stop(resource.handle).catch(() => {});
+          await resource.provider.stop(resource.handle).catch(() => {});
         }
-        await browserProvider.shutdown().catch((err) => {
-          logger.warn("browser provider shutdown failed", {
-            provider: browserProvider?.id,
-            error: err instanceof Error ? err.message : String(err),
+        for (const provider of browserProviders.values()) {
+          await provider.shutdown().catch((err) => {
+            logger.warn("browser provider shutdown failed", {
+              provider: provider.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
-        });
+        }
         for (const resource of browserResources) {
           await resource.gateway.close().catch(() => {});
         }
@@ -2168,7 +2210,10 @@ export async function runBrowserConnectOnce(
 
   const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
   const adapter = selectIntegrationRuntimeAdapter();
-  const browserProvider = selectBrowserProvider();
+  const browserProvider = selectBrowserProvider(
+    process.env,
+    spec.browser.providerBinding?.provider,
+  );
   const host = new McpHost();
   const clients: AppstrateMcpClient[] = [];
   const listeners: MitmListenerHandle[] = [];

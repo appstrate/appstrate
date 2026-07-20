@@ -9,6 +9,7 @@ import {
   hasValidCdpCommandEnvelope,
   isReadOnlyDevtoolsDiscoveryRequest,
 } from "@appstrate/core/browser-cdp-policy";
+import type { BrowserProviderProxy } from "@appstrate/core/sidecar-types";
 import type { BrowserHandle, BrowserProvider, SpawnBrowserOptions } from "./browser-provider.ts";
 import { registerBrowserProvider } from "./browser-provider.ts";
 
@@ -85,6 +86,48 @@ function parseCloudCustomProxy(env: NodeJS.ProcessEnv): CloudCustomProxy | undef
     // errors invisible to the cloud browser merely to accommodate a proxy.
     ignoreCertErrors: false,
   };
+}
+
+function parseBindingProxy(
+  value: BrowserProviderProxy | undefined,
+): BrowserProviderProxy | undefined {
+  if (!value) return undefined;
+  if (
+    value.kind === "country" &&
+    typeof value.countryCode === "string" &&
+    /^[a-z]{2}$/.test(value.countryCode)
+  ) {
+    return { kind: "country", countryCode: value.countryCode };
+  }
+  if (
+    value.kind === "custom" &&
+    typeof value.host === "string" &&
+    value.host.length > 0 &&
+    value.host.length <= 253 &&
+    !/[\u0000-\u0020\u007f/?#@]/u.test(value.host) &&
+    Number.isInteger(value.port) &&
+    value.port >= 1 &&
+    value.port <= 65_535 &&
+    value.ignoreCertErrors === false &&
+    ((value.username === undefined && value.password === undefined) ||
+      (typeof value.username === "string" &&
+        value.username.length > 0 &&
+        value.username.length <= 512 &&
+        typeof value.password === "string" &&
+        value.password.length > 0 &&
+        value.password.length <= 4096))
+  ) {
+    return {
+      kind: "custom",
+      host: value.host,
+      port: value.port,
+      ...(value.username !== undefined
+        ? { username: value.username, password: value.password }
+        : {}),
+      ignoreCertErrors: false,
+    };
+  }
+  throw new Error("BROWSER_STATE_CONFLICT: browser binding proxy is invalid");
 }
 
 function isBrowserUseHost(hostname: string): boolean {
@@ -469,6 +512,15 @@ export function createBrowserUseCloudProvider(
     },
     async spawn(options: SpawnBrowserOptions): Promise<BrowserHandle> {
       if (!apiKey) throw new Error("BROWSER_UNAVAILABLE: Browser Use Cloud is not configured");
+      const providerBinding = options.spec.providerBinding;
+      if (providerBinding && providerBinding.provider !== "browser-use-cloud") {
+        throw new Error("BROWSER_STATE_CONFLICT: browser binding targets a different provider");
+      }
+      const effectiveProfileId = providerBinding?.profileRef ?? profileId;
+      const bindingProxy = parseBindingProxy(providerBinding?.proxy);
+      if (effectiveProfileId && !UUID_PATTERN.test(effectiveProfileId)) {
+        throw new Error("BROWSER_STATE_CONFLICT: Browser Use Cloud profile binding is invalid");
+      }
       // Remote browsers do not traverse Appstrate's host egress gateway, so
       // this provider is deliberately limited to reviewed system drivers.
       // Ordinary org-owned browser automation stays on local Docker/process,
@@ -488,8 +540,23 @@ export function createBrowserUseCloudProvider(
         headers: { "Content-Type": "application/json", "X-Browser-Use-API-Key": apiKey },
         body: JSON.stringify({
           timeout: timeoutMinutes,
-          ...(customProxy ? { customProxy } : { proxyCountryCode }),
-          ...(profileId ? { profileId } : {}),
+          ...(bindingProxy?.kind === "custom"
+            ? {
+                customProxy: {
+                  host: bindingProxy.host,
+                  port: bindingProxy.port,
+                  ...(bindingProxy.username !== undefined
+                    ? { username: bindingProxy.username, password: bindingProxy.password }
+                    : {}),
+                  ignoreCertErrors: false,
+                },
+              }
+            : bindingProxy?.kind === "country"
+              ? { proxyCountryCode: bindingProxy.countryCode }
+              : customProxy
+                ? { customProxy }
+                : { proxyCountryCode }),
+          ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
         }),
         signal: AbortSignal.timeout(20_000),
       });

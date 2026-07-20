@@ -3,7 +3,7 @@
 import type { Actor } from "@appstrate/connect";
 import type { BrowserAcquisitionResult, CredentialBundle } from "@appstrate/connect/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import type { BrowserSessionMode } from "@appstrate/core/sidecar-types";
+import type { BrowserProviderBinding, BrowserSessionMode } from "@appstrate/core/sidecar-types";
 
 import { invalidRequest } from "../../lib/errors.ts";
 import type { AppScope } from "../../lib/scope.ts";
@@ -35,6 +35,7 @@ export interface BrowserConnectExecution {
   readonly toolName: string;
   readonly produces: readonly string[];
   readonly sessionMode: Exclude<BrowserSessionMode, "none">;
+  readonly providerBinding?: BrowserProviderBinding;
   /** Transient bootstrap inputs, delivered only through the trusted channel. */
   readonly inputs: Record<string, unknown>;
   /** Streams a provider-hosted live session to the trusted connect UI. */
@@ -146,6 +147,7 @@ export class BrowserConnectStrategy implements IntegrationConnectStrategy {
         toolName: meta.tool,
         produces,
         sessionMode: executor.session_mode,
+        ...(ctx.browserProviderBinding ? { providerBinding: ctx.browserProviderBinding } : {}),
         inputs: credentials,
         ...(ctx.onBrowserInteractionRequired
           ? { onInteractionRequired: ctx.onBrowserInteractionRequired }

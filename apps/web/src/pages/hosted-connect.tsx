@@ -34,9 +34,18 @@ interface ConnectContext {
   auth: IntegrationManifestAuth;
   connection_id: string | null;
   csrf: string | null;
+  companion: {
+    available: true;
+    target_provider: "browser-use-cloud" | "process";
+  } | null;
 }
 
-type Phase = "loading" | "form" | "submitting" | "done" | "error";
+type Phase = "loading" | "form" | "submitting" | "companion" | "done" | "error";
+
+interface CompanionAttempt {
+  endpoint: string;
+  token: string;
+}
 
 function signalSuccess(packageId: string): void {
   const detail = { type: INTEGRATION_MESSAGE_TYPE, ok: true, packageId };
@@ -68,6 +77,7 @@ export function HostedConnectPage() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [interactionUrl, setInteractionUrl] = useState<string | null>(null);
+  const [companionAttempt, setCompanionAttempt] = useState<CompanionAttempt | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
   // error). Shown under the generic body so an invalid/expired link, a removed
   // integration, and a network outage don't all look identical.
@@ -95,6 +105,84 @@ export function HostedConnectPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!companionAttempt || !context) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const response = await fetch(companionAttempt.endpoint, {
+          headers: { Authorization: `Bearer ${companionAttempt.token}` },
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const status = (await response.json()) as {
+          status?: unknown;
+          interaction_url?: unknown;
+          error_code?: unknown;
+        };
+        if (cancelled) return;
+        if (status.status === "complete") {
+          signalSuccess(context.package_id);
+          setPhase("done");
+          setTimeout(() => window.close(), 1200);
+          return;
+        }
+        if (status.status === "failed") {
+          throw new Error(
+            typeof status.error_code === "string"
+              ? status.error_code
+              : "The transferred session could not be verified.",
+          );
+        }
+        if (typeof status.interaction_url === "string") {
+          setInteractionUrl(browserUseInteractionUrl(status.interaction_url));
+        }
+        timer = setTimeout(poll, 1000);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setPhase("form");
+        setCompanionAttempt(null);
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [companionAttempt, context]);
+
+  const startCompanion = async () => {
+    if (!context?.csrf) return;
+    setError(null);
+    setInteractionUrl(null);
+    try {
+      const response = await fetch("/api/integrations/connect/companion/attempts", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", [CSRF_HEADER]: context.csrf },
+        body: JSON.stringify({ target_provider: context.companion?.target_provider }),
+      });
+      if (!response.ok) {
+        const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(problem?.detail ?? `HTTP ${response.status}`);
+      }
+      const result = (await response.json()) as { companion_url?: unknown };
+      if (typeof result.companion_url !== "string") throw new Error("Malformed companion link");
+      const link = new URL(result.companion_url);
+      const endpoint = link.searchParams.get("endpoint");
+      const token = link.searchParams.get("token");
+      if (!endpoint || !token) throw new Error("Malformed companion capability");
+      setCompanionAttempt({ endpoint, token });
+      setPhase("companion");
+      window.location.assign(result.companion_url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setPhase("form");
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,7 +288,7 @@ export function HostedConnectPage() {
           </div>
         )}
 
-        {(phase === "form" || phase === "submitting") && context && (
+        {(phase === "form" || phase === "submitting" || phase === "companion") && context && (
           <>
             <div className="flex items-center gap-3">
               <IntegrationIcon src={context.icon ?? undefined} />
@@ -209,6 +297,29 @@ export function HostedConnectPage() {
               </h1>
             </div>
             <form className="space-y-4" onSubmit={submit}>
+              {context.companion && (
+                <div className="border-border bg-muted/30 space-y-3 rounded-md border p-4">
+                  <p className="text-sm">{t("integration.connect.hosted.companionBody")}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    disabled={phase !== "form"}
+                    onClick={() => void startCompanion()}
+                  >
+                    {phase === "companion"
+                      ? t("integration.connect.hosted.companionWaiting")
+                      : t("integration.connect.hosted.companionOpen")}
+                  </Button>
+                </div>
+              )}
+              {context.companion && (
+                <div className="text-muted-foreground flex items-center gap-3 text-xs">
+                  <span className="bg-border h-px flex-1" />
+                  <span>{t("integration.connect.hosted.companionAlternative")}</span>
+                  <span className="bg-border h-px flex-1" />
+                </div>
+              )}
               <p className="text-muted-foreground text-sm">
                 {t("integration.connect.modal.subtitle", { type: context.auth.type })}
               </p>
@@ -219,7 +330,7 @@ export function HostedConnectPage() {
                   <span>{t("integration.connect.hosted.browserStarting")}</span>
                 </div>
               )}
-              {phase === "submitting" && interactionUrl && (
+              {(phase === "submitting" || phase === "companion") && interactionUrl && (
                 <div className="border-border bg-muted/30 space-y-3 rounded-md border p-4">
                   <p className="text-sm">
                     {t("integration.connect.hosted.browserInteractionBody")}
@@ -235,7 +346,11 @@ export function HostedConnectPage() {
                 </div>
               )}
               {error && <p className="text-sm text-red-400">{error}</p>}
-              <Button type="submit" className="w-full" disabled={phase === "submitting"}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={phase === "submitting" || phase === "companion"}
+              >
                 {t("integration.connect.btn.save")}
               </Button>
             </form>

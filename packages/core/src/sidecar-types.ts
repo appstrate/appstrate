@@ -204,6 +204,33 @@ export type BrowserExecutionPurpose = "automation" | "connection-acquisition";
 export type BrowserExecutionProtocol = "cdp-v1";
 export type BrowserExecutionProfile = "standard";
 export type BrowserSessionMode = "none" | "exportable" | "browser-bound";
+export type BrowserProviderId = "browser-use-cloud" | "process";
+
+export type BrowserProviderProxy =
+  | { readonly kind: "country"; readonly countryCode: string }
+  | {
+      readonly kind: "custom";
+      readonly host: string;
+      readonly port: number;
+      readonly username?: string;
+      readonly password?: string;
+      readonly ignoreCertErrors: false;
+    };
+
+/**
+ * Connection-owned provider identity. This is platform-resolved trusted data,
+ * never package metadata. `profileRef` is opaque to every component except the
+ * selected provider; `bindingId` lets the API serialize profile use before a
+ * sidecar is launched.
+ */
+export interface BrowserProviderBinding {
+  readonly bindingId: string;
+  readonly provider: BrowserProviderId;
+  readonly profileRef: string;
+  readonly stateVersion: number;
+  /** Trusted-sidecar-only routing snapshot; custom proxy credentials are secret. */
+  readonly proxy?: BrowserProviderProxy;
+}
 
 /**
  * Platform-normalized browser capability for one local integration runner.
@@ -225,6 +252,8 @@ export interface BrowserExecutionSpec {
   isolationSlot?: number;
   driverGrantId?: string;
   connectionId?: string;
+  /** Per-connection provider/profile binding; absent keeps operator defaults. */
+  providerBinding?: BrowserProviderBinding;
 }
 
 /**

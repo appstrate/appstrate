@@ -23,6 +23,7 @@
       "type": "custom",
       "delivery": { "env": {} },
       "authorized_uris": [
+        "https://leboncoin.fr/**",
         "https://www.leboncoin.fr/**",
         "https://auth.leboncoin.fr/**",
         "https://api.leboncoin.fr/**"
@@ -59,6 +60,9 @@
             "executor": {
               "kind": "browser",
               "session_mode": "exportable"
+            },
+            "companion": {
+              "start_url": "https://www.leboncoin.fr/compte/part/mes-annonces"
             }
           }
         }

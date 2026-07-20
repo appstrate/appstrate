@@ -83,7 +83,10 @@ try {
       setTimeout(() => reject(new Error("browser worker startup timed out")), 30_000),
     ),
   ]);
-  const python = process.env.APPSTRATE_BROWSER_USE_PYTHON ?? "python3";
+  const localVenvPython = "runtime-pi/runners/browser-use/.venv/bin/python";
+  const python =
+    process.env.APPSTRATE_BROWSER_USE_PYTHON ??
+    ((await Bun.file(localVenvPython).exists()) ? localVenvPython : "python3");
   const smoke = Bun.spawn(
     [
       python,

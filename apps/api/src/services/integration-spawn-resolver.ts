@@ -63,6 +63,7 @@ import { isIntegrationActive, selectAccessibleConnection } from "./integration-c
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import { resolveLocalMcpServerExecution } from "./resolved-mcp-server-execution.ts";
 import { BrowserCapabilityPolicyError } from "./browser-capability-grants.ts";
+import { getBrowserProviderBinding } from "./browser-connection-state.ts";
 import {
   getIntegrationSourceKind,
   getLocalServerRef,
@@ -468,10 +469,14 @@ async function resolveOne(
         `Integration '${integrationId}' selects the browser connect executor but its resolved mcp-server is not an authorized connection-acquisition driver`,
       );
     }
+    const providerBinding = deliveries.connectionId
+      ? await getBrowserProviderBinding(deliveries.connectionId)
+      : null;
     browser = {
       ...browser,
       sessionMode: deliveries.browserConnect.sessionMode,
       connectionId: deliveries.connectionId,
+      ...(providerBinding ? { providerBinding } : {}),
     };
   }
 

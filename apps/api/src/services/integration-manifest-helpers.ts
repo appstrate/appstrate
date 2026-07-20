@@ -168,11 +168,17 @@ export interface AppstrateConnectMeta {
   produces?: string[];
   persist_login_secret?: boolean;
   executor?: BrowserConnectExecutorMeta;
+  /** Local companion entry point for a user-driven first-party login. */
+  companion?: BrowserCompanionMeta;
 }
 
 export interface BrowserConnectExecutorMeta {
   kind: "browser";
   session_mode: "exportable" | "browser-bound";
+}
+
+export interface BrowserCompanionMeta {
+  start_url: string;
 }
 
 const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
@@ -308,6 +314,34 @@ export function getAppstrateConnectMeta(
 ): AppstrateConnectMeta | undefined {
   const meta = connect?._meta?.[APPSTRATE_CONNECT_META_KEY];
   return meta && typeof meta === "object" ? (meta as AppstrateConnectMeta) : undefined;
+}
+
+/**
+ * Return a strictly validated local-companion declaration. Invalid metadata is
+ * treated as absent so a malformed package cannot turn an arbitrary URL into a
+ * privileged browser launch target.
+ */
+export function getBrowserCompanionMeta(
+  connect: AfpsManifestConnect | undefined,
+): BrowserCompanionMeta | undefined {
+  const raw = getAppstrateConnectMeta(connect)?.companion;
+  if (!raw || typeof raw !== "object") return undefined;
+  const startUrl = (raw as { start_url?: unknown }).start_url;
+  if (typeof startUrl !== "string" || startUrl.length > 2048) return undefined;
+  try {
+    const parsed = new URL(startUrl);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.hash !== ""
+    ) {
+      return undefined;
+    }
+    return { start_url: parsed.href };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

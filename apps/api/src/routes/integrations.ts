@@ -41,6 +41,8 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
+import { getEnv } from "@appstrate/env";
+import type { BrowserProviderId } from "@appstrate/core/sidecar-types";
 import {
   handleIntegrationOAuthCallback,
   OAuthCallbackError,
@@ -48,7 +50,7 @@ import {
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, internalError, notFound } from "../lib/errors.ts";
+import { ApiError, invalidRequest, internalError, notFound, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
@@ -84,7 +86,27 @@ import { resolveStrategy } from "../services/connect/registry.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import { createBrowserConnectRunExecutor } from "../services/connect/browser-run-launcher.ts";
 import type { BrowserConnectExecutor } from "../services/connect/browser-strategy.ts";
-import { getBrowserConnectExecutor } from "../services/integration-manifest-helpers.ts";
+import {
+  getAppstrateConnectMeta,
+  getBrowserCompanionMeta,
+  getBrowserConnectExecutor,
+  type AfpsManifestAuth,
+} from "../services/integration-manifest-helpers.ts";
+import {
+  BrowserAttemptUnauthorizedError,
+  createBrowserConnectionAttempt,
+  storeBrowserAttemptHandoff,
+} from "../services/browser-connection-state.ts";
+import {
+  deriveCompanionAllowedOrigins,
+  provisionBrowserConnectionAttempt,
+  readBrowserCompanionContext,
+} from "../services/browser-companion.ts";
+import {
+  createBrowserProfileManager,
+  type BrowserProfileManager,
+} from "../services/browser-profile-manager.ts";
+import { resolveBrowserProviderProxy } from "../services/browser-provider-routing.ts";
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import {
@@ -159,6 +181,17 @@ export const connectSubmitSchema = z.object({
   credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
     message: "credentials must contain at least one field",
   }),
+});
+
+export const companionAttemptSchema = z.object({
+  target_provider: z.enum(["browser-use-cloud", "process"]).optional(),
+});
+
+export const companionHandoffSchema = z.object({
+  browser_state: z
+    .string()
+    .min(1)
+    .max(900 * 1024),
 });
 
 export const setDefaultClientSchema = z.object({
@@ -254,6 +287,32 @@ async function assertConnectionBelongsToActor(
   }
 }
 
+function readCompanionBearer(c: import("hono").Context<AppEnv>): string {
+  const header = c.req.header("Authorization");
+  if (!header?.startsWith("Bearer ")) throw unauthorized("Missing companion token");
+  const token = header.slice("Bearer ".length);
+  if (!token || token.includes(" ")) throw unauthorized("Invalid companion token");
+  return token;
+}
+
+function companionAttemptUrl(attemptId: string, token: string): string {
+  const endpoint = new URL(
+    `/api/integrations/connect/companion/attempts/${encodeURIComponent(attemptId)}`,
+    getEnv().APP_URL,
+  );
+  const url = new URL("appstrate-browser://connect");
+  url.searchParams.set("endpoint", endpoint.href);
+  url.searchParams.set("token", token);
+  return url.href;
+}
+
+function throwCompanionUnauthorized(error: unknown): never {
+  if (error instanceof BrowserAttemptUnauthorizedError) {
+    throw unauthorized("Invalid or expired companion token");
+  }
+  throw error;
+}
+
 // ─────────────────────────────────────────────
 // Router
 // ─────────────────────────────────────────────
@@ -261,10 +320,24 @@ async function assertConnectionBelongsToActor(
 export interface IntegrationsRouterOptions {
   /** Test seam for the browser acquisition substrate; production uses Docker. */
   browserConnectExecutor?: BrowserConnectExecutor;
+  /** Test seam; production allocates an isolated provider profile. */
+  browserProfileManager?: BrowserProfileManager;
+  /** Test seam for observing durable background dispatch. */
+  dispatchBackground?: (job: () => Promise<void>) => void;
+  /** Test seam; production routing is controlled exclusively by the operator. */
+  browserProvider?: BrowserProviderId;
 }
 
 export function createIntegrationsRouter(options: IntegrationsRouterOptions = {}) {
   const router = new Hono<AppEnv>();
+  const browserConnectExecutor =
+    options.browserConnectExecutor ?? createBrowserConnectRunExecutor();
+  const browserCompanionExecutor =
+    options.browserConnectExecutor ?? createBrowserConnectRunExecutor({ timeoutMs: 10 * 60_000 });
+  const browserProfileManager = options.browserProfileManager ?? createBrowserProfileManager();
+  const browserProvider = options.browserProvider ?? getEnv().BROWSER_PROVIDER ?? "process";
+  const dispatchBackground =
+    options.dispatchBackground ?? ((job: () => Promise<void>) => void job());
 
   // ─── List + detail ─────────────────────────
 
@@ -846,6 +919,7 @@ export function createIntegrationsRouter(options: IntegrationsRouterOptions = {}
     if (!claims) throw notFound("No active connect session");
     const scope = scopeFromClaims(claims);
     const { manifest, auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+    const companion = getBrowserCompanionMeta(auth.connect);
     return c.json({
       package_id: claims.package_id,
       auth_key: claims.auth_key,
@@ -854,7 +928,125 @@ export function createIntegrationsRouter(options: IntegrationsRouterOptions = {}
       auth,
       connection_id: claims.connection_id ?? null,
       csrf: claims.csrf ?? null,
+      companion: companion
+        ? {
+            available: true,
+            target_provider: browserProvider,
+          }
+        : null,
     });
+  });
+
+  // Durable hybrid acquisition. The hosted page mints a short-lived bearer,
+  // then a local companion performs the first-party login and submits only a
+  // bounded portable state artifact. Provider revalidation continues in the
+  // background even if either browser window disconnects.
+  router.post("/connect/companion/attempts", async (c) => {
+    const claims = readConnectPageCookie(c);
+    if (!claims) throw notFound("No active connect session");
+    if (!csrfMatches(claims, c.req.header(CONNECT_CSRF_HEADER))) {
+      throw invalidRequest("Invalid or missing CSRF token");
+    }
+    const body = await readJsonBody(c, companionAttemptSchema, { allowEmpty: true });
+    const scope = scopeFromClaims(claims);
+    const actor = actorFromClaims(claims);
+    const { auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+    const typedAuth = auth as AfpsManifestAuth;
+    const meta = getAppstrateConnectMeta(typedAuth.connect);
+    const executor = getBrowserConnectExecutor(typedAuth.connect);
+    const companion = getBrowserCompanionMeta(typedAuth.connect);
+    const allowedOrigins = deriveCompanionAllowedOrigins(typedAuth);
+    if (
+      !meta?.tool ||
+      meta.run_at !== "link" ||
+      !executor ||
+      executor.session_mode !== "exportable" ||
+      !(meta.produces ?? []).includes("browser_state") ||
+      !companion ||
+      !allowedOrigins.includes(new URL(companion.start_url).origin)
+    ) {
+      throw invalidRequest("This integration does not support local browser handoff");
+    }
+    if (body.target_provider !== undefined && body.target_provider !== browserProvider) {
+      throw invalidRequest("Requested browser provider does not match operator policy");
+    }
+    const targetProvider = browserProvider;
+    const proxy = resolveBrowserProviderProxy(targetProvider);
+    const { attempt, token } = await createBrowserConnectionAttempt(
+      {
+        scope,
+        actor,
+        integrationId: claims.package_id,
+        authKey: claims.auth_key,
+        ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        targetProvider,
+        ...(proxy ? { proxy } : {}),
+      },
+      browserProfileManager,
+    );
+    c.header("Cache-Control", "no-store");
+    return c.json(
+      {
+        attempt_id: attempt.id,
+        companion_url: companionAttemptUrl(attempt.id, token),
+        expires_at: attempt.expiresAt.toISOString(),
+      },
+      201,
+    );
+  });
+
+  router.get("/connect/companion/attempts/:attemptId", async (c) => {
+    c.header("Cache-Control", "no-store");
+    try {
+      const context = await readBrowserCompanionContext(
+        c.req.param("attemptId")!,
+        readCompanionBearer(c),
+        { claim: true },
+      );
+      return c.json({
+        attempt_id: context.attempt.id,
+        package_id: context.attempt.integrationId,
+        display_name: context.displayName,
+        icon: context.icon,
+        start_url: context.startUrl,
+        allowed_origins: context.allowedOrigins,
+        target_provider: context.attempt.targetProvider,
+        status: context.attempt.status,
+        interaction_url: context.attempt.interactionUrl,
+        error_code: context.attempt.errorCode,
+        expires_at: context.attempt.expiresAt.toISOString(),
+      });
+    } catch (error) {
+      throwCompanionUnauthorized(error);
+    }
+  });
+
+  router.post("/connect/companion/attempts/:attemptId/handoff", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const attemptId = c.req.param("attemptId")!;
+    const token = readCompanionBearer(c);
+    const body = await readJsonBody(c, companionHandoffSchema);
+    let context: Awaited<ReturnType<typeof readBrowserCompanionContext>>;
+    try {
+      context = await readBrowserCompanionContext(attemptId, token, { claim: true });
+    } catch (error) {
+      throwCompanionUnauthorized(error);
+    }
+    try {
+      const attempt = await storeBrowserAttemptHandoff({
+        attemptId,
+        token,
+        browserState: body.browser_state,
+        allowedOrigins: context.allowedOrigins,
+      });
+      dispatchBackground(() =>
+        provisionBrowserConnectionAttempt(attemptId, browserCompanionExecutor),
+      );
+      return c.json({ attempt_id: attempt.id, status: attempt.status }, 202);
+    } catch (error) {
+      if (error instanceof BrowserAttemptUnauthorizedError) throwCompanionUnauthorized(error);
+      throw invalidRequest(error instanceof Error ? error.message : "Invalid browser state");
+    }
   });
 
   // POST /connect/submit — hosted-form credential submit. Context + actor come
@@ -877,7 +1069,7 @@ export function createIntegrationsRouter(options: IntegrationsRouterOptions = {}
     }
     const strategy = resolveStrategy(auth, {
       connectToolExecutor: createConnectRunExecutor(),
-      browserConnectExecutor: options.browserConnectExecutor ?? createBrowserConnectRunExecutor(),
+      browserConnectExecutor,
     });
     const connectContext = {
       scope,

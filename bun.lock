@@ -87,6 +87,16 @@
         "pino-pretty": "^13.1.3",
       },
     },
+    "apps/browser-companion": {
+      "name": "@appstrate/browser-companion",
+      "version": "0.1.0",
+      "bin": {
+        "appstrate-browser": "./src/cli.ts",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+    },
     "apps/cli": {
       "name": "appstrate",
       "version": "0.0.0",
@@ -545,6 +555,8 @@
     "@appstrate/afps-shared": ["@appstrate/afps-shared@workspace:packages/afps-shared"],
 
     "@appstrate/api": ["@appstrate/api@workspace:apps/api"],
+
+    "@appstrate/browser-companion": ["@appstrate/browser-companion@workspace:apps/browser-companion"],
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 

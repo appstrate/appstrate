@@ -29,4 +29,17 @@ export const securitySchemes = {
     scheme: "bearer",
     description: "Run token for container-to-host internal routes.",
   },
+  connectPageCookie: {
+    type: "apiKey" as const,
+    in: "cookie" as const,
+    name: "appstrate_connect",
+    description:
+      "Short-lived hosted-connect page capability. Mutating requests also require the x-connect-csrf header.",
+  },
+  companionBearer: {
+    type: "http" as const,
+    scheme: "bearer",
+    description:
+      "Short-lived, one-attempt browser companion capability. Only its SHA-256 hash is persisted.",
+  },
 } as const;

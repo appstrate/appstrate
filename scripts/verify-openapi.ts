@@ -127,6 +127,9 @@ const expectedEndpoints = [
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/session",
   "GET /api/integrations/connect/start",
   "GET /api/integrations/connect/context",
+  "POST /api/integrations/connect/companion/attempts",
+  "GET /api/integrations/connect/companion/attempts/{attemptId}",
+  "POST /api/integrations/connect/companion/attempts/{attemptId}/handoff",
   "POST /api/integrations/connect/submit",
   "GET /api/integrations/{packageId}/connections",
   "GET /api/integrations/{packageId}/consuming-agents",
@@ -657,8 +660,7 @@ function getOpenApiRequestBodySchema(
   if (!operation?.requestBody) return undefined;
 
   let schema = operation.requestBody?.content?.["application/json"]?.schema as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
 
   // Resolve top-level $ref
   if (schema && typeof schema.$ref === "string") {

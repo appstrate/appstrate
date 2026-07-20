@@ -155,7 +155,11 @@ export async function buildBrowserConnectSpec(
     spawnEnv: {},
     toolAllowlist: [],
     hiddenTools: [execution.toolName],
-    browser: { ...server.browser, isolationSlot: 0 },
+    browser: {
+      ...server.browser,
+      isolationSlot: 0,
+      ...(execution.providerBinding ? { providerBinding: execution.providerBinding } : {}),
+    },
     browserConnect: {
       toolName: execution.toolName,
       produces: [...execution.produces],

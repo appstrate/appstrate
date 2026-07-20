@@ -285,6 +285,7 @@ export function connectToolBlock(opts: {
   persistLoginSecret?: boolean;
   reauthOn?: number[];
   browserExecutor?: { sessionMode: "exportable" | "browser-bound" };
+  companionStartUrl?: string;
 }): Record<string, unknown> {
   const meta: Record<string, unknown> = { tool: opts.tool };
   if (opts.runAt !== undefined) meta.run_at = opts.runAt;
@@ -293,6 +294,9 @@ export function connectToolBlock(opts: {
   if (opts.reauthOn !== undefined) meta.reauth_on = opts.reauthOn;
   if (opts.browserExecutor !== undefined) {
     meta.executor = { kind: "browser", session_mode: opts.browserExecutor.sessionMode };
+  }
+  if (opts.companionStartUrl !== undefined) {
+    meta.companion = { start_url: opts.companionStartUrl };
   }
   return { tool: {}, _meta: { "dev.appstrate/connect": meta } };
 }
