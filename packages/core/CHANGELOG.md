@@ -33,6 +33,12 @@ of a provider-neutral bearer-swap.
   command envelopes, nested-channel denial, and page ceilings across local and
   cloud browser brokers.
 
+- **`ModuleInitContext.getOrgName?`** — optional query helper resolving an
+  organization's display name (`(orgId) => Promise<string | null>`, null when
+  the org no longer exists). Lets modules label org-scoped outbound messages
+  (e.g. transactional emails) with the organization concerned. Optional so
+  modules degrade gracefully on older platforms that don't inject it.
+
 - **`api_upload` is a first-class catalog member (#881)** —
   `resolveIntegrationToolCatalog` now appends the `api_upload` companion after
   each `api_call` whose auth declares `_meta["dev.appstrate/api"].auths.<key>

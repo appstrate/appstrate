@@ -942,6 +942,12 @@ export interface ModuleInitContext {
   /** Query helper: get org admin emails. */
   getOrgAdminEmails: (orgId: string) => Promise<string[]>;
   /**
+   * Query helper: resolve an organization's display name, or null when the
+   * org no longer exists. Optional — older platforms don't provide it, so
+   * modules must degrade gracefully when absent.
+   */
+  getOrgName?: (orgId: string) => Promise<string | null>;
+  /**
    * Typed platform capabilities injected at init. Modules capture this
    * reference and consume services through it without importing
    * apps/api internals.
