@@ -4,7 +4,6 @@ import AppKit
 import Carbon
 import Foundation
 
-@main
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launched = false
     private var workerProcess: Process?
@@ -24,8 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launchWorker(raw)
             return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            if self?.launched == false { NSApp.terminate(nil) }
+        // Keep the delegate alive until the one-shot registration launch has
+        // either received a URL or terminated. NSApplication's delegate does
+        // not provide the ownership guarantee this callback needs.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+            if launched == false { NSApp.terminate(nil) }
         }
     }
 
@@ -54,7 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let errors = Pipe()
         process.standardInput = input
         process.standardError = errors
-        process.terminationHandler = { [weak self] completed in
+        // Retain the delegate for the worker lifetime. The cycle is broken by
+        // clearing `workerProcess` after termination.
+        process.terminationHandler = { [self] completed in
             let errorData = errors.fileHandleForReading.readDataToEndOfFile()
             let detail = String(data: errorData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -67,13 +71,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         : "Le compagnon navigateur s’est arrêté de façon inattendue."
                     alert.runModal()
                 }
-                self?.workerProcess = nil
+                self.workerProcess = nil
                 NSApp.terminate(nil)
             }
         }
         do {
             workerProcess = process
             try process.run()
+            // `Pipe` retains both file handles in this parent process. Close
+            // our copy of the write end after the child has inherited it;
+            // otherwise `readDataToEndOfFile()` in the termination handler
+            // never observes EOF when the worker exits and the background app
+            // remains stuck forever without surfacing the worker error.
+            try? errors.fileHandleForWriting.close()
             if let data = capability.data(using: .utf8) {
                 input.fileHandleForWriting.write(data)
             }
@@ -85,6 +95,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.informativeText = error.localizedDescription
             alert.runModal()
             NSApp.terminate(nil)
+        }
+    }
+}
+
+@main
+private enum AppstrateBrowserMain {
+    static func main() {
+        let application = NSApplication.shared
+        let delegate = AppDelegate()
+        application.delegate = delegate
+        withExtendedLifetime(delegate) {
+            application.run()
         }
     }
 }

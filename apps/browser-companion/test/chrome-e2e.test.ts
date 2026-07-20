@@ -35,7 +35,6 @@ describe("real Chrome portable-state smoke", () => {
     });
     origin = server.url.origin;
     chrome = await launchLocalChrome([server.url.href], { headless: true });
-    await Bun.sleep(500);
   });
 
   afterAll(async () => {
@@ -48,8 +47,7 @@ describe("real Chrome portable-state smoke", () => {
       console.warn(`Chrome smoke skipped: ${unavailableReason ?? "unavailable"}`);
       return;
     }
-    const encoded = await capturePortableBrowserState(chrome.debuggingOrigin, [origin]);
-    const state = JSON.parse(encoded) as {
+    let state: {
       version: number;
       cookies: Array<{ name: string; value: string; domain: string }>;
       origins: Array<{
@@ -57,6 +55,22 @@ describe("real Chrome portable-state smoke", () => {
         localStorage: Array<{ name: string; value: string }>;
       }>;
     };
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      const encoded = await capturePortableBrowserState(chrome.debuggingOrigin, [origin]);
+      state = JSON.parse(encoded) as typeof state;
+      if (
+        state.origins.some((entry) =>
+          entry.localStorage.some(
+            (item) => item.name === "appstrate-smoke" && item.value === "present",
+          ),
+        ) ||
+        Date.now() >= deadline
+      ) {
+        break;
+      }
+      await Bun.sleep(100);
+    }
     expect(state.version).toBe(1);
     expect(state.cookies).toContainEqual(
       expect.objectContaining({ name: "appstrate_smoke", value: "cookie-value" }),

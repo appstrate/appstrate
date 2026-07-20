@@ -61,7 +61,11 @@ async function readTargetState(target: CdpTarget): Promise<{
     const [cookieResult, storageResult] = await Promise.all([
       client.send<{ cookies?: CdpCookie[] }>("Network.getCookies", { urls: [origin] }),
       client.send<{ result?: { value?: unknown } }>("Runtime.evaluate", {
-        expression: "Object.entries(localStorage).map(([name,value])=>({name,value}))",
+        // Storage's named properties are not consistently enumerable across
+        // Chromium revisions. Use the standard Storage API instead of
+        // Object.entries() so persisted login state is not silently dropped.
+        expression:
+          "Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).filter(name=>name!==null).map(name=>({name,value:localStorage.getItem(name)}))",
         returnByValue: true,
         awaitPromise: true,
       }),
