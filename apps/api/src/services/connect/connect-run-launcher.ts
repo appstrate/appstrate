@@ -40,7 +40,7 @@
 import { createDecipheriv, randomBytes } from "node:crypto";
 
 import { logger } from "../../lib/logger.ts";
-import { signRunToken } from "../../lib/run-token.ts";
+import { signConnectWorkloadToken } from "../../lib/connect-workload-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import {
@@ -327,7 +327,6 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     }
     const orch = this.orchestrator ?? getOrchestrator();
     const connectId = `connect_${randomBytes(12).toString("hex")}`;
-    const runToken = signRunToken(connectId);
     // Per-connect-run ephemeral key for the result channel. The sidecar
     // encrypts the captured credential bundle with it (AES-256-GCM) before
     // writing the APPSTRATE_CONNECT_RESULT sentinel, so the plaintext credential
@@ -336,6 +335,20 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     const resultKey = randomBytes(32);
 
     const spec = await buildConnectLoginSpec(execution, this.resolveMcpServer);
+    const server = spec.manifest.server;
+    if (!server?.packageId) {
+      throw new Error("connect-run: resolved mcp-server package id is missing");
+    }
+    const runToken = signConnectWorkloadToken({
+      connectId,
+      orgId: execution.scope.orgId,
+      applicationId: execution.scope.applicationId,
+      integrationId: execution.integrationId,
+      mcpServerId: server.packageId,
+      mcpServerVersion: server.version ?? null,
+      mcpServerSource: server.version ? "version" : "system",
+      ttlMs: Math.min(this.timeoutMs + 30_000, 5 * 60_000),
+    });
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;
 

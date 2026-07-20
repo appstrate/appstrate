@@ -14,7 +14,7 @@ import { getEnv } from "@appstrate/env";
 
 import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
 import { logger } from "../../lib/logger.ts";
-import { signRunToken } from "../../lib/run-token.ts";
+import { signConnectWorkloadToken } from "../../lib/connect-workload-token.ts";
 import {
   hasExecutionRequirements,
   resolveBrowserExecutionRequirements,
@@ -180,8 +180,21 @@ class BrowserConnectRunExecutor implements BrowserConnectExecutor {
     const orchestrator = this.options.orchestrator ?? (await resolveConnectOrchestrator());
     const connectId = `browser_connect_${randomBytes(12).toString("hex")}`;
     const resultKey = randomBytes(32);
-    const runToken = signRunToken(connectId);
     const spec = await buildBrowserConnectSpec(execution, this.options.resolveMcpServer);
+    const server = spec.manifest.server;
+    if (!server?.packageId) {
+      throw new Error("browser-connect: resolved mcp-server package id is missing");
+    }
+    const runToken = signConnectWorkloadToken({
+      connectId,
+      orgId: execution.scope.orgId,
+      applicationId: execution.scope.applicationId,
+      integrationId: execution.integrationId,
+      mcpServerId: server.packageId,
+      mcpServerVersion: server.version ?? null,
+      mcpServerSource: server.version ? "version" : "system",
+      ttlMs: Math.min(this.timeoutMs + 30_000, 5 * 60_000),
+    });
     const requirements = resolveBrowserExecutionRequirements([spec]);
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;

@@ -40,4 +40,13 @@ describe("browser capability error mapping", () => {
       title: "Browser Resource Limit",
     });
   });
+
+  it("distinguishes a driver bundle authorization failure from backend incapability", () => {
+    expect(toBrowserCapabilityApiError(new Error("BROWSER_BUNDLE_UNAVAILABLE"))).toMatchObject({
+      status: 503,
+      code: "browser_bundle_unavailable",
+      title: "Browser Driver Bundle Unavailable",
+      message: "The trusted browser driver bundle could not be authorized or loaded.",
+    });
+  });
 });

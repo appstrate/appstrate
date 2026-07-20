@@ -106,6 +106,9 @@ describe("browser connect private result parser", () => {
     expect(browserSafeErrorCode(new Error("BROWSER_RESOURCE_LIMIT: host slots occupied"))).toBe(
       "BROWSER_RESOURCE_LIMIT",
     );
+    expect(browserSafeErrorCode(new Error("BROWSER_BUNDLE_UNAVAILABLE: HTTP 401"))).toBe(
+      "BROWSER_BUNDLE_UNAVAILABLE",
+    );
     expect(browserSafeErrorCode(new Error("driver failed with password=hunter2"))).toBe(
       "BROWSER_UNAVAILABLE",
     );

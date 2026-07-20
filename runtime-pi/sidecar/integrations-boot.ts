@@ -969,11 +969,18 @@ async function spawnAndConnectLocalIntegration(params: {
   // if a spec somehow omits it (defensive).
   params.onStage?.("bundle-fetch");
   const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
-  const bytes = await fetchBundleBytes(
-    serverPackageId,
-    spec.manifest.server?.version,
-    bundleFetchOpts,
-  );
+  let bytes: Uint8Array;
+  try {
+    bytes = await fetchBundleBytes(serverPackageId, spec.manifest.server?.version, bundleFetchOpts);
+  } catch (error) {
+    // Browser connect errors cross a public API boundary and are reduced to a
+    // safe canonical code. Preserve the failing stage without forwarding the
+    // platform response body, which may contain deployment detail.
+    if (spec.browser) {
+      throw new Error("BROWSER_BUNDLE_UNAVAILABLE", { cause: error });
+    }
+    throw error;
+  }
   params.onStage?.("bundle-extract");
   const root = await extractBundle(bytes, spec.namespace);
 
@@ -2040,7 +2047,11 @@ export async function runConnectOnce(
       integrationId: spec.integrationId,
       platformApiUrl: bundleFetchOpts.platformApiUrl,
       runToken: bundleFetchOpts.runToken,
-      initialPayload: await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts),
+      // A link-time connect workload is intentionally authorized for only its
+      // exact MCP bundle. It must never inherit the broader run-token ability
+      // to read stored integration credentials. The login hook starts from an
+      // empty source and opens a bounded transient-input window below.
+      initialPayload: { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} },
     });
 
     // Same spawn→connect→register pipeline the agent-run path uses, but

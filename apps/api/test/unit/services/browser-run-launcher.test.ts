@@ -12,6 +12,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import type { McpServerManifest } from "@appstrate/core/mcp-server";
 import { _resetCacheForTesting } from "@appstrate/env";
+import { parseConnectWorkloadToken } from "../../../src/lib/connect-workload-token.ts";
 
 import {
   initBrowserCapabilityGrants,
@@ -244,6 +245,15 @@ describe("browser connect run executor", () => {
       "canary-secret",
     );
     expect(sidecarSpecs[0]?.connectLoginSpec).toBeUndefined();
+    expect(parseConnectWorkloadToken(sidecarSpecs[0]!.runToken)).toMatchObject({
+      audience: "internal:mcp-server-bundle",
+      orgId: "org-1",
+      applicationId: "app-1",
+      integrationId: "@scope/browser-integration",
+      mcpServerId: "@scope/browser-driver",
+      mcpServerVersion: null,
+      mcpServerSource: "system",
+    });
     expect(removedWorkload).toBe(1);
     expect(removedBoundary).toBe(1);
   });

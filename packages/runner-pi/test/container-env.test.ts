@@ -331,6 +331,10 @@ describe("pickOperatorSidecarEnv", () => {
     const originals: Record<string, string | undefined> = {};
     for (const key of SIDECAR_OPERATOR_ENV_KEYS) originals[key] = process.env[key];
     try {
+      // Tests run with the developer/operator .env loaded, which may set any
+      // of the browser/proxy knobs in the full allowlist. Start from a truly
+      // empty allowlisted environment before applying this case's fixtures.
+      for (const key of SIDECAR_OPERATOR_ENV_KEYS) delete process.env[key];
       for (const [k, v] of Object.entries(values)) {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;

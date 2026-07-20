@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { _resetCacheForTesting } from "@appstrate/env";
+import { parseConnectWorkloadToken } from "../../../src/lib/connect-workload-token.ts";
 import {
   registerOrchestrator,
   _resetOrchestratorRegistryForTesting,
@@ -371,7 +372,15 @@ describe("createConnectRunExecutor.run", () => {
     expect(spec.connectLoginSpec).toBeDefined();
     expect(spec.connectLoginSpec!.connectLogin!.toolName).toBe("login");
     expect(spec.integrations?.length).toBe(1);
-    expect(spec.runToken).toContain(".");
+    expect(parseConnectWorkloadToken(spec.runToken)).toMatchObject({
+      audience: "internal:mcp-server-bundle",
+      orgId: "o",
+      applicationId: "a",
+      integrationId: "@scope/connect-it",
+      mcpServerId: "@scope/connect-server",
+      mcpServerVersion: "1.2.3",
+      mcpServerSource: "version",
+    });
     // Teardown ran.
     expect(calls.removedWorkloads).toBe(1);
     expect(calls.removedBoundaries).toBe(1);

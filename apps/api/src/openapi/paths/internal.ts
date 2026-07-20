@@ -310,7 +310,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Fetch the AFPS bundle bytes for a referenced mcp-server package",
       description:
-        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read; absent, the latest non-yanked version is served (back-compat).",
+        "Container-to-host only. Auth via a Bearer run token, or a short-lived sidecar-only connect capability bound to one exact MCP package/source/version and application integration. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. For normal runs it verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server. Connect capabilities have no access to credentials or other internal run surfaces. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read; absent, the latest non-yanked version is served (back-compat).",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -337,7 +337,7 @@ export const internalPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
           description:
-            "Agent does not reference this mcp-server through an installed integration, or no published version exists.",
+            "The run does not reference this mcp-server through an installed integration, the connect capability scope is no longer active, or no authorized bundle version exists.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

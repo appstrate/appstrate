@@ -26,6 +26,11 @@ export function toBrowserCapabilityApiError(error: unknown): ApiError | null {
       title: "Browser Unavailable",
       detail: "The selected backend could not provide the required browser capability.",
     },
+    BROWSER_BUNDLE_UNAVAILABLE: {
+      status: 503,
+      title: "Browser Driver Bundle Unavailable",
+      detail: "The trusted browser driver bundle could not be authorized or loaded.",
+    },
     BROWSER_UNSUPPORTED_REVISION: {
       status: 422,
       title: "Browser Revision Unsupported",

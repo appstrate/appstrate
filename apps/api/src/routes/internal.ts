@@ -5,15 +5,26 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, packageVersions, runs } from "@appstrate/db/schema";
+import {
+  applications,
+  modelProviderCredentials,
+  packageVersions,
+  runs,
+} from "@appstrate/db/schema";
 import { sql } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
+import {
+  isConnectWorkloadToken,
+  parseConnectWorkloadToken,
+  type ConnectWorkloadClaims,
+} from "../lib/connect-workload-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import {
   getRecentRuns,
@@ -47,7 +58,10 @@ import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
 } from "../services/integration-credentials-resolver.ts";
-import { readIntegrationManifestForRun } from "../services/integration-service.ts";
+import {
+  readIntegrationManifestForRun,
+  resolveMcpServerForSpawn,
+} from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 import { isIntegrationActive } from "../services/integration-connections.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -407,19 +421,27 @@ export function createInternalRouter() {
   // server code). In AFPS a local-source integration references a SEPARATE
   // mcp-server package via `source.server.name`; the sidecar fetches that
   // package's bundle here before spawning a runner. Authorised by the same
-  // Bearer run-token as the credentials surface; additionally verifies the
-  // run's agent declares an installed integration that references this
-  // mcp-server, so a leaked run token can't enumerate arbitrary server source.
+  // Normal runs use the same Bearer run-token as the credentials surface and
+  // must declare an installed integration referencing the server. Sidecar-only
+  // connect workloads have no `runs` row; they use a short-lived capability
+  // token bound to this exact package + version. That token is rejected by all
+  // other internal endpoints and cannot read credentials or run state.
   router.get(`/mcp-server-bundle/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
-    const { runId, run } = await verifyRunToken(c);
     const mcpServerId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    await assertAgentReferencesMcpServer(mcpServerId, run, runId);
+    const requestedVersion = c.req.query("version")?.trim() || null;
+    const authorization = await authorizeMcpServerBundleRequest(c, mcpServerId, requestedVersion);
+    const requestId =
+      authorization.kind === "run" ? authorization.runId : authorization.claims.connectId;
 
-    // Resolve bytes: system package from in-memory map, local from S3
-    const sys = getSystemPackages().get(mcpServerId);
+    // A connect capability pins package provenance. Never let a `version`
+    // grant fall through to a newly-added system package (or vice versa).
+    const sys =
+      authorization.kind === "connect" && authorization.claims.mcpServerSource !== "system"
+        ? undefined
+        : getSystemPackages().get(mcpServerId);
     if (sys?.zipBuffer) {
       logger.info("mcp-server bundle delivered (system)", {
-        runId,
+        requestId,
         mcpServerId,
         bytes: sys.zipBuffer.length,
       });
@@ -435,7 +457,29 @@ export function createInternalRouter() {
     // by exact match (yank-visibility already applied upstream). Falling back to
     // "latest non-yanked" only when the query is absent keeps older sidecars
     // (and the pre-#588 path) working.
-    const requestedVersion = c.req.query("version")?.trim();
+    if (authorization.kind === "connect" && authorization.claims.mcpServerSource === "system") {
+      throw notFound(`System bundle bytes unavailable for '${mcpServerId}'`);
+    }
+
+    // Re-resolve a connect grant under its signed org boundary before reading
+    // storage. This proves the pinned package is still an org-visible
+    // mcp-server and that source/version provenance did not change.
+    if (authorization.kind === "connect") {
+      const claims = authorization.claims;
+      const resolution = await resolveMcpServerForSpawn(
+        mcpServerId,
+        claims.orgId,
+        claims.mcpServerVersion,
+      );
+      if (
+        !resolution.ok ||
+        resolution.source !== claims.mcpServerSource ||
+        resolution.version !== claims.mcpServerVersion
+      ) {
+        throw notFound(`Authorized bundle '${mcpServerId}' is no longer resolvable`);
+      }
+    }
+
     let resolved: { version: string; integrity: string } | undefined;
     if (requestedVersion) {
       [resolved] = await db
@@ -469,7 +513,7 @@ export function createInternalRouter() {
     const bytes = await downloadVersionZip(mcpServerId, resolved.version, resolved.integrity);
     if (!bytes) throw notFound(`Bundle bytes unavailable for '${mcpServerId}'`);
     logger.info("mcp-server bundle delivered (storage)", {
-      runId,
+      requestId,
       mcpServerId,
       version: resolved.version,
       pinned: Boolean(requestedVersion),
@@ -477,6 +521,55 @@ export function createInternalRouter() {
     });
     return new Response(bytes, { status: 200, headers: { "Content-Type": "application/zip" } });
   });
+
+  type McpBundleAuthorization =
+    { kind: "run"; runId: string } | { kind: "connect"; claims: ConnectWorkloadClaims };
+
+  async function authorizeMcpServerBundleRequest(
+    c: Context,
+    mcpServerId: string,
+    requestedVersion: string | null,
+  ): Promise<McpBundleAuthorization> {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) throw unauthorized("Missing run token");
+    const rawToken = authHeader.slice(7);
+    if (!rawToken) throw unauthorized("Invalid run token");
+
+    if (isConnectWorkloadToken(rawToken)) {
+      const claims = parseConnectWorkloadToken(rawToken);
+      if (!claims) throw unauthorized("Invalid or expired connect workload token");
+      if (claims.mcpServerId !== mcpServerId || claims.mcpServerVersion !== requestedVersion) {
+        throw forbidden("Connect workload token does not authorize this MCP bundle");
+      }
+      await assertConnectWorkloadContext(claims);
+      return { kind: "connect", claims };
+    }
+
+    const { runId, run } = await verifyRunToken(c);
+    await assertAgentReferencesMcpServer(mcpServerId, run, runId);
+    return { kind: "run", runId };
+  }
+
+  async function assertConnectWorkloadContext(claims: ConnectWorkloadClaims): Promise<void> {
+    const [[application], integration] = await Promise.all([
+      db
+        .select({ id: applications.id })
+        .from(applications)
+        .where(and(eq(applications.id, claims.applicationId), eq(applications.orgId, claims.orgId)))
+        .limit(1),
+      getPackage(claims.integrationId, claims.orgId),
+    ]);
+    if (!application || !integration) {
+      throw notFound("Connect workload scope is no longer available");
+    }
+    if (!(await isIntegrationActive(claims.integrationId, claims.applicationId))) {
+      throw notFound("Connect workload integration is no longer active");
+    }
+    const ref = getLocalServerRef(integration.manifest as unknown as IntegrationManifest);
+    if (ref?.name !== claims.mcpServerId) {
+      throw forbidden("Connect workload integration no longer references the authorized bundle");
+    }
+  }
 
   /**
    * Authorise an mcp-server bundle fetch: the running agent must declare at
