@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 import { capturePortableBrowserState } from "../src/browser-state.ts";
+import { CdpClient } from "../src/cdp.ts";
 import { findChromeExecutable, launchLocalChrome, type LocalChrome } from "../src/chrome.ts";
 
 let server: ReturnType<typeof Bun.serve> | undefined;
@@ -79,5 +80,36 @@ describe("real Chrome portable-state smoke", () => {
       origin,
       localStorage: [{ name: "appstrate-smoke", value: "present" }],
     });
+  });
+
+  it("does not advertise WebDriver in an interactive companion session", async () => {
+    if (process.env.APPSTRATE_BROWSER_HEADFUL_SMOKE !== "1") {
+      console.warn("Interactive Chrome smoke skipped; set APPSTRATE_BROWSER_HEADFUL_SMOKE=1");
+      return;
+    }
+    const interactiveChrome = await launchLocalChrome(["about:blank"]);
+    try {
+      const targetsResponse = await fetch(`${interactiveChrome.debuggingOrigin}/json/list`);
+      const targets = (await targetsResponse.json()) as Array<{
+        type?: string;
+        webSocketDebuggerUrl?: string;
+      }>;
+      const page = targets.find(
+        (target) => target.type === "page" && target.webSocketDebuggerUrl !== undefined,
+      );
+      if (!page?.webSocketDebuggerUrl) throw new Error("Interactive Chrome page target is missing");
+      const client = await CdpClient.connect(page.webSocketDebuggerUrl);
+      try {
+        const result = await client.send<{ result?: { value?: unknown } }>("Runtime.evaluate", {
+          expression: "navigator.webdriver",
+          returnByValue: true,
+        });
+        expect(result.result?.value).toBe(false);
+      } finally {
+        client.close();
+      }
+    } finally {
+      await interactiveChrome.close();
+    }
   });
 });

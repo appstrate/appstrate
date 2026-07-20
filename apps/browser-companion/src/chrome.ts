@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,16 +30,39 @@ export async function findChromeExecutable(): Promise<string> {
   throw new Error("Google Chrome or Chromium is required");
 }
 
-async function waitForDebuggingPort(userDataDir: string): Promise<number> {
-  const file = join(userDataDir, "DevToolsActivePort");
+async function reserveDebuggingPort(): Promise<number> {
+  const server = createServer();
+  server.unref();
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    server.once("error", onError);
+    server.listen({ host: "127.0.0.1", port: 0, exclusive: true }, () => {
+      server.off("error", onError);
+      resolve();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Could not reserve a local Chrome debugging port");
+  }
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+  return address.port;
+}
+
+async function waitForDebuggingPort(port: number): Promise<void> {
+  const origin = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     try {
-      const [rawPort] = (await readFile(file, "utf8")).split("\n");
-      const port = Number(rawPort);
-      if (Number.isInteger(port) && port > 0 && port < 65_536) return port;
+      const response = await fetch(`${origin}/json/version`, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (response.ok) return;
     } catch {
-      // Chrome creates the file after its browser process starts listening.
+      // Chrome has not started listening yet.
     }
     await Bun.sleep(100);
   }
@@ -55,12 +79,17 @@ export async function launchLocalChrome(
   options: { headless?: boolean } = {},
 ): Promise<LocalChrome> {
   const executable = await findChromeExecutable();
+  const debuggingPort = await reserveDebuggingPort();
   const userDataDir = await mkdtemp(join(tmpdir(), "appstrate-browser-"));
   const processHandle = Bun.spawn(
     [
       executable,
       `--user-data-dir=${userDataDir}`,
-      "--remote-debugging-port=0",
+      // Port zero makes Chromium expose navigator.webdriver=true even in a
+      // user-driven, headful session. Reserve a random non-zero loopback port
+      // so WebDriver state accurately reflects that no automation driver is
+      // controlling the interactive login.
+      `--remote-debugging-port=${debuggingPort}`,
       "--remote-debugging-address=127.0.0.1",
       "--no-first-run",
       "--no-default-browser-check",
@@ -72,9 +101,9 @@ export async function launchLocalChrome(
     { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
   );
   try {
-    const port = await waitForDebuggingPort(userDataDir);
+    await waitForDebuggingPort(debuggingPort);
     return {
-      debuggingOrigin: `http://127.0.0.1:${port}`,
+      debuggingOrigin: `http://127.0.0.1:${debuggingPort}`,
       async close() {
         processHandle.kill();
         await processHandle.exited.catch(() => undefined);
