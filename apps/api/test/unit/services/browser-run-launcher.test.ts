@@ -3,7 +3,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { createCipheriv, randomBytes } from "node:crypto";
 
-import type { BrowserAcquisitionResult } from "@appstrate/connect/connect";
 import type {
   IsolationBoundary,
   RunOrchestrator,
@@ -113,7 +112,7 @@ const resolveDriver = async () => ({
   source: "system" as const,
 });
 
-function encryptedResult(result: BrowserAcquisitionResult, key: Buffer): string {
+function encryptedResult(result: unknown, key: Buffer): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const ciphertext = Buffer.concat([cipher.update(JSON.stringify(result)), cipher.final()]);
@@ -183,6 +182,8 @@ describe("browser connect run executor", () => {
     let removedWorkload = 0;
     let removedBoundary = 0;
     let resultLine = "";
+    let interactionLine = "";
+    const forwardedInteractions: string[] = [];
     const boundary: IsolationBoundary = {
       id: "boundary-1",
       name: "boundary-1",
@@ -204,6 +205,9 @@ describe("browser connect run executor", () => {
       createSidecar: async (_runId, _boundary, spec) => {
         sidecarSpecs.push(spec);
         const key = Buffer.from(spec.connectResultKey!, "base64");
+        interactionLine =
+          "APPSTRATE_BROWSER_INTERACTION:" +
+          encryptedResult({ url: "https://live.browser-use.com/live/session-id" }, key);
         resultLine =
           "APPSTRATE_CONNECT_RESULT:" +
           encryptedResult(
@@ -218,6 +222,7 @@ describe("browser connect run executor", () => {
       startWorkload: async () => {},
       waitForExit: async () => 0,
       streamLogs: async function* () {
+        yield interactionLine;
         yield resultLine;
       },
       stopWorkload: async () => {},
@@ -234,7 +239,12 @@ describe("browser connect run executor", () => {
       resolveMcpServer: resolveDriver,
       timeoutMs: 1_000,
     });
-    const result = await executor.run(execution());
+    const result = await executor.run({
+      ...execution(),
+      onInteractionRequired: ({ url }) => {
+        forwardedInteractions.push(url);
+      },
+    });
     expect(result.proof).toEqual({ kind: "account-page", succeeded: true });
     expect(boundaries[0]?.opts).toMatchObject({
       requirements: {
@@ -256,5 +266,6 @@ describe("browser connect run executor", () => {
     });
     expect(removedWorkload).toBe(1);
     expect(removedBoundary).toBe(1);
+    expect(forwardedInteractions).toEqual(["https://live.browser-use.com/live/session-id"]);
   });
 });

@@ -28,6 +28,28 @@ function isBrowserUseHost(hostname: string): boolean {
   return host === "browser-use.com" || host.endsWith(".browser-use.com");
 }
 
+function parseCloudInteractionUrl(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || value.length === 0 || value.length > 4096) {
+    throw new Error("BROWSER_UNAVAILABLE: Browser Use Cloud returned a malformed live URL");
+  }
+  let live: URL;
+  try {
+    live = new URL(value);
+  } catch {
+    throw new Error("BROWSER_UNAVAILABLE: Browser Use Cloud returned a malformed live URL");
+  }
+  if (
+    live.protocol !== "https:" ||
+    live.username ||
+    live.password ||
+    !isBrowserUseHost(live.hostname)
+  ) {
+    throw new Error("BROWSER_UNAVAILABLE: Browser Use Cloud returned an unsafe live URL");
+  }
+  return live.toString();
+}
+
 interface BrokerData {
   upstream?: WebSocket;
   pending: Array<string | Buffer>;
@@ -125,6 +147,10 @@ export async function createBrowserUseCloudBroker(input: {
           // file-input paths. Keep search/login available, but make upload
           // support explicit so publication drivers can fail before submit.
           fileUploadMode: "unsupported",
+          // The managed browser emits BrowserUse.captchaSolver* CDP events.
+          // The Python bridge enables its watchdog only when this trusted
+          // sidecar-owned broker advertises the capability.
+          captchaSolver: true,
         });
       }
       if (url.pathname === "/json/version" || url.pathname === "/json/version/") {
@@ -295,7 +321,7 @@ function parseCloudSession(value: unknown): CloudSession {
   return {
     id: raw.id,
     cdpUrl: raw.cdpUrl,
-    liveUrl: typeof raw.liveUrl === "string" ? raw.liveUrl : null,
+    liveUrl: parseCloudInteractionUrl(raw.liveUrl),
   };
 }
 
@@ -430,6 +456,7 @@ export function createBrowserUseCloudProvider(
           id: session.id,
           endpoint: broker.endpoint,
           authToken,
+          interactionUrl: session.liveUrl,
           workerBuildId: "browser-use-cloud",
           protocolVersion: 1,
           browserRevision: "Browser Use Cloud",

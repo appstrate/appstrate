@@ -4,7 +4,7 @@
 import { describe, it, expect } from "bun:test";
 import { planCaBundle, type CertGenerator } from "../src/proxy-ca-planner.ts";
 
-const FAKE_PEM = (kind: "CERTIFICATE" | "PRIVATE KEY") =>
+const FAKE_PEM = (kind: "CERTIFICATE" | "PRIVATE KEY" | "RSA PRIVATE KEY") =>
   `-----BEGIN ${kind}-----\nMIIBkTCCATegAwIB...\n-----END ${kind}-----\n`;
 
 const okGenerator: CertGenerator = async (req) => {
@@ -19,6 +19,19 @@ const okGenerator: CertGenerator = async (req) => {
 };
 
 describe("planCaBundle", () => {
+  it("accepts OpenSSL/LibreSSL PKCS#1 RSA private keys", async () => {
+    const bundle = await planCaBundle({
+      runId: "rsa-key-run",
+      generator: async () => ({
+        caCertPem: FAKE_PEM("CERTIFICATE"),
+        caKeyPem: FAKE_PEM("RSA PRIVATE KEY"),
+        serverCertPem: FAKE_PEM("CERTIFICATE"),
+        serverKeyPem: FAKE_PEM("RSA PRIVATE KEY"),
+      }),
+    });
+    expect(bundle.pems.caKeyPem).toContain("BEGIN RSA PRIVATE KEY");
+  });
+
   it("computes paths under the default tmpfs root", async () => {
     const bundle = await planCaBundle({
       runId: "run-abc",

@@ -29,6 +29,13 @@ def context_file_upload_mode(value: object) -> str:
     return str(mode)
 
 
+def context_captcha_solver(value: object) -> bool:
+    enabled = value.get("captchaSolver") if isinstance(value, dict) else None
+    if not isinstance(enabled, bool):
+        raise RuntimeError("BROWSER_UNAVAILABLE: browser context captcha policy was malformed")
+    return enabled
+
+
 @dataclass(frozen=True)
 class BrowserConfiguration:
     endpoint: str
@@ -71,6 +78,7 @@ class AppstrateBrowser:
         self._session: Any | None = None
         self._tools: Any | None = None
         self._file_upload_mode: str | None = None
+        self._captcha_solver = False
 
     @property
     def configured(self) -> bool:
@@ -101,6 +109,7 @@ class AppstrateBrowser:
         except (ValueError, TypeError) as error:
             raise RuntimeError("BROWSER_UNAVAILABLE: browser context metadata was malformed") from error
         file_upload_mode = context_file_upload_mode(context_metadata)
+        captcha_solver = context_captcha_solver(context_metadata)
         BrowserSession, Tools = _load_browser_use()
         domains = [urlsplit(origin).hostname for origin in configuration.allowed_origins]
         try:
@@ -112,7 +121,11 @@ class AppstrateBrowser:
                 is_local=False,
                 keep_alive=True,
                 enable_default_extensions=False,
-                captcha_solver=False,
+                # Browser Use Cloud emits private BrowserUse.* CDP events while
+                # its managed solver is active. Local workers explicitly return
+                # false from /v1/context, so an untrusted/self-hosted endpoint
+                # can never opt itself into cloud-only solver semantics.
+                captcha_solver=captcha_solver,
                 cross_origin_iframes=True,
                 max_iframes=16,
                 max_iframe_depth=3,
@@ -128,16 +141,41 @@ class AppstrateBrowser:
         self._session = session
         self._tools = Tools(exclude_actions=["search", "done"])
         self._file_upload_mode = file_upload_mode
+        self._captcha_solver = captcha_solver
 
     async def close(self) -> None:
         session, self._session = self._session, None
         self._tools = None
         self._file_upload_mode = None
+        self._captcha_solver = False
         if session is not None:
             try:
                 await session.stop()
             except Exception:
                 pass
+
+    async def wait_for_captcha_solver(self, timeout_seconds: float = 45.0) -> bool:
+        """Wait for a managed cloud solver event without weakening local policy.
+
+        The event can arrive just after the deterministic driver observes the
+        challenge DOM, so briefly poll for the watchdog to enter its solving
+        state. Once it does, Browser Use owns the bounded wait and reports the
+        authenticated success/failure result.
+        """
+        if not 0.0 < timeout_seconds <= 120.0:
+            raise ValueError("captcha solver timeout must be between 0 and 120 seconds")
+        await self.start()
+        if not self._captcha_solver:
+            return False
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return False
+            result = await self._session.wait_if_captcha_solving(timeout=remaining)
+            if result is not None:
+                return result.result == "success"
+            await asyncio.sleep(min(0.1, remaining))
 
     async def navigate(self, url: str, timeout_seconds: float = 30.0) -> BrowserSnapshot:
         self._assert_allowed_url(url)

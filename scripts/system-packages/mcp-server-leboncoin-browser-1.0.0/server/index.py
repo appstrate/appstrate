@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -23,6 +24,8 @@ from appstrate_browser_use import (
 LEBONCOIN_ORIGIN = "https://www.leboncoin.fr"
 LEBONCOIN_ACCOUNT_URL = f"{LEBONCOIN_ORIGIN}/compte/part/mes-annonces"
 LOGIN_COOKIE = "__Secure-login"
+CHALLENGE_WAIT_SECONDS = 120.0
+AUTH_COMPLETION_WAIT_SECONDS = 120.0
 
 TOOLS = [
     {
@@ -154,7 +157,7 @@ class LeboncoinDriver:
         snapshot = await self.browser.navigate(
             f"https://auth.leboncoin.fr/api/authorizer/v2/authorize?{query}", 45.0
         )
-        self._assert_no_challenge(snapshot)
+        snapshot = await self._assert_no_challenge(snapshot)
         await self.browser.click_semantic(("Tout accepter", "Accepter", "Cookies requis uniquement"))
 
         email_labels = ("email", "e-mail", "adresse email", "username")
@@ -175,8 +178,8 @@ class LeboncoinDriver:
         if password_visible is None:
             if not await self.browser.click_semantic(("Continuer", "Se connecter", "Connexion")):
                 await self.browser.press("Enter")
-            if not await self._wait_for_field(password_labels, 20.0, ("password",)):
-                self._assert_no_challenge(await self.browser.snapshot())
+            if not await self._wait_for_field(password_labels, 60.0, ("password",)):
+                await self._assert_no_challenge(await self.browser.snapshot())
                 raise RuntimeError("BROWSER_AUTH_REQUIRED: Leboncoin password step was not reached")
         if not await self.browser.fill_semantic(
             password_labels,
@@ -188,7 +191,7 @@ class LeboncoinDriver:
         if not await self.browser.click_semantic(("Se connecter", "Connexion", "Valider")):
             await self.browser.press("Enter")
 
-        deadline = asyncio.get_running_loop().time() + 45.0
+        deadline = asyncio.get_running_loop().time() + AUTH_COMPLETION_WAIT_SECONDS
         while asyncio.get_running_loop().time() < deadline:
             cookies = await self.browser.cookies()
             if has_session(cookies):
@@ -196,11 +199,12 @@ class LeboncoinDriver:
                     return await self._result(email)
                 raise RuntimeError("BROWSER_AUTH_REQUIRED: Leboncoin did not establish an account session")
             snapshot = await self.browser.snapshot()
-            self._assert_no_challenge(snapshot)
+            snapshot = await self._assert_no_challenge(snapshot)
             if credentials_rejected(snapshot.body_text):
                 raise RuntimeError("BROWSER_AUTH_REQUIRED: Leboncoin rejected the credentials")
-            if re.search(r"(?:code|vérification|verification).{0,80}(?:sms|e-mail|email)", snapshot.body_text, re.I):
-                raise RuntimeError("BROWSER_INTERACTION_REQUIRED: Leboncoin requires account verification")
+            # Email/SMS/2FA is completed by the user in the Browser Use live
+            # session. Keep observing the same page until it establishes the
+            # authenticated cookie instead of terminating the acquisition.
             await asyncio.sleep(0.5)
         raise RuntimeError("BROWSER_NAVIGATION_TIMEOUT: Leboncoin login did not complete")
 
@@ -217,7 +221,7 @@ class LeboncoinDriver:
     async def search(self, query: str, limit: int) -> dict[str, object]:
         url = f"{LEBONCOIN_ORIGIN}/recherche?{urlencode({'text': query})}"
         snapshot = await self.browser.navigate(url)
-        self._assert_no_challenge(snapshot)
+        snapshot = await self._assert_no_challenge(snapshot)
         listings = await self.browser.evaluate(
             "(limit) => { const seen = new Set(), out = []; "
             "for (const anchor of document.querySelectorAll('a[href*=\"/ad/\"]')) { "
@@ -237,7 +241,7 @@ class LeboncoinDriver:
 
     async def get_listing(self, url: str) -> dict[str, object]:
         snapshot = await self.browser.navigate(url)
-        self._assert_no_challenge(snapshot)
+        snapshot = await self._assert_no_challenge(snapshot)
         result = await self.browser.evaluate(
             "() => { const text=(document.body?.innerText||'').replace(/\\n{3,}/g,'\\n\\n').trim(); "
             "const canonical=document.querySelector('link[rel=\"canonical\"]')?.href||location.href; "
@@ -268,7 +272,7 @@ class LeboncoinDriver:
 
     async def _prove_session(self) -> bool:
         snapshot = await self.browser.navigate(LEBONCOIN_ACCOUNT_URL)
-        self._assert_no_challenge(snapshot)
+        snapshot = await self._assert_no_challenge(snapshot)
         parsed = urlsplit(snapshot.url)
         return (
             parsed.scheme == "https"
@@ -286,14 +290,33 @@ class LeboncoinDriver:
                 labels, tags=("input", "textarea"), input_types=input_types
             ) is not None:
                 return True
-            self._assert_no_challenge(await self.browser.snapshot())
+            await self._assert_no_challenge(await self.browser.snapshot())
             await asyncio.sleep(0.25)
         return False
 
-    @staticmethod
-    def _assert_no_challenge(snapshot: object) -> None:
-        if detect_datadome_challenge(snapshot):
-            raise RuntimeError("BROWSER_INTERACTION_REQUIRED: Leboncoin presented a DataDome challenge")
+    async def _assert_no_challenge(self, snapshot: object) -> object:
+        if not detect_datadome_challenge(snapshot):
+            return snapshot
+        deadline = asyncio.get_running_loop().time() + CHALLENGE_WAIT_SECONDS
+        solver = asyncio.create_task(
+            self.browser.wait_for_captcha_solver(CHALLENGE_WAIT_SECONDS)
+        )
+        await asyncio.sleep(0)
+        # A managed solver failure is not terminal: Browser Use Cloud also
+        # exposes the same live session to the user. Keep polling until the
+        # shared deadline so a human-completed DataDome/2FA step resumes here.
+        try:
+            while asyncio.get_running_loop().time() < deadline:
+                refreshed = await self.browser.snapshot()
+                if not detect_datadome_challenge(refreshed):
+                    return refreshed
+                await asyncio.sleep(0.25)
+        finally:
+            if not solver.done():
+                solver.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await solver
+        raise RuntimeError("BROWSER_INTERACTION_REQUIRED: Leboncoin presented a DataDome challenge")
 
 
 driver = LeboncoinDriver()

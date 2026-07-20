@@ -42,6 +42,11 @@ export interface BrowserHandle {
   readonly id: string;
   readonly endpoint: string;
   readonly authToken: string;
+  /**
+   * Provider-hosted, user-facing session URL for human-in-the-loop challenges.
+   * This URL carries session authority and must be treated like a secret.
+   */
+  readonly interactionUrl?: string | null;
   readonly workerBuildId: string;
   readonly protocolVersion: number;
   readonly browserRevision: string;

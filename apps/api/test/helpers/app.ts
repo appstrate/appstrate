@@ -65,7 +65,10 @@ import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.t
 import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
-import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
+import {
+  createIntegrationsRouter,
+  type IntegrationsRouterOptions,
+} from "../../src/routes/integrations.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
@@ -85,6 +88,8 @@ export interface GetTestAppOptions {
    * middleware. Core tests that want to prove isolation should use this.
    */
   modules?: readonly AppstrateModule[];
+  /** Optional connect executor seam for focused hosted-browser route tests. */
+  integrationsRouter?: IntegrationsRouterOptions;
 }
 
 let cachedApp: Hono<AppEnv> | null = null;
@@ -117,8 +122,9 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Explicit module list → always return a fresh app (never touches the
   // singleton cache, so core "modules: []" tests stay isolated from the
   // preload-discovered default app used by every other test).
-  const explicit = options?.modules !== undefined;
-  const extraModules = explicit ? options!.modules! : getDiscoveredModules();
+  const explicitModules = options?.modules !== undefined;
+  const uncached = explicitModules || options?.integrationsRouter !== undefined;
+  const extraModules = explicitModules ? options!.modules! : getDiscoveredModules();
 
   // Register module RBAC contributions BEFORE returning the app — mirrors
   // production wiring in `initSortedModules()`, which calls
@@ -138,7 +144,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   const rbacSnapshot = collectModulePermissions(extraModules);
   setModulePermissionsProvider(() => rbacSnapshot);
 
-  if (!explicit && cachedApp) return cachedApp;
+  if (!uncached && cachedApp) return cachedApp;
 
   const app = new Hono<AppEnv>();
 
@@ -274,7 +280,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/applications", createApplicationsRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
-  app.route("/api/integrations", createIntegrationsRouter());
+  app.route("/api/integrations", createIntegrationsRouter(options?.integrationsRouter));
   app.route("/api/credential-proxy", createCredentialProxyRouter());
   app.route("/api/llm-proxy", createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
@@ -287,6 +293,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
   });
 
-  if (!explicit) cachedApp = app;
+  if (!uncached) cachedApp = app;
   return app;
 }

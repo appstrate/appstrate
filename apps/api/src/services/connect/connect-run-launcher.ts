@@ -66,6 +66,7 @@ import type { CredentialBundle } from "./strategy.ts";
 
 const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
+const BROWSER_INTERACTION_SENTINEL = "APPSTRATE_BROWSER_INTERACTION:";
 
 /**
  * Coerce a credential bag's values to strings. The sidecar's MITM substitutes
@@ -245,7 +246,7 @@ export async function buildConnectLoginSpec(
  * (malformed base64, truncated payload, auth-tag mismatch, wrong key) throws —
  * the caller maps it onto a structured "could not decrypt" strategy error.
  */
-function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
+function decryptConnectPayload(payloadB64: string, resultKey: Buffer): string {
   const buf = Buffer.from(payloadB64, "base64");
   // 12-byte GCM iv + 16-byte auth tag = 28-byte minimum framing.
   if (buf.length < 28) {
@@ -257,6 +258,61 @@ function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
   const decipher = createDecipheriv("aes-256-gcm", resultKey, iv);
   decipher.setAuthTag(authTag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+}
+
+function isBrowserUseHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "browser-use.com" || host.endsWith(".browser-use.com");
+}
+
+/**
+ * Parse one encrypted human-interaction event emitted by a browser connect
+ * sidecar. Returns null for ordinary log lines. The live URL is deliberately
+ * validated again at the API trust boundary before it can reach the UI.
+ */
+export function parseBrowserInteraction(line: string, resultKey: Buffer): string | null {
+  const idx = line.indexOf(BROWSER_INTERACTION_SENTINEL);
+  if (idx === -1) return null;
+  const payload = line.slice(idx + BROWSER_INTERACTION_SENTINEL.length).trim();
+  let json: string;
+  try {
+    json = decryptConnectPayload(payload, resultKey);
+  } catch {
+    throw new Error("connect-run: browser interaction sentinel could not be decrypted");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("connect-run: browser interaction sentinel carried invalid JSON");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("connect-run: browser interaction sentinel is not a JSON object");
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 1 ||
+    typeof record.url !== "string" ||
+    record.url.length === 0 ||
+    record.url.length > 4096
+  ) {
+    throw new Error("connect-run: browser interaction sentinel is malformed");
+  }
+  let url: URL;
+  try {
+    url = new URL(record.url);
+  } catch {
+    throw new Error("connect-run: browser interaction URL is malformed");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    !isBrowserUseHost(url.hostname)
+  ) {
+    throw new Error("connect-run: browser interaction URL is unsafe");
+  }
+  return url.toString();
 }
 
 /**
@@ -276,7 +332,7 @@ export function parseConnectResult(lines: readonly string[], resultKey: Buffer):
       const payload = line.slice(resultIdx + RESULT_SENTINEL.length).trim();
       let json: string;
       try {
-        json = decryptConnectResult(payload, resultKey);
+        json = decryptConnectPayload(payload, resultKey);
       } catch {
         // Never surface the raw payload / crypto detail — a decrypt failure is
         // opaque by design (wrong key, tampered log line, truncated capture).

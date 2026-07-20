@@ -10,7 +10,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from appstrate_browser_use.bridge import AppstrateBrowser, context_file_upload_mode
+from appstrate_browser_use.bridge import (
+    AppstrateBrowser,
+    context_captcha_solver,
+    context_file_upload_mode,
+)
 
 
 def _source_root() -> Path:
@@ -66,6 +70,34 @@ class BrowserBridgeTests(unittest.IsolatedAsyncioTestCase):
         for malformed in ({}, {"fileUploadMode": "remote-magic"}, None):
             with self.assertRaisesRegex(RuntimeError, "BROWSER_UNAVAILABLE"):
                 context_file_upload_mode(malformed)
+
+    def test_context_captcha_solver_is_fail_closed(self) -> None:
+        self.assertTrue(context_captcha_solver({"captchaSolver": True}))
+        self.assertFalse(context_captcha_solver({"captchaSolver": False}))
+        for malformed in ({}, {"captchaSolver": "true"}, None):
+            with self.assertRaisesRegex(RuntimeError, "BROWSER_UNAVAILABLE"):
+                context_captcha_solver(malformed)
+
+    async def test_managed_captcha_solver_waits_for_a_late_success_event(self) -> None:
+        class Result:
+            result = "success"
+
+        class Session:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def wait_if_captcha_solving(self, timeout: float) -> object | None:
+                self.calls += 1
+                return None if self.calls == 1 else Result()
+
+        browser = AppstrateBrowser()
+        browser._session = Session()
+        browser._captcha_solver = True
+        self.assertTrue(await browser.wait_for_captcha_solver(1.0))
+        self.assertEqual(browser._session.calls, 2)
+
+        browser._captcha_solver = False
+        self.assertFalse(await browser.wait_for_captcha_solver(1.0))
 
     async def test_remote_browser_rejects_workspace_upload_before_cdp(self) -> None:
         browser = AppstrateBrowser()
@@ -191,6 +223,82 @@ class MarketplaceBehaviorTests(unittest.IsolatedAsyncioTestCase):
         driver.browser = Browser(module.LEBONCOIN_ACCOUNT_URL, "evilleboncoin.fr")
         self.assertFalse(await driver._prove_session())
 
+    async def test_leboncoin_waits_for_managed_datadome_solver(self) -> None:
+        module = self.leboncoin
+        challenged = types.SimpleNamespace(
+            url="https://www.leboncoin.fr/",
+            title="Pardon the interruption",
+            body_text="DataDome",
+            frame_urls=("https://geo.captcha-delivery.com/captcha",),
+        )
+        cleared = types.SimpleNamespace(
+            url="https://www.leboncoin.fr/",
+            title="Leboncoin",
+            body_text="Bienvenue",
+            frame_urls=(),
+        )
+
+        class Browser:
+            async def wait_for_captcha_solver(self, timeout: float) -> bool:
+                self.timeout = timeout
+                return True
+
+            async def snapshot(self) -> object:
+                return cleared
+
+        driver = module.LeboncoinDriver()
+        driver.browser = Browser()
+        self.assertIs(await driver._assert_no_challenge(challenged), cleared)
+        self.assertEqual(driver.browser.timeout, module.CHALLENGE_WAIT_SECONDS)
+
+    async def test_leboncoin_resumes_after_human_clears_datadome(self) -> None:
+        module = self.leboncoin
+        challenged = types.SimpleNamespace(
+            url="https://www.leboncoin.fr/",
+            title="DataDome",
+            body_text="Verify you are human",
+            frame_urls=(),
+        )
+        cleared = types.SimpleNamespace(
+            url="https://www.leboncoin.fr/",
+            title="Leboncoin",
+            body_text="Bienvenue",
+            frame_urls=(),
+        )
+
+        class Browser:
+            async def wait_for_captcha_solver(self, _timeout: float) -> bool:
+                return False
+
+            async def snapshot(self) -> object:
+                return cleared
+
+        driver = module.LeboncoinDriver()
+        driver.browser = Browser()
+        self.assertIs(await driver._assert_no_challenge(challenged), cleared)
+
+    async def test_leboncoin_fails_closed_when_managed_solver_cannot_clear_challenge(self) -> None:
+        module = self.leboncoin
+        challenged = types.SimpleNamespace(
+            url="https://geo.captcha-delivery.com/captcha",
+            title="DataDome",
+            body_text="Verify you are human",
+            frame_urls=(),
+        )
+
+        class Browser:
+            async def wait_for_captcha_solver(self, _timeout: float) -> bool:
+                return False
+
+            async def snapshot(self) -> object:
+                return challenged
+
+        driver = module.LeboncoinDriver()
+        driver.browser = Browser()
+        with mock.patch.object(module, "CHALLENGE_WAIT_SECONDS", 0.001):
+            with self.assertRaisesRegex(RuntimeError, "BROWSER_INTERACTION_REQUIRED"):
+                await driver._assert_no_challenge(challenged)
+
     async def test_vinted_publish_token_is_consumed_before_click(self) -> None:
         module = self.vinted
 
@@ -236,6 +344,46 @@ class MarketplaceBehaviorTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(module.ProtocolError):
             await driver.publish(draft.token)
         self.assertEqual(driver.browser.click_count, 1)
+
+    async def test_vinted_waits_for_human_verification_redirect(self) -> None:
+        module = self.vinted
+
+        class Browser:
+            def __init__(self) -> None:
+                self.snapshots = [
+                    types.SimpleNamespace(
+                        url="https://www.vinted.fr/member/login",
+                        title="Verification",
+                        body_text="Enter the code sent by email",
+                        frame_urls=(),
+                    ),
+                    types.SimpleNamespace(
+                        url="https://www.vinted.fr/items/new",
+                        title="New item",
+                        body_text="Sell an item",
+                        frame_urls=(),
+                    ),
+                ]
+
+            async def current_url(self) -> str:
+                return "https://www.vinted.fr/member/login"
+
+            async def navigate(self, _url: str) -> object:
+                return self.snapshots[0]
+
+            async def snapshot(self) -> object:
+                return self.snapshots.pop(0)
+
+            async def evaluate(self, _expression: str) -> bool:
+                return len(self.snapshots) == 0
+
+        async def no_sleep(_seconds: float) -> None:
+            return None
+
+        driver = module.VintedDriver()
+        driver.browser = Browser()
+        with mock.patch.object(module.asyncio, "sleep", new=no_sleep):
+            self.assertTrue(await driver._wait_for_listing_form(1.0))
 
     async def test_vinted_publish_accepts_only_exact_item_confirmation(self) -> None:
         module = self.vinted

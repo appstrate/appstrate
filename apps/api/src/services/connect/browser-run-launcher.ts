@@ -34,7 +34,7 @@ import {
 import { getOrchestrator, orchestratorSupportsSidecarOnly } from "../orchestrator/index.ts";
 import { selectOrchestrator } from "../orchestrator/registry.ts";
 import type { BrowserConnectExecution, BrowserConnectExecutor } from "./browser-strategy.ts";
-import { parseConnectResult } from "./connect-run-launcher.ts";
+import { parseBrowserInteraction, parseConnectResult } from "./connect-run-launcher.ts";
 
 export interface BrowserConnectRunExecutorOptions {
   readonly orchestrator?: RunOrchestrator;
@@ -173,7 +173,7 @@ class BrowserConnectRunExecutor implements BrowserConnectExecutor {
   private readonly timeoutMs: number;
 
   constructor(private readonly options: BrowserConnectRunExecutorOptions) {
-    this.timeoutMs = options.timeoutMs ?? 90_000;
+    this.timeoutMs = options.timeoutMs ?? 240_000;
   }
 
   async run(execution: BrowserConnectExecution): Promise<BrowserAcquisitionResult> {
@@ -214,20 +214,49 @@ class BrowserConnectRunExecutor implements BrowserConnectExecutor {
 
       const lines: string[] = [];
       const abort = new AbortController();
+      let interactionForwarded = false;
       const stream = (async () => {
         try {
           for await (const line of orchestrator.streamLogs(sidecar!, abort.signal)) {
             lines.push(line);
             if (lines.length > 500) lines.shift();
+            const interactionUrl = parseBrowserInteraction(line, resultKey);
+            if (interactionUrl && !interactionForwarded) {
+              interactionForwarded = true;
+              await execution.onInteractionRequired?.({ url: interactionUrl });
+            }
           }
-        } catch {
-          // The exit/result path remains authoritative.
+        } catch (error) {
+          if (abort.signal.aborted) return;
+          await orchestrator.stopWorkload(sidecar!).catch(() => undefined);
+          throw error;
         }
       })();
+      // A normally-ended log stream is not authoritative (the workload exit
+      // and encrypted result are); only propagate streaming/callback failures.
+      const streamFailure = stream.then(() => new Promise<never>(() => {}));
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let removeExternalAbortListener: (() => void) | undefined;
+      const externalAbort = new Promise<never>((_resolve, reject) => {
+        const signal = execution.signal;
+        if (!signal) return;
+        const cancel = () => {
+          abort.abort();
+          void orchestrator.stopWorkload(sidecar!).catch(() => undefined);
+          reject(new Error("browser connect run aborted by client"));
+        };
+        if (signal.aborted) {
+          cancel();
+          return;
+        }
+        signal.addEventListener("abort", cancel, { once: true });
+        removeExternalAbortListener = () => signal.removeEventListener("abort", cancel);
+      });
       try {
         await Promise.race([
           orchestrator.waitForExit(sidecar),
+          streamFailure,
+          externalAbort,
           new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => {
               void orchestrator.stopWorkload(sidecar!);
@@ -240,7 +269,9 @@ class BrowserConnectRunExecutor implements BrowserConnectExecutor {
         return parseConnectResult(lines, resultKey) as BrowserAcquisitionResult;
       } finally {
         if (timer) clearTimeout(timer);
+        removeExternalAbortListener?.();
         abort.abort();
+        await stream.catch(() => undefined);
       }
     } finally {
       if (sidecar) {

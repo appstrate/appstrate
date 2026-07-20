@@ -945,7 +945,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Hosted form credential submit (page cookie + CSRF)",
       description:
-        "Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header.",
+        "Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header. Browser-backed acquisition returns an SSE stream with `interaction`, `complete`, or `error` events so human challenges can be completed in the provider's secure live session.",
       parameters: [
         {
           name: "x-connect-csrf",
@@ -982,6 +982,13 @@ export const integrationsPaths = {
                   ok: { type: "boolean" },
                   connection: integrationConnectionSchema,
                 },
+              },
+            },
+            "text/event-stream": {
+              schema: {
+                type: "string",
+                description:
+                  "Browser acquisition event stream. `interaction` carries `{ url }`; terminal `complete` carries the stored connection and terminal `error` carries a safe problem summary.",
               },
             },
           },

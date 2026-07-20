@@ -2150,6 +2150,7 @@ export async function runConnectOnce(
 export async function runBrowserConnectOnce(
   spec: IntegrationSpawnSpec,
   bundleFetchOpts: BundleFetchOptions,
+  onInteractionReady?: (interaction: { url: string }) => void | Promise<void>,
 ): Promise<BrowserAcquisitionResult> {
   if (!spec.browser || !spec.browserConnect) {
     throw new Error("runBrowserConnectOnce: spec has no browser acquisition contract");
@@ -2211,6 +2212,9 @@ export async function runBrowserConnectOnce(
       resources: STANDARD_BROWSER_PROFILE,
     });
     assertBrowserWorkerCompatible(spec.browser.protocol, browser);
+    if (browser.interactionUrl) {
+      await onInteractionReady?.({ url: browser.interactionUrl });
+    }
     const { allocatedNs } = await spawnAndConnectLocalIntegration({
       spec: spec.workspaceMount ? { ...spec, workspaceMount: undefined } : spec,
       runId,

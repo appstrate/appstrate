@@ -88,4 +88,18 @@ describe("applySpecToSidecarEnv", () => {
     expect(env.CONNECT_LOGIN_JSON).toBeUndefined();
     expect(env.CONNECT_RESULT_KEY).toBeUndefined();
   });
+
+  it("extends browser-connect tool calls without overriding operator policy", () => {
+    const spec = {
+      runToken: "rt_test",
+      browserConnectSpec: { browserConnect: {} },
+    } as unknown as SidecarLaunchSpec;
+    const defaulted: Record<string, string> = {};
+    applySpecToSidecarEnv(spec, defaulted);
+    expect(defaulted.APPSTRATE_MCP_TOOL_TIMEOUT_MS).toBe("210000");
+
+    const overridden = { APPSTRATE_MCP_TOOL_TIMEOUT_MS: "300000" };
+    applySpecToSidecarEnv(spec, overridden);
+    expect(overridden.APPSTRATE_MCP_TOOL_TIMEOUT_MS).toBe("300000");
+  });
 });

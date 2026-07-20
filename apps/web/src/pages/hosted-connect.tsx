@@ -6,6 +6,7 @@ import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
 import { IntegrationIcon } from "../components/integration-icon";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
+import { browserUseInteractionUrl, readConnectEventStream } from "./hosted-connect-sse";
 
 /**
  * Standalone hosted connect form (issue #769) — the non-OAuth half of the
@@ -66,6 +67,7 @@ export function HostedConnectPage() {
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [interactionUrl, setInteractionUrl] = useState<string | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
   // error). Shown under the generic body so an invalid/expired link, a removed
   // integration, and a network outage don't all look identical.
@@ -104,6 +106,8 @@ export function HostedConnectPage() {
     }
     setPhase("submitting");
     setError(null);
+    setInteractionUrl(null);
+    let interactionWasRequired = false;
     try {
       const res = await fetch("/api/integrations/connect/submit", {
         method: "POST",
@@ -118,6 +122,30 @@ export function HostedConnectPage() {
         const problem = (await res.json().catch(() => null)) as { detail?: string } | null;
         throw new Error(problem?.detail ?? `submit ${res.status}`);
       }
+      const contentType = res.headers.get("content-type")?.toLowerCase() ?? "";
+      if (contentType.includes("text/event-stream")) {
+        let completed = false;
+        await readConnectEventStream(res, async ({ event, data }) => {
+          if (event === "interaction") {
+            const payload = data as { url?: unknown };
+            interactionWasRequired = true;
+            setInteractionUrl(browserUseInteractionUrl(payload?.url));
+            return;
+          }
+          if (event === "error") {
+            const problem = data as { detail?: unknown };
+            throw new Error(
+              typeof problem?.detail === "string"
+                ? problem.detail
+                : "The browser connection could not be completed.",
+            );
+          }
+          if (event === "complete") completed = true;
+        });
+        if (!completed) throw new Error("The browser connection ended before completion.");
+      } else {
+        await res.json();
+      }
       signalSuccess(context.package_id);
       setPhase("done");
       // Close the popup/tab after a short confirmation, mirroring the OAuth page.
@@ -129,8 +157,14 @@ export function HostedConnectPage() {
         }
       }, 1200);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setPhase("form");
+      const message = err instanceof Error ? err.message : String(err);
+      if (interactionWasRequired) {
+        setErrorDetail(message);
+        setPhase("error");
+      } else {
+        setError(message);
+        setPhase("form");
+      }
     }
   };
 
@@ -179,6 +213,27 @@ export function HostedConnectPage() {
                 {t("integration.connect.modal.subtitle", { type: context.auth.type })}
               </p>
               <CredentialFields auth={context.auth} values={values} onChange={setValues} />
+              {phase === "submitting" && !interactionUrl && (
+                <div className="text-muted-foreground flex items-center gap-2 text-sm">
+                  <Spinner />
+                  <span>{t("integration.connect.hosted.browserStarting")}</span>
+                </div>
+              )}
+              {phase === "submitting" && interactionUrl && (
+                <div className="border-border bg-muted/30 space-y-3 rounded-md border p-4">
+                  <p className="text-sm">
+                    {t("integration.connect.hosted.browserInteractionBody")}
+                  </p>
+                  <Button asChild className="w-full">
+                    <a href={interactionUrl} target="_blank" rel="noopener noreferrer">
+                      {t("integration.connect.hosted.browserOpen")}
+                    </a>
+                  </Button>
+                  <p className="text-muted-foreground text-xs">
+                    {t("integration.connect.hosted.browserWaiting")}
+                  </p>
+                </div>
+              )}
               {error && <p className="text-sm text-red-400">{error}</p>}
               <Button type="submit" className="w-full" disabled={phase === "submitting"}>
                 {t("integration.connect.btn.save")}

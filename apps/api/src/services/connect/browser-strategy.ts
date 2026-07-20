@@ -37,6 +37,10 @@ export interface BrowserConnectExecution {
   readonly sessionMode: Exclude<BrowserSessionMode, "none">;
   /** Transient bootstrap inputs, delivered only through the trusted channel. */
   readonly inputs: Record<string, unknown>;
+  /** Streams a provider-hosted live session to the trusted connect UI. */
+  readonly onInteractionRequired?: (interaction: { url: string }) => void | Promise<void>;
+  /** Cancels the paid browser workload when the connect client goes away. */
+  readonly signal?: AbortSignal;
 }
 
 export interface BrowserConnectExecutor {
@@ -143,6 +147,10 @@ export class BrowserConnectStrategy implements IntegrationConnectStrategy {
         produces,
         sessionMode: executor.session_mode,
         inputs: credentials,
+        ...(ctx.onBrowserInteractionRequired
+          ? { onInteractionRequired: ctx.onBrowserInteractionRequired }
+          : {}),
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
       });
     } catch (error) {
       const mapped = toBrowserCapabilityApiError(error);

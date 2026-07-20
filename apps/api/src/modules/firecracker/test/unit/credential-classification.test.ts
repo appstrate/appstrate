@@ -60,6 +60,8 @@ const CLASSIFIED_NON_SECRET: readonly string[] = [
   // Operator-trusted internal egress hostnames (comma list, forwarded from the
   // platform's EGRESS_ALLOW_INTERNAL_HOSTS) — network policy, no credential.
   "EGRESS_ALLOW_INTERNAL_HOSTS",
+  // MCP call deadline in milliseconds — execution policy, no credential.
+  "APPSTRATE_MCP_TOOL_TIMEOUT_MS",
 ];
 
 /** Minimal but structurally valid integration spawn spec. */

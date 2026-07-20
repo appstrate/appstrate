@@ -31,6 +31,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   createConnectRunExecutor,
   buildConnectLoginSpec,
+  parseBrowserInteraction,
   parseConnectResult,
   type McpServerResolver,
 } from "../../../src/services/connect/connect-run-launcher.ts";
@@ -343,6 +344,34 @@ describe("parseConnectResult", () => {
     expect(() => parseConnectResult([`APPSTRATE_CONNECT_RESULT:${payload}`], KEY)).toThrow(
       /invalid JSON/,
     );
+  });
+});
+
+describe("parseBrowserInteraction", () => {
+  const KEY = randomBytes(32);
+
+  it("decrypts and validates a Browser Use live session URL", () => {
+    const payload = encryptConnectResult(
+      { url: "https://live.browser-use.com/live/session-id?token=secret" },
+      KEY,
+    );
+    expect(parseBrowserInteraction(`APPSTRATE_BROWSER_INTERACTION:${payload}`, KEY)).toBe(
+      "https://live.browser-use.com/live/session-id?token=secret",
+    );
+    expect(parseBrowserInteraction("ordinary sidecar log", KEY)).toBeNull();
+  });
+
+  it("rejects tampered payloads and non-Browser-Use URLs", () => {
+    const unsafe = encryptConnectResult(
+      { url: "https://live.browser-use.com.attacker.example/session" },
+      KEY,
+    );
+    expect(() => parseBrowserInteraction(`APPSTRATE_BROWSER_INTERACTION:${unsafe}`, KEY)).toThrow(
+      /unsafe/,
+    );
+    expect(() =>
+      parseBrowserInteraction("APPSTRATE_BROWSER_INTERACTION:not-ciphertext", KEY),
+    ).toThrow(/could not be decrypted/);
   });
 });
 

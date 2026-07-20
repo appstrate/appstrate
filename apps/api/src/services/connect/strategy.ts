@@ -32,6 +32,10 @@ export interface ConnectContext {
   authKey: string;
   /** Reconnect / scope-upgrade target. Absent on a fresh connect. */
   connectionId?: string;
+  /** Browser connect only: forward a human-in-the-loop live session. */
+  onBrowserInteractionRequired?: (interaction: { url: string }) => void | Promise<void>;
+  /** Browser connect only: stop acquisition if the hosted client disconnects. */
+  signal?: AbortSignal;
 }
 
 /** Options for the interactive `begin` step (OAuth2 authorize URL). */

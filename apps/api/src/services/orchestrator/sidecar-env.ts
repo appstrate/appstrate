@@ -135,6 +135,10 @@ export function applySpecToSidecarEnv(
   }
   if (spec.browserConnectSpec) {
     target.BROWSER_CONNECT_JSON = JSON.stringify(spec.browserConnectSpec);
+    // Human-in-the-loop browser acquisition may legitimately pause on a
+    // DataDome/2FA screen. Keep the MCP invocation alive long enough for the
+    // hosted live-view flow, while preserving an explicit operator override.
+    target.APPSTRATE_MCP_TOOL_TIMEOUT_MS ??= "210000";
   }
   // P4 — result-channel key. The sidecar encrypts the captured credential
   // bundle with this AES-256 key before emitting the APPSTRATE_CONNECT_RESULT

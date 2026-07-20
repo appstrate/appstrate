@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -23,6 +24,8 @@ from appstrate_browser_use import (
 )
 
 VINTED_ORIGIN = "https://www.vinted.fr"
+CHALLENGE_WAIT_SECONDS = 120.0
+AUTH_COMPLETION_WAIT_SECONDS = 120.0
 
 TOOLS = [
     {
@@ -226,12 +229,12 @@ class VintedDriver:
         email = required_string(inputs.get("email"), "inputs.email", 320)
         password = required_string(inputs.get("password"), "inputs.password", 4096)
         snapshot = await self.browser.navigate(f"{VINTED_ORIGIN}/member/signup/select_type")
-        self._assert_no_challenge(snapshot)
+        snapshot = await self._assert_no_challenge(snapshot)
         await self.browser.click_semantic(("Cookies requis uniquement", "Accepter tout", "Tout accepter"))
         await self.browser.click_semantic(("Se connecter", "Connexion"))
         email_labels = ("email", "e-mail", "adresse e-mail", "username")
         password_labels = ("password", "mot de passe", "current-password")
-        if not await self._wait_for_field(email_labels, 12.0, ("email", "text")):
+        if not await self._wait_for_field(email_labels, 30.0, ("email", "text")):
             raise RuntimeError("BROWSER_INTERACTION_REQUIRED: Vinted did not expose its email login form")
         if not await self.browser.fill_semantic(
             email_labels, email, secret_name="login_email", input_types=("email", "text")
@@ -239,8 +242,8 @@ class VintedDriver:
             raise RuntimeError("BROWSER_AUTH_REQUIRED: Vinted email field disappeared")
         if not await self.browser.click_semantic(("Continuer", "Se connecter", "Connexion")):
             await self.browser.press("Enter")
-        if not await self._wait_for_field(password_labels, 15.0, ("password",)):
-            self._assert_no_challenge(await self.browser.snapshot())
+        if not await self._wait_for_field(password_labels, 60.0, ("password",)):
+            await self._assert_no_challenge(await self.browser.snapshot())
             raise RuntimeError("BROWSER_INTERACTION_REQUIRED: Vinted requires an additional login verification step")
         if not await self.browser.fill_semantic(
             password_labels, password, secret_name="login_password", input_types=("password",)
@@ -249,16 +252,10 @@ class VintedDriver:
         if not await self.browser.click_semantic(("Se connecter", "Connexion", "Valider")):
             await self.browser.press("Enter")
 
-        authenticated = await self._wait_for_listing_form(25.0)
+        authenticated = await self._wait_for_listing_form(AUTH_COMPLETION_WAIT_SECONDS)
         if not authenticated:
             snapshot = await self.browser.snapshot()
-            self._assert_no_challenge(snapshot)
-            if re.search(
-                r"(?:code|vérification|verification|confirmer).{0,80}(?:e-mail|email|téléphone|telephone|sms)",
-                snapshot.body_text,
-                re.I,
-            ):
-                raise RuntimeError("BROWSER_INTERACTION_REQUIRED: Vinted requires email, SMS, or 2FA verification")
+            snapshot = await self._assert_no_challenge(snapshot)
             raise RuntimeError("BROWSER_AUTH_REQUIRED: Vinted rejected the supplied account credentials")
         cookies = await self.browser.cookies()
         if not cookies:
@@ -279,7 +276,7 @@ class VintedDriver:
         snapshot = await self.browser.navigate(
             f"{VINTED_ORIGIN}/catalog?{urlencode({'search_text': query})}"
         )
-        self._assert_no_challenge(snapshot)
+        snapshot = await self._assert_no_challenge(snapshot)
         found = await self.browser.evaluate(
             "(limit) => { const seen=new Set(), out=[]; for (const anchor of document.querySelectorAll('a[href*=\"/items/\"]')) { "
             "let p; try { p=new URL(anchor.href,location.href); } catch { continue; } "
@@ -296,7 +293,7 @@ class VintedDriver:
 
     async def get_item(self, url: str) -> dict[str, object]:
         snapshot = await self.browser.navigate(url)
-        self._assert_no_challenge(snapshot)
+        snapshot = await self._assert_no_challenge(snapshot)
         output = await self.browser.evaluate(
             "() => { const text=(document.body?.innerText||'').replace(/\\n{3,}/g,'\\n\\n').trim(); "
             "const canonical=document.querySelector('link[rel=\"canonical\"]')?.href||location.href; const title=document.querySelector('h1')?.textContent?.trim()||document.title; "
@@ -309,7 +306,7 @@ class VintedDriver:
         if not await self._wait_for_listing_form(15.0):
             raise RuntimeError("BROWSER_AUTH_REQUIRED: Vinted listing form requires an authenticated account")
         snapshot = await self.browser.snapshot()
-        self._assert_no_challenge(snapshot)
+        snapshot = await self._assert_no_challenge(snapshot)
         await self.browser.upload_files(draft.image_paths)
         await self._fill_required(("Titre", "Title", "title"), draft.title)
         await self._fill_required(("Description", "description"), draft.description)
@@ -346,7 +343,7 @@ class VintedDriver:
         if draft is None or not secrets.compare_digest(draft.token, token):
             raise ProtocolError("draft_token does not match the currently prepared Vinted draft")
         before = await self.browser.snapshot()
-        self._assert_no_challenge(before)
+        before = await self._assert_no_challenge(before)
         if not urlsplit(before.url).path.startswith("/items/new"):
             raise RuntimeError("BROWSER_STATE_CONFLICT: the prepared Vinted listing form is no longer open")
         self.draft = None
@@ -357,7 +354,7 @@ class VintedDriver:
         while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.25)
             snapshot = await self.browser.snapshot()
-            self._assert_no_challenge(snapshot)
+            snapshot = await self._assert_no_challenge(snapshot)
             if re.fullmatch(r"/items/\d+(?:-[^/]+)?/?", urlsplit(snapshot.url).path):
                 return {
                     "published": True,
@@ -393,7 +390,7 @@ class VintedDriver:
         while asyncio.get_running_loop().time() < deadline:
             if await self.browser.find_semantic_index(labels, tags=("input", "textarea"), input_types=types) is not None:
                 return True
-            self._assert_no_challenge(await self.browser.snapshot())
+            await self._assert_no_challenge(await self.browser.snapshot())
             await asyncio.sleep(0.25)
         return False
 
@@ -404,14 +401,12 @@ class VintedDriver:
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
             snapshot = await self.browser.snapshot()
-            self._assert_no_challenge(snapshot)
+            snapshot = await self._assert_no_challenge(snapshot)
             ready = await self.browser.evaluate(
                 "() => [...document.querySelectorAll('input[type=\"file\"],textarea,input')].some(e => e.getClientRects().length > 0 && !e.disabled)"
             )
             if ready and urlsplit(snapshot.url).path.startswith("/items/new"):
                 return True
-            if "/member/" in urlsplit(snapshot.url).path or "/login" in urlsplit(snapshot.url).path:
-                return False
             await asyncio.sleep(0.25)
         return False
 
@@ -442,10 +437,26 @@ class VintedDriver:
             if not await self.browser.click_semantic((value,), required=True):
                 raise RuntimeError(f"BROWSER_INTERACTION_REQUIRED: Vinted option '{value}' is unavailable")
 
-    @staticmethod
-    def _assert_no_challenge(snapshot: object) -> None:
-        if detect_datadome_challenge(snapshot):
-            raise RuntimeError("BROWSER_INTERACTION_REQUIRED: Vinted presented a DataDome challenge")
+    async def _assert_no_challenge(self, snapshot: object) -> object:
+        if not detect_datadome_challenge(snapshot):
+            return snapshot
+        deadline = asyncio.get_running_loop().time() + CHALLENGE_WAIT_SECONDS
+        solver = asyncio.create_task(
+            self.browser.wait_for_captcha_solver(CHALLENGE_WAIT_SECONDS)
+        )
+        await asyncio.sleep(0)
+        try:
+            while asyncio.get_running_loop().time() < deadline:
+                refreshed = await self.browser.snapshot()
+                if not detect_datadome_challenge(refreshed):
+                    return refreshed
+                await asyncio.sleep(0.25)
+        finally:
+            if not solver.done():
+                solver.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await solver
+        raise RuntimeError("BROWSER_INTERACTION_REQUIRED: Vinted presented a DataDome challenge")
 
 
 driver = VintedDriver()

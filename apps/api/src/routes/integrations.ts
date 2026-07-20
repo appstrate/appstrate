@@ -39,6 +39,7 @@
  */
 
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import {
   handleIntegrationOAuthCallback,
@@ -82,6 +83,8 @@ import {
 import { resolveStrategy } from "../services/connect/registry.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import { createBrowserConnectRunExecutor } from "../services/connect/browser-run-launcher.ts";
+import type { BrowserConnectExecutor } from "../services/connect/browser-strategy.ts";
+import { getBrowserConnectExecutor } from "../services/integration-manifest-helpers.ts";
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import {
@@ -255,7 +258,12 @@ async function assertConnectionBelongsToActor(
 // Router
 // ─────────────────────────────────────────────
 
-export function createIntegrationsRouter() {
+export interface IntegrationsRouterOptions {
+  /** Test seam for the browser acquisition substrate; production uses Docker. */
+  browserConnectExecutor?: BrowserConnectExecutor;
+}
+
+export function createIntegrationsRouter(options: IntegrationsRouterOptions = {}) {
   const router = new Hono<AppEnv>();
 
   // ─── List + detail ─────────────────────────
@@ -863,24 +871,83 @@ export function createIntegrationsRouter() {
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
     const body = await readJsonBody(c, connectSubmitSchema, { allowEmpty: true });
+    const { auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+    if (auth.type === "oauth2") {
+      throw invalidRequest("This integration uses OAuth — open the connect link instead");
+    }
+    const strategy = resolveStrategy(auth, {
+      connectToolExecutor: createConnectRunExecutor(),
+      browserConnectExecutor: options.browserConnectExecutor ?? createBrowserConnectRunExecutor(),
+    });
+    const connectContext = {
+      scope,
+      actor,
+      integrationId: claims.package_id,
+      authKey: claims.auth_key,
+      ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+    };
+
+    // Browser acquisition may pause for DataDome/2FA. Keep this POST open as
+    // an SSE stream so the sidecar's encrypted live-view event can reach the
+    // user while the same browser session and trusted driver continue running.
+    if (getBrowserConnectExecutor(auth.connect)) {
+      clearConnectPageCookie(c);
+      const response = streamSSE(c, async (stream) => {
+        const abort = new AbortController();
+        stream.onAbort(() => abort.abort());
+        try {
+          const conn = await strategy.complete(
+            {
+              ...connectContext,
+              signal: abort.signal,
+              onBrowserInteractionRequired: async ({ url }) => {
+                if (stream.aborted) throw new Error("hosted connect client disconnected");
+                await stream.writeSSE({
+                  event: "interaction",
+                  data: JSON.stringify({ url }),
+                });
+              },
+            },
+            { kind: "fields", credentials: body.credentials },
+          );
+          if (!stream.aborted) {
+            await stream.writeSSE({
+              event: "complete",
+              data: JSON.stringify({ ok: true, connection: conn }),
+            });
+          }
+        } catch (err) {
+          if (stream.aborted) return;
+          if (!(err instanceof ApiError)) {
+            logger.error("Hosted browser connect submit failed", {
+              err: String(err),
+              packageId: claims.package_id,
+              authKey: claims.auth_key,
+            });
+          }
+          const problem =
+            err instanceof ApiError
+              ? { status: err.status, code: err.code, detail: err.message }
+              : {
+                  status: 500,
+                  code: "internal_error",
+                  detail: "The browser connection could not be completed.",
+                };
+          await stream.writeSSE({ event: "error", data: JSON.stringify(problem) });
+        }
+      });
+      // Hono's streamSSE defaults to `no-cache`; this stream temporarily
+      // carries a capability URL, so forbid browser/proxy persistence.
+      c.header("Cache-Control", "no-store");
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+
     try {
-      const { auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
-      if (auth.type === "oauth2") {
-        throw invalidRequest("This integration uses OAuth — open the connect link instead");
-      }
-      const conn = await resolveStrategy(auth, {
-        connectToolExecutor: createConnectRunExecutor(),
-        browserConnectExecutor: createBrowserConnectRunExecutor(),
-      }).complete(
-        {
-          scope,
-          actor,
-          integrationId: claims.package_id,
-          authKey: claims.auth_key,
-          ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
-        },
-        { kind: "fields", credentials: body.credentials },
-      );
+      const conn = await strategy.complete(connectContext, {
+        kind: "fields",
+        credentials: body.credentials,
+      });
       clearConnectPageCookie(c);
       return c.json({ ok: true, connection: conn });
     } catch (err) {

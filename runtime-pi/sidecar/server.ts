@@ -137,7 +137,9 @@ const config = {
 // `runConnectOnce`, emits the captured CredentialBundle on a sentinel stdout
 // line, and exits. The agent-facing `/mcp` server is never started.
 //
-// Result protocol (stdout, one line):
+// Result protocol (stdout, one line per event):
+//   APPSTRATE_BROWSER_INTERACTION:<b64> — AES-256-GCM ciphertext of a
+//                                        provider live-view URL (process stays up)
 //   APPSTRATE_CONNECT_RESULT:<b64>    — AES-256-GCM ciphertext of the
 //                                       CredentialBundle JSON (exit 0)
 //   APPSTRATE_CONNECT_ERROR:<message> — failure (exit 1)
@@ -175,18 +177,25 @@ if (process.env.CONNECT_LOGIN_JSON || process.env.BROWSER_CONNECT_JSON) {
       runToken,
       ...(config.proxyUrl ? { proxyUrl: config.proxyUrl } : {}),
     };
+    const encryptPayload = (value: unknown): string => {
+      const iv = randomBytes(12);
+      const cipher = createCipheriv("aes-256-gcm", resultKey, iv);
+      const ciphertext = Buffer.concat([
+        cipher.update(JSON.stringify(value), "utf8"),
+        cipher.final(),
+      ]);
+      return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64");
+    };
     const bundle = browserMode
-      ? await runBrowserConnectOnce(spec, fetchOptions)
+      ? await runBrowserConnectOnce(spec, fetchOptions, ({ url }) => {
+          // The live-view URL carries authority over the paid browser session.
+          // It uses the same ephemeral authenticated-encryption channel as the
+          // final credential bundle and is never written to logs in plaintext.
+          process.stdout.write(`APPSTRATE_BROWSER_INTERACTION:${encryptPayload({ url })}\n`);
+        })
       : await runConnectOnce(spec, fetchOptions);
     // Encrypt the bundle JSON — plaintext credentials never reach stdout.
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", resultKey, iv);
-    const ciphertext = Buffer.concat([
-      cipher.update(JSON.stringify(bundle), "utf8"),
-      cipher.final(),
-    ]);
-    const payload = Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64");
-    process.stdout.write(`APPSTRATE_CONNECT_RESULT:${payload}\n`);
+    process.stdout.write(`APPSTRATE_CONNECT_RESULT:${encryptPayload(bundle)}\n`);
     process.exit(0);
   } catch (err) {
     const message = browserMode

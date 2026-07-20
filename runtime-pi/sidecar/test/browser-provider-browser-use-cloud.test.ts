@@ -102,6 +102,7 @@ describe("Browser Use Cloud provider", () => {
     expect(handle.endpoint).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(handle.endpoint).not.toContain("cloud-secret");
     expect(handle.authToken).not.toBe("operator-cloud-key-value");
+    expect(handle.interactionUrl).toBe("https://live.browser-use.com/live/public-id");
     const unauthorized = await fetch(`${handle.endpoint}/json/version`);
     expect(unauthorized.status).toBe(401);
     const discovery = await fetch(`${handle.endpoint}/json/version`, {
@@ -117,6 +118,7 @@ describe("Browser Use Cloud provider", () => {
     expect(await context.json()).toMatchObject({
       defaultContext: true,
       fileUploadMode: "unsupported",
+      captchaSolver: true,
     });
     await provider.stop(handle);
 
@@ -154,6 +156,30 @@ describe("Browser Use Cloud provider", () => {
       fetchFn,
     });
     await expect(provider.spawn(options)).rejects.toThrow(/unsafe CDP URL/);
+    expect(methods).toEqual(["POST", "PATCH"]);
+  });
+
+  it("rejects unsafe live-view URLs and stops the paid session", async () => {
+    const methods: string[] = [];
+    const fetchFn = (async (_url: string | URL | Request, init?: RequestInit) => {
+      methods.push(init?.method ?? "GET");
+      if (init?.method === "POST") {
+        return Response.json(
+          {
+            id: "018f0c67-98ab-7def-8123-123456789abc",
+            cdpUrl: "https://018f0c67.cdp.browser-use.com",
+            liveUrl: "https://browser-use.com.attacker.example/live/session",
+          },
+          { status: 201 },
+        );
+      }
+      return Response.json({}, { status: 200 });
+    }) as typeof fetch;
+    const provider = createBrowserUseCloudProvider({
+      env: { BROWSER_USE_API_KEY: "operator-cloud-key-value" },
+      fetchFn,
+    });
+    await expect(provider.spawn(options)).rejects.toThrow(/unsafe live URL/);
     expect(methods).toEqual(["POST", "PATCH"]);
   });
 });

@@ -468,7 +468,11 @@ const server = Bun.serve<BrokerData>({
     if (url.pathname === "/v1/context" && req.method === "POST") {
       if (activeContext) {
         return Response.json(
-          { error: "context already exists", fileUploadMode: "shared-filesystem" },
+          {
+            error: "context already exists",
+            fileUploadMode: "shared-filesystem",
+            captchaSolver: false,
+          },
           { status: 409 },
         );
       }
@@ -485,6 +489,7 @@ const server = Bun.serve<BrokerData>({
         defaultContext: true,
         endpoint: url.origin,
         fileUploadMode: "shared-filesystem",
+        captchaSolver: false,
       });
     }
     if (url.pathname === "/v1/context/state" && req.method === "PUT") {
