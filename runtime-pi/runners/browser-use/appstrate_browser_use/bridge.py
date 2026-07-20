@@ -79,6 +79,7 @@ class AppstrateBrowser:
         self._tools: Any | None = None
         self._file_upload_mode: str | None = None
         self._captcha_solver = False
+        self._storage_init_scripts: list[tuple[Any, str, str]] = []
 
     @property
     def configured(self) -> bool:
@@ -148,6 +149,7 @@ class AppstrateBrowser:
         self._tools = None
         self._file_upload_mode = None
         self._captcha_solver = False
+        await self._clear_storage_init_scripts()
         if session is not None:
             try:
                 await session.stop()
@@ -200,16 +202,34 @@ class AppstrateBrowser:
             raise
         except Exception as error:
             raise RuntimeError("BROWSER_UNAVAILABLE: navigation failed") from error
+        finally:
+            # Storage restoration runs before the first authenticated
+            # navigation. Once it has reached a stable document, do not keep
+            # replaying the captured values over changes made by the site.
+            await self._clear_storage_init_scripts()
 
     async def wait_ready(self, timeout_seconds: float = 15.0) -> BrowserSnapshot:
         deadline = asyncio.get_running_loop().time() + timeout_seconds
-        latest = await self.snapshot()
-        while latest.ready_state not in ("interactive", "complete"):
+        last_unavailable: RuntimeError | None = None
+        while True:
+            try:
+                latest = await self.snapshot()
+                last_unavailable = None
+                if latest.ready_state in ("interactive", "complete"):
+                    return latest
+            except RuntimeError as error:
+                # Page.evaluate can race with an authenticated redirect or a
+                # managed challenge replacing its target. Reacquire the page
+                # until the bounded navigation deadline instead of surfacing a
+                # transient lifecycle state as BROWSER_UNAVAILABLE.
+                if not str(error).startswith("BROWSER_UNAVAILABLE:"):
+                    raise
+                last_unavailable = error
             if asyncio.get_running_loop().time() >= deadline:
-                raise RuntimeError("BROWSER_NAVIGATION_TIMEOUT: page did not become ready")
+                raise RuntimeError(
+                    "BROWSER_NAVIGATION_TIMEOUT: page did not become ready"
+                ) from last_unavailable
             await asyncio.sleep(0.15)
-            latest = await self.snapshot()
-        return latest
 
     async def snapshot(self) -> BrowserSnapshot:
         raw = await self.evaluate(
@@ -345,14 +365,68 @@ class AppstrateBrowser:
             await self._session.cdp_client.send.Storage.setCookies(params={"cookies": cookies})
         except Exception as error:
             raise RuntimeError("BROWSER_AUTH_REQUIRED: stored browser cookies were rejected") from error
-        for origin_state in origins:
-            origin = str(origin_state["origin"])
-            entries = origin_state.get("localStorage", [])
-            await self.navigate(origin)
-            await self.evaluate(
-                "(entries) => { localStorage.clear(); for (const entry of entries) localStorage.setItem(entry.name, entry.value); return true; }",
-                entries,
+        if origins:
+            await self._install_local_storage_state(origins)
+
+    async def _install_local_storage_state(self, origins: list[dict[str, object]]) -> None:
+        """Restore origin storage before site scripts run, without navigation.
+
+        Navigating the live page through every stored origin can race with auth
+        redirects, DataDome target replacement, and Browser Use's focus recovery.
+        A target-scoped init script applies only when one of the captured origins
+        actually loads, including intermediate authentication redirects.
+        """
+        await self._clear_storage_init_scripts()
+        try:
+            cdp_session = await self._session.get_or_create_cdp_session(
+                target_id=None,
+                focus=False,
             )
+            state_by_origin = {
+                str(origin_state["origin"]): [
+                    [entry["name"], entry["value"]]
+                    for entry in origin_state.get("localStorage", [])
+                ]
+                for origin_state in origins
+            }
+            serialized = json.dumps(
+                state_by_origin,
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            script = (
+                "(() => { try {"
+                f"const entries = ({serialized})[location.origin];"
+                "if (!entries) return;"
+                "localStorage.clear();"
+                "for (const [key, value] of entries) localStorage.setItem(key, value);"
+                "} catch (_) {} })();"
+            )
+            result = await cdp_session.cdp_client.send.Page.addScriptToEvaluateOnNewDocument(
+                params={"source": script, "runImmediately": True},
+                session_id=cdp_session.session_id,
+            )
+            identifier = result.get("identifier") if isinstance(result, dict) else None
+            if not isinstance(identifier, str) or not identifier:
+                raise RuntimeError("storage init script identifier was missing")
+            self._storage_init_scripts.append(
+                (cdp_session.cdp_client, cdp_session.session_id, identifier)
+            )
+        except Exception as error:
+            raise RuntimeError("BROWSER_AUTH_REQUIRED: stored local storage was rejected") from error
+
+    async def _clear_storage_init_scripts(self) -> None:
+        scripts, self._storage_init_scripts = self._storage_init_scripts, []
+        for cdp_client, session_id, identifier in scripts:
+            try:
+                await cdp_client.send.Page.removeScriptToEvaluateOnNewDocument(
+                    params={"identifier": identifier},
+                    session_id=session_id,
+                )
+            except Exception:
+                # Target replacement and browser shutdown can invalidate the
+                # original session. The script disappears with that target.
+                pass
 
     async def current_url(self) -> str:
         await self.start()

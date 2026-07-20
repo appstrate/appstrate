@@ -41,8 +41,10 @@ async def main() -> None:
         if not isinstance(state.dom_state.selector_map, dict):
             raise AssertionError("Browser Use did not return a selector map")
         smoke_domain = urlsplit(target_url).hostname
+        smoke_url = urlsplit(target_url)
         if not smoke_domain:
             raise AssertionError("target URL has no hostname")
+        smoke_origin = f"{smoke_url.scheme}://{smoke_url.netloc}"
         await browser.restore_storage_state_json(
             json.dumps(
                 {
@@ -57,13 +59,28 @@ async def main() -> None:
                             "httpOnly": False,
                         }
                     ],
-                    "origins": [],
+                    "origins": [
+                        {
+                            "origin": smoke_origin,
+                            "localStorage": [
+                                {
+                                    "name": "appstrate_browser_use_smoke",
+                                    "value": "restored",
+                                }
+                            ],
+                        }
+                    ],
                 }
             )
         )
         restored = await browser.cookies()
         if not any(cookie.get("name") == "appstrate_browser_use_smoke" for cookie in restored):
             raise AssertionError("storage-state restore did not reach Chromium")
+        local_storage_value = await browser.evaluate(
+            "() => localStorage.getItem('appstrate_browser_use_smoke')"
+        )
+        if local_storage_value != "restored":
+            raise AssertionError("localStorage restore did not reach Chromium")
         policy_denied = False
         try:
             await browser.navigate("https://example.invalid/")
@@ -80,6 +97,7 @@ async def main() -> None:
                     "interactive_elements": len(state.dom_state.selector_map),
                     "datadome_challenge": detect_datadome_challenge(snapshot),
                     "storage_state_restore": True,
+                    "local_storage_restore": True,
                     "engine": "browser-use",
                 },
                 ensure_ascii=False,
