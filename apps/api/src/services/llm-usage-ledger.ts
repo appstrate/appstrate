@@ -121,10 +121,12 @@ export async function recordLlmUsage(
       ? await executor
           .insert(llmUsage)
           .values(values)
-          // Monotonic upsert on the partial unique index: only the highest-seen
+          // Monotonic upsert on the partial unique index: only a strictly higher
           // cumulative total ever wins, so out-of-order metric events and the
-          // finalize fallback can never regress the recorded cost. Token columns
-          // are bumped alongside the cost so the snapshot stays consistent.
+          // finalize fallback can never regress the recorded cost, and an
+          // equal-total duplicate (finalize landing the same number) is a no-op
+          // that re-emits nothing. Token columns are bumped alongside the cost
+          // so the snapshot stays consistent.
           .onConflictDoUpdate({
             target: llmUsage.runId,
             targetWhere: sql`source = 'runner' AND run_id IS NOT NULL`,
@@ -135,7 +137,7 @@ export async function recordLlmUsage(
               cacheWriteTokens: sql`EXCLUDED.cache_write_tokens`,
               costUsd: sql`EXCLUDED.cost_usd`,
             },
-            setWhere: sql`EXCLUDED.cost_usd >= ${llmUsage.costUsd}`,
+            setWhere: sql`EXCLUDED.cost_usd > ${llmUsage.costUsd}`,
           })
           .returning({ id: llmUsage.id })
       : await executor.insert(llmUsage).values(values).returning({ id: llmUsage.id });

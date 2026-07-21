@@ -340,7 +340,7 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
  * (a later metric event, the finalize-time fallback) UPSERT into the
  * partial unique index `uq_llm_usage_runner_run_id`. The conflict
  * clause is monotonic: an UPDATE only takes effect when the incoming
- * `cost_usd` is at least as large as the stored value, so:
+ * `cost_usd` is strictly larger than the stored value, so:
  *
  *   - rapid-fire metric events keep the row in sync with the latest total
  *   - a finalize-fallback emit with a smaller `result.cost` (e.g. when
