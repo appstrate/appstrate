@@ -77,13 +77,14 @@ export const runs_wrong = pgTable("runs", {
 ```
 
 **Why** (SOTA evidence):
-| ORM | Default convention |
-|-----|-------------------|
-| Prisma | `userId @map("user_id")` (recommended by docs) |
-| Drizzle | `userId: text("user_id")` (our pattern) |
-| TypeORM | `@Column({ name: "user_id" }) userId` |
-| Kysely | `CamelCasePlugin` auto-conversion |
-| MikroORM | `@Property({ fieldName: 'user_id' })` |
+
+| ORM      | Default convention                             |
+| -------- | ---------------------------------------------- |
+| Prisma   | `userId @map("user_id")` (recommended by docs) |
+| Drizzle  | `userId: text("user_id")` (our pattern)        |
+| TypeORM  | `@Column({ name: "user_id" }) userId`          |
+| Kysely   | `CamelCasePlugin` auto-conversion              |
+| MikroORM | `@Property({ fieldName: 'user_id' })`          |
 
 → 95%+ of TS ORM ecosystem uses this split.
 
@@ -162,7 +163,7 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 **File**: `packages/core/src/module.ts`
 
-**Interfaces**: `BeforeRunParams`, `AfterRunResult`, `RunStatusChangeParams`, `OnOrgCreateParams`, `BeforeSignupContext`, `AfterSignupContext`, `RunConnectionMissingError`, `RunConnectionMissingParams`, `ModuleHooks`, `ModuleEvents`.
+**Interfaces**: `BeforeUsageParams`, `AfterRunResult`, `RunStatusChangeParams`, `OnOrgCreateParams`, `BeforeSignupContext`, `AfterSignupContext`, `RunConnectionMissingError`, `RunConnectionMissingParams`, `ModuleHooks`, `ModuleEvents`.
 
 **Rule**: All fields camelCase TS.
 

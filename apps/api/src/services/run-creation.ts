@@ -11,7 +11,7 @@
  * pass through here — they go straight to {@link prepareAndExecuteRun}
  * from `runs.ts` / `scheduler.ts` / `inline-run.ts`. Both paths share the
  * same building blocks: `runPreflightGates` (rate/concurrency/timeout +
- * `beforeRun` hook), the connection-cascade resolver, the state-layer
+ * `beforeUsage` hook), the connection-cascade resolver, the state-layer
  * `createRun` insert, and the `onRunStatusChange` event.
  *
  * Spec: docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md §6.2.
@@ -136,7 +136,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
     };
   }
 
-  // --- Shared preflight: rate, concurrency, timeout cap, beforeRun hook.
+  // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.
   const gates = await runPreflightGates({
     orgId,

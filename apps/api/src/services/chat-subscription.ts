@@ -21,12 +21,15 @@
  */
 
 import type { ChatUsageRecord, SubscriptionChatResolution } from "@appstrate/core/chat-contract";
+import type { UsageRejection } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeTokenCost } from "@appstrate/afps-runtime/runner";
 import { recordLlmUsage } from "./llm-usage-ledger.ts";
 import { loadModel, modelNeedsReconnection } from "./org-models.ts";
+import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
+import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 
@@ -155,4 +158,32 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
       error: getErrorMessage(err),
     });
   }
+}
+
+/**
+ * Chat admission gate — the chat-surface entry into the `beforeUsage` hook.
+ *
+ * The chat module calls this for its non-subscription (built-in / API-key)
+ * branch before starting a turn. The gate decides system-provided vs. org-owned
+ * SERVER-SIDE (`isSystemModel` on the chosen preset) so the module stays dumb:
+ *   - org's own API-key model → never gated (returns null immediately);
+ *   - system-provided model → dispatch `beforeUsage` (chat context). A rejection
+ *     flows back for the module to surface as an RFC 9457 problem response.
+ *
+ * Returns null when no module provides the hook (OSS mode allows everything).
+ */
+export async function checkUsageAllowed(args: {
+  orgId: string;
+  presetId: string;
+  sessionId: string | null;
+}): Promise<UsageRejection | null> {
+  // An org's own model spends the org's own credential — never platform-metered.
+  if (!isSystemModel(args.presetId)) return null;
+  if (!hasHook("beforeUsage")) return null;
+  const rejection = await callHook("beforeUsage", {
+    orgId: args.orgId,
+    context: "chat",
+    sessionId: args.sessionId,
+  });
+  return rejection ?? null;
 }

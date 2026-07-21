@@ -285,6 +285,10 @@ export const chatPaths = {
           content: { "text/event-stream": { schema: { type: "string" } } },
         },
         "400": { description: "No enabled model configured, or invalid body" },
+        "402": {
+          description:
+            "Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model (RFC 9457 problem+json).",
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { description: "Rate limited (20/min per caller)" },

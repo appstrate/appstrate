@@ -43,6 +43,7 @@ import { ensureSession, persistUserMessage, persistAssistantMessage } from "./pe
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
+import type { UsageRejection } from "@appstrate/core/module";
 import {
   appendFinalStepSystemPrompt,
   CHAT_MAX_STEPS,
@@ -68,6 +69,25 @@ function subscriptionReconnectResponse(): Response {
       needsReconnection: true,
     }),
     { status: 401, headers: { "content-type": "application/problem+json" } },
+  );
+}
+
+/**
+ * RFC 9457 response for a turn blocked by the platform admission gate
+ * (`beforeUsage`, chat context). The hook's status flows through — a metering
+ * module returns 402 (payment required) when the org is over its soft cap.
+ */
+function usageRejectionResponse(rejection: UsageRejection): Response {
+  const status = rejection.status ?? 403;
+  return new Response(
+    JSON.stringify({
+      type: "https://docs.appstrate.dev/errors/usage-not-allowed",
+      title: "Usage not allowed",
+      status,
+      detail: rejection.message,
+      code: rejection.code,
+    }),
+    { status, headers: { "content-type": "application/problem+json" } },
   );
 }
 
@@ -252,6 +272,22 @@ export async function handleChatStream(
   // possible refresh) happens here in the preamble, alongside the other reads.
   const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
   const isSubscription = subscription.subscription;
+
+  // Admission gate — non-subscription (built-in / API-key) turns only. A
+  // subscription turn spends the user's OWN credential (`credentialSource`
+  // `org`) and is never gated. The platform decides system-provided vs.
+  // org-owned server-side and dispatches `beforeUsage` (chat context) only for a
+  // system-provided model — an org's own API-key model is never blocked. Gated
+  // BEFORE the phase-B preamble so a rejected turn opens no MCP session and
+  // persists no user message.
+  if (!isSubscription) {
+    const rejection = await deps.checkUsageAllowed({
+      orgId,
+      presetId: chosen.id,
+      sessionId: meteringSessionId,
+    });
+    if (rejection) return usageRejectionResponse(rejection);
+  }
 
   // ── Preamble phase B (parallel) ──────────────────────────────────────────
   // The caller-context block (both paths) and the platform MCP probe (ai-sdk

@@ -201,18 +201,28 @@ describe("module-loader", () => {
   describe("hooks (first-match-wins)", () => {
     it("callHook returns undefined when no module provides the hook", async () => {
       await loadModulesFromInstances([], mockCtx());
-      const result = await callHook("beforeRun", { orgId: "o", packageId: "a", runningCount: 0 });
+      const result = await callHook("beforeUsage", {
+        orgId: "o",
+        context: "run",
+        packageId: "a",
+        runningCount: 0,
+      });
       expect(result).toBeUndefined();
     });
 
     it("callHook delegates to the first module providing the hook", async () => {
       const hookA = mock(async () => ({ code: "blocked", message: "no" }));
       const hookB = mock(async () => ({ code: "other", message: "ignored" }));
-      const a = mockModule("a", { hooks: { beforeRun: hookA } });
-      const b = mockModule("b", { hooks: { beforeRun: hookB } });
+      const a = mockModule("a", { hooks: { beforeUsage: hookA } });
+      const b = mockModule("b", { hooks: { beforeUsage: hookB } });
       await loadModulesFromInstances([a, b], mockCtx());
 
-      const result = await callHook("beforeRun", { orgId: "o", packageId: "a", runningCount: 0 });
+      const result = await callHook("beforeUsage", {
+        orgId: "o",
+        context: "run",
+        packageId: "a",
+        runningCount: 0,
+      });
       expect(result).toEqual({ code: "blocked", message: "no" });
       expect(hookA).toHaveBeenCalledTimes(1);
       expect(hookB).toHaveBeenCalledTimes(0);
@@ -220,10 +230,10 @@ describe("module-loader", () => {
 
     it("hasHook reflects whether any module provides the hook", async () => {
       await loadModulesFromInstances(
-        [mockModule("gate", { hooks: { beforeRun: async () => null } })],
+        [mockModule("gate", { hooks: { beforeUsage: async () => null } })],
         mockCtx(),
       );
-      expect(hasHook("beforeRun")).toBe(true);
+      expect(hasHook("beforeUsage")).toBe(true);
       expect(hasHook("beforeSignup")).toBe(false);
     });
 
@@ -355,7 +365,7 @@ describe("module-loader", () => {
 
       // No module-provided hooks. Core does not use the module hook system
       // for its own logic, so this strictly reflects the module surface.
-      expect(hasHook("beforeRun")).toBe(false);
+      expect(hasHook("beforeUsage")).toBe(false);
       expect(hasHook("afterRun")).toBe(false);
       expect(hasHook("beforeSignup")).toBe(false);
 

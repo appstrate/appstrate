@@ -7,6 +7,7 @@ import {
   gt,
   lt,
   or,
+  asc,
   desc,
   isNull,
   inArray,
@@ -30,6 +31,7 @@ import {
   notifications,
   runStatusValues,
   activeRunStatusValues,
+  terminalRunStatusValues,
   type RunStatus,
 } from "@appstrate/db/schema";
 import { getEnv } from "@appstrate/env";
@@ -46,6 +48,7 @@ import {
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { normalizeScope } from "@appstrate/core/naming";
+import type { LlmUsageLedgerRow } from "@appstrate/core/module";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 import type {
   RunWireDto,
@@ -1307,28 +1310,80 @@ export async function listOrphanRunIds(): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
+/** Default / max batch sizes for the cursor ledger read (plain clamp, internal service). */
+const LLM_USAGE_LIST_DEFAULT_LIMIT = 500;
+const LLM_USAGE_LIST_MAX_LIMIT = 1000;
+
 /**
- * Per-call `llm_usage` ledger rows for a run, org-scoped and filtered by source.
+ * Cursor read into the append-only `llm_usage` ledger, ordered by serial `id`
+ * ASC. Exposed to modules via `PlatformServices.usage.list` so a metering
+ * consumer sweeps the canonical platform ledger by watermark instead of a
+ * cross-module SQL join into `llm_usage`.
  *
- * Exposed to modules via `PlatformServices.runs.listLlmUsage` so a consumer that
- * aggregates per-call usage reads the canonical platform ledger through its API
- * instead of a cross-module SQL join into `llm_usage`. The caller reconciles on
- * the returned `id`s against its own store.
+ * `settled` (LEFT JOIN `runs`): proxy/chat rows are immutable at insert (always
+ * settled); a runner row's `cost_usd` GROWS during its run (one cumulative row
+ * per run) and only settles once the run reaches a terminal status — or its run
+ * row is gone (deleted → cascade already removed the ledger row, so a surviving
+ * runner row with no run is a legacy/detached case, treated settled). A cursor
+ * consumer processes settled rows only and never advances past the first
+ * unsettled row. `real_model` / `api` are NEVER selected (server-side only).
  */
-export async function listLlmUsageForRun(args: {
-  runId: string;
-  orgId: string;
-  sources: readonly string[];
-}): Promise<Array<{ id: number; costUsd: number; source: string }>> {
-  if (args.sources.length === 0) return [];
-  return db
-    .select({ id: llmUsage.id, costUsd: llmUsage.costUsd, source: llmUsage.source })
+export async function listLlmUsage(args: {
+  afterId?: number;
+  limit?: number;
+  credentialSource?: "system" | "org";
+}): Promise<LlmUsageLedgerRow[]> {
+  const afterId = args.afterId ?? 0;
+  const limit = Math.min(
+    Math.max(args.limit ?? LLM_USAGE_LIST_DEFAULT_LIMIT, 1),
+    LLM_USAGE_LIST_MAX_LIMIT,
+  );
+  const terminalList = sql.join(
+    terminalRunStatusValues.map((s) => sql`${s}`),
+    sql`, `,
+  );
+  const rows = await db
+    .select({
+      id: llmUsage.id,
+      orgId: llmUsage.orgId,
+      costUsd: llmUsage.costUsd,
+      source: llmUsage.source,
+      runId: llmUsage.runId,
+      chatSessionId: llmUsage.chatSessionId,
+      credentialSource: llmUsage.credentialSource,
+      settled: sql<boolean>`(${llmUsage.source} <> 'runner' OR ${runs.status} IN (${terminalList}) OR ${runs.id} IS NULL)`,
+    })
     .from(llmUsage)
+    .leftJoin(runs, eq(llmUsage.runId, runs.id))
     .where(
       and(
-        eq(llmUsage.runId, args.runId),
-        eq(llmUsage.orgId, args.orgId),
-        inArray(llmUsage.source, args.sources as (typeof llmUsage.$inferSelect)["source"][]),
+        gt(llmUsage.id, afterId),
+        args.credentialSource ? eq(llmUsage.credentialSource, args.credentialSource) : undefined,
       ),
-    );
+    )
+    .orderBy(asc(llmUsage.id))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    id: r.id,
+    orgId: r.orgId,
+    costUsd: r.costUsd,
+    source: r.source,
+    contextType: r.runId ? "run" : r.chatSessionId ? "chat" : null,
+    contextId: r.runId ?? r.chatSessionId ?? null,
+    credentialSource: r.credentialSource,
+    settled: r.settled,
+  }));
+}
+
+/**
+ * Current high-water mark of the `llm_usage` ledger (max serial `id`), or 0 when
+ * empty. Exposed via `PlatformServices.usage.maxId` so a metering consumer can
+ * initialize its cursor at cutover and never retro-process historical rows.
+ */
+export async function getMaxLlmUsageId(): Promise<number> {
+  const [row] = await db
+    .select({ maxId: sql<number>`COALESCE(MAX(${llmUsage.id}), 0)` })
+    .from(llmUsage);
+  return Number(row?.maxId ?? 0);
 }

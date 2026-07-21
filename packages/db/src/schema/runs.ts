@@ -474,7 +474,7 @@ export const llmUsage = pgTable(
     // preset via `loadModel()`. Optional on runner rows. SERVER-SIDE ONLY —
     // for an aliased model this is the hidden backing id; never serialize it
     // on any caller-facing surface (route, DTO, SSE, webhook) —
-    // `listLlmUsageForRun` deliberately selects only id/costUsd/source. Same
+    // `listLlmUsage` deliberately never selects real_model/api. Same
     // for `api` below (backing protocol family).
     realModel: text("real_model"),
     // Protocol family: "openai-completions", "anthropic-messages", …

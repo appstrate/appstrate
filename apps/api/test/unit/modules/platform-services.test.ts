@@ -28,8 +28,9 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.logger.info).toBe("function");
   });
 
-  it("wires the run-ledger read (runs.listLlmUsage — sole cross-tenant consumer: cloud)", () => {
-    expect(typeof services.runs.listLlmUsage).toBe("function");
+  it("wires the ledger cursor read (usage.list + usage.maxId — sole cross-tenant consumer: cloud)", () => {
+    expect(typeof services.usage.list).toBe("function");
+    expect(typeof services.usage.maxId).toBe("function");
   });
 
   it("wires the per-route rate limiter (http.rateLimit)", () => {
@@ -40,9 +41,10 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.inProcess.dispatch).toBe("function");
   });
 
-  it("wires the subscription-chat channel (resolveSubscriptionChatModel + recordChatUsage)", () => {
+  it("wires the subscription-chat channel (resolveSubscriptionChatModel + recordChatUsage + checkUsageAllowed)", () => {
     expect(typeof services.resolveSubscriptionChatModel).toBe("function");
     expect(typeof services.recordChatUsage).toBe("function");
+    expect(typeof services.checkUsageAllowed).toBe("function");
   });
 
   it("wires the org query helpers (getOrgAdminEmails + getOrgName)", () => {

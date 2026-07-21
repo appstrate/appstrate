@@ -6,7 +6,7 @@
  *
  *   1. Per-org rate limit (Redis token bucket).
  *   2. Per-org concurrency cap.
- *   3. `beforeRun` module hook (quota / billing / feature gates).
+ *   3. `beforeUsage` module hook (quota / billing / feature gates) — run surface.
  *   4. Timeout ceiling — agent manifest's `timeout` capped to the platform
  *      limit. Returns a cloned agent when a cap is applied so callers pass
  *      the capped value into the container env without mutating the DB.
@@ -34,14 +34,14 @@ export interface PreflightGatesInput {
 export interface PreflightGateTimings {
   rateLimitMs: number;
   concurrencyMs: number;
-  beforeRunHookMs: number;
+  beforeUsageHookMs: number;
 }
 
 export interface PreflightGatesOk {
   ok: true;
   /** Agent potentially cloned with a capped `timeout` — pass this to downstream code. */
   agent: LoadedPackage;
-  /** Running run count observed during the concurrency check. Forwarded to `beforeRun`. */
+  /** Running run count observed during the concurrency check. Forwarded to `beforeUsage`. */
   runningCount: number;
   /** Sub-gate durations (ms) for the pipeline's per-stage timing log. */
   timings: PreflightGateTimings;
@@ -124,7 +124,7 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
     };
   }
 
-  // 3. Timeout ceiling — applied before `beforeRun` so module code sees
+  // 3. Timeout ceiling — applied before `beforeUsage` so module code sees
   //    the effective timeout (e.g. for pre-charging cost estimation).
   const declaredTimeout = typeof agent.manifest.timeout === "number" ? agent.manifest.timeout : 300;
   if (declaredTimeout > platformLimits.timeout_ceiling_seconds) {
@@ -134,16 +134,17 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
     };
   }
 
-  // 4. `beforeRun` module hook.
-  let beforeRunHookMs = 0;
-  if (hasHook("beforeRun")) {
+  // 4. `beforeUsage` module hook (run surface).
+  let beforeUsageHookMs = 0;
+  if (hasHook("beforeUsage")) {
     const hookStart = Date.now();
-    const rejection = await callHook("beforeRun", {
+    const rejection = await callHook("beforeUsage", {
       orgId,
+      context: "run",
       packageId: agent.id,
       runningCount,
     });
-    beforeRunHookMs = Date.now() - hookStart;
+    beforeUsageHookMs = Date.now() - hookStart;
     if (rejection) {
       return {
         ok: false,
@@ -156,6 +157,6 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
     ok: true,
     agent,
     runningCount,
-    timings: { rateLimitMs, concurrencyMs, beforeRunHookMs },
+    timings: { rateLimitMs, concurrencyMs, beforeUsageHookMs },
   };
 }

@@ -47,6 +47,29 @@ accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
   `anthropic-beta`, `chatgpt-account-id`, …) rides through unchanged. Pure (no
   credential lookup, no I/O); the caller owns SSRF + credential resolution.
 
+- **Unified LLM usage metering contract.**
+  - **`ModuleHooks.beforeUsage`** — one admission gate over metered LLM usage,
+    replacing `beforeRun` (see Removed). `BeforeUsageParams` is a discriminated
+    union: `{ context: "run"; packageId; runningCount }` and
+    `{ context: "chat"; sessionId }` (both carry `orgId`). Same return contract
+    as the old gate: `UsageRejection { code, message, status? }` to block, or
+    null to allow. `RunRejection` is renamed to `UsageRejection`.
+  - **`ModuleEvents.onUsageRecorded`** (`UsageRecordedParams`) — broadcast after
+    each `llm_usage` ledger row is appended, carrying per-row attribution
+    (source, principal, context, credential source, token counts, `costUsd`).
+    Advisory; consumers that must not miss a row read the ledger by `id` cursor.
+  - **`PlatformServices.usage`** — `list({ afterId?, limit?, credentialSource? })`
+    and `maxId()`: a serial-`id` cursor sweep of the append-only `llm_usage`
+    ledger (returns `LlmUsageLedgerRow`, including the `settled` flag that marks
+    when a runner row's growing cost is final). Replaces the runId-keyed
+    `runs.listLlmUsage` (see Removed). Never projects `real_model` / `api`.
+  - **`PlatformServices.checkUsageAllowed`** — chat-surface entry into
+    `beforeUsage`; the platform decides system-provided vs. org-owned and only
+    dispatches the hook for a system-provided model.
+  - **`ChatUsageRecord.cost`** — the model's catalog per-token rates; the
+    platform seam computes the equivalent USD via the shared `computeTokenCost`
+    formula so the chat / proxy / runner producers can't drift.
+
 ### Fixed
 
 - **`isValidToolName` accepts a digit-leading namespace.** The namespace token
@@ -86,6 +109,16 @@ accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
   solely for the deleted Claude Agent SDK runner (`@appstrate/runner-claude` /
   `claude-binary.ts`); nothing spawns a vendor CLI on the single Pi engine and
   the subpath had zero importers left.
+
+- **`ModuleHooks.beforeRun` removed** (with `BeforeRunParams` and `RunRejection`
+  from `@appstrate/core/module`). Replaced by the unified `beforeUsage` hook
+  (see Added) — no back-compat alias. A module gating runs moves its handler to
+  `beforeUsage` and switches on `params.context === "run"`; the rejection type
+  is now `UsageRejection`.
+- **`PlatformServices.runs.listLlmUsage` removed** (the `runs` group is gone).
+  The runId-keyed per-run ledger read is replaced by the generic serial-`id`
+  cursor `PlatformServices.usage.list` (see Added), which spans run and chat
+  attribution and exposes the `settled` flag a cursor consumer needs.
 
   These are removed public API → requires a major version bump on next
   publish. Consumers on the `claude`/`codex` engine vocabulary should drop it;
