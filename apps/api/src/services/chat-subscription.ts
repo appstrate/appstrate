@@ -20,10 +20,10 @@
  * and a module must not depend on the API package.
  */
 
-import { db } from "@appstrate/db/client";
-import { llmUsage } from "@appstrate/db/schema";
 import type { ChatUsageRecord, SubscriptionChatResolution } from "@appstrate/core/chat-contract";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { computeTokenCost } from "@appstrate/afps-runtime/runner";
+import { recordLlmUsage } from "./llm-usage-ledger.ts";
 import { loadModel, modelNeedsReconnection } from "./org-models.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
@@ -108,27 +108,44 @@ export async function resolveSubscriptionChatModel(
 }
 
 /**
- * Insert one `llm_usage` row for a chat turn. Metering failures MUST NOT break
- * a completed turn (the reply already streamed), so DB errors are logged and
- * swallowed — same posture as `recordProxyUsage`.
+ * Insert one `llm_usage` row for a chat turn via the single ledger writer.
+ * Metering failures MUST NOT break a completed turn (the reply already
+ * streamed), so DB errors are logged and swallowed — same posture as
+ * `recordProxyUsage`.
+ *
+ * The subscription chat path spends the user's OWN provider subscription
+ * (oauth2 claude-code/codex), so the row is always stamped
+ * `credentialSource="org"`. Cost is derived here from the token counts + the
+ * model's catalog rates with the shared `computeTokenCost` formula — the same
+ * source and arithmetic as the proxy/runner rows.
  */
 export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
   try {
-    await db.insert(llmUsage).values({
+    await recordLlmUsage({
       source: "proxy",
       orgId: record.orgId,
-      apiKeyId: null,
       userId: record.userId,
-      runId: null,
+      chatSessionId: record.chatSessionId,
       model: record.presetId,
       realModel: record.modelId,
       api: record.apiShape,
+      credentialSource: "org",
       inputTokens: record.inputTokens,
       outputTokens: record.outputTokens,
       cacheReadTokens: record.cacheReadTokens ?? null,
       cacheWriteTokens: record.cacheWriteTokens ?? null,
-      costUsd: record.costUsd,
+      costUsd: computeTokenCost(
+        {
+          input_tokens: record.inputTokens,
+          output_tokens: record.outputTokens,
+          cache_read_input_tokens: record.cacheReadTokens ?? 0,
+          cache_creation_input_tokens: record.cacheWriteTokens ?? 0,
+        },
+        record.cost,
+      ),
       durationMs: record.durationMs,
+      // Chat turns aren't retried at the CLI layer, but proxy-source rows carry
+      // a request_id by the ledger check constraint — mint a fresh one.
       requestId: crypto.randomUUID(),
     });
   } catch (err) {

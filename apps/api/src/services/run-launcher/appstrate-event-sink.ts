@@ -55,8 +55,7 @@ import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { db, type Db } from "@appstrate/db/client";
-import { llmUsage } from "@appstrate/db/schema";
-import { sql } from "drizzle-orm";
+import { recordLlmUsage, type CredentialSource } from "../llm-usage-ledger.ts";
 import type { AppScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
@@ -77,6 +76,12 @@ export interface PersistingEventSinkOptions {
    * ledger writes.
    */
   writeLedger?: boolean;
+  /**
+   * Run's model source (`"system"` platform-provided, `"org"` BYOK, or null)
+   * — stamped as `llm_usage.credential_source` on the runner row so the
+   * attribution matches the proxy path. Only consulted when {@link writeLedger}.
+   */
+  modelSource?: string | null;
 }
 
 export type AggregatingEventSinkOptions = Pick<PersistingEventSinkOptions, "scope" | "runId">;
@@ -94,11 +99,13 @@ export class PersistingEventSink implements EventSink {
   protected readonly scope: AppScope;
   protected lastAdapterError: string | null = null;
   private readonly writeLedger: boolean;
+  private readonly modelSource: string | null;
 
   constructor(opts: PersistingEventSinkOptions) {
     this.scope = opts.scope;
     this.runId = opts.runId;
     this.writeLedger = opts.writeLedger ?? false;
+    this.modelSource = opts.modelSource ?? null;
   }
 
   async handle(event: RunEvent): Promise<void> {
@@ -121,6 +128,7 @@ export class PersistingEventSink implements EventSink {
   protected async persist(event: RunEvent): Promise<void> {
     const adapterError = await persistRunEvent(db, this.scope, this.runId, event, {
       writeLedger: this.writeLedger,
+      modelSource: this.modelSource,
     });
     if (adapterError !== null) this.lastAdapterError = adapterError;
   }
@@ -142,7 +150,7 @@ export async function persistRunEvent(
   scope: AppScope,
   runId: string,
   event: RunEvent,
-  opts: { writeLedger?: boolean } = {},
+  opts: { writeLedger?: boolean; modelSource?: string | null } = {},
 ): Promise<string | null> {
   switch (event.type) {
     case "output.emitted": {
@@ -228,7 +236,12 @@ export async function persistRunEvent(
       // is best-effort by its own contract (see writeRunnerLedgerRow's
       // try/catch) so it never aborts the surrounding transaction.
       if (opts.writeLedger) {
-        await writeRunnerLedgerRow(scope, runId, { cost, usage }, executor);
+        await writeRunnerLedgerRow(
+          scope,
+          runId,
+          { cost, usage, modelSource: opts.modelSource },
+          executor,
+        );
         // Best-effort live broadcast — never blocks the ingestion hot
         // path nor fails it. The broadcaster throttles per-run to
         // avoid flooding SSE subscribers under bursty metric emission
@@ -344,6 +357,8 @@ export async function writeRunnerLedgerRow(
   row: {
     cost: number | null;
     usage: TokenUsage | null;
+    /** Run's model source — stamped as `credential_source` (see below). */
+    modelSource?: string | null;
   },
   executor: Db = db,
 ): Promise<void> {
@@ -352,40 +367,33 @@ export async function writeRunnerLedgerRow(
   if (row.cost === null && !row.usage) return;
 
   try {
-    await executor
-      .insert(llmUsage)
-      .values({
+    // The single ledger writer performs the monotonic upsert against the
+    // partial unique index (highest cumulative total wins) and broadcasts
+    // `onUsageRecorded`. Best-effort by contract: metric persistence MUST NOT
+    // fail the ingestion path, so errors are logged, never rethrown.
+    await recordLlmUsage(
+      {
         source: "runner",
         orgId: scope.orgId,
         runId,
+        credentialSource: coerceCredentialSource(row.modelSource),
         inputTokens: row.usage?.input_tokens ?? 0,
         outputTokens: row.usage?.output_tokens ?? 0,
         cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
         cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
         costUsd: row.cost ?? 0,
-      })
-      // Upsert via the partial unique index. `setWhere` keeps the
-      // update monotonic — only the highest-seen cumulative total ever
-      // wins, so out-of-order metric events and the finalize fallback
-      // can never regress the recorded cost. Token columns are bumped
-      // alongside the cost so the snapshot stays internally consistent
-      // (cost ≥ stored cost ⇒ tokens are at least as large too).
-      .onConflictDoUpdate({
-        target: llmUsage.runId,
-        targetWhere: sql`source = 'runner' AND run_id IS NOT NULL`,
-        set: {
-          inputTokens: sql`EXCLUDED.input_tokens`,
-          outputTokens: sql`EXCLUDED.output_tokens`,
-          cacheReadTokens: sql`EXCLUDED.cache_read_tokens`,
-          cacheWriteTokens: sql`EXCLUDED.cache_write_tokens`,
-          costUsd: sql`EXCLUDED.cost_usd`,
-        },
-        setWhere: sql`EXCLUDED.cost_usd >= ${llmUsage.costUsd}`,
-      });
+      },
+      { executor, onConflict: "runner-monotonic" },
+    );
   } catch (err) {
     logger.error("Failed to write runner ledger row", {
       runId,
       error: getErrorMessage(err),
     });
   }
+}
+
+/** Narrow a run's free-form `model_source` to the `credential_source` enum. */
+function coerceCredentialSource(modelSource: string | null | undefined): CredentialSource | null {
+  return modelSource === "system" || modelSource === "org" ? modelSource : null;
 }

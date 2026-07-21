@@ -429,6 +429,15 @@ export interface ModuleEvents {
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
   onOrgDelete: (orgId: string) => void | Promise<void>;
+  /**
+   * One `llm_usage` row was appended to the platform's usage ledger —
+   * broadcast after the row is written by the single ledger writer. Carries the
+   * full per-row attribution (source, principal, context, credential source,
+   * token counts, equivalent cost). Advisory only: the row is authoritative and
+   * consumers that must never miss a row should read the ledger by its serial
+   * `id` cursor rather than relying on this side-effect broadcast.
+   */
+  onUsageRecorded: (params: UsageRecordedParams) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -905,6 +914,40 @@ export interface RunStatusChangeParams {
   packageEphemeral?: boolean;
   /** Additional data for webhook payloads (result, error, etc.). */
   extra?: Record<string, unknown>;
+}
+
+/**
+ * Parameters passed to the `onUsageRecorded` event — the per-row projection of
+ * one `llm_usage` ledger entry a module may observe.
+ *
+ * Deliberately OSS-neutral: it reports who paid the provider
+ * ({@link credentialSource}), never how that maps to any downstream accounting.
+ * The backing upstream model id and protocol family (`real_model` / `api`,
+ * server-side-only columns) are NEVER exposed here.
+ */
+export interface UsageRecordedParams {
+  /** Serial primary key of the appended `llm_usage` row — the ledger cursor value. */
+  llmUsageId: number;
+  orgId: string;
+  /** Authenticated user the usage is attributed to, when the principal was a user. */
+  userId?: string | null;
+  /** Which producer wrote the row: the inference proxy or the agent runner. */
+  source: "proxy" | "runner";
+  /** What the row is attributed to — an agent run, a chat session, or nothing. */
+  contextType: "run" | "chat" | null;
+  /** The run id / chat session id matching {@link contextType} (null when unattributed). */
+  contextId: string | null;
+  /** Which credential set reached the provider: platform-provided or the org's own. */
+  credentialSource: "system" | "org" | null;
+  /** Preset id (the catalog model the caller selected); never the backing upstream id. */
+  model?: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  /** Equivalent cost (USD) at the model's catalog rates. */
+  costUsd: number;
+  durationMs?: number | null;
 }
 
 /**

@@ -153,6 +153,12 @@ export async function handleChatStream(
   const sessionId = body.id;
   const lastMessage = messages[messages.length - 1] as UIMessage | undefined;
 
+  // Session id to stamp on this turn's `llm_usage` row. Only set when the row
+  // for that session is (or will be) persisted this turn — the same condition
+  // that runs `ensureSession` below — so the ledger's `chat_session_id` FK is
+  // always satisfiable. Ephemeral turns record un-attributed usage (null).
+  const meteringSessionId = sessionId && lastMessage?.id ? sessionId : null;
+
   // Persist the session ROW up front, BEFORE the (potentially multi-second)
   // inference preamble (model resolve + MCP boot). The client mints the id and
   // creates conversations lazily, so the sidebar shows a new conversation
@@ -198,7 +204,13 @@ export async function handleChatStream(
   // bearer on every proxy call. The static header below is for the one-shot
   // calls (listModels) that fire immediately on this same line.
   const mintInferenceAuth = () =>
-    mintLoopbackToken({ userId: user.id, email: user.email, name: user.name, orgId, orgRole });
+    mintLoopbackToken(
+      { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
+      // The session id rides the SIGNED loopback claims (not a header) so the
+      // llm-proxy can attribute the ai-sdk path's usage to the chat session
+      // without trusting anything spoofable.
+      { chatSessionId: meteringSessionId },
+    );
   const inferenceHeaders: Record<string, string> = {
     Authorization: `Bearer ${mintInferenceAuth()}`,
     "X-Org-Id": orgId,
@@ -421,6 +433,7 @@ export async function handleChatStream(
           presetId: chosen.id,
           orgId,
           userId: user.id,
+          chatSessionId: meteringSessionId,
           prompt: buildTranscriptPrompt(messages),
           system,
           platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },

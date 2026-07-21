@@ -467,6 +467,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     await writeRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
       cost: result.cost,
       usage: validatedUsage,
+      modelSource: run.modelSource,
     });
   }
 
@@ -971,7 +972,10 @@ async function persistEventAndAdvance(
       .returning({ id: runs.id });
     if (rows.length === 0) return false;
 
-    await persistRunEvent(tx, scope, run.id, event, { writeLedger: true });
+    await persistRunEvent(tx, scope, run.id, event, {
+      writeLedger: true,
+      modelSource: run.modelSource,
+    });
 
     // No runner emits `run.started`, so flip status → running on the
     // first ingested sequence regardless of type. Terminal status is
