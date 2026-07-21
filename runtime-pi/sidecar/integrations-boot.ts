@@ -32,7 +32,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join, normalize } from "node:path";
 import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import { guardedFetch } from "@appstrate/core/ssrf";
 import { isOperatorTrustedEgressHost } from "./ssrf.ts";
@@ -51,7 +51,7 @@ import {
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
-import type { CredentialBundle } from "@appstrate/connect/connect";
+import type { BrowserAcquisitionResult, CredentialBundle } from "@appstrate/connect/connect";
 
 import { McpHost } from "./mcp-host.ts";
 import { logger } from "./logger.ts";
@@ -64,12 +64,29 @@ import {
 } from "./integration-mitm-listener.ts";
 import { createIntegrationEgressListener } from "./integration-egress-listener.ts";
 import {
+  createBrowserEgressGateway,
+  type BrowserEgressGatewayHandle,
+} from "./browser-egress-gateway.ts";
+import {
+  assertBrowserIsolationSlot,
+  browserGatewayPort,
+  isFirecrackerBrowserIsolation,
+} from "./browser-guest-isolation.ts";
+import {
+  assertBrowserWorkerCompatible,
+  selectBrowserProvider,
+  type BrowserHandle,
+  type BrowserProvider,
+  type BrowserResourceProfile,
+} from "./browser-provider.ts";
+import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
   type IntegrationCredentialsSource,
 } from "./integration-credentials-source.ts";
 import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
 import { runConnectLogin } from "./connect-login.ts";
+import { browserSafeErrorCode, runBrowserConnect } from "./browser-connect.ts";
 import {
   createApiCallToolDefs,
   isSyntheticApiToolName,
@@ -86,6 +103,49 @@ import {
 // New adapters (firecracker, podman, …) plug in with one more import here.
 import "./integration-runtime-adapter-docker.ts";
 import "./integration-runtime-adapter-process.ts";
+import "./browser-provider-docker.ts";
+import "./browser-provider-process.ts";
+import "./browser-provider-browser-use-cloud.ts";
+
+const STANDARD_BROWSER_PROFILE: BrowserResourceProfile = {
+  memoryBytes: 1024 * 1024 * 1024,
+  nanoCpus: 1_000_000_000,
+  pidsLimit: 256,
+  shmBytes: 256 * 1024 * 1024,
+  maxContexts: 1,
+  maxPages: 4,
+};
+
+export function requiredBrowserProviders(specs: readonly IntegrationSpawnSpec[]): {
+  needsDefault: boolean;
+  overrides: string[];
+} {
+  const browserSpecs = specs.flatMap((spec) => (spec.browser ? [spec.browser] : []));
+  return {
+    needsDefault: browserSpecs.some((browser) => browser.providerBinding === undefined),
+    overrides: [
+      ...new Set(
+        browserSpecs.flatMap((browser) =>
+          browser.providerBinding ? [browser.providerBinding.provider] : [],
+        ),
+      ),
+    ].sort(),
+  };
+}
+
+export function canKeepBrowserInteractionDegraded(input: {
+  errorCode: string;
+  hasPrivateConnect: boolean;
+  browserProvisioned: boolean;
+  driverRegistered: boolean;
+}): boolean {
+  return (
+    input.errorCode === "BROWSER_INTERACTION_REQUIRED" &&
+    input.hasPrivateConnect &&
+    input.browserProvisioned &&
+    input.driverRegistered
+  );
+}
 
 /**
  * Re-export the canonical spawn-spec type from `@appstrate/core/sidecar-types`
@@ -157,6 +217,8 @@ function decodeWorkspaceHandle(): WorkspaceHandle | null {
 export interface BundleFetchOptions {
   platformApiUrl: string;
   runToken: string;
+  /** Organization proxy selected for this run; browser gateways fail closed on it. */
+  proxyUrl?: string;
   /** Override for tests. Defaults to `globalThis.fetch`. */
   fetchFn?: typeof fetch;
   /**
@@ -673,6 +735,11 @@ async function prepareRunCa(runId: string, dirPrefix: string): Promise<RunCaMate
   return { bundle, minter, certHostPath };
 }
 
+async function disposeRunCa(ca: RunCaMaterials): Promise<void> {
+  await rm(ca.certHostPath, { force: true }).catch(() => {});
+  await ca.minter.dispose().catch(() => {});
+}
+
 interface SpawnAndConnectResult {
   /** The wrapped MCP client (already registered + pushed onto `clients`). */
   wrapped: AppstrateMcpClient;
@@ -742,6 +809,18 @@ export function scrubStderrLine(line: string): string {
 }
 
 /**
+ * Browser drivers can hold a CDP bearer token and, for connection acquisition,
+ * bootstrap secrets. Their stderr is therefore a secret-bearing channel, not
+ * an operator diagnostic stream. Suppress it wholesale instead of relying on
+ * pattern redaction that cannot recognize arbitrary passwords or page data.
+ */
+export function shouldSuppressIntegrationStderr(
+  spec: Pick<IntegrationSpawnSpec, "browser">,
+): boolean {
+  return spec.browser !== undefined;
+}
+
+/**
  * Operator override for the per-call MCP tool timeout applied to
  * integration clients (#779 annex). Absent/invalid → `undefined` → the
  * MCP SDK default applies, unchanged behaviour. Third-party servers that
@@ -790,6 +869,7 @@ async function spawnAndConnectLocalIntegration(params: {
    * wins when both are set (it already provides egress).
    */
   wantsEgress: boolean;
+  browser?: BrowserHandle;
   /** Allowlist for `host.register`. `[]` exposes nothing (connect-run). */
   allowedTools: readonly string[] | undefined;
   /**
@@ -814,6 +894,8 @@ async function spawnAndConnectLocalIntegration(params: {
    * `docker logs` on the sidecar host.
    */
   stderrTail?: string[];
+  /** Secret-free stage marker used to diagnose browser boot failures. */
+  onStage?: (stage: string) => void;
 }): Promise<SpawnAndConnectResult> {
   const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
 
@@ -902,22 +984,53 @@ async function spawnAndConnectLocalIntegration(params: {
   // server code), NOT the integration's own bundle. Local-source integrations
   // always carry `server.packageId`; fall back to the integration id only
   // if a spec somehow omits it (defensive).
+  params.onStage?.("bundle-fetch");
   const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
-  const bytes = await fetchBundleBytes(
-    serverPackageId,
-    spec.manifest.server?.version,
-    bundleFetchOpts,
-  );
+  let bytes: Uint8Array;
+  try {
+    bytes = await fetchBundleBytes(serverPackageId, spec.manifest.server?.version, bundleFetchOpts);
+  } catch (error) {
+    // Browser connect errors cross a public API boundary and are reduced to a
+    // safe canonical code. Preserve the failing stage without forwarding the
+    // platform response body, which may contain deployment detail.
+    if (spec.browser) {
+      throw new Error("BROWSER_BUNDLE_UNAVAILABLE", { cause: error });
+    }
+    throw error;
+  }
+  params.onStage?.("bundle-extract");
   const root = await extractBundle(bytes, spec.namespace);
 
   const spawnStart = performance.now();
+  const suppressStderr = shouldSuppressIntegrationStderr(spec);
+  let suppressedStderrObserved = false;
+  params.onStage?.("runner-spawn");
   const spawnedIntegration = await adapter.spawn({
     runId,
     spec,
     bundleRoot: root,
     egress: egressCtx,
+    ...(params.browser ? { browserProxyBypassEndpoint: params.browser.endpoint } : {}),
+    ...(params.browser && spec.browser?.purpose === "automation"
+      ? {
+          browser: {
+            endpoint: params.browser.endpoint,
+            authToken: params.browser.authToken,
+            protocolVersion: params.browser.protocolVersion,
+          },
+        }
+      : {}),
     workspaceHandle: params.workspaceHandle,
     onStderrLine: (line) => {
+      if (suppressStderr) {
+        if (!suppressedStderrObserved) {
+          suppressedStderrObserved = true;
+          logger.info(`${logLabel} browser integration stderr suppressed`, {
+            integrationId: spec.integrationId,
+          });
+        }
+        return;
+      }
       logger.info(`${logLabel} integration stderr`, { integrationId: spec.integrationId, line });
       if (params.stderrTail) {
         params.stderrTail.push(scrubStderrLine(line));
@@ -929,6 +1042,7 @@ async function spawnAndConnectLocalIntegration(params: {
   const spawnMs = performance.now() - spawnStart;
 
   const connectStart = performance.now();
+  params.onStage?.("mcp-connect");
   const client = new Client(
     { name: "appstrate-sidecar-integration-host", version: "0.1.0" },
     // Advertise MCP Roots capability when the spec declares a workspace
@@ -992,6 +1106,7 @@ async function spawnAndConnectLocalIntegration(params: {
   const wrapped = wrapClient(client, spawnedIntegration.transport, toolTimeoutMsFromEnv());
   params.clients.push(wrapped);
 
+  params.onStage?.("tool-register");
   const sizeBefore = host.size();
   const allocatedNs = await host.register({
     namespace: spec.namespace,
@@ -1151,6 +1266,11 @@ export async function bootIntegrations(
   const breadcrumbs: IntegrationBootBreadcrumb[] = [];
   const clients: AppstrateMcpClient[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
+  const browserResources: Array<{
+    handle: BrowserHandle;
+    gateway: BrowserEgressGatewayHandle;
+    provider: BrowserProvider;
+  }> = [];
 
   // The sidecar receives RUN_TOKEN but not always RUN_ID directly — we
   // need a stable identifier for labelling integration containers
@@ -1161,6 +1281,21 @@ export async function bootIntegrations(
   // talk to the daemon). Fall back to an opaque random id when RUN_ID
   // isn't available — orphan-cleanup is best-effort either way.
   const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
+  const browserCount = specs.filter((spec) => spec.browser !== undefined).length;
+  const browserProviders = new Map<string, BrowserProvider>();
+  let defaultBrowserProvider: BrowserProvider | null = null;
+  if (browserCount > 0) {
+    const providerRequirements = requiredBrowserProviders(specs);
+    if (providerRequirements.needsDefault) {
+      defaultBrowserProvider = selectBrowserProvider();
+      browserProviders.set(defaultBrowserProvider.id, defaultBrowserProvider);
+    }
+    for (const requested of providerRequirements.overrides) {
+      if (!browserProviders.has(requested)) {
+        browserProviders.set(requested, selectBrowserProvider(process.env, requested));
+      }
+    }
+  }
 
   // Pick the runtime backend deterministically from `INTEGRATION_RUNTIME_ADAPTER`
   // (the launching orchestrator pins it to mirror `RUN_ADAPTER` — no probing).
@@ -1194,7 +1329,26 @@ export async function bootIntegrations(
   runCaPromise?.catch(() => {});
 
   const adapterPrepareStart = performance.now();
-  const adapterCtx = await adapter.prepare(runId);
+  const [adapterPreparation, browserPreparation] = await Promise.allSettled([
+    adapter.prepare(runId),
+    Promise.all([...browserProviders.values()].map((provider) => provider.prepare(runId))),
+  ]);
+  if (adapterPreparation.status === "rejected" || browserPreparation.status === "rejected") {
+    await adapter.shutdown().catch(() => {});
+    await Promise.all(
+      [...browserProviders.values()].map((provider) => provider.shutdown().catch(() => {})),
+    );
+    if (runCaPromise) {
+      const pendingCa = await runCaPromise.catch(() => null);
+      if (pendingCa) await disposeRunCa(pendingCa);
+    }
+    throw adapterPreparation.status === "rejected"
+      ? adapterPreparation.reason
+      : browserPreparation.status === "rejected"
+        ? browserPreparation.reason
+        : new Error("integration runtime preparation failed");
+  }
+  const adapterCtx = adapterPreparation.value;
   const adapterPrepareMs = performance.now() - adapterPrepareStart;
   // Decode the workspace handle once for the whole run — same handle is
   // shared by every opt-in integration runner. The agent already has
@@ -1264,6 +1418,19 @@ export async function bootIntegrations(
 
   for (const spec of specs) {
     const specStart = performance.now();
+    let pendingBrowser:
+      | {
+          handle: BrowserHandle;
+          gateway: BrowserEgressGatewayHandle;
+          provider: BrowserProvider;
+        }
+      | undefined;
+    let selectedBrowserProvider: BrowserProvider | undefined;
+    let pendingGateway: BrowserEgressGatewayHandle | undefined;
+    let browserStage = "preflight";
+    let registeredBrowserDriver:
+      | { toolCount: number; diagnosticId: string | null; spawnMs: number; connectMs: number }
+      | undefined;
     // #779 — bounded tail of the runner's stderr, folded into the failure
     // report below so the real cause (an OAuth 405, a crashed module, …)
     // reaches operators instead of living only in `docker logs`.
@@ -1281,7 +1448,12 @@ export async function bootIntegrations(
       const hasApiCall = (spec.apiCalls?.length ?? 0) > 0;
       const hasHttpDelivery =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
-      const needsSource = hasHttpDelivery || hasApiCall || spec.sourceKind === "remote";
+      const needsSource =
+        hasHttpDelivery ||
+        hasApiCall ||
+        spec.sourceKind === "remote" ||
+        (spec.browserConnect?.sessionMode === "exportable" &&
+          spec.browserConnect.deliveryHttp !== undefined);
       const source = needsSource
         ? createIntegrationCredentialsSource({
             integrationId: spec.integrationId,
@@ -1500,6 +1672,69 @@ export async function bootIntegrations(
       const wantsMitm =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
       const wantsEgress = spec.needsEgress === true;
+      if (spec.browser) {
+        browserStage = "gateway";
+        selectedBrowserProvider = spec.browser.providerBinding
+          ? browserProviders.get(spec.browser.providerBinding.provider)
+          : (defaultBrowserProvider ?? undefined);
+        if (!selectedBrowserProvider) {
+          throw new Error("BROWSER_UNAVAILABLE: no browser provider was selected");
+        }
+        const gatewayToken = randomBytes(32).toString("base64url");
+        const guestIsolation = isFirecrackerBrowserIsolation();
+        const isolationSlot = guestIsolation
+          ? assertBrowserIsolationSlot(spec.browser.isolationSlot)
+          : undefined;
+        const gateway = createBrowserEgressGateway({
+          authToken: gatewayToken,
+          allowedOrigins: spec.browser.allowedOrigins,
+          ...(bundleFetchOpts.proxyUrl ? { upstreamProxyUrl: bundleFetchOpts.proxyUrl } : {}),
+          host: adapterCtx.listenerBindHost,
+          ...(isolationSlot === undefined ? {} : { port: browserGatewayPort(isolationSlot) }),
+          resolveHostFn: bundleFetchOpts.resolveHostFn,
+          onEvent: (event) =>
+            logger.info("browser gateway event", {
+              integrationId: spec.integrationId,
+              ...event,
+            }),
+        });
+        await gateway.ready;
+        pendingGateway = gateway;
+        browserStage = "worker-spawn";
+        const handle = await selectedBrowserProvider.spawn({
+          runId,
+          integrationId: spec.integrationId,
+          spec: spec.browser,
+          egress: {
+            proxyUrl: adapterCtx.proxyUrlFor(gateway.address().port),
+            authToken: gatewayToken,
+          },
+          resources: STANDARD_BROWSER_PROFILE,
+          ...(spec.workspaceMount && workspaceHandle
+            ? {
+                workspace: {
+                  handle: workspaceHandle,
+                  mount: spec.workspaceMount.mount,
+                },
+              }
+            : {}),
+        });
+        pendingBrowser = { handle, gateway, provider: selectedBrowserProvider };
+        assertBrowserWorkerCompatible(spec.browser.protocol, handle);
+        browserResources.push(pendingBrowser);
+        breadcrumbs.push({
+          message: `${spec.integrationId}: browser worker ready`,
+          level: "info",
+          data: {
+            integrationId: spec.integrationId,
+            provider: selectedBrowserProvider.id,
+            workerBuildId: handle.workerBuildId,
+            protocolVersion: handle.protocolVersion,
+            browserRevision: handle.browserRevision,
+            ...(handle.diagnosticId ? { diagnosticId: handle.diagnosticId } : {}),
+          },
+        });
+      }
       const {
         allocatedNs,
         mitmSource,
@@ -1519,6 +1754,7 @@ export async function bootIntegrations(
         workspaceHandle,
         wantsMitm,
         wantsEgress,
+        ...(pendingBrowser ? { browser: pendingBrowser.handle } : {}),
         allowedTools: spec.toolAllowlist,
         // R8a — propagate `hidden_tools` so the host filters them out at
         // runtime, regardless of whether install-time validation removed them.
@@ -1527,7 +1763,16 @@ export async function bootIntegrations(
         clients,
         mitmListeners,
         stderrTail,
+        ...(spec.browser ? { onStage: (stage: string) => (browserStage = stage) } : {}),
       });
+      if (spec.browser) {
+        registeredBrowserDriver = {
+          toolCount: added,
+          diagnosticId: diagnosticId ?? null,
+          spawnMs,
+          connectMs,
+        };
+      }
       pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
 
       // ─── P2 — connect.tool `runAt: "run-start"` session acquisition ───
@@ -1544,6 +1789,30 @@ export async function bootIntegrations(
       // host may have disambiguated `spec.namespace` with a suffix).
       if (spec.connectLogin) {
         await runConnectLoginHook(spec, host, mitmSource, allocatedNs);
+      }
+      if (spec.browserConnect) {
+        browserStage = "session-acquisition";
+        if (!pendingBrowser || !spec.browser) {
+          throw new Error("browser-connect: browser worker was not provisioned");
+        }
+        await runBrowserConnect({
+          host,
+          namespace: allocatedNs,
+          connect: spec.browserConnect,
+          browserSpec: spec.browser,
+          browser: pendingBrowser.handle,
+          source,
+          installExportedSession: spec.browserConnect.deliveryHttp !== undefined,
+          onStage: (stage) => (browserStage = stage),
+        });
+        breadcrumbs.push({
+          message: `${spec.integrationId}: browser connection proof succeeded`,
+          level: "info",
+          data: {
+            integrationId: spec.integrationId,
+            sessionMode: spec.browserConnect.sessionMode,
+          },
+        });
       }
 
       // Attach the in-process api_call tool alongside the spawned server's
@@ -1567,7 +1836,11 @@ export async function bootIntegrations(
         ...(diagnosticId ? { diagnosticId } : {}),
         toolCount: added + apiCallAdded,
       });
-      const loginPart = spec.connectLogin ? " · login" : "";
+      const loginPart = spec.connectLogin
+        ? " · login"
+        : spec.browserConnect
+          ? " · browser-login"
+          : "";
       breadcrumbs.push({
         message: `${spec.integrationId}: spawn ${Math.round(spawnMs)}ms · connect ${Math.round(connectMs)}ms${loginPart} · ready`,
         level: "info",
@@ -1583,8 +1856,61 @@ export async function bootIntegrations(
         },
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = spec.browser
+        ? browserSafeErrorCode(err)
+        : err instanceof Error
+          ? err.message
+          : String(err);
       const ms = Math.round(performance.now() - specStart);
+      // A site challenge is not a platform boot failure. The browser and its
+      // deterministic tools are already registered and remain isolated for
+      // the rest of the run, so keep them alive and let the agent use another
+      // integration or report that human verification is required. Other
+      // browser errors still fail closed and tear down every resource below.
+      if (
+        canKeepBrowserInteractionDegraded({
+          errorCode: msg,
+          hasPrivateConnect: !!spec.browserConnect,
+          browserProvisioned: !!pendingBrowser,
+          driverRegistered: !!registeredBrowserDriver,
+        }) &&
+        pendingBrowser &&
+        registeredBrowserDriver
+      ) {
+        spawned.push({
+          integrationId: spec.integrationId,
+          namespace: spec.namespace,
+          toolCount: registeredBrowserDriver.toolCount,
+          ...(typeof spec.manifest.server?.vendored === "boolean"
+            ? { vendored: spec.manifest.server.vendored }
+            : {}),
+        });
+        logger.warn("browser integration requires user interaction; keeping degraded tools alive", {
+          integrationId: spec.integrationId,
+          stage: browserStage,
+          diagnosticId: registeredBrowserDriver.diagnosticId,
+        });
+        breadcrumbs.push({
+          message: `${spec.integrationId}: browser verification required; tools remain available`,
+          level: "warn",
+          data: {
+            integrationId: spec.integrationId,
+            durationMs: ms,
+            error: msg,
+            stage: browserStage,
+            degraded: true,
+          },
+        });
+        continue;
+      }
+      if (pendingBrowser) {
+        await pendingBrowser.provider.stop(pendingBrowser.handle).catch(() => {});
+        await pendingBrowser.gateway.close().catch(() => {});
+        const index = browserResources.indexOf(pendingBrowser);
+        if (index !== -1) browserResources.splice(index, 1);
+      } else if (pendingGateway) {
+        await pendingGateway.close().catch(() => {});
+      }
       // #779 — append the runner's stderr tail so the boot report carries
       // the actual upstream cause, not just the transport-level symptom
       // (e.g. "MCP connect timeout (30s)" hiding an OAuth 405 underneath).
@@ -1601,7 +1927,12 @@ export async function bootIntegrations(
       breadcrumbs.push({
         message: `${spec.integrationId}: failed after ${ms}ms — ${msg}${stderrSuffix}`,
         level: "error",
-        data: { integrationId: spec.integrationId, durationMs: ms, error: msg },
+        data: {
+          integrationId: spec.integrationId,
+          durationMs: ms,
+          error: msg,
+          ...(spec.browser ? { stage: browserStage } : {}),
+        },
       });
     }
   }
@@ -1651,6 +1982,26 @@ export async function bootIntegrations(
           error: err instanceof Error ? err.message : String(err),
         });
       }
+      // Browser workers outlive their integration runner during the run, then
+      // stop before their gateways so Chromium cannot escape through a stale
+      // listener while teardown races.
+      if (browserProviders.size > 0) {
+        for (const resource of browserResources) {
+          await resource.provider.stop(resource.handle).catch(() => {});
+        }
+        for (const provider of browserProviders.values()) {
+          await provider.shutdown().catch((err) => {
+            logger.warn("browser provider shutdown failed", {
+              provider: provider.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
+        for (const resource of browserResources) {
+          await resource.gateway.close().catch(() => {});
+        }
+        browserResources.length = 0;
+      }
       // Close MITM listeners after the runtimes are torn down — listeners
       // hold open per-SNI Bun.serve sockets + cached leaf certs.
       for (const l of mitmListeners) {
@@ -1660,17 +2011,7 @@ export async function bootIntegrations(
           // ignore — listener already torn down via SIGTERM
         }
       }
-      if (runCa) {
-        try {
-          await rm(runCa.certHostPath, { force: true });
-        } catch {
-          // ignore — best-effort
-        }
-        // Wipe the minter's on-disk session workdir (the staged CA *private
-        // key*). On the process adapter os.tmpdir() is not tmpfs, so without
-        // this the per-run CA signing key survives on the host.
-        await runCa.minter.dispose();
-      }
+      if (runCa) await disposeRunCa(runCa);
     },
   };
 }
@@ -1748,7 +2089,11 @@ export async function runConnectOnce(
       integrationId: spec.integrationId,
       platformApiUrl: bundleFetchOpts.platformApiUrl,
       runToken: bundleFetchOpts.runToken,
-      initialPayload: await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts),
+      // A link-time connect workload is intentionally authorized for only its
+      // exact MCP bundle. It must never inherit the broader run-token ability
+      // to read stored integration credentials. The login hook starts from an
+      // empty source and opens a bounded transient-input window below.
+      initialPayload: { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} },
     });
 
     // Same spawn→connect→register pipeline the agent-run path uses, but
@@ -1838,5 +2183,117 @@ export async function runConnectOnce(
         // ignore — best-effort
       }
     }
+  }
+}
+
+/** Trusted browser link-acquisition lifecycle. It is intentionally separate
+ * from runConnectOnce: bootstrap inputs go directly to an authorized driver,
+ * never through the ordinary secret-blind MITM substitution contract. */
+export async function runBrowserConnectOnce(
+  spec: IntegrationSpawnSpec,
+  bundleFetchOpts: BundleFetchOptions,
+  onInteractionReady?: (interaction: { url: string }) => void | Promise<void>,
+): Promise<BrowserAcquisitionResult> {
+  if (!spec.browser || !spec.browserConnect) {
+    throw new Error("runBrowserConnectOnce: spec has no browser acquisition contract");
+  }
+  if (
+    spec.browser.purpose !== "connection-acquisition" ||
+    !spec.browser.trustedDriver ||
+    !spec.browser.driverGrantId
+  ) {
+    throw new Error("runBrowserConnectOnce: driver is not authorized for secret-aware browser use");
+  }
+  if (!spec.manifest.server || spec.sourceKind !== "local") {
+    throw new Error("runBrowserConnectOnce: browser acquisition requires a local mcp-server");
+  }
+
+  const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
+  const adapter = selectIntegrationRuntimeAdapter();
+  const browserProvider = selectBrowserProvider(
+    process.env,
+    spec.browser.providerBinding?.provider,
+  );
+  const host = new McpHost();
+  const clients: AppstrateMcpClient[] = [];
+  const listeners: MitmListenerHandle[] = [];
+  let gateway: BrowserEgressGatewayHandle | null = null;
+  let browser: BrowserHandle | null = null;
+  try {
+    const [adapterPreparation, browserPreparation] = await Promise.allSettled([
+      adapter.prepare(runId),
+      browserProvider.prepare(runId),
+    ]);
+    if (adapterPreparation.status === "rejected" || browserPreparation.status === "rejected") {
+      throw adapterPreparation.status === "rejected"
+        ? adapterPreparation.reason
+        : browserPreparation.status === "rejected"
+          ? browserPreparation.reason
+          : new Error("browser connect runtime preparation failed");
+    }
+    const adapterCtx = adapterPreparation.value;
+    const gatewayToken = randomBytes(32).toString("base64url");
+    const guestIsolation = isFirecrackerBrowserIsolation();
+    const isolationSlot = guestIsolation
+      ? assertBrowserIsolationSlot(spec.browser.isolationSlot)
+      : undefined;
+    gateway = createBrowserEgressGateway({
+      authToken: gatewayToken,
+      allowedOrigins: spec.browser.allowedOrigins,
+      ...(bundleFetchOpts.proxyUrl ? { upstreamProxyUrl: bundleFetchOpts.proxyUrl } : {}),
+      host: adapterCtx.listenerBindHost,
+      ...(isolationSlot === undefined ? {} : { port: browserGatewayPort(isolationSlot) }),
+      resolveHostFn: bundleFetchOpts.resolveHostFn,
+    });
+    await gateway.ready;
+    browser = await browserProvider.spawn({
+      runId,
+      integrationId: spec.integrationId,
+      spec: spec.browser,
+      egress: {
+        proxyUrl: adapterCtx.proxyUrlFor(gateway.address().port),
+        authToken: gatewayToken,
+      },
+      resources: STANDARD_BROWSER_PROFILE,
+    });
+    assertBrowserWorkerCompatible(spec.browser.protocol, browser);
+    if (browser.interactionUrl) {
+      await onInteractionReady?.({ url: browser.interactionUrl });
+    }
+    const { allocatedNs } = await spawnAndConnectLocalIntegration({
+      spec: spec.workspaceMount ? { ...spec, workspaceMount: undefined } : spec,
+      runId,
+      adapter,
+      adapterCtx,
+      host,
+      bundleFetchOpts,
+      source: null,
+      ca: null,
+      workspaceHandle: null,
+      wantsMitm: false,
+      wantsEgress: false,
+      browser,
+      allowedTools: [],
+      hiddenTools: spec.hiddenTools,
+      logLabel: "browser-connect-run",
+      clients,
+      mitmListeners: listeners,
+    });
+    return await runBrowserConnect({
+      host,
+      namespace: allocatedNs,
+      connect: spec.browserConnect,
+      browserSpec: spec.browser,
+      browser,
+      source: null,
+      installExportedSession: false,
+    });
+  } finally {
+    await host.dispose().catch(() => {});
+    for (const client of clients) await client.close().catch(() => {});
+    await adapter.shutdown().catch(() => {});
+    if (browser) await browserProvider.stop(browser).catch(() => {});
+    await browserProvider.shutdown().catch(() => {});
+    await gateway?.close().catch(() => {});
   }
 }

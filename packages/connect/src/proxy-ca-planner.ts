@@ -134,9 +134,9 @@ export async function planCaBundle(options: PlanCaBundleOptions): Promise<CaBund
 
   const pems = await options.generator(req);
   assertPem(pems.caCertPem, "caCertPem", "CERTIFICATE");
-  assertPem(pems.caKeyPem, "caKeyPem", "PRIVATE KEY");
+  assertPrivateKeyPem(pems.caKeyPem, "caKeyPem");
   assertPem(pems.serverCertPem, "serverCertPem", "CERTIFICATE");
-  assertPem(pems.serverKeyPem, "serverKeyPem", "PRIVATE KEY");
+  assertPrivateKeyPem(pems.serverKeyPem, "serverKeyPem");
 
   return {
     runId: options.runId,
@@ -161,5 +161,20 @@ function assertPem(value: string, fieldName: string, kind: string): void {
   }
   if (!value.includes(`-----BEGIN ${kind}-----`)) {
     throw new Error(`planCaBundle: ${fieldName} is missing the '-----BEGIN ${kind}-----' marker`);
+  }
+}
+
+function assertPrivateKeyPem(value: string, fieldName: string): void {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`planCaBundle: ${fieldName} is missing`);
+  }
+  // OpenSSL 3 emits PKCS#8 (`PRIVATE KEY`) by default while LibreSSL and
+  // older OpenSSL builds may emit PKCS#1 (`RSA PRIVATE KEY`) for `genrsa`.
+  // Both are accepted by the TLS consumers and by the generator's own tests.
+  if (
+    !value.includes("-----BEGIN PRIVATE KEY-----") &&
+    !value.includes("-----BEGIN RSA PRIVATE KEY-----")
+  ) {
+    throw new Error(`planCaBundle: ${fieldName} is missing a supported private-key PEM marker`);
   }
 }

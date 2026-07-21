@@ -167,6 +167,18 @@ export interface AppstrateConnectMeta {
   reauth_on?: number[];
   produces?: string[];
   persist_login_secret?: boolean;
+  executor?: BrowserConnectExecutorMeta;
+  /** Local companion entry point for a user-driven first-party login. */
+  companion?: BrowserCompanionMeta;
+}
+
+export interface BrowserConnectExecutorMeta {
+  kind: "browser";
+  session_mode: "exportable" | "browser-bound";
+}
+
+export interface BrowserCompanionMeta {
+  start_url: string;
 }
 
 const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
@@ -302,4 +314,58 @@ export function getAppstrateConnectMeta(
 ): AppstrateConnectMeta | undefined {
   const meta = connect?._meta?.[APPSTRATE_CONNECT_META_KEY];
   return meta && typeof meta === "object" ? (meta as AppstrateConnectMeta) : undefined;
+}
+
+/**
+ * Return a strictly validated local-companion declaration. Invalid metadata is
+ * treated as absent so a malformed package cannot turn an arbitrary URL into a
+ * privileged browser launch target.
+ */
+export function getBrowserCompanionMeta(
+  connect: AfpsManifestConnect | undefined,
+): BrowserCompanionMeta | undefined {
+  const raw = getAppstrateConnectMeta(connect)?.companion;
+  if (!raw || typeof raw !== "object") return undefined;
+  const startUrl = (raw as { start_url?: unknown }).start_url;
+  if (typeof startUrl !== "string" || startUrl.length > 2048) return undefined;
+  try {
+    const parsed = new URL(startUrl);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.hash !== ""
+    ) {
+      return undefined;
+    }
+    return { start_url: parsed.href };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Return the strictly-shaped browser executor marker. Install-time validation
+ * rejects malformed metadata; this runtime guard remains fail-closed for rows
+ * written directly to the database or created by old fixtures.
+ */
+export function getBrowserConnectExecutor(
+  connect: AfpsManifestConnect | undefined,
+): BrowserConnectExecutorMeta | undefined {
+  const raw = getAppstrateConnectMeta(connect)?.executor;
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("browser connect executor must be an object");
+  }
+  const record = raw as unknown as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== "kind" && key !== "session_mode")) {
+    throw new Error("browser connect executor contains unknown fields");
+  }
+  if (record.kind !== "browser") {
+    throw new Error("unsupported connect executor kind");
+  }
+  if (record.session_mode !== "exportable" && record.session_mode !== "browser-bound") {
+    throw new Error("unsupported browser session mode");
+  }
+  return { kind: "browser", session_mode: record.session_mode };
 }

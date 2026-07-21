@@ -331,6 +331,10 @@ describe("pickOperatorSidecarEnv", () => {
     const originals: Record<string, string | undefined> = {};
     for (const key of SIDECAR_OPERATOR_ENV_KEYS) originals[key] = process.env[key];
     try {
+      // Tests run with the developer/operator .env loaded, which may set any
+      // of the browser/proxy knobs in the full allowlist. Start from a truly
+      // empty allowlisted environment before applying this case's fixtures.
+      for (const key of SIDECAR_OPERATOR_ENV_KEYS) delete process.env[key];
       for (const [k, v] of Object.entries(values)) {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
@@ -360,6 +364,27 @@ describe("pickOperatorSidecarEnv", () => {
         expect(pickOperatorSidecarEnv()).toEqual({
           SIDECAR_MAX_REQUEST_BODY_BYTES: "20971520",
           SIDECAR_MAX_MCP_ENVELOPE_BYTES: "33554432",
+        });
+      },
+    );
+  });
+
+  it("forwards Browser Use Cloud proxy credentials only to the sidecar allowlist", () => {
+    withEnv(
+      {
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: "proxy.example",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT: "8443",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME: "proxy-user",
+        BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD: "proxy-password",
+        BROWSER_USE_CLOUD_PROFILE_ID: "018f0c67-98ab-7def-8123-123456789abc",
+      },
+      () => {
+        expect(pickOperatorSidecarEnv()).toEqual({
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST: "proxy.example",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT: "8443",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME: "proxy-user",
+          BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD: "proxy-password",
+          BROWSER_USE_CLOUD_PROFILE_ID: "018f0c67-98ab-7def-8123-123456789abc",
         });
       },
     );

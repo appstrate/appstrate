@@ -40,10 +40,13 @@
 import { createDecipheriv, randomBytes } from "node:crypto";
 
 import { logger } from "../../lib/logger.ts";
-import { signRunToken } from "../../lib/run-token.ts";
+import { signConnectWorkloadToken } from "../../lib/connect-workload-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import { fetchMcpServerManifest } from "../integration-service.ts";
+import {
+  resolveLocalMcpServerExecution,
+  type LocalMcpServerExecutionResolution,
+} from "../resolved-mcp-server-execution.ts";
 import {
   getIntegrationSourceKind,
   getLocalServerRef,
@@ -63,6 +66,7 @@ import type { CredentialBundle } from "./strategy.ts";
 
 const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
+const BROWSER_INTERACTION_SENTINEL = "APPSTRATE_BROWSER_INTERACTION:";
 
 /**
  * Coerce a credential bag's values to strings. The sidecar's MITM substitutes
@@ -128,11 +132,14 @@ export interface ConnectRunExecutorOptions {
  */
 export type McpServerResolver = (
   packageId: string,
-) => Promise<{ server?: { type?: string; entry_point?: string } } | null>;
+  orgId: string,
+  pin?: string | null,
+) => Promise<LocalMcpServerExecutionResolution>;
 
 export async function buildConnectLoginSpec(
   execution: ConnectToolExecution,
-  resolveMcpServer: McpServerResolver = fetchMcpServerManifest,
+  resolveMcpServer: McpServerResolver = (packageId, orgId, pin) =>
+    resolveLocalMcpServerExecution({ packageId, orgId, pin }),
 ): Promise<IntegrationSpawnSpec> {
   const auths = (execution.manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   const auth = auths[execution.authKey];
@@ -164,11 +171,16 @@ export async function buildConnectLoginSpec(
       `connect-run: integration '${execution.integrationId}' local source is missing source.server`,
     );
   }
-  const mcpServer = await resolveMcpServer(ref.name);
-  const run = mcpServer?.server;
-  if (!mcpServer || !run?.type || !run.entry_point) {
+  const resolution = await resolveMcpServer(ref.name, execution.scope.orgId, ref.version);
+  if (!resolution.ok) {
     throw new Error(
-      `connect-run: referenced mcp-server '${ref.name}' could not be resolved (missing or invalid)`,
+      `connect-run: referenced mcp-server '${ref.name}@${ref.version}' could not be resolved (${resolution.reason})`,
+    );
+  }
+  const resolvedServer = resolution.execution;
+  if (resolvedServer.browser) {
+    throw new Error(
+      "connect-run: a browser-capable mcp-server requires the explicit trusted browser executor marker",
     );
   }
 
@@ -189,8 +201,10 @@ export async function buildConnectLoginSpec(
       name: execution.manifest.name,
       version: execution.manifest.version,
       server: {
-        type: run.type,
-        entry_point: run.entry_point,
+        type: resolvedServer.runtime,
+        entry_point: resolvedServer.entryPoint,
+        packageId: resolvedServer.packageId,
+        ...(resolvedServer.source === "version" ? { version: resolvedServer.version } : {}),
       },
     },
     spawnEnv: {},
@@ -209,6 +223,7 @@ export async function buildConnectLoginSpec(
     },
     // No agent — expose nothing.
     toolAllowlist: [],
+    ...(resolvedServer.workspaceMount ? { workspaceMount: resolvedServer.workspaceMount } : {}),
     connectLogin: {
       toolName: execution.toolName,
       ...(execution.produces ? { produces: execution.produces } : {}),
@@ -231,7 +246,7 @@ export async function buildConnectLoginSpec(
  * (malformed base64, truncated payload, auth-tag mismatch, wrong key) throws —
  * the caller maps it onto a structured "could not decrypt" strategy error.
  */
-function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
+function decryptConnectPayload(payloadB64: string, resultKey: Buffer): string {
   const buf = Buffer.from(payloadB64, "base64");
   // 12-byte GCM iv + 16-byte auth tag = 28-byte minimum framing.
   if (buf.length < 28) {
@@ -243,6 +258,61 @@ function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
   const decipher = createDecipheriv("aes-256-gcm", resultKey, iv);
   decipher.setAuthTag(authTag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+}
+
+function isBrowserUseHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "browser-use.com" || host.endsWith(".browser-use.com");
+}
+
+/**
+ * Parse one encrypted human-interaction event emitted by a browser connect
+ * sidecar. Returns null for ordinary log lines. The live URL is deliberately
+ * validated again at the API trust boundary before it can reach the UI.
+ */
+export function parseBrowserInteraction(line: string, resultKey: Buffer): string | null {
+  const idx = line.indexOf(BROWSER_INTERACTION_SENTINEL);
+  if (idx === -1) return null;
+  const payload = line.slice(idx + BROWSER_INTERACTION_SENTINEL.length).trim();
+  let json: string;
+  try {
+    json = decryptConnectPayload(payload, resultKey);
+  } catch {
+    throw new Error("connect-run: browser interaction sentinel could not be decrypted");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("connect-run: browser interaction sentinel carried invalid JSON");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("connect-run: browser interaction sentinel is not a JSON object");
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 1 ||
+    typeof record.url !== "string" ||
+    record.url.length === 0 ||
+    record.url.length > 4096
+  ) {
+    throw new Error("connect-run: browser interaction sentinel is malformed");
+  }
+  let url: URL;
+  try {
+    url = new URL(record.url);
+  } catch {
+    throw new Error("connect-run: browser interaction URL is malformed");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    !isBrowserUseHost(url.hostname)
+  ) {
+    throw new Error("connect-run: browser interaction URL is unsafe");
+  }
+  return url.toString();
 }
 
 /**
@@ -262,7 +332,7 @@ export function parseConnectResult(lines: readonly string[], resultKey: Buffer):
       const payload = line.slice(resultIdx + RESULT_SENTINEL.length).trim();
       let json: string;
       try {
-        json = decryptConnectResult(payload, resultKey);
+        json = decryptConnectPayload(payload, resultKey);
       } catch {
         // Never surface the raw payload / crypto detail — a decrypt failure is
         // opaque by design (wrong key, tampered log line, truncated capture).
@@ -300,7 +370,9 @@ class ConnectRunExecutor implements ConnectToolExecutor {
   constructor(opts: ConnectRunExecutorOptions = {}) {
     this.orchestrator = opts.orchestrator;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
-    this.resolveMcpServer = opts.resolveMcpServer ?? fetchMcpServerManifest;
+    this.resolveMcpServer =
+      opts.resolveMcpServer ??
+      ((packageId, orgId, pin) => resolveLocalMcpServerExecution({ packageId, orgId, pin }));
   }
 
   async run(execution: ConnectToolExecution): Promise<CredentialBundle> {
@@ -311,7 +383,6 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     }
     const orch = this.orchestrator ?? getOrchestrator();
     const connectId = `connect_${randomBytes(12).toString("hex")}`;
-    const runToken = signRunToken(connectId);
     // Per-connect-run ephemeral key for the result channel. The sidecar
     // encrypts the captured credential bundle with it (AES-256-GCM) before
     // writing the APPSTRATE_CONNECT_RESULT sentinel, so the plaintext credential
@@ -320,7 +391,20 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     const resultKey = randomBytes(32);
 
     const spec = await buildConnectLoginSpec(execution, this.resolveMcpServer);
-
+    const server = spec.manifest.server;
+    if (!server?.packageId) {
+      throw new Error("connect-run: resolved mcp-server package id is missing");
+    }
+    const runToken = signConnectWorkloadToken({
+      connectId,
+      orgId: execution.scope.orgId,
+      applicationId: execution.scope.applicationId,
+      integrationId: execution.integrationId,
+      mcpServerId: server.packageId,
+      mcpServerVersion: server.version ?? null,
+      mcpServerSource: server.version ? "version" : "system",
+      ttlMs: Math.min(this.timeoutMs + 30_000, 5 * 60_000),
+    });
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;
 

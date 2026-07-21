@@ -15,6 +15,11 @@ import { isInlineShadowPackageId } from "../inline-run.ts";
 import { synthesiseFinalize } from "../run-event-ingestion.ts";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 import { runWithSpan } from "@appstrate/core/telemetry";
+import {
+  acquireBrowserSessionLease,
+  releaseBrowserSessionLease,
+  type BrowserSessionLease,
+} from "../browser-connection-state.ts";
 
 // --- Background run (decoupled from client) ---
 
@@ -96,8 +101,40 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
   const controller = trackRun(runId);
   const { signal } = controller;
   const packageEphemeral = isInlineShadowPackageId(agent.id);
+  const browserBindingVersions = new Map<string, number>();
+  let browserBindingConflict = false;
+  for (const spec of plan.integrations ?? []) {
+    const binding = spec.browser?.providerBinding;
+    if (!binding) continue;
+    const existing = browserBindingVersions.get(binding.bindingId);
+    if (existing !== undefined && existing !== binding.stateVersion) {
+      browserBindingConflict = true;
+      continue;
+    }
+    browserBindingVersions.set(binding.bindingId, binding.stateVersion);
+  }
+  const browserBindings = [...browserBindingVersions].sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  const browserLeases: BrowserSessionLease[] = [];
 
   try {
+    if (browserBindingConflict) {
+      throw new Error("BROWSER_STATE_CONFLICT: run resolved inconsistent browser bindings");
+    }
+    // Serialize provider-profile use before any browser workload starts. The
+    // lease spans the complete run and carries a fencing token so a stale
+    // cleanup cannot release a newer owner's takeover.
+    for (const [bindingId, stateVersion] of browserBindings) {
+      browserLeases.push(
+        await acquireBrowserSessionLease({
+          bindingId,
+          ownerId: `run:${runId}`,
+          ttlMs: Math.min(4 * 60 * 60_000, (plan.timeout + 300) * 1_000),
+          expectedStateVersion: stateVersion,
+        }),
+      );
+    }
     // Status flip — pending → running — is the ONE lifecycle transition
     // the platform still owns (the container can't authoritatively
     // announce itself running because it doesn't know when the server
@@ -221,6 +258,15 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
       durationMs: Date.now() - startTime,
     });
   } finally {
+    for (const lease of browserLeases.reverse()) {
+      await releaseBrowserSessionLease(lease).catch((error) => {
+        logger.warn("browser session lease release failed", {
+          runId,
+          bindingId: lease.bindingId,
+          error: getErrorMessage(error),
+        });
+      });
+    }
     untrackRun(runId);
   }
 }

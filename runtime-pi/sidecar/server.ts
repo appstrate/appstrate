@@ -11,12 +11,14 @@ import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
   bootIntegrations,
   readIntegrationSpecsFromEnv,
+  runBrowserConnectOnce,
   runConnectOnce,
 } from "./integrations-boot.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
+import { browserSafeErrorCode } from "./browser-connect.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -135,7 +137,9 @@ const config = {
 // `runConnectOnce`, emits the captured CredentialBundle on a sentinel stdout
 // line, and exits. The agent-facing `/mcp` server is never started.
 //
-// Result protocol (stdout, one line):
+// Result protocol (stdout, one line per event):
+//   APPSTRATE_BROWSER_INTERACTION:<b64> — AES-256-GCM ciphertext of a
+//                                        provider live-view URL (process stays up)
 //   APPSTRATE_CONNECT_RESULT:<b64>    — AES-256-GCM ciphertext of the
 //                                       CredentialBundle JSON (exit 0)
 //   APPSTRATE_CONNECT_ERROR:<message> — failure (exit 1)
@@ -150,10 +154,11 @@ const config = {
 // line; the launcher holds the key and decrypts. The wire payload is
 // base64(iv‖authTag‖ciphertext). Error messages are NOT secrets and stay
 // plaintext so a boot failure is diagnosable from logs.
-if (process.env.CONNECT_LOGIN_JSON) {
+if (process.env.CONNECT_LOGIN_JSON || process.env.BROWSER_CONNECT_JSON) {
   const platformApiUrl = process.env.PLATFORM_API_URL || "http://localhost:3000";
   const runToken = process.env.RUN_TOKEN || "";
   const resultKeyB64 = process.env.CONNECT_RESULT_KEY || "";
+  const browserMode = process.env.BROWSER_CONNECT_JSON !== undefined;
   try {
     // Fail closed: without the ephemeral key we cannot emit the bundle without
     // leaking it, so refuse rather than fall back to a plaintext sentinel.
@@ -164,20 +169,40 @@ if (process.env.CONNECT_LOGIN_JSON) {
     if (resultKey.length !== 32) {
       throw new Error("connect-run: CONNECT_RESULT_KEY must decode to 32 bytes (AES-256 key)");
     }
-    const spec = JSON.parse(process.env.CONNECT_LOGIN_JSON) as IntegrationSpawnSpec;
-    const bundle = await runConnectOnce(spec, { platformApiUrl, runToken });
+    const rawSpec = browserMode ? process.env.BROWSER_CONNECT_JSON : process.env.CONNECT_LOGIN_JSON;
+    if (!rawSpec) throw new Error("connect-run: acquisition spec is missing");
+    const spec = JSON.parse(rawSpec) as IntegrationSpawnSpec;
+    const fetchOptions = {
+      platformApiUrl,
+      runToken,
+      ...(config.proxyUrl ? { proxyUrl: config.proxyUrl } : {}),
+    };
+    const encryptPayload = (value: unknown): string => {
+      const iv = randomBytes(12);
+      const cipher = createCipheriv("aes-256-gcm", resultKey, iv);
+      const ciphertext = Buffer.concat([
+        cipher.update(JSON.stringify(value), "utf8"),
+        cipher.final(),
+      ]);
+      return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64");
+    };
+    const bundle = browserMode
+      ? await runBrowserConnectOnce(spec, fetchOptions, ({ url }) => {
+          // The live-view URL carries authority over the paid browser session.
+          // It uses the same ephemeral authenticated-encryption channel as the
+          // final credential bundle and is never written to logs in plaintext.
+          process.stdout.write(`APPSTRATE_BROWSER_INTERACTION:${encryptPayload({ url })}\n`);
+        })
+      : await runConnectOnce(spec, fetchOptions);
     // Encrypt the bundle JSON — plaintext credentials never reach stdout.
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", resultKey, iv);
-    const ciphertext = Buffer.concat([
-      cipher.update(JSON.stringify(bundle), "utf8"),
-      cipher.final(),
-    ]);
-    const payload = Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64");
-    process.stdout.write(`APPSTRATE_CONNECT_RESULT:${payload}\n`);
+    process.stdout.write(`APPSTRATE_CONNECT_RESULT:${encryptPayload(bundle)}\n`);
     process.exit(0);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = browserMode
+      ? browserSafeErrorCode(err)
+      : err instanceof Error
+        ? err.message
+        : String(err);
     process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
     process.exit(1);
   }
@@ -304,6 +329,7 @@ const integrationBootPromise =
         {
           platformApiUrl: config.platformApiUrl,
           runToken: config.runToken,
+          ...(config.proxyUrl ? { proxyUrl: config.proxyUrl } : {}),
         },
         runtimeDeps,
       )

@@ -45,29 +45,31 @@ import type {
 // ResolvedConnectionMap is consumed via input prop (`resolvedConnections`) below.
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import {
-  getMcpServerRuntime,
   getMcpServerMcpConfigEnv,
-  getMcpServerWorkspaceMount,
   renderMcpConfigEnv,
   type McpServerManifest,
 } from "@appstrate/core/mcp-server";
-import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
+import type {
+  IntegrationSpawnSpec,
+  ApiCallSpec,
+  BrowserExecutionSpec,
+} from "@appstrate/core/sidecar-types";
 
 import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
-import {
-  fetchIntegrationManifest,
-  resolveMcpServerForSpawn,
-  type IntegrationManifestCache,
-} from "./integration-service.ts";
+import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
+import { resolveLocalMcpServerExecution } from "./resolved-mcp-server-execution.ts";
+import { BrowserCapabilityPolicyError } from "./browser-capability-grants.ts";
+import { getBrowserProviderBinding } from "./browser-connection-state.ts";
 import {
   getIntegrationSourceKind,
   getLocalServerRef,
   getRemoteSource,
   getAppstrateConnectMeta,
+  getBrowserConnectExecutor,
   renderCredentialTemplate,
   parseFileMode,
   isSafeDeliveryFilePath,
@@ -108,6 +110,31 @@ export interface ResolveIntegrationsInput {
    * manifest is SELECTed + Zod-parsed once per run trigger.
    */
   manifestCache?: IntegrationManifestCache;
+}
+
+/**
+ * Compute the two independent agent-surface filters for credential-acquisition
+ * tools. The sidecar may still call the raw upstream client by name, but the
+ * agent must neither list nor invoke these tools through McpHost.
+ */
+export function privateConnectToolExposure(input: {
+  wildcardSelection: boolean;
+  effectiveSelection: readonly string[];
+  manifestHiddenTools: readonly string[];
+  privateToolNames: readonly (string | undefined)[];
+}): { toolAllowlist: readonly string[] | undefined; hiddenTools: string[] } {
+  const privateTools = new Set(
+    input.privateToolNames.filter(
+      (name): name is string => typeof name === "string" && name !== "",
+    ),
+  );
+  const hiddenTools = [...new Set([...input.manifestHiddenTools, ...privateTools])];
+  return {
+    toolAllowlist: input.wildcardSelection
+      ? undefined
+      : input.effectiveSelection.filter((tool) => !privateTools.has(tool)),
+    hiddenTools,
+  };
 }
 
 /**
@@ -153,7 +180,12 @@ export async function resolveIntegrationSpawns(
         // the pipeline maps it to a structured 422 (#686), matching the skill
         // closure (#666). Every other failure (not installed / not connected /
         // missing referenced package) stays a per-integration warn-and-skip.
-        if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
+        if (
+          (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") ||
+          err instanceof BrowserCapabilityPolicyError
+        ) {
+          throw err;
+        }
         logger.warn("integration resolve failed; skipping", {
           integrationId: entry.id,
           applicationId,
@@ -163,7 +195,12 @@ export async function resolveIntegrationSpawns(
       }
     }),
   );
-  return specs.filter((s): s is IntegrationSpawnSpec => s !== null);
+  let browserSlot = 0;
+  return specs
+    .filter((s): s is IntegrationSpawnSpec => s !== null)
+    .map((spec) =>
+      spec.browser ? { ...spec, browser: { ...spec.browser, isolationSlot: browserSlot++ } } : spec,
+    );
 }
 
 async function resolveOne(
@@ -291,6 +328,8 @@ async function resolveOne(
       }
     | undefined;
   let referencedMcpServer: McpServerManifest | null = null;
+  let browser: BrowserExecutionSpec | undefined;
+  let workspaceMount: IntegrationSpawnSpec["workspaceMount"];
   if (isRemoteHttp) {
     const remote = getRemoteSource(manifest);
     if (!remote) {
@@ -352,7 +391,11 @@ async function resolveOne(
     // draft overwrite (issue #588). An unsatisfiable pin / missing published
     // version skips the integration LOUDLY rather than silently falling back to
     // whatever bytes happen to be latest.
-    const resolution = await resolveMcpServerForSpawn(ref.name, orgId, ref.version);
+    const resolution = await resolveLocalMcpServerExecution({
+      packageId: ref.name,
+      orgId,
+      pin: ref.version,
+    });
     if (!resolution.ok) {
       // A real `source.server.version` pin that cannot be met (unsatisfiable
       // range / never-published) fails the run LOUDLY (#686) — a pinned run
@@ -378,34 +421,21 @@ async function resolveOne(
       });
       return null;
     }
-    const mcpServer = resolution.manifest;
+    const resolvedServer = resolution.execution;
+    const mcpServer = resolvedServer.manifest;
     referencedMcpServer = mcpServer;
-    const run = (mcpServer as { server?: { type?: string; entry_point?: string } }).server;
-    // Defensive: mcpServerManifestSchema makes `server.{type,entry_point}`
-    // required, so a manifest that parsed (non-null above) always has them.
-    // Kept as a fail-closed guard against a future schema relaxation.
-    if (!run?.type || !run.entry_point) {
-      logger.warn("referenced mcp-server has no runnable server config; skipping", {
-        integrationId,
-        mcpServerId: ref.name,
-      });
-      return null;
-    }
-    // The Appstrate runtime override (`_meta["dev.appstrate/mcp-server"].runtime`)
-    // wins over the MCPB `server.type`. MCPB has no `bun` type, so a bun-native
-    // server keeps an MCPB-vocabulary `server.type: "node"` and declares
-    // `bun` in _meta; the runner then picks the bun interpreter/image.
-    const effectiveType = getMcpServerRuntime(mcpServer) ?? run.type;
+    browser = resolvedServer.browser;
+    workspaceMount = resolvedServer.workspaceMount;
     // AFPS §7.1 — propagate `source.server.vendored` build-provenance signal
     // through the spawn spec → boot report so operators can audit "this run
     // used a vendored foreign package". Only meaningful for local sources.
     serverSpec = {
-      type: effectiveType,
-      entry_point: run.entry_point,
+      type: resolvedServer.runtime,
+      entry_point: resolvedServer.entryPoint,
       packageId: ref.name,
       // The version the byte route must serve. `null` for system mcp-servers
       // (the boot registry holds a single version, fetched by id alone).
-      ...(resolution.version ? { version: resolution.version } : {}),
+      ...(resolvedServer.source === "version" ? { version: resolvedServer.version } : {}),
       ...(typeof ref.vendored === "boolean" ? { vendored: ref.vendored } : {}),
     };
   }
@@ -433,48 +463,42 @@ async function resolveOne(
     return null;
   }
 
+  if (deliveries.browserConnect) {
+    if (!browser || browser.purpose !== "connection-acquisition" || !browser.trustedDriver) {
+      throw new BrowserCapabilityPolicyError(
+        `Integration '${integrationId}' selects the browser connect executor but its resolved mcp-server is not an authorized connection-acquisition driver`,
+      );
+    }
+    const providerBinding = deliveries.connectionId
+      ? await getBrowserProviderBinding(deliveries.connectionId)
+      : null;
+    browser = {
+      ...browser,
+      sessionMode: deliveries.browserConnect.sessionMode,
+      connectionId: deliveries.connectionId,
+      ...(providerBinding ? { providerBinding } : {}),
+    };
+  }
+
   // Namespace = the manifest name's slug portion, normalised by the
   // MCP host. We pass the package id; McpHost.normaliseNamespace does
   // the slug + length cap.
   const namespace = integrationId;
 
-  // The connect-login tool is a credential-acquisition primitive, never an
-  // agent-facing capability — exclude it from the allowlist so the agent's
-  // LLM can never invoke it directly. (It is normally not in the selection
-  // anyway, but defence-in-depth: an author could have listed it.)
-  //
-  // AFPS §4.4 wildcard — when the effective selection is `"*"`, emit `undefined`
-  // so the sidecar's McpHost passes every upstream tool through (legacy
-  // "all tools allowed" path). The connect-login tool would otherwise reach
-  // the agent surface under that passthrough, so we append its name to
-  // `hiddenTools` below (the McpHost belt-and-suspenders filter that runs
-  // AFTER the allowlist). Without this, an integration with a `connect.tool`
-  // login primitive would expose the credential-acquisition tool to the
-  // agent's LLM whenever an agent opted into the wildcard.
-  let toolAllowlist: readonly string[] | undefined;
-  if (wildcardSelection) {
-    toolAllowlist = undefined;
-  } else {
-    const baseAllowlist = effectiveSelection ?? [];
-    toolAllowlist = deliveries.connectLogin
-      ? (baseAllowlist as readonly string[]).filter((t) => t !== deliveries.connectLogin!.toolName)
-      : baseAllowlist;
-  }
-
-  // R8a hidden-tools sidecar filter. Union of:
-  //   - `manifest.hidden_tools` (explicit opt-out)
-  //   - the connect-login `toolName` when the wildcard branch is in effect
-  //     (only then does the allowlist no longer filter it out)
-  // Connect tools never reach the agent's LLM regardless of agent selection.
-  const hiddenToolsUnion: string[] = [...(manifest.hidden_tools ?? [])];
+  // Canonicalize manifest-hidden names first, then apply the single policy
+  // kernel that removes every private connect hook from both agent-facing
+  // surfaces: the selection allowlist and the sidecar's defensive hidden set.
+  const manifestHiddenTools: string[] = [...(manifest.hidden_tools ?? [])];
   for (const name of manifest.hidden_tools ?? []) {
     const canonical = canonicalizeApiToolName(manifest, name);
-    if (!hiddenToolsUnion.includes(canonical)) hiddenToolsUnion.push(canonical);
+    if (!manifestHiddenTools.includes(canonical)) manifestHiddenTools.push(canonical);
   }
-  if (wildcardSelection && deliveries.connectLogin) {
-    const loginName = deliveries.connectLogin.toolName;
-    if (!hiddenToolsUnion.includes(loginName)) hiddenToolsUnion.push(loginName);
-  }
+  const { toolAllowlist, hiddenTools: hiddenToolsUnion } = privateConnectToolExposure({
+    wildcardSelection,
+    effectiveSelection: wildcardSelection ? [] : ((effectiveSelection ?? []) as readonly string[]),
+    manifestHiddenTools,
+    privateToolNames: [deliveries.connectLogin?.toolName, deliveries.browserConnect?.toolName],
+  });
 
   // Peer discriminant for the sidecar's spawn-mode dispatch. Mirrors
   // `source.kind`; defaults to `"none"` when the manifest didn't declare a
@@ -526,9 +550,9 @@ async function resolveOne(
     // independent of whether the install-time catalog resolver already
     // removed them. This guards against fixtures / direct DB writes that
     // bypass `resolveIntegrationToolCatalog`. Under the wildcard branch
-    // we also union in the connect-login tool name so the agent's LLM
-    // can never see the credential-acquisition primitive. Omitted when
-    // both sources are empty.
+    // we also union in every connect tool name so the agent's LLM can never
+    // see a credential-acquisition primitive. Omitted when both sources are
+    // empty.
     ...(hiddenToolsUnion.length > 0 ? { hiddenTools: hiddenToolsUnion } : {}),
     spawnEnv: deliveries.spawnEnv,
     // For remote HTTP MCP we deliberately drop `httpDeliveryAuths`: the
@@ -549,6 +573,8 @@ async function resolveOne(
     // McpHost interprets as "all tools allowed" (legacy passthrough).
     ...(toolAllowlist !== undefined ? { toolAllowlist } : {}),
     ...(deliveries.connectLogin ? { connectLogin: deliveries.connectLogin } : {}),
+    ...(deliveries.browserConnect ? { browserConnect: deliveries.browserConnect } : {}),
+    ...(browser ? { browser } : {}),
     ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
       ? { fileMounts: deliveries.fileMounts }
       : {}),
@@ -562,37 +588,8 @@ async function resolveOne(
     // mount into. A malformed `_meta` throws synchronously here so a
     // bad manifest fails fast at run kickoff rather than producing a
     // silently-degraded spawn that the operator can't diagnose.
-    ...(referencedMcpServer && specSourceKind === "local"
-      ? resolveWorkspaceMount(integrationId, referencedMcpServer)
-      : {}),
+    ...(workspaceMount && specSourceKind === "local" ? { workspaceMount } : {}),
   };
-}
-
-/**
- * Render the optional `workspaceMount` field on the spawn spec from
- * the referenced mcp-server's `_meta["dev.appstrate/workspace"]`. The
- * core parser throws on malformed entries; that error propagates (with
- * integration context) so a bad manifest fails fast at run kickoff —
- * matching the caller's contract — rather than producing a silently
- * degraded spawn (runner with no workspace mount) the operator can't
- * diagnose.
- */
-function resolveWorkspaceMount(
-  integrationId: string,
-  mcpServer: McpServerManifest,
-): { workspaceMount?: NonNullable<IntegrationSpawnSpec["workspaceMount"]> } {
-  let mount: ReturnType<typeof getMcpServerWorkspaceMount>;
-  try {
-    mount = getMcpServerWorkspaceMount(mcpServer);
-  } catch (err) {
-    throw new Error(
-      `Integration '${integrationId}': mcp-server _meta.workspace is malformed — ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
-  if (!mount) return {};
-  return { workspaceMount: { mount: mount.mount, access: mount.access } };
 }
 
 interface ResolvedDeliveries {
@@ -613,6 +610,8 @@ interface ResolvedDeliveries {
    * onto `IntegrationSpawnSpec.connectLogin`.
    */
   connectLogin?: NonNullable<IntegrationSpawnSpec["connectLogin"]>;
+  browserConnect?: NonNullable<IntegrationSpawnSpec["browserConnect"]>;
+  connectionId?: string;
   /**
    * Issue #543 — `true` when this local-source runner needs a controlled
    * egress route but no header injection (a `delivery.env` auth that declares
@@ -621,6 +620,47 @@ interface ResolvedDeliveries {
    * sources. `resolveOne` copies this onto `IntegrationSpawnSpec.needsEgress`.
    */
   needsEgress?: boolean;
+}
+
+/**
+ * An exportable run-start browser session is installed only after the driver
+ * has started, so env/files delivery cannot be mutated in place. A blank HTTP
+ * plan forces the sidecar to create the shared credential source + MITM
+ * listener before acquisition; `runBrowserConnect` then replaces its value
+ * atomically with the proven session for all subsequent native tool calls.
+ */
+export function buildBrowserRunStartHttpPlaceholder(input: {
+  authKey: string;
+  authType: string;
+  authorizedUris: readonly string[];
+  deliveryHttp: ConnectAfpsHttpDelivery;
+}): NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> {
+  const placeholderPlan = resolveAfpsHttpDelivery(input.authType, {}, input.deliveryHttp) ?? {
+    headerName: "",
+    headerPrefix: "",
+    value: "",
+    allowServerOverride: false,
+  };
+  return {
+    [input.authKey]: {
+      ...placeholderPlan,
+      authType: input.authType,
+      authorizedUris: [...input.authorizedUris],
+      expiresAtEpochMs: null,
+    },
+  };
+}
+
+export function selectPersistedBrowserState(
+  fields: Readonly<Record<string, string>>,
+  produces: readonly string[],
+): Record<string, string> | null {
+  const selected: Record<string, string> = {};
+  for (const field of produces) {
+    const value = fields[field];
+    if (typeof value === "string" && value.length > 0) selected[field] = value;
+  }
+  return Object.keys(selected).length > 0 ? selected : null;
 }
 
 /**
@@ -698,21 +738,13 @@ async function resolveDeliveries(
   // `produces`); `connect.tool` itself is just the spec marker object.
   const httpDecl0 = auth.delivery?.http;
   const connectMeta = getAppstrateConnectMeta(auth.connect);
+  const browserExecutor = getBrowserConnectExecutor(auth.connect);
   if (
     auth.type === "custom" &&
     auth.connect?.tool !== undefined &&
     connectMeta?.tool &&
     connectMeta.run_at === "run-start"
   ) {
-    if (!httpDecl0) {
-      // A run-start connect.tool auth without delivery.http has nothing to
-      // inject the captured session into — the manifest is mis-declared.
-      logger.warn("run-start connect.tool auth has no delivery.http; skipping", {
-        integrationId,
-        authKey: row.authKey,
-      });
-      return null;
-    }
     let inputs: Record<string, string>;
     try {
       inputs = decryptCredentialInputsToStringMap(row.credentialsEncrypted);
@@ -733,6 +765,63 @@ async function resolveDeliveries(
       });
       return null;
     }
+    if (browserExecutor) {
+      const produces = connectMeta.produces ?? [];
+      if (browserExecutor.session_mode === "exportable" && produces.length === 0) {
+        logger.warn("exportable browser connect declares no outputs; skipping", {
+          integrationId,
+          authKey: row.authKey,
+        });
+        return null;
+      }
+      if (browserExecutor.session_mode === "exportable" && !httpDecl0) {
+        // The driver starts before the session exists, so delivery.env/files
+        // cannot be updated for this run. Link-time export can persist those
+        // channels, but run-start export currently requires HTTP injection.
+        logger.warn("run-start exportable browser auth has no delivery.http; skipping", {
+          integrationId,
+          authKey: row.authKey,
+        });
+        return null;
+      }
+      const authorizedUris = [...(auth.authorized_uris ?? [])];
+      return {
+        spawnEnv: {},
+        connectionId: row.id,
+        ...(browserExecutor.session_mode === "exportable" && httpDecl0
+          ? {
+              httpDeliveryAuths: buildBrowserRunStartHttpPlaceholder({
+                authKey: row.authKey,
+                authType: auth.type,
+                authorizedUris,
+                deliveryHttp: httpDecl0 as ConnectAfpsHttpDelivery,
+              }),
+            }
+          : {}),
+        browserConnect: {
+          toolName: connectMeta.tool,
+          produces: [...produces],
+          authKey: row.authKey,
+          authType: auth.type,
+          authorizedUris,
+          sessionMode: browserExecutor.session_mode,
+          inputs,
+          deliveryHttp: httpDecl0,
+        },
+      };
+    }
+
+    if (!httpDecl0) {
+      // A regular run-start connect.tool auth without delivery.http has
+      // nothing to inject the captured session into. Browser-bound acquisition
+      // is handled above and deliberately does not need this channel.
+      logger.warn("run-start connect.tool auth has no delivery.http; skipping", {
+        integrationId,
+        authKey: row.authKey,
+      });
+      return null;
+    }
+
     // Placeholder MITM entry so the sidecar creates the per-integration
     // credentials source + listener. The real session header is installed at
     // boot by `runConnectLogin` (`source.setSessionOutputs`). The value is
@@ -782,6 +871,43 @@ async function resolveDeliveries(
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
+  }
+
+  // Link-time exportable browser connections persist an encrypted, driver-owned
+  // storage-state blob rather than a cookie/header credential. Rehydrate that
+  // state into a fresh isolated browser at run boot through the same private
+  // sidecar→trusted-driver channel used for acquisition. The blob never enters
+  // runner env, argv, logs, delivery templates, or the agent-visible surface.
+  if (
+    auth.type === "custom" &&
+    auth.connect?.tool !== undefined &&
+    connectMeta?.tool &&
+    connectMeta.run_at !== "run-start" &&
+    browserExecutor?.session_mode === "exportable"
+  ) {
+    const produces = connectMeta.produces ?? [];
+    const browserState = selectPersistedBrowserState(fields, produces);
+    if (!browserState) {
+      logger.warn("exportable browser connection has no restorable state; skipping", {
+        integrationId,
+        authKey: row.authKey,
+        connectionId: row.id,
+      });
+      return null;
+    }
+    return {
+      spawnEnv: {},
+      connectionId: row.id,
+      browserConnect: {
+        toolName: connectMeta.tool,
+        produces: [...produces],
+        authKey: row.authKey,
+        authType: auth.type,
+        authorizedUris: [...(auth.authorized_uris ?? [])],
+        sessionMode: "exportable",
+        inputs: browserState,
+      },
+    };
   }
 
   const spawnEnv: Record<string, string> = {};

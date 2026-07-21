@@ -235,6 +235,85 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     }
 
+    // Appstrate browser executor: this is a privilege-bearing extension, so
+    // validate it strictly instead of relying on AFPS's loose vendor metadata.
+    // Cross-package capability/grant checks happen after concrete mcp-server
+    // version resolution; these local invariants are knowable at install time.
+    const connectMeta = (auth.connect as { _meta?: Record<string, unknown> } | undefined)?._meta?.[
+      "dev.appstrate/connect"
+    ] as { executor?: unknown; produces?: unknown } | undefined;
+    const rawExecutor = connectMeta?.executor;
+    if (rawExecutor !== undefined) {
+      const executorPath = [
+        "auths",
+        authKey,
+        "connect",
+        "_meta",
+        "dev.appstrate/connect",
+        "executor",
+      ];
+      if (!rawExecutor || typeof rawExecutor !== "object" || Array.isArray(rawExecutor)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "browser connect executor must be an object",
+          path: executorPath,
+        });
+      } else {
+        const executor = rawExecutor as Record<string, unknown>;
+        const unknownKeys = Object.keys(executor).filter(
+          (key) => key !== "kind" && key !== "session_mode",
+        );
+        const unknownKey = unknownKeys[0];
+        if (unknownKey !== undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: `browser connect executor contains unknown field '${unknownKey}'`,
+            path: [...executorPath, unknownKey],
+          });
+        }
+        if (executor.kind !== "browser") {
+          ctx.addIssue({
+            code: "custom",
+            message: "connect executor kind must be 'browser'",
+            path: [...executorPath, "kind"],
+          });
+        }
+        if (executor.session_mode !== "exportable" && executor.session_mode !== "browser-bound") {
+          ctx.addIssue({
+            code: "custom",
+            message: "browser connect session_mode must be 'exportable' or 'browser-bound'",
+            path: [...executorPath, "session_mode"],
+          });
+        }
+      }
+      if (auth.connect?.tool === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: "browser connect executor requires connect.tool",
+          path: ["auths", authKey, "connect", "tool"],
+        });
+      }
+      if (manifest.source?.kind !== "local") {
+        ctx.addIssue({
+          code: "custom",
+          message: "browser connect executor requires source.kind 'local'",
+          path: ["source", "kind"],
+        });
+      }
+      if (
+        (rawExecutor as { session_mode?: unknown } | undefined)?.session_mode === "exportable" &&
+        (!Array.isArray(connectMeta?.produces) ||
+          connectMeta.produces.length === 0 ||
+          connectMeta.produces.some((value) => typeof value !== "string" || value.length === 0))
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: "exportable browser connect requires non-empty connect produces",
+          path: ["auths", authKey, "connect", "_meta", "dev.appstrate/connect", "produces"],
+        });
+      }
+    }
+
     // (2) default_scopes ⊆ scope_catalog.
     if (auth.scope_catalog && auth.default_scopes) {
       const catalog = new Set(auth.scope_catalog.map((s) => s.value));

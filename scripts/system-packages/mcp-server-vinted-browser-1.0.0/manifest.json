@@ -1,0 +1,78 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/mcp-server.schema.json",
+  "schema_version": "0.1",
+  "manifest_version": "0.3",
+  "type": "mcp-server",
+  "name": "@appstrate/vinted-browser",
+  "version": "1.0.0",
+  "display_name": "Vinted Browser Driver",
+  "description": "First-party deterministic Browser Use MCP driver for the @appstrate/vinted integration. It attaches to Appstrate's isolated CDP worker for authenticated catalog access and guarded listing publication from read-only workspace images.",
+  "author": "Appstrate",
+  "license": "Apache-2.0",
+  "server": {
+    "type": "python",
+    "entry_point": "server/index.py",
+    "mcp_config": {
+      "command": "python",
+      "args": ["-u", "server/index.py"]
+    }
+  },
+  "tools": [
+    {
+      "name": "acquire_session",
+      "description": "Private Appstrate connect hook. Signs in or restores bounded Vinted browser state and returns an authenticated proof. Never exposed to the agent."
+    },
+    {
+      "name": "search_items",
+      "description": "Search the public Vinted France catalog in the isolated browser and return a bounded list of visible item summaries."
+    },
+    {
+      "name": "get_item",
+      "description": "Open one canonical vinted.fr/items/... URL and return bounded visible item details. Read-only."
+    },
+    {
+      "name": "prepare_item_draft",
+      "description": "Fill a Vinted listing form from validated workspace images without submitting it. Returns a one-time draft token."
+    },
+    {
+      "name": "publish_item",
+      "description": "Publish the exact prepared Vinted listing after explicit user approval, using its one-time draft token."
+    },
+    {
+      "name": "browser_status",
+      "description": "Report the Vinted browser state and cookie names without exposing cookie values."
+    }
+  ],
+  "_meta": {
+    "dev.appstrate/mcp-server": {
+      "runtime": "browser-use",
+      "capabilities": {
+        "browser": {
+          "purpose": "connection-acquisition",
+          "protocol": "cdp-v1",
+          "profile": "standard",
+          "origins": [
+            "https://vinted.fr",
+            "https://www.vinted.fr",
+            "https://images1.vinted.net",
+            "https://marketplace-web-assets.vinted.com",
+            "https://static-assets.vinted.com",
+            "https://cdn.cookielaw.org",
+            "https://api-js.datadome.co",
+            "https://js.datadome.co",
+            "https://ct.captcha-delivery.com",
+            "https://geo.captcha-delivery.com",
+            "https://static.captcha-delivery.com"
+          ]
+        }
+      }
+    },
+    "dev.appstrate/workspace": {
+      "mount": "/workspace",
+      "access": "ro"
+    },
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

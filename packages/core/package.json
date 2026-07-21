@@ -78,6 +78,7 @@
     "./token-usage": "./src/token-usage.ts",
     "./token-budget": "./src/token-budget.ts",
     "./sidecar-types": "./src/sidecar-types.ts",
+    "./browser-cdp-policy": "./src/browser-cdp-policy.ts",
     "./model-swap": "./src/model-swap.ts",
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",

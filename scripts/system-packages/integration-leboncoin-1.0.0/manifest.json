@@ -1,0 +1,103 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/integration.schema.json",
+  "schema_version": "0.1",
+  "type": "integration",
+  "name": "@appstrate/leboncoin",
+  "version": "1.0.0",
+  "display_name": "Leboncoin",
+  "icon": "simple-icons:leboncoin",
+  "description": "Unofficial, read-only Leboncoin integration backed by Appstrate's Browser Use capability. A trusted system driver signs in once when the connection is linked, persists only bounded encrypted browser state, and re-proves the session at run boot. Local DataDome challenges are reported for human intervention; operators may opt into Browser Use Cloud for a stealth browser and French residential proxy, without any guarantee that a challenge will pass.",
+  "license": "Apache-2.0",
+  "keywords": ["leboncoin", "classifieds", "marketplace", "browser", "france"],
+  "source": {
+    "kind": "local",
+    "server": {
+      "name": "@appstrate/leboncoin-browser",
+      "version": "^1.0.0"
+    }
+  },
+  "default_tools": ["search_listings", "get_listing", "session_status"],
+  "hidden_tools": ["acquire_session"],
+  "auths": {
+    "session": {
+      "type": "custom",
+      "delivery": { "env": {} },
+      "authorized_uris": [
+        "https://leboncoin.fr/**",
+        "https://www.leboncoin.fr/**",
+        "https://auth.leboncoin.fr/**",
+        "https://api.leboncoin.fr/**"
+      ],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["email", "password"],
+          "properties": {
+            "email": {
+              "type": "string",
+              "format": "email",
+              "description": "Leboncoin account email. Delivered only to the granted system browser driver during connection and not persisted after browser state is proven."
+            },
+            "password": {
+              "type": "string",
+              "format": "password",
+              "minLength": 1,
+              "description": "Leboncoin account password. Delivered only to the granted system browser driver during connection and not persisted after browser state is proven."
+            }
+          }
+        }
+      },
+      "connect": {
+        "tool": {},
+        "_meta": {
+          "dev.appstrate/connect": {
+            "tool": "acquire_session",
+            "run_at": "link",
+            "persist_login_secret": false,
+            "produces": ["browser_state"],
+            "reauth_on": [401, 403],
+            "executor": {
+              "kind": "browser",
+              "session_mode": "exportable"
+            },
+            "companion": {
+              "start_url": "https://www.leboncoin.fr/compte/part/mes-annonces"
+            }
+          }
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "acquire_session": {
+      "required_auth_key": "session",
+      "url_patterns": [
+        { "pattern": "https://www.leboncoin.fr/**" },
+        { "pattern": "https://auth.leboncoin.fr/**" }
+      ]
+    },
+    "search_listings": {
+      "required_auth_key": "session",
+      "url_patterns": [{ "pattern": "https://www.leboncoin.fr/recherche**" }]
+    },
+    "get_listing": {
+      "required_auth_key": "session",
+      "url_patterns": [{ "pattern": "https://www.leboncoin.fr/ad/**" }]
+    },
+    "session_status": {
+      "required_auth_key": "session",
+      "url_patterns": [{ "pattern": "https://www.leboncoin.fr/**" }]
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

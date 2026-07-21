@@ -80,6 +80,18 @@ export interface SpawnIntegrationOptions {
    * a plain CONNECT egress listener.
    */
   readonly egress: RuntimeEgressContext | null;
+  /** Scoped browser broker credentials for this integration only. */
+  readonly browser?: {
+    readonly endpoint: string;
+    readonly authToken: string;
+    readonly protocolVersion: number;
+  };
+  /**
+   * Provisioned browser control origin used only to bypass the integration's
+   * outbound proxy. Unlike `browser`, this carries no bearer token and is safe
+   * to pass for secret-aware connection-acquisition drivers.
+   */
+  readonly browserProxyBypassEndpoint?: string;
   /**
    * Per-run shared workspace handle decoded from the sidecar's
    * `WORKSPACE_HANDLE_JSON` env var. Adapters mount/expose it under
@@ -261,14 +273,18 @@ export function isPathSafeForMount(
  * terminates TLS. The CA half ({@link buildCaEnvBlock}) is layered on top only
  * for the MITM kind.
  */
-export function buildProxyEnvBlock(proxyUrl: string): Record<string, string> {
+export function buildProxyEnvBlock(
+  proxyUrl: string,
+  additionalNoProxyHosts: readonly string[] = [],
+): Record<string, string> {
+  const noProxy = [...new Set(["127.0.0.1", "localhost", ...additionalNoProxyHosts])].join(",");
   return {
     HTTPS_PROXY: proxyUrl,
     HTTP_PROXY: proxyUrl,
     https_proxy: proxyUrl,
     http_proxy: proxyUrl,
-    NO_PROXY: "127.0.0.1,localhost",
-    no_proxy: "127.0.0.1,localhost",
+    NO_PROXY: noProxy,
+    no_proxy: noProxy,
   };
 }
 

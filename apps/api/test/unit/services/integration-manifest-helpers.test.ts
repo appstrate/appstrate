@@ -15,6 +15,7 @@ import {
   getLocalServerRef,
   getRemoteSource,
   getAppstrateConnectMeta,
+  getBrowserConnectExecutor,
   type AfpsManifestConnect,
 } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -153,5 +154,35 @@ describe("getAppstrateConnectMeta", () => {
   it("returns undefined when the connect block or meta is absent", () => {
     expect(getAppstrateConnectMeta(undefined)).toBeUndefined();
     expect(getAppstrateConnectMeta({ tool: {} })).toBeUndefined();
+  });
+});
+
+describe("getBrowserConnectExecutor", () => {
+  it("parses the strict browser executor marker", () => {
+    const connect: AfpsManifestConnect = {
+      tool: {},
+      _meta: {
+        "dev.appstrate/connect": {
+          tool: "login",
+          executor: { kind: "browser", session_mode: "exportable" },
+        },
+      },
+    };
+    expect(getBrowserConnectExecutor(connect)).toEqual({
+      kind: "browser",
+      session_mode: "exportable",
+    });
+  });
+
+  it("fails closed for unknown executor policy fields", () => {
+    const connect: AfpsManifestConnect = {
+      tool: {},
+      _meta: {
+        "dev.appstrate/connect": {
+          executor: { kind: "browser", session_mode: "exportable", unsafe: true },
+        },
+      },
+    };
+    expect(() => getBrowserConnectExecutor(connect)).toThrow(/unknown fields/);
   });
 });

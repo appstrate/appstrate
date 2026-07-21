@@ -210,7 +210,18 @@ describe("RemoteFirecrackerOrchestrator boundary calls", () => {
     const { fn, calls } = fetchStub(() => json(BOUNDARY));
     const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
 
-    const boundary = await orchestrator.createIsolationBoundary("r-1", { skipSidecar: true });
+    const requirements = {
+      capabilities: [{ kind: "browser" as const, profile: "standard" as const, instances: 1 }],
+      supplementalResources: {
+        memoryBytes: 1_073_741_824,
+        nanoCpus: 1_000_000_000,
+        pidsLimit: 256,
+      },
+    };
+    const boundary = await orchestrator.createIsolationBoundary("r-1", {
+      skipSidecar: true,
+      requirements,
+    });
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe(`${BASE_URL}${RUNNER_ROUTES.createBoundary}`);
@@ -220,7 +231,7 @@ describe("RemoteFirecrackerOrchestrator boundary calls", () => {
     expect(parsed.success).toBe(true);
     expect(bodyOf(calls[0] as RecordedCall)).toEqual({
       runId: "r-1",
-      opts: { skipSidecar: true },
+      opts: { skipSidecar: true, requirements },
     });
     expect(boundary).toEqual(BOUNDARY);
   });

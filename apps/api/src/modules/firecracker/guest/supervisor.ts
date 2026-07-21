@@ -34,10 +34,21 @@ import type { GuestConfig } from "./guest-config.ts";
 const GUEST_SIDECAR_UID = "1000";
 const GUEST_AGENT_UID = "1001";
 const GUEST_RUNNER_UID = "1002";
+const BROWSER_DRIVER_UID_BASE = 1100;
+const BROWSER_UID_BASE = 1101;
+const BROWSER_UID_SLOT_STRIDE = 2;
+const BROWSER_PORT_SLOT_STRIDE = 4;
+const BROWSER_MAX_SLOTS = 4;
+const BROWSER_GATEWAY_PORT_BASE = 18_080;
+const BROWSER_WORKER_PORT_BASE = 18_081;
+const BROWSER_AUTH_PROXY_PORT_BASE = 18_082;
+const BROWSER_DEVTOOLS_PORT_BASE = 18_083;
 const GUEST_AGENT_USER = "pi"; // uid 1001, baked into the rootfs
 const SIDECAR_BIN = "/usr/local/bin/sidecar";
 /** setuid(1002) wrapper the sidecar uses to spawn integration runners. */
 const RUNNER_EXEC_WRAPPER = "/usr/local/bin/appstrate-runner-exec";
+const BROWSER_EXEC_WRAPPER = "/usr/local/bin/appstrate-browser-exec";
+const BROWSER_EXECUTABLE = "/usr/bin/chromium-browser";
 const AGENT_ENTRY = "/runtime/dist/entrypoint.js";
 const CONFIG_PATH = "/config/config.json";
 /**
@@ -100,11 +111,48 @@ function readConfig(): GuestConfig {
  * (sidecar/runner always, agent only when unrestricted) via the general
  * accept rules — no special-casing needed.
  */
-function applyFirewall(exec: RunHostCmd, cfg: GuestConfig): Promise<void> {
+export function buildGuestFirewallScript(cfg: GuestConfig): string {
+  const reservedBrowserPorts = Array.from({ length: BROWSER_MAX_SLOTS }, (_unused, slot) => [
+    BROWSER_GATEWAY_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE,
+    BROWSER_WORKER_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE,
+    BROWSER_AUTH_PROXY_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE,
+    BROWSER_DEVTOOLS_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE,
+  ]).flat();
+  const reservedPortSet = `{ ${reservedBrowserPorts.join(", ")} }`;
+  const browserIsolationRules = Array.from({ length: BROWSER_MAX_SLOTS }, (_unused, slot) => {
+    const driverUid = BROWSER_DRIVER_UID_BASE + slot * BROWSER_UID_SLOT_STRIDE;
+    const browserUid = BROWSER_UID_BASE + slot * BROWSER_UID_SLOT_STRIDE;
+    const gatewayPort = BROWSER_GATEWAY_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE;
+    const workerPort = BROWSER_WORKER_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE;
+    const authProxyPort = BROWSER_AUTH_PROXY_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE;
+    const devtoolsPort = BROWSER_DEVTOOLS_PORT_BASE + slot * BROWSER_PORT_SLOT_STRIDE;
+    return [
+      // The driver can reach only its own authenticated control endpoint
+      // among the reserved browser ports. Other loopback remains available
+      // for its per-integration credential proxy and stdio-adjacent helpers.
+      `    meta skuid ${driverUid} oifname "lo" tcp dport ${workerPort} accept`,
+      `    meta skuid ${driverUid} oifname "lo" tcp dport ${reservedPortSet} drop`,
+      `    meta skuid ${driverUid} oifname "lo" accept`,
+      // Chromium and its broker share one uid. Their three loopback peers are
+      // fixed per slot (gateway, auth shim, DevTools); everything else on lo,
+      // including the sidecar's 8080/8081 listeners, is denied. There is no
+      // external accept for this uid either.
+      `    meta skuid ${browserUid} oifname "lo" tcp dport ${gatewayPort} accept`,
+      `    meta skuid ${browserUid} oifname "lo" tcp dport ${authProxyPort} accept`,
+      `    meta skuid ${browserUid} oifname "lo" tcp dport ${devtoolsPort} accept`,
+      `    meta skuid ${browserUid} oifname "lo" tcp dport ${reservedPortSet} drop`,
+      `    meta skuid ${browserUid} oifname "lo" drop`,
+    ];
+  }).flat();
   const agentEgress = cfg.agent.unrestricted_egress
-    ? [`      meta skuid ${GUEST_AGENT_UID} accept`]
+    ? [
+        // Unrestricted means external egress; it never grants access to
+        // privileged browser control/gateway listeners inside the guest.
+        `      meta skuid ${GUEST_AGENT_UID} oifname "lo" tcp dport ${reservedPortSet} drop`,
+        `      meta skuid ${GUEST_AGENT_UID} accept`,
+      ]
     : [
-        `      meta skuid ${GUEST_AGENT_UID} ip daddr 127.0.0.1 accept`,
+        `      meta skuid ${GUEST_AGENT_UID} ip daddr 127.0.0.1 tcp dport { 8080, 8081 } accept`,
         `      meta skuid ${GUEST_AGENT_UID} ip daddr ${cfg.network.platform_ip} tcp dport ${cfg.network.platform_port} accept`,
       ];
 
@@ -121,16 +169,23 @@ function applyFirewall(exec: RunHostCmd, cfg: GuestConfig): Promise<void> {
     // config-drive mode MMDS is not even configured, so this is a harmless
     // belt-and-suspenders (the host forward chain also drops 169.254/16).
     `    ip daddr ${MMDS_IPV4_ADDRESS} drop`,
-    `    oifname "lo" accept`,
     `    meta skuid 0 accept`,
     `    meta skuid ${GUEST_SIDECAR_UID} accept`,
+    // Ordinary (non-browser) runners keep their legacy egress, but cannot
+    // dial any browser worker/gateway even if they guess its loopback port.
+    `    meta skuid ${GUEST_RUNNER_UID} oifname "lo" tcp dport ${reservedPortSet} drop`,
     `    meta skuid ${GUEST_RUNNER_UID} accept`,
+    ...browserIsolationRules,
     ...agentEgress,
     `  }`,
     `}`,
     ``,
   ].join("\n");
-  return exec(["nft", "-f", "-"], script);
+  return script;
+}
+
+function applyFirewall(exec: RunHostCmd, cfg: GuestConfig): Promise<void> {
+  return exec(["nft", "-f", "-"], buildGuestFirewallScript(cfg));
 }
 
 type RunHostCmd = (cmd: string[], stdin?: string) => Promise<void>;
@@ -318,7 +373,16 @@ async function main(): Promise<void> {
       // The wrapper path rides the env (not the adapter's own config): the
       // process adapter is shared with host process-mode, where runners
       // stay plain children of the sidecar.
-      { ...cfg.sidecar.env, APPSTRATE_RUNNER_EXEC: RUNNER_EXEC_WRAPPER },
+      {
+        ...cfg.sidecar.env,
+        APPSTRATE_RUNNER_EXEC: RUNNER_EXEC_WRAPPER,
+        APPSTRATE_BROWSER_DRIVER_EXEC: RUNNER_EXEC_WRAPPER,
+        APPSTRATE_BROWSER_EXEC: BROWSER_EXEC_WRAPPER,
+        APPSTRATE_BROWSER_EXECUTABLE: BROWSER_EXECUTABLE,
+        APPSTRATE_BROWSER_GUEST_ISOLATION: "1",
+        APPSTRATE_BROWSER_USE_PYTHON: "/opt/appstrate-browser-use/.venv/bin/python",
+        APPSTRATE_BROWSER_USE_BRIDGE: "/opt/appstrate-browser-use-bridge",
+      },
       "/tmp",
       { harden: false },
     );
@@ -400,11 +464,13 @@ function powerOff(): never {
   }
 }
 
-main().catch((err) => {
-  log(`FATAL: ${err instanceof Error ? err.stack : String(err)}`);
-  // Before the config is read the nonce is empty — the host then ignores
-  // the marker and reports a non-clean exit, which is the right outcome
-  // for a supervisor crash anyway.
-  printExitMarker(125);
-  powerOff();
-});
+if (import.meta.main) {
+  void main().catch((err) => {
+    log(`FATAL: ${err instanceof Error ? err.stack : String(err)}`);
+    // Before the config is read the nonce is empty — the host then ignores
+    // the marker and reports a non-clean exit, which is the right outcome
+    // for a supervisor crash anyway.
+    printExitMarker(125);
+    powerOff();
+  });
+}

@@ -118,6 +118,9 @@ LABEL org.opencontainers.image.title="Appstrate Sidecar" \
 RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli openssl
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
+RUN install -d -o root -g root -m 0555 /usr/local/share/appstrate
+COPY --chmod=0444 runtime-pi/sidecar/browser-seccomp.json /usr/local/share/appstrate/browser-seccomp.json
+COPY --chmod=0444 runtime-pi/sidecar/browser-seccomp.NOTICE.md /usr/local/share/appstrate/browser-seccomp.NOTICE.md
 
 USER nobody:nobody
 

@@ -16,6 +16,7 @@
 
 import type { Actor, IntegrationOAuthCallbackResult } from "@appstrate/connect";
 import type { CredentialBundle } from "@appstrate/connect/connect";
+import type { BrowserProviderBinding } from "@appstrate/core/sidecar-types";
 import type { IntegrationConnectionSummary, PersistTarget } from "../integration-connections.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 
@@ -32,6 +33,12 @@ export interface ConnectContext {
   authKey: string;
   /** Reconnect / scope-upgrade target. Absent on a fresh connect. */
   connectionId?: string;
+  /** Trusted provider/profile allocation for a companion handoff. */
+  browserProviderBinding?: BrowserProviderBinding;
+  /** Browser connect only: forward a human-in-the-loop live session. */
+  onBrowserInteractionRequired?: (interaction: { url: string }) => void | Promise<void>;
+  /** Browser connect only: stop acquisition if the hosted client disconnects. */
+  signal?: AbortSignal;
 }
 
 /** Options for the interactive `begin` step (OAuth2 authorize URL). */

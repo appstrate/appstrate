@@ -1331,6 +1331,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/connect/companion/attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a local browser companion handoff
+         * @description Authenticated by the hosted-connect page cookie plus CSRF. Allocates a connection-scoped target browser profile and returns a one-time local-app capability. The capability response is non-cacheable.
+         */
+        post: operations["createBrowserCompanionAttempt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/connect/companion/attempts/{attemptId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a browser companion attempt
+         * @description Polled by the local companion and hosted connect page using the attempt bearer. Live provider URLs remain encrypted at rest and are returned only here.
+         */
+        get: operations["getBrowserCompanionAttempt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/connect/companion/attempts/{attemptId}/failure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report that local browser acquisition stopped
+         * @description Allows the authenticated local companion to end a pending or claimed attempt immediately. This transition cannot interrupt a handoff that has already entered provider provisioning.
+         */
+        post: operations["failBrowserCompanionAttempt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/connect/companion/attempts/{attemptId}/handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit local browser state for target-provider proof
+         * @description Accepts a bounded browser state from the local companion. The state is encrypted immediately and asynchronously restored into the allocated target profile; callers poll the attempt resource for completion.
+         */
+        post: operations["submitBrowserCompanionHandoff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/connect/context": {
         parameters: {
             query?: never;
@@ -1382,7 +1462,7 @@ export interface paths {
         put?: never;
         /**
          * Hosted form credential submit (page cookie + CSRF)
-         * @description Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header.
+         * @description Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header. Browser-backed acquisition returns an SSE stream with `interaction`, `complete`, or `error` events so human challenges can be completed in the provider's secure live session.
          */
         post: operations["submitIntegrationConnect"];
         delete?: never;
@@ -4300,7 +4380,7 @@ export interface paths {
         };
         /**
          * Fetch the AFPS bundle bytes for a referenced mcp-server package
-         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read; absent, the latest non-yanked version is served (back-compat).
+         * @description Container-to-host only. Auth via a Bearer run token, or a short-lived sidecar-only connect capability bound to one exact MCP package/source/version and application integration. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. For normal runs it verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server. Connect capabilities have no access to credentials or other internal run surfaces. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read; absent, the latest non-yanked version is served (back-compat).
          */
         get: operations["getMcpServerBundle"];
         put?: never;
@@ -9875,6 +9955,168 @@ export interface operations {
             };
         };
     };
+    createBrowserCompanionAttempt: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-connect-csrf": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Optional echo of the operator-selected provider. A different value is rejected.
+                     * @enum {string}
+                     */
+                    target_provider?: "browser-use-cloud" | "process";
+                };
+            };
+        };
+        responses: {
+            /** @description Companion attempt created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        attempt_id: string;
+                        /** Format: uri */
+                        companion_url: string;
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getBrowserCompanionAttempt: {
+        parameters: {
+            query?: {
+                /** @description Read without claiming the attempt. Used by the hosted page so pending means the local companion has not connected yet. */
+                observe?: "1";
+            };
+            header?: never;
+            path: {
+                attemptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Companion attempt state */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        attempt_id: string;
+                        package_id: string;
+                        display_name: string;
+                        icon: string | null;
+                        /** Format: uri */
+                        start_url: string;
+                        allowed_origins: string[];
+                        /** @enum {string} */
+                        target_provider: "browser-use-cloud" | "process";
+                        /** @enum {string} */
+                        status: "pending" | "claimed" | "state_received" | "provisioning" | "interaction_required" | "complete" | "failed";
+                        /** Format: uri */
+                        interaction_url: string | null;
+                        error_code: string | null;
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    failBrowserCompanionAttempt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attemptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    reason: "closed" | "timeout" | "failed";
+                };
+            };
+        };
+        responses: {
+            /** @description Failure accepted or ignored because handoff already started */
+            202: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        accepted: true;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    submitBrowserCompanionHandoff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attemptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    browser_state: string;
+                };
+            };
+        };
+        responses: {
+            /** @description State accepted for asynchronous proof */
+            202: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        attempt_id: string;
+                        /** @enum {string} */
+                        status: "state_received";
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     getIntegrationConnectContext: {
         parameters: {
             query?: never;
@@ -9900,8 +10142,14 @@ export interface operations {
                         auth: {
                             [key: string]: unknown;
                         };
-                        connection_id?: string | null;
-                        csrf?: string | null;
+                        connection_id: string | null;
+                        csrf: string | null;
+                        companion: null | {
+                            /** @constant */
+                            available: true;
+                            /** @enum {string} */
+                            target_provider: "browser-use-cloud" | "process";
+                        };
                     };
                 };
             };
@@ -10013,6 +10261,7 @@ export interface operations {
                             updatedAt: string;
                         };
                     };
+                    "text/event-stream": string;
                 };
             };
             400: components["responses"]["ValidationError"];
@@ -19509,7 +19758,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Agent does not reference this mcp-server through an installed integration, or no published version exists. */
+            /** @description The run does not reference this mcp-server through an installed integration, the connect capability scope is no longer active, or no authorized bundle version exists. */
             404: {
                 headers: {
                     [name: string]: unknown;

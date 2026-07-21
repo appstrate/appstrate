@@ -22,6 +22,17 @@ of a provider-neutral bearer-swap.
 
 ### Added
 
+- **Browser companion execution contracts** — `@appstrate/core/mcp-server`
+  parses strict exact-origin browser capabilities, `platform-types` carries
+  platform-resolved companion requirements, and `sidecar-types` carries the
+  normalized worker/connection-acquisition contract. Secret-aware drivers are
+  authorized by the platform after concrete system-package resolution; raw
+  manifest metadata is never treated as an execution grant. The new
+  `@appstrate/core/browser-cdp-policy` subpath is the single shared policy for
+  exact origins, read-only DevTools discovery, owned contexts, cookie domains,
+  command envelopes, nested-channel denial, and page ceilings across local and
+  cloud browser brokers.
+
 - **`ModuleInitContext.getOrgName?`** — optional query helper resolving an
   organization's display name (`(orgId) => Promise<string | null>`, null when
   the org no longer exists). Lets modules label org-scoped outbound messages

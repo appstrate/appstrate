@@ -16,8 +16,15 @@
 
 ARG PI_IMAGE=appstrate-pi:latest
 ARG SIDECAR_IMAGE=appstrate-sidecar:latest
+ARG BUN_IMAGE=oven/bun:1.3.14-alpine
 
 FROM ${SIDECAR_IMAGE} AS sidecar
+
+FROM ${BUN_IMAGE} AS browser-worker
+WORKDIR /build
+COPY runtime-pi/browser-worker/server.ts ./server.ts
+COPY packages/core/src/browser-cdp-policy.ts ./policy.ts
+RUN bun build --compile --minify server.ts --outfile /tmp/appstrate-browser-worker
 
 # Astral's official uv build — same source as the docker uv runner image
 # (runtime-pi/runners/uv/Dockerfile), so `server.type: "uv"` behaves the
@@ -29,10 +36,14 @@ FROM ghcr.io/astral-sh/uv:0.7 AS uv
 FROM alpine:3.21 AS wrapper
 RUN apk add --no-cache gcc musl-dev
 COPY apps/api/src/modules/firecracker/guest/runner-exec.c /tmp/runner-exec.c
-RUN gcc -static -O2 -Wall -Werror -o /tmp/appstrate-runner-exec /tmp/runner-exec.c
+COPY apps/api/src/modules/firecracker/guest/browser-exec.c /tmp/browser-exec.c
+RUN gcc -static -O2 -Wall -Werror -o /tmp/appstrate-runner-exec /tmp/runner-exec.c \
+ && gcc -static -O2 -Wall -Werror -o /tmp/appstrate-browser-exec /tmp/browser-exec.c
 
 FROM ${PI_IMAGE}
 USER root
+
+ARG CHROMIUM_VERSION
 
 # Guest-side tooling:
 #   nftables  the supervisor's uid-scoped egress firewall
@@ -40,7 +51,8 @@ USER root
 #   nodejs    `server.type: "node"` integration runners (parity with the
 #             docker node runner image — bun is NOT a drop-in for them)
 # busybox (base) already provides ip / mount / pivot_root / poweroff.
-RUN apk add --no-cache nftables setpriv nodejs \
+RUN test -n "${CHROMIUM_VERSION}" \
+ && apk add --no-cache nftables setpriv nodejs "chromium=${CHROMIUM_VERSION}" ca-certificates font-noto nss freetype harfbuzz \
  # Mount points the init script depends on (the rootfs is read-only at
  # boot, so they must pre-exist): /overlay (tmpfs upper), /rom (old root
  # after pivot), /config (config drive).
@@ -63,8 +75,21 @@ RUN apk add --no-cache nftables setpriv nodejs \
 # `server.type: "uv"` runners (uvx alongside, same as the docker runner).
 COPY --from=uv /uv /uvx /usr/local/bin/
 
+# First-party Browser Use drivers run as uid 1002 subprocesses inside the
+# microVM. Keep their pinned dependency graph separate from the agent venv,
+# and ship only the shared bridge here: Chromium remains the separately
+# provisioned uid 1101 companion reached over the authenticated CDP broker.
+COPY runtime-pi/runners/browser-use/pyproject.toml runtime-pi/runners/browser-use/uv.lock /opt/appstrate-browser-use/
+RUN cd /opt/appstrate-browser-use \
+ && uv sync --frozen --no-dev --no-install-project
+COPY runtime-pi/runners/browser-use/appstrate_browser_use /opt/appstrate-browser-use-bridge/appstrate_browser_use
+RUN PYTHONPATH=/opt/appstrate-browser-use-bridge /opt/appstrate-browser-use/.venv/bin/python -c 'import browser_use; from appstrate_browser_use import AppstrateBrowser' \
+ && chmod -R a+rX /opt/appstrate-browser-use /opt/appstrate-browser-use-bridge
+
 # The sidecar ships as one compiled binary — no sources, no node_modules.
 COPY --from=sidecar /usr/local/bin/sidecar /usr/local/bin/sidecar
+COPY --from=browser-worker /tmp/appstrate-browser-worker /usr/local/bin/appstrate-browser-worker
+RUN chmod 0555 /usr/local/bin/appstrate-browser-worker
 
 # Guest supervisor, pre-bundled to a single file for cold-start speed.
 # It only imports node builtins plus the type-only wire contract
@@ -78,16 +103,17 @@ COPY --chmod=0755 apps/api/src/modules/firecracker/guest/init.sh /sbin/appstrate
 
 # Strip every setuid/setgid bit inherited from the merged base images —
 # a setuid binary is a uid-firewall bypass (the in-guest isolation is
-# uid-based). MUST run before the wrapper install below, which is the
-# single intentional setuid in the guest.
+# uid-based). MUST run before the wrapper install below; the two fixed-target
+# launchers are the only intentional setuid files in the guest.
 RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
 
-# The runner-exec privilege-drop wrapper: setuid root, exec restricted to
-# the sidecar's group (1000) — the agent (uid 1001, other groups) cannot
-# even exec it. See apps/api/src/modules/firecracker/guest/runner-exec.c.
+# The runner/browser fixed-target wrappers: setuid root, exec restricted to the
+# sidecar's group (1000) — the agent (uid 1001, other groups) cannot even exec
+# them. See guest/runner-exec.c and guest/browser-exec.c.
 COPY --from=wrapper /tmp/appstrate-runner-exec /usr/local/bin/appstrate-runner-exec
-RUN chown root:1000 /usr/local/bin/appstrate-runner-exec \
- && chmod 4750 /usr/local/bin/appstrate-runner-exec
+COPY --from=wrapper /tmp/appstrate-browser-exec /usr/local/bin/appstrate-browser-exec
+RUN chown root:1000 /usr/local/bin/appstrate-runner-exec /usr/local/bin/appstrate-browser-exec \
+ && chmod 4750 /usr/local/bin/appstrate-runner-exec /usr/local/bin/appstrate-browser-exec
 
 # The microVM ignores ENTRYPOINT/CMD (the kernel boots init directly);
 # keep root as the image user so the exported filesystem preserves

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>fr</string>
+  <key>CFBundleDisplayName</key><string>Appstrate Browser</string>
+  <key>CFBundleExecutable</key><string>AppstrateBrowser</string>
+  <key>CFBundleIdentifier</key><string>dev.appstrate.browser-companion</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Appstrate Browser</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSBackgroundOnly</key><true/>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>Appstrate browser companion</string>
+      <key>CFBundleURLSchemes</key><array><string>appstrate-browser</string></array>
+    </dict>
+  </array>
+</dict>
+</plist>

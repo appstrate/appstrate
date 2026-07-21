@@ -58,6 +58,10 @@ const DEFAULT_RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
   // so `uv run` is on PATH and can materialise per-bundle venvs from
   // pyproject.toml / requirements.txt / PEP-723 inline metadata.
   uv: "appstrate-mcp-runner-uv:latest",
+  // First-party Browser Use drivers attach to the Appstrate-provisioned CDP
+  // worker. The dedicated image pins the large Python dependency graph and
+  // deliberately contains no Chromium binary of its own.
+  "browser-use": "appstrate-mcp-runner-browser-use:latest",
   binary: "appstrate-mcp-runner-binary:latest",
 };
 
@@ -78,6 +82,7 @@ const RUNNER_IMAGE_ENV_BY_TYPE: Record<string, string> = {
   bun: "RUNNER_IMAGE_BUN",
   python: "RUNNER_IMAGE_PYTHON",
   uv: "RUNNER_IMAGE_UV",
+  "browser-use": "RUNNER_IMAGE_BROWSER_USE",
   binary: "RUNNER_IMAGE_BINARY",
 };
 
@@ -474,7 +479,16 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
-      const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
+      const {
+        runId,
+        spec,
+        bundleRoot,
+        egress,
+        browser,
+        browserProxyBypassEndpoint,
+        workspaceHandle,
+        onStderrLine,
+      } = options;
       const plan = planContainer(spec, bundleRoot);
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
       const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
@@ -487,9 +501,14 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       // create's lifetime.
       const envFlags: string[] = [];
       if (egress) {
+        const browserNoProxyHosts = browserProxyBypassEndpoint
+          ? [new URL(browserProxyBypassEndpoint).hostname]
+          : [];
         // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
         // The proxy URL is `http://sidecar:<port>` (non-secret routing info).
-        for (const [k, v] of Object.entries(buildProxyEnvBlock(egress.proxyUrl))) {
+        for (const [k, v] of Object.entries(
+          buildProxyEnvBlock(egress.proxyUrl, browserNoProxyHosts),
+        )) {
           envFlags.push("-e", `${k}=${v}`);
         }
         // CA trust ONLY for a TLS-terminating MITM listener; a plain CONNECT
@@ -571,8 +590,21 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       // container sees exactly the same env vars as before.
       const envFileFlags: string[] = [];
       let secretEnvDir: string | null = null;
-      if (Object.keys(spec.spawnEnv).length > 0) {
-        const written = await writeSecretEnvFile(spec.spawnEnv);
+      const secretEnv = {
+        ...spec.spawnEnv,
+        ...(browser
+          ? {
+              APPSTRATE_BROWSER_ENDPOINT: browser.endpoint,
+              APPSTRATE_BROWSER_TOKEN: browser.authToken,
+              APPSTRATE_BROWSER_PROTOCOL: String(browser.protocolVersion),
+              APPSTRATE_BROWSER_ALLOWED_ORIGINS_JSON: JSON.stringify(
+                spec.browser?.allowedOrigins ?? [],
+              ),
+            }
+          : {}),
+      };
+      if (Object.keys(secretEnv).length > 0) {
+        const written = await writeSecretEnvFile(secretEnv);
         secretEnvDir = written.dir;
         envFileFlags.push("--env-file", written.path);
       }

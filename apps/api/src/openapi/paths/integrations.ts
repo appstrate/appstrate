@@ -873,6 +873,7 @@ export const integrationsPaths = {
   "/api/integrations/connect/start": {
     get: {
       operationId: "startIntegrationConnect",
+      security: [],
       tags: ["Integrations"],
       summary: "Hosted connect dispatch (token)",
       description:
@@ -909,6 +910,7 @@ export const integrationsPaths = {
   "/api/integrations/connect/context": {
     get: {
       operationId: "getIntegrationConnectContext",
+      security: [{ connectPageCookie: [] }],
       tags: ["Integrations"],
       summary: "Hosted form render context (page cookie)",
       description:
@@ -921,7 +923,15 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["package_id", "auth_key", "display_name", "auth"],
+                required: [
+                  "package_id",
+                  "auth_key",
+                  "display_name",
+                  "auth",
+                  "connection_id",
+                  "csrf",
+                  "companion",
+                ],
                 properties: {
                   package_id: { type: "string" },
                   auth_key: { type: "string" },
@@ -930,6 +940,22 @@ export const integrationsPaths = {
                   auth: { type: "object", additionalProperties: true },
                   connection_id: { type: ["string", "null"] },
                   csrf: { type: ["string", "null"] },
+                  companion: {
+                    oneOf: [
+                      { type: "null" },
+                      {
+                        type: "object",
+                        required: ["available", "target_provider"],
+                        properties: {
+                          available: { type: "boolean", const: true },
+                          target_provider: {
+                            type: "string",
+                            enum: ["browser-use-cloud", "process"],
+                          },
+                        },
+                      },
+                    ],
+                  },
                 },
               },
             },
@@ -939,13 +965,253 @@ export const integrationsPaths = {
       },
     },
   },
+  "/api/integrations/connect/companion/attempts": {
+    post: {
+      operationId: "createBrowserCompanionAttempt",
+      security: [{ connectPageCookie: [] }],
+      tags: ["Integrations"],
+      summary: "Create a local browser companion handoff",
+      description:
+        "Authenticated by the hosted-connect page cookie plus CSRF. Allocates a connection-scoped target browser profile and returns a one-time local-app capability. The capability response is non-cacheable.",
+      parameters: [
+        {
+          name: "x-connect-csrf",
+          in: "header",
+          required: true,
+          schema: { type: "string" },
+        },
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                target_provider: {
+                  type: "string",
+                  enum: ["browser-use-cloud", "process"],
+                  description:
+                    "Optional echo of the operator-selected provider. A different value is rejected.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Companion attempt created",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["attempt_id", "companion_url", "expires_at"],
+                properties: {
+                  attempt_id: { type: "string", format: "uuid" },
+                  companion_url: { type: "string", format: "uri" },
+                  expires_at: { type: "string", format: "date-time" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/connect/companion/attempts/{attemptId}": {
+    get: {
+      operationId: "getBrowserCompanionAttempt",
+      security: [{ companionBearer: [] }],
+      tags: ["Integrations"],
+      summary: "Read a browser companion attempt",
+      description:
+        "Polled by the local companion and hosted connect page using the attempt bearer. Live provider URLs remain encrypted at rest and are returned only here.",
+      parameters: [
+        {
+          name: "attemptId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+        {
+          name: "observe",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["1"] },
+          description:
+            "Read without claiming the attempt. Used by the hosted page so pending means the local companion has not connected yet.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Companion attempt state",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: [
+                  "attempt_id",
+                  "package_id",
+                  "display_name",
+                  "icon",
+                  "start_url",
+                  "allowed_origins",
+                  "target_provider",
+                  "status",
+                  "interaction_url",
+                  "error_code",
+                  "expires_at",
+                ],
+                properties: {
+                  attempt_id: { type: "string", format: "uuid" },
+                  package_id: { type: "string" },
+                  display_name: { type: "string" },
+                  icon: { type: ["string", "null"] },
+                  start_url: { type: "string", format: "uri" },
+                  allowed_origins: {
+                    type: "array",
+                    items: { type: "string", format: "uri" },
+                  },
+                  target_provider: {
+                    type: "string",
+                    enum: ["browser-use-cloud", "process"],
+                  },
+                  status: {
+                    type: "string",
+                    enum: [
+                      "pending",
+                      "claimed",
+                      "state_received",
+                      "provisioning",
+                      "interaction_required",
+                      "complete",
+                      "failed",
+                    ],
+                  },
+                  interaction_url: { type: ["string", "null"], format: "uri" },
+                  error_code: { type: ["string", "null"] },
+                  expires_at: { type: "string", format: "date-time" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
+  "/api/integrations/connect/companion/attempts/{attemptId}/failure": {
+    post: {
+      operationId: "failBrowserCompanionAttempt",
+      security: [{ companionBearer: [] }],
+      tags: ["Integrations"],
+      summary: "Report that local browser acquisition stopped",
+      description:
+        "Allows the authenticated local companion to end a pending or claimed attempt immediately. This transition cannot interrupt a handoff that has already entered provider provisioning.",
+      parameters: [
+        {
+          name: "attemptId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["reason"],
+              properties: {
+                reason: { type: "string", enum: ["closed", "timeout", "failed"] },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "202": {
+          description: "Failure accepted or ignored because handoff already started",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["accepted"],
+                properties: { accepted: { type: "boolean", const: true } },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
+  "/api/integrations/connect/companion/attempts/{attemptId}/handoff": {
+    post: {
+      operationId: "submitBrowserCompanionHandoff",
+      security: [{ companionBearer: [] }],
+      tags: ["Integrations"],
+      summary: "Submit local browser state for target-provider proof",
+      description:
+        "Accepts a bounded browser state from the local companion. The state is encrypted immediately and asynchronously restored into the allocated target profile; callers poll the attempt resource for completion.",
+      parameters: [
+        {
+          name: "attemptId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["browser_state"],
+              properties: { browser_state: { type: "string", maxLength: 921600 } },
+            },
+          },
+        },
+      },
+      responses: {
+        "202": {
+          description: "State accepted for asynchronous proof",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["attempt_id", "status"],
+                properties: {
+                  attempt_id: { type: "string", format: "uuid" },
+                  status: { type: "string", enum: ["state_received"] },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
   "/api/integrations/connect/submit": {
     post: {
       operationId: "submitIntegrationConnect",
+      security: [{ connectPageCookie: [] }],
       tags: ["Integrations"],
       summary: "Hosted form credential submit (page cookie + CSRF)",
       description:
-        "Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header.",
+        "Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header. Browser-backed acquisition returns an SSE stream with `interaction`, `complete`, or `error` events so human challenges can be completed in the provider's secure live session.",
       parameters: [
         {
           name: "x-connect-csrf",
@@ -982,6 +1248,13 @@ export const integrationsPaths = {
                   ok: { type: "boolean" },
                   connection: integrationConnectionSchema,
                 },
+              },
+            },
+            "text/event-stream": {
+              schema: {
+                type: "string",
+                description:
+                  "Browser acquisition event stream. `interaction` carries `{ url }`; terminal `complete` carries the stored connection and terminal `error` carries a safe problem summary.",
               },
             },
           },

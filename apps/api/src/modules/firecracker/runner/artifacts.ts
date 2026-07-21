@@ -68,13 +68,17 @@ import { logger as defaultLogger } from "./logger.ts";
  * with the daemon that speaks N.
  *
  * History:
+ *   3 — standard rootfs browser contract (pinned Chromium, authenticated
+ *       worker, setuid driver/browser wrappers, and UID-aware nftables). A
+ *       browser-capable daemon must not accept a protocol-2 artifact that
+ *       lacks those fixed paths and identities.
  *   2 — MMDS credential broker (config-drive `credentials.source: "mmds"`
  *       strips RUN_TOKEN/APPSTRATE_SINK_SECRET off the drive; a protocol-1
  *       supervisor ignores the field, never fetches MMDS, and boots the
  *       run without credentials).
  *   1 — initial config-drive contract.
  */
-export const GUEST_PROTOCOL_VERSION = 2;
+export const GUEST_PROTOCOL_VERSION = 3;
 
 /** GitHub Release download base for this repo (versioned + `latest`). */
 export const DEFAULT_ARTIFACTS_BASE_URL = "https://github.com/appstrate/appstrate/releases";

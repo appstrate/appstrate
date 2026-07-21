@@ -150,6 +150,14 @@ describe("vmSizing", () => {
     expect(sizing).toEqual({ vcpuCount: 2, memSizeMib: 1536 + 256 });
   });
 
+  it("adds the platform-owned browser envelope before VMM cgroup sizing", () => {
+    const sizing = vmSizing({ memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 }, true, {
+      memoryBytes: 1024 * 1024 * 1024,
+      nanoCpus: 1_000_000_000,
+    });
+    expect(sizing).toEqual({ vcpuCount: 4, memSizeMib: 1536 + 256 + 256 + 1024 });
+  });
+
   it("clamps vcpus to a sane range", () => {
     expect(vmSizing({ memoryBytes: 1, nanoCpus: 100 }, true).vcpuCount).toBe(2);
     expect(vmSizing({ memoryBytes: 1, nanoCpus: 100 }, false).vcpuCount).toBe(2);

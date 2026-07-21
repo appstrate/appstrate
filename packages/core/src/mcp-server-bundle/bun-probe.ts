@@ -81,6 +81,19 @@ export interface BunProbeOptions {
   workRoot?: string;
 }
 
+export interface StdioProbeOptions {
+  /** Hard wall-clock budget. Default 10000 ms. */
+  timeoutMs?: number;
+  /** Interpreter or executable used to start the bundled entry point. */
+  executable: string;
+  /** Arguments inserted before the absolute entry-point path. */
+  executableArgs?: readonly string[];
+  /** Explicit, non-secret additions to the minimal probe environment. */
+  env?: Readonly<Record<string, string>>;
+  /** Working directory root for the materialised tree. */
+  workRoot?: string;
+}
+
 /**
  * Materialise the bundle's `./server/` tree into a temp directory and
  * run the probe against it. Accepting the file map directly avoids
@@ -91,9 +104,25 @@ export async function probeBunCompat(
   entryPoint: string,
   options: BunProbeOptions = {},
 ): Promise<BunCompatProbeResult> {
+  return probeStdioCompat(files, entryPoint, {
+    executable: options.bunPath ?? "bun",
+    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    ...(options.workRoot !== undefined ? { workRoot: options.workRoot } : {}),
+  });
+}
+
+/**
+ * Runtime-neutral MCP stdio probe used by conformance checks for first-party
+ * runtimes that are not Bun. The caller must provide the executable and may
+ * add only the explicit, non-secret environment required by that runtime.
+ */
+export async function probeStdioCompat(
+  files: Record<string, Uint8Array>,
+  entryPoint: string,
+  options: StdioProbeOptions,
+): Promise<BunCompatProbeResult> {
   const startedAt = performance.now();
   const timeoutMs = options.timeoutMs ?? 10_000;
-  const bunPath = options.bunPath ?? "bun";
   const workRoot = options.workRoot ?? tmpdir();
 
   const workDir = await mkdtemp(join(workRoot, "afps-bundle-probe-"));
@@ -105,7 +134,12 @@ export async function probeBunCompat(
     const cleanEntry = entryPoint.replace(/^\.\//, "");
     const entryAbs = join(workDir, cleanEntry);
 
-    return await runProbe(bunPath, entryAbs, timeoutMs, startedAt);
+    return await runProbe(
+      [options.executable, ...(options.executableArgs ?? []), entryAbs],
+      timeoutMs,
+      startedAt,
+      options.env,
+    );
   } catch (err) {
     return {
       ok: false,
@@ -118,10 +152,10 @@ export async function probeBunCompat(
 }
 
 async function runProbe(
-  bunPath: string,
-  entryAbs: string,
+  command: string[],
   timeoutMs: number,
   startedAt: number,
+  explicitEnv?: Readonly<Record<string, string>>,
 ): Promise<BunCompatProbeResult> {
   const withDuration = (r: BunCompatProbeResult): BunCompatProbeResult => ({
     ...r,
@@ -130,18 +164,18 @@ async function runProbe(
 
   let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   try {
-    proc = Bun.spawn([bunPath, entryAbs], {
+    proc = Bun.spawn(command, {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
       // SECURITY: never forward the full process.env to third-party MCP
       // code — pass only a minimal, non-secret system allowlist.
-      env: buildProbeEnv(),
+      env: { ...buildProbeEnv(), ...explicitEnv },
     });
   } catch (err) {
     return withDuration({
       ok: false,
-      reason: `failed to spawn bun: ${err instanceof Error ? err.message : String(err)}`,
+      reason: `failed to spawn ${command[0]}: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
 

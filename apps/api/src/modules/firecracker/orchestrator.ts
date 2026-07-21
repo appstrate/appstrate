@@ -65,13 +65,17 @@ import type {
   RunOrchestrator,
   WorkloadHandle,
   WorkloadSpec,
+  WorkloadResources,
   IsolationBoundary,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
+  ExecutionRequirements,
+  IsolationBoundaryOptions,
 } from "@appstrate/core/platform-types";
 import { logger } from "./runner/logger.ts";
 import { buildBaseSidecarEnv } from "../../services/orchestrator/sidecar-env.ts";
+import { browserSupplementalResources } from "../../services/browser-execution-profiles.ts";
 import {
   drainStream,
   spawnCollect,
@@ -235,6 +239,8 @@ interface VmRecord {
   consolePath: string;
   apiSocketPath: string;
   proc: BunProcess | null;
+  /** Capability resources admitted before the VM exists and consumed at boot. */
+  requirements?: ExecutionRequirements;
   /** Set once stopWorkload initiated a teardown — suppresses crash logs. */
   stopping: boolean;
   /**
@@ -880,7 +886,44 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     return this.vms.size + this.creatingBoundaries.size;
   }
 
-  async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+  /**
+   * The runner daemon is the final capability-admission boundary. A rolling
+   * upgrade may deliver additive requirement fields, but a capability this
+   * binary cannot provision must never be ignored. Resource totals are also
+   * checked against the daemon's own profile registry so a malformed or stale
+   * client cannot request a browser while under-sizing the guest.
+   */
+  private assertSupportedRequirements(
+    runId: string,
+    requirements: ExecutionRequirements | undefined,
+  ): void {
+    if (!requirements) return;
+    let expected: WorkloadResources;
+    try {
+      expected = browserSupplementalResources(requirements.capabilities);
+    } catch (error) {
+      throw new Error(
+        `Firecracker orchestrator: invalid capability requirements for run ${runId}: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const supplemental = requirements.supplementalResources;
+    if (
+      supplemental.memoryBytes !== expected.memoryBytes ||
+      supplemental.nanoCpus !== expected.nanoCpus ||
+      (supplemental.pidsLimit ?? 0) !== (expected.pidsLimit ?? 0)
+    ) {
+      throw new Error(
+        `Firecracker orchestrator: supplemental resources do not match the platform-owned ` +
+          `browser profile for run ${runId}`,
+      );
+    }
+  }
+
+  async createIsolationBoundary(
+    runId: string,
+    opts?: IsolationBoundaryOptions,
+  ): Promise<IsolationBoundary> {
     if (!this.initialized) {
       throw new Error(
         "Firecracker orchestrator is not initialized (host firewall setup failed or " +
@@ -898,6 +941,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           `run-identifier charset — refusing (it reaches the filesystem verbatim)`,
       );
     }
+    this.assertSupportedRequirements(runId, opts?.requirements);
     // One boundary per runId, ever-live. Checked here and reserved below in
     // the SAME synchronous stretch (no await between check and add) so two
     // concurrent creates for the same runId cannot both pass — the loser
@@ -1010,6 +1054,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         proc: null,
         stopping: false,
         createdAt: Date.now(),
+        ...(opts?.requirements ? { requirements: opts.requirements } : {}),
         reapAbandoned,
         abandonReap,
         ...(jail ? { jail } : {}),
@@ -1435,7 +1480,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const configDrivePath = join(vm.runDir, "config.img");
     await this.buildConfigDrive(vm.runDir, configDrivePath, guestConfig);
 
-    const sizing = vmSizing(agentSpec.resources, sidecarEnv !== undefined);
+    const sizing = vmSizing(
+      agentSpec.resources,
+      sidecarEnv !== undefined,
+      vm.requirements?.supplementalResources,
+    );
     const proc = await this.spawnVmm(
       vm,
       configDrivePath,

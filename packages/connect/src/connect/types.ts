@@ -40,3 +40,19 @@ export interface CredentialBundle {
   /** Expiry of the acquired material → `expires_at`. `null` = durable. */
   expiresAt?: string | null;
 }
+
+export interface BrowserAcquisitionProof {
+  readonly kind: string;
+  readonly succeeded: true;
+}
+
+/** Secret-aware browser acquisition output before persistence. */
+export interface BrowserAcquisitionResult extends CredentialBundle {
+  readonly proof: BrowserAcquisitionProof;
+}
+
+export interface BrowserInteractionRequired {
+  readonly kind: "otp" | "consent" | "captcha" | "manual";
+  readonly interactionId: string;
+  readonly expiresAt: string;
+}

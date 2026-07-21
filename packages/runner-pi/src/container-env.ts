@@ -281,7 +281,29 @@ export const SIDECAR_OPERATOR_ENV_KEYS = [
   "RUNNER_IMAGE_BUN",
   "RUNNER_IMAGE_PYTHON",
   "RUNNER_IMAGE_UV",
+  "RUNNER_IMAGE_BROWSER_USE",
   "RUNNER_IMAGE_BINARY",
+  // Browser companion provisioning. Docker sidecars consume the worker image;
+  // process/Firecracker sidecars consume the fixed first-party worker and
+  // Chromium executable paths. Secrets remain per-run and are never forwarded.
+  "BROWSER_WORKER_IMAGE",
+  "BROWSER_WORKER_EXECUTABLE_PATH",
+  "APPSTRATE_BROWSER_EXEC",
+  "APPSTRATE_BROWSER_EXECUTABLE",
+  "BROWSER_EXECUTABLE_PATH",
+  "BROWSER_MAX_CONCURRENT",
+  // Optional Browser Use Cloud provider. The API key is forwarded only to the
+  // trusted sidecar, which creates a per-run CDP broker; it is never delivered
+  // to integration runners, browser drivers, agents, or tool arguments.
+  "BROWSER_PROVIDER",
+  "BROWSER_USE_API_KEY",
+  "BROWSER_USE_CLOUD_TIMEOUT_MINUTES",
+  "BROWSER_USE_CLOUD_PROXY_COUNTRY",
+  "BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST",
+  "BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT",
+  "BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME",
+  "BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD",
+  "BROWSER_USE_CLOUD_PROFILE_ID",
   // Per-call MCP tool timeout override (#779 annex). Consumed sidecar-side
   // (integration clients, `integrations-boot.toolTimeoutMsFromEnv`) and
   // agent-side (`runtime-pi/env.ts` → entrypoint's sidecar client), so a

@@ -24,6 +24,7 @@ import {
   mcpServerManifestSchema as afpsMcpServerManifestSchema,
   type McpServerManifest,
 } from "@afps-spec/schema";
+import { isBlockedHost } from "@appstrate/afps-shared/ssrf";
 
 export type { McpServerManifest };
 
@@ -85,6 +86,19 @@ export const mcpServerManifestSchema = afpsMcpServerManifestSchema.superRefine((
       message: err instanceof Error ? err.message : String(err),
     });
   }
+
+  // Browser capability is an Appstrate execution permission, not an
+  // open-ended metadata bag. Validate it at package upload so unsafe origins
+  // and unknown policy fields never make it to a run resolver.
+  try {
+    getMcpServerBrowserCapability(m as McpServerManifest);
+  } catch (err) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "capabilities", "browser"],
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 /** The `_meta` key carrying Appstrate-specific mcp-server runtime hints. */
@@ -92,6 +106,110 @@ export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
 
 /** The `_meta` key carrying the shared-workspace opt-in declaration. */
 export const MCP_SERVER_WORKSPACE_META_KEY = "dev.appstrate/workspace";
+
+export type BrowserCapabilityPurpose = "automation" | "connection-acquisition";
+export type BrowserCapabilityProtocol = "cdp-v1";
+export type BrowserCapabilityProfile = "standard";
+
+/**
+ * Normalized browser execution capability declared by a local mcp-server.
+ * Chromium remains a companion dependency: `server.type` / `.runtime` still
+ * select the package's language runtime.
+ */
+export interface McpServerBrowserCapability {
+  readonly purpose: BrowserCapabilityPurpose;
+  readonly protocol: BrowserCapabilityProtocol;
+  readonly profile: BrowserCapabilityProfile;
+  /** Canonical exact HTTPS origins (`URL.origin`), deduplicated in order. */
+  readonly origins: readonly string[];
+}
+
+const browserCapabilitySchema = z
+  .object({
+    purpose: z.enum(["automation", "connection-acquisition"]),
+    protocol: z.literal("cdp-v1").default("cdp-v1"),
+    profile: z.literal("standard").default("standard"),
+    origins: z.array(z.string().min(1).max(2048)).min(1).max(64),
+  })
+  .strict();
+
+function normalizeBrowserOrigin(raw: string): string {
+  if (raw.includes("*")) {
+    throw new Error("browser origins must be exact origins; wildcards are not allowed");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`invalid browser origin '${raw}'`);
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new Error(`browser origin '${raw}' must use https`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`browser origin '${raw}' must not contain credentials`);
+  }
+  if ((parsed.pathname && parsed.pathname !== "/") || parsed.search || parsed.hash) {
+    throw new Error(`browser origin '${raw}' must not contain a path, query, or fragment`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (
+    isBlockedHost(hostname) ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".internal")
+  ) {
+    throw new Error(`browser origin '${raw}' targets a blocked host`);
+  }
+
+  return parsed.origin;
+}
+
+/**
+ * Parse `_meta["dev.appstrate/mcp-server"].capabilities.browser`.
+ *
+ * Returns `undefined` when absent. A present declaration is strict and throws
+ * on any malformed or unsafe field. Callers receive canonical origins rather
+ * than the package's spelling so policy comparisons stay exact.
+ */
+export function getMcpServerBrowserCapability(
+  manifest: McpServerManifest,
+): McpServerBrowserCapability | undefined {
+  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+  const appstrate = meta?.[MCP_SERVER_APPSTRATE_META_KEY];
+  if (appstrate == null) return undefined;
+  if (typeof appstrate !== "object" || Array.isArray(appstrate)) {
+    throw new Error(`${MCP_SERVER_APPSTRATE_META_KEY}: expected object`);
+  }
+
+  const capabilities = (appstrate as { capabilities?: unknown }).capabilities;
+  if (capabilities == null) return undefined;
+  if (typeof capabilities !== "object" || Array.isArray(capabilities)) {
+    throw new Error(`${MCP_SERVER_APPSTRATE_META_KEY}.capabilities: expected object`);
+  }
+
+  const browser = (capabilities as { browser?: unknown }).browser;
+  if (browser == null) return undefined;
+  const parsed = browserCapabilitySchema.safeParse(browser);
+  if (!parsed.success) {
+    throw new Error(
+      `${MCP_SERVER_APPSTRATE_META_KEY}.capabilities.browser: ${parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "value"} ${issue.message}`)
+        .join("; ")}`,
+    );
+  }
+
+  const origins = [...new Set(parsed.data.origins.map(normalizeBrowserOrigin))];
+  return {
+    purpose: parsed.data.purpose,
+    protocol: parsed.data.protocol,
+    profile: parsed.data.profile,
+    origins,
+  };
+}
 
 /**
  * Per-run shared workspace declaration parsed from an mcp-server

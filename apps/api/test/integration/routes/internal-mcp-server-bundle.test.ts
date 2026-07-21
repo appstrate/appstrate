@@ -25,6 +25,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
+import { signConnectWorkloadToken } from "../../../src/lib/connect-workload-token.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -240,5 +241,93 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     });
 
     expect(res.status).toBe(404);
+  });
+
+  it("allows a sidecar-only connect workload to fetch only its exact pinned bundle", async () => {
+    await seedLocalIntegration(true);
+    await seedMcpServerWithBundle(MCP_SERVER, SERVER_BUNDLE_BYTES);
+    const connectToken = signConnectWorkloadToken({
+      connectId: "browser_connect_without_run_row",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      integrationId: INTEGRATION,
+      mcpServerId: MCP_SERVER,
+      mcpServerVersion: SERVER_VERSION,
+      mcpServerSource: "version",
+      ttlMs: 60_000,
+    });
+
+    const allowed = await app.request(
+      `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+      { headers: { Authorization: `Bearer ${connectToken}` } },
+    );
+    expect(allowed.status).toBe(200);
+    expect(Array.from(new Uint8Array(await allowed.arrayBuffer()))).toEqual(
+      Array.from(SERVER_BUNDLE_BYTES),
+    );
+
+    const wrongPackage = await app.request(
+      `/internal/mcp-server-bundle/${ORPHAN_SERVER}?version=${SERVER_VERSION}`,
+      { headers: { Authorization: `Bearer ${connectToken}` } },
+    );
+    expect(wrongPackage.status).toBe(403);
+
+    const wrongVersion = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}`, {
+      headers: { Authorization: `Bearer ${connectToken}` },
+    });
+    expect(wrongVersion.status).toBe(403);
+  });
+
+  it("rejects expired or context-mismatched connect workload grants", async () => {
+    await seedLocalIntegration(true);
+    await seedMcpServerWithBundle(MCP_SERVER, SERVER_BUNDLE_BYTES);
+    const base = {
+      connectId: "connect_context_test",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      integrationId: INTEGRATION,
+      mcpServerId: MCP_SERVER,
+      mcpServerVersion: SERVER_VERSION,
+      mcpServerSource: "version" as const,
+      ttlMs: 60_000,
+    };
+    const url = `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`;
+
+    const expired = signConnectWorkloadToken(base, Date.now() - 60_001);
+    expect(
+      (await app.request(url, { headers: { Authorization: `Bearer ${expired}` } })).status,
+    ).toBe(401);
+
+    for (const overrides of [
+      { orgId: "00000000-0000-0000-0000-000000000000" },
+      { applicationId: "00000000-0000-0000-0000-000000000000" },
+      { integrationId: "@mcporg/other-integration" },
+    ]) {
+      const mismatched = signConnectWorkloadToken({ ...base, ...overrides });
+      const response = await app.request(url, {
+        headers: { Authorization: `Bearer ${mismatched}` },
+      });
+      expect([403, 404]).toContain(response.status);
+    }
+  });
+
+  it("does not let a connect workload token read credentials or run state", async () => {
+    await seedLocalIntegration(true);
+    const connectToken = signConnectWorkloadToken({
+      connectId: "connect_least_privilege",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      integrationId: INTEGRATION,
+      mcpServerId: MCP_SERVER,
+      mcpServerVersion: SERVER_VERSION,
+      mcpServerSource: "version",
+      ttlMs: 60_000,
+    });
+    const headers = { Authorization: `Bearer ${connectToken}` };
+
+    expect((await app.request("/internal/run-history", { headers })).status).toBe(401);
+    expect(
+      (await app.request(`/internal/integration-credentials/${INTEGRATION}`, { headers })).status,
+    ).toBe(401);
   });
 });

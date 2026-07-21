@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { _resetCacheForTesting } from "@appstrate/env";
+import { parseConnectWorkloadToken } from "../../../src/lib/connect-workload-token.ts";
 import {
   registerOrchestrator,
   _resetOrchestratorRegistryForTesting,
@@ -30,6 +31,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   createConnectRunExecutor,
   buildConnectLoginSpec,
+  parseBrowserInteraction,
   parseConnectResult,
   type McpServerResolver,
 } from "../../../src/services/connect/connect-run-launcher.ts";
@@ -68,7 +70,22 @@ const MANIFEST: IntegrationManifest = localIntegrationManifest({
 // The local-source integration references an mcp-server package; the launcher
 // resolves its runnable server config. Injected here so the unit test needs no DB.
 const fakeMcpResolver: McpServerResolver = async () => ({
-  server: { type: "python", entry_point: "./server.py" },
+  ok: true,
+  execution: {
+    packageId: "@scope/connect-server",
+    version: "1.2.3",
+    source: "version",
+    runtime: "python",
+    entryPoint: "./server.py",
+    manifest: {
+      manifest_version: "0.3",
+      name: "@scope/connect-server",
+      version: "1.2.3",
+      type: "mcp-server",
+      schema_version: "0.1",
+      server: { type: "python", entry_point: "./server.py" },
+    } as never,
+  },
 });
 
 /**
@@ -205,7 +222,12 @@ describe("buildConnectLoginSpec", () => {
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
     // The runnable server config comes from the referenced mcp-server package.
-    expect(spec.manifest.server).toEqual({ type: "python", entry_point: "./server.py" });
+    expect(spec.manifest.server).toEqual({
+      type: "python",
+      entry_point: "./server.py",
+      packageId: "@scope/connect-server",
+      version: "1.2.3",
+    });
     expect(spec.connectLogin).toBeDefined();
     expect(spec.connectLogin!).toMatchObject({
       toolName: "login",
@@ -248,8 +270,32 @@ describe("buildConnectLoginSpec", () => {
 
   it("throws when the referenced mcp-server cannot be resolved", async () => {
     const ex = execution();
-    const missing: McpServerResolver = async () => null;
+    const missing: McpServerResolver = async () => ({ ok: false, reason: "not_found" });
     await expect(buildConnectLoginSpec(ex, missing)).rejects.toThrow(/mcp-server/);
+  });
+
+  it("does not silently drop a declared browser capability on the secret-blind path", async () => {
+    const browserServer: McpServerResolver = async () => {
+      const base = await fakeMcpResolver("@scope/connect-server", "o");
+      if (!base.ok) return base;
+      return {
+        ok: true,
+        execution: {
+          ...base.execution,
+          browser: {
+            purpose: "automation",
+            protocol: "cdp-v1",
+            profile: "standard",
+            allowedOrigins: ["https://example.com"],
+            sessionMode: "none",
+            trustedDriver: false,
+          },
+        },
+      };
+    };
+    await expect(buildConnectLoginSpec(execution(), browserServer)).rejects.toThrow(
+      /explicit trusted browser executor marker/,
+    );
   });
 });
 
@@ -301,6 +347,34 @@ describe("parseConnectResult", () => {
   });
 });
 
+describe("parseBrowserInteraction", () => {
+  const KEY = randomBytes(32);
+
+  it("decrypts and validates a Browser Use live session URL", () => {
+    const payload = encryptConnectResult(
+      { url: "https://live.browser-use.com/live/session-id?token=secret" },
+      KEY,
+    );
+    expect(parseBrowserInteraction(`APPSTRATE_BROWSER_INTERACTION:${payload}`, KEY)).toBe(
+      "https://live.browser-use.com/live/session-id?token=secret",
+    );
+    expect(parseBrowserInteraction("ordinary sidecar log", KEY)).toBeNull();
+  });
+
+  it("rejects tampered payloads and non-Browser-Use URLs", () => {
+    const unsafe = encryptConnectResult(
+      { url: "https://live.browser-use.com.attacker.example/session" },
+      KEY,
+    );
+    expect(() => parseBrowserInteraction(`APPSTRATE_BROWSER_INTERACTION:${unsafe}`, KEY)).toThrow(
+      /unsafe/,
+    );
+    expect(() =>
+      parseBrowserInteraction("APPSTRATE_BROWSER_INTERACTION:not-ciphertext", KEY),
+    ).toThrow(/could not be decrypted/);
+  });
+});
+
 describe("createConnectRunExecutor.run", () => {
   it("builds the spec, launches a connect-mode sidecar, and returns the bundle", async () => {
     const bundle = { outputs: { session_token: "sess-1" }, expiresAt: null };
@@ -327,7 +401,15 @@ describe("createConnectRunExecutor.run", () => {
     expect(spec.connectLoginSpec).toBeDefined();
     expect(spec.connectLoginSpec!.connectLogin!.toolName).toBe("login");
     expect(spec.integrations?.length).toBe(1);
-    expect(spec.runToken).toContain(".");
+    expect(parseConnectWorkloadToken(spec.runToken)).toMatchObject({
+      audience: "internal:mcp-server-bundle",
+      orgId: "o",
+      applicationId: "a",
+      integrationId: "@scope/connect-it",
+      mcpServerId: "@scope/connect-server",
+      mcpServerVersion: "1.2.3",
+      mcpServerSource: "version",
+    });
     // Teardown ran.
     expect(calls.removedWorkloads).toBe(1);
     expect(calls.removedBoundaries).toBe(1);

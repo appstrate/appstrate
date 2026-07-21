@@ -6,6 +6,12 @@ import type { packages, packageVersions, applicationPackages } from "./packages.
 import type { runs, runLogs, schedules, packagePersistence } from "./runs.ts";
 import type { applications, endUsers } from "./applications.ts";
 import type { integrationConnections } from "./integrations.ts";
+import type {
+  browserConnectionAttempts,
+  browserConnectionBindings,
+  browserProfileDeletions,
+  browserSessionLeases,
+} from "./browser-connections.ts";
 import type { integrationPins } from "./integration-pins.ts";
 import type { user } from "./auth.ts";
 import type { organizations, modelProviderCredentials, orgModels } from "./organizations.ts";
@@ -39,5 +45,9 @@ export type User = InferSelectModel<typeof user>;
 export type PackagePersistenceRow = InferSelectModel<typeof packagePersistence>;
 
 export type IntegrationConnectionRow = InferSelectModel<typeof integrationConnections>;
+export type BrowserConnectionBindingRow = InferSelectModel<typeof browserConnectionBindings>;
+export type BrowserConnectionAttemptRow = InferSelectModel<typeof browserConnectionAttempts>;
+export type BrowserSessionLeaseRow = InferSelectModel<typeof browserSessionLeases>;
+export type BrowserProfileDeletionRow = InferSelectModel<typeof browserProfileDeletions>;
 
 export type IntegrationPinRow = InferSelectModel<typeof integrationPins>;

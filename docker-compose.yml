@@ -166,6 +166,11 @@ services:
     entrypoint: ["true"]
     restart: "no"
 
+  appstrate-mcp-runner-browser-use:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-browser-use:${APPSTRATE_VERSION:-1.0.0-beta.36}
+    entrypoint: ["true"]
+    restart: "no"
+
   appstrate-mcp-runner-binary:
     image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.36}
     entrypoint: ["true"]
@@ -276,6 +281,24 @@ services:
       # Set it only if you need to point sidecars at a different host.
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.36}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - BROWSER_ENABLED=${BROWSER_ENABLED:-false}
+      - BROWSER_CONNECT_ENABLED=${BROWSER_CONNECT_ENABLED:-false}
+      - BROWSER_DRIVER_GRANTS=${BROWSER_DRIVER_GRANTS:-[]}
+      - BROWSER_WORKER_IMAGE=ghcr.io/appstrate/appstrate-browser-worker:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - BROWSER_MAX_CONCURRENT=${BROWSER_MAX_CONCURRENT:-4}
+      # Optional remote stealth browser. Local Docker remains the default;
+      # setting BROWSER_PROVIDER=browser-use-cloud also requires the API key.
+      - BROWSER_PROVIDER=${BROWSER_PROVIDER:-}
+      - BROWSER_USE_API_KEY=${BROWSER_USE_API_KEY:-}
+      - BROWSER_USE_CLOUD_TIMEOUT_MINUTES=${BROWSER_USE_CLOUD_TIMEOUT_MINUTES:-15}
+      # Leave country empty here so the sidecar can apply its `fr` default
+      # only when no custom proxy is configured.
+      - BROWSER_USE_CLOUD_PROXY_COUNTRY=${BROWSER_USE_CLOUD_PROXY_COUNTRY:-}
+      - BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST=${BROWSER_USE_CLOUD_CUSTOM_PROXY_HOST:-}
+      - BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT=${BROWSER_USE_CLOUD_CUSTOM_PROXY_PORT:-}
+      - BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME=${BROWSER_USE_CLOUD_CUSTOM_PROXY_USERNAME:-}
+      - BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD=${BROWSER_USE_CLOUD_CUSTOM_PROXY_PASSWORD:-}
+      - BROWSER_USE_CLOUD_PROFILE_ID=${BROWSER_USE_CLOUD_PROFILE_ID:-}
       # Runner images forwarded to the sidecar (SIDECAR_OPERATOR_ENV_KEYS) so
       # it spawns integration runners from GHCR instead of bare `:latest` tags
       # (which the daemon would try — and fail — to pull from Docker Hub).
@@ -283,6 +306,7 @@ services:
       - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.36}
       - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.36}
       - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.36}
+      - RUNNER_IMAGE_BROWSER_USE=ghcr.io/appstrate/appstrate-mcp-runner-browser-use:${APPSTRATE_VERSION:-1.0.0-beta.36}
       - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.36}
       # ── System config (JSON arrays) ──
       - SYSTEM_PROVIDER_KEYS=${SYSTEM_PROVIDER_KEYS:-[]}

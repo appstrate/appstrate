@@ -24,6 +24,9 @@ import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
+  browserConnectionBindings,
+  browserProfileDeletions,
+  browserSessionLeases,
   integrationConnections,
   integrationOauthClients,
   packages,
@@ -2170,16 +2173,56 @@ export async function deleteIntegrationConnection(
   // routes skip org context.
   if ("orgId" in scope) await assertApplicationInScope(scope);
   const ownerPredicate = actorFilter(actor, integrationConnections);
-  const deleted = await db
-    .delete(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.id, connectionId),
-        eq(integrationConnections.applicationId, scope.applicationId),
-        ownerPredicate,
-      ),
-    )
-    .returning({ id: integrationConnections.id });
+  const deleted = await db.transaction(async (tx) => {
+    const [binding] = await tx
+      .select({
+        id: browserConnectionBindings.id,
+        provider: browserConnectionBindings.provider,
+        profileRef: browserConnectionBindings.profileRef,
+      })
+      .from(browserConnectionBindings)
+      .where(eq(browserConnectionBindings.connectionId, connectionId))
+      .limit(1)
+      .for("update");
+    const [bindingLease] = binding
+      ? await tx
+          .select({ expiresAt: browserSessionLeases.expiresAt })
+          .from(browserSessionLeases)
+          .where(eq(browserSessionLeases.bindingId, binding.id))
+          .limit(1)
+      : [];
+    const rows = await tx
+      .delete(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.id, connectionId),
+          eq(integrationConnections.applicationId, scope.applicationId),
+          ownerPredicate,
+        ),
+      )
+      .returning({ id: integrationConnections.id });
+    if (rows.length > 0 && binding) {
+      // The binding itself cascades with the connection. Persist its provider
+      // cleanup in the same transaction so an API crash can never orphan the
+      // remote authenticated profile between DELETE and queue insertion.
+      await tx
+        .insert(browserProfileDeletions)
+        .values({
+          provider: binding.provider,
+          profileRef: binding.profileRef,
+          // Connection deletion remains immediate, but a provider profile may
+          // still back an already-running workload. Delay remote deletion
+          // until its fenced lease expires instead of breaking that run.
+          ...(bindingLease?.expiresAt && bindingLease.expiresAt > new Date()
+            ? { nextAttemptAt: bindingLease.expiresAt }
+            : {}),
+        })
+        .onConflictDoNothing({
+          target: [browserProfileDeletions.provider, browserProfileDeletions.profileRef],
+        });
+    }
+    return rows;
+  });
   if (deleted.length === 0) {
     throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
   }
