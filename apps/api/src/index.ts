@@ -32,6 +32,7 @@ import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
+import { createDocumentsRouter } from "./routes/documents.ts";
 import healthRouter from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
@@ -196,6 +197,7 @@ const APP_SCOPED_PREFIXES = [
   "/api/packages",
   "/api/integrations",
   "/api/uploads",
+  "/api/documents",
 ];
 
 const appContextMiddleware = requireAppContext();
@@ -325,6 +327,7 @@ app.route("/api/end-users", createEndUsersRouter());
 // Public path (no auth middleware — authenticated via HMAC token), rate-limited.
 app.route("/api/uploads/_content", createUploadContentRouter());
 app.route("/api/uploads", createUploadsRouter());
+app.route("/api", createDocumentsRouter());
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());

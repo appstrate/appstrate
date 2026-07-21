@@ -7,6 +7,7 @@ import {
   boolean,
   uuid,
   integer,
+  bigint,
   jsonb,
   index,
   uniqueIndex,
@@ -40,6 +41,12 @@ export const organizations = pgTable("organizations", {
   // to the system-flagged proxy then `PROXY_URL`. No FK (a system id is not a DB
   // row); stale custom ids are cleared on delete and ignored by the resolver.
   defaultProxyId: text("default_proxy_id"),
+  // Running total of durable document bytes stored by this org. Maintained
+  // transactionally alongside `documents` insert/delete so the synchronous
+  // org-storage quota check (`ORG_STORAGE_QUOTA_BYTES`) needs no aggregate
+  // scan. bigint (mode: number) — total storage far exceeds the int4 ceiling.
+  // A daily reconciliation job corrects any drift from SUM(documents.size).
+  documentsBytesUsed: bigint("documents_bytes_used", { mode: "number" }).notNull().default(0),
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

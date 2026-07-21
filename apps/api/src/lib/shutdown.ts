@@ -17,6 +17,7 @@ import { shutdownPairingCleanupWorker } from "../services/model-providers/pairin
 import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { stopUploadGc } from "../services/uploads.ts";
+import { stopDocumentGc } from "../services/documents.ts";
 import { shutdownTelemetry } from "@appstrate/core/telemetry";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -31,6 +32,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Shutdown initiated, stopping container orchestrator...");
     stopUploadGc();
+    stopDocumentGc();
     await getOrchestrator().shutdown();
 
     // Unsubscribe from cancel channel before draining to avoid processing

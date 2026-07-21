@@ -1237,6 +1237,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List documents
+         * @description List the documents visible to the caller in the current application. Members see their own documents (and system-owned ones); end-users see only their own. Filter by `purpose`, `run_id`, `package_id`, or `chat_session_id`; paginate with `starting_after` + `limit`. Access is inherited from each document's container (no per-file grants).
+         */
+        get: operations["listDocuments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get document metadata
+         * @description Fetch a document's metadata, including the derived `downloadable` flag. Access is inherited from the document's container; an id the caller cannot read returns 404.
+         */
+        get: operations["getDocument"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a document
+         * @description Delete a document (storage object + row) and release its quota. Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator.
+         */
+        delete: operations["deleteDocument"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download document content
+         * @description Download the document bytes with `Content-Disposition: attachment`. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Gated by the `downloadable` flag — a user upload is served only to its creator (403 otherwise).
+         */
+        get: operations["getDocumentContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/end-users": {
         parameters: {
             query?: never;
@@ -9482,6 +9546,221 @@ export interface operations {
                     "text/html": string;
                 };
             };
+        };
+    };
+    listDocuments: {
+        parameters: {
+            query?: {
+                /** @description Filter by document purpose. */
+                purpose?: "user_upload" | "agent_output";
+                /** @description Filter to documents anchored to this run. */
+                run_id?: string;
+                /** @description Filter to documents produced by this agent package. */
+                package_id?: string;
+                /** @description Filter to documents anchored to this chat session. */
+                chat_session_id?: string;
+                /** @description Keyset cursor — document id to page after (newest-first order). */
+                starting_after?: string;
+                /** @description Page size (1–100, default 20). */
+                limit?: number;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of documents. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @enum {string} */
+                            object: "document";
+                            /** @description Opaque document id (`doc_…`). */
+                            id: string;
+                            /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
+                            uri: string;
+                            /** @enum {string} */
+                            purpose: "user_upload" | "agent_output";
+                            application_id: string;
+                            /** @description Run container, or null. */
+                            run_id: string | null;
+                            /** @description Chat-session container, or null. */
+                            chat_session_id: string | null;
+                            /** @description Producing agent package id, or null. */
+                            package_id: string | null;
+                            name: string;
+                            mime: string;
+                            /** @description Size in bytes. */
+                            size: number;
+                            /** @description SHA-256 of the bytes (hex). */
+                            sha256: string;
+                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                            downloadable: boolean;
+                            /**
+                             * Format: date-time
+                             * @description Retention deadline, or null when permanent.
+                             */
+                            expires_at: string | null;
+                            /** Format: date-time */
+                            created_at: string;
+                        }[];
+                        hasMore: boolean;
+                        limit?: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getDocument: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "document";
+                        /** @description Opaque document id (`doc_…`). */
+                        id: string;
+                        /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
+                        uri: string;
+                        /** @enum {string} */
+                        purpose: "user_upload" | "agent_output";
+                        application_id: string;
+                        /** @description Run container, or null. */
+                        run_id: string | null;
+                        /** @description Chat-session container, or null. */
+                        chat_session_id: string | null;
+                        /** @description Producing agent package id, or null. */
+                        package_id: string | null;
+                        name: string;
+                        mime: string;
+                        /** @description Size in bytes. */
+                        size: number;
+                        /** @description SHA-256 of the bytes (hex). */
+                        sha256: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                        downloadable: boolean;
+                        /**
+                         * Format: date-time
+                         * @description Retention deadline, or null when permanent.
+                         */
+                        expires_at: string | null;
+                        /** Format: date-time */
+                        created_at: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteDocument: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getDocumentContent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document bytes (proxy-stream mode). */
+            200: {
+                headers: {
+                    /** @description attachment; filename=… */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description Redirect to a presigned GET URL (public-endpoint S3 mode). */
+            307: {
+                headers: {
+                    /** @description Presigned URL. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listEndUsers: {

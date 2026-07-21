@@ -350,6 +350,12 @@ const expectedEndpoints = [
   "POST /api/uploads",
   "PUT /api/uploads/_content",
 
+  // Documents (durable document store — inputs + agent outputs)
+  "GET /api/documents",
+  "GET /api/documents/{id}",
+  "DELETE /api/documents/{id}",
+  "GET /api/documents/{id}/content",
+
   // Credential proxy (AFPS BYOI) — registered as router.all() in code,
   // every verb is documented because upstream provider semantics are method-defined.
   "GET /api/credential-proxy/proxy",

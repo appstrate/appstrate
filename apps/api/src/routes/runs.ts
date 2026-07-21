@@ -126,6 +126,7 @@ export function createRunsRouter() {
         const {
           input: parsedInput,
           uploadedFiles,
+          pendingDocuments,
           modelIdOverride,
           proxyIdOverride,
           configOverride,
@@ -181,6 +182,9 @@ export function createRunsRouter() {
           // File metadata for prompt context — the document bytes were already
           // streamed into the run workspace during consume.
           files: uploadedFiles,
+          // Staged uploads to materialize into durable `documents` rows after
+          // the run row exists (input already rewritten to `document://` ids).
+          pendingDocuments,
           config: mergedConfig,
           configOverride: configOverride ?? null,
           modelId: modelIdOverride ?? preflightModelId,

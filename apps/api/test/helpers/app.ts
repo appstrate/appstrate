@@ -61,6 +61,7 @@ import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "../../src/routes/uploads.ts";
+import { createDocumentsRouter } from "../../src/routes/documents.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
@@ -208,6 +209,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     "/api/packages",
     "/api/integrations",
     "/api/uploads",
+    "/api/documents",
   ];
 
   const appContextMiddleware = requireAppContext();
@@ -258,6 +260,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // path first. Mirrors production wiring in `apps/api/src/index.ts`.
   app.route("/api/uploads/_content", createUploadContentRouter());
   app.route("/api/uploads", createUploadsRouter());
+  app.route("/api", createDocumentsRouter());
   for (const mod of extraModules) {
     const moduleRouter = mod.createRouter?.();
     // Modules mount at the HTTP origin root — they declare full paths

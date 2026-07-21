@@ -453,6 +453,35 @@ const envSchema = z
     // within the window.
     UPLOAD_RETENTION_HOURS: z.coerce.number().min(0).max(720).default(24),
 
+    // Per-file ceiling on a durable document (materialized upload or agent
+    // output). Enforced synchronously at write time — over-cap writes 413.
+    // Default 100 MiB, aligned with the staged-upload absolute ceiling.
+    DOCUMENT_MAX_FILE_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(100 * 1024 * 1024),
+
+    // Per-org durable-storage quota in bytes. Checked synchronously against
+    // `organizations.documents_bytes_used` before a document write (403
+    // `storage_limit_exceeded` on over-cap). Absent ⇒ unlimited (OSS default);
+    // Cloud sets a plan value in the same column.
+    ORG_STORAGE_QUOTA_BYTES: z.coerce.number().int().positive().optional(),
+
+    // Ceiling on the total bytes of documents a single run may publish as
+    // output (Phase 2 ingestion). Default 256 MiB.
+    RUN_MAX_OUTPUT_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(256 * 1024 * 1024),
+
+    // Default retention for durable documents, in days. Applied as `expires_at`
+    // at creation time so the operator sets an instance-wide policy (GitLab
+    // pattern). Absent ⇒ permanent (documents never auto-expire) — the OSS
+    // default; livrable expiry is the #1 complaint, so this stays opt-in.
+    DOCUMENT_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
+
     // Redis (optional — falls back to in-memory adapters when absent)
     REDIS_URL: z.string().optional(),
 

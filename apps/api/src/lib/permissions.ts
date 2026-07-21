@@ -100,6 +100,8 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "runs:read",
   "runs:cancel",
   "runs:delete",
+  // Documents (reads are ungated; delete is owner/admin or the doc's creator)
+  "documents:delete",
   // MCP servers (AFPS §3.4 — browse/import/delete, no editor)
   "mcp-servers:read",
   "mcp-servers:write",
@@ -244,6 +246,8 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "runs:read",
   "runs:cancel",
   "runs:delete",
+  // Documents (delete via API key for headless cleanup flows)
+  "documents:delete",
   // Schedules
   "schedules:read",
   "schedules:write",

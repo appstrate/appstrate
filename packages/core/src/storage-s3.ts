@@ -12,7 +12,12 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
-import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
+import type {
+  Storage,
+  CreateUploadUrlOptions,
+  CreateDownloadUrlOptions,
+  UploadUrlDescriptor,
+} from "./storage.ts";
 import { StorageAlreadyExistsError } from "./storage.ts";
 import { createProxyUploadDescriptor } from "./storage-fs.ts";
 
@@ -334,6 +339,35 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       if (opts?.mime) headers["Content-Type"] = opts.mime;
       if (opts?.maxSize && opts.maxSize > 0) headers["Content-Length"] = String(opts.maxSize);
       return { url, method: "PUT", headers, expiresIn };
+    },
+
+    async createDownloadUrl(
+      bucket: string,
+      path: string,
+      opts?: CreateDownloadUrlOptions,
+    ): Promise<string | null> {
+      // Only presign when a public endpoint is configured — same flip as
+      // createUploadUrl (issue #829 / PR #830). Without it the bucket is
+      // private (proxy mode) and a presigned URL against the internal endpoint
+      // is not browser-reachable, so return null and let the caller
+      // proxy-stream the bytes through the API.
+      if (!config.publicEndpoint) return null;
+      const expiresIn = opts?.expiresIn ?? 900;
+      const cmd = new GetObjectCommand({
+        Bucket: config.bucket,
+        Key: makeKey(bucket, path),
+        ...(opts?.filename
+          ? {
+              ResponseContentDisposition: `attachment; filename="${opts.filename.replace(/"/g, "")}"`,
+            }
+          : {}),
+        ...(opts?.contentType ? { ResponseContentType: opts.contentType } : {}),
+      });
+      return getSignedUrl(
+        presignClient as unknown as Parameters<typeof getSignedUrl>[0],
+        cmd as unknown as Parameters<typeof getSignedUrl>[1],
+        { expiresIn },
+      );
     },
   };
 }

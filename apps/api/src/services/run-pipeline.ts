@@ -13,6 +13,7 @@ import {
 } from "./run-context-builder.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
+import { materializeRunUploads, type PendingUploadMaterialization } from "./documents.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -71,6 +72,13 @@ export interface RunPipelineParams {
   actor: Actor | null;
   input?: Record<string, unknown> | null;
   files?: FileReference[];
+  /**
+   * Staged uploads to materialize into durable `documents` rows once the run
+   * row exists (D1). The persisted `input` already references the pre-minted
+   * `document://` ids; the row insert is deferred here because `documents.run_id`
+   * is a hard FK. Set by the POST /run route; unset for scheduler/inline runs.
+   */
+  pendingDocuments?: PendingUploadMaterialization[];
   config: Record<string, unknown>;
   /**
    * Per-run override delta — the raw object the caller sent in the request
@@ -530,6 +538,20 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     ),
   );
   const createMs = Date.now() - createStart;
+
+  // Materialize the run's staged uploads into durable `documents` rows now the
+  // run row exists (deferred from the input-parser by the `documents.run_id`
+  // FK). Best-effort per document — the bytes already live in the run
+  // workspace, so a materialization hiccup never fails the run.
+  if (params.pendingDocuments?.length && actor) {
+    await materializeRunUploads(
+      { orgId, applicationId },
+      actor,
+      runId,
+      agent.id,
+      params.pendingDocuments,
+    );
+  }
 
   logger.info("run pipeline timings", {
     runId,

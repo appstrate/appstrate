@@ -4,6 +4,7 @@ import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/cli
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
+import { cleanupExpiredDocuments, startDocumentGc } from "../services/documents.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import {
@@ -332,12 +333,22 @@ export async function boot(): Promise<void> {
           error: getErrorMessage(err),
         });
       }),
+    cleanupExpiredDocuments()
+      .then((count) => {
+        if (count > 0) logger.info("Removed expired documents", { count });
+      })
+      .catch((err) => {
+        logger.warn("Could not clean up expired documents", {
+          error: getErrorMessage(err),
+        });
+      }),
   ];
 
   await Promise.all(parallelInits);
 
-  // Kick off the recurring upload sweep once initial cleanup is scheduled.
+  // Kick off the recurring upload + document sweeps once initial cleanup is scheduled.
   startUploadGc();
+  startDocumentGc();
 }
 
 /**

@@ -19,6 +19,8 @@ import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { parseRequestInput, isStrippedInlineMarker } from "../../../src/services/input-parser.ts";
+import { createDocumentFromUpload } from "../../../src/services/documents.ts";
+import { _resetCacheForTesting } from "@appstrate/env";
 import {
   downloadRunDocumentStream,
   downloadRunDocumentsManifest,
@@ -56,10 +58,10 @@ async function seedUpload(
   });
 }
 
-/** Minimal Hono context stub — parseRequestInput reads the JSON body, orgId/applicationId, and (for rerun_from) endUser. */
+/** Minimal Hono context stub — parseRequestInput reads the JSON body, orgId/applicationId, the actor (user/endUser), and (for rerun_from) endUser. */
 function fakeCtx(
   body: unknown,
-  ctx: { orgId: string; applicationId: string; endUser?: { id: string } },
+  ctx: { orgId: string; applicationId: string; endUser?: { id: string }; user?: { id: string } },
 ): Context {
   return {
     req: { json: async () => body },
@@ -70,7 +72,9 @@ function fakeCtx(
           ? ctx.applicationId
           : key === "endUser"
             ? ctx.endUser
-            : undefined,
+            : key === "user"
+              ? ctx.user
+              : undefined,
   } as unknown as Context;
 }
 
@@ -211,19 +215,16 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     await truncateAll();
   });
 
-  it("replays a cancelled run's input — documents re-consumed, no re-upload", async () => {
+  it("replays a cancelled run's upload:// input — re-consumed, rewritten to document://", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-ok" });
     const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
     const id = "upl_rerun_ok_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
 
-    // First trigger consumes the upload into run 1's workspace…
+    // A prior run persisted an upload:// input (legacy / pre-materialization);
+    // the upload stays re-consumable within its reuse window.
     const priorRunId = `run_${crypto.randomUUID()}`;
-    const input = { doc: `upload://${id}` };
-    await parseRequestInput(fakeCtx({ input }, scope), priorRunId, fileSchema);
-    // …and the run row persists the raw input (URI included). The run is then
-    // cancelled — the upload stays re-consumable for the reuse window.
-    await seedRun(scope, { id: priorRunId, input });
+    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` } });
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
@@ -232,19 +233,110 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       fileSchema,
     );
 
-    expect(result.input).toEqual(input);
+    // upload:// stays replayable (backward compat) — re-consumed into the new
+    // workspace and rewritten to a durable document:// reference (with a pending
+    // materialization the run pipeline commits once the run row exists).
     expect(result.uploadedFiles).toHaveLength(1);
     expect(result.uploadedFiles![0]).toMatchObject({
       fieldName: "doc",
       name: "file.pdf",
       size: PDF_BYTES.length,
     });
+    expect(result.input!.doc as string).toStartWith("document://doc_");
+    expect(result.pendingDocuments).toHaveLength(1);
     // The replayed document landed in the NEW run's workspace.
     const docStream = await downloadRunDocumentStream(newRunId, "file.pdf");
     expect(docStream).not.toBeNull();
     expect(new Uint8Array(await new Response(docStream!).arrayBuffer())).toEqual(
       new Uint8Array(PDF_BYTES),
     );
+  });
+
+  it("resolves a document:// input into the run workspace; 404 cross-org and cross-app", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-docref" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const actor = { type: "user" as const, id: ctx.user.id };
+
+    // Materialize a durable document from a staged upload on a run.
+    const id = "upl_docref_1";
+    await seedUpload(scope, { id, bytes: PDF_BYTES });
+    const runId = `run_${crypto.randomUUID()}`;
+    await db.insert(runs).values({
+      id: runId,
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
+      status: "running",
+    });
+    const doc = await createDocumentFromUpload(scope, actor, id, { runId });
+
+    // A new run references it by document:// — resolved into the new workspace.
+    const newRunId = `run_${crypto.randomUUID()}`;
+    const result = await parseRequestInput(
+      fakeCtx({ input: { doc: `document://${doc.id}` } }, { ...scope, user: { id: ctx.user.id } }),
+      newRunId,
+      fileSchema,
+    );
+    expect(result.uploadedFiles).toHaveLength(1);
+    expect(result.pendingDocuments).toBeUndefined(); // document:// is not re-materialized
+    const docStream = await downloadRunDocumentStream(newRunId, "file.pdf");
+    expect(docStream).not.toBeNull();
+    expect(new Uint8Array(await new Response(docStream!).arrayBuffer())).toEqual(
+      new Uint8Array(PDF_BYTES),
+    );
+
+    // Cross-org: another org's run cannot resolve the document → 404.
+    const other = await createTestContext({ orgSlug: "org-docref-other" });
+    await expect(
+      parseRequestInput(
+        fakeCtx(
+          { input: { doc: `document://${doc.id}` } },
+          { orgId: other.orgId, applicationId: other.defaultAppId, user: { id: other.user.id } },
+        ),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+
+    // Cross-app: same org, foreign application id → 404.
+    await expect(
+      parseRequestInput(
+        fakeCtx(
+          { input: { doc: `document://${doc.id}` } },
+          { orgId: ctx.orgId, applicationId: "app_not_this_one", user: { id: ctx.user.id } },
+        ),
+        `run_${crypto.randomUUID()}`,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("rejects an over-quota upload input synchronously (403) BEFORE the run is created", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-docquota" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const id = "upl_docquota_1";
+    await seedUpload(scope, { id, bytes: PDF_BYTES });
+
+    // Quota below the upload's declared size → the input-parser pre-flight
+    // rejects with 403 before any streaming (and, in the route, before createRun).
+    const prev = process.env.ORG_STORAGE_QUOTA_BYTES;
+    process.env.ORG_STORAGE_QUOTA_BYTES = String(PDF_BYTES.length - 1);
+    _resetCacheForTesting();
+    try {
+      await expect(
+        parseRequestInput(
+          fakeCtx({ input: { doc: `upload://${id}` } }, { ...scope, user: { id: ctx.user.id } }),
+          `run_${crypto.randomUUID()}`,
+          fileSchema,
+        ),
+      ).rejects.toMatchObject({ status: 403, code: "storage_limit_exceeded" });
+      // The upload was never consumed (rejected pre-stream) and no document exists.
+      const [uploadRow] = await db.select().from(uploads).where(eq(uploads.id, id));
+      expect(uploadRow!.consumedAt).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.ORG_STORAGE_QUOTA_BYTES;
+      else process.env.ORG_STORAGE_QUOTA_BYTES = prev;
+      _resetCacheForTesting();
+    }
   });
 
   it("rejects when both input and rerun_from are sent", async () => {
@@ -332,11 +424,9 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
     const id = "upl_rerun_gone_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
-    const input = { doc: `upload://${id}` };
     const priorRunId = `run_${crypto.randomUUID()}`;
-    await parseRequestInput(fakeCtx({ input }, scope), priorRunId, fileSchema);
-    await seedRun(scope, { id: priorRunId, input });
-    // Push the first consume outside the 24h reuse window.
+    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` } });
+    // The upload was consumed long ago — past the 24h reuse window.
     await db
       .update(uploads)
       .set({ consumedAt: new Date(Date.now() - 25 * 60 * 60 * 1000) })

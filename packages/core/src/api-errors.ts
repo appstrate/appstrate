@@ -222,6 +222,21 @@ export function gone(code: string, detail: string): ApiError {
   });
 }
 
+/**
+ * 403 with a distinct `storage_limit_exceeded` problem type — the org's
+ * durable-storage quota (`ORG_STORAGE_QUOTA_BYTES`) would be exceeded by the
+ * write. Separate from the generic `forbidden` so clients can branch on it
+ * (surface a quota-upgrade prompt) rather than treating it as an authz denial.
+ */
+export function storageLimitExceeded(detail: string): ApiError {
+  return new ApiError({
+    status: 403,
+    code: "storage_limit_exceeded",
+    title: "Storage Limit Exceeded",
+    detail,
+  });
+}
+
 export function payloadTooLarge(detail: string): ApiError {
   return new ApiError({
     status: 413,

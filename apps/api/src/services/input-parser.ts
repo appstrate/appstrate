@@ -50,6 +50,17 @@ import {
   type UploadMeta,
 } from "./uploads.ts";
 import { getRun } from "./state/runs.ts";
+import {
+  isDocumentUri,
+  parseDocumentUri,
+  documentUri,
+  getDocumentForActor,
+  streamDocumentContent,
+  assertWithinDocumentLimits,
+  type PendingUploadMaterialization,
+} from "./documents.ts";
+import { getActor } from "../lib/actor.ts";
+import { prefixedId } from "../lib/ids.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
@@ -99,6 +110,14 @@ export interface ParsedInput {
    * any other value replaces the manifest pin for that dependency.
    */
   dependencyOverrides?: Record<string, string>;
+  /**
+   * Staged uploads consumed by this run that must be materialized into durable
+   * `documents` rows once the run row exists (D1). The persisted `input`
+   * already carries the rewritten `document://<documentId>` URIs; the row
+   * insert is deferred to `prepareAndExecuteRun` (after `createRun`) because
+   * `documents.run_id` is a hard FK. Empty/undefined for runs with no uploads.
+   */
+  pendingDocuments?: PendingUploadMaterialization[];
 }
 
 interface RunRequestBody {
@@ -174,7 +193,7 @@ export function isDataUri(value: unknown): value is string {
 export interface InputFileRef {
   fieldName: string;
   uri: string;
-  kind: "upload" | "data";
+  kind: "upload" | "data" | "document";
   index?: number;
 }
 
@@ -187,11 +206,20 @@ function toFileRef(key: string, value: unknown, index?: number): InputFileRef {
       ...(index !== undefined ? { index } : {}),
     };
   }
+  if (isDocumentUri(value)) {
+    return {
+      fieldName: key,
+      uri: value,
+      kind: "document",
+      ...(index !== undefined ? { index } : {}),
+    };
+  }
   if (isDataUri(value)) {
     return { fieldName: key, uri: value, kind: "data", ...(index !== undefined ? { index } : {}) };
   }
   throw invalidRequest(
-    `Field '${key}' must be an 'upload://<id>' URI or an inline 'data:<mime>;base64,<payload>' URI`,
+    `Field '${key}' must be an 'upload://<id>' URI, a 'document://<id>' URI, or an inline ` +
+      "'data:<mime>;base64,<payload>' URI",
     key,
   );
 }
@@ -509,6 +537,7 @@ export async function parseRequestInput(
     input = await resolveRerunInput(c, body.rerun_from, opts?.agentPackageId);
   }
   let uploadedFiles: FileReference[] = [];
+  let pendingDocuments: PendingUploadMaterialization[] = [];
 
   if (inputSchema) {
     const refs = collectFileRefs(inputSchema, input);
@@ -522,6 +551,18 @@ export async function parseRequestInput(
       .map((ref) => {
         const id = parseUploadUri(ref.uri);
         if (!id) throw invalidRequest(`Invalid upload URI '${ref.uri}'`, ref.fieldName);
+        return { ref, id };
+      });
+
+    // Resolve every document URI to a document id up front (same eager-fail as
+    // uploads). A `document://` reference points at an already-durable document
+    // (a prior materialized upload or an agent output); it is streamed into the
+    // run workspace like an upload but never re-materialized.
+    const docRefs = refs
+      .filter((ref) => ref.kind === "document")
+      .map((ref) => {
+        const id = parseDocumentUri(ref.uri);
+        if (!id) throw invalidRequest(`Invalid document URI '${ref.uri}'`, ref.fieldName);
         return { ref, id };
       });
 
@@ -554,15 +595,35 @@ export async function parseRequestInput(
     // stream, so a pre-stream failure (bad URI, cap, peek) rolls back nothing.
     let docNames: string[] = [];
     try {
-      if (resolved.length > 0 || inline.length > 0) {
+      if (resolved.length > 0 || inline.length > 0 || docRefs.length > 0) {
+        // Resolve every `document://` reference through the container ACL (D2):
+        // the run-triggering actor must be able to read the document, else it is
+        // indistinguishable from missing (404 — covers cross-org and cross-app).
+        // The actor is resolved only on this path so upload/inline-only inputs
+        // never require a principal in context.
+        const resolvedDocs =
+          docRefs.length > 0
+            ? await (async () => {
+                const actor = getActor(c);
+                return Promise.all(
+                  docRefs.map(async ({ ref, id }) => {
+                    const doc = await getDocumentForActor({ orgId, applicationId }, actor, id);
+                    if (!doc) throw notFound(`Document '${id}' not found`);
+                    return { ref, doc: doc.row };
+                  }),
+                );
+              })()
+            : [];
+
         // Bound the total input-document payload on DECLARED sizes BEFORE
         // streaming any bytes. Documents are delivered to the agent out-of-band
         // (fetched + streamed to disk), so an oversized payload is a policy
         // violation rather than a crash. The per-file `bytes === size` check
         // inside consume keeps each actual size ≤ its declared size, so a
         // declared total under the cap bounds the actual total too. Inline
-        // files count their already-decoded (exact) size. Reject before launch
-        // so the caller gets a clean 413 instead of a mid-flight run failure.
+        // files count their already-decoded (exact) size; `document://`
+        // references count their stored size. Reject before launch so the
+        // caller gets a clean 413 instead of a mid-flight run failure.
         const metas: Map<string, UploadMeta> =
           resolved.length > 0
             ? await peekUploads(
@@ -571,9 +632,26 @@ export async function parseRequestInput(
               )
             : new Map();
         assertDocsWithinCap(
-          [...metas.values(), ...inline.map((i) => ({ size: i.file.bytes.byteLength }))],
+          [
+            ...metas.values(),
+            ...inline.map((i) => ({ size: i.file.bytes.byteLength })),
+            ...resolvedDocs.map(({ doc }) => ({ size: doc.size })),
+          ],
           getEnv().WORKSPACE_MAX_DOCS_BYTES,
         );
+
+        // Documents quota + per-file cap on the uploads that will be
+        // materialized into durable rows (D1) — a SYNCHRONOUS reject BEFORE the
+        // run is created, so an over-quota / over-cap run 403/413s here rather
+        // than after `createRun`. `createDocumentFromUpload` re-checks the exact
+        // bytes inside its transaction. `document://` inputs are already durable
+        // (their bytes were counted at creation) so they are not re-counted.
+        if (resolved.length > 0) {
+          await assertWithinDocumentLimits(
+            orgId,
+            resolved.map((r) => metas.get(r.id)!.size),
+          );
+        }
 
         // Inline files: sniff the magic bytes once — used both for the
         // declared-vs-actual MIME check (same policy as the staged-upload
@@ -607,7 +685,8 @@ export async function parseRequestInput(
           const suffix = ref.index !== undefined ? `-${ref.index}` : "";
           return sanitizeStorageKey(`${ref.fieldName}${suffix}.${ext}`);
         });
-        docNames = [...uploadDocNames, ...inlineDocNames];
+        const documentDocNames = resolvedDocs.map(({ doc }) => sanitizeStorageKey(doc.name));
+        docNames = [...uploadDocNames, ...inlineDocNames, ...documentDocNames];
 
         // Stream each upload straight from the uploads bucket into the run
         // workspace — validating size + MIME on the fly — so the platform never
@@ -672,6 +751,25 @@ export async function parseRequestInput(
           });
         }
 
+        // Stream each `document://` reference straight from the durable
+        // documents bucket into the run workspace (same path as uploads — the
+        // runtime is unchanged). No re-materialization: the document already
+        // exists and its bytes were validated when it was created.
+        const documentFiles: FileReference[] = [];
+        for (let j = 0; j < resolvedDocs.length; j++) {
+          const { ref, doc } = resolvedDocs[j]!;
+          const docName = documentDocNames[j]!;
+          const src = await streamDocumentContent(doc.storageKey);
+          if (!src) throw notFound(`Document '${doc.id}' content is missing`);
+          await streamRunDocument(runId, docName, src);
+          documentFiles.push({
+            fieldName: ref.fieldName,
+            name: docName,
+            type: doc.mime,
+            size: doc.size,
+          });
+        }
+
         // Strip the inline payloads from the input now that the bytes live in
         // the run workspace — the persisted run input (run record, prompt
         // templates) keeps a compact `data:<mime>;name=<doc>;base64,` marker
@@ -686,10 +784,27 @@ export async function parseRequestInput(
           }
         }
 
+        // Materialization (D1): each consumed upload becomes a durable
+        // `documents` row. Mint the id now, rewrite the persisted input value
+        // `upload://upl_x` → `document://doc_y` (durable source of truth — a
+        // rerun re-resolves the document, no upload retention window needed),
+        // and defer the row insert to `prepareAndExecuteRun` (after `createRun`,
+        // because `documents.run_id` is a hard FK).
+        pendingDocuments = resolved.map(({ ref, id }) => {
+          const documentId = prefixedId("doc");
+          const uri = documentUri(documentId);
+          if (ref.index === undefined) {
+            input[ref.fieldName] = uri;
+          } else {
+            (input[ref.fieldName] as unknown[])[ref.index] = uri;
+          }
+          return { uploadId: id, documentId };
+        });
+
         // Write the documents manifest once every document has streamed — it
         // doubles as the agent's enumeration index and the run-workspace
         // deletion index on teardown.
-        const allFiles = [...consumed, ...inlined];
+        const allFiles = [...consumed, ...inlined, ...documentFiles];
         await writeRunDocumentsManifest(
           runId,
           allFiles.map((d, i) => ({ name: docNames[i]!, size: d.size })),
@@ -783,6 +898,7 @@ export async function parseRequestInput(
   return {
     input,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+    pendingDocuments: pendingDocuments.length > 0 ? pendingDocuments : undefined,
     modelIdOverride: body.modelId,
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
