@@ -175,6 +175,50 @@ describe("PiChatUiStreamMapper", () => {
     expect(meta.errorText).toBe("upstream 500");
   });
 
+  it("captures a run failure that only rides turn_end (no message_end)", () => {
+    // pi-agent-core's handleRunFailure path: tool exception / context overflow
+    // ends the run via turn_end + agent_end without any message_end.
+    const { mapper } = run([
+      { type: "message_start", message: {} },
+      {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "tool exploded" },
+        toolResults: [],
+      },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).toBe("error");
+    expect(meta.errorText).toBe("tool exploded");
+  });
+
+  it("captures a run failure carried by agent_end's message list", () => {
+    const { mapper } = run([
+      { type: "message_start", message: {} },
+      {
+        type: "agent_end",
+        messages: [
+          { role: "user" },
+          { role: "assistant", stopReason: "error", errorMessage: "context overflow" },
+        ],
+      },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).toBe("error");
+    expect(meta.errorText).toBe("context overflow");
+  });
+
+  it("does not flag an explicit stop (aborted) as an error", () => {
+    const { mapper } = run([
+      {
+        type: "message_end",
+        message: { role: "assistant", stopReason: "aborted", errorMessage: "Aborted" },
+      },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).toBe("other");
+    expect(meta.errorText).toBeUndefined();
+  });
+
   it("maps thinking deltas to reasoning-* chunks", () => {
     const { chunks } = run([
       { type: "message_start", message: {} },

@@ -205,8 +205,18 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           if (!turnAbort.signal.aborted) throw err;
         }
 
+        // Invariant: an errored turn ALWAYS surfaces a visible error. The
+        // `error` chunk covers the live client; `errorText` in the persisted
+        // turn metadata covers reloads (error chunks are transient — they never
+        // become message parts). The fallback text guards any capture gap in
+        // the mapper — a silent empty turn is the one unacceptable outcome.
         const meta = mapper.result();
-        if (meta.errorText) write({ type: "error", errorText: meta.errorText });
+        const errorText =
+          meta.errorText ??
+          (meta.finishReason === "error"
+            ? "La génération a échoué (erreur du modèle)."
+            : undefined);
+        if (errorText) write({ type: "error", errorText });
 
         const stepCount = mapper.stepCount();
         write({
@@ -214,6 +224,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           messageMetadata: mergeTurnMetadata(undefined, {
             engine: "subscription",
             finishReason: meta.finishReason,
+            ...(errorText ? { errorText } : {}),
             stepCount,
             maxSteps: CHAT_MAX_STEPS,
             maxStepsReached: stepCount >= CHAT_MAX_STEPS,

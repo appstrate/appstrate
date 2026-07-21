@@ -34,6 +34,8 @@ export type AgentSessionEvent =
   | { type: "message_start"; message: unknown }
   | { type: "message_update"; message: unknown; assistantMessageEvent: PiAssistantMessageEvent }
   | { type: "message_end"; message: unknown }
+  | { type: "turn_end"; message: unknown; toolResults: unknown[] }
+  | { type: "agent_end"; messages: unknown[] }
   | {
       type: "tool_execution_end";
       toolCallId: string;

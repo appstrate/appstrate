@@ -26,7 +26,7 @@ import {
   SendHorizontalIcon,
   SquareIcon,
 } from "lucide-react";
-import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
+import { turnLimitReached, turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 import { Button } from "./button.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
@@ -233,9 +233,13 @@ function UserMessage() {
 /**
  * Shown while the model hasn't produced anything visible yet. Height is pinned
  * to h-6 (24px) — exactly one prose-sm text line — so the dots→first-text swap
- * is a 0px layout change.
+ * is a 0px layout change. Gated on the message actually running: a DEAD message
+ * with no visible parts (e.g. a turn that errored before producing content)
+ * must not animate "thinking" forever — that reads as a hung chat.
  */
 function ThinkingIndicator() {
+  const running = useMessage((m) => m.status?.type === "running");
+  if (!running) return null;
   return (
     <div className="flex h-6 items-center gap-1" role="status" aria-label="L'assistant réfléchit…">
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
@@ -256,6 +260,29 @@ function TurnLimitNotice() {
   );
 }
 
+/**
+ * Failure notice for a PERSISTED errored turn, driven by the turn metadata
+ * (`finishReason: "error"` + client-safe `errorText`). The live failure is
+ * shown by MessageError (assistant-ui message status — transient, not
+ * persisted); this one survives reload. Suppressed while MessageError is
+ * visible so a live error isn't shown twice.
+ */
+function TurnErrorNotice() {
+  const errorText = useMessage((m) => {
+    if (m.status?.type === "incomplete" && m.status.reason === "error") return null;
+    const turn = turnMetadataFromMessage(m);
+    if (turn?.finishReason !== "error") return null;
+    return turn.errorText ?? "La génération a échoué.";
+  });
+  if (!errorText) return null;
+  return (
+    <div className="text-destructive mt-3 flex items-center gap-2 text-xs" role="alert">
+      <AlertTriangleIcon className="size-3.5 shrink-0" />
+      <span className="break-words">{errorText}</span>
+    </div>
+  );
+}
+
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
@@ -272,6 +299,7 @@ function AssistantMessage() {
           }}
         />
         <TurnLimitNotice />
+        <TurnErrorNotice />
       </div>
       <MessageError />
       <div className="mt-1 flex h-7 items-center gap-1">
