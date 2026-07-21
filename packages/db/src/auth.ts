@@ -738,14 +738,14 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     session: {
       expiresIn: 60 * 60 * 24 * 7, // 7 days
       updateAge: 60 * 60 * 24, // Refresh every 24h
-      // Disable BA's session-freshness gate (default 24h) on sensitive
-      // endpoints (`unlink-account`, `delete-user`). With 7-day sessions and
-      // no re-authentication flow in the SPA, any session older than a day
-      // would 403 with SESSION_NOT_FRESH on those endpoints — making social
-      // unlink effectively unusable. The comparable credential mutations BA
-      // ships (changePassword, changeEmail) are not freshness-gated either;
-      // unlink keeps its own guard (BA refuses to unlink the last account).
-      freshAge: 0,
+      // Better Auth freshness gate for sensitive endpoints (unlink-account,
+      // delete-user): sessions older than this must re-authenticate first.
+      // The SPA catches SESSION_NOT_FRESH and walks the user through a
+      // re-login (see apps/web/src/pages/preferences/security.tsx), so
+      // keeping the gate costs one extra re-login for sessions older than
+      // 24h and keeps stolen-cookie damage bounded — a cookie older than a
+      // day can't unlink providers without a fresh step-up sign-in.
+      freshAge: 60 * 60 * 24, // 24h (BA default, made explicit)
       // Disabled to work around BA 1.6 issue #7607 — when `session_data`
       // expires (at `maxAge`), BA fails to regenerate it from the still-valid
       // `session_token` under certain plugin configurations, logging the

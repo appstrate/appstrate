@@ -15,6 +15,9 @@ import { useAuth } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { client } from "../../api/client";
 import { GoogleIcon, GitHubIcon } from "../../components/icons";
+import { ReauthModal } from "../../components/reauth-modal";
+import { SessionNotFreshError } from "../../lib/auth-errors";
+import { availableReauthMethods } from "../../lib/reauth-methods";
 
 type LinkedAccount = { providerId: string; accountId: string };
 
@@ -30,6 +33,7 @@ function LinkedAccountsSection({
   const { linkGoogle, linkGithub, unlinkAccount } = useAuth();
   const [unlinking, setUnlinking] = useState<string | false>(false);
   const [linking, setLinking] = useState<string | false>(false);
+  const [pendingUnlink, setPendingUnlink] = useState<string | null>(null);
 
   if (!features.googleAuth && !features.githubAuth) return null;
 
@@ -115,9 +119,15 @@ function LinkedAccountsSection({
                     await unlinkAccount(provider.id);
                     await refetch();
                   } catch (err: unknown) {
-                    // Surface the failure — previously a rejection here was
-                    // silently swallowed and the button just stopped spinning.
-                    toast.error(err instanceof Error ? err.message : String(err));
+                    if (err instanceof SessionNotFreshError) {
+                      // Session too old for a sensitive action — walk the user
+                      // through a step-up re-login, then retry the unlink.
+                      setPendingUnlink(provider.id);
+                    } else {
+                      // Surface the failure — previously a rejection here was
+                      // silently swallowed and the button just stopped spinning.
+                      toast.error(err instanceof Error ? err.message : String(err));
+                    }
                   } finally {
                     setUnlinking(false);
                   }
@@ -156,6 +166,22 @@ function LinkedAccountsSection({
           );
         })}
       </div>
+      <ReauthModal
+        open={pendingUnlink !== null}
+        methods={availableReauthMethods(accounts, features)}
+        onReauthenticated={async () => {
+          try {
+            await unlinkAccount(pendingUnlink!);
+            await refetch();
+            toast.success(t("preferences.unlinked"));
+          } catch (err: unknown) {
+            // The retry can still fail (last account, unlinked in another tab).
+            toast.error(err instanceof Error ? err.message : String(err));
+            setPendingUnlink(null);
+          }
+        }}
+        onClose={() => setPendingUnlink(null)}
+      />
     </div>
   );
 }

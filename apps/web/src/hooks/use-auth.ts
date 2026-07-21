@@ -5,6 +5,7 @@ import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
+import { toUnlinkError } from "../lib/auth-errors";
 import { orgStore } from "../stores/org-store";
 import { appStore } from "../stores/app-store";
 import i18n from "../i18n";
@@ -249,7 +250,7 @@ export function useAuth() {
 
   const unlinkAccount = useCallback(async (providerId: string) => {
     const result = await authClient.unlinkAccount({ providerId });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toUnlinkError(result.error);
   }, []);
 
   const resendVerificationEmail = useCallback(async (email: string) => {
