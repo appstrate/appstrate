@@ -94,6 +94,19 @@ export const llmUsageSourceEnum = pgEnum("llm_usage_source", llmUsageSourceValue
 export const zLlmUsageSourceEnum = z.enum(llmUsageSourceValues);
 
 /**
+ * Which credential set reached the upstream provider for an `llm_usage`
+ * row — `system` for platform-provided model credentials, `org` for the
+ * organization's own key or subscription. Attribution only: the OSS
+ * platform records who paid the provider, never how that maps to any
+ * downstream accounting. Nullable on the column (historical rows may
+ * predate it); every new row is stamped.
+ */
+export const credentialSourceValues = ["system", "org"] as const;
+export const credentialSourceEnum = pgEnum("credential_source", credentialSourceValues);
+export const zCredentialSourceEnum = z.enum(credentialSourceValues);
+export type CredentialSource = z.infer<typeof zCredentialSourceEnum>;
+
+/**
  * Distinguishes WHO controls the runner process — `platform` for
  * platform-managed Pi containers, `remote` for caller-managed runners
  * (CLI, GitHub Action, self-hosted). Closed set: every event-ingestion

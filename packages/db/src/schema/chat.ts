@@ -10,6 +10,7 @@ import {
   integer,
   serial,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
 import { user } from "./auth.ts";
@@ -50,7 +51,14 @@ export const chatSessions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("idx_chat_sessions_org_user").on(table.orgId, table.userId)],
+  (table) => [
+    index("idx_chat_sessions_org_user").on(table.orgId, table.userId),
+    // Referenced target of the composite tenant-integrity FK on
+    // `llm_usage(chat_session_id, org_id)`: Postgres needs a unique index
+    // covering exactly these columns for the FK to attach. Trivially valid —
+    // `id` alone is the PK, so `(id, org_id)` can never collide.
+    uniqueIndex("uq_chat_sessions_id_org_id").on(table.id, table.orgId),
+  ],
 );
 
 // Messages are OPAQUE tree nodes written by assistant-ui's native history
