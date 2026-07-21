@@ -41,7 +41,11 @@ class _Session:
 class _CommandRecorder:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object, object]] = []
-        self.Storage = SimpleNamespace(setCookies=self._record("Storage.setCookies"))
+        self.cookie_result: list[dict[str, object]] = []
+        self.Storage = SimpleNamespace(
+            setCookies=self._record("Storage.setCookies"),
+            getCookies=self._get_cookies,
+        )
         self.Page = SimpleNamespace(
             addScriptToEvaluateOnNewDocument=self._record("Page.addInitScript"),
             removeScriptToEvaluateOnNewDocument=self._record("Page.removeInitScript"),
@@ -53,6 +57,14 @@ class _CommandRecorder:
             return {"identifier": "storage-script"} if name == "Page.addInitScript" else {}
 
         return call
+
+    async def _get_cookies(
+        self,
+        params: object = None,
+        session_id: object = None,
+    ) -> dict[str, object]:
+        self.calls.append(("Storage.getCookies", params, session_id))
+        return {"cookies": self.cookie_result}
 
 
 class _StorageSession(_Session):
@@ -155,6 +167,36 @@ class BridgeNavigationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(snapshot.ready_state, "complete")
         self.assertEqual(calls, 2)
+
+    async def test_state_export_reads_browser_scope_and_preserves_local_storage(self) -> None:
+        page = _Page()
+        browser = self.browser_with(page)
+        session = _StorageSession(page)
+        session.commands.cookie_result = [
+            {
+                "name": "login_token",
+                "value": "updated-cookie",
+                "domain": "www.leboncoin.fr",
+                "path": "/",
+                "secure": True,
+                "httpOnly": True,
+                "sameSite": "Lax",
+            }
+        ]
+        browser._session = session  # noqa: SLF001 - isolated bridge contract test
+        await browser.restore_storage_state_json(
+            '{"version":1,"cookies":[],"origins":['
+            '{"origin":"https://www.leboncoin.fr","localStorage":['
+            '{"name":"session-key","value":"session-value"}]}'
+            ']}'
+        )
+
+        exported = await browser.export_storage_state_json()
+
+        self.assertIn('"value":"updated-cookie"', exported)
+        self.assertIn('"name":"session-key","value":"session-value"', exported)
+        get_cookies = session.commands.calls[-1]
+        self.assertEqual(get_cookies, ("Storage.getCookies", None, None))
 
 
 if __name__ == "__main__":

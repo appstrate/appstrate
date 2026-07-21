@@ -109,6 +109,9 @@ describe("browser connect private result parser", () => {
     expect(browserSafeErrorCode(new Error("BROWSER_BUNDLE_UNAVAILABLE: HTTP 401"))).toBe(
       "BROWSER_BUNDLE_UNAVAILABLE",
     );
+    expect(browserSafeErrorCode(new Error("BROWSER_STATE_READ_FAILED: private detail"))).toBe(
+      "BROWSER_STATE_READ_FAILED",
+    );
     expect(browserSafeErrorCode(new Error("driver failed with password=hunter2"))).toBe(
       "BROWSER_UNAVAILABLE",
     );

@@ -80,6 +80,7 @@ class AppstrateBrowser:
         self._file_upload_mode: str | None = None
         self._captcha_solver = False
         self._storage_init_scripts: list[tuple[Any, str, str]] = []
+        self._restored_origins: list[dict[str, object]] = []
 
     @property
     def configured(self) -> bool:
@@ -272,24 +273,30 @@ class AppstrateBrowser:
 
     async def cookies(self) -> list[dict[str, object]]:
         await self.start()
-        try:
-            state = await self._session.export_storage_state()
-        except Exception as error:
-            raise RuntimeError("BROWSER_UNAVAILABLE: browser state export failed") from error
-        cookies = state.get("cookies") if isinstance(state, dict) else None
-        return [cookie for cookie in cookies if isinstance(cookie, dict)] if isinstance(cookies, list) else []
+        return await self._read_browser_cookies()
 
     async def export_storage_state_json(self) -> str:
         await self.start()
-        try:
-            state = await self._session.export_storage_state()
-        except Exception as error:
-            raise RuntimeError("BROWSER_UNAVAILABLE: browser state export failed") from error
-        if not isinstance(state, dict):
-            raise RuntimeError("BROWSER_UNAVAILABLE: browser state export was malformed")
+        raw_cookies = await self._read_browser_cookies()
+        cookies = [
+            {
+                "name": cookie.get("name"),
+                "value": cookie.get("value"),
+                "domain": cookie.get("domain"),
+                "path": cookie.get("path", "/"),
+                "expires": cookie.get("expires", -1),
+                "httpOnly": cookie.get("httpOnly", False),
+                "secure": cookie.get("secure", False),
+                "sameSite": cookie.get("sameSite", "Lax"),
+            }
+            for cookie in raw_cookies
+        ]
+        # Browser Use 0.13 currently exports cookies but drops origins. Keep
+        # the companion-captured origin state so a successful cloud proof does
+        # not silently degrade the portable session saved for future runs.
+        origins = self._restored_origins
         configuration = self._require_configuration()
         allowed_hosts = {urlsplit(origin).hostname for origin in configuration.allowed_origins}
-        cookies = state.get("cookies")
         if not isinstance(cookies, list) or len(cookies) > 256:
             raise RuntimeError("BROWSER_RESOURCE_LIMIT: browser state has too many cookies")
         for cookie in cookies:
@@ -300,7 +307,6 @@ class AppstrateBrowser:
             )
             if not domain or domain not in allowed_hosts:
                 raise RuntimeError("BROWSER_POLICY_DENIED: browser state contains a foreign cookie")
-        origins = state.get("origins", [])
         if not isinstance(origins, list) or len(origins) > 64:
             raise RuntimeError("BROWSER_RESOURCE_LIMIT: browser state has too many origins")
         for origin_state in origins:
@@ -318,6 +324,34 @@ class AppstrateBrowser:
         if len(encoded.encode("utf-8")) > MAX_STORAGE_STATE_BYTES:
             raise RuntimeError("BROWSER_RESOURCE_LIMIT: browser state is too large")
         return encoded
+
+    async def _read_browser_cookies(self, timeout_seconds: float = 5.0) -> list[dict[str, object]]:
+        """Read browser-wide cookies without depending on the focused page.
+
+        Authentication redirects and managed challenge solvers may replace the
+        active target after a successful navigation. Storage.getCookies is a
+        browser-level CDP command, so it remains valid across that transition.
+        """
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        last_error: Exception | None = None
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise RuntimeError(
+                    "BROWSER_STATE_READ_FAILED: browser cookies could not be read"
+                ) from last_error
+            try:
+                result = await asyncio.wait_for(
+                    self._session.cdp_client.send.Storage.getCookies(),
+                    timeout=remaining,
+                )
+                cookies = result.get("cookies") if isinstance(result, dict) else None
+                if not isinstance(cookies, list):
+                    raise RuntimeError("browser cookie response was malformed")
+                return [cookie for cookie in cookies if isinstance(cookie, dict)]
+            except Exception as error:
+                last_error = error
+                await asyncio.sleep(min(0.1, max(0.0, remaining)))
 
     async def restore_storage_state_json(self, encoded: str) -> None:
         if not encoded or len(encoded.encode("utf-8")) > MAX_STORAGE_STATE_BYTES:
@@ -367,6 +401,16 @@ class AppstrateBrowser:
             raise RuntimeError("BROWSER_AUTH_REQUIRED: stored browser cookies were rejected") from error
         if origins:
             await self._install_local_storage_state(origins)
+        self._restored_origins = [
+            {
+                "origin": str(origin_state["origin"]),
+                "localStorage": [
+                    {"name": entry["name"], "value": entry["value"]}
+                    for entry in origin_state.get("localStorage", [])
+                ],
+            }
+            for origin_state in origins
+        ]
 
     async def _install_local_storage_state(self, origins: list[dict[str, object]]) -> None:
         """Restore origin storage before site scripts run, without navigation.

@@ -49,4 +49,16 @@ describe("browser capability error mapping", () => {
       message: "The trusted browser driver bundle could not be authorized or loaded.",
     });
   });
+
+  it("distinguishes an authenticated state read failure from backend startup", () => {
+    expect(
+      toBrowserCapabilityApiError(new Error("BROWSER_STATE_READ_FAILED: private")),
+    ).toMatchObject({
+      status: 503,
+      code: "browser_state_read_failed",
+      title: "Browser State Read Failed",
+      message:
+        "The authenticated browser session was reached but its portable state could not be read.",
+    });
+  });
 });

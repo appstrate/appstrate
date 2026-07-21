@@ -15,6 +15,7 @@ class ValidationError(ValueError):
 SAFE_BROWSER_ERROR_CODES = frozenset(
     {
         "BROWSER_UNAVAILABLE",
+        "BROWSER_STATE_READ_FAILED",
         "BROWSER_UNSUPPORTED_REVISION",
         "BROWSER_POLICY_DENIED",
         "BROWSER_PROXY_UNAVAILABLE",
