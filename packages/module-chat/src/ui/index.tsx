@@ -311,47 +311,57 @@ function ConversationInner({
     // Reconnect to an in-flight turn on mount (mid-inference reload). 204 when
     // nothing is generating (the common case) → no-op.
     resume: true,
-    onFinish: () => {
-      // Surface the (possibly new) conversation + its derived title in the list.
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
-    },
   });
 
-  // On the first message of a brand-new conversation, lazily adopt its id into
-  // the URL (the server creates the session on that same POST) and surface it in
-  // the sidebar. `id` is stable across this navigation (ChatPage's `??` keeps it
-  // once the URL holds it), so the runtime key never flips under the in-flight
-  // send. Seeded `true` for an already-persisted conversation so opening one
-  // neither re-navigates nor refetches.
-  //
-  // We OPTIMISTICALLY prepend the new session to the list cache rather than
-  // invalidating: the server persists the session only after its inference
-  // preamble (model select + MCP boot), so a refetch fired here would race that
-  // write and return a list WITHOUT the new conversation — leaving it missing
-  // from the sidebar until the next refetch. The optimistic entry is
-  // `generating: true` (drives the fast generating refetch in use-sessions.ts)
-  // and reconciles to its server-derived title on the next SSE-driven or
-  // interval refetch / `onFinish` invalidate.
-  const announced = useRef(isPersisted);
+  // LOCAL-FIRST sidebar state for this conversation. The turn's lifecycle is
+  // known right here (`chat.status`) — waiting for the server round-trip
+  // (NOTIFY → SSE → refetch) leaves the spinner blind for seconds: the server
+  // only sets its `generating` marker AFTER the inference preamble (model
+  // select + MCP boot). So on every send we patch our own row into the cache
+  // (spinner on, fresh timestamp, moved to the top — the list is
+  // updatedAt-desc, so this mirrors the server ordering and also creates the
+  // row for a brand-new conversation the server hasn't persisted yet). When
+  // the turn settles we flip the spinner off and invalidate once to reconcile
+  // the server-derived fields (title, unread, authoritative updatedAt). If
+  // that refetch races the server's finalize and briefly resurrects
+  // `generating: true`, the fast generating refetch (use-sessions.ts) is
+  // re-armed by that very value and corrects it within seconds. External-store
+  // sync in an effect (no setState) — same pattern as the mark-read effect.
+  const generating = chat.status === "submitted" || chat.status === "streaming";
+  const wasGenerating = useRef(false);
   useEffect(() => {
-    if (announced.current) return;
-    if (chat.messages.length > 0) {
-      announced.current = true;
-      onConversationChange?.(id);
+    if (generating) {
       queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) => {
         const list = prev ?? [];
-        if (list.some((s) => s.id === id)) return list;
-        const optimistic: SessionSummary = {
-          id,
-          title: null,
+        const existing = list.find((s) => s.id === id);
+        const row: SessionSummary = {
+          ...(existing ?? { id, title: null, unread: false }),
           generating: true,
-          unread: false,
           updatedAt: new Date().toISOString(),
         };
-        return [optimistic, ...list];
+        return [row, ...list.filter((s) => s.id !== id)];
       });
+    } else if (wasGenerating.current) {
+      queryClient.setQueryData<SessionSummary[]>(SESSIONS_QUERY_KEY, (prev) =>
+        prev?.map((s) => (s.id === id ? { ...s, generating: false } : s)),
+      );
+      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }
-  }, [chat.messages.length, id, onConversationChange, queryClient]);
+    wasGenerating.current = generating;
+  }, [generating, id, queryClient]);
+
+  // On the first message of a brand-new conversation, lazily adopt its id into
+  // the URL (the server creates the session on that same POST). `id` is stable
+  // across this navigation (ChatPage's `??` keeps it once the URL holds it), so
+  // the runtime key never flips under the in-flight send. Seeded `true` for an
+  // already-persisted conversation so opening one never re-navigates. The
+  // sidebar row itself is handled by the status-mirror effect above.
+  const announced = useRef(isPersisted);
+  useEffect(() => {
+    if (announced.current || chat.messages.length === 0) return;
+    announced.current = true;
+    onConversationChange?.(id);
+  }, [chat.messages.length, id, onConversationChange]);
 
   const runtime = useAISDKRuntime(chat);
 

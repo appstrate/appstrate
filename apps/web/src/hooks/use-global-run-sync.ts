@@ -234,6 +234,11 @@ export function useGlobalRunSync() {
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
 
+      // The protocol is signal-only: frames emitted while the stream was down
+      // are lost forever. Reconcile the chat list on every (re)connect instead
+      // of leaving a missed `chat_session_update` to the 60s safety net.
+      handleChatSessionUpdate(qcRef.current);
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
