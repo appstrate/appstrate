@@ -41,8 +41,9 @@ import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
-import { notFound, payloadTooLarge, storageLimitExceeded } from "../lib/errors.ts";
-import { consumeUploadStream, peekUploads, sanitizeFilename } from "./uploads.ts";
+import { invalidRequest, notFound, payloadTooLarge, storageLimitExceeded } from "../lib/errors.ts";
+import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
+import { consumeUploadStream, peekUploads, sanitizeFilename, parseUploadUri } from "./uploads.ts";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import { getRun, updateRun } from "./state/runs.ts";
 import { recordAudit } from "./audit.ts";
@@ -522,6 +523,44 @@ export async function getDocumentForActor(
   }
 
   return { row: row as DocumentRow, downloadable: deriveDownloadable(row, actor) };
+}
+
+/**
+ * Resolve a chat composer file attachment to a durable `document://` URI + its
+ * metadata (the seam behind `PlatformServices.resolveChatAttachment`, wired for
+ * the chat module which has no DB access):
+ *
+ *  - `upload://upl_x` → materialize it into a chat-session-scoped document
+ *    (purpose `user_upload`, attributed to the session owner) and return the new
+ *    `document://` URI. Quota/cap rejections propagate as RFC 9457 errors.
+ *  - `document://doc_x` → validate the session owner can read it (container ACL)
+ *    and echo it back; a foreign/missing document is a 404.
+ *
+ * Chat sessions are per dashboard user, so the actor is always a `user`.
+ */
+export async function resolveChatAttachment(
+  request: ChatAttachmentRequest,
+): Promise<ResolvedChatAttachment> {
+  const scope: AppScope = { orgId: request.orgId, applicationId: request.applicationId };
+  const actor: Actor = { type: "user", id: request.userId };
+
+  if (isDocumentUri(request.uri)) {
+    const docId = parseDocumentUri(request.uri);
+    if (!docId) throw invalidRequest(`Malformed document URI '${request.uri}'`);
+    const resolved = await getDocumentForActor(scope, actor, docId);
+    if (!resolved) throw notFound(`Document '${docId}' not found`);
+    const { row } = resolved;
+    return { uri: documentUri(row.id), name: row.name, mime: row.mime, size: row.size };
+  }
+
+  const uploadId = parseUploadUri(request.uri);
+  if (!uploadId) {
+    throw invalidRequest(`Attachment URI must be an 'upload://' or 'document://' URI`);
+  }
+  const row = await createDocumentFromUpload(scope, actor, uploadId, {
+    chatSessionId: request.chatSessionId,
+  });
+  return { uri: documentUri(row.id), name: row.name, mime: row.mime, size: row.size };
 }
 
 // ---------------------------------------------------------------------------

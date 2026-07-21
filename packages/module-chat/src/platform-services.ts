@@ -25,7 +25,12 @@
 
 import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext } from "@appstrate/core/module";
-import type { ChatUsageRecord, SubscriptionChatResolution } from "@appstrate/core/chat-contract";
+import type {
+  ChatAttachmentRequest,
+  ChatUsageRecord,
+  ResolvedChatAttachment,
+  SubscriptionChatResolution,
+} from "@appstrate/core/chat-contract";
 
 export interface ChatPlatformDeps {
   /**
@@ -48,6 +53,13 @@ export interface ChatPlatformDeps {
   ): Promise<SubscriptionChatResolution>;
   /** Persist one metered `llm_usage` row for a completed chat turn. */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
+  /**
+   * Resolve a chat composer file attachment (`upload://` or `document://`) to a
+   * durable `document://` URI, materializing the upload into a chat-session-scoped
+   * document server-side (the module has no DB access). Throws the platform's
+   * quota/cap/not-found errors, which the stream route surfaces to the user.
+   */
+  resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
 }
 
 /**
@@ -77,5 +89,12 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
           // provider, the same safe baseline this module had before.
           Promise.resolve({ subscription: false }),
     recordChatUsage: (record) => (ctx ? ctx.services.recordChatUsage(record) : Promise.resolve()),
+    resolveChatAttachment: (request) =>
+      ctx
+        ? ctx.services.resolveChatAttachment(request)
+        : // No init context (test harness / OSS standalone) → no document store
+          // surface. Text-only turns never reach here; an attachment turn without
+          // the platform wired is a genuine misconfiguration.
+          Promise.reject(new Error("chat attachments require the platform document service")),
   };
 }

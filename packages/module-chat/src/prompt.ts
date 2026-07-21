@@ -98,6 +98,8 @@ Never quote run metrics — duration, cost, token usage — in your replies, eve
 
 When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.
 
+Documents the user attaches to the conversation are shown to you as \`[Attached document: <name> — document://doc_… — <mime>, <size>]\` lines. Pass that \`document://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) when running an agent — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. Never invent a \`document://\` URI.
+
 Respect the user's role: actions beyond it will be refused by the platform — don't attempt them.`;
 
 /** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */

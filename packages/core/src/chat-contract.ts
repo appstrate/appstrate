@@ -59,6 +59,37 @@ export type SubscriptionChatResolution =
   | { subscription: true; needsReconnection: true }
   | { subscription: true; model: SubscriptionChatModel };
 
+/**
+ * A chat composer file attachment to resolve to a durable document. The chat
+ * module has no DB access, so it hands these plain fields across `ctx.services`
+ * and the platform builds the scope/actor + materializes/validates server-side.
+ */
+export interface ChatAttachmentRequest {
+  orgId: string;
+  applicationId: string;
+  /** The chat session owner (chat sessions are per dashboard user). */
+  userId: string;
+  /** Container the materialized document is anchored to (session-scoped ACL). */
+  chatSessionId: string;
+  /** `upload://upl_x` (materialize) or `document://doc_x` (validate access). */
+  uri: string;
+}
+
+/**
+ * A chat attachment resolved to its stable `document://` URI + metadata. An
+ * `upload://` was materialized into a chat-session-scoped document; an existing
+ * `document://` was validated as readable by the session owner. The URI is what
+ * the message persists (stable for the session's lifetime) and what the model
+ * is told the attached document is addressed by.
+ */
+export interface ResolvedChatAttachment {
+  /** `document://doc_x` — the durable, stable URI. */
+  uri: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
 /** One chat turn's metered usage — inserted as an `llm_usage` row (runId null). */
 export interface ChatUsageRecord {
   orgId: string;

@@ -786,7 +786,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         },
         input: {
           type: "object",
-          description: "Run input, validated against the agent's input schema (kind:agent).",
+          description:
+            "Run input, validated against the agent's input schema (kind:agent). File fields " +
+            "(typed `format: uri` with a `contentMediaType`) accept `document://` and `upload://` " +
+            "URIs directly — pass an attached document's `document://` URI verbatim.",
           additionalProperties: true,
         },
         manifest: {

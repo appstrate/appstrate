@@ -23,6 +23,7 @@ import { getClientIp } from "../client-ip.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
 import { dispatchInProcess } from "../platform-app.ts";
 import { recordChatUsage, resolveSubscriptionChatModel } from "../../services/chat-subscription.ts";
+import { resolveChatAttachment } from "../../services/documents.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -117,6 +118,10 @@ function buildPlatformServices(): PlatformServices {
     // through these, since it has no DB access.
     resolveSubscriptionChatModel,
     recordChatUsage,
+    // Chat attachments — materialize a composer upload into a chat-session-scoped
+    // document (or validate an existing document) and hand back its stable
+    // `document://` URI. The module has no DB access, so it crosses here.
+    resolveChatAttachment,
   };
 }
 

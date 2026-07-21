@@ -39,6 +39,7 @@ import {
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
 import { subscribeModel, getSelectedModel, setSelectedModel } from "./model-store.ts";
+import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
@@ -363,7 +364,11 @@ function ConversationInner({
     onConversationChange?.(id);
   }, [chat.messages.length, id, onConversationChange]);
 
-  const runtime = useAISDKRuntime(chat);
+  // File attachments: the composer uploads picked files (2-step upload) and
+  // sends them as `upload://` file parts the server materializes into durable
+  // documents. Memoized on `getHeaders` (stable) so the runtime keeps one adapter.
+  const attachments = useMemo(() => createChatAttachmentAdapter(getHeaders), [getHeaders]);
+  const runtime = useAISDKRuntime(chat, { adapters: { attachments } });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>

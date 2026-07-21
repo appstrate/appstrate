@@ -35,6 +35,7 @@ import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { buildTranscriptPrompt } from "./transcript.ts";
+import { materializeUserAttachments, messagesWithAttachmentsAsText } from "./attachments.ts";
 import { runPiSubscriptionChat } from "./pi-chat/engine.ts";
 import { SYSTEM_PROMPT, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
@@ -112,10 +113,37 @@ const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
 
 // The client (assistant-ui / useChat) posts the full thread plus optional
 // session/model/context extras. `messages` are UIMessages; we keep validation
-// loose here and let `convertToModelMessages` enforce the real shape.
+// loose here and let `convertToModelMessages` enforce the real shape — with one
+// tightening: any `file` part MUST reference an `upload://` or `document://`
+// URI. That rejects inline `data:` bytes and arbitrary URLs in the chat channel
+// (attachments flow only through the document store, never inline).
 const chatStreamSchema = z.object({
   id: z.string().optional(),
-  messages: z.array(z.unknown()).min(1, "messages must not be empty"),
+  messages: z
+    .array(z.unknown())
+    .min(1, "messages must not be empty")
+    .superRefine((messages, ctx) => {
+      messages.forEach((message, i) => {
+        const parts = (message as { parts?: unknown }).parts;
+        if (!Array.isArray(parts)) return;
+        parts.forEach((part, j) => {
+          if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "file") {
+            return;
+          }
+          const url = (part as { url?: unknown }).url;
+          if (
+            typeof url !== "string" ||
+            !(url.startsWith("upload://") || url.startsWith("document://"))
+          ) {
+            ctx.addIssue({
+              code: "custom",
+              message: "File attachment URI must be an 'upload://' or 'document://' URI.",
+              path: [i, "parts", j, "url"],
+            });
+          }
+        });
+      });
+    }),
   modelId: z.string().optional(),
 });
 
@@ -151,7 +179,7 @@ export async function handleChatStream(
   logger.info("chat turn", { turns: messages.length });
 
   const sessionId = body.id;
-  const lastMessage = messages[messages.length - 1] as UIMessage | undefined;
+  let lastMessage = messages[messages.length - 1] as UIMessage | undefined;
 
   // Persist the session ROW up front, BEFORE the (potentially multi-second)
   // inference preamble (model resolve + MCP boot). The client mints the id and
@@ -230,6 +258,28 @@ export async function handleChatStream(
     modelId: chosen.modelId,
     providerId: chosen.providerId,
   });
+
+  // Materialize the new turn's composer attachments into durable, session-scoped
+  // documents and rewrite each `upload://` (or already-`document://`) file part
+  // to its stable `document://` URI, BEFORE the turn is persisted (persistence
+  // stores only `document://`) and before it reaches either engine (the model is
+  // shown the attachment as a text line, never a raw file URL). Needs the session
+  // (the document container) and the resolved application id, both known here;
+  // nothing has been opened yet, so a quota/cap rejection surfaces as a clean
+  // error with no MCP/stop-controller to leak. Only the last message can carry
+  // fresh uploads — earlier turns already hold rewritten `document://` URIs.
+  if (sessionId && lastMessage && applicationId) {
+    lastMessage = await materializeUserAttachments(lastMessage, (uri) =>
+      deps.resolveChatAttachment({
+        orgId,
+        applicationId,
+        userId: user.id,
+        chatSessionId: sessionId,
+        uri,
+      }),
+    );
+    messages[messages.length - 1] = lastMessage;
+  }
 
   // Subscription chat routing. Every oauth-subscription provider (claude-code,
   // codex) is served by ONE generic in-process Pi engine owned by this module —
@@ -449,10 +499,12 @@ export async function handleChatStream(
   }
 
   try {
-    // Pass the tools so replayed tool results go through each tool's
-    // `toModelOutput` — the connect-link redaction must hold on history
+    // Flatten file attachments to model-facing text lines first (a `document://`
+    // URL is not a fetchable data URL — passing the raw file part would break the
+    // provider), then pass the tools so replayed tool results go through each
+    // tool's `toModelOutput` — the connect-link redaction must hold on history
     // replay too, not just on the turn that produced the result.
-    const modelMessages = await convertToModelMessages(messages, {
+    const modelMessages = await convertToModelMessages(messagesWithAttachmentsAsText(messages), {
       tools: mcp ? mcp.tools : undefined,
     });
     const result = streamText({

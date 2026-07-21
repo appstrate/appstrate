@@ -13,9 +13,11 @@ import {
   ThreadPrimitive,
   MessagePrimitive,
   ComposerPrimitive,
+  AttachmentPrimitive,
   ActionBarPrimitive,
   AuiIf,
   useMessage,
+  useAttachment,
   getExternalStoreMessages,
 } from "@assistant-ui/react";
 import {
@@ -23,10 +25,14 @@ import {
   ArrowDownIcon,
   CheckIcon,
   CopyIcon,
+  FileIcon,
+  PaperclipIcon,
   SendHorizontalIcon,
   SquareIcon,
+  XIcon,
 } from "lucide-react";
 import { turnLimitReached, turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import { formatBytes } from "@appstrate/core/format";
 import { Button } from "./button.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
@@ -140,12 +146,53 @@ function ScrollToBottom() {
   );
 }
 
+/** A pending composer attachment chip: file icon, name, size, remove button. */
+function ComposerAttachmentChip() {
+  const name = useAttachment((a) => a.name);
+  const size = useAttachment((a) => a.file?.size ?? 0);
+  return (
+    <AttachmentPrimitive.Root className="bg-muted flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs">
+      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
+      <span className="max-w-40 truncate font-medium">{name}</span>
+      {size > 0 && <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>}
+      <AttachmentPrimitive.Remove asChild>
+        <button
+          type="button"
+          aria-label="Retirer la pièce jointe"
+          className="text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      </AttachmentPrimitive.Remove>
+    </AttachmentPrimitive.Root>
+  );
+}
+
+/**
+ * A sent file attachment, rendered from a message `file` part. The wire part
+ * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + icon
+ * only (the composer chip shows the size, read from the picked File).
+ */
+function FileAttachmentPart(props: { filename?: string }) {
+  return (
+    <div className="bg-background text-foreground mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs">
+      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
+      <span className="max-w-52 truncate font-medium">{props.filename ?? "document"}</span>
+    </div>
+  );
+}
+
 function Composer({ slot }: { slot?: React.ReactNode }) {
   // No focus ring on the box: the app's global `textarea:focus` ring is too
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
     <ComposerPrimitive.Root className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
+      {/* Pending attachments, above the input. `empty:hidden` collapses the row
+          (and its gap) when nothing is attached. */}
+      <div className="flex flex-wrap gap-1.5 empty:hidden">
+        <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
+      </div>
       <ComposerPrimitive.Input
         rows={1}
         autoFocus
@@ -153,7 +200,19 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
         className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
       />
       <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">{slot}</div>
+        <div className="flex min-w-0 items-center gap-1">
+          <ComposerPrimitive.AddAttachment multiple asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground size-8 shrink-0 rounded-lg"
+              aria-label="Joindre un fichier"
+            >
+              <PaperclipIcon />
+            </Button>
+          </ComposerPrimitive.AddAttachment>
+          <div className="min-w-0">{slot}</div>
+        </div>
         <ThreadPrimitive.If running={false}>
           <ComposerPrimitive.Send asChild>
             <Button size="icon" className="size-8 shrink-0 rounded-lg" aria-label="Envoyer">
@@ -218,7 +277,7 @@ function UserMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col items-end py-2">
       <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
-        <MessagePrimitive.Parts />
+        <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
       </div>
     </MessagePrimitive.Root>
   );
