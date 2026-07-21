@@ -31,9 +31,11 @@ import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
+import { getEnv } from "@appstrate/env";
 import {
   ApiError,
   unauthorized,
+  forbidden,
   invalidRequest,
   badGateway,
   serviceUnavailable,
@@ -82,11 +84,60 @@ export function desktopErrorToApiError(err: unknown): ApiError {
   return err instanceof ApiError ? err : internalError();
 }
 
+/**
+ * Reject a cookie-authenticated WebSocket upgrade coming from a page we
+ * don't trust — the WebSocket equivalent of CSRF (CSWSH).
+ *
+ * The handshake is a plain GET that the browser sends with the user's
+ * cookies, and neither CORS nor the SPA's CSRF story applies to it. A
+ * page on evil.test could therefore open `ws://<instance>/api/desktop/bridge`
+ * in a logged-in victim's browser and be registered as *their* desktop:
+ * the registry displaces the real client, so the attacker both cuts the
+ * user off and receives every command the platform dispatches to them.
+ *
+ * Two-part rule, matching who legitimately connects:
+ *   - Origin present → it is a browser (the header is browser-controlled
+ *     and unforgeable from script), so it must be a trusted origin.
+ *   - Origin absent → a native client (the Electron bridge sends only
+ *     `Cookie`, per `apps/desktop/src/bridge/client.ts`). Nothing to
+ *     check: the attack this guards against is browser-borne, and a
+ *     non-browser attacker able to set arbitrary headers would need the
+ *     session cookie anyway.
+ *
+ * `SameSite=lax` on the session cookie already stops modern browsers
+ * from attaching it here (a WS handshake is not a top-level navigation).
+ * This is the belt to that suspenders — cheap, and the failure mode it
+ * covers is a silent session takeover.
+ */
+export function isTrustedUpgradeOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  const env = getEnv();
+  const allowed = [...env.TRUSTED_ORIGINS, env.APP_URL];
+  return allowed.some((candidate) => {
+    try {
+      return new URL(candidate).origin === new URL(origin).origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function createDesktopRouter(): Hono<AppEnv> {
   const router = new Hono<AppEnv>();
 
   router.get(
     "/bridge",
+    async (c, next) => {
+      const origin = c.req.header("Origin");
+      if (!isTrustedUpgradeOrigin(origin)) {
+        logger.warn("Desktop bridge: rejected upgrade from untrusted origin", {
+          module: "desktop",
+          origin,
+        });
+        throw forbidden("Origin not allowed for the desktop bridge");
+      }
+      await next();
+    },
     upgradeWebSocket((c) => {
       // Auth has already run via the platform middleware chain — if
       // `user` is missing we wouldn't be here. Capture the id now so the

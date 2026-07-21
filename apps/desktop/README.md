@@ -103,11 +103,15 @@ One mechanism: the webapp pane's Better Auth session cookie.
 
 **Why domain filter, not url filter**: Better Auth marks its session cookie `Secure`. Electron's url-based filter drops Secure cookies when the URL scheme is `http` (local dev). Domain filter ignores scheme. The server checks the cookie value, not transport scheme, so it accepts the cookie over plain `ws://` localhost.
 
+**Origin guard on the upgrade (CSWSH)**: cookie auth on a WebSocket is not covered by CORS — the handshake is a plain GET the browser sends with the user's cookies. Without a check, a page on any origin could open the bridge in a logged-in victim's browser and be registered as _their_ desktop; since a new connection displaces the previous one, that both cuts the user off and hands the attacker every command dispatched to them. So: an `Origin` header, which only a browser sets and page script cannot forge, must match `TRUSTED_ORIGINS` / `APP_URL`; no `Origin` at all is allowed, because that is what a native client sends (this app included) and the attack being blocked is browser-borne. `SameSite=lax` on the session cookie already blocks this in current browsers — the guard is the second lock.
+
 No JWT, no refresh token, no Keychain. The SPA owns the auth lifecycle; the bridge is a downstream consumer.
 
 **Sign out** (tray menu): stops the bridge, clears the host's cookies, reloads the webapp pane so the SPA renders the login form, starts a fresh bridge. As soon as the user signs back in, the next reconnect tick picks up the new session.
 
-## Credential substitution
+## Credential substitution (NOT ported — historical)
+
+> This section describes the original POC behaviour. It does not exist on `main`: the provider-model plumbing it relied on is gone. Kept as the spec to re-implement against the integrations / credential-proxy model.
 
 Mirrors `provider_call.substituteBody`. Inside `params`, any string containing `{{key}}` is replaced server-side by the matching field from the named provider's credentials before the command leaves the platform.
 
@@ -151,6 +155,8 @@ APPSTRATE_INSTANCE=http://localhost:3000 bun run dev
 ```
 
 The window opens with the SPA. Sign in via the embedded login form. The tray icon `APP` flips to `Bridge: connected` within a couple seconds.
+
+**`bun --hot` silently drops the bridge.** The registry is process memory: editing any file it imports gives the reloaded module an empty `Map`, while the client keeps its socket open and still believes it is connected. You get `503 No Appstrate Desktop connected` with a happily-connected tray icon. Restart the API without `--hot` (or restart the app) after touching bridge code.
 
 `APPSTRATE_INSTANCE` only seeds the config on FIRST launch. Afterwards the instance URL lives in the profile file and the env var is ignored — dev builds read `~/Library/Application Support/@appstrate/desktop/config.json`, packaged builds `~/Library/Application Support/Appstrate Desktop/config.json`. Point an existing install at another instance by editing `defaultProfile` there.
 

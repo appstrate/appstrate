@@ -123,6 +123,18 @@ describe("Desktop bridge — /api/desktop/me/*", () => {
     expect(res.status).toBe(400);
   });
 
+  // CSWSH: the upgrade is a cookie-authenticated GET that CORS does not
+  // cover, so a page on another origin could otherwise register itself
+  // as the victim's desktop — displacing their real client and
+  // receiving every command dispatched to them.
+  it("refuses a bridge upgrade from an untrusted origin", async () => {
+    const res = await app.request("/api/desktop/bridge", {
+      headers: { ...authHeaders(ctx), Origin: "https://evil.test", Upgrade: "websocket" },
+    });
+    expect(res.status).toBe(403);
+    expect(isConnected(ctx.user.id)).toBe(false);
+  });
+
   it("never reaches another user's desktop", async () => {
     const other = await createTestContext({ orgSlug: "otherorg" });
     connected = fakeDesktop(ctx.user.id);
