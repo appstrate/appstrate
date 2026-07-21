@@ -11,10 +11,13 @@
   "run.empty": "Aucun document",
   "run.emptyHint": "Ce run n'a ni fichier importé ni fichier produit.",
   "row.download": "Télécharger",
+  "row.preview": "Aperçu",
   "row.delete": "Supprimer",
   "row.run": "Run",
   "row.openRun": "Ouvrir la page du run",
   "delete.title": "Supprimer le document",
   "delete.description": "Supprimer « {{name}} » ? Cette action est irréversible.",
-  "delete.success": "Document supprimé."
+  "delete.success": "Document supprimé.",
+  "preview.frameTitle": "Aperçu de {{name}}",
+  "preview.unavailable": "Ce document ne peut pas être prévisualisé."
 }

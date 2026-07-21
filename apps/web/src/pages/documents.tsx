@@ -24,6 +24,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { DocumentRow } from "../components/document-row";
+import { DocumentPreview } from "../components/document-preview";
 import { ConfirmModal } from "../components/confirm-modal";
 
 type PurposeFilter = "all" | "user_upload" | "agent_output";
@@ -46,6 +47,7 @@ function DocumentsPageContent() {
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [loadedPages, setLoadedPages] = useState<DocumentDto[]>([]);
   const [pendingDelete, setPendingDelete] = useState<DocumentDto | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<DocumentDto | null>(null);
 
   const { data, isLoading, error } = useDocuments({
     purpose: purpose === "all" ? undefined : purpose,
@@ -132,6 +134,7 @@ function DocumentsPageContent() {
               doc={doc}
               onDownload={download}
               onDelete={onDelete}
+              onPreview={setPreviewDoc}
               showRunLink
             />
           ))}
@@ -163,6 +166,10 @@ function DocumentsPageContent() {
         confirmLabel={t("row.delete")}
         isPending={deleteDoc.isPending}
       />
+
+      {previewDoc && (
+        <DocumentPreview doc={previewDoc} open={!!previewDoc} onClose={() => setPreviewDoc(null)} />
+      )}
     </div>
   );
 }

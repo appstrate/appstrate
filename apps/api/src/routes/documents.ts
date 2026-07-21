@@ -14,11 +14,12 @@
  */
 
 import { Hono } from "hono";
+import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
-import { rateLimit } from "../middleware/rate-limit.ts";
+import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
-import { forbidden, notFound } from "../lib/errors.ts";
+import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { createDownloadUrl } from "@appstrate/db/storage";
 import { zDocumentPurposeEnum } from "@appstrate/db/schema";
@@ -28,8 +29,16 @@ import {
   deleteDocument,
   toDocumentDto,
   streamDocumentContent,
+  loadDocumentForPreview,
   type ListDocumentsFilters,
 } from "../services/documents.ts";
+import {
+  verifyPreviewToken,
+  isHtmlMime,
+  buildPreviewCsp,
+  injectMetaCsp,
+  PREVIEW_MAX_BYTES,
+} from "../services/document-preview.ts";
 
 /**
  * Build a safe `Content-Disposition: attachment` header for a filename.
@@ -139,6 +148,84 @@ export function createDocumentsRouter() {
       before: { name: row.name, size: row.size, mime: row.mime, purpose: row.purpose },
     });
     return c.body(null, 204);
+  });
+
+  return router;
+}
+
+/**
+ * Cookie-less HTML preview router — MOUNTED OUTSIDE `/api`, BEFORE the auth
+ * pipeline, so no cookie/API-key/org/app middleware ever touches it. Serves
+ * untrusted agent-generated HTML in maximum isolation:
+ *
+ *  - Authorized ONLY by a short-lived signed token in the URL (`?t=`), never a
+ *    cookie — verified constant-time, expiry-enforced, bound to this one
+ *    document id. No session is read; a session WITHOUT a token is a 401.
+ *  - A strict CSP header + an injected parse-time `<meta>` CSP (covers the
+ *    relative-URL / `srcdoc` bypass a header alone can miss).
+ *  - `nosniff`, `no-referrer`, a `Permissions-Policy` cutting camera/mic/geo/
+ *    payment/usb, COOP `same-origin`, and a CORP tuned to whether the preview is
+ *    served same-origin or on a separate `USERCONTENT_URL` domain. Never sets a
+ *    cookie.
+ *
+ * Path `/preview/documents/:id` is a dedicated top-level namespace — it does NOT
+ * share the `/documents` SPA page prefix, so it can never be shadowed by (nor
+ * shadow) the client-side gallery route or the static SPA fallback.
+ */
+export function createDocumentPreviewRouter() {
+  const router = new Hono<AppEnv>();
+
+  // Cookie-less → no user/API-key identity to key on; rate-limit by client IP.
+  router.get("/preview/documents/:id", rateLimitByIp(120), async (c) => {
+    const env = getEnv();
+
+    // Token IS the authorization — a missing/invalid/expired token is 401,
+    // never a cookie fallback.
+    const token = c.req.query("t");
+    if (!token) throw unauthorized("Missing preview token");
+    const payload = verifyPreviewToken(token, env.UPLOAD_SIGNING_SECRET);
+    if (!payload) throw unauthorized("Invalid or expired preview token");
+    // The token authorizes exactly ONE document — reject a token minted for a
+    // different id replayed on this path.
+    if (payload.d !== c.req.param("id"))
+      throw unauthorized("Preview token does not match document");
+
+    const row = await loadDocumentForPreview(payload.o, payload.d);
+    // Only HTML is previewable this phase; anything else (or a missing/foreign
+    // doc) is indistinguishable from not-found.
+    if (!row || !isHtmlMime(row.mime)) throw notFound("Preview not available");
+    if (row.size > PREVIEW_MAX_BYTES) {
+      throw payloadTooLarge(`Preview exceeds the ${PREVIEW_MAX_BYTES}-byte limit`);
+    }
+
+    const stream = await streamDocumentContent(row.storageKey);
+    if (!stream) throw notFound("Preview not available");
+
+    // Buffer-and-transform: read the whole (capped) body, inject the meta CSP as
+    // the first child of <head>, serve. Simple + correct over regex streaming.
+    const html = await new Response(stream).text();
+    const appOrigin = new URL(env.APP_URL).origin;
+    const csp = buildPreviewCsp(appOrigin);
+    const body = injectMetaCsp(html, csp);
+
+    // When the preview is served from a SEPARATE origin (USERCONTENT_URL), the
+    // app (APP_URL) embeds it cross-origin, so CORP must allow cross-origin
+    // embedding; same-origin serving stays locked to same-origin.
+    const corp = env.USERCONTENT_URL ? "cross-origin" : "same-origin";
+
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Security-Policy": csp,
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "Cache-Control": "private, no-store",
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Resource-Policy": corp,
+      },
+    });
   });
 
   return router;

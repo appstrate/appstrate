@@ -9615,6 +9615,11 @@ export interface operations {
                             /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
                             downloadable: boolean;
                             /**
+                             * Format: uri
+                             * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Non-null only for a `text/html` document the caller can read; null otherwise. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                             */
+                            preview_url: string | null;
+                            /**
                              * Format: date-time
                              * @description Retention deadline, or null when permanent.
                              */
@@ -9680,6 +9685,11 @@ export interface operations {
                         sha256: string;
                         /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
                         downloadable: boolean;
+                        /**
+                         * Format: uri
+                         * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Non-null only for a `text/html` document the caller can read; null otherwise. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         */
+                        preview_url: string | null;
                         /**
                          * Format: date-time
                          * @description Retention deadline, or null when permanent.

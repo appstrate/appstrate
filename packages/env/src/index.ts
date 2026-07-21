@@ -482,6 +482,19 @@ const envSchema = z
     // default; livrable expiry is the #1 complaint, so this stays opt-in.
     DOCUMENT_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
 
+    // Separate origin for serving untrusted agent-generated HTML previews
+    // (Phase 4 / D5). When set, `GET /api/documents/:id` mints its
+    // `preview_url` on THIS origin instead of `APP_URL` — the operator points a
+    // second registrable domain (eTLD+1) at the same server. A distinct
+    // registrable domain is the strongest isolation: the browser gives the
+    // preview its own cookie jar, storage partition, and process (site
+    // isolation), so untrusted script can never reach the app's session even if
+    // the sandbox is somehow defeated. Absent ⇒ previews are served same-origin
+    // on `APP_URL` (still hardened: opaque-sandbox iframe + strict CSP + injected
+    // meta CSP), which is defensible for render-only content. Cloud always sets
+    // it. No trailing slash required — it is trimmed when the URL is built.
+    USERCONTENT_URL: z.string().optional(),
+
     // Redis (optional — falls back to in-memory adapters when absent)
     REDIS_URL: z.string().optional(),
 

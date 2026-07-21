@@ -47,6 +47,7 @@ import { consumeUploadStream, peekUploads, sanitizeFilename, parseUploadUri } fr
 import { sanitizeStorageKey } from "./file-storage.ts";
 import { getRun, updateRun } from "./state/runs.ts";
 import { recordAudit } from "./audit.ts";
+import { signPreviewToken, isHtmlMime, PREVIEW_TOKEN_TTL_SECONDS } from "./document-preview.ts";
 
 /** Durable documents bucket (distinct from the ephemeral `uploads` bucket). */
 export const DOCUMENTS_BUCKET = "documents";
@@ -258,8 +259,34 @@ export interface DocumentDto {
   size: number;
   sha256: string;
   downloadable: boolean;
+  /**
+   * Absolute URL of a hardened, cookie-less HTML preview — non-null ONLY for a
+   * `text/html` document the caller resolved. Carries a short-lived signed token
+   * (`?t=`); the SPA loads it in an `sandbox="allow-scripts"` iframe. On the
+   * `USERCONTENT_URL` origin when set, else on `APP_URL`.
+   */
+  preview_url: string | null;
   expires_at: string | null;
   created_at: string;
+}
+
+/**
+ * Mint the hardened-preview URL for a resolved document, or null when it is not
+ * a `text/html` document (only HTML is previewed this phase). The token
+ * authorizes a GET of THIS document's preview for {@link PREVIEW_TOKEN_TTL_SECONDS};
+ * the URL points at the cookie-less preview route on `USERCONTENT_URL` (separate
+ * registrable domain — strongest isolation) when configured, else same-origin on
+ * `APP_URL`. Called only after the container ACL already resolved the row for the
+ * caller, so presence of a URL is itself the "previewable by you" signal.
+ */
+function mintPreviewUrl(row: DocumentRow): string | null {
+  if (!isHtmlMime(row.mime)) return null;
+  const env = getEnv();
+  const exp = Math.floor(Date.now() / 1000) + PREVIEW_TOKEN_TTL_SECONDS;
+  const token = signPreviewToken({ d: row.id, o: row.orgId, e: exp }, env.UPLOAD_SIGNING_SECRET);
+  let base = env.USERCONTENT_URL ?? env.APP_URL;
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  return `${base}/preview/documents/${row.id}?t=${encodeURIComponent(token)}`;
 }
 
 export function toDocumentDto(row: DocumentRow, actor: Actor): DocumentDto {
@@ -277,6 +304,7 @@ export function toDocumentDto(row: DocumentRow, actor: Actor): DocumentDto {
     size: row.size,
     sha256: row.sha256,
     downloadable: deriveDownloadable(row, actor),
+    preview_url: mintPreviewUrl(row),
     expires_at: row.expiresAt?.toISOString() ?? null,
     created_at: row.createdAt.toISOString(),
   };
@@ -745,6 +773,27 @@ export async function getDocumentForActor(
   }
 
   return { row: row as DocumentRow, downloadable: deriveDownloadable(row, actor) };
+}
+
+/**
+ * Load a document row by id, scoped to `orgId` only — for the cookie-less
+ * preview route, whose signed token IS the authorization (no session actor, no
+ * container ACL re-check: the token was minted by `getDocumentForActor` having
+ * already resolved the row for a caller). Binding to the token's `orgId` means a
+ * token whose tenant does not match the stored row resolves to null (→ 404).
+ * Returns null for a malformed id or a miss.
+ */
+export async function loadDocumentForPreview(
+  orgId: string,
+  docId: string,
+): Promise<DocumentRow | null> {
+  if (!DOCUMENT_ID_RE.test(docId)) return null;
+  const [row] = await db
+    .select(documentSelect)
+    .from(documents)
+    .where(and(eq(documents.id, docId), eq(documents.orgId, orgId)))
+    .limit(1);
+  return (row as DocumentRow) ?? null;
 }
 
 /**

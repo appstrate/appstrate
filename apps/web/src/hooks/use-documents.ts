@@ -48,6 +48,22 @@ export function useDocuments(filters: DocumentListFilters = {}) {
 }
 
 /**
+ * Fetch a single document's metadata — including a freshly-minted `preview_url`
+ * (its signed token is short-lived, so the preview modal refetches on each open
+ * rather than reusing a token carried in a list page). Disabled until `enabled`
+ * so the token is minted only when the preview is actually opened.
+ */
+export function useDocument(id: string | null, enabled: boolean) {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/documents/{id}",
+    { params: { path: { id: id ?? "" }, header: scope.header } },
+    { enabled: scope.enabled && enabled && !!id, staleTime: 0, gcTime: 0 },
+  );
+}
+
+/**
  * openapi-react-query keys are `[method, path, init]` with the literal spec
  * path — invalidate the list and the single-document paths separately after a
  * write (they live under different path strings).

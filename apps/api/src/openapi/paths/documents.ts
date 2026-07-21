@@ -17,6 +17,7 @@ const documentSchema = {
     "size",
     "sha256",
     "downloadable",
+    "preview_url",
     "expires_at",
     "created_at",
   ],
@@ -41,6 +42,15 @@ const documentSchema = {
       description:
         "Whether `/content` will serve the bytes to the current caller: an agent output is " +
         "downloadable by anyone who can read the container; a user upload only by its creator.",
+    },
+    preview_url: {
+      type: ["string", "null"],
+      format: "uri",
+      description:
+        "Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the " +
+        "query). Non-null only for a `text/html` document the caller can read; null otherwise. " +
+        'Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the ' +
+        "instance configures a separate preview domain, else same-origin.",
     },
     expires_at: {
       type: ["string", "null"],

@@ -11,7 +11,7 @@
 import { createElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { DownloadIcon, ExternalLinkIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon, ExternalLinkIcon, EyeIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { formatDateField } from "../lib/markdown";
@@ -31,12 +31,15 @@ export function DocumentRow({
   doc,
   onDownload,
   onDelete,
+  onPreview,
   showRunLink,
 }: {
   doc: DocumentDto;
   onDownload: (id: string, name: string) => void;
   /** When provided, a delete button is rendered (visibility is the parent's call). */
   onDelete?: (doc: DocumentDto) => void;
+  /** When provided and the doc is previewable (`preview_url` set), a preview button is rendered. */
+  onPreview?: (doc: DocumentDto) => void;
   /** Show the producing-agent label + a link to its run (gallery). */
   showRunLink?: boolean;
 }) {
@@ -75,6 +78,18 @@ export function DocumentRow({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        {onPreview && doc.preview_url ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            title={t("row.preview")}
+            aria-label={t("row.preview")}
+            onClick={() => onPreview(doc)}
+          >
+            <EyeIcon className="size-4" />
+          </Button>
+        ) : null}
         {doc.downloadable ? (
           <Button
             variant="ghost"

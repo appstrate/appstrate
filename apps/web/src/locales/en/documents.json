@@ -11,10 +11,13 @@
   "run.empty": "No documents",
   "run.emptyHint": "This run has no uploaded or produced files.",
   "row.download": "Download",
+  "row.preview": "Preview",
   "row.delete": "Delete",
   "row.run": "Run",
   "row.openRun": "Open the run page",
   "delete.title": "Delete document",
   "delete.description": "Delete “{{name}}”? This cannot be undone.",
-  "delete.success": "Document deleted."
+  "delete.success": "Document deleted.",
+  "preview.frameTitle": "Preview of {{name}}",
+  "preview.unavailable": "This document cannot be previewed."
 }

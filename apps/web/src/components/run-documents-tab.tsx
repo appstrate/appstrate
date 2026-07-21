@@ -22,6 +22,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { groupDocumentsByPurpose } from "../lib/documents";
 import { LoadingState, ErrorState, EmptyState } from "./page-states";
 import { DocumentRow } from "./document-row";
+import { DocumentPreview } from "./document-preview";
 import { ConfirmModal } from "./confirm-modal";
 
 export function RunDocumentsTab({ runId }: { runId: string }) {
@@ -31,6 +32,7 @@ export function RunDocumentsTab({ runId }: { runId: string }) {
   const download = useDocumentDownload();
   const deleteDoc = useDeleteDocument();
   const [pendingDelete, setPendingDelete] = useState<DocumentDto | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<DocumentDto | null>(null);
 
   const { inputs, outputs } = useMemo(
     () => groupDocumentsByPurpose(data?.data ?? []),
@@ -72,7 +74,13 @@ export function RunDocumentsTab({ runId }: { runId: string }) {
           </h3>
           <div className="flex flex-col gap-2">
             {outputs.map((doc) => (
-              <DocumentRow key={doc.id} doc={doc} onDownload={download} onDelete={onDelete} />
+              <DocumentRow
+                key={doc.id}
+                doc={doc}
+                onDownload={download}
+                onDelete={onDelete}
+                onPreview={setPreviewDoc}
+              />
             ))}
           </div>
         </section>
@@ -84,7 +92,13 @@ export function RunDocumentsTab({ runId }: { runId: string }) {
           </h3>
           <div className="flex flex-col gap-2">
             {inputs.map((doc) => (
-              <DocumentRow key={doc.id} doc={doc} onDownload={download} onDelete={onDelete} />
+              <DocumentRow
+                key={doc.id}
+                doc={doc}
+                onDownload={download}
+                onDelete={onDelete}
+                onPreview={setPreviewDoc}
+              />
             ))}
           </div>
         </section>
@@ -99,6 +113,10 @@ export function RunDocumentsTab({ runId }: { runId: string }) {
         confirmLabel={t("row.delete")}
         isPending={deleteDoc.isPending}
       />
+
+      {previewDoc && (
+        <DocumentPreview doc={previewDoc} open={!!previewDoc} onClose={() => setPreviewDoc(null)} />
+      )}
     </div>
   );
 }

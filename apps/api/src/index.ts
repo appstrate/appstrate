@@ -32,7 +32,7 @@ import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
-import { createDocumentsRouter } from "./routes/documents.ts";
+import { createDocumentsRouter, createDocumentPreviewRouter } from "./routes/documents.ts";
 import healthRouter from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
@@ -150,6 +150,13 @@ Install the CLI (\`curl -fsSL https://get.appstrate.dev | bash\` or \`bunx appst
 - [Source repository](https://github.com/appstrate/appstrate): Apache-2.0
 `;
 app.get("/llms.txt", (c) => c.text(LLMS_TXT));
+
+// Cookie-less HTML document preview — mounted BEFORE the auth pipeline so no
+// cookie/API-key/org/app middleware ever runs on it. Authorized solely by the
+// short-lived signed token in the URL; serves untrusted agent HTML under a
+// strict CSP + injected meta CSP. Dedicated `/preview/*` namespace, so it never
+// collides with the `/documents` SPA page route below.
+app.route("/", createDocumentPreviewRouter());
 
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
