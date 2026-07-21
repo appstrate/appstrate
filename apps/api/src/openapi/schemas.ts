@@ -1460,7 +1460,10 @@ export const schemas = {
         properties: {
           runtime_tools: {
             type: "array",
-            items: { type: "string", enum: ["output", "log", "note", "pin", "report"] },
+            items: {
+              type: "string",
+              enum: ["output", "log", "note", "pin", "report", "publish_document"],
+            },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional.",
           },

@@ -36,7 +36,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { getEnv } from "@appstrate/env";
 import type { Actor } from "@appstrate/connect";
 import type { AppScope } from "../lib/scope.ts";
-import { actorInsert, actorScopeFilter } from "../lib/actor.ts";
+import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -189,6 +189,56 @@ export function createHashingCounter(): {
   };
 }
 
+/**
+ * A {@link createHashingCounter} variant that also enforces byte ceilings
+ * mid-stream: the per-file cap and the run's remaining output budget. As soon
+ * as either is exceeded the stream errors (aborting the S3 write so no full
+ * object lands), with a distinct {@link payloadTooLarge} message per limit so
+ * the caller surfaces the right 413. Used by the agent-output ingestion path,
+ * which has no declared size to pre-check.
+ */
+export function createCappedHashingCounter(caps: {
+  perFileCap: number;
+  runOutputCap: number;
+  runOutputUsed: number;
+}): {
+  stream: TransformStream<Uint8Array, Uint8Array>;
+  result: () => { bytes: number; sha256: string };
+} {
+  const hasher = new Bun.CryptoHasher("sha256");
+  const runRemaining = caps.runOutputCap - caps.runOutputUsed;
+  let bytes = 0;
+  let digest: string | null = null;
+  const stream = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      bytes += chunk.byteLength;
+      if (bytes > caps.perFileCap) {
+        controller.error(
+          payloadTooLarge(`Document exceeds the per-file limit of ${caps.perFileCap} bytes`),
+        );
+        return;
+      }
+      if (bytes > runRemaining) {
+        controller.error(
+          payloadTooLarge(
+            `Run output would exceed the per-run limit of ${caps.runOutputCap} bytes`,
+          ),
+        );
+        return;
+      }
+      hasher.update(chunk);
+      controller.enqueue(chunk);
+    },
+  });
+  return {
+    stream,
+    result: () => {
+      digest ??= hasher.digest("hex");
+      return { bytes, sha256: digest };
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // DTO
 // ---------------------------------------------------------------------------
@@ -299,13 +349,55 @@ export async function createDocumentFromUpload(
   }
 
   const { bytes: byteCount, sha256 } = digester.result();
-  const expiresAt = retentionExpiry(env.DOCUMENT_RETENTION_DAYS);
-  const attribution = actorInsert(actor);
 
+  return commitDocumentRow({
+    scope,
+    documentId,
+    storagePath,
+    purpose: "user_upload",
+    runId: "runId" in container ? container.runId : null,
+    chatSessionId: "chatSessionId" in container ? container.chatSessionId : null,
+    packageId: opts.packageId ?? null,
+    attribution: actorInsert(actor),
+    name: meta!.name,
+    mime: meta!.mime,
+    byteCount,
+    sha256,
+    expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
+  });
+}
+
+/**
+ * Commit a just-streamed document object into a durable `documents` row: the
+ * FOR UPDATE org-quota re-check + row insert + byte-counter increment run in
+ * one transaction, and on any failure the storage object is dropped so its
+ * bytes are never stranded uncounted in the bucket. Shared by
+ * {@link createDocumentFromUpload} (staged-upload materialization) and
+ * {@link createDocumentFromStream} (agent-output ingestion) so the quota
+ * transaction + audit live in exactly one place.
+ */
+async function commitDocumentRow(params: {
+  scope: AppScope;
+  documentId: string;
+  /** Path inside {@link DOCUMENTS_BUCKET} the bytes were streamed to. */
+  storagePath: string;
+  purpose: DocumentPurpose;
+  runId: string | null;
+  chatSessionId: string | null;
+  packageId: string | null;
+  attribution: { userId: string | null; endUserId: string | null };
+  name: string;
+  mime: string;
+  byteCount: number;
+  sha256: string;
+  expiresAt: Date | null;
+}): Promise<DocumentRow> {
+  const { scope, documentId, storagePath, byteCount, attribution } = params;
+  const env = getEnv();
   try {
     const [row] = await db.transaction(async (tx) => {
-      // Lock the org row so a concurrent materialize cannot both pass the
-      // quota re-check on a stale `used`. Exact byte count re-checked here.
+      // Lock the org row so a concurrent write cannot both pass the quota
+      // re-check on a stale `used`. Exact byte count re-checked here.
       const [orgLocked] = await tx
         .select({ used: organizations.documentsBytesUsed })
         .from(organizations)
@@ -323,18 +415,18 @@ export async function createDocumentFromUpload(
           id: documentId,
           orgId: scope.orgId,
           applicationId: scope.applicationId,
-          purpose: "user_upload",
-          runId: "runId" in container ? container.runId : null,
-          chatSessionId: "chatSessionId" in container ? container.chatSessionId : null,
-          packageId: opts.packageId ?? null,
+          purpose: params.purpose,
+          runId: params.runId,
+          chatSessionId: params.chatSessionId,
+          packageId: params.packageId,
           userId: attribution.userId,
           endUserId: attribution.endUserId,
           storageKey: `${DOCUMENTS_BUCKET}/${storagePath}`,
-          name: meta!.name,
-          mime: meta!.mime,
+          name: params.name,
+          mime: params.mime,
           size: byteCount,
-          sha256,
-          expiresAt,
+          sha256: params.sha256,
+          expiresAt: params.expiresAt,
         })
         .returning();
       await tx
@@ -344,17 +436,19 @@ export async function createDocumentFromUpload(
       return inserted;
     });
     // Best-effort audit — `recordAudit` swallows its own failures. Emitted from
-    // the service (not a route) because materialization runs without a request
-    // context (deferred behind `createRun` in the run pipeline).
+    // the service (not a route) because these writes run without a request
+    // context (materialization behind `createRun`; agent-output ingestion is
+    // HMAC-run-authenticated, not a user session).
+    const auditActor = actorFromIds(attribution.userId, attribution.endUserId);
     await recordAudit({
       orgId: scope.orgId,
       applicationId: scope.applicationId,
-      actorType: actor.type === "user" ? "user" : "end_user",
-      actorId: actor.id,
+      actorType: auditActor ? auditActor.type : "system",
+      actorId: auditActor?.id ?? null,
       action: "document.created",
       resourceType: "document",
       resourceId: documentId,
-      after: { name: meta!.name, size: byteCount, mime: meta!.mime, purpose: "user_upload" },
+      after: { name: params.name, size: byteCount, mime: params.mime, purpose: params.purpose },
     });
     return row as DocumentRow;
   } catch (err) {
@@ -368,6 +462,134 @@ export async function createDocumentFromUpload(
     });
     throw err;
   }
+}
+
+/**
+ * Sum the bytes of the `agent_output` documents a run has already published —
+ * the running total the per-run output cap ({@link createDocumentFromStream})
+ * checks the incoming file against.
+ */
+async function runOutputBytesUsed(scope: AppScope, runId: string): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<string>`COALESCE(SUM(${documents.size}), 0)` })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.runId, runId),
+        eq(documents.orgId, scope.orgId),
+        eq(documents.purpose, "agent_output"),
+      ),
+    );
+  return Number(row?.total ?? 0);
+}
+
+/** The outcome of an agent-output ingestion: the row plus whether it deduped. */
+export interface CreatedDocumentFromStream {
+  row: DocumentRow;
+  /** True when an identical (run, sha256, name) document already existed. */
+  deduped: boolean;
+}
+
+/**
+ * Ingest an agent-published document from a run's streaming request body into a
+ * durable `agent_output` document. Mirrors {@link createDocumentFromUpload} but
+ * for the run→platform channel: the bytes arrive as a raw stream (no staged
+ * upload), so the caps are enforced mid-stream via {@link createCappedHashingCounter}
+ * (per-file + per-run output budget, both 413) and the org quota + counter are
+ * committed transactionally via the shared {@link commitDocumentRow}.
+ *
+ * Idempotent for the sweep's at-least-once retries: if this run already
+ * published a document with the SAME sha256 AND name, the just-streamed object
+ * is dropped and the existing row returned (`deduped: true`) rather than storing
+ * the bytes twice.
+ */
+export async function createDocumentFromStream(
+  scope: AppScope,
+  runId: string,
+  attribution: { userId: string | null; endUserId: string | null },
+  packageId: string | null,
+  input: { name: string; mime: string; body: ReadableStream<Uint8Array> },
+): Promise<CreatedDocumentFromStream> {
+  const env = getEnv();
+  const documentId = prefixedId("doc");
+  const safeName = sanitizeStorageKey(sanitizeFilename(input.name));
+  const storagePath = `${scope.applicationId}/${documentId}/${safeName}`;
+
+  const runOutputUsed = await runOutputBytesUsed(scope, runId);
+  const digester = createCappedHashingCounter({
+    perFileCap: env.DOCUMENT_MAX_FILE_BYTES,
+    runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
+    runOutputUsed,
+  });
+
+  try {
+    await storageUploadStream(
+      DOCUMENTS_BUCKET,
+      storagePath,
+      input.body.pipeThrough(digester.stream),
+      {
+        exclusive: true,
+      },
+    );
+  } catch (err) {
+    // Cap tripped mid-stream (or a transient storage error) — the object may
+    // have been partially written before the abort. Drop it so a cut-short
+    // upload never leaves a partial object behind (the 413 delete-on-short
+    // contract) nor strands bytes uncounted.
+    await storageDelete(DOCUMENTS_BUCKET, storagePath).catch((delErr) => {
+      logger.warn("failed to delete documents object after stream error", {
+        documentId,
+        error: getErrorMessage(delErr),
+      });
+    });
+    throw err;
+  }
+
+  const { bytes: byteCount, sha256 } = digester.result();
+
+  // Dedup: an identical (run, sha256, name) agent_output already exists — the
+  // sweep re-published a file the tool already stored, or a retried POST. Drop
+  // the freshly-written object and return the existing row (no double count).
+  const [existing] = await db
+    .select(documentSelect)
+    .from(documents)
+    .where(
+      and(
+        eq(documents.runId, runId),
+        eq(documents.orgId, scope.orgId),
+        eq(documents.applicationId, scope.applicationId),
+        eq(documents.purpose, "agent_output"),
+        eq(documents.sha256, sha256),
+        eq(documents.name, input.name),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    await storageDelete(DOCUMENTS_BUCKET, storagePath).catch((delErr) => {
+      logger.warn("failed to delete duplicate documents object", {
+        documentId,
+        error: getErrorMessage(delErr),
+      });
+    });
+    return { row: existing as DocumentRow, deduped: true };
+  }
+
+  const row = await commitDocumentRow({
+    scope,
+    documentId,
+    storagePath,
+    purpose: "agent_output",
+    runId,
+    chatSessionId: null,
+    packageId,
+    attribution,
+    name: input.name,
+    mime: input.mime,
+    byteCount,
+    sha256,
+    expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
+  });
+  return { row, deduped: false };
 }
 
 function assertWithinFileCap(size: number, cap: number): void {

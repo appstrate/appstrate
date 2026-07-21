@@ -3,16 +3,29 @@
 import { describe, expect, it } from "bun:test";
 import {
   SELECTABLE_RUNTIME_TOOLS,
+  EVENT_EMITTER_RUNTIME_TOOLS,
   RUNTIME_TOOL_CATALOG,
   isSelectableRuntimeTool,
 } from "../src/runtime-tools-catalog.ts";
 
 describe("runtime-tools-catalog", () => {
-  it("SELECTABLE set is exactly [output, log, note, pin, report]", () => {
-    // Guards against drift with runner-pi's local SELECTABLE_RUNTIME_TOOLS,
-    // which duplicates this list (the published runner package must not take
-    // a hard @appstrate/core dependency). If you change one, change both.
-    expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin", "report"]);
+  it("SELECTABLE set is the event emitters plus publish_document", () => {
+    // Guards against drift with the OpenAPI manifest enum + the agent-editor
+    // checklist, which mirror this list. If you change one, change all.
+    expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual([
+      "output",
+      "log",
+      "note",
+      "pin",
+      "report",
+      "publish_document",
+    ]);
+  });
+
+  it("EVENT_EMITTER set is exactly the five pure event-emitter tools", () => {
+    // These are the tools `buildRuntimeToolDefs` builds standalone;
+    // `publish_document` is deliberately excluded (it needs an injected uploader).
+    expect([...EVENT_EMITTER_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin", "report"]);
   });
 
   it("output is present in the catalog and selectable like every other tool", () => {

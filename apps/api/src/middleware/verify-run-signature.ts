@@ -61,3 +61,39 @@ export const verifyRunSignature = createMiddleware<AppEnv>(async (c, next) => {
   c.set("webhookId", c.req.header("webhook-id")!);
   await next();
 });
+
+/**
+ * Signature guard for the streaming document-ingestion POST
+ * (`POST /api/runs/:runId/documents`). Identical run-authentication to
+ * {@link verifyRunSignature} — Standard Webhooks HMAC over the run secret —
+ * but the HMAC is verified over an EMPTY body, exactly like the run's signed
+ * workspace/documents GET provisioning fetches (see `runtime-pi/provision.ts`).
+ *
+ * The document bytes are therefore NOT part of the signature, which is
+ * deliberate: buffering the whole (up to 100 MiB) file to re-hash it for the
+ * HMAC would defeat the streaming ingestion the route is built for. The run
+ * secret authenticates the caller as the run; the body's integrity is captured
+ * by the server-computed sha256 returned to the caller. The request body is
+ * left completely untouched so the handler can stream it straight to storage.
+ */
+export const verifyRunUploadSignature = createMiddleware<AppEnv>(async (c, next) => {
+  const runId = c.req.param("runId");
+  if (!runId) throw invalidRequest("runId path parameter is required", "runId");
+
+  const run = await getRunSinkContext(runId);
+  if (!run) throw notFound(`run ${runId} not found`);
+
+  assertSinkOpen(run);
+
+  verifyRunSignatureHeaders({
+    run,
+    signatureHeader: c.req.header("webhook-signature") ?? "",
+    msgIdHeader: c.req.header("webhook-id") ?? "",
+    timestampHeader: c.req.header("webhook-timestamp") ?? "",
+    body: "",
+  });
+
+  c.set("run", run);
+  c.set("webhookId", c.req.header("webhook-id")!);
+  await next();
+});

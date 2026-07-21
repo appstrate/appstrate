@@ -37,7 +37,10 @@
  */
 
 import Ajv, { type ValidateFunction } from "ajv";
-import { SELECTABLE_RUNTIME_TOOLS, type SelectableRuntimeTool } from "./runtime-tools-catalog.ts";
+import {
+  EVENT_EMITTER_RUNTIME_TOOLS,
+  type EventEmitterRuntimeTool,
+} from "./runtime-tools-catalog.ts";
 
 /**
  * MCP `_meta` key under which a runtime tool call surfaces the canonical
@@ -64,6 +67,10 @@ export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
   "memory.added",
   "pinned.set",
   "report.appended",
+  // Emitted by the `publish_document` tool (and the entrypoint outputs sweep)
+  // once a run document has been stored on the platform. Carries the durable
+  // document metadata so ingestion persists a run_log the UI/chat can render.
+  "document.published",
 ] as const;
 
 const CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set(
@@ -326,7 +333,7 @@ function buildReportDef(): RuntimeToolDef {
 }
 
 const RUNTIME_TOOL_BUILDERS: Record<
-  SelectableRuntimeTool,
+  EventEmitterRuntimeTool,
   (outputSchema: Record<string, unknown> | null) => RuntimeToolDef
 > = {
   output: (s) => buildOutputDef(s),
@@ -338,21 +345,105 @@ const RUNTIME_TOOL_BUILDERS: Record<
 
 /**
  * Build the {@link RuntimeToolDef}s for an agent's selected runtime tools.
- * Unknown entries are ignored (install-time validation rejects them).
- * Order follows the agent's selection, de-duplicated.
+ * Only the pure event-emitter tools are built here — `publish_document` is
+ * excluded (it needs an injected uploader; the entrypoint builds it). Unknown
+ * entries are ignored (install-time validation rejects them). Order follows
+ * the agent's selection, de-duplicated.
  */
 export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): RuntimeToolDef[] {
   const outputSchema = opts.outputSchema ?? null;
-  const selected: SelectableRuntimeTool[] = [];
+  const selected: EventEmitterRuntimeTool[] = [];
   const seen = new Set<string>();
   for (const entry of opts.runtimeTools ?? []) {
     if (seen.has(entry)) continue;
-    if ((SELECTABLE_RUNTIME_TOOLS as readonly string[]).includes(entry)) {
+    if ((EVENT_EMITTER_RUNTIME_TOOLS as readonly string[]).includes(entry)) {
       seen.add(entry);
-      selected.push(entry as SelectableRuntimeTool);
+      selected.push(entry as EventEmitterRuntimeTool);
     }
   }
   return selected.map((name) => RUNTIME_TOOL_BUILDERS[name](outputSchema));
+}
+
+// ---------------------------------------------------------------------------
+// publish_document — the one runtime tool with a side effect (HTTP upload)
+// ---------------------------------------------------------------------------
+
+/** Durable document metadata returned by a successful upload. */
+export interface PublishedDocument {
+  id: string;
+  uri: string;
+  name: string;
+  mime: string;
+  size: number;
+  sha256: string;
+}
+
+/**
+ * Uploads a workspace file to the platform and returns its durable document
+ * metadata. Injected into {@link buildPublishDocumentDef} by the runtime
+ * entrypoint (which holds the run's HMAC sink signer); `path` is relative to
+ * the agent workspace, `name` an optional display-name override.
+ */
+export type DocumentUploader = (path: string, name?: string) => Promise<PublishedDocument>;
+
+/**
+ * Build the `publish_document` runtime tool def around an injected
+ * {@link DocumentUploader}. Unlike the pure event emitters this tool performs
+ * the upload itself (via `uploader`), then surfaces the canonical
+ * `document.published` event under `_meta` so ingestion persists a run_log.
+ * An upload failure (cap / quota / HTTP) is returned as a tool error, never a
+ * throw — the agent sees a clear message and can continue.
+ */
+export function buildPublishDocumentDef(uploader: DocumentUploader): RuntimeToolDef {
+  return {
+    descriptor: {
+      name: "publish_document",
+      description:
+        "Publish a file you created in the workspace (e.g. an HTML report, a CSV, a PDF) as a " +
+        "durable document attached to this run. Returns a stable `document://` URI. Files written " +
+        "under `./outputs/` are published automatically at the end of the run — use this tool only " +
+        "to publish a deliverable that lives elsewhere in the workspace.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["path"],
+        properties: {
+          path: {
+            type: "string",
+            description: "Path to the file to publish, relative to the workspace root.",
+          },
+          name: {
+            type: "string",
+            description: "Optional display name for the document (defaults to the file name).",
+          },
+        },
+      },
+    },
+    handler: async (rawArgs) => {
+      const { path, name } = (rawArgs ?? {}) as { path?: unknown; name?: unknown };
+      if (typeof path !== "string" || path.length === 0) {
+        return toolError("publish_document requires a non-empty `path`.");
+      }
+      let doc: PublishedDocument;
+      try {
+        doc = await uploader(path, typeof name === "string" && name.length > 0 ? name : undefined);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return toolError(`Failed to publish '${path}': ${message}`);
+      }
+      return withEvents(`Published ${doc.name} → ${doc.uri}`, [
+        {
+          type: "document.published",
+          document_id: doc.id,
+          uri: doc.uri,
+          name: doc.name,
+          mime: doc.mime,
+          size: doc.size,
+          sha256: doc.sha256,
+        },
+      ]);
+    },
+  };
 }
 
 /**

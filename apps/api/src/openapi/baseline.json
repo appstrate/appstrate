@@ -118,6 +118,10 @@
       "description": "Direct-upload protocol for agent input files"
     },
     {
+      "name": "Documents",
+      "description": "Durable document store — inputs and agent outputs"
+    },
+    {
       "name": "Credential Proxy",
       "description": "Server-side credential injection for external runners (CLI, GitHub Action)"
     },
@@ -3614,6 +3618,165 @@
             "$ref": "#/components/responses/RateLimited"
           }
         }
+      },
+      "post": {
+        "operationId": "publishRunDocument",
+        "tags": ["Runs"],
+        "summary": "Publish an agent-produced document (HMAC, streaming)",
+        "description": "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 otherwise).",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Document-Name",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Display name for the document (sanitised server-side)."
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "MIME type of the document bytes."
+          },
+          {
+            "name": "webhook-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Idempotent replay — an identical (run, sha256, name) document already existed; the existing document is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "uri", "name", "mime", "size", "sha256"],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "uri": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Document stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "uri", "name", "mime", "size", "sha256"],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "uri": {
+                      "type": "string",
+                      "description": "`document://<id>` durable URI."
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "X-Document-Name or Content-Type header missing / empty body"
+          },
+          "401": {
+            "description": "Signature verification failed"
+          },
+          "403": {
+            "description": "storage_limit_exceeded"
+          },
+          "404": {
+            "description": "run_not_found"
+          },
+          "409": {
+            "description": "run_not_running"
+          },
+          "410": {
+            "description": "run_sink_closed | run_sink_expired"
+          },
+          "413": {
+            "description": "Document exceeds the per-file or per-run output limit"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
       }
     },
     "/api/runs/{runId}/documents/{name}": {
@@ -3775,7 +3938,7 @@
         "operationId": "streamAllRuns",
         "tags": ["Realtime"],
         "summary": "SSE: all run status changes",
-        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
+        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
         "parameters": [
           {
             "$ref": "#/components/parameters/SseOrgId"
@@ -3803,6 +3966,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -3812,7 +3978,7 @@
         "operationId": "streamRun",
         "tags": ["Realtime"],
         "summary": "SSE: single run events",
-        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
+        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
         "parameters": [
           {
             "name": "id",
@@ -3848,6 +4014,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -3857,7 +4026,7 @@
         "operationId": "streamAgentRuns",
         "tags": ["Realtime"],
         "summary": "SSE: agent run changes",
-        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
+        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
         "parameters": [
           {
             "name": "packageId",
@@ -3894,6 +4063,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -10883,6 +11055,88 @@
         }
       }
     },
+    "/api/profile/password": {
+      "post": {
+        "operationId": "setProfilePassword",
+        "tags": ["Profile"],
+        "summary": "Set an initial password",
+        "description": "Set a password for the current user when none exists yet (account created via social sign-in). Creates the email/password credential so the user can also sign in with email. Fails with 409 when a password is already set — use the Better Auth change-password flow instead. Session authentication only; API keys are rejected.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["newPassword"],
+                "properties": {
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password set — the credential account was created",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status"],
+                  "properties": {
+                    "status": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "example": {
+                  "status": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "Conflict — a password is already set for this account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "example": {
+                  "type": "https://docs.appstrate.dev/errors/password-already-set",
+                  "title": "Conflict",
+                  "status": 409,
+                  "detail": "A password is already set for this account. Use the change password form instead.",
+                  "code": "password_already_set",
+                  "requestId": "req_abc123"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/profiles/batch": {
       "post": {
         "operationId": "batchGetProfiles",
@@ -11058,7 +11312,7 @@
         "operationId": "listMyConnections",
         "tags": ["Profile"],
         "summary": "List the caller's connections across every org/app",
-        "description": "Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. Crosses orgs/applications by design — does NOT require `X-Org-Id`.",
+        "description": "Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For interactive user credentials (cookie session, dashboard/instance JWT) it crosses orgs/applications by design — does NOT require `X-Org-Id`. For an API key the list is scoped to the key's bound organization and application only.",
         "responses": {
           "200": {
             "description": "Connection groups",
@@ -11407,7 +11661,7 @@
         "operationId": "deleteMyConnection",
         "tags": ["Profile"],
         "summary": "Delete one of the caller's own connections (destructive)",
-        "description": "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`).",
+        "description": "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With an API key, only connections inside the key's bound organization and application can be deleted (204 with no effect otherwise).",
         "parameters": [
           {
             "name": "connectionId",
@@ -13776,6 +14030,16 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -14621,7 +14885,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Agent in use (runs in progress) or no changes to snapshot. RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, or `conflict`.",
+            "description": "Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`, or `conflict`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15584,6 +15848,16 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -16454,6 +16728,16 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -18461,6 +18745,448 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/documents": {
+      "get": {
+        "operationId": "listDocuments",
+        "tags": ["Documents"],
+        "summary": "List documents",
+        "description": "List the documents visible to the caller in the current application. Members see their own documents (and system-owned ones); end-users see only their own. Filter by `purpose`, `run_id`, `package_id`, or `chat_session_id`; paginate with `starting_after` + `limit`. Access is inherited from each document's container (no per-file grants).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["user_upload", "agent_output"]
+            },
+            "description": "Filter by document purpose."
+          },
+          {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter to documents anchored to this run."
+          },
+          {
+            "name": "package_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter to documents produced by this agent package."
+          },
+          {
+            "name": "chat_session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter to documents anchored to this chat session."
+          },
+          {
+            "name": "starting_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Keyset cursor — document id to page after (newest-first order)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "description": "Page size (1–100, default 20)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of documents.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "object",
+                          "id",
+                          "uri",
+                          "purpose",
+                          "application_id",
+                          "run_id",
+                          "chat_session_id",
+                          "package_id",
+                          "name",
+                          "mime",
+                          "size",
+                          "sha256",
+                          "downloadable",
+                          "expires_at",
+                          "created_at"
+                        ],
+                        "properties": {
+                          "object": {
+                            "type": "string",
+                            "enum": ["document"]
+                          },
+                          "id": {
+                            "type": "string",
+                            "description": "Opaque document id (`doc_…`)."
+                          },
+                          "uri": {
+                            "type": "string",
+                            "description": "Stable `document://doc_…` reference — pass in a run's file input field."
+                          },
+                          "purpose": {
+                            "type": "string",
+                            "enum": ["user_upload", "agent_output"]
+                          },
+                          "application_id": {
+                            "type": "string"
+                          },
+                          "run_id": {
+                            "type": ["string", "null"],
+                            "description": "Run container, or null."
+                          },
+                          "chat_session_id": {
+                            "type": ["string", "null"],
+                            "description": "Chat-session container, or null."
+                          },
+                          "package_id": {
+                            "type": ["string", "null"],
+                            "description": "Producing agent package id, or null."
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "mime": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "description": "Size in bytes."
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "description": "SHA-256 of the bytes (hex)."
+                          },
+                          "downloadable": {
+                            "type": "boolean",
+                            "description": "Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator."
+                          },
+                          "expires_at": {
+                            "type": ["string", "null"],
+                            "format": "date-time",
+                            "description": "Retention deadline, or null when permanent."
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}": {
+      "get": {
+        "operationId": "getDocument",
+        "tags": ["Documents"],
+        "summary": "Get document metadata",
+        "description": "Fetch a document's metadata, including the derived `downloadable` flag. Access is inherited from the document's container; an id the caller cannot read returns 404.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "object",
+                    "id",
+                    "uri",
+                    "purpose",
+                    "application_id",
+                    "run_id",
+                    "chat_session_id",
+                    "package_id",
+                    "name",
+                    "mime",
+                    "size",
+                    "sha256",
+                    "downloadable",
+                    "expires_at",
+                    "created_at"
+                  ],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["document"]
+                    },
+                    "id": {
+                      "type": "string",
+                      "description": "Opaque document id (`doc_…`)."
+                    },
+                    "uri": {
+                      "type": "string",
+                      "description": "Stable `document://doc_…` reference — pass in a run's file input field."
+                    },
+                    "purpose": {
+                      "type": "string",
+                      "enum": ["user_upload", "agent_output"]
+                    },
+                    "application_id": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": ["string", "null"],
+                      "description": "Run container, or null."
+                    },
+                    "chat_session_id": {
+                      "type": ["string", "null"],
+                      "description": "Chat-session container, or null."
+                    },
+                    "package_id": {
+                      "type": ["string", "null"],
+                      "description": "Producing agent package id, or null."
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "description": "Size in bytes."
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "description": "SHA-256 of the bytes (hex)."
+                    },
+                    "downloadable": {
+                      "type": "boolean",
+                      "description": "Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator."
+                    },
+                    "expires_at": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "Retention deadline, or null when permanent."
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDocument",
+        "tags": ["Documents"],
+        "summary": "Delete a document",
+        "description": "Delete a document (storage object + row) and release its quota. Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/documents/{id}/content": {
+      "get": {
+        "operationId": "getDocumentContent",
+        "tags": ["Documents"],
+        "summary": "Download document content",
+        "description": "Download the document bytes with `Content-Disposition: attachment`. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Gated by the `downloadable` flag — a user upload is served only to its creator (403 otherwise).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document bytes (proxy-stream mode).",
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "attachment; filename=…"
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "307": {
+            "description": "Redirect to a presigned GET URL (public-endpoint S3 mode).",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "description": "Presigned URL."
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -22180,7 +22906,7 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "enum": ["output", "log", "note", "pin", "report"]
+                  "enum": ["output", "log", "note", "pin", "report", "publish_document"]
                 },
                 "description": "Appstrate top-level extension: runtime tools the agent may use. Optional."
               }

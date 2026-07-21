@@ -577,6 +577,39 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(reportLogs[0]!.data).toEqual({ content: markdown });
   });
 
+  // Phase 2: a `document.published` event (emitted by the publish_document
+  // tool / outputs sweep once the documents row already exists) must persist a
+  // run_log so the published document streams over the run_log SSE and replays.
+  it("document.published events persist as run_logs(type='result', event='document')", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+    const payload = {
+      document_id: "doc_abc12345",
+      uri: "document://doc_abc12345",
+      name: "report.html",
+      mime: "text/html",
+      size: 1234,
+      sha256: "f".repeat(64),
+    };
+    const envelope = buildEnvelope(runId, "document.published", payload, 1);
+    const res = await postEvent(runId, envelope);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { outcome: string }).outcome).toBe("persisted");
+
+    const docLogs = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "document")));
+    expect(docLogs).toHaveLength(1);
+    expect(docLogs[0]!.type).toBe("result");
+    expect(docLogs[0]!.data).toMatchObject({
+      document_id: "doc_abc12345",
+      uri: "document://doc_abc12345",
+      name: "report.html",
+      mime: "text/html",
+      size: 1234,
+    });
+  });
+
   // Multiple report.appended POSTs must all land — the tool docstring
   // says "Appends markdown content"; concatenation is the UI's job, not
   // the persistence layer's. Each event becomes its own log row.

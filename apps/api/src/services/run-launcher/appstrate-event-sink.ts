@@ -193,6 +193,36 @@ export async function persistRunEvent(
       return null;
     }
 
+    case "document.published": {
+      // A run document was stored on the platform (via the `publish_document`
+      // tool or the entrypoint outputs sweep). The `documents` row already
+      // exists (created by the POST /api/runs/:id/documents route) — this
+      // event carries no new DB state, it only persists a run_log so the
+      // published document streams over the existing run_log SSE and replays.
+      // Stored as `type='result' event='document'`, mirroring output/report.
+      const documentId = typeof event.document_id === "string" ? event.document_id : null;
+      if (documentId) {
+        await appendRunLog(
+          scope,
+          runId,
+          "result",
+          "document",
+          null,
+          {
+            document_id: documentId,
+            uri: typeof event.uri === "string" ? event.uri : `document://${documentId}`,
+            name: typeof event.name === "string" ? event.name : null,
+            mime: typeof event.mime === "string" ? event.mime : null,
+            size: typeof event.size === "number" ? event.size : null,
+            sha256: typeof event.sha256 === "string" ? event.sha256 : null,
+          },
+          "info",
+          executor,
+        );
+      }
+      return null;
+    }
+
     case "appstrate.progress": {
       const message = typeof event.message === "string" ? event.message : null;
       const data = isPlainObject(event.data) ? event.data : null;

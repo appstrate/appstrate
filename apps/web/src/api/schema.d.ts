@@ -3948,7 +3948,11 @@ export interface paths {
          */
         get: operations["fetchRunDocumentsManifest"];
         put?: never;
-        post?: never;
+        /**
+         * Publish an agent-produced document (HMAC, streaming)
+         * @description Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 otherwise).
+         */
+        post: operations["publishRunDocument"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4814,7 +4818,7 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "report")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "report" | "publish_document")[];
         };
         AgentSkillRef: {
             id: string;
@@ -18458,6 +18462,114 @@ export interface operations {
             };
             /** @description run_sink_closed | run_sink_expired */
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    publishRunDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Display name for the document (sanitised server-side). */
+                "X-Document-Name": string;
+                /** @description MIME type of the document bytes. */
+                "Content-Type": string;
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": Blob;
+            };
+        };
+        responses: {
+            /** @description Idempotent replay — an identical (run, sha256, name) document already existed; the existing document is returned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        uri: string;
+                        name: string;
+                        mime: string;
+                        size: number;
+                        sha256: string;
+                    };
+                };
+            };
+            /** @description Document stored */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @description `document://<id>` durable URI. */
+                        uri: string;
+                        name: string;
+                        mime: string;
+                        size: number;
+                        sha256: string;
+                    };
+                };
+            };
+            /** @description X-Document-Name or Content-Type header missing / empty body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signature verification failed */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description storage_limit_exceeded */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_sink_closed | run_sink_expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Document exceeds the per-file or per-run output limit */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

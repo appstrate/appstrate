@@ -1446,6 +1446,91 @@ export const runsPaths = {
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
+    post: {
+      operationId: "publishRunDocument",
+      tags: ["Runs"],
+      summary: "Publish an agent-produced document (HMAC, streaming)",
+      description:
+        "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 otherwise).",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "X-Document-Name",
+          in: "header",
+          required: true,
+          schema: { type: "string" },
+          description: "Display name for the document (sanitised server-side).",
+        },
+        {
+          name: "Content-Type",
+          in: "header",
+          required: true,
+          schema: { type: "string" },
+          description: "MIME type of the document bytes.",
+        },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/octet-stream": {
+            schema: { type: "string", format: "binary" },
+          },
+        },
+      },
+      security: [],
+      responses: {
+        "201": {
+          description: "Document stored",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["id", "uri", "name", "mime", "size", "sha256"],
+                properties: {
+                  id: { type: "string" },
+                  uri: { type: "string", description: "`document://<id>` durable URI." },
+                  name: { type: "string" },
+                  mime: { type: "string" },
+                  size: { type: "integer" },
+                  sha256: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "200": {
+          description:
+            "Idempotent replay — an identical (run, sha256, name) document already existed; the existing document is returned.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["id", "uri", "name", "mime", "size", "sha256"],
+                properties: {
+                  id: { type: "string" },
+                  uri: { type: "string" },
+                  name: { type: "string" },
+                  mime: { type: "string" },
+                  size: { type: "integer" },
+                  sha256: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { description: "X-Document-Name or Content-Type header missing / empty body" },
+        "401": { description: "Signature verification failed" },
+        "403": { description: "storage_limit_exceeded" },
+        "404": { description: "run_not_found" },
+        "409": { description: "run_not_running" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "413": { description: "Document exceeds the per-file or per-run output limit" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
   },
   "/api/runs/{runId}/documents/{name}": {
     get: {

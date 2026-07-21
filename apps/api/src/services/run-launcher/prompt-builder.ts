@@ -79,5 +79,14 @@ export async function buildPlatformSystemPrompt(
   // it stays. This keeps a single source of truth for each tool's
   // signature and avoids a stale/partial in-prompt list that would
   // contradict the live tool set.
-  return renderPlatformPrompt(inputs);
+  // Deliverables convention (Phase 2): files the agent writes under
+  // `./outputs/` are published automatically as durable run documents at the
+  // end of the run — one concise line so the agent knows where to put anything
+  // it produces for the user. (The optional `publish_document` tool covers
+  // deliverables written elsewhere.)
+  return `${renderPlatformPrompt(inputs)}
+
+## Deliverables
+
+Write any file you produce for the user (reports, exports, generated documents) under \`./outputs/\` — everything there is published automatically as a downloadable document when the run ends.`;
 }
