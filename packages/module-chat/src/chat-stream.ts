@@ -21,7 +21,7 @@ import type { Context } from "hono";
 import {
   streamText,
   convertToModelMessages,
-  stepCountIs,
+  isStepCount,
   type FinishReason,
   type UIMessage,
 } from "ai";
@@ -73,6 +73,25 @@ function subscriptionReconnectResponse(): Response {
 
 type ConvertedModelMessages = Awaited<ReturnType<typeof convertToModelMessages>>;
 
+/**
+ * The system prompt as a cache-controlled `SystemModelMessage`, passed to
+ * `streamText` via the canonical `instructions` field (NOT at the head of
+ * `messages`). The platform MCP instructions carry a generated operation index
+ * (several KB, re-sent on every one of the up-to-CHAT_MAX_STEPS inference calls
+ * in a turn). OpenAI auto-caches the prefix; the ai-sdk Anthropic providers need
+ * an explicit `cache_control` breakpoint or they'd pay the index in full each
+ * step. The breakpoint MUST ride on the system prompt, so we carry it in
+ * `providerOptions` on this instructions object. Harmless for non-Anthropic
+ * models (`providerOptions` is namespaced).
+ *
+ * ai@7 prepends `instructions` to the model prompt as a `{ role:"system",
+ * content, providerOptions }` message (`convertToLanguageModelPrompt`) — the
+ * exact model input the old head-of-`messages` pattern produced, cacheControl
+ * preserved — so this is the trusted server-side channel with no need for the
+ * `allowSystemInMessages` compat flag. A bare string `instructions` would drop
+ * the `providerOptions`, losing the cacheControl breakpoint; keep the object
+ * form.
+ */
 export function aiSdkCachedSystemMessage(content: string) {
   return {
     role: "system" as const,
@@ -94,10 +113,17 @@ export function prepareAiSdkChatStep({
 }) {
   if (!isFinalChatStep(stepNumber, CHAT_MAX_STEPS)) return undefined;
   markToolStepBudgetReached();
+  // Final step: swap the base instructions for the appended final-step directive
+  // (still cache-controlled). ai@7 re-standardizes every step and prepends the
+  // per-step `instructions` as the system message, so the cacheControl breakpoint
+  // rides along without needing `allowSystemInMessages`. `messages` is reset to
+  // the original history (as before), and instructions supplies the system —
+  // yielding the same model input the old head-of-`messages` pattern did.
   return {
     activeTools: [],
     toolChoice: "none" as const,
-    messages: [aiSdkCachedSystemMessage(appendFinalStepSystemPrompt(system)), ...modelMessages],
+    instructions: aiSdkCachedSystemMessage(appendFinalStepSystemPrompt(system)),
+    messages: modelMessages,
   };
 }
 
@@ -253,7 +279,7 @@ export async function handleChatStream(
   // absent the engine just gets no tools.
   let mcp: Awaited<ReturnType<typeof openPlatformMcp>> | null = null;
   // Single MCP-teardown path. The session must be closed on EVERY ai-sdk exit
-  // (stream `onError` AND `onFinish`, and a mid-stream client disconnect) or it
+  // (stream `onError` AND `onEnd`, and a mid-stream client disconnect) or it
   // leaks per turn — close failures are swallowed (warn only) so they never mask
   // the turn result. `await` it on the synchronous paths, `void` in callbacks.
   const closeMcp = async (): Promise<void> => {
@@ -457,16 +483,15 @@ export async function handleChatStream(
     });
     const result = streamText({
       model,
-      // System rides as a cached message part rather than the `system` field:
-      // the platform MCP instructions now carry a generated operation index
-      // (several KB, re-sent on every one of the up-to-CHAT_MAX_STEPS inference
-      // calls in a turn). OpenAI auto-caches the prefix; the ai-sdk Anthropic
-      // providers need an explicit cache_control breakpoint or they'd pay the
-      // index in full each step. Harmless for non-Anthropic models
-      // (providerOptions is namespaced).
-      messages: [aiSdkCachedSystemMessage(system), ...modelMessages],
+      // System rides via the canonical `instructions` field as a cache-controlled
+      // `SystemModelMessage`; ai@7 prepends it to the model prompt as a system
+      // message (cacheControl preserved). See `aiSdkCachedSystemMessage` for why
+      // the object form (not a bare string) is required and why `prepareStep`
+      // overrides `instructions` per-step on the final step.
+      instructions: aiSdkCachedSystemMessage(system),
+      messages: modelMessages,
       tools: mcp ? mcp.tools : undefined,
-      stopWhen: stepCountIs(CHAT_MAX_STEPS),
+      stopWhen: isStepCount(CHAT_MAX_STEPS),
       prepareStep: ({ stepNumber }) =>
         prepareAiSdkChatStep({
           stepNumber,
@@ -487,16 +512,17 @@ export async function handleChatStream(
           logger.info("chat first token", { firstTokenMs: firstChunkAt - turnStart });
         }
       },
-      onStepFinish: ({ toolCalls, toolResults, finishReason, usage }) => {
+      onStepEnd: ({ toolCalls, toolResults, finishReason, usage }) => {
         const now = Date.now();
         const step = completedSteps;
         completedSteps += 1;
         const toolName = toolCalls.at(-1)?.toolName;
         if (toolName) lastToolName = toolName;
+        // `usage` here is this step's own token count (StepResult.usage).
         logger.info("chat step", {
           step,
           finishReason,
-          usage: usage as unknown as Record<string, unknown>,
+          usage,
           stepMs: now - stepStart,
           tools: toolCalls.map((t) => t.toolName),
           ...(debug
@@ -516,12 +542,14 @@ export async function handleChatStream(
         // to completion regardless of the client — so it is not closed here.
         logger.error("chat stream error", { err: String(error) });
       },
-      onFinish: ({ totalUsage, finishReason }) => {
+      onEnd: ({ usage, finishReason }) => {
         aiSdkFinishReason = finishReason ?? "unknown";
+        // v7's `onEnd.usage` is the cumulative usage across all steps — the same
+        // semantics v6 exposed as `totalUsage` (which is now a deprecated alias).
         logger.info("chat turn done", {
           steps: completedSteps,
           totalMs: Date.now() - turnStart,
-          usage: totalUsage as unknown as Record<string, unknown>,
+          usage,
           finishReason,
         });
       },

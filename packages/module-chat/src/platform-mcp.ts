@@ -62,6 +62,13 @@ export async function openPlatformMcp(args: {
       type: "http",
       url: platformMcpUrl(args.origin, args.orgId),
       headers,
+      // Ride the caller's single platform-call seam for the handshake too, not
+      // just the run-and-wait polling below: in-process dispatch when wired
+      // (`ChatPlatformDeps.dispatch`), loopback fetch otherwise. Without this the
+      // MCP transport would fall back to `globalThis.fetch` against `origin`,
+      // bypassing in-process dispatch (and unreachable when no HTTP listener is
+      // bound, e.g. under `app.request` tests).
+      ...(args.fetch ? { fetch: args.fetch } : {}),
     },
     onUncaughtError: (err) => logger.error("MCP uncaught error", { err: String(err) }),
   });
