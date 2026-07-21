@@ -15,6 +15,8 @@ import {
   parseDocumentUri,
   documentUri,
   createHashingCounter,
+  toDocumentDto,
+  type DocumentRow,
 } from "../../../src/services/documents.ts";
 import type { Actor } from "@appstrate/connect";
 
@@ -43,6 +45,46 @@ describe("deriveDownloadable", () => {
     expect(deriveDownloadable(doc, euA)).toBe(true);
     expect(deriveDownloadable(doc, euB)).toBe(false);
     expect(deriveDownloadable(doc, userA)).toBe(false);
+  });
+});
+
+describe("toDocumentDto — preview_url honours the downloadable gate (S1)", () => {
+  const htmlRow = (over: Partial<DocumentRow> = {}): DocumentRow => ({
+    id: "doc_previewgate12",
+    orgId: "org-1",
+    applicationId: "app-1",
+    purpose: "user_upload",
+    runId: "run-1",
+    chatSessionId: null,
+    packageId: null,
+    userId: "user-a",
+    endUserId: null,
+    storageKey: "documents/app-1/doc_previewgate12/page.html",
+    name: "page.html",
+    mime: "text/html",
+    size: 10,
+    sha256: "0".repeat(64),
+    expiresAt: null,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    ...over,
+  });
+
+  it("a non-creator member gets NO preview_url for an html user_upload (cross-member disclosure blocked)", () => {
+    const dto = toDocumentDto(htmlRow(), userB);
+    expect(dto.downloadable).toBe(false);
+    expect(dto.preview_url).toBeNull();
+  });
+
+  it("the creator gets a working preview_url for their own html user_upload", () => {
+    const dto = toDocumentDto(htmlRow(), userA);
+    expect(dto.downloadable).toBe(true);
+    expect(dto.preview_url).toContain("/preview/documents/doc_previewgate12?t=");
+  });
+
+  it("an html agent_output stays previewable by anyone who resolved the container", () => {
+    const dto = toDocumentDto(htmlRow({ purpose: "agent_output" }), userB);
+    expect(dto.downloadable).toBe(true);
+    expect(dto.preview_url).toContain("/preview/documents/doc_previewgate12?t=");
   });
 });
 

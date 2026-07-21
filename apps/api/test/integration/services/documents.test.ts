@@ -98,6 +98,14 @@ async function seedRunRow(
     applicationId: scope.applicationId,
     status: "running",
     endUserId: extra.endUserId ?? null,
+    // Sink context so the materialization-failure path can route its terminal
+    // transition through `synthesiseFinalize` (getRunSinkContext requires a
+    // non-null sink secret; finalize never decrypts it). Mirrors production,
+    // where createRun stamps these before materializeRunUploads runs.
+    runOrigin: "platform",
+    sinkSecretEncrypted: "test-sink-secret",
+    sinkExpiresAt: new Date(Date.now() + 3_600_000),
+    startedAt: new Date(),
   });
   return id;
 }
@@ -236,6 +244,8 @@ describe("documents service + routes", () => {
     });
     expect(content.status).toBe(200);
     expect(content.headers.get("content-disposition")).toContain("attachment");
+    // S3: the proxy stream must forbid content-type sniffing.
+    expect(content.headers.get("x-content-type-options")).toBe("nosniff");
     const body = new Uint8Array(await content.arrayBuffer());
     expect(body).toEqual(bytes);
 

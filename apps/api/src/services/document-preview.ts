@@ -55,6 +55,14 @@ export interface PreviewTokenPayload {
   o: string;
   /** Expiration unix timestamp (seconds). */
   e: number;
+  /**
+   * Minting actor's dashboard-user id (null for an end-user actor). Bound so
+   * the route can re-check a `user_upload` preview against the document's
+   * creator — a foreign upload's hand-crafted token is refused (S1).
+   */
+  u?: string | null;
+  /** Minting actor's end-user id (null for a dashboard-user actor). */
+  eu?: string | null;
 }
 
 /** Split a comma-separated secret into a keyring; drop empties. Mirrors storage-fs. */

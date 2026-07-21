@@ -17,7 +17,7 @@ import { Hono } from "hono";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
-import { getActor } from "../lib/actor.ts";
+import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -30,6 +30,7 @@ import {
   toDocumentDto,
   streamDocumentContent,
   loadDocumentForPreview,
+  deriveDownloadable,
   type ListDocumentsFilters,
 } from "../services/documents.ts";
 import {
@@ -118,6 +119,10 @@ export function createDocumentsRouter() {
       status: 200,
       headers: {
         "Content-Type": row.mime,
+        // The MIME is agent/uploader-controlled — forbid content-type sniffing
+        // so a mislabelled body can never be reinterpreted as active content
+        // (S3). Attachment disposition already prevents inline rendering.
+        "X-Content-Type-Options": "nosniff",
         "Content-Length": String(row.size),
         "Content-Disposition": attachmentDisposition(row.name),
         "Cache-Control": "private, no-store",
@@ -194,6 +199,18 @@ export function createDocumentPreviewRouter() {
     // Only HTML is previewable this phase; anything else (or a missing/foreign
     // doc) is indistinguishable from not-found.
     if (!row || !isHtmlMime(row.mime)) throw notFound("Preview not available");
+
+    // Defense-in-depth (S1): a `user_upload` is creator-only content, so its
+    // preview is refused unless the token's bound minting actor is the
+    // document's creator — even a hand-crafted token that verifies. An
+    // `agent_output` is previewable by anyone who resolved the container
+    // (deriveDownloadable is always true for it), so this gate is a no-op there.
+    if (row.purpose === "user_upload") {
+      const tokenActor = actorFromIds(payload.u ?? null, payload.eu ?? null);
+      if (!tokenActor || !deriveDownloadable(row, tokenActor)) {
+        throw unauthorized("Preview token does not authorize this document");
+      }
+    }
     if (row.size > PREVIEW_MAX_BYTES) {
       throw payloadTooLarge(`Preview exceeds the ${PREVIEW_MAX_BYTES}-byte limit`);
     }

@@ -34,9 +34,14 @@ No per-file grants. `getDocumentForActor` derives access at check time:
 - **`chat_session_id` container** → chat sessions are per dashboard user; only the owner reads.
 - A cross-org, cross-app, or cross-actor id is **indistinguishable from a missing one** (returns null → 404).
 
+**Cross-actor references honour `deriveDownloadable` (a `user_upload` is creator-only content).** Because a run is org-wide-visible to members, container resolution alone would let member B reference member A's private upload. So both surfaces that hand a document to a _different_ actor's context gate on `downloadable`, not just container ACL:
+
+- **`document://` run input** (`input-parser`): after `getDocumentForActor`, a `user_upload` whose creator is not the resolving run actor is **rejected as not-found** (404) — a member cannot deliver another member's upload into their own run. An `agent_output` stays freely referenceable by anyone who can read the run (the intended chaining case, D6). A chat-contained upload passes trivially: its creator is the chat user, who is the run actor.
+- **`preview_url`** (`toDocumentDto`): minted **only** when the caller is `downloadable`, so a member never even receives a working preview link for another member's `user_upload`. The preview token additionally binds the minting actor, and the preview route re-checks it against a `user_upload`'s creator — a hand-crafted token that verifies is still refused (401).
+
 `listDocumentsForActor` (the gallery) applies the same visibility: a member sees every run-contained document in the app (mirroring the org-wide runs list) plus chat-contained documents only from their own sessions; an end-user sees only their own rows (`actorScopeFilter`). Keyset pagination on `(createdAt, id)` DESC.
 
-The cookie-less preview route uses `loadDocumentForPreview` (org-scoped only) — its signed token IS the authorization, so no container re-check.
+The cookie-less preview route uses `loadDocumentForPreview` (org-scoped only) — its signed token IS the authorization; for a `user_upload` the token's bound creator must match the document's, so no container re-check is needed while private uploads stay creator-only.
 
 ## Quotas, retention, GC (D3, D4)
 

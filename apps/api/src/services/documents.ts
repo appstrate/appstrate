@@ -45,7 +45,8 @@ import { invalidRequest, notFound, payloadTooLarge, storageLimitExceeded } from 
 import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { consumeUploadStream, peekUploads, sanitizeFilename, parseUploadUri } from "./uploads.ts";
 import { sanitizeStorageKey } from "./file-storage.ts";
-import { getRun, updateRun } from "./state/runs.ts";
+import { getRun } from "./state/runs.ts";
+import { synthesiseFinalize } from "./run-event-ingestion.ts";
 import { recordAudit } from "./audit.ts";
 import { signPreviewToken, isHtmlMime, PREVIEW_TOKEN_TTL_SECONDS } from "./document-preview.ts";
 
@@ -279,17 +280,30 @@ export interface DocumentDto {
  * `APP_URL`. Called only after the container ACL already resolved the row for the
  * caller, so presence of a URL is itself the "previewable by you" signal.
  */
-function mintPreviewUrl(row: DocumentRow): string | null {
+function mintPreviewUrl(row: DocumentRow, actor: Actor): string | null {
   if (!isHtmlMime(row.mime)) return null;
   const env = getEnv();
   const exp = Math.floor(Date.now() / 1000) + PREVIEW_TOKEN_TTL_SECONDS;
-  const token = signPreviewToken({ d: row.id, o: row.orgId, e: exp }, env.UPLOAD_SIGNING_SECRET);
+  // Bind the minting actor into the token (defense-in-depth for S1): the
+  // preview route re-checks it against the document's creator for a
+  // `user_upload`, so a hand-crafted token for another member's private
+  // upload is refused even if it verifies.
+  const creator = actorInsert(actor);
+  const token = signPreviewToken(
+    { d: row.id, o: row.orgId, e: exp, u: creator.userId, eu: creator.endUserId },
+    env.UPLOAD_SIGNING_SECRET,
+  );
   let base = env.USERCONTENT_URL ?? env.APP_URL;
   while (base.endsWith("/")) base = base.slice(0, -1);
   return `${base}/preview/documents/${row.id}?t=${encodeURIComponent(token)}`;
 }
 
 export function toDocumentDto(row: DocumentRow, actor: Actor): DocumentDto {
+  // `downloadable` gates BOTH the bytes (`/content`) and the preview URL: a
+  // `user_upload` is creator-only content (D2), so another member who can
+  // merely resolve the run must not receive a working `preview_url` for it
+  // (S1). Compute once; mint a preview only when the caller may read it.
+  const downloadable = deriveDownloadable(row, actor);
   return {
     object: "document",
     id: row.id,
@@ -303,8 +317,8 @@ export function toDocumentDto(row: DocumentRow, actor: Actor): DocumentDto {
     mime: row.mime,
     size: row.size,
     sha256: row.sha256,
-    downloadable: deriveDownloadable(row, actor),
-    preview_url: mintPreviewUrl(row),
+    downloadable,
+    preview_url: downloadable ? mintPreviewUrl(row, actor) : null,
     expires_at: row.expiresAt?.toISOString() ?? null,
     created_at: row.createdAt.toISOString(),
   };
@@ -419,6 +433,14 @@ async function commitDocumentRow(params: {
   byteCount: number;
   sha256: string;
   expiresAt: Date | null;
+  /**
+   * Per-run output ceiling ({@link createDocumentFromStream} only). When set,
+   * the run's `agent_output` total is re-summed under the same org `FOR UPDATE`
+   * lock and this file is rejected (413) if it would overrun the cap — closing
+   * the race where concurrent publishes each pass the pre-stream check on a
+   * stale total.
+   */
+  runOutputCap?: number;
 }): Promise<DocumentRow> {
   const { scope, documentId, storagePath, byteCount, attribution } = params;
   const env = getEnv();
@@ -436,6 +458,27 @@ async function commitDocumentRow(params: {
         throw storageLimitExceeded(
           `Organization storage quota (${env.ORG_STORAGE_QUOTA_BYTES} bytes) would be exceeded`,
         );
+      }
+      // Per-run cap re-check under the same lock (agent-output ingestion). The
+      // org `FOR UPDATE` above serialises every commit for this org — so two
+      // concurrent publishes to the same run each observe the other's already-
+      // committed row here, and their combined total is bounded exactly.
+      if (params.runOutputCap !== undefined && params.runId && params.purpose === "agent_output") {
+        const [runTotal] = await tx
+          .select({ total: sql<string>`COALESCE(SUM(${documents.size}), 0)` })
+          .from(documents)
+          .where(
+            and(
+              eq(documents.runId, params.runId),
+              eq(documents.orgId, scope.orgId),
+              eq(documents.purpose, "agent_output"),
+            ),
+          );
+        if (Number(runTotal?.total ?? 0) + byteCount > params.runOutputCap) {
+          throw payloadTooLarge(
+            `Run output would exceed the per-run limit of ${params.runOutputCap} bytes`,
+          );
+        }
       }
       const inserted = await tx
         .insert(documents)
@@ -616,6 +659,9 @@ export async function createDocumentFromStream(
     byteCount,
     sha256,
     expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
+    // Authoritative per-run cap re-check under the org lock (the pre-stream
+    // `runOutputUsed` read above is only the fast reject — see commitDocumentRow).
+    runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
   });
   return { row, deduped: false };
 }
@@ -691,15 +737,19 @@ export async function materializeRunUploads(
       });
     }
     // Fail the run loudly rather than leaving it pointing at documents it never
-    // got — a clear terminal beats a silently broken run.
-    await updateRun(scope, runId, {
+    // got — a clear terminal beats a silently broken run. Route through the
+    // canonical convergence point (`synthesiseFinalize` → `finalizeRun`) so the
+    // `afterRun`/billing hooks fire like any other terminal transition, instead
+    // of writing `runs.status` directly. The run has not launched its container
+    // yet (createRun already stamped the sink secret), so this is a clean failed
+    // finalize.
+    await synthesiseFinalize(runId, {
       status: "failed",
-      error: "Failed to persist input documents",
-      completedAt: new Date().toISOString(),
-    }).catch((updErr) => {
+      error: { message: "Failed to persist input documents" },
+    }).catch((finErr) => {
       logger.warn("failed to mark run failed after materialization error", {
         runId,
-        error: getErrorMessage(updErr),
+        error: getErrorMessage(finErr),
       });
     });
     throw err;

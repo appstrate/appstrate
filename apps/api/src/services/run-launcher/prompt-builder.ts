@@ -66,6 +66,11 @@ export async function buildPlatformSystemPrompt(
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
     timeoutSeconds: plan.timeout,
+    // Deliverables convention (Phase 2): files the agent writes under
+    // `./outputs/` are swept and published as durable run documents at
+    // finalize. Rendered as a platform-managed section BEFORE the raw prompt
+    // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
+    deliverables: true,
     ...(uploads ? { uploads } : {}),
     ...(integrations && integrations.length > 0 ? { integrations } : {}),
   });
@@ -79,14 +84,5 @@ export async function buildPlatformSystemPrompt(
   // it stays. This keeps a single source of truth for each tool's
   // signature and avoids a stale/partial in-prompt list that would
   // contradict the live tool set.
-  // Deliverables convention (Phase 2): files the agent writes under
-  // `./outputs/` are published automatically as durable run documents at the
-  // end of the run — one concise line so the agent knows where to put anything
-  // it produces for the user. (The optional `publish_document` tool covers
-  // deliverables written elsewhere.)
-  return `${renderPlatformPrompt(inputs)}
-
-## Deliverables
-
-Write any file you produce for the user (reports, exports, generated documents) under \`./outputs/\` — everything there is published automatically as a downloadable document when the run ends.`;
+  return renderPlatformPrompt(inputs);
 }

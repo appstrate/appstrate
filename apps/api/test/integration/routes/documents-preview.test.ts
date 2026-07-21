@@ -52,6 +52,7 @@ async function seedDoc(
     size?: number;
     orgId?: string;
     purpose?: "agent_output" | "user_upload";
+    userId?: string | null;
   } = {},
 ): Promise<string> {
   const docId = `doc_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
@@ -64,6 +65,7 @@ async function seedDoc(
     orgId: opts.orgId ?? ctx.orgId,
     applicationId: ctx.defaultAppId,
     purpose: opts.purpose ?? "agent_output",
+    userId: opts.userId ?? null,
     storageKey: `documents/${storagePath}`,
     name: safeName,
     mime: opts.mime ?? "text/html",
@@ -73,8 +75,16 @@ async function seedDoc(
   return docId;
 }
 
-function mintToken(docId: string, orgId: string, expSeconds: number): string {
-  return signPreviewToken({ d: docId, o: orgId, e: expSeconds }, getEnv().UPLOAD_SIGNING_SECRET);
+function mintToken(
+  docId: string,
+  orgId: string,
+  expSeconds: number,
+  creator: { u?: string | null; eu?: string | null } = {},
+): string {
+  return signPreviewToken(
+    { d: docId, o: orgId, e: expSeconds, ...creator },
+    getEnv().UPLOAD_SIGNING_SECRET,
+  );
 }
 
 function nowSec(): number {
@@ -193,6 +203,37 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
     const token = mintToken(docId, ctx.orgId, nowSec() + 300);
     const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`);
     expect(res.status).toBe(413);
+  });
+
+  // S1 defense-in-depth: a `user_upload` is creator-only content, so its
+  // preview is refused unless the token's bound minting actor is the document's
+  // creator — even a token that verifies (was signed with the real secret).
+  it("refuses a user_upload preview whose token carries NO creator binding (401)", async () => {
+    const docId = await seedDoc(ctx, { purpose: "user_upload", userId: ctx.user.id });
+    const token = mintToken(docId, ctx.orgId, nowSec() + 300); // no u/eu bound
+    const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`);
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses a user_upload preview whose token is bound to a DIFFERENT user (401)", async () => {
+    const docId = await seedDoc(ctx, { purpose: "user_upload", userId: ctx.user.id });
+    const token = mintToken(docId, ctx.orgId, nowSec() + 300, { u: crypto.randomUUID() });
+    const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`);
+    expect(res.status).toBe(401);
+  });
+
+  it("serves a user_upload preview when the token is bound to the creator (200)", async () => {
+    const docId = await seedDoc(ctx, { purpose: "user_upload", userId: ctx.user.id });
+    const token = mintToken(docId, ctx.orgId, nowSec() + 300, { u: ctx.user.id });
+    const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`);
+    expect(res.status).toBe(200);
+  });
+
+  it("leaves agent_output previews unaffected by the creator gate (200 without a binding)", async () => {
+    const docId = await seedDoc(ctx, { purpose: "agent_output" });
+    const token = mintToken(docId, ctx.orgId, nowSec() + 300); // no binding
+    const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`);
+    expect(res.status).toBe(200);
   });
 
   it("serves cross-origin CORP when USERCONTENT_URL is configured", async () => {

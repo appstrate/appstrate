@@ -17,9 +17,12 @@ import { db } from "@appstrate/db/client";
 import { uploads, runs } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext } from "../../helpers/auth.ts";
+import { createTestContext, createTestUser, addOrgMember } from "../../helpers/auth.ts";
 import { parseRequestInput, isStrippedInlineMarker } from "../../../src/services/input-parser.ts";
-import { createDocumentFromUpload } from "../../../src/services/documents.ts";
+import {
+  createDocumentFromUpload,
+  createDocumentFromStream,
+} from "../../../src/services/documents.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import {
   downloadRunDocumentStream,
@@ -207,6 +210,107 @@ describe("parseRequestInput — streamed document consume", () => {
     expect((thrown as ApiError).status).toBe(400);
     expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+  });
+});
+
+describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  async function seedRunningRun(
+    scope: { orgId: string; applicationId: string },
+    id: string,
+  ): Promise<void> {
+    await db.insert(runs).values({
+      id,
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
+      packageId: null,
+      status: "running",
+    });
+  }
+
+  it("member B cannot deliver member A's user_upload into their own run (404)", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-s2-upload" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const memberB = await createTestUser({ email: "b@s2.test" });
+    await addOrgMember(ctx.orgId, memberB.id, "member");
+
+    // Member A (ctx.user) materializes a run-contained user_upload.
+    const runId = `run_${crypto.randomUUID()}`;
+    await seedRunningRun(scope, runId);
+    await seedUpload(scope, { id: "upl_s2_up", bytes: PDF_BYTES });
+    const docA = await createDocumentFromUpload(
+      scope,
+      { type: "user", id: ctx.user.id },
+      "upl_s2_up",
+      { runId },
+    );
+
+    // Member B references A's private upload — org-wide run visibility resolves
+    // the container, but the creator-only gate rejects it as not-found.
+    const newRunId = `run_${crypto.randomUUID()}`;
+    await expect(
+      parseRequestInput(
+        fakeCtx(
+          { input: { doc: `document://${docA.id}` } },
+          { ...scope, user: { id: memberB.id } },
+        ),
+        newRunId,
+        fileSchema,
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("member A CAN resolve their own user_upload", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-s2-own" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const runId = `run_${crypto.randomUUID()}`;
+    await seedRunningRun(scope, runId);
+    await seedUpload(scope, { id: "upl_s2_own", bytes: PDF_BYTES });
+    const docA = await createDocumentFromUpload(
+      scope,
+      { type: "user", id: ctx.user.id },
+      "upl_s2_own",
+      { runId },
+    );
+
+    const newRunId = `run_${crypto.randomUUID()}`;
+    const result = await parseRequestInput(
+      fakeCtx({ input: { doc: `document://${docA.id}` } }, { ...scope, user: { id: ctx.user.id } }),
+      newRunId,
+      fileSchema,
+    );
+    expect(result.uploadedFiles).toHaveLength(1);
+  });
+
+  it("member B CAN resolve an agent_output of a run they can see (chaining, D6)", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-s2-out" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const memberB = await createTestUser({ email: "b2@s2.test" });
+    await addOrgMember(ctx.orgId, memberB.id, "member");
+
+    const runId = `run_${crypto.randomUUID()}`;
+    await seedRunningRun(scope, runId);
+    const { row: agentDoc } = await createDocumentFromStream(
+      scope,
+      runId,
+      { userId: ctx.user.id, endUserId: null },
+      null,
+      { name: "out.pdf", mime: "application/pdf", body: new Blob([PDF_BYTES]).stream() },
+    );
+
+    const newRunId = `run_${crypto.randomUUID()}`;
+    const result = await parseRequestInput(
+      fakeCtx(
+        { input: { doc: `document://${agentDoc.id}` } },
+        { ...scope, user: { id: memberB.id } },
+      ),
+      newRunId,
+      fileSchema,
+    );
+    expect(result.uploadedFiles).toHaveLength(1);
   });
 });
 
