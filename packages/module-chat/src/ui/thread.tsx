@@ -17,6 +17,7 @@ import {
   ErrorPrimitive,
   AuiIf,
   useMessage,
+  getExternalStoreMessages,
 } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
@@ -249,8 +250,19 @@ function ThinkingIndicator() {
   );
 }
 
+/**
+ * The ORIGINAL AI-SDK message behind an assistant-ui message. assistant-ui
+ * normalizes `ThreadMessage.metadata` to its own shape ({custom, steps, …}) and
+ * DROPS unknown keys — so the persisted `appstrate` turn metadata is only
+ * reachable on the source message. Falls back to the message itself when no
+ * source is bound.
+ */
+function sourceMessage(m: unknown): unknown {
+  return (getExternalStoreMessages(m as never) as unknown[])[0] ?? m;
+}
+
 function TurnLimitNotice() {
-  const reached = useMessage((m) => turnLimitReached(m));
+  const reached = useMessage((m) => turnLimitReached(sourceMessage(m)));
   if (!reached) return null;
   return (
     <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs" role="status">
@@ -270,15 +282,15 @@ function TurnLimitNotice() {
 function TurnErrorNotice() {
   const errorText = useMessage((m) => {
     if (m.status?.type === "incomplete" && m.status.reason === "error") return null;
-    const turn = turnMetadataFromMessage(m);
+    const turn = turnMetadataFromMessage(sourceMessage(m));
     if (turn?.finishReason !== "error") return null;
     return turn.errorText ?? "La génération a échoué.";
   });
   if (!errorText) return null;
   return (
-    <div className="text-destructive mt-3 flex items-center gap-2 text-xs" role="alert">
-      <AlertTriangleIcon className="size-3.5 shrink-0" />
-      <span className="break-words">{errorText}</span>
+    <div className="text-destructive mt-3 flex items-start gap-2 text-xs" role="alert">
+      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+      <span className="min-w-0 break-words">{errorText}</span>
     </div>
   );
 }
@@ -334,7 +346,7 @@ function MessageError() {
   const isError = useMessage((m) => m.status?.type === "incomplete" && m.status.reason === "error");
   if (!isError) return null;
   return (
-    <ErrorPrimitive.Root className="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border px-3 py-2 text-sm">
+    <ErrorPrimitive.Root className="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border px-3 py-2 text-sm break-words">
       <ErrorPrimitive.Message />
     </ErrorPrimitive.Root>
   );

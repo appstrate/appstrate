@@ -170,7 +170,12 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           sessionManager: SessionManager.inMemory(),
           settingsManager: SettingsManager.inMemory({
             compaction: derivePiCompactionSettings(piModel),
-            retry: { enabled: true, maxRetries: 4 },
+            // ONE retry: chat is interactive — a user watches blank "thinking"
+            // dots for the whole retry window. One retry absorbs transient
+            // blips; anything sturdier (quota 429s, auth failures) fails the
+            // same way on every attempt and should surface fast. Runs keep
+            // their own (more patient) retry policy.
+            retry: { enabled: true, maxRetries: 1 },
           }),
           // Chat must NOT get the built-in host tools (read/bash/edit/write) —
           // only the platform MCP meta-tools (extension tools stay enabled).
@@ -211,11 +216,16 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         // become message parts). The fallback text guards any capture gap in
         // the mapper — a silent empty turn is the one unacceptable outcome.
         const meta = mapper.result();
-        const errorText =
+        const rawError =
           meta.errorText ??
           (meta.finishReason === "error"
             ? "La génération a échoué (erreur du modèle)."
             : undefined);
+        // Cap the surfaced text: provider errors can be a full response dump
+        // (headers included) — the useful part is the head, the rest belongs
+        // in server logs, not the chat bubble.
+        const errorText =
+          rawError && rawError.length > 300 ? `${rawError.slice(0, 300)}…` : rawError;
         if (errorText) write({ type: "error", errorText });
 
         const stepCount = mapper.stepCount();
