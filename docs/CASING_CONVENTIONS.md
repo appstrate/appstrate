@@ -19,7 +19,7 @@ This document captures every casing decision made during the AFPS snake_case + D
 | Better Auth tables + plugin tables (carve-out — HARD blocker)            | **camelCase** TS / **snake_case** SQL         | `user.emailVerified`                                        |
 | Module hook contracts, logger fields, CloudEvents, Webhooks, BullMQ jobs | **camelCase**                                 | `logger.info({ runId })`                                    |
 | JSONB internal `token_usage`                                             | **snake_case**                                | `{ input_tokens, output_tokens }` (SDK convention)          |
-| JSONB internal `runs.metadata.creditsUsed`                               | **camelCase**                                 | (cloud's afterRun hook contract)                            |
+| JSONB internal `runs.metadata` (module `afterRun` patch)                 | **camelCase**                                 | (module hook contract, opaque TS object)                    |
 
 When in doubt: **wire = snake_case, internal = camelCase**, with explicit carve-outs below.
 
@@ -167,7 +167,7 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 **Rule**: All fields camelCase TS.
 
-**Why**: TS function-argument convention. Hook params are TS interfaces, not wire DTOs. Cloud's `afterRun` returns `{ creditsUsed }` (camelCase) — that's a TS contract, not a JSON wire field. The data ends up in `runs.metadata` JSONB as opaque storage.
+**Why**: TS function-argument convention. Hook params are TS interfaces, not wire DTOs. Fields like `BeforeUsageParams.runningCount`, and a module's `afterRun` metadata patch (e.g. `{ usage }`), are camelCase — TS contracts, not JSON wire fields. An `afterRun` patch ends up in `runs.metadata` JSONB as opaque storage.
 
 #### Carve-out 4e — ModelProviderDefinition + provider DTOs
 
@@ -190,11 +190,11 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 #### Carve-out 4g — JSONB internal contracts
 
-| JSONB column                                                                                                                                                                                                | Interior casing                                                                                        | Why                                                           |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
-| `runs.token_usage`                                                                                                                                                                                          | snake_case (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) | Anthropic/OpenAI SDK wire convention                          |
-| `runs.metadata.creditsUsed`                                                                                                                                                                                 | camelCase                                                                                              | Cloud's `afterRun` hook contract; opaque storage of TS object |
-| `runs.checkpoint`, `runs.config`, `runs.config_override`, `runs.input`, `runs.result`, `runs.connection_overrides`, `runs.inline_manifest`, `runs.context_snapshot`, `pinned`, `memory`, `webhooks.payload` | Opaque (varies by producer)                                                                            | Each producer documents its own shape                         |
+| JSONB column                                                                                                                                                                                                | Interior casing                                                                                        | Why                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `runs.token_usage`                                                                                                                                                                                          | snake_case (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) | Anthropic/OpenAI SDK wire convention                         |
+| `runs.metadata` (module `afterRun` patch, e.g. `{ usage }`)                                                                                                                                                 | camelCase                                                                                              | Module `afterRun` hook contract; opaque storage of TS object |
+| `runs.checkpoint`, `runs.config`, `runs.config_override`, `runs.input`, `runs.result`, `runs.connection_overrides`, `runs.inline_manifest`, `runs.context_snapshot`, `pinned`, `memory`, `webhooks.payload` | Opaque (varies by producer)                                                                            | Each producer documents its own shape                        |
 
 **⚠️ Boundary — this carve-out covers JSONB that NEVER crosses the wire verbatim.** A JSONB column that is serialized back to a client as-is (no per-key projection) is a **wire payload**, not an internal contract, and its interior keys follow Zone 1 (**snake_case**, with the universal DB carve-out). The interior is the API contract.
 
@@ -451,7 +451,7 @@ Rule of thumb: a field qualifies for the camelCase carve-out only if its literal
 10. **Is it an internal TS variable, function arg, React prop, hook param?** → camelCase.
 11. **Is it a logger field, BullMQ job key, CloudEvent payload, Webhook delivery payload?** → camelCase.
 12. **Is it the interior of `runs.token_usage` JSONB?** → snake_case (SDK convention).
-13. **Is it `runs.metadata.creditsUsed`?** → camelCase (cloud hook contract).
+13. **Is it a module `afterRun` metadata patch in `runs.metadata`?** → camelCase (module hook contract).
 14. **Is it an audit log JSONB `after` payload?** → camelCase explicit keys (not raw snake_case body).
 15. **Otherwise** → wire = snake_case, internal = camelCase. When ambiguous, **wire is the safer default for any external-facing surface**.
 

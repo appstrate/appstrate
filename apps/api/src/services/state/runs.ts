@@ -1285,9 +1285,12 @@ export async function listRunLogs(args: {
  * List all in-flight run IDs at server startup. The caller (boot) feeds
  * each id through `synthesiseFinalize` so the same lifecycle that fires
  * for clean termination (afterRun, terminal log, onRunStatusChange) also
- * fires for runs that survived a server crash. Without that convergence,
- * any LLM tokens already burned by the crashed-runner before the crash
- * would silently never be billed (cloud's `afterRun` would never see them).
+ * fires for runs that survived a server crash. Without that convergence, the
+ * run stays non-terminal forever, so its cumulative runner ledger row never
+ * settles — and a cursor consumer, which must never advance past an unsettled
+ * row, would stall at that row and never process it or anything after it. The
+ * synthesized finalize drives the run terminal, which settles the row so the
+ * consumer can move on.
  *
  * Excludes runs a sibling instance is actively heartbeating: a run whose
  * `last_heartbeat_at` is within the watchdog stall threshold is being
@@ -1314,6 +1317,24 @@ export async function listOrphanRunIds(): Promise<string[]> {
 const LLM_USAGE_LIST_DEFAULT_LIMIT = 500;
 const LLM_USAGE_LIST_MAX_LIMIT = 1000;
 
+/** Terminal run statuses as a SQL value list, for the `settled` predicate. */
+const terminalRunStatusSqlList = sql.join(
+  terminalRunStatusValues.map((s) => sql`${s}`),
+  sql`, `,
+);
+
+/**
+ * SQL boolean — is this ledger row's `cost_usd` final? Proxy/chat rows are
+ * immutable at insert (always settled); a runner row settles only once its run
+ * reaches a terminal status, or its run row is gone (LEFT JOIN `runs` → NULL, a
+ * legacy/detached row treated settled). Shared by the cursor read
+ * ({@link listLlmUsage}) and the settled-frontier query
+ * ({@link getSettledFrontierId}) so the two definitions can never drift. Both
+ * callers must LEFT JOIN `runs` on `llm_usage.run_id` for `runs.status` /
+ * `runs.id` to resolve.
+ */
+const settledSql = sql<boolean>`(${llmUsage.source} <> 'runner' OR ${runs.status} IN (${terminalRunStatusSqlList}) OR ${runs.id} IS NULL)`;
+
 /**
  * Cursor read into the append-only `llm_usage` ledger, ordered by serial `id`
  * ASC. Exposed to modules via `PlatformServices.usage.list` so a metering
@@ -1338,10 +1359,6 @@ export async function listLlmUsage(args: {
     Math.max(args.limit ?? LLM_USAGE_LIST_DEFAULT_LIMIT, 1),
     LLM_USAGE_LIST_MAX_LIMIT,
   );
-  const terminalList = sql.join(
-    terminalRunStatusValues.map((s) => sql`${s}`),
-    sql`, `,
-  );
   const rows = await db
     .select({
       id: llmUsage.id,
@@ -1351,7 +1368,7 @@ export async function listLlmUsage(args: {
       runId: llmUsage.runId,
       chatSessionId: llmUsage.chatSessionId,
       credentialSource: llmUsage.credentialSource,
-      settled: sql<boolean>`(${llmUsage.source} <> 'runner' OR ${runs.status} IN (${terminalList}) OR ${runs.id} IS NULL)`,
+      settled: settledSql,
     })
     .from(llmUsage)
     .leftJoin(runs, eq(llmUsage.runId, runs.id))
@@ -1377,13 +1394,28 @@ export async function listLlmUsage(args: {
 }
 
 /**
- * Current high-water mark of the `llm_usage` ledger (max serial `id`), or 0 when
- * empty. Exposed via `PlatformServices.usage.maxId` so a metering consumer can
- * initialize its cursor at cutover and never retro-process historical rows.
+ * Highest `llm_usage.id` `N` such that EVERY row with id ≤ `N` is settled — the
+ * only safe point at which a metering consumer may initialize its cursor
+ * watermark at cutover. Exposed via `PlatformServices.usage.settledFrontier`.
+ * Returns `MIN(unsettled id) − 1` when any unsettled row exists, else `MAX(id)`,
+ * else 0 for an empty ledger.
+ *
+ * A plain `MAX(id)` would be unsafe: a runner row for an in-flight run gets its
+ * serial `id` at the first metric event (a LOW id) but stays unsettled while its
+ * cumulative cost grows, so a watermark at `MAX(id)` sits above it and drops its
+ * usage forever once it settles. Stopping at the first unsettled row prevents
+ * that. Single query: LEFT JOIN `runs` so {@link settledSql} resolves, then read
+ * `MIN(id) FILTER (unsettled)` and `MAX(id)` together.
  */
-export async function getMaxLlmUsageId(): Promise<number> {
+export async function getSettledFrontierId(): Promise<number> {
   const [row] = await db
-    .select({ maxId: sql<number>`COALESCE(MAX(${llmUsage.id}), 0)` })
-    .from(llmUsage);
-  return Number(row?.maxId ?? 0);
+    .select({
+      minUnsettled: sql<number | null>`MIN(${llmUsage.id}) FILTER (WHERE NOT ${settledSql})`,
+      maxId: sql<number | null>`MAX(${llmUsage.id})`,
+    })
+    .from(llmUsage)
+    .leftJoin(runs, eq(llmUsage.runId, runs.id));
+  const minUnsettled = row?.minUnsettled == null ? null : Number(row.minUnsettled);
+  if (minUnsettled != null) return minUnsettled - 1;
+  return row?.maxId == null ? 0 : Number(row.maxId);
 }

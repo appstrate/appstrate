@@ -5,7 +5,7 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.0.0] — 2026-07-21
 
 > **Release ordering.** This release bumps `@appstrate/afps-shared` to
 > `^0.3.0` (new `api-tool-naming` / `mcp-naming` subpaths). Publish
@@ -59,10 +59,14 @@ accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
     (source, principal, context, credential source, token counts, `costUsd`).
     Advisory; consumers that must not miss a row read the ledger by `id` cursor.
   - **`PlatformServices.usage`** — `list({ afterId?, limit?, credentialSource? })`
-    and `maxId()`: a serial-`id` cursor sweep of the append-only `llm_usage`
-    ledger (returns `LlmUsageLedgerRow`, including the `settled` flag that marks
-    when a runner row's growing cost is final). Replaces the runId-keyed
-    `runs.listLlmUsage` (see Removed). Never projects `real_model` / `api`.
+    and `settledFrontier()`: a serial-`id` cursor sweep of the append-only
+    `llm_usage` ledger (returns `LlmUsageLedgerRow`, including the `settled` flag
+    that marks when a runner row's growing cost is final). `settledFrontier()` is
+    the safe cursor-init point at cutover — the highest id below which every row
+    is settled (not a plain `MAX(id)`, which would strand an in-flight runner
+    row's low, still-unsettled serial id below the watermark and drop its usage
+    when it later settles). Replaces the runId-keyed `runs.listLlmUsage` (see
+    Removed). Never projects `real_model` / `api`.
   - **`PlatformServices.checkUsageAllowed`** — chat-surface entry into
     `beforeUsage`; the platform decides system-provided vs. org-owned and only
     dispatches the hook for a system-provided model.

@@ -228,12 +228,12 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // resolves no platform model (the CLI/runner executes on its own host with
   // its own model + credentials), so `runs.model_source` stays NULL. Runner
   // ledger rows (source="runner") inherit that NULL `credential_source` and are
-  // therefore never billed. That is the invariant that prevents double-billing:
-  // a remote run's system-model inference flows through `/api/llm-proxy`, whose
-  // proxy rows ARE stamped `credential_source:"system"` and carry the charge;
-  // the null-stamped runner row is the untariffed mirror. (The platform path
-  // resolves a model at creation and stamps `modelSource` — see
-  // `run-context-builder.ts`.)
+  // therefore never attributed to platform credentials. That is the invariant
+  // that prevents double-counting: a remote run's system-model inference flows
+  // through `/api/llm-proxy`, whose proxy rows ARE stamped
+  // `credential_source:"system"` and carry the attribution; the null-stamped
+  // runner row is the un-attributed mirror. (The platform path resolves a model
+  // at creation and stamps `modelSource` — see `run-context-builder.ts`.)
   await createRunRow(
     { orgId, applicationId },
     {

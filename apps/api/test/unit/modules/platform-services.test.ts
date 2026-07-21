@@ -28,9 +28,9 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.logger.info).toBe("function");
   });
 
-  it("wires the ledger cursor read (usage.list + usage.maxId — sole cross-tenant consumer: cloud)", () => {
+  it("wires the ledger cursor read (usage.list + usage.settledFrontier — sole cross-tenant consumer: cloud)", () => {
     expect(typeof services.usage.list).toBe("function");
-    expect(typeof services.usage.maxId).toBe("function");
+    expect(typeof services.usage.settledFrontier).toBe("function");
   });
 
   it("wires the per-route rate limiter (http.rateLimit)", () => {

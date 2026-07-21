@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `listLlmUsage` + `getMaxLlmUsageId` — the platform cursor read
- * (`PlatformServices.usage.list` / `.maxId`) a metering module uses to sweep the
- * canonical `llm_usage` ledger by serial `id` WITHOUT a cross-module SQL join.
- * Locks down: id-ASC ordering, the `afterId` cursor, context derivation,
- * `credentialSource` filtering, limit clamping, the projection (never
- * `real_model`/`api`), and the `settled` flag that governs cursor correctness.
+ * `listLlmUsage` + `getSettledFrontierId` — the platform cursor read
+ * (`PlatformServices.usage.list` / `.settledFrontier`) a metering module uses to
+ * sweep the canonical `llm_usage` ledger by serial `id` WITHOUT a cross-module
+ * SQL join. Locks down: id-ASC ordering, the `afterId` cursor, context
+ * derivation, `credentialSource` filtering, limit clamping, the projection
+ * (never `real_model`/`api`), the `settled` flag that governs cursor
+ * correctness, and the settled-frontier cutover point.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
-import { listLlmUsage, getMaxLlmUsageId } from "../../../src/services/state/runs.ts";
-import { llmUsage, chatSessions } from "@appstrate/db/schema";
+import { listLlmUsage, getSettledFrontierId } from "../../../src/services/state/runs.ts";
+import { llmUsage, chatSessions, runs } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
-describe("listLlmUsage / getMaxLlmUsageId", () => {
+describe("listLlmUsage / getSettledFrontierId", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -160,15 +162,50 @@ describe("listLlmUsage / getMaxLlmUsageId", () => {
     expect(bySource("proxy", activeRun.id).settled).toBe(true);
   });
 
-  it("getMaxLlmUsageId returns 0 when empty and the max id otherwise", async () => {
-    expect(await getMaxLlmUsageId()).toBe(0);
+  it("getSettledFrontierId returns 0 when empty and the max id when all rows are settled", async () => {
+    expect(await getSettledFrontierId()).toBe(0);
     await db.insert(llmUsage).values({
       source: "proxy",
       orgId: ctx.orgId,
       costUsd: 0.01,
-      requestId: "req_max_1",
+      requestId: "req_frontier_1",
     });
     const rows = await listLlmUsage({});
-    expect(await getMaxLlmUsageId()).toBe(rows.at(-1)!.id);
+    expect(await getSettledFrontierId()).toBe(rows.at(-1)!.id);
+  });
+
+  it("getSettledFrontierId stops at MIN(unsettled)-1 even when higher settled ids exist", async () => {
+    // Regression for the cutover bug: an in-flight runner row is assigned a LOW
+    // serial id but stays unsettled while its cost grows. A plain MAX(id) would
+    // seed a cursor above it and drop its usage forever once it settles. The
+    // frontier must sit just below that unsettled row, not at the global max.
+    const activeRun = await seedRun({
+      packageId: "@meterorg/agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+    });
+    await db.insert(llmUsage).values([
+      // Settled proxy row (lowest id).
+      { source: "proxy", orgId: ctx.orgId, costUsd: 0.01, requestId: "req_frontier_lo" },
+      // Unsettled runner row on the in-flight run (middle id).
+      { source: "runner", orgId: ctx.orgId, runId: activeRun.id, costUsd: 0.5 },
+      // Settled proxy rows with HIGHER ids than the unsettled row.
+      { source: "proxy", orgId: ctx.orgId, costUsd: 0.02, requestId: "req_frontier_hi1" },
+      { source: "proxy", orgId: ctx.orgId, costUsd: 0.03, requestId: "req_frontier_hi2" },
+    ]);
+
+    const rows = await listLlmUsage({});
+    const unsettled = rows.find((r) => !r.settled)!;
+    const maxId = rows.at(-1)!.id;
+    // Sanity: higher settled ids exist beyond the unsettled row.
+    expect(maxId).toBeGreaterThan(unsettled.id);
+
+    expect(await getSettledFrontierId()).toBe(unsettled.id - 1);
+
+    // Once the run reaches terminal status the row settles → frontier jumps to
+    // the global max.
+    await db.update(runs).set({ status: "success" }).where(eq(runs.id, activeRun.id));
+    expect(await getSettledFrontierId()).toBe(maxId);
   });
 });

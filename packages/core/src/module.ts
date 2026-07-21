@@ -1042,7 +1042,7 @@ export interface ModuleInitContext {
 // consumer needs it (the same razor `scripts/verify-module-contract.ts`
 // applies to the `AppstrateModule` members). Today the sole consumer is the
 // `cloud` metering module, which sweeps the append-only `llm_usage` ledger by
-// serial-`id` cursor via `usage.list` / `usage.maxId` and gates admission via
+// serial-`id` cursor via `usage.list` / `usage.settledFrontier` and gates admission via
 // `checkUsageAllowed`. The previous broad surface (orchestrator / pubsub /
 // realtime / inline / packages / models / applications / run CRUD) mirrored
 // the in-process `chat` module that has since been removed — it carried zero
@@ -1076,7 +1076,9 @@ export interface LlmUsageLedgerRow {
    * insert (always settled); a runner row's total GROWS during its run (one
    * cumulative row per run) and only settles once the run reaches a terminal
    * status (or its run row is gone). A cursor consumer processes settled rows
-   * only and NEVER advances its watermark past the first unsettled row.
+   * only and NEVER advances its watermark past the first unsettled row — see
+   * {@link PlatformServices.usage.list} for the head-of-line trade-off that
+   * implies and when it is safe to skip an unsettled row.
    */
   settled: boolean;
 }
@@ -1109,24 +1111,47 @@ export interface PlatformServices {
    * Cursor read into the append-only `llm_usage` ledger — the canonical platform
    * usage source of truth, read WITHOUT a cross-module SQL join. A metering
    * consumer sweeps it by serial `id` watermark: `list({ afterId })` returns the
-   * next batch ordered by `id` ASC, `maxId()` returns the current high-water mark
-   * (0 when empty) for initializing a cursor at cutover so historical rows are
-   * never retro-processed. See {@link LlmUsageLedgerRow.settled} for the ordering
-   * contract the consumer must honor.
+   * next batch ordered by `id` ASC; `settledFrontier()` returns the only safe
+   * point at which to initialize that watermark at cutover (see its doc). See
+   * {@link LlmUsageLedgerRow.settled} for the ordering contract the consumer must
+   * honor.
    */
   usage: {
     /**
      * Next ledger rows after `afterId` (exclusive, default 0), ordered by `id`
      * ASC, capped by `limit` (service default 500, max 1000). Optional
      * `credentialSource` filters to rows stamped `system` / `org`.
+     *
+     * Head-of-line trade-off: the consumer must never advance its watermark past
+     * the first UNSETTLED row (see {@link LlmUsageLedgerRow.settled}), so a single
+     * unsettled row — e.g. a long-running run whose cumulative runner row is still
+     * growing — pins the frontier and holds back every LATER row (settled or not)
+     * from being processed until it settles. A consumer that will never process a
+     * given `credentialSource` may nonetheless safely skip that row's unsettled
+     * entries: `credentialSource` is fixed at a row's first insert and is NEVER
+     * mutated by the monotonic runner upsert, so skipping it can never cause a
+     * later cost to be mis-attributed.
      */
     list(args: {
       afterId?: number;
       limit?: number;
       credentialSource?: "system" | "org";
     }): Promise<LlmUsageLedgerRow[]>;
-    /** Current max `llm_usage.id`, or 0 when the ledger is empty. */
-    maxId(): Promise<number>;
+    /**
+     * Highest ledger id `N` such that EVERY row with id ≤ `N` is settled — the
+     * only safe point at which a consumer may initialize its cursor watermark at
+     * cutover. Returns `MIN(unsettled id) − 1` when any unsettled row exists, else
+     * `MAX(id)`, else `0` for an empty ledger.
+     *
+     * Why not a plain `MAX(id)`: a runner row for an in-flight run is assigned its
+     * serial `id` at the first metric event (a LOW id) yet stays unsettled while
+     * its cumulative cost grows. A watermark seeded at the global `MAX(id)` would
+     * sit ABOVE that low id, so when the run finally settles its row is already
+     * behind the watermark and its usage is dropped forever. `settledFrontier()`
+     * stops at the first unsettled row, so no in-flight runner row is ever
+     * stranded below the initial watermark.
+     */
+    settledFrontier(): Promise<number>;
   };
   /**
    * In-process dispatch into the fully-wired platform Hono app — the same

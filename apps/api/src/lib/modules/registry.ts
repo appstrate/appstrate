@@ -20,7 +20,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { getClientIp } from "../client-ip.ts";
-import { listLlmUsage, getMaxLlmUsageId } from "../../services/state/runs.ts";
+import { listLlmUsage, getSettledFrontierId } from "../../services/state/runs.ts";
 import { dispatchInProcess } from "../platform-app.ts";
 import {
   recordChatUsage,
@@ -90,7 +90,7 @@ export function getModuleRegistry(): string[] {
 /**
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
- * minimal — `usage.list` / `usage.maxId` (the cloud metering module's cursor
+ * minimal — `usage.list` / `usage.settledFrontier` (the cloud metering module's cursor
  * sweep of the `llm_usage` ledger), `inProcess.dispatch`, and the chat seam
  * (`resolveSubscriptionChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
  * which the chat module drives the single generic in-process Pi chat engine,
@@ -111,7 +111,7 @@ function buildPlatformServices(): PlatformServices {
     },
     usage: {
       list: listLlmUsage,
-      maxId: getMaxLlmUsageId,
+      settledFrontier: getSettledFrontierId,
     },
     inProcess: {
       // In-process self-dispatch through the full platform middleware chain.
