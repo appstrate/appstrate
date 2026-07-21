@@ -277,6 +277,39 @@ class MarketplaceBehaviorTests(unittest.IsolatedAsyncioTestCase):
         driver.browser = Browser()
         self.assertIs(await driver._assert_no_challenge(challenged), cleared)
 
+    async def test_leboncoin_retries_snapshot_while_datadome_replaces_target(self) -> None:
+        module = self.leboncoin
+        challenged = types.SimpleNamespace(
+            url="https://www.leboncoin.fr/",
+            title="Pardon the interruption",
+            body_text="DataDome",
+            frame_urls=("https://geo.captcha-delivery.com/captcha",),
+        )
+        cleared = types.SimpleNamespace(
+            url=module.LEBONCOIN_ACCOUNT_URL,
+            title="Mes annonces",
+            body_text="Compte connecté",
+            frame_urls=(),
+        )
+
+        class Browser:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def wait_for_captcha_solver(self, _timeout: float) -> bool:
+                return True
+
+            async def snapshot(self) -> object:
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("BROWSER_UNAVAILABLE: page evaluation failed")
+                return cleared
+
+        driver = module.LeboncoinDriver()
+        driver.browser = Browser()
+        self.assertIs(await driver._assert_no_challenge(challenged), cleared)
+        self.assertEqual(driver.browser.calls, 2)
+
     async def test_leboncoin_fails_closed_when_managed_solver_cannot_clear_challenge(self) -> None:
         module = self.leboncoin
         challenged = types.SimpleNamespace(

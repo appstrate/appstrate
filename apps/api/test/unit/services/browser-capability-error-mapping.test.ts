@@ -61,4 +61,19 @@ describe("browser capability error mapping", () => {
         "The authenticated browser session was reached but its portable state could not be read.",
     });
   });
+
+  it("distinguishes driver attachment from an unstable upstream page transition", () => {
+    expect(toBrowserCapabilityApiError(new Error("BROWSER_DRIVER_ATTACH_FAILED"))).toMatchObject({
+      status: 503,
+      code: "browser_driver_attach_failed",
+      title: "Browser Driver Attach Failed",
+    });
+    expect(
+      toBrowserCapabilityApiError(new Error("BROWSER_PAGE_TRANSITION_FAILED: private")),
+    ).toMatchObject({
+      status: 503,
+      code: "browser_page_transition_failed",
+      title: "Browser Page Transition Failed",
+    });
+  });
 });

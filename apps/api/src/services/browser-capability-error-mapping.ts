@@ -26,6 +26,16 @@ export function toBrowserCapabilityApiError(error: unknown): ApiError | null {
       title: "Browser Unavailable",
       detail: "The selected backend could not provide the required browser capability.",
     },
+    BROWSER_DRIVER_ATTACH_FAILED: {
+      status: 503,
+      title: "Browser Driver Attach Failed",
+      detail: "The trusted browser driver could not attach to the provisioned browser session.",
+    },
+    BROWSER_PAGE_TRANSITION_FAILED: {
+      status: 503,
+      title: "Browser Page Transition Failed",
+      detail: "The browser page remained unavailable while the upstream replaced its active tab.",
+    },
     BROWSER_STATE_READ_FAILED: {
       status: 503,
       title: "Browser State Read Failed",

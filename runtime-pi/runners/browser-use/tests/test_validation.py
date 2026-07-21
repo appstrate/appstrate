@@ -67,6 +67,10 @@ class ValidationTests(unittest.TestCase):
             safe_browser_error(RuntimeError("BROWSER_STATE_READ_FAILED: secret detail")),
             "BROWSER_STATE_READ_FAILED",
         )
+        self.assertEqual(
+            safe_browser_error(RuntimeError("BROWSER_PAGE_TRANSITION_FAILED: secret detail")),
+            "BROWSER_PAGE_TRANSITION_FAILED",
+        )
         self.assertEqual(safe_browser_error(RuntimeError("password=hunter2")), "BROWSER_UNAVAILABLE")
 
 

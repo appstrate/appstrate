@@ -298,6 +298,8 @@ class LeboncoinDriver:
         if not detect_datadome_challenge(snapshot):
             return snapshot
         deadline = asyncio.get_running_loop().time() + CHALLENGE_WAIT_SECONDS
+        last_transition_error: RuntimeError | None = None
+        observed_challenge_after_solver_start = False
         solver = asyncio.create_task(
             self.browser.wait_for_captcha_solver(CHALLENGE_WAIT_SECONDS)
         )
@@ -305,17 +307,35 @@ class LeboncoinDriver:
         # A managed solver failure is not terminal: Browser Use Cloud also
         # exposes the same live session to the user. Keep polling until the
         # shared deadline so a human-completed DataDome/2FA step resumes here.
+        # DataDome replaces the active CDP target while the managed solver is
+        # running. That expected transition can make one DOM snapshot fail even
+        # though the replacement page is already visible in the live browser.
+        # Treat only the bridge's sanitized page-unavailable error as transient;
+        # policy, auth, and resource failures still fail closed immediately.
         try:
             while asyncio.get_running_loop().time() < deadline:
-                refreshed = await self.browser.snapshot()
+                try:
+                    refreshed = await self.browser.snapshot()
+                    last_transition_error = None
+                except RuntimeError as error:
+                    if not str(error).startswith("BROWSER_UNAVAILABLE:"):
+                        raise
+                    last_transition_error = error
+                    await asyncio.sleep(0.25)
+                    continue
                 if not detect_datadome_challenge(refreshed):
                     return refreshed
+                observed_challenge_after_solver_start = True
                 await asyncio.sleep(0.25)
         finally:
             if not solver.done():
                 solver.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await solver
+        if last_transition_error is not None and not observed_challenge_after_solver_start:
+            raise RuntimeError(
+                "BROWSER_PAGE_TRANSITION_FAILED: DataDome replacement target did not stabilize"
+            ) from last_transition_error
         raise RuntimeError("BROWSER_INTERACTION_REQUIRED: Leboncoin presented a DataDome challenge")
 
 

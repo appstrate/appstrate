@@ -139,7 +139,9 @@ class AppstrateBrowser:
             )
             await session.start()
         except Exception as error:
-            raise RuntimeError("BROWSER_UNAVAILABLE: Browser Use could not attach to CDP") from error
+            raise RuntimeError(
+                "BROWSER_DRIVER_ATTACH_FAILED: Browser Use could not attach to CDP"
+            ) from error
         self._session = session
         self._tools = Tools(exclude_actions=["search", "done"])
         self._file_upload_mode = file_upload_mode
@@ -202,7 +204,7 @@ class AppstrateBrowser:
         except RuntimeError:
             raise
         except Exception as error:
-            raise RuntimeError("BROWSER_UNAVAILABLE: navigation failed") from error
+            raise RuntimeError("BROWSER_PAGE_TRANSITION_FAILED: navigation failed") from error
         finally:
             # Storage restoration runs before the first authenticated
             # navigation. Once it has reached a stable document, do not keep
