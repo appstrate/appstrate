@@ -34,7 +34,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "better-auth": "1.7.0-beta.4",
+    "better-auth": "1.7.0-rc.1",
     "bullmq": "^5.80.8",
     "cron-parser": "^4.9.0",
     "drizzle-orm": "^0.45.2",
