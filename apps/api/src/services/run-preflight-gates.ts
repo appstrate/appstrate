@@ -6,7 +6,8 @@
  *
  *   1. Per-org rate limit (Redis token bucket).
  *   2. Per-org concurrency cap.
- *   3. `beforeUsage` module hook (quota / billing / feature gates) — run surface.
+ *   3. `beforeUsage` module hook (admission policies — usage caps, feature
+ *      gates) — run surface.
  *   4. Timeout ceiling — agent manifest's `timeout` capped to the platform
  *      limit. Returns a cloned agent when a cap is applied so callers pass
  *      the capped value into the container env without mutating the DB.

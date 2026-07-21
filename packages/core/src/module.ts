@@ -154,9 +154,9 @@ export interface AppstrateModule {
    * Priority order: topological order from `manifest.dependencies`. Modules
    * without dependencies keep the order they appear in `MODULES`.
    *
-   * Example: `MODULES=cloud,quota` — if both provide `beforeUsage`,
-   * cloud runs first. To force ordering, add `dependencies: ["cloud"]` on
-   * quota so the topo sort always places cloud earlier.
+   * Example: `MODULES=admission,metering` — if both provide `beforeUsage`,
+   * `admission` runs first. To force ordering, add `dependencies: ["admission"]`
+   * on `metering` so the topo sort always places `admission` earlier.
    */
   hooks?: Partial<ModuleHooks>;
 
@@ -436,11 +436,22 @@ export interface ModuleEvents {
   /** Org deleted — broadcast before an organization is deleted. */
   onOrgDelete: (orgId: string) => void | Promise<void>;
   /**
-   * One `llm_usage` row was appended to the platform's usage ledger —
-   * broadcast after the row is written by the single ledger writer. Carries the
-   * full per-row attribution (source, principal, context, credential source,
-   * token counts, equivalent cost). Advisory only: the row is authoritative and
-   * consumers that must never miss a row should read the ledger by its serial
+   * One `llm_usage` row was written to the platform's usage ledger — broadcast
+   * after the row is committed by the single ledger writer (post-commit for
+   * writes made inside a transaction, so a rolled-back row never fires). Carries
+   * the full per-row attribution (source, principal, context, credential source,
+   * token counts, equivalent cost).
+   *
+   * CUMULATIVE runner rows: a `source:"runner"` row is a running total, not a
+   * per-call delta. The SAME {@link UsageRecordedParams.llmUsageId} re-fires as
+   * the run progresses, each time carrying a higher cumulative token/cost
+   * snapshot (the writer keeps one row per run and monotonically raises it).
+   * Consumers MUST upsert/replace by `llmUsageId` — NEVER sum successive event
+   * payloads, or a run's usage is over-counted. (`source:"proxy"` rows are
+   * per-call and fire once each.)
+   *
+   * Advisory only: the row is authoritative and consumers that must never miss a
+   * row (or must reconcile the final total) should read the ledger by its serial
    * `id` cursor rather than relying on this side-effect broadcast.
    */
   onUsageRecorded: (params: UsageRecordedParams) => void | Promise<void>;
@@ -878,7 +889,7 @@ export interface AuthStrategy {
 /**
  * Parameters passed to the `beforeUsage` hook — a discriminated union over the
  * usage surface. `run` carries the agent package id and the org's current
- * running-run count (so a module can gate concurrency-aware quota); `chat`
+ * running-run count (so a module can apply concurrency-aware admission); `chat`
  * carries the session id (null for an ephemeral turn with no persisted session).
  */
 export type BeforeUsageParams =
@@ -935,7 +946,12 @@ export interface RunStatusChangeParams {
  * server-side-only columns) are NEVER exposed here.
  */
 export interface UsageRecordedParams {
-  /** Serial primary key of the appended `llm_usage` row — the ledger cursor value. */
+  /**
+   * Serial primary key of the `llm_usage` row — the ledger cursor value. For a
+   * `source:"runner"` row this id is STABLE across the run: the same id re-fires
+   * with an updated (higher) cumulative total as the run progresses, so key any
+   * state on it and replace-by-id, never accumulate. See `onUsageRecorded`.
+   */
   llmUsageId: number;
   orgId: string;
   /** Authenticated user the usage is attributed to, when the principal was a user. */

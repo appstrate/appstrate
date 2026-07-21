@@ -34,6 +34,7 @@ import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
 import { runWithSpan, recordRunDuration, recordRunTerminal } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
+import { emitUsageRecorded } from "./llm-usage-ledger.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
@@ -48,7 +49,7 @@ import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
-import type { RunStatusChangeParams } from "@appstrate/core/module";
+import type { RunStatusChangeParams, UsageRecordedParams } from "@appstrate/core/module";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import { gone } from "@appstrate/core/api-errors";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
@@ -958,6 +959,10 @@ async function persistEventAndAdvance(
   // event's CAS would tolerate without retrying the dropped one.
   const scope = { orgId: run.orgId, applicationId: run.applicationId };
   const firstEvent = run.lastEventSequence === 0;
+  // Ledger `onUsageRecorded` events written inside the transaction below are
+  // collected here and broadcast only AFTER the commit — emitting inline would
+  // announce a row a rollback erases (a phantom event).
+  const pendingUsage: UsageRecordedParams[] = [];
   const claimed = await db.transaction(async (tx) => {
     const rows = await tx
       .update(runs)
@@ -975,6 +980,7 @@ async function persistEventAndAdvance(
     await persistRunEvent(tx, scope, run.id, event, {
       writeLedger: true,
       modelSource: run.modelSource,
+      deferEmit: (usageEvent) => pendingUsage.push(usageEvent),
     });
 
     // No runner emits `run.started`, so flip status → running on the
@@ -1008,6 +1014,12 @@ async function persistEventAndAdvance(
   }
 
   run.lastEventSequence = sequence;
+
+  // Post-commit broadcast of any `onUsageRecorded` event the ledger write
+  // collected inside the transaction above. Deferred to here so a rolled-back
+  // ledger row can never fire a phantom event; the CAS committed, so the row is
+  // now durable.
+  for (const usageEvent of pendingUsage) emitUsageRecorded(usageEvent);
 
   // Emit `run.started` for remote-origin runs at the moment the DB
   // actually transitions pending → running (the first ingested event).

@@ -55,6 +55,7 @@ import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { db, type Db } from "@appstrate/db/client";
+import type { UsageRecordedParams } from "@appstrate/core/module";
 import { recordLlmUsage, type CredentialSource } from "../llm-usage-ledger.ts";
 import type { AppScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
@@ -144,13 +145,22 @@ export class PersistingEventSink implements EventSink {
  *
  * Returns the `appstrate.error.message` if this event was one, so the
  * caller can update its own `lastAdapterError` cache.
+ *
+ * When `executor` is a transaction and the caller must not broadcast the
+ * `onUsageRecorded` event until that transaction commits, it passes
+ * `opts.deferEmit`; the ledger write threads it straight through to
+ * {@link recordLlmUsage} (see {@link writeRunnerLedgerRow}).
  */
 export async function persistRunEvent(
   executor: Db,
   scope: AppScope,
   runId: string,
   event: RunEvent,
-  opts: { writeLedger?: boolean; modelSource?: string | null } = {},
+  opts: {
+    writeLedger?: boolean;
+    modelSource?: string | null;
+    deferEmit?: (event: UsageRecordedParams) => void;
+  } = {},
 ): Promise<string | null> {
   switch (event.type) {
     case "output.emitted": {
@@ -240,7 +250,7 @@ export async function persistRunEvent(
           scope,
           runId,
           { cost, usage, modelSource: opts.modelSource },
-          executor,
+          { executor, deferEmit: opts.deferEmit },
         );
         // Best-effort live broadcast — never blocks the ingestion hot
         // path nor fails it. The broadcaster throttles per-run to
@@ -350,6 +360,12 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
  *
  * Best-effort: metric persistence MUST NOT fail the ingestion path.
  * Errors are logged.
+ *
+ * `opts.executor` writes inside the ingestion transaction; `opts.deferEmit`
+ * (paired with it) collects the `onUsageRecorded` event so the ingestion layer
+ * broadcasts it AFTER commit instead of inside the open transaction — see
+ * {@link recordLlmUsage}. The finalize-fallback caller passes neither: it runs
+ * outside any transaction, so the event fires inline the instant the row commits.
  */
 export async function writeRunnerLedgerRow(
   scope: AppScope,
@@ -360,7 +376,15 @@ export async function writeRunnerLedgerRow(
     /** Run's model source — stamped as `credential_source` (see below). */
     modelSource?: string | null;
   },
-  executor: Db = db,
+  opts: {
+    /** Executor — pass the ingestion transaction on the metric hot path. */
+    executor?: Db;
+    /**
+     * Deferred-emit collector threaded through to {@link recordLlmUsage}. Set
+     * by the transactional metric path so the broadcast happens post-commit.
+     */
+    deferEmit?: (event: UsageRecordedParams) => void;
+  } = {},
 ): Promise<void> {
   // Skip degenerate events with neither usage nor cost — nothing to bill
   // or audit.
@@ -369,8 +393,9 @@ export async function writeRunnerLedgerRow(
   try {
     // The single ledger writer performs the monotonic upsert against the
     // partial unique index (highest cumulative total wins) and broadcasts
-    // `onUsageRecorded`. Best-effort by contract: metric persistence MUST NOT
-    // fail the ingestion path, so errors are logged, never rethrown.
+    // `onUsageRecorded` (deferred to post-commit when `deferEmit` is set).
+    // Best-effort by contract: metric persistence MUST NOT fail the ingestion
+    // path, so errors are logged, never rethrown.
     await recordLlmUsage(
       {
         source: "runner",
@@ -383,7 +408,7 @@ export async function writeRunnerLedgerRow(
         cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
         costUsd: row.cost ?? 0,
       },
-      { executor, onConflict: "runner-monotonic" },
+      { executor: opts.executor, onConflict: "runner-monotonic", deferEmit: opts.deferEmit },
     );
   } catch (err) {
     logger.error("Failed to write runner ledger row", {

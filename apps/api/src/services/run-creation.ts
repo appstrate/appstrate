@@ -224,6 +224,16 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   //     sink bookkeeping consistently across both origins).
   const agentDenorm = extractRunAgentDenorm(agent);
 
+  // Note: `modelSource` is deliberately NOT stamped on remote runs — this path
+  // resolves no platform model (the CLI/runner executes on its own host with
+  // its own model + credentials), so `runs.model_source` stays NULL. Runner
+  // ledger rows (source="runner") inherit that NULL `credential_source` and are
+  // therefore never billed. That is the invariant that prevents double-billing:
+  // a remote run's system-model inference flows through `/api/llm-proxy`, whose
+  // proxy rows ARE stamped `credential_source:"system"` and carry the charge;
+  // the null-stamped runner row is the untariffed mirror. (The platform path
+  // resolves a model at creation and stamps `modelSource` — see
+  // `run-context-builder.ts`.)
   await createRunRow(
     { orgId, applicationId },
     {

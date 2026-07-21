@@ -11,7 +11,12 @@
  *
  *   1. the column mapping + the ledger check-constraint invariants (a proxy row
  *      carries a `request_id`; a row is attributed to at most one context);
- *   2. the post-insert broadcast of the `onUsageRecorded` module event.
+ *   2. the broadcast of the `onUsageRecorded` module event — fired inline the
+ *      instant the row is durably written, EXCEPT when a caller records inside
+ *      its own transaction: it passes {@link RecordLlmUsageOptions.deferEmit}
+ *      and the built event is handed back to that collector so the caller can
+ *      broadcast it AFTER commit (via {@link emitUsageRecorded}). This keeps a
+ *      row whose transaction later rolls back from firing a phantom event.
  *
  * It is intentionally a thin insert+emit seam, not a framework: cost is already
  * computed by each caller (they own the token→USD arithmetic and their own
@@ -71,6 +76,17 @@ export interface RecordLlmUsageOptions {
    * the highest cumulative cost wins). The plain insert (proxy / chat) omits it.
    */
   onConflict?: "runner-monotonic";
+  /**
+   * Deferred-emit collector for a caller that records INSIDE its own
+   * transaction. When provided, {@link recordLlmUsage} does NOT broadcast
+   * `onUsageRecorded` inline — it hands the built event to this collector, and
+   * the caller MUST broadcast it (via {@link emitUsageRecorded}) only AFTER its
+   * transaction commits. This is what stops a rolled-back row from firing a
+   * phantom event. It is called only when a row was actually written (a
+   * monotonic-upsert no-op collects nothing). Non-transactional callers omit it
+   * and the event fires inline as soon as the row is durable.
+   */
+  deferEmit?: (event: UsageRecordedParams) => void;
 }
 
 /** Derive the module-facing `(contextType, contextId)` from a row's attribution. */
@@ -88,8 +104,10 @@ function resolveContext(
  * Returns the new row's serial `id`, or `null` when a runner-monotonic upsert
  * was a no-op (an equal-or-lower cumulative total lost the conflict). The event
  * fires only when a row was actually written, and never for the server-side-only
- * columns (`real_model` / `api`). DB errors are NOT swallowed here — each caller
- * owns its best-effort try/catch and its own log line.
+ * columns (`real_model` / `api`). When {@link RecordLlmUsageOptions.deferEmit}
+ * is supplied the event is collected instead of broadcast — see that option's
+ * doc for the post-commit contract. DB errors are NOT swallowed here — each
+ * caller owns its best-effort try/catch and its own log line.
  */
 export async function recordLlmUsage(
   entry: LlmUsageEntry,
@@ -160,9 +178,28 @@ export async function recordLlmUsage(
     costUsd: entry.costUsd,
     durationMs: entry.durationMs ?? null,
   };
-  // Broadcast is fire-and-forget: handler errors are isolated inside emitEvent,
-  // and a slow subscriber must not block the producer that just recorded usage.
-  void emitEvent("onUsageRecorded", params);
+  // A transactional caller (one that passed `deferEmit`) must NOT broadcast
+  // inline: its row may still roll back, which would make this a phantom event.
+  // Hand the built event to the collector and let the caller broadcast it after
+  // commit. Everyone else emits inline the instant the row is durable.
+  if (opts.deferEmit) {
+    opts.deferEmit(params);
+  } else {
+    // Broadcast is fire-and-forget: handler errors are isolated inside emitEvent,
+    // and a slow subscriber must not block the producer that just recorded usage.
+    void emitEvent("onUsageRecorded", params);
+  }
 
   return llmUsageId;
+}
+
+/**
+ * Broadcast an `onUsageRecorded` event previously collected via
+ * {@link RecordLlmUsageOptions.deferEmit}. A transactional caller MUST call this
+ * only AFTER its transaction commits — never before — so the broadcast can
+ * never announce a row a later rollback erased. Fire-and-forget by the same
+ * contract as the inline path: handler errors are isolated inside `emitEvent`.
+ */
+export function emitUsageRecorded(event: UsageRecordedParams): void {
+  void emitEvent("onUsageRecorded", event);
 }
