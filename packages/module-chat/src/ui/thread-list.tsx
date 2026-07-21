@@ -8,7 +8,7 @@
  * index.tsx) so a new conversation appears here with its server-derived title.
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { useChatHeaders, useSelectConversation } from "./runtime-context.ts";
@@ -21,11 +21,11 @@ import {
 import { useSessions } from "./use-sessions.ts";
 
 /**
- * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of render.
+ * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of `now`.
  * `Intl.RelativeTimeFormat` always prefixes "il y a", so we format by hand.
  */
-function relativeTime(iso: string): string {
-  const sec = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+function relativeTime(iso: string, now: number): string {
+  const sec = Math.round((now - new Date(iso).getTime()) / 1000);
   if (Number.isNaN(sec)) return "";
   if (sec < 60) return "à l'instant";
   const min = Math.round(sec / 60);
@@ -40,6 +40,22 @@ function relativeTime(iso: string): string {
   return `${year} an${year > 1 ? "s" : ""}`;
 }
 
+/**
+ * Re-render clock for the relative-time labels. Freshness of the list DATA is
+ * event-driven (SSE + safety-net refetch), but React Query's structural sharing
+ * keeps `data` referentially stable when the payload is unchanged — no
+ * re-render, so a label computed at render time would freeze ("à l'instant"
+ * forever on a quiet list). 30s granularity matches the coarsest visible unit.
+ */
+function useNowTick(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
+
 export function ThreadList({
   activeId,
   unreadIds,
@@ -49,6 +65,7 @@ export function ThreadList({
 }) {
   const select = useSelectConversation();
   const { data: sessions, isLoading } = useSessions();
+  const now = useNowTick();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
@@ -70,6 +87,7 @@ export function ThreadList({
             session={s}
             active={s.id === activeId}
             unread={unreadIds?.has(s.id) ?? false}
+            now={now}
           />
         ))}
         {!isLoading && (sessions ?? []).length === 0 && (
@@ -102,10 +120,12 @@ function ConversationRow({
   session,
   active,
   unread,
+  now,
 }: {
   session: SessionSummary;
   active: boolean;
   unread: boolean;
+  now: number;
 }) {
   const getHeaders = useChatHeaders();
   const select = useSelectConversation();
@@ -164,7 +184,7 @@ function ConversationRow({
           />
         ) : (
           <span className="text-muted-foreground text-xs transition-opacity group-hover:opacity-0">
-            {relativeTime(session.updatedAt)}
+            {relativeTime(session.updatedAt, now)}
           </span>
         )}
         {/* pointer-events must track visibility: opacity-0 alone keeps the

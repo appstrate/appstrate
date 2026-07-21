@@ -328,9 +328,10 @@ function ConversationInner({
   // invalidating: the server persists the session only after its inference
   // preamble (model select + MCP boot), so a refetch fired here would race that
   // write and return a list WITHOUT the new conversation — leaving it missing
-  // from the sidebar until the next idle poll (up to 8s). The optimistic entry
-  // is `generating: true` (drives the fast 2s poll) and reconciles to its
-  // server-derived title on the next poll / `onFinish` invalidate.
+  // from the sidebar until the next refetch. The optimistic entry is
+  // `generating: true` (drives the fast generating refetch in use-sessions.ts)
+  // and reconciles to its server-derived title on the next SSE-driven or
+  // interval refetch / `onFinish` invalidate.
   const announced = useRef(isPersisted);
   useEffect(() => {
     if (announced.current) return;
