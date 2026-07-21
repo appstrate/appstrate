@@ -253,7 +253,7 @@ export async function handleChatStream(
   // absent the engine just gets no tools.
   let mcp: Awaited<ReturnType<typeof openPlatformMcp>> | null = null;
   // Single MCP-teardown path. The session must be closed on EVERY ai-sdk exit
-  // (stream `onError` AND `onFinish`, and a mid-stream client disconnect) or it
+  // (stream `onError` AND `onEnd`, and a mid-stream client disconnect) or it
   // leaks per turn — close failures are swallowed (warn only) so they never mask
   // the turn result. `await` it on the synchronous paths, `void` in callbacks.
   const closeMcp = async (): Promise<void> => {
@@ -487,16 +487,17 @@ export async function handleChatStream(
           logger.info("chat first token", { firstTokenMs: firstChunkAt - turnStart });
         }
       },
-      onStepFinish: ({ toolCalls, toolResults, finishReason, usage }) => {
+      onStepEnd: ({ toolCalls, toolResults, finishReason, usage }) => {
         const now = Date.now();
         const step = completedSteps;
         completedSteps += 1;
         const toolName = toolCalls.at(-1)?.toolName;
         if (toolName) lastToolName = toolName;
+        // `usage` here is this step's own token count (StepResult.usage).
         logger.info("chat step", {
           step,
           finishReason,
-          usage: usage as unknown as Record<string, unknown>,
+          usage,
           stepMs: now - stepStart,
           tools: toolCalls.map((t) => t.toolName),
           ...(debug
@@ -516,12 +517,14 @@ export async function handleChatStream(
         // to completion regardless of the client — so it is not closed here.
         logger.error("chat stream error", { err: String(error) });
       },
-      onFinish: ({ totalUsage, finishReason }) => {
+      onEnd: ({ usage, finishReason }) => {
         aiSdkFinishReason = finishReason ?? "unknown";
+        // v7's `onEnd.usage` is the cumulative usage across all steps — the same
+        // semantics v6 exposed as `totalUsage` (which is now a deprecated alias).
         logger.info("chat turn done", {
           steps: completedSteps,
           totalMs: Date.now() - turnStart,
-          usage: totalUsage as unknown as Record<string, unknown>,
+          usage,
           finishReason,
         });
       },
