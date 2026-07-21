@@ -20,6 +20,8 @@ import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
+import { RunDocumentsTab } from "../components/run-documents-tab";
+import { useDocuments } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
@@ -100,11 +102,16 @@ export function RunDetailPage() {
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
   const hasRunMemory = runMemoryCount > 0;
 
+  // Document count for the tab badge. The tab body runs the same query (identical
+  // key) so React Query dedups it into a single request.
+  const { data: documentsPage } = useDocuments({ runId, limit: 100 });
+  const documentCount = documentsPage?.data.length ?? 0;
+
   // Default tab: "result" if results exist (report and/or output), otherwise "logs".
   // useTabWithHash respects the URL hash if present.
   const defaultTab = hasResult ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "memory", "info"] as const,
+    ["result", "logs", "memory", "documents", "info"] as const,
     defaultTab,
   );
 
@@ -138,6 +145,12 @@ export function RunDetailPage() {
           if (prev.some((l) => l.id === entry.id)) return prev;
           return [...prev, entry];
         });
+        // A published document arrives as a `type='result' event='document'`
+        // log frame — invalidate the run's documents list so the tab (and its
+        // badge) picks up the new file without a dedicated SSE channel.
+        if (entry.type === "result" && entry.event === "document") {
+          void qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
+        }
       },
       [qc, orgId, applicationId, runId],
     ),
@@ -233,7 +246,9 @@ export function RunDetailPage() {
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "memory" | "info")}
+          onValueChange={(v) =>
+            setActiveTab(v as "logs" | "result" | "memory" | "documents" | "info")
+          }
         >
           <TabsList>
             {hasResult && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
@@ -253,6 +268,14 @@ export function RunDetailPage() {
                 </span>
               </TabsTrigger>
             )}
+            <TabsTrigger value="documents">
+              {t("run.tabDocuments")}
+              {documentCount > 0 && (
+                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                  {documentCount}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="info">{t("run.tabInfo")}</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -326,6 +349,8 @@ export function RunDetailPage() {
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
       {activeTab === "memory" && <MemoryPanel packageId={packageId} runId={runId} />}
+
+      {activeTab === "documents" && runId && <RunDocumentsTab runId={runId} />}
 
       {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
     </div>

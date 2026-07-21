@@ -16,7 +16,7 @@
  */
 
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
-import { runAndWaitSteps } from "@appstrate/core/run-and-wait-client";
+import { runAndWaitStepsWithDocuments } from "@appstrate/core/run-and-wait-client";
 import { redactConnectLinks, splitConnectPayload, splitToolResult } from "./connect-offer.ts";
 import { logger } from "./logger.ts";
 
@@ -122,7 +122,7 @@ export function wrapRunAndWaitTool(
   const wrapped = {
     ...runAndWait,
     async *execute(rawArgs: unknown, options: { abortSignal?: AbortSignal }) {
-      for await (const step of runAndWaitSteps(rawArgs, {
+      for await (const step of runAndWaitStepsWithDocuments(rawArgs, {
         origin: opts.origin,
         headers: opts.headers,
         fetch: opts.fetch,

@@ -126,6 +126,7 @@
   "run.draft": "draft",
   "run.versionModified": "+ modifications",
   "run.tabInfo": "Information",
+  "run.tabDocuments": "Documents",
   "run.tabManifest": "Manifest",
   "run.tabPrompt": "Prompt",
   "run.emptyUsage": "No usage data",

@@ -56,26 +56,39 @@ async function collectRunAndWait(
 }
 
 describe("platform MCP run_and_wait wrapper", () => {
-  test("emits a preliminary run id, then the terminal run", async () => {
+  test("emits a preliminary run id, then the terminal run enriched with documents", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = [];
-    const responses = [
-      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" }),
-      jsonResponse({
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      calls.push({
+        url,
+        method: init?.method ?? "GET",
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      if (url.endsWith("/run")) {
+        return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" });
+      }
+      if (url.includes("/api/documents")) {
+        return jsonResponse({
+          object: "list",
+          data: [
+            {
+              id: "doc_1",
+              uri: "document://doc_1",
+              name: "report.html",
+              mime: "text/html",
+              size: 12,
+            },
+          ],
+          hasMore: false,
+        });
+      }
+      return jsonResponse({
         id: "run_1",
         packageId: "@acme/writer",
         status: "success",
         result: { ok: true },
-      }),
-    ];
-    const fetchImpl: typeof fetch = async (input, init) => {
-      calls.push({
-        url: String(input),
-        method: init?.method ?? "GET",
-        body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
-      const res = responses.shift();
-      if (!res) throw new Error("unexpected fetch");
-      return res;
     };
 
     const { outputs, originalCalled } = await collectRunAndWait(fetchImpl, {
@@ -94,6 +107,15 @@ describe("platform MCP run_and_wait wrapper", () => {
         status: "success",
         result: { ok: true },
         done: true,
+        documents: [
+          {
+            id: "doc_1",
+            uri: "document://doc_1",
+            name: "report.html",
+            mime: "text/html",
+            size: 12,
+          },
+        ],
       },
     ]);
     expect(calls).toMatchObject([
@@ -103,6 +125,10 @@ describe("platform MCP run_and_wait wrapper", () => {
         body: { input: { topic: "x" } },
       },
       { url: "https://test.local/api/runs/run_1?wait=55", method: "GET" },
+      {
+        url: "https://test.local/api/documents?run_id=run_1&purpose=agent_output&limit=100",
+        method: "GET",
+      },
     ]);
   });
 

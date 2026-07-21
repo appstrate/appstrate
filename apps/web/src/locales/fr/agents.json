@@ -126,6 +126,7 @@
   "run.draft": "brouillon",
   "run.versionModified": "+ modifications",
   "run.tabInfo": "Informations",
+  "run.tabDocuments": "Documents",
   "run.tabManifest": "Manifest",
   "run.tabPrompt": "Prompt",
   "run.emptyUsage": "Aucune donnée d'utilisation",

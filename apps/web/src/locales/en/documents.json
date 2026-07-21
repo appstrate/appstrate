@@ -1,0 +1,20 @@
+{
+  "page.title": "Documents",
+  "page.empty": "No documents",
+  "page.emptyHint": "Files uploaded in chat and produced by your agents will appear here.",
+  "page.loadMore": "Load more",
+  "filter.all": "All",
+  "filter.agent_output": "Agent outputs",
+  "filter.user_upload": "Uploads",
+  "run.inputs": "Inputs",
+  "run.outputs": "Outputs",
+  "run.empty": "No documents",
+  "run.emptyHint": "This run has no uploaded or produced files.",
+  "row.download": "Download",
+  "row.delete": "Delete",
+  "row.run": "Run",
+  "row.openRun": "Open the run page",
+  "delete.title": "Delete document",
+  "delete.description": "Delete “{{name}}”? This cannot be undone.",
+  "delete.success": "Document deleted."
+}

@@ -25,20 +25,79 @@
  */
 
 import * as React from "react";
-import { AlertTriangleIcon, CheckIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  Loader2Icon,
+} from "lucide-react";
 import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
 import { useLiveElapsedMs } from "./use-elapsed.ts";
+import { useChatHeaders } from "./runtime-context.ts";
 import {
   buildRunPageHref,
+  documentContentHref,
   isTerminalStatus,
+  mergeRunDocuments,
+  publishedDocumentsFromLogs,
   terminalRunLineText,
   visibleLogEntries,
+  type ChatRunDocument,
   type RunStatus,
 } from "./run-events.ts";
 import type { ToolPhase } from "./tool-result.ts";
+
+/**
+ * Download a document via an authenticated blob fetch. A bare anchor cannot
+ * carry the `X-Org-Id` / `X-Application-Id` scoping headers the content route
+ * requires, so mirror the run-log fetch: forwarded headers + cookie session,
+ * following the `307` transparently.
+ */
+async function downloadChatDocument(
+  doc: ChatRunDocument,
+  headers: Record<string, string>,
+): Promise<void> {
+  const res = await fetch(documentContentHref(doc.id), { headers, credentials: "include" });
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = doc.name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** Row of downloadable document chips surfaced under a run card. */
+function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
+  const getHeaders = useChatHeaders();
+  if (documents.length === 0) return null;
+  return (
+    <div className="pointer-events-auto flex flex-wrap gap-1.5 px-3 pb-2">
+      {documents.map((doc) => (
+        <button
+          key={doc.id}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            void downloadChatDocument(doc, getHeaders?.() ?? {});
+          }}
+          title={doc.name}
+          className="border-border bg-muted/40 hover:bg-muted text-foreground flex max-w-[16rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+        >
+          <DownloadIcon className="text-muted-foreground size-3 shrink-0" />
+          <span className="truncate">{doc.name}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const STATUS_TONE: Record<RunStatus, string> = {
   pending: "text-muted-foreground",
@@ -78,6 +137,7 @@ export function ChatRunProgressCard({
   agentLabel,
   runHref,
   initialPackageId,
+  initialDocuments,
   phase,
   errorText,
   modalTitle,
@@ -88,6 +148,8 @@ export function ChatRunProgressCard({
   agentLabel?: string;
   runHref?: string;
   initialPackageId?: string;
+  /** Documents from the persisted tool result — survive reload; merged with live ones. */
+  initialDocuments?: ChatRunDocument[];
   phase: ToolPhase;
   /** Launch-failure message shown on line 2 when the tool errored without a run id. */
   errorText?: string;
@@ -98,6 +160,13 @@ export function ChatRunProgressCard({
     runId,
     initialStatus,
     initialPackageId,
+  );
+
+  // Documents: the persisted tool-result list (reload-safe) merged with any
+  // that arrive live over the log stream (`document.published` frames).
+  const documents = React.useMemo(
+    () => mergeRunDocuments(initialDocuments ?? [], publishedDocumentsFromLogs(logs)),
+    [initialDocuments, logs],
   );
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
@@ -190,6 +259,12 @@ export function ChatRunProgressCard({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Downloadable document chips (z-10 so they sit above the full-card click
+          target and stay individually clickable). */}
+      <div className="relative z-10">
+        <DocumentChips documents={documents} />
       </div>
 
       {open ? (

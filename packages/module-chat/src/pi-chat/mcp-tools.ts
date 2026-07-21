@@ -16,7 +16,7 @@
  * behaviour the `ai-sdk` path gets from `wrapRunAndWaitTool`.
  */
 
-import { runAndWaitSteps } from "@appstrate/core/run-and-wait-client";
+import { runAndWaitStepsWithDocuments } from "@appstrate/core/run-and-wait-client";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { Type, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
@@ -224,7 +224,7 @@ function makeRunAndWaitExtension(
         let finalPayload: Record<string, unknown> = {
           error: "run_and_wait produced no result",
         };
-        for await (const step of runAndWaitSteps(params, {
+        for await (const step of runAndWaitStepsWithDocuments(params, {
           origin: ctx.origin,
           headers: ctx.headers,
           fetch,

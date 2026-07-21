@@ -16,6 +16,15 @@ export interface RunAndWaitStep {
   isError?: boolean;
 }
 
+/** A published run document, projected for the tool result the model reads. */
+export interface RunAndWaitDocument {
+  id: string;
+  uri: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
 export interface RunAndWaitLaunch {
   runId: string;
   launchRecord: Record<string, unknown>;
@@ -350,4 +359,68 @@ export async function* runAndWaitSteps(
   }
   yield { payload: launch.launch.preliminary };
   yield await waitForRunAndWaitCompletion(launch.launch, opts);
+}
+
+/**
+ * List the agent-output documents a run published, projected to the `{ id, uri,
+ * name, mime, size }` shape the tool result embeds. Best-effort: any failure
+ * (network, non-2xx, malformed body) yields an empty list — a missing document
+ * list must never turn a successful run into a tool error.
+ */
+export async function fetchRunDocuments(
+  runId: string,
+  opts: RunAndWaitClientOptions,
+): Promise<RunAndWaitDocument[]> {
+  try {
+    const url = apiUrl(
+      opts.origin,
+      `/api/documents?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=100`,
+    );
+    const res = await opts.fetch(url, { method: "GET", headers: new Headers(opts.headers) });
+    if (!res.ok) return [];
+    const data = asRecord(await readJsonResponse(res))?.data;
+    if (!Array.isArray(data)) return [];
+    const out: RunAndWaitDocument[] = [];
+    for (const raw of data) {
+      const r = asRecord(raw);
+      const id = asString(r?.id);
+      const uri = asString(r?.uri);
+      const name = asString(r?.name);
+      if (!id || !uri || !name) continue;
+      out.push({
+        id,
+        uri,
+        name,
+        mime: asString(r?.mime) ?? "application/octet-stream",
+        size: typeof r?.size === "number" ? r.size : 0,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Like {@link runAndWaitSteps}, but enriches the FINAL (terminal) step with the
+ * run's published `documents` so the model sees `{ uri, name, … }` it can chain
+ * into a follow-up run (D6). The extra fetch runs only once the run is terminal
+ * and only when a run id exists; a run that published nothing keeps the payload
+ * document-free. Used by the chat run_and_wait paths (pi + ai-sdk).
+ */
+export async function* runAndWaitStepsWithDocuments(
+  rawArgs: unknown,
+  opts: RunAndWaitClientOptions,
+): AsyncGenerator<RunAndWaitStep> {
+  for await (const step of runAndWaitSteps(rawArgs, opts)) {
+    const runId = asString(step.payload.id);
+    if (step.payload.done === true && runId) {
+      const documents = await fetchRunDocuments(runId, opts);
+      if (documents.length > 0) {
+        yield { ...step, payload: { ...step.payload, documents } };
+        continue;
+      }
+    }
+    yield step;
+  }
 }

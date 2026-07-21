@@ -39,6 +39,7 @@ import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import {
   buildRunPageHref,
   extractAgentLabel,
+  extractRunDocuments,
   extractRunId,
   extractRunPackageId,
   extractRunStatus,
@@ -276,6 +277,7 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
       agentLabel={agentLabel}
       runHref={runId ? buildRunPageHref(packageId, runId) : undefined}
       initialPackageId={packageId}
+      initialDocuments={extractRunDocuments(props.result)}
       phase={phase}
       errorText={phase === "error" ? extractErrorMessage(unwrapped) : undefined}
       modalTitle={modalTitle}

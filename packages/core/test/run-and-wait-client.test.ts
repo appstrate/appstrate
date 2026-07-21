@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, test } from "bun:test";
-import { runAndWaitSteps } from "../src/run-and-wait-client.ts";
+import {
+  fetchRunDocuments,
+  runAndWaitSteps,
+  runAndWaitStepsWithDocuments,
+} from "../src/run-and-wait-client.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -198,6 +202,96 @@ describe("run_and_wait client", () => {
       "https://test.local/api/agents/%40acme/writer/run",
       "https://test.local/api/runs/run_1?wait=0",
     ]);
+  });
+
+  test("enriches the terminal step with the run's published documents", async () => {
+    const fetchImpl = fakeFetch(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/run")) {
+        return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" });
+      }
+      if (url.includes("/api/documents")) {
+        return jsonResponse({
+          object: "list",
+          data: [
+            {
+              id: "doc_1",
+              uri: "document://doc_1",
+              name: "report.html",
+              mime: "text/html",
+              size: 2048,
+              purpose: "agent_output",
+            },
+          ],
+          hasMore: false,
+        });
+      }
+      // GET /api/runs/run_1?wait=…
+      return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "success" });
+    });
+
+    const steps: Record<string, unknown>[] = [];
+    for await (const step of runAndWaitStepsWithDocuments(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      { origin: "https://test.local", headers: { authorization: "Bearer tok" }, fetch: fetchImpl },
+    )) {
+      steps.push(step.payload);
+    }
+
+    expect(steps[0]).toEqual({
+      id: "run_1",
+      packageId: "@acme/writer",
+      status: "pending",
+      done: false,
+    });
+    expect(steps[1]).toEqual({
+      id: "run_1",
+      packageId: "@acme/writer",
+      status: "success",
+      done: true,
+      documents: [
+        {
+          id: "doc_1",
+          uri: "document://doc_1",
+          name: "report.html",
+          mime: "text/html",
+          size: 2048,
+        },
+      ],
+    });
+  });
+
+  test("leaves the payload document-free when the run published none", async () => {
+    const fetchImpl = fakeFetch(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/run")) {
+        return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" });
+      }
+      if (url.includes("/api/documents")) {
+        return jsonResponse({ object: "list", data: [], hasMore: false });
+      }
+      return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "success" });
+    });
+
+    const steps: Record<string, unknown>[] = [];
+    for await (const step of runAndWaitStepsWithDocuments(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    )) {
+      steps.push(step.payload);
+    }
+    expect(steps[1]).not.toHaveProperty("documents");
+  });
+
+  test("fetchRunDocuments swallows a non-2xx response", async () => {
+    const fetchImpl = fakeFetch(async () => jsonResponse({ error: "nope" }, 500));
+    await expect(
+      fetchRunDocuments("run_1", {
+        origin: "https://test.local",
+        headers: {},
+        fetch: fetchImpl,
+      }),
+    ).resolves.toEqual([]);
   });
 
   test("honors abort before dispatching", async () => {
