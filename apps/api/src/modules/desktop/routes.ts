@@ -1,0 +1,352 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
+
+/**
+ * Desktop bridge routes — full paths, mounted at root by the module
+ * loader.
+ *
+ *   - `GET  /api/desktop/bridge` — WebSocket upgrade. The desktop app
+ *     connects with the Better Auth session cookie of the webapp pane
+ *     it embeds; the standard auth middleware resolves the user before
+ *     this handler runs, and that user is what we register.
+ *   - `GET  /api/desktop/me/status` — is the caller's desktop connected.
+ *   - `POST /api/desktop/me/command` — drive one's own desktop (smoke
+ *     tests, CLI). Not on the agent execution path; no substitution.
+ *   - `POST /internal/desktop-command` — sidecar-only, backs the
+ *     `desktop_browser` runtime tool. Run-token auth. Supports
+ *     credential substitution: `integrationId` + `substituteParams`
+ *     resolve the run's connected credentials for that integration and
+ *     replace `{{field}}` placeholders inside `params` server-side, so
+ *     secret values never enter the agent's context. Every reply for a
+ *     run that used substitution is scrubbed of the substituted values
+ *     (see `secret-scrub.ts`).
+ *
+ * The `/api/desktop/*` routes are user-scoped and org-agnostic: a
+ * desktop belongs to a person, not to an organization. They are
+ * whitelisted in core `skipOrgContext` (`lib/auth-pipeline.ts`) — a
+ * path-based allowance that is harmless when this module is disabled
+ * (the paths then 404 at the catch-all).
+ */
+
+import { Hono } from "hono";
+import type { AppEnv } from "../../types/index.ts";
+import { logger } from "../../lib/logger.ts";
+import { getEnv } from "@appstrate/env";
+import { asRecord } from "@appstrate/core/safe-json";
+import {
+  ApiError,
+  unauthorized,
+  forbidden,
+  notFound,
+  invalidRequest,
+  badGateway,
+  serviceUnavailable,
+  internalError,
+} from "../../lib/errors.ts";
+import { upgradeWebSocket } from "../../lib/websocket.ts";
+import { rateLimit, rateLimitByBearer } from "../../middleware/rate-limit.ts";
+import { verifyRunToken } from "../../routes/internal.ts";
+import { getPackage } from "../../services/package-catalog.ts";
+import { actorFromIds } from "../../lib/actor.ts";
+import { resolveLiveIntegrationCredentials } from "../../services/integration-credentials-resolver.ts";
+import {
+  registerClient,
+  unregisterClient,
+  sendCommand,
+  handleClientReply,
+  DesktopNotConnectedError,
+  DesktopCommandError,
+  DesktopCommandTimeoutError,
+  isConnected,
+} from "./registry.ts";
+import { registerRunSecrets, scrubRunSecrets } from "./secret-scrub.ts";
+
+/**
+ * Translate a registry rejection into the platform's RFC 9457 error
+ * shape. Timeout gets a 504 (the desktop is connected but silent),
+ * absence a 503, an error reported by the desktop itself a 502.
+ *
+ * `scrub` cleans desktop-reported error messages: a page script that
+ * throws with the just-filled value in its message must not carry that
+ * value back into the agent's context.
+ */
+export function desktopErrorToApiError(err: unknown, scrub?: (text: string) => string): ApiError {
+  if (err instanceof DesktopNotConnectedError) {
+    return serviceUnavailable("No Appstrate Desktop connected for this user");
+  }
+  if (err instanceof DesktopCommandTimeoutError) {
+    return new ApiError({
+      status: 504,
+      code: "desktop_command_timeout",
+      title: "Gateway Timeout",
+      detail: err.message,
+    });
+  }
+  if (err instanceof DesktopCommandError) {
+    return badGateway(scrub ? scrub(err.message) : err.message);
+  }
+  return err instanceof ApiError ? err : internalError();
+}
+
+/**
+ * Reject a cookie-authenticated WebSocket upgrade coming from a page we
+ * don't trust — the WebSocket equivalent of CSRF (CSWSH).
+ *
+ * The handshake is a plain GET that the browser sends with the user's
+ * cookies, and neither CORS nor the SPA's CSRF story applies to it. A
+ * page on evil.test could therefore open `ws://<instance>/api/desktop/bridge`
+ * in a logged-in victim's browser and be registered as *their* desktop:
+ * the registry displaces the real client, so the attacker both cuts the
+ * user off and receives every command the platform dispatches to them.
+ *
+ * Two-part rule, matching who legitimately connects:
+ *   - Origin present → it is a browser (the header is browser-controlled
+ *     and unforgeable from script), so it must be a trusted origin.
+ *   - Origin absent → a native client (the Electron bridge sends only
+ *     `Cookie`, per `apps/desktop/src/bridge/client.ts`). Nothing to
+ *     check: the attack this guards against is browser-borne, and a
+ *     non-browser attacker able to set arbitrary headers would need the
+ *     session cookie anyway.
+ *
+ * `SameSite=lax` on the session cookie already stops modern browsers
+ * from attaching it here (a WS handshake is not a top-level navigation).
+ * This is the belt to that suspenders — cheap, and the failure mode it
+ * covers is a silent session takeover.
+ */
+export function isTrustedUpgradeOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  const env = getEnv();
+  const allowed = [...env.TRUSTED_ORIGINS, env.APP_URL];
+  return allowed.some((candidate) => {
+    try {
+      return new URL(candidate).origin === new URL(origin).origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Replace `{{field}}` placeholders in every string of `value` with the
+ * matching credential field. Unknown placeholders are left intact
+ * (spec-correct fail-safe — a typo'd key surfaces as a literal
+ * `{{typo}}` in the page instead of silently becoming ""). Walks own
+ * enumerable string-keyed properties and rebuilds plain objects.
+ */
+const PLACEHOLDER = /\{\{([\w.-]+)\}\}/g;
+
+export function substituteInValue(value: unknown, fields: Record<string, string>): unknown {
+  if (typeof value === "string") {
+    return value.replace(PLACEHOLDER, (match, key: string) =>
+      key in fields ? fields[key]! : match,
+    );
+  }
+  if (Array.isArray(value)) return value.map((v) => substituteInValue(v, fields));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = substituteInValue(v, fields);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Same fail-closed gate as the core `/internal/integration-credentials`
+ * endpoints (`routes/internal.ts`): the running agent must DECLARE the
+ * integration as a dependency before its run token can touch that
+ * integration's credentials. A leaked run token must not be able to
+ * substitute (and then exfiltrate via the page) arbitrary secrets
+ * across the org.
+ */
+async function assertAgentDeclaresIntegration(
+  integrationId: string,
+  run: { packageId: string; orgId: string },
+  runId: string,
+): Promise<void> {
+  const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+  if (!agent) throw notFound("Agent not found");
+  const deps = asRecord(asRecord(agent.manifest).dependencies);
+  const integrations = asRecord(deps.integrations);
+  if (!(integrationId in integrations)) {
+    logger.warn("Desktop substitution rejected — integration not declared by agent", {
+      runId,
+      integrationId,
+      agentId: agent.id,
+      module: "desktop",
+    });
+    throw notFound(`Integration '${integrationId}' is not a dependency of the running agent`);
+  }
+}
+
+interface CommandBody {
+  method?: string;
+  params?: unknown;
+  timeoutMs?: number;
+}
+
+function parseCommandBody(raw: unknown): { method: string; params: unknown; timeoutMs?: number } {
+  const body = raw as CommandBody;
+  if (!body || typeof body !== "object") throw invalidRequest("Invalid JSON body");
+  if (!body.method || typeof body.method !== "string") {
+    throw invalidRequest("Missing or invalid `method`", "method");
+  }
+  return {
+    method: body.method,
+    params: body.params ?? {},
+    ...(body.timeoutMs !== undefined ? { timeoutMs: body.timeoutMs } : {}),
+  };
+}
+
+export function createDesktopRouter(): Hono<AppEnv> {
+  const router = new Hono<AppEnv>();
+
+  router.get(
+    "/api/desktop/bridge",
+    async (c, next) => {
+      const origin = c.req.header("Origin");
+      if (!isTrustedUpgradeOrigin(origin)) {
+        logger.warn("Desktop bridge: rejected upgrade from untrusted origin", {
+          module: "desktop",
+          origin,
+        });
+        throw forbidden("Origin not allowed for the desktop bridge");
+      }
+      await next();
+    },
+    upgradeWebSocket((c) => {
+      // Auth has already run via the platform middleware chain — if
+      // `user` is missing we wouldn't be here. Capture the id now so the
+      // callbacks below can register / unregister without re-reading `c`
+      // (the context object's lifetime ends at upgrade time).
+      const userId = c.get("user")?.id;
+      if (!userId) {
+        // Defense in depth — the auth middleware rejects unauthenticated
+        // upgrades long before we reach this point.
+        return { onMessage: (): void => {} };
+      }
+      let registered: { userId: string; send(payload: string): void; close(): void } | null = null;
+
+      return {
+        onOpen: (_evt, ws): void => {
+          registered = {
+            userId,
+            send: (payload): void => ws.send(payload),
+            close: (): void => ws.close(),
+          };
+          registerClient(registered);
+        },
+        onMessage: (evt): void => {
+          let parsed: { id?: string; result?: unknown; error?: { message?: string } };
+          try {
+            const raw = typeof evt.data === "string" ? evt.data : evt.data.toString();
+            parsed = JSON.parse(raw);
+          } catch {
+            logger.debug("Desktop bridge: dropped malformed message", { module: "desktop" });
+            return;
+          }
+          handleClientReply(parsed);
+        },
+        onClose: (): void => {
+          if (registered) unregisterClient(userId, registered);
+        },
+        onError: (): void => {
+          if (registered) unregisterClient(userId, registered);
+        },
+      };
+    }),
+  );
+
+  router.get("/api/desktop/me/status", (c) => {
+    const user = c.get("user");
+    if (!user) throw unauthorized("Authentication required");
+    return c.json({ connected: isConnected(user.id) });
+  });
+
+  router.post("/api/desktop/me/command", rateLimit(120), async (c) => {
+    const user = c.get("user");
+    if (!user) throw unauthorized("Authentication required");
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      throw invalidRequest("Invalid JSON body");
+    }
+    const body = parseCommandBody(raw);
+    try {
+      const result = await sendCommand(user.id, body.method, body.params, {
+        timeoutMs: body.timeoutMs,
+      });
+      return c.json({ result });
+    } catch (err) {
+      throw desktopErrorToApiError(err);
+    }
+  });
+
+  router.post("/internal/desktop-command", rateLimitByBearer(200), async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    if (!run.userId) {
+      throw forbidden("Run has no owning user — the desktop bridge requires a user-owned run");
+    }
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      throw invalidRequest("Invalid JSON body");
+    }
+    const body = parseCommandBody(raw);
+    const extras = raw as { integrationId?: string; substituteParams?: boolean };
+
+    let dispatchedParams: unknown = body.params;
+
+    // Credential substitution — resolve the run's connected credentials
+    // for the named integration and swap `{{field}}` placeholders out of
+    // `params` before dispatching. The agent's LLM only ever writes
+    // templates; the resolved values go straight to the user's desktop.
+    if (extras.substituteParams) {
+      if (!extras.integrationId || typeof extras.integrationId !== "string") {
+        throw invalidRequest(
+          "`integrationId` is required when `substituteParams` is set",
+          "integrationId",
+        );
+      }
+      await assertAgentDeclaresIntegration(extras.integrationId, run, runId);
+      const wire = await resolveLiveIntegrationCredentials(extras.integrationId, {
+        runId,
+        orgId: run.orgId,
+        applicationId: run.applicationId,
+        agentPackageId: run.packageId,
+        actor: actorFromIds(run.userId, run.endUserId),
+        resolvedConnections: run.resolvedConnections,
+        resolvedIntegrationVersions: run.resolvedIntegrationVersions,
+      });
+      const fields: Record<string, string> = {};
+      for (const auth of wire.auths) Object.assign(fields, auth.fields);
+      if (Object.keys(fields).length === 0) {
+        throw notFound(`No credentials available for integration '${extras.integrationId}'`);
+      }
+      dispatchedParams = substituteInValue(body.params, fields);
+      // From now on, every reply for this run is scrubbed of these
+      // values — including replies to later commands (an agent could
+      // fill a password and read the field back with a second call).
+      registerRunSecrets(runId, Object.values(fields));
+      logger.info("Desktop command credential substitution", {
+        runId,
+        integrationId: extras.integrationId,
+        fieldCount: Object.keys(fields).length,
+        module: "desktop",
+      });
+    }
+
+    const scrub = (text: string): string => scrubRunSecrets(runId, text) as string;
+    try {
+      const result = await sendCommand(run.userId, body.method, dispatchedParams, {
+        timeoutMs: body.timeoutMs,
+      });
+      return c.json({ result: scrubRunSecrets(runId, result) });
+    } catch (err) {
+      throw desktopErrorToApiError(err, scrub);
+    }
+  });
+
+  return router;
+}

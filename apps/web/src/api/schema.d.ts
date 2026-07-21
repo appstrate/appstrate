@@ -4339,7 +4339,7 @@ export interface paths {
         put?: never;
         /**
          * Dispatch a browser command to the run owner's desktop companion
-         * @description Backs the agent-facing `desktop_browser` MCP tool. Forwards a JSON-RPC command to the Appstrate Desktop client connected for the run's owning user and returns the correlated reply inline. Container-to-host only. Auth via Bearer run token. A run with no owning user (remote or end-user triggered) has no desktop to drive and gets a 403.
+         * @description Backs the agent-facing `desktop_browser` MCP tool. Forwards a JSON-RPC command to the Appstrate Desktop client connected for the run's owning user and returns the correlated reply inline. Container-to-host only. Auth via Bearer run token. A run with no owning user (remote or end-user triggered) has no desktop to drive and gets a 403. Supports server-side credential substitution (`integrationId` + `substituteParams`): `{{field}}` placeholders in `params` are resolved from the run's connected credentials for the declared integration, and every reply for the run is scrubbed of the substituted values.
          */
         post: operations["dispatchDesktopCommand"];
         delete?: never;
@@ -4943,6 +4943,22 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        /** @description Agent-path variant of DesktopCommandRequest: adds server-side credential substitution. With `integrationId` + `substituteParams`, `{{field}}` placeholders inside `params` strings are replaced by the run's connected credential fields for that integration before dispatch — the values never appear in the agent's context, and every reply for the run is scrubbed of them afterwards. */
+        DesktopAgentCommandRequest: {
+            /**
+             * @description Browser primitive to invoke.
+             * @enum {string}
+             */
+            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector";
+            /** @description Method-specific arguments. Strings may contain `{{field}}` placeholders when substitution is enabled; unknown placeholders are left intact. */
+            params?: Record<string, never>;
+            /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */
+            timeoutMs?: number;
+            /** @description Integration package id (`@scope/name`) whose connected credential fields fill the placeholders. Must be declared in the running agent's dependencies. */
+            integrationId?: string;
+            /** @description Enable `{{field}}` substitution from `integrationId`'s credentials. */
+            substituteParams?: boolean;
+        };
         /** @description A browser primitive to execute on the user's local Appstrate Desktop client. */
         DesktopCommandRequest: {
             /**
@@ -4952,10 +4968,10 @@ export interface components {
             method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector";
             /** @description Method-specific arguments (e.g. `{ url }`, `{ selector, value }`). */
             params?: Record<string, never>;
-            /** @description Dispatch timeout in ms (1s–120s, default 30s). 504 when it elapses. */
+            /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */
             timeoutMs?: number;
         };
-        /** @description The desktop client's reply, forwarded verbatim. */
+        /** @description The desktop client's reply, forwarded verbatim (scrubbed on the agent path). */
         DesktopCommandResponse: {
             /** @description Method-specific result — e.g. `{ url }` for navigate, `{ dataUrl }` for screenshot, the evaluated value for evaluate. */
             result: unknown;
@@ -9620,6 +9636,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
             /** @description The desktop reported an error executing the command. */
             502: {
                 headers: {
@@ -19686,17 +19703,20 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "method": "browser.navigate",
+                 *       "method": "browser.fill",
                  *       "params": {
-                 *         "url": "https://example.com"
-                 *       }
+                 *         "selector": "#password",
+                 *         "value": "{{password}}"
+                 *       },
+                 *       "integrationId": "@myorg/somesite",
+                 *       "substituteParams": true
                  *     }
                  */
-                "application/json": components["schemas"]["DesktopCommandRequest"];
+                "application/json": components["schemas"]["DesktopAgentCommandRequest"];
             };
         };
         responses: {
-            /** @description The desktop's reply to the command. */
+            /** @description The desktop's reply to the command (scrubbed of substituted values). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -19705,7 +19725,7 @@ export interface operations {
                     /**
                      * @example {
                      *       "result": {
-                     *         "url": "https://example.com"
+                     *         "filled": true
                      *       }
                      *     }
                      */
@@ -19715,6 +19735,8 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
             /** @description The desktop reported an error executing the command. */
             502: {

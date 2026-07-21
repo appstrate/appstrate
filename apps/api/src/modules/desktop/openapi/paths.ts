@@ -71,6 +71,66 @@ export const desktopPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "502": {
+          description: "The desktop reported an error executing the command.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "503": {
+          description: "No desktop companion is connected for this user.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "504": {
+          description: "The desktop did not reply before the timeout elapsed.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+      },
+    },
+  },
+  "/internal/desktop-command": {
+    post: {
+      operationId: "dispatchDesktopCommand",
+      tags: ["Desktop"],
+      summary: "Dispatch a browser command to the run owner's desktop companion",
+      description:
+        "Backs the agent-facing `desktop_browser` MCP tool. Forwards a JSON-RPC command to the Appstrate Desktop client connected for the run's owning user and returns the correlated reply inline. Container-to-host only. Auth via Bearer run token. A run with no owning user (remote or end-user triggered) has no desktop to drive and gets a 403. Supports server-side credential substitution (`integrationId` + `substituteParams`): `{{field}}` placeholders in `params` are resolved from the run's connected credentials for the declared integration, and every reply for the run is scrubbed of the substituted values.",
+      security: [{ bearerExecToken: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/DesktopAgentCommandRequest" },
+            example: {
+              method: "browser.fill",
+              params: { selector: "#password", value: "{{password}}" },
+              integrationId: "@myorg/somesite",
+              substituteParams: true,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The desktop's reply to the command (scrubbed of substituted values).",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/DesktopCommandResponse" },
+              example: { result: { filled: true } },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
         "502": {
           description: "The desktop reported an error executing the command.",
           content: {

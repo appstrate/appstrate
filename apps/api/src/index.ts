@@ -35,7 +35,7 @@ import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads
 import healthRouter from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
-import { createDesktopRouter, desktopBunWebSocketHandler } from "./routes/desktop.ts";
+import { bunWebSocketHandler } from "./lib/websocket.ts";
 import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import { createAuthBootstrapRouter } from "./routes/auth-bootstrap.ts";
@@ -338,10 +338,6 @@ app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/integrations", createIntegrationsRouter());
 app.route("/api/credential-proxy", createCredentialProxyRouter());
 app.route("/api/llm-proxy", createLlmProxyRouter());
-// Desktop bridge — WebSocket upgrade + user-scoped status/command surface
-// (see apps/desktop/README.md). The WS handler is exported separately and
-// passed to Bun.serve via the `websocket` field on the default export.
-app.route("/api/desktop", createDesktopRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);
@@ -385,13 +381,13 @@ app.get("/*", async (c) => {
 });
 
 // Start server — bind 0.0.0.0 so both IPv4 and IPv6 clients can connect.
-// `websocket` enables the Bun-native WS path that `upgradeWebSocket()` in
-// `routes/desktop.ts` hooks into for the desktop bridge.
+// `websocket` enables the Bun-native WS path paired with `upgradeWebSocket`
+// in `lib/websocket.ts` (used by WS-mounting modules, e.g. `desktop`).
 export default {
   port: env.PORT,
   hostname: "0.0.0.0",
   fetch: app.fetch,
-  websocket: desktopBunWebSocketHandler,
+  websocket: bunWebSocketHandler,
   idleTimeout: 255,
 };
 

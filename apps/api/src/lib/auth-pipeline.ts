@@ -476,10 +476,11 @@ export function skipOrgContext(path: string): boolean {
   // `DELETE /api/me/connections/:id` — destructive global delete, derives
   // applicationId from the row itself. Same rationale as the list above.
   if (/^\/api\/me\/connections\/[^/]+\/?$/.test(path)) return true;
-  // Desktop bridge — a desktop companion belongs to a person, not to an
-  // organization: the WS upgrade and the `/me/*` surface are keyed by
-  // `userId` alone. Requiring `X-Org-Id` would force the Electron client
-  // to pick an org it has no reason to know about.
+  // Desktop bridge (the `desktop` module) — a desktop companion belongs
+  // to a person, not to an organization: the WS upgrade and the `/me/*`
+  // surface are keyed by `userId` alone. Requiring `X-Org-Id` would force
+  // the Electron client to pick an org it has no reason to know about.
+  // Path-based, so harmless when the module is disabled (404 either way).
   if (path === "/api/desktop/bridge") return true;
   if (path.startsWith("/api/desktop/me/")) return true;
   return false;

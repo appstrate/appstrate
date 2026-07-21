@@ -133,61 +133,6 @@ export const internalPaths = {
       },
     },
   },
-  "/internal/desktop-command": {
-    post: {
-      operationId: "dispatchDesktopCommand",
-      tags: ["Internal"],
-      summary: "Dispatch a browser command to the run owner's desktop companion",
-      description:
-        "Backs the agent-facing `desktop_browser` MCP tool. Forwards a JSON-RPC command to the Appstrate Desktop client connected for the run's owning user and returns the correlated reply inline. Container-to-host only. Auth via Bearer run token. A run with no owning user (remote or end-user triggered) has no desktop to drive and gets a 403.",
-      security: [{ bearerExecToken: [] }],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/DesktopCommandRequest" },
-            example: {
-              method: "browser.navigate",
-              params: { url: "https://example.com" },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "The desktop's reply to the command.",
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/DesktopCommandResponse" },
-              example: { result: { url: "https://example.com" } },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
-        "502": {
-          description: "The desktop reported an error executing the command.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-        "503": {
-          description: "No desktop companion is connected for this user.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-        "504": {
-          description: "The desktop did not reply before the timeout elapsed.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-      },
-    },
-  },
   "/internal/oauth-token/{credentialId}": {
     get: {
       operationId: "getOAuthModelProviderToken",

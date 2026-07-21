@@ -12,8 +12,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { isTrustedUpgradeOrigin } from "../../src/routes/desktop.ts";
 import { getEnv } from "@appstrate/env";
+import { isTrustedUpgradeOrigin, substituteInValue } from "../../routes.ts";
 
 describe("isTrustedUpgradeOrigin", () => {
   it("allows a request with no Origin (the Electron client sends none)", () => {
@@ -36,5 +36,29 @@ describe("isTrustedUpgradeOrigin", () => {
 
   it("rejects a malformed Origin rather than failing open", () => {
     expect(isTrustedUpgradeOrigin("not-a-url")).toBe(false);
+  });
+});
+
+describe("substituteInValue", () => {
+  const FIELDS = { password: "S3cret!Pass", email: "user@example.com" };
+
+  it("replaces placeholders in nested strings", () => {
+    const out = substituteInValue(
+      { selector: "#pw", value: "{{password}}", meta: ["{{email}}", 42, null] },
+      FIELDS,
+    ) as { selector: string; value: string; meta: unknown[] };
+    expect(out.value).toBe("S3cret!Pass");
+    expect(out.meta).toEqual(["user@example.com", 42, null]);
+    expect(out.selector).toBe("#pw");
+  });
+
+  it("leaves unknown placeholders intact (fail-safe, visible typo)", () => {
+    expect(substituteInValue("{{passwrod}}", FIELDS)).toBe("{{passwrod}}");
+  });
+
+  it("substitutes inside larger strings", () => {
+    expect(substituteInValue("login('{{email}}','{{password}}')", FIELDS)).toBe(
+      "login('user@example.com','S3cret!Pass')",
+    );
   });
 });

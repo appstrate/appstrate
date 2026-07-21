@@ -36,7 +36,12 @@ export const desktopBrowserTool = defineTool({
     "`browser.screenshot` {} — PNG data URL of the visible page; " +
     "`browser.waitForSelector` {selector, timeoutMs?} — poll until the selector exists. " +
     "Returns 503 when no desktop is connected for this user. Prefer reading a page's own API " +
-    "(extract its token via `browser.evaluate`, then call the REST endpoint) over clicking through pages.",
+    "(extract its token via `browser.evaluate`, then call the REST endpoint) over clicking through pages. " +
+    "Credential substitution: set `integrationId` (an integration declared by this agent) + " +
+    "`substituteParams: true`, and every `{{field}}` placeholder inside `params` strings is replaced " +
+    "server-side with the connected credential's field value AFTER your call leaves this context — " +
+    "write `{{password}}`, never ask for the real value. You cannot read substituted values back: " +
+    "every reply of this run is scrubbed of them.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -66,6 +71,18 @@ export const desktopBrowserTool = defineTool({
         description:
           "Optional per-command timeout the platform enforces on the desktop dispatch " +
           "(1s–120s, default 30s). Returns 504 if the desktop doesn't reply in time.",
+      },
+      integrationId: {
+        type: "string",
+        description:
+          "Integration package id (`@scope/name`) whose connected credential fields fill " +
+          "`{{field}}` placeholders in `params`. Must be declared in this agent's dependencies.",
+      },
+      substituteParams: {
+        type: "boolean",
+        description:
+          "Enable server-side `{{field}}` substitution from `integrationId`'s connected " +
+          "credentials. The real values never appear in your context.",
       },
     },
   },

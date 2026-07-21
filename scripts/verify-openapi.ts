@@ -281,15 +281,9 @@ const expectedEndpoints = [
   // Welcome
   "POST /api/welcome/setup",
 
-  // Desktop bridge
-  "GET /api/desktop/bridge",
-  "GET /api/desktop/me/status",
-  "POST /api/desktop/me/command",
-
   // Internal
   "GET /internal/run-history",
   "GET /internal/memories",
-  "POST /internal/desktop-command",
   "GET /internal/oauth-token/{credentialId}",
   "POST /internal/oauth-token/{credentialId}/refresh",
   "GET /internal/mcp-server-bundle/{scope}/{name}",

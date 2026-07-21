@@ -25,7 +25,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { logger } from "../lib/logger.ts";
+import { logger } from "../../lib/logger.ts";
 
 interface RegisteredClient {
   userId: string;
@@ -99,6 +99,16 @@ export function unregisterClient(userId: string, client: RegisteredClient): void
 
 export function isConnected(userId: string): boolean {
   return clients.has(userId);
+}
+
+/**
+ * Close every registered client socket. Called from the module's
+ * `shutdown()` so a graceful platform stop doesn't leave desktop apps
+ * holding half-open sockets that only die at the TCP keepalive.
+ */
+export function closeAllClients(): void {
+  for (const client of clients.values()) client.close();
+  clients.clear();
 }
 
 export async function sendCommand(

@@ -1265,7 +1265,13 @@ function buildSidecarTools(options: MountMcpOptions): {
         DESKTOP_BROWSER_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
     handler: async (rawArgs) => {
-      const args = rawArgs as { method: string; params?: unknown; timeoutMs?: number };
+      const args = rawArgs as {
+        method: string;
+        params?: unknown;
+        timeoutMs?: number;
+        integrationId?: string;
+        substituteParams?: boolean;
+      };
       const url = `${config.platformApiUrl}/internal/desktop-command`;
       let res: Response;
       try {
@@ -1279,6 +1285,10 @@ function buildSidecarTools(options: MountMcpOptions): {
             method: args.method,
             params: args.params ?? {},
             ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}),
+            ...(args.integrationId !== undefined ? { integrationId: args.integrationId } : {}),
+            ...(args.substituteParams !== undefined
+              ? { substituteParams: args.substituteParams }
+              : {}),
           }),
         });
       } catch (err) {

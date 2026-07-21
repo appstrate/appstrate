@@ -45,7 +45,6 @@ import { uploadsPaths } from "./paths/uploads.ts";
 import { credentialProxyPaths } from "./paths/credential-proxy.ts";
 import { llmProxyPaths } from "./paths/llm-proxy.ts";
 import { libraryPaths } from "./paths/library.ts";
-import { desktopPaths } from "./paths/desktop.ts";
 
 const corePaths = {
   ...healthPaths,
@@ -75,7 +74,6 @@ const corePaths = {
   ...credentialProxyPaths,
   ...llmProxyPaths,
   ...libraryPaths,
-  ...desktopPaths,
 };
 
 const components = {

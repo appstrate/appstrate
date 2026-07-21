@@ -38,8 +38,6 @@ import {
   invalidRequest,
   internalError,
 } from "../lib/errors.ts";
-import { sendCommand } from "../services/desktop-registry.ts";
-import { desktopErrorToApiError } from "./desktop.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 import {
   forceRefreshOAuthModelProviderToken,
@@ -57,8 +55,12 @@ import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 /**
  * Verify the run token from the Authorization header.
  * Returns the run data or throws an ApiError.
+ *
+ * Exported for modules that mount their own run-token-authenticated
+ * `/internal/*` routes (e.g. the `desktop` module's
+ * `/internal/desktop-command`) — one verifier, one contract.
  */
-async function verifyRunToken(c: Context): Promise<{
+export async function verifyRunToken(c: Context): Promise<{
   runId: string;
   run: {
     packageId: string;
@@ -261,45 +263,6 @@ export function createInternalRouter() {
         error: getErrorMessage(err),
       });
       throw internalError();
-    }
-  });
-
-  // POST /internal/desktop-command — backs the agent-facing
-  // `desktop_browser` MCP tool. Forwards a JSON-RPC command to the
-  // desktop registry for the run's owning user, awaits the correlated
-  // reply, returns it inline.
-  //
-  // The run's `userId` is the canonical owner: a desktop companion is
-  // tied to a person's machine, so a run with no owning user (remote or
-  // end-user triggered) has no desktop to drive.
-  router.post("/desktop-command", async (c) => {
-    const { runId, run } = await verifyRunToken(c);
-    if (!run.userId) {
-      throw forbidden("Run has no owning user — the desktop bridge requires a user-owned run");
-    }
-    let body: { method?: string; params?: unknown; timeoutMs?: number };
-    try {
-      body = (await c.req.json()) as typeof body;
-    } catch {
-      throw invalidRequest("Invalid JSON body");
-    }
-    if (!body.method || typeof body.method !== "string") {
-      throw invalidRequest("Missing or invalid `method`", "method");
-    }
-
-    logger.info("Desktop command dispatch", {
-      runId,
-      userId: run.userId,
-      method: body.method,
-      module: "desktop",
-    });
-    try {
-      const result = await sendCommand(run.userId, body.method, body.params ?? {}, {
-        timeoutMs: body.timeoutMs,
-      });
-      return c.json({ result });
-    } catch (err) {
-      throw desktopErrorToApiError(err);
     }
   });
 
