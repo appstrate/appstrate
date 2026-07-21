@@ -13,7 +13,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useChatHeaders, type GetHeaders } from "./runtime-context.ts";
-import { fetchSessions, SESSIONS_QUERY_KEY } from "./sessions.ts";
+import { fetchSessions, SESSIONS_QUERY_KEY, type SessionSummary } from "./sessions.ts";
 
 // Re-exported for the app shell: the SSE dispatcher invalidates this key on
 // `chat_session_update` frames, and this module's `"./unread"` entry is the
@@ -22,13 +22,27 @@ export { SESSIONS_QUERY_KEY } from "./sessions.ts";
 
 /** Reconciliation-only refetch — SSE is the primary freshness signal. */
 const SAFETY_NET_REFETCH_MS = 60_000;
+/**
+ * Fast backstop while a turn is generating. The `generating` flip is announced
+ * by a fire-and-forget NOTIFY (realtime.ts) — if that frame is lost (SSE
+ * reconnect window, dropped NOTIFY) the sidebar spinner would otherwise stick
+ * for up to the 60s safety net. Only active while at least one session reports
+ * `generating`, so the idle cost stays the slow interval.
+ */
+const GENERATING_REFETCH_MS = 3_000;
+
+function sessionsRefetchInterval(query: { state: { data?: SessionSummary[] } }): number {
+  return query.state.data?.some((s) => s.generating)
+    ? GENERATING_REFETCH_MS
+    : SAFETY_NET_REFETCH_MS;
+}
 
 export function useSessions() {
   const getHeaders = useChatHeaders();
   return useQuery({
     queryKey: SESSIONS_QUERY_KEY,
     queryFn: () => fetchSessions(getHeaders),
-    refetchInterval: SAFETY_NET_REFETCH_MS,
+    refetchInterval: sessionsRefetchInterval,
     refetchIntervalInBackground: false,
   });
 }
@@ -45,7 +59,7 @@ export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): num
   const { data } = useQuery({
     queryKey: SESSIONS_QUERY_KEY,
     queryFn: () => fetchSessions(getHeaders),
-    refetchInterval: SAFETY_NET_REFETCH_MS,
+    refetchInterval: sessionsRefetchInterval,
     refetchIntervalInBackground: false,
     enabled,
   });

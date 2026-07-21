@@ -43,7 +43,6 @@ import {
   extractRunPackageId,
   extractRunStatus,
   isRunLaunchOp,
-  shouldRenderRunLaunchPanel,
 } from "./run-events.ts";
 import { extractAuthOffer } from "./auth-offer.ts";
 import {
@@ -196,9 +195,13 @@ export function ToolCallCard({
   const border = phase === "error" ? "border-destructive/40" : "";
   return (
     <div className={`bg-card text-card-foreground my-3 w-full rounded-lg border ${border}`}>
+      {/* Fixed h-9 header row: the HTTP badge (taller than the text line) and
+          the duration appear when the result lands — a py-based row would grow
+          by a few px at that moment. Fixed height makes result arrival a 0px
+          layout change. */}
       <button
         type="button"
-        className="hover:bg-muted/40 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm"
+        className="hover:bg-muted/40 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
         onClick={() => setOpen(true)}
       >
         <LeadIcon phase={phase} Icon={Icon} />
@@ -246,6 +249,7 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
     artifact: props.artifact,
   });
   const agentLabel = extractAgentLabel(props.args);
+  const phase = deriveToolPhase(props);
   const modalTitle = (
     <span className="flex items-center gap-2">
       <PlayIcon className="size-4 shrink-0" />
@@ -272,7 +276,8 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
       agentLabel={agentLabel}
       runHref={runId ? buildRunPageHref(packageId, runId) : undefined}
       initialPackageId={packageId}
-      phase={deriveToolPhase(props)}
+      phase={phase}
+      errorText={phase === "error" ? extractErrorMessage(unwrapped) : undefined}
       modalTitle={modalTitle}
       details={details}
     />
@@ -287,26 +292,40 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
   render: (props) => {
     const { args, result } = props;
     const opId = args?.operation_id ?? "";
+    const phase = deriveToolPhase(props);
 
-    // Connect kickoff → render an interactive connect card (button + auto-resume)
-    // once the result carries the connect/auth url. Until then, fall through to
-    // the generic running line.
+    // Connect kickoff → the interactive connect card, mounted from the FIRST
+    // frame (before the result carries the connect/auth url) so the generic row
+    // never swaps into the card mid-stream — a swap changes the block's height
+    // and makes the transcript jump. On failure the card shows the error in
+    // place (same geometry). Only the anomalous success-without-offer shape
+    // falls through to the generic row.
     if (opId === INITIATE_CONNECT_OP) {
       const offer = extractAuthOffer(result);
-      if (offer) {
+      if (offer || phase !== "success") {
         return (
           <OAuthConnectCard
-            authUrl={offer.authUrl}
-            state={offer.state}
+            authUrl={offer?.authUrl}
+            state={offer?.state}
             packageId={args?.path_params?.packageId}
+            errorText={
+              phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined
+            }
           />
         );
       }
     }
 
-    const phase = deriveToolPhase(props);
+    // Run launch (runAgent / runInline) → rich in-chat run progress, mounted for
+    // the tool call's whole life (launch, stream, terminal, and launch failure —
+    // the error renders inside the panel). Never falls back to the generic card:
+    // a component swap would change the block's height mid-stream.
+    if (isRunLaunchOp(opId)) {
+      return buildRunLaunch(props, extractRunId(result));
+    }
+
     const rule = OP_RULES.find((r) => r.re.test(opId)) ?? { Icon: ZapIcon, label: "Opération" };
-    const card = (
+    return (
       <ToolCallCard
         phase={phase}
         Icon={rule.Icon}
@@ -320,17 +339,6 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
         timing={props.timing}
       />
     );
-
-    // Run launch (runAgent / runInline) → rich in-chat run progress. These return the
-    // run id immediately in the result, so no discovery is needed. If launch
-    // fails before a run exists, fall back to the generic card so the inline
-    // error is visible instead of a stuck "Lancement" run panel.
-    if (isRunLaunchOp(opId)) {
-      const runId = extractRunId(result);
-      if (shouldRenderRunLaunchPanel(phase, runId)) return buildRunLaunch(props, runId);
-    }
-
-    return card;
   },
 });
 
@@ -392,25 +400,13 @@ export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>
   ),
 });
 
-/** Render `run_and_wait` like other run launch tools. Chat emits the run id as a preliminary result. */
+/**
+ * Render `run_and_wait` like other run launch tools. Chat emits the run id as a
+ * preliminary result. The progress panel is mounted for the call's whole life
+ * (launch failures render inside it) — no generic-card fallback swap.
+ */
 function RunAndWaitCard(props: AnyToolProps): React.ReactNode {
-  const phase = deriveToolPhase(props);
-  const resultRunId = extractRunId(props.result);
-  if (shouldRenderRunLaunchPanel(phase, resultRunId)) return buildRunLaunch(props, resultRunId);
-  return (
-    <ToolCallCard
-      phase={phase}
-      Icon={PlayIcon}
-      label="Lancement"
-      idText="run_and_wait"
-      args={props.args}
-      result={props.result}
-      isError={props.isError}
-      toolCallId={props.toolCallId}
-      artifact={props.artifact}
-      timing={props.timing}
-    />
-  );
+  return buildRunLaunch(props, extractRunId(props.result));
 }
 
 // `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own

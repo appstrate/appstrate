@@ -14,9 +14,9 @@ import {
   MessagePrimitive,
   ComposerPrimitive,
   ActionBarPrimitive,
-  ErrorPrimitive,
   AuiIf,
   useMessage,
+  getExternalStoreMessages,
 } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
@@ -26,7 +26,7 @@ import {
   SendHorizontalIcon,
   SquareIcon,
 } from "lucide-react";
-import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
+import { turnLimitReached, turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 import { Button } from "./button.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
@@ -60,7 +60,10 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       </AuiIf>
 
       <AuiIf condition={(s) => !s.thread.isEmpty}>
-        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto scroll-smooth px-4 pt-6">
+        {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
+            instant — smoothing turns every content append into a visible glide
+            and amplifies any residual layout shift. */}
+        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
           <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
           <div className="min-h-6 flex-grow" />
@@ -227,10 +230,18 @@ function UserMessage() {
 // branches that aren't persisted — corrupting history on reload — so they're
 // intentionally absent.
 
-/** Shown while the model hasn't produced anything visible yet. */
+/**
+ * Shown while the model hasn't produced anything visible yet. Height is pinned
+ * to h-6 (24px) — exactly one prose-sm text line — so the dots→first-text swap
+ * is a 0px layout change. Gated on the message actually running: a DEAD message
+ * with no visible parts (e.g. a turn that errored before producing content)
+ * must not animate "thinking" forever — that reads as a hung chat.
+ */
 function ThinkingIndicator() {
+  const running = useMessage((m) => m.status?.type === "running");
+  if (!running) return null;
   return (
-    <div className="flex items-center gap-1 py-2" role="status" aria-label="L'assistant réfléchit…">
+    <div className="flex h-6 items-center gap-1" role="status" aria-label="L'assistant réfléchit…">
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.15s]" />
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full" />
@@ -238,13 +249,54 @@ function ThinkingIndicator() {
   );
 }
 
+/**
+ * The ORIGINAL AI-SDK message behind an assistant-ui message. assistant-ui
+ * normalizes `ThreadMessage.metadata` to its own shape ({custom, steps, …}) and
+ * DROPS unknown keys — so the persisted `appstrate` turn metadata is only
+ * reachable on the source message. Falls back to the message itself when no
+ * source is bound.
+ */
+function sourceMessage(m: unknown): unknown {
+  return (getExternalStoreMessages(m as never) as unknown[])[0] ?? m;
+}
+
 function TurnLimitNotice() {
-  const reached = useMessage((m) => turnLimitReached(m));
+  const reached = useMessage((m) => turnLimitReached(sourceMessage(m)));
   if (!reached) return null;
   return (
     <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs" role="status">
       <AlertTriangleIcon className="size-3.5 shrink-0" />
       <span>Réponse partielle : limite d'étapes atteinte.</span>
+    </div>
+  );
+}
+
+const GENERIC_TURN_ERROR = "La génération a échoué.";
+
+/**
+ * THE failure display for a turn — one component, one visual, live or
+ * reloaded. The persisted turn metadata (`finishReason: "error"` + client-safe
+ * `errorText`) is the preferred source since it survives reload; the transient
+ * assistant-ui error status is the fallback for failures that never reached a
+ * finish chunk (e.g. a hard ai-sdk stream error).
+ */
+function MessageError() {
+  const errorText = useMessage((m) => {
+    const turn = turnMetadataFromMessage(sourceMessage(m));
+    if (turn?.finishReason === "error") return turn.errorText ?? GENERIC_TURN_ERROR;
+    if (m.status?.type === "incomplete" && m.status.reason === "error") {
+      const err = m.status.error;
+      return typeof err === "string" && err ? err : GENERIC_TURN_ERROR;
+    }
+    return null;
+  });
+  if (!errorText) return null;
+  return (
+    <div
+      role="alert"
+      className="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border px-3 py-2 text-sm break-words"
+    >
+      {errorText}
     </div>
   );
 }
@@ -265,15 +317,16 @@ function AssistantMessage() {
           }}
         />
         <TurnLimitNotice />
+        <MessageError />
       </div>
-      <MessageError />
-      <div className="mt-1 flex items-center gap-1">
-        {/* Always mounted (space reserved), revealed by opacity — `autohide`
-            would unmount it and shift the layout on hover. */}
-        <ActionBarPrimitive.Root
-          hideWhenRunning
-          className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-        >
+      <div className="mt-1 flex h-7 items-center gap-1">
+        {/* Space permanently reserved (fixed h-7 wrapper) and the bar ALWAYS
+            mounted, revealed by opacity only. `hideWhenRunning`/`autohide`
+            would unmount it and collapse every assistant message by the bar's
+            height at each inference start/finish — the whole transcript would
+            visibly jump. Copy stays usable mid-stream (copies the current
+            snapshot), which is the seamless behavior we want. */}
+        <ActionBarPrimitive.Root className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <ActionBarPrimitive.Copy asChild>
             <IconButton label="Copier">
               <MessagePrimitive.If copied>
@@ -291,18 +344,6 @@ function AssistantMessage() {
 }
 
 // ─── Shared bits ─────────────────────────────────────────────────────────────
-
-// ErrorPrimitive.Root renders unconditionally (a role="alert" div), so gate it
-// on the message error status to avoid an empty box on successful turns.
-function MessageError() {
-  const isError = useMessage((m) => m.status?.type === "incomplete" && m.status.reason === "error");
-  if (!isError) return null;
-  return (
-    <ErrorPrimitive.Root className="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border px-3 py-2 text-sm">
-      <ErrorPrimitive.Message />
-    </ErrorPrimitive.Root>
-  );
-}
 
 // forwardRef + prop spread so `asChild`/Slot-injected handlers (onClick from
 // the action-bar/branch-picker primitives) actually reach the button.

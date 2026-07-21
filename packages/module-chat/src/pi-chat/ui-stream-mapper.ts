@@ -113,6 +113,7 @@ export class PiChatUiStreamMapper {
       type: string;
       assistantMessageEvent?: PiAssistantMessageEvent;
       message?: unknown;
+      messages?: unknown[];
       toolCallId?: string;
       result?: unknown;
       isError?: boolean;
@@ -133,6 +134,16 @@ export class PiChatUiStreamMapper {
       case "message_end":
         this.captureMessageEnd(e.message);
         return [{ type: "finish-step" }];
+      // A run that fails OUTSIDE the assistant stream (tool exception, context
+      // overflow — pi-agent-core's `handleRunFailure`) never emits a
+      // `message_end`: the errored assistant message only rides `turn_end` /
+      // `agent_end`. Capture it there too, or the turn would end silently.
+      case "turn_end":
+        this.captureFailure(e.message);
+        return [];
+      case "agent_end":
+        for (const m of e.messages ?? []) this.captureFailure(m);
+        return [];
       default:
         return [];
     }
@@ -231,19 +242,23 @@ export class PiChatUiStreamMapper {
   }
 
   private captureMessageEnd(message: unknown): void {
-    if (!message || typeof message !== "object") return;
-    const m = message as {
-      role?: string;
-      usage?: PiUsage;
-      stopReason?: string;
-      errorMessage?: string;
-    };
-    if (m.role !== "assistant") return;
+    const m = assistantView(message);
+    if (!m) return;
     if (m.usage) this.addUsage(m.usage);
     this.finishReason = mapStopReason(m.stopReason);
-    if (m.errorMessage && (m.stopReason === "error" || m.stopReason === "aborted")) {
-      this.lastError = m.errorMessage;
-    }
+    this.captureFailure(message);
+  }
+
+  /**
+   * Capture a genuine failure (`stopReason: "error"`) into the terminal meta.
+   * An explicit stop (`aborted`) is NOT a failure — surfacing its message as an
+   * error would flag every user stop as a fault.
+   */
+  private captureFailure(message: unknown): void {
+    const m = assistantView(message);
+    if (!m?.errorMessage || m.stopReason !== "error") return;
+    this.finishReason = "error";
+    this.lastError = m.errorMessage;
   }
 
   private addUsage(u: PiUsage): void {
@@ -281,6 +296,19 @@ export class PiChatUiStreamMapper {
       ...(this.lastError ? { errorText: this.lastError } : {}),
     };
   }
+}
+
+interface PiAssistantView {
+  usage?: PiUsage;
+  stopReason?: string;
+  errorMessage?: string;
+}
+
+/** Structural view of an assistant message, or null for anything else. */
+function assistantView(message: unknown): PiAssistantView | null {
+  if (!message || typeof message !== "object") return null;
+  const m = message as { role?: string } & PiAssistantView;
+  return m.role === "assistant" ? m : null;
 }
 
 interface PiToolCallBlock {
