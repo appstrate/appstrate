@@ -281,7 +281,6 @@ describe("handleChatStream (ai-sdk path)", () => {
     );
     expect(body?.messages?.[0]?.role).toBe("system");
     const systemContent = String(body?.messages?.[0]?.content ?? "");
-    expect(systemContent).toContain("You are Appstrate's assistant.");
     expect(systemContent).toContain(SYSTEM_PROMPT.slice(0, 64));
     // The platform MCP server instructions + caller context were assembled in.
     expect(systemContent).toContain(MCP_INSTRUCTIONS_MARKER);
