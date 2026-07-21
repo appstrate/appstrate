@@ -1,0 +1,8 @@
+Appstrate Desktop
+Copyright 2026 Appstrate
+
+This product includes software developed at
+Appstrate (https://appstrate.dev).
+
+Portions of the device-authorization and OS-keyring token-storage logic
+were adapted from `apps/cli` (Apache-2.0, same project).

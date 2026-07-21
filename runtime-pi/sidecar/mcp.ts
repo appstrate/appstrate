@@ -64,6 +64,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import {
   RUN_HISTORY_INJECTED_TOOL,
   RECALL_MEMORY_INJECTED_TOOL,
+  DESKTOP_BROWSER_INJECTED_TOOL,
 } from "@appstrate/runner-pi/runtime-tools";
 import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
@@ -1246,7 +1247,62 @@ function buildSidecarTools(options: MountMcpOptions): {
     },
   };
 
-  return { firstParty: [runHistory, recallMemory], makeApiCallTool, makeApiUploadTool };
+  // `desktop_browser` MCP tool — drives the run owner's local Chromium
+  // surface through the Appstrate Desktop companion app (see
+  // `apps/desktop/`). The sidecar forwards the command to
+  // `/internal/desktop-command`; the platform resolves the run's owning
+  // user, looks up their connected desktop WebSocket, dispatches the
+  // command and returns the correlated reply inline.
+  const desktopBrowser: AppstrateToolDefinition = {
+    // Name + description + inputSchema are derived from the canonical
+    // `desktop_browser` descriptor in `@appstrate/runner-pi/runtime-tools`
+    // (the single source consumed by the runtime Pi-tool registration).
+    // The handler stays local to the sidecar.
+    descriptor: {
+      name: DESKTOP_BROWSER_INJECTED_TOOL.name,
+      description: DESKTOP_BROWSER_INJECTED_TOOL.description,
+      inputSchema:
+        DESKTOP_BROWSER_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
+    },
+    handler: async (rawArgs) => {
+      const args = rawArgs as { method: string; params?: unknown; timeoutMs?: number };
+      const url = `${config.platformApiUrl}/internal/desktop-command`;
+      let res: Response;
+      try {
+        res = await fetchFn(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.runToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            method: args.method,
+            params: args.params ?? {},
+            ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}),
+          }),
+        });
+      } catch (err) {
+        const code =
+          err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+        const suffix = code ? `: ${code}` : "";
+        return {
+          content: [{ type: "text", text: `desktop_browser: upstream fetch failed${suffix}` }],
+          isError: true,
+        };
+      }
+      return responseToToolResult(res, {
+        source: "desktop_browser",
+        ...(blobStore ? { blobStore } : {}),
+        tokenBudget,
+      });
+    },
+  };
+
+  return {
+    firstParty: [runHistory, recallMemory, desktopBrowser],
+    makeApiCallTool,
+    makeApiUploadTool,
+  };
 }
 
 /**

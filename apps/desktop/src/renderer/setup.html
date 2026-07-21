@@ -1,0 +1,192 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Appstrate Desktop — Setup</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        background: #f5f5f7;
+        color: #1d1d1f;
+        user-select: none;
+        overflow: hidden;
+      }
+      .wrap {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 100%;
+        padding: 32px;
+        box-sizing: border-box;
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 22px;
+        font-weight: 600;
+      }
+      p.subtitle {
+        margin: 0 0 28px 0;
+        color: #6e6e73;
+        font-size: 13px;
+        text-align: center;
+        max-width: 360px;
+        line-height: 1.5;
+      }
+      .form {
+        width: 100%;
+        max-width: 360px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      label {
+        font-size: 12px;
+        font-weight: 500;
+        color: #6e6e73;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      input.url {
+        padding: 10px 14px;
+        border: 1px solid #d2d2d7;
+        border-radius: 8px;
+        font-size: 14px;
+        background: #ffffff;
+        outline: none;
+        box-sizing: border-box;
+        width: 100%;
+      }
+      input.url:focus {
+        border-color: #007aff;
+        box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      button {
+        flex: 1;
+        padding: 10px 16px;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      button.primary {
+        background: #007aff;
+        color: white;
+      }
+      button.primary:hover {
+        background: #0066d6;
+      }
+      button.primary:disabled {
+        background: #b0b0b8;
+        cursor: not-allowed;
+      }
+      .examples {
+        font-size: 12px;
+        color: #8e8e93;
+        margin-top: 4px;
+      }
+      .error {
+        font-size: 12px;
+        color: #ff3b30;
+        margin-top: 4px;
+        min-height: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Connect to an Appstrate instance</h1>
+      <p class="subtitle">
+        Paste the URL of your Appstrate instance and give this profile a label. You'll sign in via
+        the embedded login form on the next screen.
+      </p>
+      <div class="form">
+        <label for="url">Instance URL</label>
+        <input
+          class="url"
+          id="url"
+          type="text"
+          placeholder="http://localhost:3000"
+          spellcheck="false"
+          autocomplete="off"
+          autofocus
+        />
+        <label for="profile">Profile label (optional)</label>
+        <input
+          class="url"
+          id="profile"
+          type="text"
+          placeholder="local · prod · staging …"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <div class="examples">
+          Examples: http://localhost:3000 · https://app.appstrate.dev · https://appstrate.tractr.net
+        </div>
+        <div class="error" id="err"></div>
+        <div class="actions">
+          <button class="primary" id="connect">Connect</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      const url = document.getElementById("url");
+      const profile = document.getElementById("profile");
+      const connect = document.getElementById("connect");
+      const err = document.getElementById("err");
+
+      function normalize(raw) {
+        const t = raw.trim().replace(/\/+$/, "");
+        if (!t) return null;
+        if (!/^https?:\/\//i.test(t)) return "https://" + t;
+        return t;
+      }
+
+      async function submit() {
+        const norm = normalize(url.value);
+        if (!norm) {
+          err.textContent = "Please enter a URL.";
+          return;
+        }
+        try {
+          new URL(norm);
+        } catch {
+          err.textContent = "Invalid URL.";
+          return;
+        }
+        err.textContent = "";
+        connect.disabled = true;
+        connect.textContent = "Connecting…";
+        try {
+          await window.appstrateSetup.saveInstance({
+            url: norm,
+            profile: profile.value.trim() || null,
+          });
+        } catch (e) {
+          err.textContent = e?.message || "Failed to save. Try again.";
+          connect.disabled = false;
+          connect.textContent = "Connect";
+        }
+      }
+
+      connect.addEventListener("click", submit);
+      url.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submit();
+      });
+      profile.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submit();
+      });
+    </script>
+  </body>
+</html>

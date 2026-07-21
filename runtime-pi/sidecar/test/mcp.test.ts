@@ -22,16 +22,14 @@ import type { CredentialsResponse } from "../helpers.ts";
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
-    fetchCredentials: mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "test-123" },
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    ),
+    fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "test-123" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    })),
     cookieJar: new Map(),
     // Bun's `Mock` lacks the `preconnect` member that `typeof fetch`
     // declares; the cast bridges that cross-lib friction.
@@ -167,13 +165,13 @@ describe("POST /mcp — initialize", () => {
 });
 
 describe("POST /mcp — tools/list", () => {
-  it("advertises run_history and recall_memory (no api_call)", async () => {
+  it("advertises the first-party tools (no api_call)", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);
     const result = res.json.result as { tools: Array<{ name: string }> };
     const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["recall_memory", "run_history"]);
+    expect(names).toEqual(["desktop_browser", "recall_memory", "run_history"]);
   });
 
   it("declares input schemas matching the legacy contracts", async () => {
@@ -315,13 +313,21 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     const first = await rpc(app, { method: "tools/list" });
     expect(first.status).toBe(200);
     const firstResult = first.json.result as { tools: Array<{ name: string }> };
-    expect(firstResult.tools.map((t) => t.name).sort()).toEqual(["recall_memory", "run_history"]);
+    expect(firstResult.tools.map((t) => t.name).sort()).toEqual([
+      "desktop_browser",
+      "recall_memory",
+      "run_history",
+    ]);
 
     const second = await rpc(app, { method: "tools/list" });
     expect(second.status).toBe(200);
     expect(second.json.error).toBeUndefined();
     const secondResult = second.json.result as { tools: Array<{ name: string }> };
-    expect(secondResult.tools.map((t) => t.name).sort()).toEqual(["recall_memory", "run_history"]);
+    expect(secondResult.tools.map((t) => t.name).sort()).toEqual([
+      "desktop_browser",
+      "recall_memory",
+      "run_history",
+    ]);
   });
 
   it("handles two consecutive tools/call invocations on the same app", async () => {

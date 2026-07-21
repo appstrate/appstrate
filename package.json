@@ -119,6 +119,7 @@
   },
   "workspaces": [
     "apps/*",
+    "!apps/desktop",
     "packages/*",
     "runtime-pi",
     "runtime-pi/sidecar",

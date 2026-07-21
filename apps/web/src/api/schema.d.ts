@@ -1217,6 +1217,63 @@ export interface paths {
         patch: operations["credentialProxyPatch"];
         trace?: never;
     };
+    "/api/desktop/bridge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open the desktop bridge WebSocket
+         * @description WebSocket upgrade. The Appstrate Desktop client connects here with the Better Auth session cookie of the webapp pane it embeds; the resolved user is registered as the owner of that bridge. One connection per user — a new one displaces the previous. Org context is not required (a desktop belongs to a person, not an organization). Over the socket the platform sends `{ id, method, params }` frames and the client replies `{ id, result }` or `{ id, error }`.
+         */
+        get: operations["connectDesktopBridge"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/desktop/me/command": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Drive my desktop companion's browser
+         * @description Executes a browser primitive on the caller's own desktop client and returns the correlated reply. Not on the agent execution path — agents use the `desktop_browser` tool, which goes through `/internal/desktop-command` — but this is the fastest way to smoke-test a bridge without starting a run.
+         */
+        post: operations["sendMyDesktopCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/desktop/me/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check whether my desktop companion is connected */
+        get: operations["getMyDesktopStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/docs": {
         parameters: {
             query?: never;
@@ -4271,6 +4328,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/desktop-command": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch a browser command to the run owner's desktop companion
+         * @description Backs the agent-facing `desktop_browser` MCP tool. Forwards a JSON-RPC command to the Appstrate Desktop client connected for the run's owning user and returns the correlated reply inline. Container-to-host only. Auth via Bearer run token. A run with no owning user (remote or end-user triggered) has no desktop to drive and gets a 403.
+         */
+        post: operations["dispatchDesktopCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/integration-credentials/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -4865,6 +4942,27 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        /** @description A browser primitive to execute on the user's local Appstrate Desktop client. */
+        DesktopCommandRequest: {
+            /**
+             * @description Browser primitive to invoke.
+             * @enum {string}
+             */
+            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector";
+            /** @description Method-specific arguments (e.g. `{ url }`, `{ selector, value }`). */
+            params?: Record<string, never>;
+            /** @description Dispatch timeout in ms (1s–120s, default 30s). 504 when it elapses. */
+            timeoutMs?: number;
+        };
+        /** @description The desktop client's reply, forwarded verbatim. */
+        DesktopCommandResponse: {
+            /** @description Method-specific result — e.g. `{ url }` for navigate, `{ dataUrl }` for screenshot, the evaluated value for evaluate. */
+            result: unknown;
+        };
+        /** @description Whether the caller currently has a desktop companion connected. */
+        DesktopStatusResponse: {
+            connected: boolean;
         };
         EndUserObject: {
             /** @description End-user ID (eu_ prefix) */
@@ -9462,6 +9560,119 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    connectDesktopBridge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switching protocols — the bridge is open. */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    sendMyDesktopCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "method": "browser.navigate",
+                 *       "params": {
+                 *         "url": "https://example.com"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["DesktopCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description The desktop's reply to the command. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "result": {
+                     *         "url": "https://example.com"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["DesktopCommandResponse"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The desktop reported an error executing the command. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No desktop companion is connected for this user. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The desktop did not reply before the timeout elapsed. */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    getMyDesktopStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection status of the caller's desktop companion. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "connected": true
+                     *     }
+                     */
+                    "application/json": components["schemas"]["DesktopStatusResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     getSwaggerUI: {
@@ -19460,6 +19671,76 @@ export interface operations {
                         uptime_ms?: number;
                         checks?: Record<string, never>;
                     };
+                };
+            };
+        };
+    };
+    dispatchDesktopCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "method": "browser.navigate",
+                 *       "params": {
+                 *         "url": "https://example.com"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["DesktopCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description The desktop's reply to the command. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "result": {
+                     *         "url": "https://example.com"
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["DesktopCommandResponse"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalServerError"];
+            /** @description The desktop reported an error executing the command. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No desktop companion is connected for this user. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The desktop did not reply before the timeout elapsed. */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
         };

@@ -203,6 +203,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
   OAuthTokenResponse: "internal credential-proxy wire; mirrors @appstrate/core/sidecar-types",
   IntegrationCredentialsResponse: "sidecar↔platform credential-proxy wire; no SPA consumer",
+  DesktopCommandRequest: "desktop-bridge command envelope; JSON-RPC-ish wire, no SPA consumer",
+  DesktopCommandResponse:
+    "desktop-bridge reply forwarded verbatim from the Electron client; `result` is method-specific, no shared-type",
+  DesktopStatusResponse: "desktop-bridge liveness probe; single boolean, no shared-type",
   User: "Better-Auth-shaped minimal user; no shared-type",
   ProfileBatchItem: "profiles/batch list item; SPA uses the generated spec type",
   LibraryPackageList: "SPA consumes components['schemas']['LibraryPackageList'] directly",

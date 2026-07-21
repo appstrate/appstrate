@@ -63,6 +63,7 @@ import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "../../src/routes/uploads.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
+import { createDesktopRouter } from "../../src/routes/desktop.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
@@ -277,6 +278,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/integrations", createIntegrationsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
   app.route("/api/llm-proxy", createLlmProxyRouter());
+  app.route("/api/desktop", createDesktopRouter());
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());

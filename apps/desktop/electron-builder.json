@@ -1,0 +1,16 @@
+{
+  "appId": "dev.appstrate.desktop",
+  "productName": "Appstrate Desktop",
+  "directories": {
+    "output": "release",
+    "buildResources": "assets"
+  },
+  "files": ["dist/**/*", "package.json", "LICENSE", "NOTICE"],
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "target": "dir",
+    "hardenedRuntime": false,
+    "gatekeeperAssess": false,
+    "icon": "assets/icon.png"
+  }
+}

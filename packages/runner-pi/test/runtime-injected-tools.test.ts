@@ -16,6 +16,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  DESKTOP_BROWSER_INJECTED_TOOL,
   RECALL_MEMORY_INJECTED_TOOL,
   RUN_HISTORY_INJECTED_TOOL,
   RUNTIME_INJECTED_TOOLS,
@@ -26,10 +27,11 @@ import { defineTool } from "../src/runtime-tools/define.ts";
 const RUNTIME_TOOLS_DIR = fileURLToPath(new URL("../src/runtime-tools/", import.meta.url));
 
 describe("RUNTIME_INJECTED_TOOLS", () => {
-  it("includes both run_history and recall_memory in canonical order", () => {
+  it("includes run_history, recall_memory and desktop_browser in canonical order", () => {
     expect(RUNTIME_INJECTED_TOOLS).toEqual([
       RUN_HISTORY_INJECTED_TOOL,
       RECALL_MEMORY_INJECTED_TOOL,
+      DESKTOP_BROWSER_INJECTED_TOOL,
     ]);
   });
 

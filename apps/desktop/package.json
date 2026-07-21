@@ -1,0 +1,27 @@
+{
+  "name": "@appstrate/desktop",
+  "version": "0.0.0",
+  "description": "Appstrate Desktop — Electron companion exposing a local Chromium browser surface to remote Appstrate agents via authenticated WebSocket bridge",
+  "license": "Apache-2.0",
+  "type": "module",
+  "private": true,
+  "main": "dist/main.js",
+  "author": "Appstrate <hello@appstrate.dev>",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && mkdir -p dist/renderer dist/assets && cp -R src/renderer/* dist/renderer/ && cp -R assets/* dist/assets/",
+    "dev": "bun run build && electron .",
+    "start": "electron .",
+    "package": "bun run build && electron-builder --mac --dir"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/ws": "^8.18.1",
+    "electron": "^39.2.4",
+    "electron-builder": "^26.1.1",
+    "typescript": "^5"
+  }
+}
