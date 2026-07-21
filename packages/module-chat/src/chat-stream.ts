@@ -21,7 +21,7 @@ import type { Context } from "hono";
 import {
   streamText,
   convertToModelMessages,
-  stepCountIs,
+  isStepCount,
   type FinishReason,
   type UIMessage,
 } from "ai";
@@ -73,37 +73,30 @@ function subscriptionReconnectResponse(): Response {
 
 type ConvertedModelMessages = Awaited<ReturnType<typeof convertToModelMessages>>;
 
+/**
+ * The system prompt as a cache-controlled `SystemModelMessage`, passed to
+ * `streamText` via the canonical `instructions` field (NOT at the head of
+ * `messages`). The platform MCP instructions carry a generated operation index
+ * (several KB, re-sent on every one of the up-to-CHAT_MAX_STEPS inference calls
+ * in a turn). OpenAI auto-caches the prefix; the ai-sdk Anthropic providers need
+ * an explicit `cache_control` breakpoint or they'd pay the index in full each
+ * step. The breakpoint MUST ride on the system prompt, so we carry it in
+ * `providerOptions` on this instructions object. Harmless for non-Anthropic
+ * models (`providerOptions` is namespaced).
+ *
+ * ai@7 prepends `instructions` to the model prompt as a `{ role:"system",
+ * content, providerOptions }` message (`convertToLanguageModelPrompt`) — the
+ * exact model input the old head-of-`messages` pattern produced, cacheControl
+ * preserved — so this is the trusted server-side channel with no need for the
+ * `allowSystemInMessages` compat flag. A bare string `instructions` would drop
+ * the `providerOptions`, losing the cacheControl breakpoint; keep the object
+ * form.
+ */
 export function aiSdkCachedSystemMessage(content: string) {
   return {
     role: "system" as const,
     content,
     providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } },
-  };
-}
-
-/**
- * Attach the system prompt to a `streamText` call as a cache-controlled system
- * MESSAGE at the head of `messages` — deliberately NOT the `instructions`/
- * `system` field. The platform MCP instructions carry a generated operation
- * index (several KB, re-sent on every one of the up-to-CHAT_MAX_STEPS inference
- * calls in a turn). OpenAI auto-caches the prefix; the ai-sdk Anthropic
- * providers need an explicit `cache_control` breakpoint or they'd pay the index
- * in full each step. Riding it as a system message keeps that breakpoint on the
- * prompt. Harmless for non-Anthropic models (`providerOptions` is namespaced).
- *
- * ai@7's `standardizePrompt` rejects a `role:"system"` message inside `messages`
- * unless `allowSystemInMessages` is set, and it re-standardizes EVERY step
- * (`streamLanguageModelCall` → `standardizePrompt` per step), so `prepareStep`'s
- * final-step messages — which carry the same system message — hit the same
- * guard. `allowSystemInMessages` has no per-step override (`PrepareStepResult`
- * lacks it), so this single top-level flag re-permits the pattern across all
- * steps. Keeping the flag and the message together here makes the pairing
- * inseparable (and testable): drop the flag and every step throws.
- */
-export function aiSdkSystemMessagePrompt(system: string, modelMessages: ConvertedModelMessages) {
-  return {
-    allowSystemInMessages: true as const,
-    messages: [aiSdkCachedSystemMessage(system), ...modelMessages],
   };
 }
 
@@ -120,14 +113,17 @@ export function prepareAiSdkChatStep({
 }) {
   if (!isFinalChatStep(stepNumber, CHAT_MAX_STEPS)) return undefined;
   markToolStepBudgetReached();
-  // The final-step system message rides inside `messages` too; ai@7 re-validates
-  // these per step, so it depends on the `allowSystemInMessages` flag set on the
-  // top-level `streamText` call (`aiSdkSystemMessagePrompt`) — `PrepareStepResult`
-  // has no per-step override for it.
+  // Final step: swap the base instructions for the appended final-step directive
+  // (still cache-controlled). ai@7 re-standardizes every step and prepends the
+  // per-step `instructions` as the system message, so the cacheControl breakpoint
+  // rides along without needing `allowSystemInMessages`. `messages` is reset to
+  // the original history (as before), and instructions supplies the system —
+  // yielding the same model input the old head-of-`messages` pattern did.
   return {
     activeTools: [],
     toolChoice: "none" as const,
-    messages: [aiSdkCachedSystemMessage(appendFinalStepSystemPrompt(system)), ...modelMessages],
+    instructions: aiSdkCachedSystemMessage(appendFinalStepSystemPrompt(system)),
+    messages: modelMessages,
   };
 }
 
@@ -487,13 +483,15 @@ export async function handleChatStream(
     });
     const result = streamText({
       model,
-      // System rides as a cache-controlled system message paired with
-      // `allowSystemInMessages` (ai@7 rejects it inside `messages` otherwise).
-      // See `aiSdkSystemMessagePrompt` for why the message pattern is used and
-      // why the flag covers the `prepareStep` final-step path too.
-      ...aiSdkSystemMessagePrompt(system, modelMessages),
+      // System rides via the canonical `instructions` field as a cache-controlled
+      // `SystemModelMessage`; ai@7 prepends it to the model prompt as a system
+      // message (cacheControl preserved). See `aiSdkCachedSystemMessage` for why
+      // the object form (not a bare string) is required and why `prepareStep`
+      // overrides `instructions` per-step on the final step.
+      instructions: aiSdkCachedSystemMessage(system),
+      messages: modelMessages,
       tools: mcp ? mcp.tools : undefined,
-      stopWhen: stepCountIs(CHAT_MAX_STEPS),
+      stopWhen: isStepCount(CHAT_MAX_STEPS),
       prepareStep: ({ stepNumber }) =>
         prepareAiSdkChatStep({
           stepNumber,

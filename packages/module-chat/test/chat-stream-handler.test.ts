@@ -17,13 +17,14 @@
  *   - `…/chat/completions` (POST)  → an OpenAI-style SSE text completion; the
  *                                    request body is captured for assertions
  *
- * This is the path that broke in live smoke during the ai@7 migration: without
- * `allowSystemInMessages` (paired with the cache-controlled system MESSAGE in
- * `aiSdkSystemMessagePrompt`) `standardizePrompt` throws before any model call
- * and the UI stream emits an error part. Asserting the stream reaches `finish`
- * with NO error part exercises that exact regression through the real
- * `streamText` → `toUIMessageStreamResponse` assembly, and the persisted
- * assistant turn proves the `onEnd` / `messageMetadata` finalize path ran.
+ * This exercises the cache-controlled system prompt end-to-end: the system rides
+ * via the canonical `instructions` field as a `SystemModelMessage` object (see
+ * `aiSdkCachedSystemMessage`), which ai@7 prepends to the model prompt as the
+ * first `role:"system"` message. Asserting the stream reaches `finish` with NO
+ * error part AND that the wire body's first message is the system prompt
+ * exercises the real `streamText` → `toUIMessageStreamResponse` assembly, and the
+ * persisted assistant turn proves the `onEnd` / `messageMetadata` finalize path
+ * ran.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -256,8 +257,8 @@ describe("handleChatStream (ai-sdk path)", () => {
     expect(res.headers.get("content-type") ?? "").toContain("text/event-stream");
 
     // (2) The chunk sequence: a start, text delta(s), a finish — and NO error
-    // chunk. The error chunk is exactly what the pre-fix (dropped
-    // `allowSystemInMessages`) regression produced.
+    // chunk. An error chunk here would mean the system-prompt assembly (the
+    // `instructions` object) failed to reach the model cleanly.
     const chunks = await collectUiChunks(res);
     const types = chunks.map((c) => c.type);
     expect(types).toContain("start");
