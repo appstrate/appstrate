@@ -137,7 +137,10 @@
     "ajv": "^8.20.0"
   },
   "overrides": {
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "ai": "^7.0.33",
+    "@ai-sdk/react": "^4.0.36",
+    "@ai-sdk/provider-utils": "^5.0.12"
   },
   "patchedDependencies": {
     "@redocly/openapi-core@2.25.2": "patches/@redocly%2Fopenapi-core@2.25.2.patch",
