@@ -29,10 +29,17 @@
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import type {
+  AppstrateRequestExtra,
+  AppstrateResourceProvider,
+  AppstrateToolDefinition,
+  ReadResourceResult,
+} from "@appstrate/mcp-transport";
 import {
   waitForRunAndWaitCompletion,
+  fetchRunDocuments,
   type RunAndWaitLaunch,
+  type RunAndWaitDocument,
 } from "@appstrate/core/run-and-wait-client";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
@@ -42,7 +49,12 @@ export type Dispatch = (req: Request) => Promise<Response>;
 
 /** The tools, named for telemetry/audit. */
 export type McpToolName =
-  "search_operations" | "describe_operation" | "invoke_operation" | "run_and_wait" | "get_me";
+  | "search_operations"
+  | "describe_operation"
+  | "invoke_operation"
+  | "run_and_wait"
+  | "list_documents"
+  | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
 export type McpInvokeOutcome =
@@ -165,6 +177,66 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+// --- documents (resource_link + resources/read + list_documents) -----------
+
+/** `document://doc_xxx` — the opaque, stable URI form of a stored document. */
+const DOCUMENT_URI_PREFIX = "document://";
+/**
+ * Strict document-id shape (`doc_` + ≥8 id chars), matching the service-side
+ * validator. Replicated here rather than imported so the tool layer stays free
+ * of the documents service's DB/storage dependency graph (keeps the tool unit
+ * tests DB-free); the only shared contract is this format.
+ */
+const DOCUMENT_ID_RE = /^doc_[A-Za-z0-9_-]{8,}$/;
+/**
+ * Ceiling on inlining a document's bytes into a `resources/read` text block.
+ * Above it (or for a non-textual mime) the read returns metadata only — MCP has
+ * no partial-content standard, so we keep it simple.
+ */
+const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
+
+/** Extract the document id from a `document://doc_xxx` URI, or null if malformed. */
+function parseDocumentResourceUri(uri: string): string | null {
+  if (!uri.startsWith(DOCUMENT_URI_PREFIX)) return null;
+  const id = uri.slice(DOCUMENT_URI_PREFIX.length);
+  return DOCUMENT_ID_RE.test(id) ? id : null;
+}
+
+/**
+ * Whether a mime type is textual enough to inline as `text` in a
+ * `resources/read` result: `text/*`, JSON/XML (incl. `+json` / `+xml`
+ * structured suffixes, which covers `image/svg+xml`).
+ */
+function isTextualMime(mime: string): boolean {
+  const m = mime.toLowerCase().split(";")[0]!.trim();
+  return (
+    m.startsWith("text/") ||
+    m === "application/json" ||
+    m === "application/xml" ||
+    m.endsWith("+json") ||
+    m.endsWith("+xml")
+  );
+}
+
+/** A published run document → the MCP `resource_link` content block (spec 2025-06-18). */
+function documentResourceLink(doc: RunAndWaitDocument): {
+  type: "resource_link";
+  uri: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  description: string;
+} {
+  return {
+    type: "resource_link",
+    uri: doc.uri,
+    name: doc.name,
+    mimeType: doc.mime,
+    size: doc.size,
+    description: `Document published by this run — read it with resources/read or pass its URI to a follow-up run_and_wait input file field.`,
+  };
 }
 
 /**
@@ -941,6 +1013,11 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
 
     const waitHeaders = new Headers(ctx.authHeaders);
     waitHeaders.set(...internalDispatchHeader());
+    const dispatchFetch = ((input, init) => {
+      const request =
+        input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
+      return ctx.dispatch(request);
+    }) as typeof fetch;
     const launch: RunAndWaitLaunch = {
       runId,
       launchRecord: runRecord,
@@ -950,11 +1027,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
     const final = await waitForRunAndWaitCompletion(launch, {
       origin: ctx.origin,
       headers: waitHeaders,
-      fetch: ((input, init) => {
-        const request =
-          input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
-        return ctx.dispatch(request);
-      }) as typeof fetch,
+      fetch: dispatchFetch,
       signal,
     });
 
@@ -971,10 +1044,229 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       status: typeof runStatus === "number" ? runStatus : runStatusToHttp(runStatus),
       outcome: "invoked",
     });
+
+    // Enrich the terminal result with the run's published documents (D6). The
+    // SAME enrichment the chat gets from `runAndWaitStepsWithDocuments`, reused
+    // via `fetchRunDocuments` (best-effort, empty on any failure). Beyond echoing
+    // them in the text payload, each is returned as an MCP `resource_link`
+    // content block (spec 2025-06-18) so an external client (claude.ai, …)
+    // consumes them natively — read one with `resources/read`, or chain its
+    // `document://` URI into a follow-up run's input file field.
+    if (!final.isError) {
+      const documents = await fetchRunDocuments(runId, {
+        origin: ctx.origin,
+        headers: waitHeaders,
+        fetch: dispatchFetch,
+        signal,
+      });
+      if (documents.length > 0) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ ...final.payload, documents }, null, 2) },
+            ...documents.map(documentResourceLink),
+          ],
+          isError: false,
+        };
+      }
+    }
     return textResult(final.payload, final.isError);
   };
 
   return { descriptor, handler };
+}
+
+// --- list_documents --------------------------------------------------------
+
+const DEFAULT_DOCUMENT_LIST_LIMIT = 20;
+const MAX_DOCUMENT_LIST_LIMIT = 100;
+
+/** Dispatch an in-process GET, forwarding the caller's auth + trusted marker. */
+function dispatchGet(ctx: McpToolContext, url: URL): Promise<Response> {
+  const headers = new Headers(ctx.authHeaders);
+  headers.set(...internalDispatchHeader());
+  return ctx.dispatch(new Request(url.toString(), { method: "GET", headers }));
+}
+
+/** Project a `DocumentDto` onto the compact row the list tool returns. */
+function projectDocumentRow(raw: unknown): Record<string, unknown> | null {
+  const r = asRecord(raw);
+  const id = asString(r?.id);
+  const uri = asString(r?.uri);
+  const name = asString(r?.name);
+  if (!id || !uri || !name) return null;
+  return {
+    id,
+    uri,
+    name,
+    mime: asString(r?.mime) ?? "application/octet-stream",
+    size: typeof r?.size === "number" ? r.size : 0,
+    run_id: asString(r?.run_id) ?? null,
+    package_id: asString(r?.package_id) ?? null,
+    created_at: asString(r?.created_at) ?? null,
+  };
+}
+
+function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "list_documents",
+    description:
+      "List the documents visible to you — files you attached to this conversation " +
+      "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
+      "`run_id`, `chat_session_id`, or `purpose`. Each row carries a `document://` URI you can " +
+      "pass verbatim into a run_and_wait input file field (to feed a document to another agent) " +
+      "or read with resources/read. Returns `{ documents: [...], has_more }`.",
+    annotations: {
+      title: "List documents",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        run_id: {
+          type: "string",
+          description: "Only documents produced by / attached to this run.",
+        },
+        chat_session_id: {
+          type: "string",
+          description: "Only documents attached to this chat session.",
+        },
+        purpose: {
+          type: "string",
+          enum: ["user_upload", "agent_output"],
+          description: "`user_upload` = files you attached; `agent_output` = agent deliverables.",
+        },
+        limit: {
+          type: "integer",
+          description: `Max results (default ${DEFAULT_DOCUMENT_LIST_LIMIT}, max ${MAX_DOCUMENT_LIST_LIMIT}).`,
+          minimum: 1,
+          maximum: MAX_DOCUMENT_LIST_LIMIT,
+        },
+      },
+    },
+  };
+
+  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const start = performance.now();
+    const query: Record<string, unknown> = {};
+    const runId = asString(args.run_id);
+    if (runId) query.run_id = runId;
+    const chatSessionId = asString(args.chat_session_id);
+    if (chatSessionId) query.chat_session_id = chatSessionId;
+    const purpose = asString(args.purpose);
+    if (purpose === "user_upload" || purpose === "agent_output") query.purpose = purpose;
+    if (typeof args.limit === "number") {
+      query.limit = Math.min(Math.max(1, Math.floor(args.limit)), MAX_DOCUMENT_LIST_LIMIT);
+    }
+
+    const url = new URL("/api/documents", ctx.origin);
+    applyQuery(url, query);
+    const response = await dispatchGet(ctx, url);
+    // Reuse container-inherited ACL + scope resolution of the REST route; on any
+    // non-2xx surface it verbatim so the model sees the real error.
+    if (!response.ok) {
+      emit(ctx, { tool: "list_documents", durationMs: performance.now() - start });
+      return readResponse(response);
+    }
+    const body = asRecord(await response.json().catch(() => undefined));
+    const data = Array.isArray(body?.data) ? body.data : [];
+    const documents = data
+      .map(projectDocumentRow)
+      .filter((d): d is Record<string, unknown> => d !== null);
+
+    emit(ctx, {
+      tool: "list_documents",
+      durationMs: performance.now() - start,
+      resultCount: documents.length,
+    });
+    return textResult({ documents, has_more: body?.hasMore === true });
+  };
+
+  return { descriptor, handler };
+}
+
+// --- resources/read for document:// ----------------------------------------
+
+/**
+ * The `resources/read` provider for `document://doc_xxx` URIs — lets an MCP
+ * client read a document referenced by a `resource_link` (or a known
+ * `document://` URI) WITHOUT going through the REST API.
+ *
+ * Authorization + scope resolution reuse the documents REST route by dispatching
+ * in-process with the caller's forwarded auth (identical to every other tool):
+ * `GET /api/documents/:id` enforces the container ACL (a foreign/unknown id is a
+ * 404 → surfaced as an MCP error), and `GET /api/documents/:id/content` re-checks
+ * the derived `downloadable` gate. A textual document ≤ 1 MiB that the caller may
+ * download is inlined as `text`; everything else (non-textual, oversized, or
+ * not downloadable by this caller) returns metadata only — MCP has no
+ * partial-content standard, so the read stays simple.
+ *
+ * Deliberately provides NO `list()` (documents are not enumerated under
+ * `resources/list` per the plan/spec — they surface only via `resource_link`);
+ * omitting it makes `resources/list` return empty.
+ */
+export function buildDocumentResourceProvider(ctx: McpToolContext): AppstrateResourceProvider {
+  return {
+    read: async (uri: string): Promise<ReadResourceResult> => {
+      const docId = parseDocumentResourceUri(uri);
+      if (!docId) {
+        throw new McpError(ErrorCode.InvalidParams, `Not a document resource URI: ${uri}`);
+      }
+
+      const metaRes = await dispatchGet(ctx, new URL(`/api/documents/${docId}`, ctx.origin));
+      if (metaRes.status === 404) {
+        throw new McpError(ErrorCode.InvalidParams, `Document not found: ${uri}`);
+      }
+      if (!metaRes.ok) {
+        throw new McpError(
+          ErrorCode.InternalError,
+          `Failed to read document ${uri} (status ${metaRes.status}).`,
+        );
+      }
+      const dto = asRecord(await metaRes.json().catch(() => undefined)) ?? {};
+      const mime = asString(dto.mime) ?? "application/octet-stream";
+      const name = asString(dto.name) ?? docId;
+      const size = typeof dto.size === "number" ? dto.size : 0;
+      const downloadable = dto.downloadable === true;
+
+      // Inline the bytes only for a textual, in-budget document the caller may
+      // download; a non-downloadable upload (e.g. someone else's) never has its
+      // content served here (mirrors the /content gate).
+      if (downloadable && isTextualMime(mime) && size <= RESOURCE_TEXT_MAX_BYTES) {
+        const contentRes = await dispatchGet(
+          ctx,
+          new URL(`/api/documents/${docId}/content`, ctx.origin),
+        );
+        if (contentRes.status === 200) {
+          const text = await contentRes.text();
+          return { contents: [{ uri, mimeType: mime, text }] };
+        }
+        // A 307 (presigned redirect) or any non-200 → fall through to metadata.
+      }
+
+      // Metadata-only: describe the document + how to obtain its bytes.
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify({
+              id: docId,
+              uri,
+              name,
+              mime,
+              size,
+              downloadable,
+              note: downloadable
+                ? "Content omitted (binary or exceeds the 1 MiB inline limit). Download it via GET /api/documents/:id/content."
+                : "Content is not downloadable by you; only its metadata is available.",
+            }),
+          },
+        ],
+      };
+    },
+  };
 }
 
 function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
@@ -1028,6 +1320,7 @@ export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
     buildDescribeTool(ctx),
     buildInvokeTool(ctx),
     buildRunAndWaitTool(ctx),
+    buildListDocumentsTool(ctx),
   ];
   // get_me dispatches to GET /api/me/context. A consumer that already injects
   // that payload into its own system prompt (the chat module) drops the tool —

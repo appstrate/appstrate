@@ -46,7 +46,13 @@ import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
-import { buildMcpTools, FORWARDED_AUTH_HEADERS, type Dispatch, type McpObserver } from "./tools.ts";
+import {
+  buildMcpTools,
+  buildDocumentResourceProvider,
+  FORWARDED_AUTH_HEADERS,
+  type Dispatch,
+  type McpObserver,
+} from "./tools.ts";
 import { buildOperationIndex } from "./catalog.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
@@ -336,18 +342,23 @@ export function createMcpRouter(): Hono<AppEnv> {
     // need no actor context. get_me likewise carries no actor context: it
     // dispatches in-process to /api/me/context, which resolves the caller from
     // the forwarded auth headers. The index is scoped to the caller's role.
-    const tools = buildMcpTools({
+    const toolCtx = {
       origin,
       permissions,
       authHeaders,
       dispatch,
       observe,
       contextInjected,
-    });
+    };
+    const tools = buildMcpTools(toolCtx);
+    // `resources/read` for `document://doc_xxx` — resolves through the same
+    // forwarded-auth in-process dispatch as the tools (documents are NOT listed
+    // under `resources/list`; they surface only via `resource_link`).
+    const resources = buildDocumentResourceProvider(toolCtx);
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
-      { instructions: buildServerInstructions(permissions, contextInjected) },
+      { instructions: buildServerInstructions(permissions, contextInjected), resources },
     );
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

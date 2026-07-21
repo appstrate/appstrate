@@ -457,6 +457,7 @@ describe("buildMcpTools contextInjected", () => {
     expect(names).toEqual([
       "describe_operation",
       "invoke_operation",
+      "list_documents",
       "run_and_wait",
       "search_operations",
     ]);

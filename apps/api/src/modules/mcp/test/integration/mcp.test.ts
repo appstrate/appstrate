@@ -255,6 +255,7 @@ describe("mcp tool round-trip", () => {
       "describe_operation",
       "get_me",
       "invoke_operation",
+      "list_documents",
       "run_and_wait",
       "search_operations",
     ]);
