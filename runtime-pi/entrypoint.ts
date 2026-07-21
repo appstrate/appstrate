@@ -534,6 +534,14 @@ await progress(
   },
 );
 
+// The agent's selected runtime tools (`manifest.runtime_tools`), read once from
+// the root package manifest. Reused by the no-sidecar extension registration,
+// the `publish_document` gate, and the PiRunner's terminal-tool decision.
+const declaredRuntimeTools: string[] = bundle
+  ? ((bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
+      ?.runtime_tools ?? [])
+  : [];
+
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
 // implementation forwards to the sidecar's MCP `tools/call` endpoint:
@@ -718,9 +726,6 @@ if (sidecarUrl) {
   // we register the SAME tool definitions (`@appstrate/core/runtime-tool-defs`)
   // as Pi extensions in-process. Their canonical events are re-emitted into
   // the run sink by the wrapper (default stdout-JSONL → the stdout bridge).
-  const rootManifest = bundle
-    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-    : undefined;
   let outputSchema: Record<string, unknown> | null = null;
   if (process.env.OUTPUT_SCHEMA) {
     try {
@@ -731,7 +736,7 @@ if (sidecarUrl) {
   }
   extensionFactories.push(
     ...buildRuntimeToolExtensions({
-      ...(rootManifest?.runtime_tools ? { runtimeTools: rootManifest.runtime_tools } : {}),
+      ...(declaredRuntimeTools.length > 0 ? { runtimeTools: declaredRuntimeTools } : {}),
       outputSchema,
       emit: (event) => {
         void bridgedSink.handle(event as RunEvent);
@@ -759,11 +764,7 @@ if (sidecarUrl) {
 // in-process here (the sidecar has no path to the documents route), gated on
 // the agent selecting it. It carries the run's HMAC signer via the injected
 // `uploadRunDocument`; its `document.published` event rides the bridged sink.
-const manifestRuntimeTools = bundle
-  ? ((bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-      ?.runtime_tools ?? [])
-  : [];
-if (manifestRuntimeTools.includes("publish_document")) {
+if (declaredRuntimeTools.includes("publish_document")) {
   extensionFactories.push(
     buildPublishDocumentExtension({
       uploader: uploadRunDocument,
@@ -893,10 +894,6 @@ function buildPiRunner(): PiRunner {
   // communication contract discards anyway. Gated on the manifest selection
   // so a bundle-defined tool that happens to be named `output` (no
   // `runtime_tools` opt-in) keeps the SDK's natural stop.
-  const declaredRuntimeTools = bundle
-    ? ((bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-        ?.runtime_tools ?? [])
-    : [];
   return new PiRunner({
     model,
     apiKey: env.modelApiKey,
@@ -909,13 +906,26 @@ function buildPiRunner(): PiRunner {
   });
 }
 
+/** Compiled fallback when the platform did not forward its effective cap. */
+const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+
 /**
- * Client-side per-file bound for the outputs sweep — matches the platform's
- * `DOCUMENT_MAX_FILE_BYTES` default (100 MiB). The server is the authoritative
- * gate (it cuts an over-cap stream mid-flight); this just avoids streaming a
- * file that is certain to be rejected.
+ * Client-side per-file bound for the outputs sweep — the platform's EFFECTIVE
+ * `DOCUMENT_MAX_FILE_BYTES` (forwarded by the run-launcher), falling back to the
+ * compiled 100 MiB default when absent/unparseable. The server is the
+ * authoritative gate (it cuts an over-cap stream mid-flight); this just avoids
+ * streaming a file that is certain to be rejected. Reading the forwarded value
+ * keeps the two in lockstep — an operator who raises the platform cap no longer
+ * sees large deliverables silently skipped here.
  */
-const OUTPUTS_SWEEP_MAX_FILE_BYTES = 100 * 1024 * 1024;
+const OUTPUTS_SWEEP_MAX_FILE_BYTES = ((): number => {
+  const raw = process.env.DOCUMENT_MAX_FILE_BYTES;
+  if (raw !== undefined && raw !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_DOCUMENT_MAX_FILE_BYTES;
+})();
 
 /**
  * Auto-publish everything under `workspace/outputs/` that was not already

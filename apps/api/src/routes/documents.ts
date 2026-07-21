@@ -14,6 +14,7 @@
  */
 
 import { Hono } from "hono";
+import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
@@ -31,12 +32,14 @@ import {
   streamDocumentContent,
   loadDocumentForPreview,
   deriveDownloadable,
+  parseStorageKey,
   type ListDocumentsFilters,
 } from "../services/documents.ts";
 import {
   verifyPreviewToken,
-  isHtmlMime,
+  previewKind,
   buildPreviewCsp,
+  buildInertPreviewCsp,
   injectMetaCsp,
   PREVIEW_MAX_BYTES,
 } from "../services/document-preview.ts";
@@ -56,8 +59,11 @@ function attachmentDisposition(name: string): string {
 export function createDocumentsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/documents — gallery list. Filters: purpose, run_id, package_id,
-  // chat_session_id; keyset pagination via starting_after + limit.
+  // GET /api/documents — gallery list. Filters: purpose, run_id, packageId,
+  // chat_session_id; keyset pagination via startingAfter + limit. Query-param
+  // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `packageId`
+  // and the `startingAfter` pagination param are camelCase; `run_id` /
+  // `chat_session_id` are snake_case domain fields.
   router.get("/documents", rateLimit(120), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
@@ -67,26 +73,27 @@ export function createDocumentsRouter() {
     if (purpose.success) filters.purpose = purpose.data;
     const runId = c.req.query("run_id");
     if (runId) filters.runId = runId;
-    const packageId = c.req.query("package_id");
+    const packageId = c.req.query("packageId");
     if (packageId) filters.packageId = packageId;
     const chatSessionId = c.req.query("chat_session_id");
     if (chatSessionId) filters.chatSessionId = chatSessionId;
-    const startingAfter = c.req.query("starting_after");
+    const startingAfter = c.req.query("startingAfter");
     if (startingAfter) filters.startingAfter = startingAfter;
-    const limitRaw = Number(c.req.query("limit"));
-    if (Number.isInteger(limitRaw) && limitRaw > 0) filters.limit = limitRaw;
+    // Documented query-int idiom (routes/models.ts): coerce + clamp + default.
+    filters.limit = z.coerce.number().int().min(1).max(100).catch(20).parse(c.req.query("limit"));
 
     const page = await listDocumentsForActor(scope, actor, filters);
     return c.json(page);
   });
 
-  // GET /api/documents/:id — metadata DTO.
-  router.get("/documents/:id", async (c) => {
+  // GET /api/documents/:id — metadata DTO. Token-minting route (the single GET
+  // mints the signed `preview_url`), so it is rate-limited like the others.
+  router.get("/documents/:id", rateLimit(120), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
     const resolved = await getDocumentForActor(scope, actor, c.req.param("id")!);
     if (!resolved) throw notFound("Document not found");
-    return c.json(toDocumentDto(resolved.row, actor));
+    return c.json(toDocumentDto(resolved.row, actor, resolved.downloadable, { mintPreview: true }));
   });
 
   // GET /api/documents/:id/content — download the bytes. Gated by the derived
@@ -103,14 +110,13 @@ export function createDocumentsRouter() {
     }
     const { row } = resolved;
 
-    const [bucket, ...rest] = row.storageKey.split("/");
-    const presigned =
-      bucket && rest.length > 0
-        ? await createDownloadUrl(bucket, rest.join("/"), {
-            filename: row.name,
-            contentType: row.mime,
-          })
-        : null;
+    const parsed = parseStorageKey(row.storageKey);
+    const presigned = parsed
+      ? await createDownloadUrl(parsed.bucket, parsed.path, {
+          filename: row.name,
+          contentType: row.mime,
+        })
+      : null;
     if (presigned) return c.redirect(presigned, 307);
 
     const stream = await streamDocumentContent(row.storageKey);
@@ -159,19 +165,25 @@ export function createDocumentsRouter() {
 }
 
 /**
- * Cookie-less HTML preview router — MOUNTED OUTSIDE `/api`, BEFORE the auth
- * pipeline, so no cookie/API-key/org/app middleware ever touches it. Serves
- * untrusted agent-generated HTML in maximum isolation:
+ * Cookie-less document preview router — MOUNTED OUTSIDE `/api`, BEFORE the auth
+ * pipeline, so no cookie/API-key/org/app middleware ever touches it. Serves a
+ * previewable document in maximum isolation, branching on its
+ * {@link previewKind}:
  *
+ *  - `html` — untrusted agent-generated ACTIVE content: a strict CSP header + an
+ *    injected parse-time `<meta>` CSP (covers the relative-URL / `srcdoc` bypass
+ *    a header alone can miss), COOP `same-origin`, the full `Permissions-Policy`.
+ *  - `image` / `pdf` / `text` — INERT content streamed byte-for-byte with a
+ *    minimal `default-src 'none'` CSP, `inline` disposition and `nosniff`; text
+ *    is always relabelled `text/plain` so no markdown→HTML sniff is possible.
+ *
+ * Every kind is:
  *  - Authorized ONLY by a short-lived signed token in the URL (`?t=`), never a
  *    cookie — verified constant-time, expiry-enforced, bound to this one
  *    document id. No session is read; a session WITHOUT a token is a 401.
- *  - A strict CSP header + an injected parse-time `<meta>` CSP (covers the
- *    relative-URL / `srcdoc` bypass a header alone can miss).
- *  - `nosniff`, `no-referrer`, a `Permissions-Policy` cutting camera/mic/geo/
- *    payment/usb, COOP `same-origin`, and a CORP tuned to whether the preview is
- *    served same-origin or on a separate `USERCONTENT_URL` domain. Never sets a
- *    cookie.
+ *  - Served with `nosniff`, `no-referrer`, COOP `same-origin`, and a CORP tuned
+ *    to whether the preview is served same-origin or on a separate
+ *    `USERCONTENT_URL` domain. Never sets a cookie.
  *
  * Path `/preview/documents/:id` is a dedicated top-level namespace — it does NOT
  * share the `/documents` SPA page prefix, so it can never be shadowed by (nor
@@ -196,15 +208,17 @@ export function createDocumentPreviewRouter() {
       throw unauthorized("Preview token does not match document");
 
     const row = await loadDocumentForPreview(payload.o, payload.d);
-    // Only HTML is previewable this phase; anything else (or a missing/foreign
-    // doc) is indistinguishable from not-found.
-    if (!row || !isHtmlMime(row.mime)) throw notFound("Preview not available");
+    // Classify the mime into a preview kind; a non-previewable mime (or a
+    // missing/foreign doc) is indistinguishable from not-found.
+    const kind = row ? previewKind(row.mime) : null;
+    if (!row || !kind) throw notFound("Preview not available");
 
-    // Defense-in-depth (S1): a `user_upload` is creator-only content, so its
-    // preview is refused unless the token's bound minting actor is the
-    // document's creator — even a hand-crafted token that verifies. An
-    // `agent_output` is previewable by anyone who resolved the container
-    // (deriveDownloadable is always true for it), so this gate is a no-op there.
+    // Defense-in-depth (S1) — applies to EVERY kind: a `user_upload` is
+    // creator-only content, so its preview is refused unless the token's bound
+    // minting actor is the document's creator — even a hand-crafted token that
+    // verifies. An `agent_output` is previewable by anyone who resolved the
+    // container (deriveDownloadable is always true for it), so this gate is a
+    // no-op there.
     if (row.purpose === "user_upload") {
       const tokenActor = actorFromIds(payload.u ?? null, payload.eu ?? null);
       if (!tokenActor || !deriveDownloadable(row, tokenActor)) {
@@ -218,26 +232,66 @@ export function createDocumentPreviewRouter() {
     const stream = await streamDocumentContent(row.storageKey);
     if (!stream) throw notFound("Preview not available");
 
-    // Buffer-and-transform: read the whole (capped) body, inject the meta CSP as
-    // the first child of <head>, serve. Simple + correct over regex streaming.
-    const html = await new Response(stream).text();
     const appOrigin = new URL(env.APP_URL).origin;
-    const csp = buildPreviewCsp(appOrigin);
-    const body = injectMetaCsp(html, csp);
-
     // When the preview is served from a SEPARATE origin (USERCONTENT_URL), the
     // app (APP_URL) embeds it cross-origin, so CORP must allow cross-origin
     // embedding; same-origin serving stays locked to same-origin.
     const corp = env.USERCONTENT_URL ? "cross-origin" : "same-origin";
 
-    return new Response(body, {
+    if (kind === "html") {
+      // Active content — the full hardened treatment, UNCHANGED. Buffer-and-
+      // transform: read the whole (capped) body, inject the meta CSP as the
+      // first child of <head>, serve. Simple + correct over regex streaming.
+      const html = await new Response(stream).text();
+      const csp = buildPreviewCsp(appOrigin);
+      const body = injectMetaCsp(html, csp);
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Security-Policy": csp,
+          "X-Content-Type-Options": "nosniff",
+          "Referrer-Policy": "no-referrer",
+          "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+          "Cache-Control": "private, no-store",
+          "Cross-Origin-Opener-Policy": "same-origin",
+          "Cross-Origin-Resource-Policy": corp,
+        },
+      });
+    }
+
+    // Inert kinds — image | pdf | text. These stream byte-for-byte (no buffer,
+    // no transform), with a minimal `default-src 'none'` CSP as belt-and-braces
+    // (they cannot execute in the embedding origin) and `inline` disposition so
+    // the browser renders rather than downloads.
+    //
+    // Content-Type is fixed PER KIND, never blindly echoed:
+    //  - text kinds are ALWAYS relabelled `text/plain; charset=utf-8` (never the
+    //    stored `text/markdown` etc.), eliminating any text→HTML sniff surface.
+    //  - image/pdf carry their stored mime.
+    // The stored mime is agent-declared, but `nosniff` makes the browser TRUST
+    // the declared type — so a body mislabelled `application/pdf` that is really
+    // HTML renders as a broken PDF in the native viewer, NEVER as active HTML in
+    // the app origin. That, plus the fixed per-kind Content-Type, closes the
+    // mime-smuggling path even though the label is not under our control.
+    // The text kind is rendered client-side (the SPA `fetch()`es this URL and
+    // shows the bytes in a `<pre>`); when the preview lives on a separate
+    // USERCONTENT_URL origin that read is cross-origin. The global CORS
+    // middleware (mounted `*` ahead of this router, keyed on the trusted origins
+    // — which always include APP_URL where the SPA lives) already emits the
+    // `Access-Control-Allow-Origin` for it, so no per-route CORS header is
+    // needed here. image/pdf are embedded (`<img>` / native-PDF `<iframe>`), not
+    // fetched, so CORS is irrelevant to them.
+    const contentType = kind === "text" ? "text/plain; charset=utf-8" : row.mime;
+    return new Response(stream, {
       status: 200,
       headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Content-Security-Policy": csp,
+        "Content-Type": contentType,
+        "Content-Length": String(row.size),
+        "Content-Disposition": "inline",
         "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": buildInertPreviewCsp(appOrigin),
         "Referrer-Policy": "no-referrer",
-        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
         "Cache-Control": "private, no-store",
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Resource-Policy": corp,

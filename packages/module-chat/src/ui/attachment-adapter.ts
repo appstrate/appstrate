@@ -17,7 +17,11 @@
 
 import type { AttachmentAdapter, CompleteAttachment, PendingAttachment } from "@assistant-ui/react";
 import type { GetHeaders } from "./runtime-context.ts";
-import { MAX_ATTACHMENT_BYTES, uploadComposerFile } from "./upload.ts";
+import {
+  ATTACHMENT_TOO_LARGE_MESSAGE,
+  MAX_ATTACHMENT_BYTES,
+  uploadComposerFile,
+} from "./upload.ts";
 
 export function createChatAttachmentAdapter(
   getHeaders: GetHeaders | null | undefined,
@@ -28,7 +32,7 @@ export function createChatAttachmentAdapter(
     accept: "*",
     add({ file }): Promise<PendingAttachment> {
       if (file.size > MAX_ATTACHMENT_BYTES) {
-        return Promise.reject(new Error("Fichier trop volumineux (100 Mo maximum)."));
+        return Promise.reject(new Error(ATTACHMENT_TOO_LARGE_MESSAGE));
       }
       return Promise.resolve({
         id: crypto.randomUUID(),

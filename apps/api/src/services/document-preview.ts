@@ -132,11 +132,77 @@ export function verifyPreviewToken(
 /**
  * Is `mime` an HTML document? Tolerates a parameterized value
  * (`text/html; charset=utf-8`) — only the type/subtype matters for the preview
- * gate. Used by both the DTO (whether to mint a `preview_url`) and the route
- * (whether the document is previewable at all).
+ * gate. Retained as a focused, tested utility; the DTO and route classify via
+ * {@link previewKind} (of which HTML is one kind).
  */
 export function isHtmlMime(mime: string): boolean {
   return mime.split(";", 1)[0]!.trim().toLowerCase() === "text/html";
+}
+
+/**
+ * The four ways a document can be previewed in-browser (or null for "not
+ * previewable"). Drives BOTH the DTO's `preview_kind`/`previewable` derivation
+ * AND the preview route's serving branch — a single source of truth, so the set
+ * of previewable types can never drift between "advertised as previewable" and
+ * "actually served".
+ */
+export type PreviewKind = "html" | "image" | "pdf" | "text";
+
+/**
+ * Image mimes served inline, byte-for-byte. Deliberately EXCLUDES
+ * `image/svg+xml`: an SVG is ACTIVE content (it can embed `<script>` and event
+ * handlers and runs in the embedding context), so it is not inert like a raster
+ * image. Routing it safely would mean serving it through the full HTML-style
+ * CSP + `sandbox="allow-scripts"` hardening — extra machinery for a rare case —
+ * so instead SVG is simply not previewable (still downloadable). See
+ * docs/architecture/DOCUMENTS.md → "Preview kinds".
+ */
+const PREVIEW_IMAGE_MIMES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+/**
+ * Text-family mimes previewed as PLAINTEXT. A conservative allowlist, NOT a
+ * blanket `text/*`: every entry is inert once the route relabels it
+ * `text/plain` (killing any markdown→HTML sniff surface). `application/json` is
+ * the common structured-text case; `application/xml` / SVG are excluded (XML can
+ * host active content).
+ */
+const PREVIEW_TEXT_MIMES: ReadonlySet<string> = new Set([
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+]);
+
+/**
+ * Classify a document's mime into its {@link PreviewKind}, or null when it is
+ * not previewable. Tolerates a parameterized mime (`text/plain; charset=…`) —
+ * only the type/subtype is matched.
+ */
+export function previewKind(mime: string): PreviewKind | null {
+  const base = mime.split(";", 1)[0]!.trim().toLowerCase();
+  if (base === "text/html") return "html";
+  if (base === "application/pdf") return "pdf";
+  if (PREVIEW_IMAGE_MIMES.has(base)) return "image";
+  if (PREVIEW_TEXT_MIMES.has(base)) return "text";
+  return null;
+}
+
+/**
+ * The CSP for an INERT preview kind (image / pdf / text). These bytes cannot
+ * execute in the embedding origin (native raster/PDF viewer, or relabelled
+ * plaintext), so the policy is pure belt-and-braces: `default-src 'none'` grants
+ * nothing, and `frame-ancestors` pins who may frame the response to the app
+ * origin (the PDF path is embedded in an iframe). Distinct from
+ * {@link buildPreviewCsp}, which must re-grant inline script/style for the
+ * active HTML path.
+ */
+export function buildInertPreviewCsp(appOrigin: string): string {
+  return ["default-src 'none'", `frame-ancestors ${appOrigin}`].join("; ");
 }
 
 /**

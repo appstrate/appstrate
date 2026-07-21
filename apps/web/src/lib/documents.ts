@@ -22,7 +22,7 @@ import {
 export interface DocumentLike {
   purpose: "user_upload" | "agent_output";
   run_id: string | null;
-  package_id: string | null;
+  packageId: string | null;
   mime: string;
 }
 
@@ -81,11 +81,6 @@ export function groupDocumentsByPurpose<T extends DocumentLike>(
  * Hono route; only the run id is percent-encoded.
  */
 export function documentRunHref(doc: DocumentLike): string | undefined {
-  if (!doc.run_id || !doc.package_id) return undefined;
-  return `/agents/${doc.package_id}/runs/${encodeURIComponent(doc.run_id)}`;
-}
-
-/** Content-download URL for a document (the `/content` route handles the 307). */
-export function documentContentHref(id: string): string {
-  return `/api/documents/${encodeURIComponent(id)}/content`;
+  if (!doc.run_id || !doc.packageId) return undefined;
+  return `/agents/${doc.packageId}/runs/${encodeURIComponent(doc.run_id)}`;
 }

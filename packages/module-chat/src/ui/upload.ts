@@ -16,10 +16,20 @@ import type { GetHeaders } from "./runtime-context.ts";
 
 /**
  * Client-side attachment size cap, aligned with the platform's per-upload limit
- * (`POST /api/uploads` rejects above 100 MB). Guards early so an over-cap file
- * never starts a doomed upload.
+ * (`POST /api/uploads` rejects above 100 MB). This is a UX fast-path only — the
+ * server is the authoritative gate and returns a 413 regardless; guarding here
+ * just avoids starting an upload that is certain to be rejected.
  */
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Localized over-cap message surfaced by the composer (size guard in both the
+ * upload staging and the attachment adapter). Derived from
+ * {@link MAX_ATTACHMENT_BYTES} so the number never drifts from the constant.
+ */
+export const ATTACHMENT_TOO_LARGE_MESSAGE = `Fichier trop volumineux (${Math.round(
+  MAX_ATTACHMENT_BYTES / 1024 / 1024,
+)} Mo maximum).`;
 
 /** Upload descriptor returned by `POST /api/uploads`. */
 interface UploadDescriptor {
@@ -39,7 +49,7 @@ export async function uploadComposerFile(
   signal?: AbortSignal,
 ): Promise<string> {
   if (file.size > MAX_ATTACHMENT_BYTES) {
-    throw new Error("Fichier trop volumineux (100 Mo maximum).");
+    throw new Error(ATTACHMENT_TOO_LARGE_MESSAGE);
   }
 
   const descRes = await fetch("/api/uploads", {

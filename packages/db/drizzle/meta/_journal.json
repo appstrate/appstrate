@@ -169,6 +169,13 @@
       "when": 1784632361762,
       "tag": "0023_blushing_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784649272690,
+      "tag": "0024_bent_moonstone",
+      "breakpoints": true
     }
   ]
 }

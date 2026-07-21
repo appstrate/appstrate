@@ -45,7 +45,10 @@ export const organizations = pgTable("organizations", {
   // transactionally alongside `documents` insert/delete so the synchronous
   // org-storage quota check (`ORG_STORAGE_QUOTA_BYTES`) needs no aggregate
   // scan. bigint (mode: number) — total storage far exceeds the int4 ceiling.
-  // A daily reconciliation job corrects any drift from SUM(documents.size).
+  // FK cascade deletes (run/chat-session/end-user/application removed) drop
+  // `documents` rows WITHOUT the app-level decrement, so the counter can drift
+  // high; `reconcileOrgDocumentBytes()` (documents.ts GC loop, ~daily) recomputes
+  // it from `SUM(documents.size)` and corrects the drift.
   documentsBytesUsed: bigint("documents_bytes_used", { mode: "number" }).notNull().default(0),
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

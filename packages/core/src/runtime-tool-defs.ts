@@ -41,6 +41,7 @@ import {
   EVENT_EMITTER_RUNTIME_TOOLS,
   type EventEmitterRuntimeTool,
 } from "./runtime-tools-catalog.ts";
+import type { RunAndWaitDocument } from "./run-and-wait-client.ts";
 
 /**
  * MCP `_meta` key under which a runtime tool call surfaces the canonical
@@ -368,14 +369,44 @@ export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): Runtime
 // publish_document — the one runtime tool with a side effect (HTTP upload)
 // ---------------------------------------------------------------------------
 
-/** Durable document metadata returned by a successful upload. */
-export interface PublishedDocument {
-  id: string;
+/**
+ * Durable document metadata returned by a successful upload. Extends the
+ * {@link RunAndWaitDocument} projection (`{ id, uri, name, mime, size }` — the
+ * shape the run_and_wait tool result embeds) with the integrity `sha256` the
+ * upload path also carries, so the two shapes cannot drift.
+ */
+export interface PublishedDocument extends RunAndWaitDocument {
+  sha256: string;
+}
+
+/** The canonical `document.published` run event for a stored document. */
+export interface DocumentPublishedEvent extends RuntimeToolEvent {
+  type: "document.published";
+  document_id: string;
   uri: string;
   name: string;
   mime: string;
   size: number;
   sha256: string;
+}
+
+/**
+ * Build the canonical `document.published` run event from an uploaded
+ * document's metadata. Single builder shared by every producer — the
+ * `publish_document` runtime tool ({@link buildPublishDocumentDef}) and the
+ * runtime's end-of-run `outputs/` sweep — so the event's field set is defined
+ * once and cannot drift between the two call sites.
+ */
+export function documentPublishedEvent(doc: PublishedDocument): DocumentPublishedEvent {
+  return {
+    type: "document.published",
+    document_id: doc.id,
+    uri: doc.uri,
+    name: doc.name,
+    mime: doc.mime,
+    size: doc.size,
+    sha256: doc.sha256,
+  };
 }
 
 /**
@@ -431,17 +462,7 @@ export function buildPublishDocumentDef(uploader: DocumentUploader): RuntimeTool
         const message = err instanceof Error ? err.message : String(err);
         return toolError(`Failed to publish '${path}': ${message}`);
       }
-      return withEvents(`Published ${doc.name} → ${doc.uri}`, [
-        {
-          type: "document.published",
-          document_id: doc.id,
-          uri: doc.uri,
-          name: doc.name,
-          mime: doc.mime,
-          size: doc.size,
-          sha256: doc.sha256,
-        },
-      ]);
+      return withEvents(`Published ${doc.name} → ${doc.uri}`, [documentPublishedEvent(doc)]);
     },
   };
 }

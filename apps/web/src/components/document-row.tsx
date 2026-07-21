@@ -38,7 +38,7 @@ export function DocumentRow({
   onDownload: (id: string, name: string) => void;
   /** When provided, a delete button is rendered (visibility is the parent's call). */
   onDelete?: (doc: DocumentDto) => void;
-  /** When provided and the doc is previewable (`preview_url` set), a preview button is rendered. */
+  /** When provided and the doc is previewable, a preview button is rendered. */
   onPreview?: (doc: DocumentDto) => void;
   /** Show the producing-agent label + a link to its run (gallery). */
   showRunLink?: boolean;
@@ -58,11 +58,11 @@ export function DocumentRow({
         <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
           <span className="tabular-nums">{formatBytes(doc.size)}</span>
           <span aria-hidden>·</span>
-          <span>{formatDateField(doc.created_at, "datetime")}</span>
-          {showRunLink && doc.package_id ? (
+          <span>{formatDateField(doc.createdAt, "datetime")}</span>
+          {showRunLink && doc.packageId ? (
             <>
               <span aria-hidden>·</span>
-              <span className="truncate font-mono">{doc.package_id}</span>
+              <span className="truncate font-mono">{doc.packageId}</span>
             </>
           ) : null}
           {runHref ? (
@@ -78,7 +78,7 @@ export function DocumentRow({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        {onPreview && doc.preview_url ? (
+        {onPreview && (doc.previewable ?? !!doc.preview_url) ? (
           <Button
             variant="ghost"
             size="icon"

@@ -23,6 +23,7 @@
  * Error codes are stable wire contract — do not rename without a deprecation.
  */
 
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../types/index.ts";
 import { invalidRequest, notFound } from "../lib/errors.ts";
@@ -32,35 +33,56 @@ import {
   verifyRunSignatureHeaders,
 } from "../services/run-event-ingestion.ts";
 
-export const verifyRunSignature = createMiddleware<AppEnv>(async (c, next) => {
-  const runId = c.req.param("runId");
-  if (!runId) throw invalidRequest("runId path parameter is required", "runId");
+/**
+ * Build a run-authentication middleware: resolve the run sink from `:runId`,
+ * fast-reject a closed sink, and verify the Standard Webhooks HMAC over the body
+ * `readBody` returns. Both the event-ingestion guard (signs the raw JSON body)
+ * and the streaming document-upload guard (signs an EMPTY body) are this factory
+ * with a different `readBody` — the only real difference between them.
+ *
+ * `exposeWebhookId` sets `c.get("webhookId")` for the event handler's replay
+ * dedup; the upload path never reads it, so it is left unset there.
+ */
+function makeRunSignatureGuard(
+  readBody: (c: Context<AppEnv>) => Promise<string>,
+  opts: { exposeWebhookId?: boolean } = {},
+) {
+  return createMiddleware<AppEnv>(async (c, next) => {
+    const runId = c.req.param("runId");
+    if (!runId) throw invalidRequest("runId path parameter is required", "runId");
 
-  const run = await getRunSinkContext(runId);
-  if (!run) throw notFound(`run ${runId} not found`);
+    const run = await getRunSinkContext(runId);
+    if (!run) throw notFound(`run ${runId} not found`);
 
-  // Fast-path rejection on a SNAPSHOT — a concurrent finalize can still close
-  // the sink between this read and the handler's write. The authoritative
-  // gate is the ingestion CAS (`persistEventAndAdvance` includes
-  // `sink_closed_at IS NULL` in its WHERE) which surfaces the same 410.
-  assertSinkOpen(run);
+    // Fast-path rejection on a SNAPSHOT — a concurrent finalize can still close
+    // the sink between this read and the handler's write. The authoritative
+    // gate is the ingestion CAS (`persistEventAndAdvance` includes
+    // `sink_closed_at IS NULL` in its WHERE) which surfaces the same 410.
+    assertSinkOpen(run);
 
-  // Raw body bytes — the HMAC signs the bytes, not a JSON re-serialisation.
-  const bodyBytes = await c.req.raw.clone().arrayBuffer();
-  const bodyString = new TextDecoder().decode(bodyBytes);
+    verifyRunSignatureHeaders({
+      run,
+      signatureHeader: c.req.header("webhook-signature") ?? "",
+      msgIdHeader: c.req.header("webhook-id") ?? "",
+      timestampHeader: c.req.header("webhook-timestamp") ?? "",
+      body: await readBody(c),
+    });
 
-  verifyRunSignatureHeaders({
-    run,
-    signatureHeader: c.req.header("webhook-signature") ?? "",
-    msgIdHeader: c.req.header("webhook-id") ?? "",
-    timestampHeader: c.req.header("webhook-timestamp") ?? "",
-    body: bodyString,
+    c.set("run", run);
+    if (opts.exposeWebhookId) c.set("webhookId", c.req.header("webhook-id")!);
+    await next();
   });
+}
 
-  c.set("run", run);
-  c.set("webhookId", c.req.header("webhook-id")!);
-  await next();
-});
+/**
+ * `POST /api/runs/:runId/events` and `/finalize` — the HMAC signs the raw body
+ * bytes (not a JSON re-serialisation), and the `webhook-id` is exposed for the
+ * handler's replay dedup.
+ */
+export const verifyRunSignature = makeRunSignatureGuard(
+  async (c) => new TextDecoder().decode(await c.req.raw.clone().arrayBuffer()),
+  { exposeWebhookId: true },
+);
 
 /**
  * Signature guard for the streaming document-ingestion POST
@@ -76,24 +98,4 @@ export const verifyRunSignature = createMiddleware<AppEnv>(async (c, next) => {
  * by the server-computed sha256 returned to the caller. The request body is
  * left completely untouched so the handler can stream it straight to storage.
  */
-export const verifyRunUploadSignature = createMiddleware<AppEnv>(async (c, next) => {
-  const runId = c.req.param("runId");
-  if (!runId) throw invalidRequest("runId path parameter is required", "runId");
-
-  const run = await getRunSinkContext(runId);
-  if (!run) throw notFound(`run ${runId} not found`);
-
-  assertSinkOpen(run);
-
-  verifyRunSignatureHeaders({
-    run,
-    signatureHeader: c.req.header("webhook-signature") ?? "",
-    msgIdHeader: c.req.header("webhook-id") ?? "",
-    timestampHeader: c.req.header("webhook-timestamp") ?? "",
-    body: "",
-  });
-
-  c.set("run", run);
-  c.set("webhookId", c.req.header("webhook-id")!);
-  await next();
-});
+export const verifyRunUploadSignature = makeRunSignatureGuard(async () => "");

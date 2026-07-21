@@ -197,6 +197,15 @@ describe("chat attachments", () => {
     expect(transcript).toContain("[Attached document: rapport.txt");
   });
 
+  it("rejects an attachment URI that is neither upload:// nor document:// (e.g. https://)", async () => {
+    // The composer seam only resolves staged uploads or existing documents — a
+    // remote URL must be refused, never fetched (SSRF / exfil vector).
+    const sessionId = await createSession(ctx.orgId, ctx.user.id);
+    await expect(
+      resolverFor(scope, ctx.user.id, sessionId)("https://evil.example.com/secret.txt"),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it("surfaces a storage-quota rejection as an RFC 9457 error", async () => {
     const bytes = new TextEncoder().encode("over quota");
     const sessionId = await createSession(ctx.orgId, ctx.user.id);

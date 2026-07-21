@@ -20,9 +20,6 @@ import type { FileUIPart, UIMessage } from "ai";
 import type { ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { formatBytes } from "@appstrate/core/format";
 
-/** The two URI schemes a chat attachment may carry (never inline `data:`). */
-const ATTACHMENT_URI_SCHEMES = ["upload://", "document://"] as const;
-
 /** Is `part` an ai-SDK `file` part? */
 export function isFileUIPart(part: unknown): part is FileUIPart {
   return (
@@ -31,11 +28,6 @@ export function isFileUIPart(part: unknown): part is FileUIPart {
     (part as { type?: unknown }).type === "file" &&
     typeof (part as { url?: unknown }).url === "string"
   );
-}
-
-/** Does `url` carry an accepted attachment scheme (`upload://` or `document://`)? */
-export function isAttachmentUri(url: unknown): url is string {
-  return typeof url === "string" && ATTACHMENT_URI_SCHEMES.some((s) => url.startsWith(s));
 }
 
 /** The `{appstrate: {size}}` metadata the rewrite stamps onto a materialized part. */

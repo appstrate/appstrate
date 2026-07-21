@@ -1246,7 +1246,7 @@ export interface paths {
         };
         /**
          * List documents
-         * @description List the documents visible to the caller in the current application. Members see their own documents (and system-owned ones); end-users see only their own. Filter by `purpose`, `run_id`, `package_id`, or `chat_session_id`; paginate with `starting_after` + `limit`. Access is inherited from each document's container (no per-file grants).
+         * @description List the documents visible to the caller in the current application. Members see their own documents (and system-owned ones); end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`. Access is inherited from each document's container (no per-file grants).
          */
         get: operations["listDocuments"];
         put?: never;
@@ -9560,11 +9560,11 @@ export interface operations {
                 /** @description Filter to documents anchored to this run. */
                 run_id?: string;
                 /** @description Filter to documents produced by this agent package. */
-                package_id?: string;
+                packageId?: string;
                 /** @description Filter to documents anchored to this chat session. */
                 chat_session_id?: string;
                 /** @description Keyset cursor — document id to page after (newest-first order). */
-                starting_after?: string;
+                startingAfter?: string;
                 /** @description Page size (1–100, default 20). */
                 limit?: number;
             };
@@ -9599,13 +9599,13 @@ export interface operations {
                             uri: string;
                             /** @enum {string} */
                             purpose: "user_upload" | "agent_output";
-                            application_id: string;
+                            applicationId: string;
                             /** @description Run container, or null. */
                             run_id: string | null;
                             /** @description Chat-session container, or null. */
                             chat_session_id: string | null;
                             /** @description Producing agent package id, or null. */
-                            package_id: string | null;
+                            packageId: string | null;
                             name: string;
                             mime: string;
                             /** @description Size in bytes. */
@@ -9614,18 +9614,25 @@ export interface operations {
                             sha256: string;
                             /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
                             downloadable: boolean;
+                            /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
+                            previewable: boolean;
+                            /**
+                             * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                             * @enum {string|null}
+                             */
+                            preview_kind: "html" | "image" | "pdf" | "text" | null;
                             /**
                              * Format: uri
-                             * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Non-null only for a `text/html` document the caller can read; null otherwise. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                             * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
                              */
-                            preview_url: string | null;
+                            preview_url?: string | null;
                             /**
                              * Format: date-time
                              * @description Retention deadline, or null when permanent.
                              */
-                            expires_at: string | null;
+                            expiresAt: string | null;
                             /** Format: date-time */
-                            created_at: string;
+                            createdAt: string;
                         }[];
                         hasMore: boolean;
                         limit?: number;
@@ -9670,13 +9677,13 @@ export interface operations {
                         uri: string;
                         /** @enum {string} */
                         purpose: "user_upload" | "agent_output";
-                        application_id: string;
+                        applicationId: string;
                         /** @description Run container, or null. */
                         run_id: string | null;
                         /** @description Chat-session container, or null. */
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
-                        package_id: string | null;
+                        packageId: string | null;
                         name: string;
                         mime: string;
                         /** @description Size in bytes. */
@@ -9685,18 +9692,25 @@ export interface operations {
                         sha256: string;
                         /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
                         downloadable: boolean;
+                        /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
+                        previewable: boolean;
+                        /**
+                         * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @enum {string|null}
+                         */
+                        preview_kind: "html" | "image" | "pdf" | "text" | null;
                         /**
                          * Format: uri
-                         * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Non-null only for a `text/html` document the caller can read; null otherwise. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
                          */
-                        preview_url: string | null;
+                        preview_url?: string | null;
                         /**
                          * Format: date-time
                          * @description Retention deadline, or null when permanent.
                          */
-                        expires_at: string | null;
+                        expiresAt: string | null;
                         /** Format: date-time */
-                        created_at: string;
+                        createdAt: string;
                     };
                 };
             };

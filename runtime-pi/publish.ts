@@ -24,6 +24,7 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { sign } from "@appstrate/afps-runtime/events";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { documentPublishedEvent } from "@appstrate/core/runtime-tool-defs";
 import type { PublishedDocument } from "@appstrate/core/runtime-tool-defs";
 
 /** Minimal Content-Type inference from a file extension. */
@@ -197,15 +198,7 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<void> {
       if (deps.publishedShas.has(sha)) continue; // already published by this run
 
       const doc = await deps.uploader(path.join("outputs", rel), path.basename(rel));
-      await deps.emit({
-        type: "document.published",
-        document_id: doc.id,
-        uri: doc.uri,
-        name: doc.name,
-        mime: doc.mime,
-        size: doc.size,
-        sha256: doc.sha256,
-      });
+      await deps.emit(documentPublishedEvent(doc));
     } catch (err) {
       // Best-effort: a single file's failure must not abort the sweep or the run.
       deps.logWarn?.("outputs sweep failed to publish a file", {

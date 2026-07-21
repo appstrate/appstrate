@@ -14,8 +14,6 @@ export type DocumentDto =
 export interface DocumentListFilters {
   purpose?: "user_upload" | "agent_output";
   runId?: string;
-  packageId?: string;
-  chatSessionId?: string;
   startingAfter?: string;
   limit?: number;
 }
@@ -35,9 +33,7 @@ export function useDocuments(filters: DocumentListFilters = {}) {
         query: {
           purpose: filters.purpose,
           run_id: filters.runId,
-          package_id: filters.packageId,
-          chat_session_id: filters.chatSessionId,
-          starting_after: filters.startingAfter,
+          startingAfter: filters.startingAfter,
           limit: filters.limit,
         },
         header: scope.header,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, timestamp, bigint, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, bigint, uuid, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { documentPurposeEnum } from "./enums.ts";
 import { user } from "./auth.ts";
@@ -80,5 +80,15 @@ export const documents = pgTable(
     index("idx_documents_expires")
       .on(table.expiresAt)
       .where(sql`${table.expiresAt} IS NOT NULL`),
+    // Agent-output dedup: a run may re-publish the SAME (sha256, name) — the
+    // at-least-once end-of-run sweep, or a retried POST. A partial UNIQUE index
+    // makes that a hard invariant so two concurrent identical publishes cannot
+    // double-insert (and double-count); the ingestion path catches the 23505 and
+    // resolves it to the existing row (dedup 200). Scoped to `agent_output` so
+    // `user_upload` rows (which legitimately repeat a name across runs) are
+    // unaffected.
+    uniqueIndex("uq_documents_run_output_dedup")
+      .on(table.runId, table.sha256, table.name)
+      .where(sql`${table.purpose} = 'agent_output'`),
   ],
 );

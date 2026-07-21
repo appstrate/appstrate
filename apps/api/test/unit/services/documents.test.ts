@@ -69,22 +69,37 @@ describe("toDocumentDto — preview_url honours the downloadable gate (S1)", () 
     ...over,
   });
 
+  // Single-document GET semantics: pass `mintPreview` so `preview_url` is minted
+  // (list rows carry only the `previewable` boolean).
+  const singleDto = (row: DocumentRow, actor: Actor) =>
+    toDocumentDto(row, actor, deriveDownloadable(row, actor), { mintPreview: true });
+
   it("a non-creator member gets NO preview_url for an html user_upload (cross-member disclosure blocked)", () => {
-    const dto = toDocumentDto(htmlRow(), userB);
+    const dto = singleDto(htmlRow(), userB);
     expect(dto.downloadable).toBe(false);
+    expect(dto.previewable).toBe(false);
     expect(dto.preview_url).toBeNull();
   });
 
   it("the creator gets a working preview_url for their own html user_upload", () => {
-    const dto = toDocumentDto(htmlRow(), userA);
+    const dto = singleDto(htmlRow(), userA);
     expect(dto.downloadable).toBe(true);
+    expect(dto.previewable).toBe(true);
     expect(dto.preview_url).toContain("/preview/documents/doc_previewgate12?t=");
   });
 
   it("an html agent_output stays previewable by anyone who resolved the container", () => {
-    const dto = toDocumentDto(htmlRow({ purpose: "agent_output" }), userB);
+    const dto = singleDto(htmlRow({ purpose: "agent_output" }), userB);
     expect(dto.downloadable).toBe(true);
+    expect(dto.previewable).toBe(true);
     expect(dto.preview_url).toContain("/preview/documents/doc_previewgate12?t=");
+  });
+
+  it("list rows carry `previewable` but never mint a `preview_url`", () => {
+    const row = htmlRow({ purpose: "agent_output" });
+    const dto = toDocumentDto(row, userB, deriveDownloadable(row, userB));
+    expect(dto.previewable).toBe(true);
+    expect(dto.preview_url).toBeUndefined();
   });
 });
 

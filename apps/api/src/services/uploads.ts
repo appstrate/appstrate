@@ -109,17 +109,23 @@ export type UploadStreamSink = (
 // ---------------------------------------------------------------------------
 
 /**
- * Strip path separators + nulls from a user-supplied filename.
+ * Strip path separators + control characters from a user-supplied filename.
  *
  * Defense in depth only — the actual path-traversal block lives in the
  * storage layer (`makeKey()` rejects any raw bucket/path containing `..`
  * or `\0` before touching the filesystem). This helper keeps the stored
  * filename human-readable and prevents a `..` segment from surviving into
  * the final on-disk path even if the storage check ever regressed.
+ *
+ * Control chars (`\x00-\x1f`, `\x7f`) are collapsed too — CR/LF in a name would
+ * otherwise survive into a stored filename and, on the download path, into a
+ * `Content-Disposition` header (a response-splitting / header-injection vector
+ * the presign path's quote-stripping alone does not cover).
  */
 export function sanitizeFilename(name: string): string {
   const cleaned = name
-    .replace(/[/\\\0]/g, "_")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[/\\\x00-\x1f\x7f]/g, "_")
     .replace(/\.\.+/g, ".")
     .trim();
   if (!cleaned) return "file";

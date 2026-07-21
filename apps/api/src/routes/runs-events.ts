@@ -30,6 +30,8 @@ import {
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
 import { createDocumentFromStream } from "../services/documents.ts";
 import { getRunAttribution } from "../services/state/runs.ts";
+import { recordAudit } from "../services/audit.ts";
+import { actorFromIds } from "../lib/actor.ts";
 import { sanitizeFilename } from "../services/uploads.ts";
 import {
   downloadRunWorkspace,
@@ -343,6 +345,23 @@ export function createRunsEventsRouter() {
       runRow.packageId,
       { name, mime, body },
     );
+
+    // Audit only a genuinely NEW publish (201), never a dedup replay (200).
+    // No request context here (HMAC-run-authenticated, no user session), so
+    // this is the direct-service `recordAudit`, attributed to the run's actor.
+    if (!deduped) {
+      const actor = actorFromIds(attribution?.userId ?? null, attribution?.endUserId ?? null);
+      await recordAudit({
+        orgId: run.orgId,
+        applicationId: run.applicationId,
+        actorType: actor ? actor.type : "system",
+        actorId: actor?.id ?? null,
+        action: "document.published",
+        resourceType: "document",
+        resourceId: row.id,
+        after: { name: row.name, size: row.size, mime: row.mime, runId: run.id },
+      });
+    }
 
     return c.json(
       {

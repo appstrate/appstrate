@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Shared Document object schema (mirrors DocumentDto in services/documents.ts).
+// Field casing follows CASING_CONVENTIONS.md carve-out 4b: `applicationId`,
+// `packageId`, `createdAt`, `expiresAt` are on the universal DB-convention list
+// (camelCase everywhere); `run_id` / `chat_session_id` are NOT on it, so they
+// stay snake_case domain fields (matching the `notification` DTO's `run_id`).
 const documentSchema = {
   type: "object",
   required: [
@@ -8,18 +12,19 @@ const documentSchema = {
     "id",
     "uri",
     "purpose",
-    "application_id",
+    "applicationId",
     "run_id",
     "chat_session_id",
-    "package_id",
+    "packageId",
     "name",
     "mime",
     "size",
     "sha256",
     "downloadable",
-    "preview_url",
-    "expires_at",
-    "created_at",
+    "previewable",
+    "preview_kind",
+    "expiresAt",
+    "createdAt",
   ],
   properties: {
     object: { type: "string", enum: ["document"] },
@@ -29,10 +34,10 @@ const documentSchema = {
       description: "Stable `document://doc_…` reference — pass in a run's file input field.",
     },
     purpose: { type: "string", enum: ["user_upload", "agent_output"] },
-    application_id: { type: "string" },
+    applicationId: { type: "string" },
     run_id: { type: ["string", "null"], description: "Run container, or null." },
     chat_session_id: { type: ["string", "null"], description: "Chat-session container, or null." },
-    package_id: { type: ["string", "null"], description: "Producing agent package id, or null." },
+    packageId: { type: ["string", "null"], description: "Producing agent package id, or null." },
     name: { type: "string" },
     mime: { type: "string" },
     size: { type: "integer", description: "Size in bytes." },
@@ -43,21 +48,37 @@ const documentSchema = {
         "Whether `/content` will serve the bytes to the current caller: an agent output is " +
         "downloadable by anyone who can read the container; a user upload only by its creator.",
     },
+    previewable: {
+      type: "boolean",
+      description:
+        "Whether the caller can open an in-browser preview of this document (a readable document " +
+        "of a previewable kind — see `preview_kind`). Present on every row; the signed " +
+        "`preview_url` is minted only on the single-document GET (below).",
+    },
+    preview_kind: {
+      type: ["string", "null"],
+      enum: ["html", "image", "pdf", "text", null],
+      description:
+        "How this document previews, or null when not previewable: `html` (sandboxed iframe, " +
+        "active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` " +
+        "(plaintext). Present on every row.",
+    },
     preview_url: {
       type: ["string", "null"],
       format: "uri",
       description:
         "Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the " +
-        "query). Non-null only for a `text/html` document the caller can read; null otherwise. " +
+        "query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list " +
+        "rows (which carry `previewable` instead). Non-null only for a previewable document. " +
         'Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the ' +
         "instance configures a separate preview domain, else same-origin.",
     },
-    expires_at: {
+    expiresAt: {
       type: ["string", "null"],
       format: "date-time",
       description: "Retention deadline, or null when permanent.",
     },
-    created_at: { type: "string", format: "date-time" },
+    createdAt: { type: "string", format: "date-time" },
   },
 } as const;
 
@@ -70,7 +91,7 @@ export const documentsPaths = {
       description:
         "List the documents visible to the caller in the current application. Members see their " +
         "own documents (and system-owned ones); end-users see only their own. Filter by " +
-        "`purpose`, `run_id`, `package_id`, or `chat_session_id`; paginate with `starting_after` " +
+        "`purpose`, `run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` " +
         "+ `limit`. Access is inherited from each document's container (no per-file grants).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -90,7 +111,7 @@ export const documentsPaths = {
           description: "Filter to documents anchored to this run.",
         },
         {
-          name: "package_id",
+          name: "packageId",
           in: "query",
           required: false,
           schema: { type: "string" },
@@ -104,7 +125,7 @@ export const documentsPaths = {
           description: "Filter to documents anchored to this chat session.",
         },
         {
-          name: "starting_after",
+          name: "startingAfter",
           in: "query",
           required: false,
           schema: { type: "string" },

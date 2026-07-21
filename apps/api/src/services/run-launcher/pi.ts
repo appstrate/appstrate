@@ -346,6 +346,10 @@ async function runPlatformContainerImpl(
           ? boundary.sidecarEndpoints.llmProxyUrl
           : undefined,
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
+      // Forward the effective per-file document cap so the runtime's outputs
+      // sweep agrees with the server-authoritative gate (avoids silently
+      // skipping large deliverables when an operator raises the platform cap).
+      documentMaxFileBytes: getEnv().DOCUMENT_MAX_FILE_BYTES,
       forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
       noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
       sink: {

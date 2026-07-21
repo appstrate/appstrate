@@ -45,4 +45,27 @@ describe("DocumentPreview iframe sandbox", () => {
     expect(source).toContain("sandbox={PREVIEW_IFRAME_SANDBOX}");
     expect(source).toContain('referrerPolicy="no-referrer"');
   });
+
+  it("uses a JSX sandbox attribute exactly ONCE — only the html iframe (the pdf iframe stays sandboxless)", () => {
+    // A second JSX `sandbox={…}` would mean another frame (notably the pdf
+    // iframe, which MUST stay sandboxless for Chrome's native viewer) grew a
+    // sandbox, or a hardcoded one appeared. Pinning to a single occurrence
+    // sourced from the constant keeps the html path the only sandboxed frame.
+    const occurrences = source.match(/sandbox=\{/g) ?? [];
+    expect(occurrences.length).toBe(1);
+    expect(source).toContain("sandbox={PREVIEW_IFRAME_SANDBOX}");
+  });
+});
+
+describe("DocumentPreview kind branching", () => {
+  it("branches on preview_kind for image / pdf / text (html is the default)", () => {
+    expect(source).toContain('kind === "image"');
+    expect(source).toContain('kind === "pdf"');
+    expect(source).toContain('kind === "text"');
+  });
+
+  it("renders images via an <img> (not an iframe) with the doc name as alt", () => {
+    expect(source).toContain("<img");
+    expect(source).toContain("alt={doc.name}");
+  });
 });

@@ -337,6 +337,7 @@ See `.env.example` for all available environment variables. Key settings:
 | `CONNECTION_ENCRYPTION_KEY`               | Credential encryption key (32 bytes base64)                                                                                                    |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO admin credentials                                                                                                                        |
 | `APP_URL`                                 | Public URL (for OAuth callbacks, email links)                                                                                                  |
+| `USERCONTENT_URL`                         | Optional — separate origin for agent-HTML previews (recommended in production; see below)                                                      |
 | `TRUSTED_ORIGINS`                         | CORS origins (comma-separated)                                                                                                                 |
 | `SYSTEM_PROVIDER_KEYS`                    | Pre-configured LLM provider credentials (JSON array)                                                                                           |
 | `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`                                                                                            |
@@ -425,6 +426,21 @@ appstrate.example.com {
     reverse_proxy localhost:3000
 }
 ```
+
+### Agent-HTML previews (`USERCONTENT_URL`)
+
+Agents can publish HTML documents, which the dashboard renders in a hardened,
+cookie-less preview. That HTML is untrusted (agent-generated), so it is served
+from a dedicated preview route with an opaque-sandbox iframe, a strict CSP, and
+an injected meta CSP. For the strongest isolation in production, set
+`USERCONTENT_URL` to a **separate registrable domain** (eTLD+1) pointed at the
+same server — e.g. `usercontent.example.com` alongside `appstrate.example.com`.
+A distinct registrable domain gives the preview its own cookie jar, storage
+partition, and process (browser site isolation), so untrusted preview script
+can never reach the app's session even if the sandbox is somehow defeated. When
+unset, previews are served same-origin on `APP_URL` (still hardened) — fine for
+render-only content, but a separate origin is recommended once agents can emit
+HTML for other users to view.
 
 ### Reverse proxy body size & timeouts (uploads)
 

@@ -48,20 +48,78 @@ import { sanitizeStorageKey } from "./file-storage.ts";
 import { getRun } from "./state/runs.ts";
 import { synthesiseFinalize } from "./run-event-ingestion.ts";
 import { recordAudit } from "./audit.ts";
-import { signPreviewToken, isHtmlMime, PREVIEW_TOKEN_TTL_SECONDS } from "./document-preview.ts";
+import {
+  signPreviewToken,
+  previewKind,
+  type PreviewKind,
+  PREVIEW_TOKEN_TTL_SECONDS,
+} from "./document-preview.ts";
+import {
+  DOCUMENT_URI_PREFIX,
+  DOCUMENT_ID_RE,
+  isDocumentUri,
+  parseDocumentUri,
+  documentUri,
+} from "@appstrate/core/document-uri";
 
 /** Durable documents bucket (distinct from the ephemeral `uploads` bucket). */
 export const DOCUMENTS_BUCKET = "documents";
 
-/** `document://doc_xxx` — the URI form stored inside run/chat input JSON. */
-export const DOCUMENT_URI_PREFIX = "document://";
+// Canonical `document://` URI contract lives in @appstrate/core/document-uri
+// (shared with the MCP router, the chat module, and the runtime). Re-exported
+// here to preserve this service's public surface.
+export { DOCUMENT_URI_PREFIX, isDocumentUri, parseDocumentUri, documentUri };
 
 /**
- * Strict document id shape: `doc_` + ≥8 id chars. `prefixedId("doc")` is well
- * above this, so the bound is safely below the real minimum. Rejects malformed
- * input before it reaches the database SELECT.
+ * Split a `bucket/path/to/object` storage key into its `{ bucket, path }` parts,
+ * or null when the key is malformed (no bucket, or no path after it). One parser
+ * for every consumer (delete, stream, content route) so the split lives in one
+ * place.
  */
-const DOCUMENT_ID_RE = /^doc_[A-Za-z0-9_-]{8,}$/;
+export function parseStorageKey(storageKey: string): { bucket: string; path: string } | null {
+  const [bucket, ...rest] = storageKey.split("/");
+  if (!bucket || rest.length === 0) return null;
+  return { bucket, path: rest.join("/") };
+}
+
+/**
+ * Best-effort delete of a document's storage object by its `bucket/path` inside
+ * {@link DOCUMENTS_BUCKET}. Swallows + logs any failure (a leftover object is
+ * harmless — the org byte counter is the source of truth, reconciled by the GC).
+ * One helper for every drop-on-error / drop-on-dedup site.
+ */
+async function dropDocumentObject(storagePath: string, reason: string): Promise<void> {
+  await storageDelete(DOCUMENTS_BUCKET, storagePath).catch((err) => {
+    logger.warn("failed to delete documents object", {
+      reason,
+      storagePath,
+      error: getErrorMessage(err),
+    });
+  });
+}
+
+/**
+ * Storage path (inside {@link DOCUMENTS_BUCKET}) a document's bytes live at:
+ * `{applicationId}/{documentId}/{safeName}`. One builder so the layout is
+ * defined once.
+ */
+function documentStoragePath(scope: AppScope, documentId: string, name: string): string {
+  const safeName = sanitizeStorageKey(sanitizeFilename(name));
+  return `${scope.applicationId}/${documentId}/${safeName}`;
+}
+
+/** The 413 message for a file exceeding the per-file cap. */
+function perFileCapMessage(cap: number): string {
+  return `Document exceeds the per-file limit of ${cap} bytes`;
+}
+
+/** The 413 message for a run's output overrunning the per-run cap. */
+function runOutputCapMessage(cap: number): string {
+  return `Run output would exceed the per-run limit of ${cap} bytes`;
+}
+
+/** A Drizzle executor — either the root `db` or an open transaction handle. */
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Which container a materialized upload is anchored to. */
 export type DocumentContainer = { runId: string } | { chatSessionId: string };
@@ -106,23 +164,6 @@ export interface ResolvedDocument {
 // Pure helpers (unit-tested)
 // ---------------------------------------------------------------------------
 
-/** Is this value a `document://doc_xxx` reference? */
-export function isDocumentUri(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith(DOCUMENT_URI_PREFIX);
-}
-
-/** Extract the document id from a `document://doc_xxx` URI, or null if malformed. */
-export function parseDocumentUri(uri: string): string | null {
-  if (!uri.startsWith(DOCUMENT_URI_PREFIX)) return null;
-  const id = uri.slice(DOCUMENT_URI_PREFIX.length);
-  return DOCUMENT_ID_RE.test(id) ? id : null;
-}
-
-/** The `document://` URI for a document id. */
-export function documentUri(id: string): string {
-  return `${DOCUMENT_URI_PREFIX}${id}`;
-}
-
 /**
  * Derive whether `/content` serves the bytes to `actor` (D2 / Anthropic rule):
  * an `agent_output` is downloadable by anyone who can read the container; a
@@ -152,12 +193,31 @@ export function wouldExceedOrgQuota(
 }
 
 /**
+ * Throw the 403 `storage_limit_exceeded` when writing `addBytes` on top of
+ * `used` would overrun the org's `ORG_STORAGE_QUOTA_BYTES`. The org-quota
+ * rejection in one place (pre-flight fast reject + FOR UPDATE re-check).
+ */
+function assertWithinOrgQuota(used: number, addBytes: number): void {
+  const quota = getEnv().ORG_STORAGE_QUOTA_BYTES;
+  if (wouldExceedOrgQuota(used, addBytes, quota)) {
+    throw storageLimitExceeded(`Organization storage quota (${quota} bytes) would be exceeded`);
+  }
+}
+
+/**
  * `expiresAt` a fresh document is stamped with, from `DOCUMENT_RETENTION_DAYS`.
  * Undefined ⇒ permanent (null column). Pure given `now`.
  */
 export function retentionExpiry(retentionDays: number | undefined, now = new Date()): Date | null {
   if (retentionDays === undefined) return null;
   return new Date(now.getTime() + retentionDays * 24 * 60 * 60 * 1000);
+}
+
+/** Mid-stream byte ceilings for {@link createHashingCounter}. */
+export interface HashingCounterCaps {
+  perFileCap: number;
+  runOutputCap: number;
+  runOutputUsed: number;
 }
 
 /**
@@ -167,66 +227,34 @@ export function retentionExpiry(retentionDays: number | undefined, now = new Dat
  * fully drained (memoized — the digest is finalized on first read, so call it
  * only after the pipe resolves). Exported so the streaming-hash contract is
  * unit-testable in isolation.
+ *
+ * When `caps` is supplied, the stream also enforces byte ceilings mid-stream —
+ * the per-file cap and the run's remaining output budget. As soon as either is
+ * exceeded the stream errors (aborting the S3 write so no full object lands),
+ * with a distinct {@link payloadTooLarge} message per limit so the caller
+ * surfaces the right 413. Used by the agent-output ingestion path, which has no
+ * declared size to pre-check. Without `caps` it just counts + hashes.
  */
-export function createHashingCounter(): {
+export function createHashingCounter(caps?: HashingCounterCaps): {
   stream: TransformStream<Uint8Array, Uint8Array>;
   result: () => { bytes: number; sha256: string };
 } {
   const hasher = new Bun.CryptoHasher("sha256");
+  const runRemaining = caps ? caps.runOutputCap - caps.runOutputUsed : Infinity;
   let bytes = 0;
   let digest: string | null = null;
   const stream = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       bytes += chunk.byteLength;
-      hasher.update(chunk);
-      controller.enqueue(chunk);
-    },
-  });
-  return {
-    stream,
-    result: () => {
-      digest ??= hasher.digest("hex");
-      return { bytes, sha256: digest };
-    },
-  };
-}
-
-/**
- * A {@link createHashingCounter} variant that also enforces byte ceilings
- * mid-stream: the per-file cap and the run's remaining output budget. As soon
- * as either is exceeded the stream errors (aborting the S3 write so no full
- * object lands), with a distinct {@link payloadTooLarge} message per limit so
- * the caller surfaces the right 413. Used by the agent-output ingestion path,
- * which has no declared size to pre-check.
- */
-export function createCappedHashingCounter(caps: {
-  perFileCap: number;
-  runOutputCap: number;
-  runOutputUsed: number;
-}): {
-  stream: TransformStream<Uint8Array, Uint8Array>;
-  result: () => { bytes: number; sha256: string };
-} {
-  const hasher = new Bun.CryptoHasher("sha256");
-  const runRemaining = caps.runOutputCap - caps.runOutputUsed;
-  let bytes = 0;
-  let digest: string | null = null;
-  const stream = new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      bytes += chunk.byteLength;
-      if (bytes > caps.perFileCap) {
-        controller.error(
-          payloadTooLarge(`Document exceeds the per-file limit of ${caps.perFileCap} bytes`),
-        );
-        return;
-      }
-      if (bytes > runRemaining) {
-        controller.error(
-          payloadTooLarge(
-            `Run output would exceed the per-run limit of ${caps.runOutputCap} bytes`,
-          ),
-        );
-        return;
+      if (caps) {
+        if (bytes > caps.perFileCap) {
+          controller.error(payloadTooLarge(perFileCapMessage(caps.perFileCap)));
+          return;
+        }
+        if (bytes > runRemaining) {
+          controller.error(payloadTooLarge(runOutputCapMessage(caps.runOutputCap)));
+          return;
+        }
       }
       hasher.update(chunk);
       controller.enqueue(chunk);
@@ -245,43 +273,69 @@ export function createCappedHashingCounter(caps: {
 // DTO
 // ---------------------------------------------------------------------------
 
-/** Wire shape (snake_case) for a document. */
+/**
+ * Wire shape for a document. Field casing follows CASING_CONVENTIONS.md
+ * carve-out 4b (universal DB-convention fields stay camelCase EVERYWHERE):
+ * `applicationId`, `packageId`, `createdAt`, `expiresAt` are on that exact list.
+ * `run_id` / `chat_session_id` are NOT on it (the list carves out `scheduleId`,
+ * `apiKeyId`, `endUserId` but deliberately not `runId`), so they stay snake_case
+ * as domain fields — matching the `notification` DTO's `run_id` and the `Run`
+ * DTO's treatment of non-listed `*_id` fields.
+ */
 export interface DocumentDto {
   object: "document";
   id: string;
   uri: string;
   purpose: DocumentPurpose;
-  application_id: string;
+  applicationId: string;
   run_id: string | null;
   chat_session_id: string | null;
-  package_id: string | null;
+  packageId: string | null;
   name: string;
   mime: string;
   size: number;
   sha256: string;
   downloadable: boolean;
   /**
-   * Absolute URL of a hardened, cookie-less HTML preview — non-null ONLY for a
-   * `text/html` document the caller resolved. Carries a short-lived signed token
-   * (`?t=`); the SPA loads it in an `sandbox="allow-scripts"` iframe. On the
-   * `USERCONTENT_URL` origin when set, else on `APP_URL`.
+   * Whether this document has an in-browser preview the caller may open — a
+   * previewable mime ({@link PreviewKind}) on a document the caller can read. A
+   * cheap boolean carried on EVERY row (list + single GET) so the gallery can
+   * show the preview affordance without minting a signed token per row (the
+   * token is minted only on the single-document GET, below).
    */
-  preview_url: string | null;
-  expires_at: string | null;
-  created_at: string;
+  previewable: boolean;
+  /**
+   * How this document previews — `html` | `image` | `pdf` | `text`, or null when
+   * not previewable. Carried on EVERY row so the frontend knows which render
+   * path (sandboxed iframe / `<img>` / native-PDF iframe / plaintext `<pre>`) to
+   * use without inspecting the mime itself. snake_case: not on the universal
+   * DB-convention carve-out list.
+   */
+  preview_kind: PreviewKind | null;
+  /**
+   * Absolute URL of a hardened, cookie-less HTML preview — minted ONLY on the
+   * single-document GET (never in list rows, to avoid signing a short-lived
+   * token per gallery row). Non-null only for a previewable document. Carries a
+   * short-lived signed token (`?t=`); the SPA loads it in an
+   * `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when set,
+   * else on `APP_URL`. Absent (undefined) on list rows.
+   */
+  preview_url?: string | null;
+  expiresAt: string | null;
+  createdAt: string;
 }
 
 /**
- * Mint the hardened-preview URL for a resolved document, or null when it is not
- * a `text/html` document (only HTML is previewed this phase). The token
- * authorizes a GET of THIS document's preview for {@link PREVIEW_TOKEN_TTL_SECONDS};
- * the URL points at the cookie-less preview route on `USERCONTENT_URL` (separate
- * registrable domain — strongest isolation) when configured, else same-origin on
- * `APP_URL`. Called only after the container ACL already resolved the row for the
- * caller, so presence of a URL is itself the "previewable by you" signal.
+ * Mint the hardened-preview URL for a resolved document, or null when its mime
+ * is not previewable ({@link previewKind}). The token authorizes a GET of THIS
+ * document's preview for {@link PREVIEW_TOKEN_TTL_SECONDS}; the URL points at the
+ * cookie-less preview route on `USERCONTENT_URL` (separate registrable domain —
+ * strongest isolation) when configured, else same-origin on `APP_URL`. Called
+ * only after the container ACL already resolved the row for the caller, so
+ * presence of a URL is itself the "previewable by you" signal.
  */
 function mintPreviewUrl(row: DocumentRow, actor: Actor): string | null {
-  if (!isHtmlMime(row.mime)) return null;
+  if (previewKind(row.mime) === null) return null;
   const env = getEnv();
   const exp = Math.floor(Date.now() / 1000) + PREVIEW_TOKEN_TTL_SECONDS;
   // Bind the minting actor into the token (defense-in-depth for S1): the
@@ -298,29 +352,46 @@ function mintPreviewUrl(row: DocumentRow, actor: Actor): string | null {
   return `${base}/preview/documents/${row.id}?t=${encodeURIComponent(token)}`;
 }
 
-export function toDocumentDto(row: DocumentRow, actor: Actor): DocumentDto {
-  // `downloadable` gates BOTH the bytes (`/content`) and the preview URL: a
-  // `user_upload` is creator-only content (D2), so another member who can
-  // merely resolve the run must not receive a working `preview_url` for it
-  // (S1). Compute once; mint a preview only when the caller may read it.
-  const downloadable = deriveDownloadable(row, actor);
+/**
+ * Serialize a resolved document row to its wire DTO. `downloadable` is passed in
+ * (the caller already derived it via {@link getDocumentForActor} /
+ * {@link deriveDownloadable}) rather than re-derived here. `mintPreview` mints
+ * the signed `preview_url` — set ONLY on the single-document GET, never in list
+ * rows (a list of N rows must not sign N short-lived tokens). `previewable` (a
+ * plain boolean) rides every row so the gallery still shows the preview
+ * affordance. `downloadable` gates BOTH the bytes and the preview: a
+ * `user_upload` is creator-only content (D2/S1), so a member who can merely
+ * resolve the container is neither told it is previewable nor handed a token.
+ */
+export function toDocumentDto(
+  row: DocumentRow,
+  actor: Actor,
+  downloadable: boolean,
+  opts: { mintPreview?: boolean } = {},
+): DocumentDto {
+  const kind = previewKind(row.mime);
+  // `downloadable` gates the preview: a `user_upload` the caller cannot download
+  // is neither advertised as previewable nor assigned a kind (D2/S1).
+  const previewable = downloadable && kind !== null;
   return {
     object: "document",
     id: row.id,
     uri: documentUri(row.id),
     purpose: row.purpose,
-    application_id: row.applicationId,
+    applicationId: row.applicationId,
     run_id: row.runId,
     chat_session_id: row.chatSessionId,
-    package_id: row.packageId,
+    packageId: row.packageId,
     name: row.name,
     mime: row.mime,
     size: row.size,
     sha256: row.sha256,
     downloadable,
-    preview_url: downloadable ? mintPreviewUrl(row, actor) : null,
-    expires_at: row.expiresAt?.toISOString() ?? null,
-    created_at: row.createdAt.toISOString(),
+    previewable,
+    preview_kind: previewable ? kind : null,
+    ...(opts.mintPreview ? { preview_url: previewable ? mintPreviewUrl(row, actor) : null } : {}),
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
   };
 }
 
@@ -360,8 +431,7 @@ export async function createDocumentFromUpload(
   const [meta] = (await peekUploads([uploadId], scope)).values();
   await assertWithinDocumentLimits(scope.orgId, [meta!.size]);
 
-  const safeName = sanitizeStorageKey(sanitizeFilename(meta!.name));
-  const storagePath = `${scope.applicationId}/${documentId}/${safeName}`;
+  const storagePath = documentStoragePath(scope, documentId, meta!.name);
 
   // Stream upload → documents bucket, hashing + counting on the fly. The sink's
   // returned `{bytes, sniffedMime}` feed consume's size + MIME validation.
@@ -381,12 +451,7 @@ export async function createDocumentFromUpload(
     // The doc object may have been (partially) written before the throw
     // (size/MIME mismatch is validated post-drain). Drop it so the counter and
     // storage never disagree; consume already rolled back the upload side.
-    await storageDelete(DOCUMENTS_BUCKET, storagePath).catch((delErr) => {
-      logger.warn("failed to delete documents object after materialize error", {
-        documentId,
-        error: getErrorMessage(delErr),
-      });
-    });
+    await dropDocumentObject(storagePath, "materialize error");
     throw err;
   }
 
@@ -443,7 +508,6 @@ async function commitDocumentRow(params: {
   runOutputCap?: number;
 }): Promise<DocumentRow> {
   const { scope, documentId, storagePath, byteCount, attribution } = params;
-  const env = getEnv();
   try {
     const [row] = await db.transaction(async (tx) => {
       // Lock the org row so a concurrent write cannot both pass the quota
@@ -454,30 +518,15 @@ async function commitDocumentRow(params: {
         .where(eq(organizations.id, scope.orgId))
         .for("update")
         .limit(1);
-      if (wouldExceedOrgQuota(orgLocked?.used ?? 0, byteCount, env.ORG_STORAGE_QUOTA_BYTES)) {
-        throw storageLimitExceeded(
-          `Organization storage quota (${env.ORG_STORAGE_QUOTA_BYTES} bytes) would be exceeded`,
-        );
-      }
+      assertWithinOrgQuota(orgLocked?.used ?? 0, byteCount);
       // Per-run cap re-check under the same lock (agent-output ingestion). The
       // org `FOR UPDATE` above serialises every commit for this org — so two
       // concurrent publishes to the same run each observe the other's already-
       // committed row here, and their combined total is bounded exactly.
       if (params.runOutputCap !== undefined && params.runId && params.purpose === "agent_output") {
-        const [runTotal] = await tx
-          .select({ total: sql<string>`COALESCE(SUM(${documents.size}), 0)` })
-          .from(documents)
-          .where(
-            and(
-              eq(documents.runId, params.runId),
-              eq(documents.orgId, scope.orgId),
-              eq(documents.purpose, "agent_output"),
-            ),
-          );
-        if (Number(runTotal?.total ?? 0) + byteCount > params.runOutputCap) {
-          throw payloadTooLarge(
-            `Run output would exceed the per-run limit of ${params.runOutputCap} bytes`,
-          );
+        const runTotal = await runOutputBytesUsed(tx, scope, params.runId);
+        if (runTotal + byteCount > params.runOutputCap) {
+          throw payloadTooLarge(runOutputCapMessage(params.runOutputCap));
         }
       }
       const inserted = await tx
@@ -525,12 +574,7 @@ async function commitDocumentRow(params: {
   } catch (err) {
     // DB failed after the bytes landed — drop the object so its bytes are not
     // stranded uncounted in the bucket.
-    await storageDelete(DOCUMENTS_BUCKET, storagePath).catch((delErr) => {
-      logger.warn("failed to delete documents object after row-insert failure", {
-        documentId,
-        error: getErrorMessage(delErr),
-      });
-    });
+    await dropDocumentObject(storagePath, "row-insert failure");
     throw err;
   }
 }
@@ -540,8 +584,12 @@ async function commitDocumentRow(params: {
  * the running total the per-run output cap ({@link createDocumentFromStream})
  * checks the incoming file against.
  */
-async function runOutputBytesUsed(scope: AppScope, runId: string): Promise<number> {
-  const [row] = await db
+async function runOutputBytesUsed(
+  executor: DbOrTx,
+  scope: AppScope,
+  runId: string,
+): Promise<number> {
+  const [row] = await executor
     .select({ total: sql<string>`COALESCE(SUM(${documents.size}), 0)` })
     .from(documents)
     .where(
@@ -562,17 +610,64 @@ export interface CreatedDocumentFromStream {
 }
 
 /**
+ * Postgres unique_violation (SQLSTATE 23505). Walks the `cause` chain since
+ * Drizzle wraps the driver error in a `DrizzleQueryError` whose own `code` is
+ * undefined (same pattern as `isInvalidTextRepresentation` in db-helpers.ts).
+ */
+function isUniqueViolation(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; current != null && depth < 5; depth++) {
+    if (typeof current !== "object") break;
+    if ((current as { code?: unknown }).code === "23505") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * The existing `agent_output` document a re-published (run, sha256, name) tuple
+ * dedups against — the same key the partial unique index enforces. Used both as
+ * the fast-path pre-commit check and to recover the winner's row after losing a
+ * concurrent-insert race.
+ */
+async function findDedupDocument(
+  scope: AppScope,
+  runId: string,
+  sha256: string,
+  name: string,
+): Promise<DocumentRow | null> {
+  const [existing] = await db
+    .select(documentSelect)
+    .from(documents)
+    .where(
+      and(
+        eq(documents.runId, runId),
+        eq(documents.orgId, scope.orgId),
+        eq(documents.applicationId, scope.applicationId),
+        eq(documents.purpose, "agent_output"),
+        eq(documents.sha256, sha256),
+        eq(documents.name, name),
+      ),
+    )
+    .limit(1);
+  return (existing as DocumentRow) ?? null;
+}
+
+/**
  * Ingest an agent-published document from a run's streaming request body into a
  * durable `agent_output` document. Mirrors {@link createDocumentFromUpload} but
  * for the run→platform channel: the bytes arrive as a raw stream (no staged
- * upload), so the caps are enforced mid-stream via {@link createCappedHashingCounter}
- * (per-file + per-run output budget, both 413) and the org quota + counter are
- * committed transactionally via the shared {@link commitDocumentRow}.
+ * upload), so the caps are enforced mid-stream via {@link createHashingCounter}'s
+ * `caps` (per-file + per-run output budget, both 413) and the org quota +
+ * counter are committed transactionally via the shared {@link commitDocumentRow}.
  *
  * Idempotent for the sweep's at-least-once retries: if this run already
  * published a document with the SAME sha256 AND name, the just-streamed object
  * is dropped and the existing row returned (`deduped: true`) rather than storing
- * the bytes twice.
+ * the bytes twice. Two layers enforce this: a fast-path pre-commit SELECT, and —
+ * for the concurrent-publish race where both callers pass that SELECT — the
+ * partial unique index `(run_id, sha256, name) WHERE purpose = 'agent_output'`,
+ * whose violation the commit path catches and resolves to the same dedup (200).
  */
 export async function createDocumentFromStream(
   scope: AppScope,
@@ -583,11 +678,10 @@ export async function createDocumentFromStream(
 ): Promise<CreatedDocumentFromStream> {
   const env = getEnv();
   const documentId = prefixedId("doc");
-  const safeName = sanitizeStorageKey(sanitizeFilename(input.name));
-  const storagePath = `${scope.applicationId}/${documentId}/${safeName}`;
+  const storagePath = documentStoragePath(scope, documentId, input.name);
 
-  const runOutputUsed = await runOutputBytesUsed(scope, runId);
-  const digester = createCappedHashingCounter({
+  const runOutputUsed = await runOutputBytesUsed(db, scope, runId);
+  const digester = createHashingCounter({
     perFileCap: env.DOCUMENT_MAX_FILE_BYTES,
     runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
     runOutputUsed,
@@ -607,68 +701,57 @@ export async function createDocumentFromStream(
     // have been partially written before the abort. Drop it so a cut-short
     // upload never leaves a partial object behind (the 413 delete-on-short
     // contract) nor strands bytes uncounted.
-    await storageDelete(DOCUMENTS_BUCKET, storagePath).catch((delErr) => {
-      logger.warn("failed to delete documents object after stream error", {
-        documentId,
-        error: getErrorMessage(delErr),
-      });
-    });
+    await dropDocumentObject(storagePath, "stream error");
     throw err;
   }
 
   const { bytes: byteCount, sha256 } = digester.result();
 
-  // Dedup: an identical (run, sha256, name) agent_output already exists — the
-  // sweep re-published a file the tool already stored, or a retried POST. Drop
-  // the freshly-written object and return the existing row (no double count).
-  const [existing] = await db
-    .select(documentSelect)
-    .from(documents)
-    .where(
-      and(
-        eq(documents.runId, runId),
-        eq(documents.orgId, scope.orgId),
-        eq(documents.applicationId, scope.applicationId),
-        eq(documents.purpose, "agent_output"),
-        eq(documents.sha256, sha256),
-        eq(documents.name, input.name),
-      ),
-    )
-    .limit(1);
+  // Dedup fast path: an identical (run, sha256, name) agent_output already
+  // exists — the sweep re-published a file the tool already stored, or a retried
+  // POST. Drop the freshly-written object and return the existing row.
+  const existing = await findDedupDocument(scope, runId, sha256, input.name);
   if (existing) {
-    await storageDelete(DOCUMENTS_BUCKET, storagePath).catch((delErr) => {
-      logger.warn("failed to delete duplicate documents object", {
-        documentId,
-        error: getErrorMessage(delErr),
-      });
-    });
-    return { row: existing as DocumentRow, deduped: true };
+    await dropDocumentObject(storagePath, "duplicate");
+    return { row: existing, deduped: true };
   }
 
-  const row = await commitDocumentRow({
-    scope,
-    documentId,
-    storagePath,
-    purpose: "agent_output",
-    runId,
-    chatSessionId: null,
-    packageId,
-    attribution,
-    name: input.name,
-    mime: input.mime,
-    byteCount,
-    sha256,
-    expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
-    // Authoritative per-run cap re-check under the org lock (the pre-stream
-    // `runOutputUsed` read above is only the fast reject — see commitDocumentRow).
-    runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
-  });
-  return { row, deduped: false };
+  try {
+    const row = await commitDocumentRow({
+      scope,
+      documentId,
+      storagePath,
+      purpose: "agent_output",
+      runId,
+      chatSessionId: null,
+      packageId,
+      attribution,
+      name: input.name,
+      mime: input.mime,
+      byteCount,
+      sha256,
+      expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
+      // Authoritative per-run cap re-check under the org lock (the pre-stream
+      // `runOutputUsed` read above is only the fast reject — see commitDocumentRow).
+      runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
+    });
+    return { row, deduped: false };
+  } catch (err) {
+    // Lost the concurrent-insert race: another publish committed the same
+    // (run, sha256, name) between our SELECT and INSERT, so the partial unique
+    // index rejected ours. commitDocumentRow already dropped OUR object; recover
+    // the winner's row and return it as the dedup case (never double-counts).
+    if (isUniqueViolation(err)) {
+      const winner = await findDedupDocument(scope, runId, sha256, input.name);
+      if (winner) return { row: winner, deduped: true };
+    }
+    throw err;
+  }
 }
 
 function assertWithinFileCap(size: number, cap: number): void {
   if (size > cap) {
-    throw payloadTooLarge(`Document exceeds the per-file limit of ${cap} bytes`);
+    throw payloadTooLarge(perFileCapMessage(cap));
   }
 }
 
@@ -691,11 +774,7 @@ export async function assertWithinDocumentLimits(orgId: string, sizes: number[])
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
-  if (wouldExceedOrgQuota(org?.used ?? 0, total, env.ORG_STORAGE_QUOTA_BYTES)) {
-    throw storageLimitExceeded(
-      `Organization storage quota (${env.ORG_STORAGE_QUOTA_BYTES} bytes) would be exceeded`,
-    );
-  }
+  assertWithinOrgQuota(org?.used ?? 0, total);
 }
 
 /**
@@ -964,9 +1043,12 @@ export async function listDocumentsForActor(
     .limit(fetchLimit);
 
   const hasMore = rows.length > limit;
-  const data = (hasMore ? rows.slice(0, limit) : rows).map((r) =>
-    toDocumentDto(r as DocumentRow, actor),
-  );
+  const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => {
+    const row = r as DocumentRow;
+    // No `mintPreview` — list rows carry only the `previewable` boolean; the
+    // signed preview token is minted on the single-document GET.
+    return toDocumentDto(row, actor, deriveDownloadable(row, actor));
+  });
   return { ...listResponse(data, { hasMore }), limit };
 }
 
@@ -977,9 +1059,10 @@ export async function listDocumentsForActor(
 /**
  * Delete a document: drop the storage object, delete the row, and decrement the
  * org counter — the counter decrement + row delete are one transaction, the
- * storage delete is best-effort (a leftover object is swept by the S3-vs-DB
- * reconciliation, and never re-counted). Authorization (owner/admin permission
- * OR creator) is enforced by the caller.
+ * storage delete is best-effort (a leftover object is harmless: the org byte
+ * counter is the source of truth for the quota, kept honest by the periodic
+ * counter reconciliation, and a stray object is never re-counted). Authorization
+ * (owner/admin permission OR creator) is enforced by the caller.
  */
 export async function deleteDocument(scope: AppScope, docId: string): Promise<void> {
   const [row] = await db
@@ -1014,9 +1097,9 @@ export async function deleteDocument(scope: AppScope, docId: string): Promise<vo
 
 /** Delete a storage object addressed by its `bucket/path` storage key. Best-effort. */
 async function deleteStorageObject(storageKey: string): Promise<void> {
-  const [bucket, ...rest] = storageKey.split("/");
-  if (!bucket || rest.length === 0) return;
-  await storageDelete(bucket, rest.join("/")).catch((err) => {
+  const parsed = parseStorageKey(storageKey);
+  if (!parsed) return;
+  await storageDelete(parsed.bucket, parsed.path).catch((err) => {
     logger.warn("failed to delete document storage object", {
       storageKey,
       error: getErrorMessage(err),
@@ -1070,12 +1153,51 @@ export async function cleanupExpiredDocuments(): Promise<number> {
   return totalRemoved;
 }
 
+/**
+ * Reconcile every org's `documents_bytes_used` counter against the authoritative
+ * `SUM(documents.size)` and correct any drift. The counter is maintained
+ * transactionally on each document insert/delete, but an FK **cascade** delete
+ * (run / chat-session / end-user / application / org removed) drops `documents`
+ * rows WITHOUT running the app-level decrement — so the counter can drift high
+ * over time. This pass recomputes it from the rows and writes the corrected
+ * value only for orgs where it differs (a single correlated UPDATE; floors at 0
+ * for orgs whose documents all cascaded away). Returns the number of orgs fixed.
+ *
+ * Note: the cascade ALSO orphans the corresponding S3 objects. The storage
+ * abstraction (`@appstrate/core/storage`) exposes no list/enumerate operation,
+ * so an object-level orphan sweep is not implemented — those bytes are dead
+ * storage, but the QUOTA a user is charged against stays exact via this counter
+ * recompute. See docs/architecture/DOCUMENTS.md.
+ */
+export async function reconcileOrgDocumentBytes(): Promise<number> {
+  const recomputed = sql<number>`COALESCE((SELECT SUM(${documents.size}) FROM ${documents} WHERE ${documents.orgId} = ${organizations.id}), 0)`;
+  const fixed = await db
+    .update(organizations)
+    .set({ documentsBytesUsed: recomputed })
+    .where(sql`${organizations.documentsBytesUsed} <> ${recomputed}`)
+    .returning({ id: organizations.id });
+  return fixed.length;
+}
+
 /** Aligned with the upload sweep cadence. */
 const DOCUMENT_GC_INTERVAL_MS = 15 * 60 * 1000;
 
-let gcTimer: ReturnType<typeof setInterval> | null = null;
+/**
+ * Run the counter reconciliation once every N sweep ticks (≈ daily at the 15-min
+ * cadence). Low-frequency because it is a full correlated scan of `organizations`
+ * — the transactional counter maintenance is the hot path; this is only the
+ * drift safety net for cascade deletes.
+ */
+const DOCUMENT_RECONCILE_EVERY_N_TICKS = 96;
 
-/** Start the periodic expired-document sweep. Safe to call multiple times. */
+let gcTimer: ReturnType<typeof setInterval> | null = null;
+let gcTicks = 0;
+
+/**
+ * Start the periodic document GC: an expired-document sweep every tick, plus a
+ * low-frequency counter reconciliation pass (every N ticks). Safe to call
+ * multiple times.
+ */
 export function startDocumentGc(): void {
   if (gcTimer) return;
   gcTimer = setInterval(() => {
@@ -1086,6 +1208,15 @@ export function startDocumentGc(): void {
       .catch((err) => {
         logger.warn("Periodic document GC failed", { error: getErrorMessage(err) });
       });
+    if (gcTicks++ % DOCUMENT_RECONCILE_EVERY_N_TICKS === 0) {
+      reconcileOrgDocumentBytes()
+        .then((count) => {
+          if (count > 0) logger.info("Reconciled org document-byte counters", { orgs: count });
+        })
+        .catch((err) => {
+          logger.warn("Document counter reconciliation failed", { error: getErrorMessage(err) });
+        });
+    }
   }, DOCUMENT_GC_INTERVAL_MS);
   gcTimer.unref?.();
 }
@@ -1095,6 +1226,7 @@ export function stopDocumentGc(): void {
   if (gcTimer) {
     clearInterval(gcTimer);
     gcTimer = null;
+    gcTicks = 0;
   }
 }
 
@@ -1106,7 +1238,7 @@ export function stopDocumentGc(): void {
 export function streamDocumentContent(
   storageKey: string,
 ): Promise<ReadableStream<Uint8Array> | null> {
-  const [bucket, ...rest] = storageKey.split("/");
-  if (!bucket || rest.length === 0) return Promise.resolve(null);
-  return storageDownloadStream(bucket, rest.join("/"));
+  const parsed = parseStorageKey(storageKey);
+  if (!parsed) return Promise.resolve(null);
+  return storageDownloadStream(parsed.bucket, parsed.path);
 }

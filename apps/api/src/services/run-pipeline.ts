@@ -541,16 +541,29 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
 
   // Materialize the run's staged uploads into durable `documents` rows now the
   // run row exists (deferred from the input-parser by the `documents.run_id`
-  // FK). Best-effort per document — the bytes already live in the run
-  // workspace, so a materialization hiccup never fails the run.
-  if (params.pendingDocuments?.length && actor) {
-    await materializeRunUploads(
-      { orgId, applicationId },
-      actor,
-      runId,
-      agent.id,
-      params.pendingDocuments,
-    );
+  // FK). NOT best-effort: the persisted run input references these document
+  // ids, so a materialization failure would leave a broken run —
+  // `materializeRunUploads` rolls back the partial batch, fails the run loudly
+  // (via `synthesiseFinalize`), and rethrows, so the caller surfaces the error.
+  if (params.pendingDocuments?.length) {
+    if (actor) {
+      await materializeRunUploads(
+        { orgId, applicationId },
+        actor,
+        runId,
+        agent.id,
+        params.pendingDocuments,
+      );
+    } else {
+      // Invariant: an actor-less run should never carry pending uploads (the
+      // input-parser only stages them for a real actor). Unreachable today, but
+      // silently skipping would strand the persisted `document://` references —
+      // log loudly if it ever regresses.
+      logger.warn("pending documents dropped: run has no actor to attribute them to", {
+        runId,
+        pendingCount: params.pendingDocuments.length,
+      });
+    }
   }
 
   logger.info("run pipeline timings", {

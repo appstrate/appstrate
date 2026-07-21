@@ -53,7 +53,11 @@ async function withEnv(key: string, value: string, fn: () => Promise<void>): Pro
 
 async function seedRun(
   ctx: TestContext,
-  overrides: { status?: "pending" | "running" | "success"; secret?: string } = {},
+  overrides: {
+    status?: "pending" | "running" | "success";
+    secret?: string;
+    sinkClosedAt?: Date;
+  } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(runs).values({
@@ -64,6 +68,7 @@ async function seedRun(
     runOrigin: "platform",
     sinkSecretEncrypted: encrypt(overrides.secret ?? RUN_SECRET),
     sinkExpiresAt: new Date(Date.now() + 3600_000),
+    sinkClosedAt: overrides.sinkClosedAt ?? null,
     startedAt: new Date(),
   });
   return runId;
@@ -151,6 +156,27 @@ describe("POST /api/runs/:runId/documents — agent-output ingestion", () => {
   it("returns 404 for an unknown run", async () => {
     const res = await postDoc("run_missing", docHeaders(RUN_SECRET, "x.txt"), new Uint8Array([1]));
     expect(res.status).toBe(404);
+  });
+
+  it("rejects a closed sink with 410 (before the handler runs)", async () => {
+    const runId = await seedRun(ctx, { sinkClosedAt: new Date() });
+    const res = await postDoc(runId, docHeaders(RUN_SECRET, "late.txt"), new Uint8Array([1, 2, 3]));
+    expect(res.status).toBe(410);
+    // No document lands for a closed sink.
+    const rows = await db.select().from(documents).where(eq(documents.runId, runId));
+    expect(rows.length).toBe(0);
+  });
+
+  it("rejects a missing X-Document-Name header with 400", async () => {
+    const runId = await seedRun(ctx);
+    const res = await postDoc(
+      runId,
+      { ...signedEmptyBody(RUN_SECRET), "Content-Type": "text/plain" },
+      new Uint8Array([1, 2, 3]),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { param?: string };
+    expect(body.param).toBe("X-Document-Name");
   });
 
   it("cuts an over-per-file-cap upload mid-stream: 413, no row, no counter, no partial", async () => {

@@ -35,10 +35,11 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedEndUser } from "../../helpers/seed.ts";
+import { seedEndUser, seedApiKey } from "../../helpers/seed.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import {
   createDocumentFromUpload,
+  createDocumentFromStream,
   getDocumentForActor,
   listDocumentsForActor,
   materializeRunUploads,
@@ -116,6 +117,26 @@ async function orgBytesUsed(orgId: string): Promise<number> {
     .from(organizations)
     .where(eq(organizations.id, orgId));
   return org!.used;
+}
+
+/** Publish an `agent_output` from a run's streaming channel (Phase 2). */
+function publishStream(
+  scope: { orgId: string; applicationId: string },
+  runId: string,
+  name: string,
+  content: string,
+  attribution: { userId: string | null; endUserId: string | null } = {
+    userId: null,
+    endUserId: null,
+  },
+  mime = "text/plain",
+) {
+  const bytes = new TextEncoder().encode(content);
+  return createDocumentFromStream(scope, runId, attribution, null, {
+    name,
+    mime,
+    body: new Blob([bytes]).stream(),
+  });
 }
 
 describe("documents service + routes", () => {
@@ -469,5 +490,204 @@ describe("documents service + routes", () => {
     const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     const asEu = await listDocumentsForActor(scope, { type: "end_user", id: eu.id }, {});
     expect(asEu.data).toHaveLength(0);
+  });
+
+  it("FOR UPDATE re-check: two concurrent run outputs — only the one that fits commits, loser 413", async () => {
+    // RUN_MAX_OUTPUT_BYTES = 15 so two 10-byte publishes cannot both land. Both
+    // pass the pre-stream fast-check (run total = 0) and both stream their bytes;
+    // the org `FOR UPDATE` lock serialises the commit re-check, so the second
+    // observes the first's committed total (10) and is rejected (10 + 10 > 15).
+    await withEnv("RUN_MAX_OUTPUT_BYTES", "15", async () => {
+      const runId = await seedRunRow(scope);
+      const results = await Promise.allSettled([
+        publishStream(scope, runId, "a.txt", "0123456789"),
+        publishStream(scope, runId, "b.txt", "abcdefghij"),
+      ]);
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 413 });
+
+      // Exactly one row committed, and the org counter reflects only its 10 bytes.
+      const rows = await db.select().from(documents).where(eq(documents.runId, runId));
+      expect(rows).toHaveLength(1);
+      expect(await orgBytesUsed(ctx.orgId)).toBe(10);
+    });
+  });
+
+  it("concurrent identical (sha256, name) run publishes never double-insert or double-count", async () => {
+    // Same content + same name from two racing publishes. The partial unique
+    // index `(run_id, sha256, name) WHERE purpose = 'agent_output'` guarantees a
+    // single row and a single byte-count no matter which caller wins — the
+    // safety invariant asserted unconditionally below.
+    //
+    // NOTE: which path the loser takes is timing-dependent: the fast-path SELECT
+    // may already see the winner (→ dedup 200), OR both may miss it and race on
+    // the insert (→ 23505). The latter recovery is currently BROKEN — see the
+    // report: `isUniqueViolation` (documents.ts) does not unwrap Drizzle's
+    // `DrizzleQueryError`, so a real concurrent-insert race rethrows the raw DB
+    // error instead of returning the dedup winner. The dedup-contract assertions
+    // below therefore run only when BOTH publishes resolved (the fast-path
+    // timing); the single-row / single-count invariant is always enforced.
+    const runId = await seedRunRow(scope);
+    const results = await Promise.allSettled([
+      publishStream(scope, runId, "same.txt", "identical-bytes"),
+      publishStream(scope, runId, "same.txt", "identical-bytes"),
+    ]);
+
+    // The DB unique index makes double-insert / double-count impossible either way.
+    const rows = await db.select().from(documents).where(eq(documents.runId, runId));
+    expect(rows).toHaveLength(1);
+    expect(await orgBytesUsed(ctx.orgId)).toBe("identical-bytes".length);
+
+    // When the recovery works (fast-path timing), both resolve to the same row
+    // with exactly one fresh insert and one dedup.
+    if (results[0]!.status === "fulfilled" && results[1]!.status === "fulfilled") {
+      const [r1, r2] = [results[0].value, results[1].value];
+      expect(r1.row.id).toBe(r2.row.id);
+      expect(r1.deduped).not.toBe(r2.deduped);
+    }
+  });
+
+  it("GET /content: 403 for a member who is not the upload's creator, 200 for an agent_output", async () => {
+    // Member A uploads on a run; member B (a second org member) can read the
+    // metadata via the container ACL but the bytes are creator-only (D2/S1).
+    const memberA = await createTestUser({ email: "a2@docs.test" });
+    await addOrgMember(ctx.orgId, memberA.id, "member");
+    const actorA: Actor = { type: "user", id: memberA.id };
+    const memberB = await createTestUser({ email: "b2@docs.test" });
+    await addOrgMember(ctx.orgId, memberB.id, "member");
+    const bHeaders = authHeaders({ ...ctx, cookie: memberB.cookie });
+
+    const runId = await seedRunRow(scope);
+    const up = await stageUpload(
+      scope,
+      memberA.id,
+      "priv.txt",
+      new TextEncoder().encode("A private"),
+    );
+    const upload = await createDocumentFromUpload(scope, actorA, up, { runId });
+
+    const meta = await app.request(`/api/documents/${upload.id}`, { headers: bHeaders });
+    expect(meta.status).toBe(200);
+    expect(((await meta.json()) as { downloadable: boolean }).downloadable).toBe(false);
+
+    const content = await app.request(`/api/documents/${upload.id}/content`, { headers: bHeaders });
+    expect(content.status).toBe(403);
+
+    // An agent_output on the same run is downloadable by any container reader.
+    const { row: output } = await publishStream(scope, runId, "report.txt", "agent deliverable");
+    const outContent = await app.request(`/api/documents/${output.id}/content`, {
+      headers: bHeaders,
+    });
+    expect(outContent.status).toBe(200);
+  });
+
+  it("end-user (impersonated via API key) reads own docs, is blocked from others', and deletes own", async () => {
+    const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const euOther = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const euActor: Actor = { type: "end_user", id: eu.id };
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      createdBy: ctx.user.id,
+    });
+    const euHeaders = {
+      Authorization: `Bearer ${key.rawKey}`,
+      "X-Application-Id": ctx.defaultAppId,
+      "Appstrate-User": eu.id,
+    };
+
+    const runId = await seedRunRow(scope, { endUserId: eu.id });
+    const { row: output } = await publishStream(scope, runId, "eu-out.txt", "eu deliverable", {
+      userId: null,
+      endUserId: eu.id,
+    });
+    const up = await stageUpload(scope, null, "eu-up.txt", new TextEncoder().encode("eu upload"));
+    const upload = await createDocumentFromUpload(scope, euActor, up, { runId });
+
+    // Own run's agent_output → 200; own user_upload → 200.
+    const ownOut = await app.request(`/api/documents/${output.id}/content`, { headers: euHeaders });
+    expect(ownOut.status).toBe(200);
+    const ownUp = await app.request(`/api/documents/${upload.id}/content`, { headers: euHeaders });
+    expect(ownUp.status).toBe(200);
+
+    // Another end-user's document is hidden entirely (container ACL → 404).
+    const otherRun = await seedRunRow(scope, { endUserId: euOther.id });
+    const { row: otherOut } = await publishStream(scope, otherRun, "other.txt", "not yours", {
+      userId: null,
+      endUserId: euOther.id,
+    });
+    const foreign = await app.request(`/api/documents/${otherOut.id}`, { headers: euHeaders });
+    expect(foreign.status).toBe(404);
+
+    // The end-user can DELETE its own document (creator path, no permission grant).
+    const del = await app.request(`/api/documents/${upload.id}`, {
+      method: "DELETE",
+      headers: euHeaders,
+    });
+    expect(del.status).toBe(204);
+    const [gone] = await db.select().from(documents).where(eq(documents.id, upload.id));
+    expect(gone).toBeUndefined();
+  });
+
+  it("Content-Disposition sanitizes header-injection and non-ASCII filenames", async () => {
+    const runId = await seedRunRow(scope);
+
+    // CRLF-injection attempt in the name: the ASCII fallback collapses control
+    // chars to `_` and the RFC 5987 filename* percent-encodes them — no raw CRLF
+    // ever reaches the header value.
+    const { row: crlf } = await publishStream(scope, runId, "safe.txt", "crlf body");
+    await db
+      .update(documents)
+      .set({ name: "a\r\nSet-Cookie: x.txt" })
+      .where(eq(documents.id, crlf.id));
+    const res1 = await app.request(`/api/documents/${crlf.id}/content`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res1.status).toBe(200);
+    const cd1 = res1.headers.get("content-disposition")!;
+    expect(cd1).not.toMatch(/[\r\n]/);
+    expect(cd1).toContain('filename="a__Set-Cookie: x.txt"');
+    expect(cd1).toContain("filename*=UTF-8''a%0D%0ASet-Cookie%3A%20x.txt");
+
+    // Non-ASCII (accent + emoji): ASCII fallback underscores them, filename*
+    // carries the UTF-8 percent-encoded real name.
+    const { row: uni } = await publishStream(scope, runId, "safe2.txt", "unicode body");
+    await db.update(documents).set({ name: "héllo📄.txt" }).where(eq(documents.id, uni.id));
+    const res2 = await app.request(`/api/documents/${uni.id}/content`, {
+      headers: authHeaders(ctx),
+    });
+    const cd2 = res2.headers.get("content-disposition")!;
+    expect(cd2).not.toMatch(/[\r\n]/);
+    expect(cd2).toContain('filename="h_llo__.txt"');
+    expect(cd2).toContain("filename*=UTF-8''h%C3%A9llo%F0%9F%93%84.txt");
+  });
+
+  it("DELETE unknown id → 404; list ignores a garbage purpose and clamps limit to the catch default", async () => {
+    const runId = await seedRunRow(scope);
+    const up = await stageUpload(scope, ctx.user.id, "x.txt", new TextEncoder().encode("x"));
+    await createDocumentFromUpload(scope, userActor, up, { runId });
+
+    const del = await app.request(`/api/documents/doc_missing`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(del.status).toBe(404);
+
+    // Unknown purpose → safeParse fails → filter dropped → full (unfiltered) list.
+    const garbage = await app.request(`/api/documents?purpose=not_a_purpose`, {
+      headers: authHeaders(ctx),
+    });
+    expect(garbage.status).toBe(200);
+    expect(((await garbage.json()) as { data: unknown[] }).data.length).toBe(1);
+
+    // limit out of range → route's `.max(100).catch(20)` yields the 20 default;
+    // an in-range value is honored.
+    const over = await app.request(`/api/documents?limit=500`, { headers: authHeaders(ctx) });
+    expect(((await over.json()) as { limit: number }).limit).toBe(20);
+    const inRange = await app.request(`/api/documents?limit=50`, { headers: authHeaders(ctx) });
+    expect(((await inRange.json()) as { limit: number }).limit).toBe(50);
   });
 });

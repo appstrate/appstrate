@@ -27,6 +27,7 @@ import {
 } from "ai";
 import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
+import { isAttachmentUri } from "@appstrate/core/document-uri";
 import { logger } from "./logger.ts";
 import { applyOperationIndexPolicy } from "./operation-index.ts";
 export { applyOperationIndexPolicy } from "./operation-index.ts";
@@ -117,7 +118,7 @@ const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
 // tightening: any `file` part MUST reference an `upload://` or `document://`
 // URI. That rejects inline `data:` bytes and arbitrary URLs in the chat channel
 // (attachments flow only through the document store, never inline).
-const chatStreamSchema = z.object({
+export const chatStreamSchema = z.object({
   id: z.string().optional(),
   messages: z
     .array(z.unknown())
@@ -131,10 +132,7 @@ const chatStreamSchema = z.object({
             return;
           }
           const url = (part as { url?: unknown }).url;
-          if (
-            typeof url !== "string" ||
-            !(url.startsWith("upload://") || url.startsWith("document://"))
-          ) {
+          if (!isAttachmentUri(url)) {
             ctx.addIssue({
               code: "custom",
               message: "File attachment URI must be an 'upload://' or 'document://' URI.",

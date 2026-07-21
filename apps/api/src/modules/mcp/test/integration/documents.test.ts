@@ -13,15 +13,27 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { runs, uploads, chatSessions } from "@appstrate/db/schema";
+import { uploadStream } from "@appstrate/db/storage";
+import type { Actor } from "@appstrate/connect";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../test/helpers/db.ts";
-import { createTestContext, type TestContext } from "../../../../../test/helpers/auth.ts";
+import {
+  createTestContext,
+  createTestUser,
+  addOrgMember,
+  type TestContext,
+} from "../../../../../test/helpers/auth.ts";
 import { seedApiKey } from "../../../../../test/helpers/seed.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
 import { resetCatalog } from "../../catalog.ts";
-import { createDocumentFromStream } from "../../../../services/documents.ts";
+import { createUpload } from "../../../../services/uploads.ts";
+import {
+  createDocumentFromStream,
+  createDocumentFromUpload,
+} from "../../../../services/documents.ts";
 
 const app = getTestApp();
 setPlatformApp(app);
@@ -96,6 +108,31 @@ async function publishDoc(
   return row.id;
 }
 
+/** Stage an upload row + write its bytes into the uploads bucket (FS). */
+async function stageUpload(
+  scope: { orgId: string; applicationId: string },
+  createdBy: string | null,
+  name: string,
+  bytes: Uint8Array,
+  mime = "text/plain",
+): Promise<string> {
+  const up = await createUpload({
+    orgId: scope.orgId,
+    applicationId: scope.applicationId,
+    createdBy,
+    name,
+    size: bytes.byteLength,
+    mime,
+  });
+  const [row] = await db
+    .select({ storageKey: uploads.storageKey })
+    .from(uploads)
+    .where(eq(uploads.id, up.id));
+  const [bucket, ...rest] = row!.storageKey.split("/");
+  await uploadStream(bucket!, rest.join("/"), new Blob([bytes]).stream(), { exclusive: true });
+  return up.id;
+}
+
 describe("mcp list_documents", () => {
   let ctx: TestContext;
   let scope: { orgId: string; applicationId: string };
@@ -168,6 +205,40 @@ describe("mcp list_documents", () => {
     });
     const docs = toolData(envelope).data.documents as Array<Record<string, unknown>>;
     expect(docs.map((d) => d.name)).toEqual(["shared.txt"]);
+  });
+
+  it("does not leak another member's private chat-session document", async () => {
+    // Member B owns a chat session with an attached user_upload. That document is
+    // private to B's session — the caller (the API-key's user) must not see it in
+    // list_documents, even though a run-contained document IS org-visible.
+    const memberB = await createTestUser({ email: "mcpchat@docs.test" });
+    await addOrgMember(ctx.orgId, memberB.id, "member");
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: memberB.id });
+    const up = await stageUpload(
+      scope,
+      memberB.id,
+      "bchat.txt",
+      new TextEncoder().encode("B private"),
+    );
+    const chatDoc = await createDocumentFromUpload(scope, { type: "user", id: memberB.id }, up, {
+      chatSessionId: sessionId,
+    });
+
+    // A run-contained document is visible as a control.
+    const runId = await seedRun(scope);
+    const visible = await publishDoc(scope, runId, "vis.txt", "text/plain", "visible");
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "list_documents", arguments: {} },
+    });
+    const docs = toolData(envelope).data.documents as Array<Record<string, unknown>>;
+    const ids = docs.map((d) => d.id);
+    expect(ids).toContain(visible);
+    expect(ids).not.toContain(chatDoc.id);
   });
 });
 
@@ -272,5 +343,58 @@ describe("mcp resources/read (document://)", () => {
       params: { uri: "document://not-a-doc-id" },
     });
     expect(envelope.error).toBeDefined();
+  });
+
+  it("returns metadata only (no bytes) for another member's user_upload the caller cannot download", async () => {
+    // Member B uploads a textual document on a run. The caller (the API-key's
+    // user) can resolve the run container but is NOT the upload's creator, so
+    // `downloadable` is false — the read serves metadata only, never the bytes.
+    const memberB = await createTestUser({ email: "mcpb@docs.test" });
+    await addOrgMember(ctx.orgId, memberB.id, "member");
+    const runId = await seedRun(scope);
+    const up = await stageUpload(
+      scope,
+      memberB.id,
+      "secret.txt",
+      new TextEncoder().encode("member B private text"),
+    );
+    const actorB: Actor = { type: "user", id: memberB.id };
+    const upload = await createDocumentFromUpload(scope, actorB, up, { runId });
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "resources/read",
+      params: { uri: `document://${upload.id}` },
+    });
+    const contents = (envelope.result?.contents as Array<Record<string, unknown>>) ?? [];
+    expect(contents).toHaveLength(1);
+    expect(contents[0]!.mimeType).toBe("application/json");
+    const meta = JSON.parse(contents[0]!.text as string) as Record<string, unknown>;
+    expect(meta).toMatchObject({ id: upload.id, downloadable: false });
+    expect(String(meta.note)).toContain("not downloadable");
+    // The private text is never inlined into the read.
+    expect(contents[0]!.text).not.toContain("member B private text");
+  });
+
+  it("returns metadata only for a textual agent_output over the 1 MiB inline limit", async () => {
+    const runId = await seedRun(scope);
+    const big = "A".repeat(1024 * 1024 + 16); // textual, but > 1 MiB inline ceiling
+    const docId = await publishDoc(scope, runId, "big.txt", "text/plain", big);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "resources/read",
+      params: { uri: `document://${docId}` },
+    });
+    const contents = (envelope.result?.contents as Array<Record<string, unknown>>) ?? [];
+    expect(contents).toHaveLength(1);
+    expect(contents[0]!.mimeType).toBe("application/json");
+    const meta = JSON.parse(contents[0]!.text as string) as Record<string, unknown>;
+    expect(meta).toMatchObject({ id: docId, downloadable: true });
+    expect(String(meta.note)).toContain("1 MiB");
+    // The oversized body is not inlined.
+    expect(contents[0]!.text).not.toContain("AAAA");
   });
 });

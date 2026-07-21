@@ -84,6 +84,7 @@
     "./credential-template": "./src/credential-template.ts",
     "./dedupe-label": "./src/dedupe-label.ts",
     "./chat-contract": "./src/chat-contract.ts",
+    "./document-uri": "./src/document-uri.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
     "./run-and-wait-client": "./src/run-and-wait-client.ts"

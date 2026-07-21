@@ -41,6 +41,7 @@ import {
   type RunAndWaitLaunch,
   type RunAndWaitDocument,
 } from "@appstrate/core/run-and-wait-client";
+import { parseDocumentUri } from "@appstrate/core/document-uri";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 
@@ -180,29 +181,17 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 // --- documents (resource_link + resources/read + list_documents) -----------
+// The `document://` URI prefix, id shape, and parser are the canonical,
+// dependency-free helpers from `@appstrate/core/document-uri` (imported above)
+// — the tool layer stays free of the documents service's DB/storage graph
+// while sharing one contract.
 
-/** `document://doc_xxx` — the opaque, stable URI form of a stored document. */
-const DOCUMENT_URI_PREFIX = "document://";
-/**
- * Strict document-id shape (`doc_` + ≥8 id chars), matching the service-side
- * validator. Replicated here rather than imported so the tool layer stays free
- * of the documents service's DB/storage dependency graph (keeps the tool unit
- * tests DB-free); the only shared contract is this format.
- */
-const DOCUMENT_ID_RE = /^doc_[A-Za-z0-9_-]{8,}$/;
 /**
  * Ceiling on inlining a document's bytes into a `resources/read` text block.
  * Above it (or for a non-textual mime) the read returns metadata only — MCP has
  * no partial-content standard, so we keep it simple.
  */
 const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
-
-/** Extract the document id from a `document://doc_xxx` URI, or null if malformed. */
-function parseDocumentResourceUri(uri: string): string | null {
-  if (!uri.startsWith(DOCUMENT_URI_PREFIX)) return null;
-  const id = uri.slice(DOCUMENT_URI_PREFIX.length);
-  return DOCUMENT_ID_RE.test(id) ? id : null;
-}
 
 /**
  * Whether a mime type is textual enough to inline as `text` in a
@@ -1100,9 +1089,11 @@ function projectDocumentRow(raw: unknown): Record<string, unknown> | null {
     name,
     mime: asString(r?.mime) ?? "application/octet-stream",
     size: typeof r?.size === "number" ? r.size : 0,
+    // Casing mirrors DocumentDto (CASING_CONVENTIONS.md 4b): `packageId`/`createdAt`
+    // camelCase carve-outs; `run_id` a snake_case domain field.
     run_id: asString(r?.run_id) ?? null,
-    package_id: asString(r?.package_id) ?? null,
-    created_at: asString(r?.created_at) ?? null,
+    packageId: asString(r?.packageId) ?? null,
+    createdAt: asString(r?.createdAt) ?? null,
   };
 }
 
@@ -1209,7 +1200,7 @@ function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
 export function buildDocumentResourceProvider(ctx: McpToolContext): AppstrateResourceProvider {
   return {
     read: async (uri: string): Promise<ReadResourceResult> => {
-      const docId = parseDocumentResourceUri(uri);
+      const docId = parseDocumentUri(uri);
       if (!docId) {
         throw new McpError(ErrorCode.InvalidParams, `Not a document resource URI: ${uri}`);
       }
