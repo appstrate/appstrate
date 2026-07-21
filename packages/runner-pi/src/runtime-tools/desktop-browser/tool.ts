@@ -37,8 +37,8 @@ export const desktopBrowserTool = defineTool({
     "`browser.waitForSelector` {selector, timeoutMs?} — poll until the selector exists. " +
     "Returns 503 when no desktop is connected for this user. Prefer reading a page's own API " +
     "(extract its token via `browser.evaluate`, then call the REST endpoint) over clicking through pages. " +
-    "Credential substitution: set `integrationId` (an integration declared by this agent) + " +
-    "`substituteParams: true`, and every `{{field}}` placeholder inside `params` strings is replaced " +
+    "Credential substitution: set `integration_id` (an integration declared by this agent) + " +
+    "`substitute_params: true`, and every `{{field}}` placeholder inside `params` strings is replaced " +
     "server-side with the connected credential's field value AFTER your call leaves this context — " +
     "write `{{password}}`, never ask for the real value. You cannot read substituted values back: " +
     "every reply of this run is scrubbed of them.",
@@ -64,7 +64,7 @@ export const desktopBrowserTool = defineTool({
         description:
           "Method-specific arguments — see the per-method shapes in this tool's description.",
       },
-      timeoutMs: {
+      timeout_ms: {
         type: "integer",
         minimum: 1000,
         maximum: 120000,
@@ -72,16 +72,16 @@ export const desktopBrowserTool = defineTool({
           "Optional per-command timeout the platform enforces on the desktop dispatch " +
           "(1s–120s, default 30s). Returns 504 if the desktop doesn't reply in time.",
       },
-      integrationId: {
+      integration_id: {
         type: "string",
         description:
           "Integration package id (`@scope/name`) whose connected credential fields fill " +
           "`{{field}}` placeholders in `params`. Must be declared in this agent's dependencies.",
       },
-      substituteParams: {
+      substitute_params: {
         type: "boolean",
         description:
-          "Enable server-side `{{field}}` substitution from `integrationId`'s connected " +
+          "Enable server-side `{{field}}` substitution from `integration_id`'s connected " +
           "credentials. The real values never appear in your context.",
       },
     },

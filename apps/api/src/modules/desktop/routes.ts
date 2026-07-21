@@ -14,7 +14,7 @@
  *     tests, CLI). Not on the agent execution path; no substitution.
  *   - `POST /internal/desktop-command` — sidecar-only, backs the
  *     `desktop_browser` runtime tool. Run-token auth. Supports
- *     credential substitution: `integrationId` + `substituteParams`
+ *     credential substitution: `integration_id` + `substitute_params`
  *     resolve the run's connected credentials for that integration and
  *     replace `{{field}}` placeholders inside `params` server-side, so
  *     secret values never enter the agent's context. Every reply for a
@@ -29,6 +29,7 @@
  */
 
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppEnv } from "../../types/index.ts";
 import { logger } from "../../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
@@ -42,6 +43,7 @@ import {
   badGateway,
   serviceUnavailable,
   internalError,
+  parseBody,
 } from "../../lib/errors.ts";
 import { upgradeWebSocket } from "../../lib/websocket.ts";
 import { rateLimit, rateLimitByBearer } from "../../middleware/rate-limit.ts";
@@ -178,23 +180,38 @@ async function assertAgentDeclaresIntegration(
   }
 }
 
-interface CommandBody {
-  method?: string;
-  params?: unknown;
-  timeoutMs?: number;
-}
+/**
+ * Zod source of truth for the command bodies — registered against the
+ * spec through the module's `openApiSchemas()` contribution so the
+ * Zod↔OpenAPI comparison gate (`verify:openapi` step 4) locks the two
+ * together. Wire casing per docs/CASING_CONVENTIONS.md: compound field
+ * names are snake_case (`integration_id` is integration-domain wire,
+ * not one of the universal camelCase carve-outs).
+ */
+export const desktopCommandSchema = z.object({
+  method: z.enum([
+    "browser.navigate",
+    "browser.click",
+    "browser.fill",
+    "browser.evaluate",
+    "browser.screenshot",
+    "browser.waitForSelector",
+  ]),
+  params: z.record(z.string(), z.unknown()).optional(),
+  timeout_ms: z.number().int().min(1000).max(120000).optional(),
+});
 
-function parseCommandBody(raw: unknown): { method: string; params: unknown; timeoutMs?: number } {
-  const body = raw as CommandBody;
-  if (!body || typeof body !== "object") throw invalidRequest("Invalid JSON body");
-  if (!body.method || typeof body.method !== "string") {
-    throw invalidRequest("Missing or invalid `method`", "method");
+export const desktopAgentCommandSchema = desktopCommandSchema.extend({
+  integration_id: z.string().optional(),
+  substitute_params: z.boolean().optional(),
+});
+
+async function readJsonBody(c: { req: { json(): Promise<unknown> } }): Promise<unknown> {
+  try {
+    return await c.req.json();
+  } catch {
+    throw invalidRequest("Invalid JSON body");
   }
-  return {
-    method: body.method,
-    params: body.params ?? {},
-    ...(body.timeoutMs !== undefined ? { timeoutMs: body.timeoutMs } : {}),
-  };
 }
 
 export function createDesktopRouter(): Hono<AppEnv> {
@@ -265,16 +282,10 @@ export function createDesktopRouter(): Hono<AppEnv> {
   router.post("/api/desktop/me/command", rateLimit(120), async (c) => {
     const user = c.get("user");
     if (!user) throw unauthorized("Authentication required");
-    let raw: unknown;
+    const body = parseBody(desktopCommandSchema, await readJsonBody(c));
     try {
-      raw = await c.req.json();
-    } catch {
-      throw invalidRequest("Invalid JSON body");
-    }
-    const body = parseCommandBody(raw);
-    try {
-      const result = await sendCommand(user.id, body.method, body.params, {
-        timeoutMs: body.timeoutMs,
+      const result = await sendCommand(user.id, body.method, body.params ?? {}, {
+        timeoutMs: body.timeout_ms,
       });
       return c.json({ result });
     } catch (err) {
@@ -287,30 +298,23 @@ export function createDesktopRouter(): Hono<AppEnv> {
     if (!run.userId) {
       throw forbidden("Run has no owning user — the desktop bridge requires a user-owned run");
     }
-    let raw: unknown;
-    try {
-      raw = await c.req.json();
-    } catch {
-      throw invalidRequest("Invalid JSON body");
-    }
-    const body = parseCommandBody(raw);
-    const extras = raw as { integrationId?: string; substituteParams?: boolean };
+    const body = parseBody(desktopAgentCommandSchema, await readJsonBody(c));
 
-    let dispatchedParams: unknown = body.params;
+    let dispatchedParams: unknown = body.params ?? {};
 
     // Credential substitution — resolve the run's connected credentials
     // for the named integration and swap `{{field}}` placeholders out of
     // `params` before dispatching. The agent's LLM only ever writes
     // templates; the resolved values go straight to the user's desktop.
-    if (extras.substituteParams) {
-      if (!extras.integrationId || typeof extras.integrationId !== "string") {
+    if (body.substitute_params) {
+      if (!body.integration_id) {
         throw invalidRequest(
-          "`integrationId` is required when `substituteParams` is set",
-          "integrationId",
+          "`integration_id` is required when `substitute_params` is set",
+          "integration_id",
         );
       }
-      await assertAgentDeclaresIntegration(extras.integrationId, run, runId);
-      const wire = await resolveLiveIntegrationCredentials(extras.integrationId, {
+      await assertAgentDeclaresIntegration(body.integration_id, run, runId);
+      const wire = await resolveLiveIntegrationCredentials(body.integration_id, {
         runId,
         orgId: run.orgId,
         applicationId: run.applicationId,
@@ -322,16 +326,16 @@ export function createDesktopRouter(): Hono<AppEnv> {
       const fields: Record<string, string> = {};
       for (const auth of wire.auths) Object.assign(fields, auth.fields);
       if (Object.keys(fields).length === 0) {
-        throw notFound(`No credentials available for integration '${extras.integrationId}'`);
+        throw notFound(`No credentials available for integration '${body.integration_id}'`);
       }
-      dispatchedParams = substituteInValue(body.params, fields);
+      dispatchedParams = substituteInValue(body.params ?? {}, fields);
       // From now on, every reply for this run is scrubbed of these
       // values — including replies to later commands (an agent could
       // fill a password and read the field back with a second call).
       registerRunSecrets(runId, Object.values(fields));
       logger.info("Desktop command credential substitution", {
         runId,
-        integrationId: extras.integrationId,
+        integrationId: body.integration_id,
         fieldCount: Object.keys(fields).length,
         module: "desktop",
       });
@@ -340,7 +344,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
     const scrub = (text: string): string => scrubRunSecrets(runId, text) as string;
     try {
       const result = await sendCommand(run.userId, body.method, dispatchedParams, {
-        timeoutMs: body.timeoutMs,
+        timeoutMs: body.timeout_ms,
       });
       return c.json({ result: scrubRunSecrets(runId, result) });
     } catch (err) {

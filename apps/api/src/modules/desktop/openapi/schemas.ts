@@ -5,34 +5,40 @@
  * spec's `components.schemas` when the module is loaded.
  */
 
+// Shared between the two command-request schemas — the user-facing one
+// and the agent-path one differ only by the substitution fields.
+const methodProperty = {
+  type: "string",
+  enum: [
+    "browser.navigate",
+    "browser.click",
+    "browser.fill",
+    "browser.evaluate",
+    "browser.screenshot",
+    "browser.waitForSelector",
+  ],
+  description: "Browser primitive to invoke.",
+} as const;
+
+const timeoutMsProperty = {
+  type: "integer",
+  minimum: 1000,
+  maximum: 120000,
+  description: "Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses.",
+} as const;
+
 export const desktopSchemas = {
   DesktopCommandRequest: {
     type: "object",
     required: ["method"],
     description: "A browser primitive to execute on the user's local Appstrate Desktop client.",
     properties: {
-      method: {
-        type: "string",
-        enum: [
-          "browser.navigate",
-          "browser.click",
-          "browser.fill",
-          "browser.evaluate",
-          "browser.screenshot",
-          "browser.waitForSelector",
-        ],
-        description: "Browser primitive to invoke.",
-      },
+      method: methodProperty,
       params: {
         type: "object",
         description: "Method-specific arguments (e.g. `{ url }`, `{ selector, value }`).",
       },
-      timeoutMs: {
-        type: "integer",
-        minimum: 1000,
-        maximum: 120000,
-        description: "Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses.",
-      },
+      timeout_ms: timeoutMsProperty,
     },
   },
   DesktopAgentCommandRequest: {
@@ -40,44 +46,28 @@ export const desktopSchemas = {
     required: ["method"],
     description:
       "Agent-path variant of DesktopCommandRequest: adds server-side credential substitution. " +
-      "With `integrationId` + `substituteParams`, `{{field}}` placeholders inside `params` " +
+      "With `integration_id` + `substitute_params`, `{{field}}` placeholders inside `params` " +
       "strings are replaced by the run's connected credential fields for that integration " +
       "before dispatch — the values never appear in the agent's context, and every reply " +
       "for the run is scrubbed of them afterwards.",
     properties: {
-      method: {
-        type: "string",
-        enum: [
-          "browser.navigate",
-          "browser.click",
-          "browser.fill",
-          "browser.evaluate",
-          "browser.screenshot",
-          "browser.waitForSelector",
-        ],
-        description: "Browser primitive to invoke.",
-      },
+      method: methodProperty,
       params: {
         type: "object",
         description:
           "Method-specific arguments. Strings may contain `{{field}}` placeholders when " +
           "substitution is enabled; unknown placeholders are left intact.",
       },
-      timeoutMs: {
-        type: "integer",
-        minimum: 1000,
-        maximum: 120000,
-        description: "Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses.",
-      },
-      integrationId: {
+      timeout_ms: timeoutMsProperty,
+      integration_id: {
         type: "string",
         description:
           "Integration package id (`@scope/name`) whose connected credential fields fill the " +
           "placeholders. Must be declared in the running agent's dependencies.",
       },
-      substituteParams: {
+      substitute_params: {
         type: "boolean",
-        description: "Enable `{{field}}` substitution from `integrationId`'s credentials.",
+        description: "Enable `{{field}}` substitution from `integration_id`'s credentials.",
       },
     },
   },

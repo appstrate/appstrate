@@ -19,8 +19,9 @@
  * live in an in-memory registry keyed by userId.
  */
 
+import { z } from "zod";
 import type { AppstrateModule } from "@appstrate/core/module";
-import { createDesktopRouter } from "./routes.ts";
+import { createDesktopRouter, desktopCommandSchema, desktopAgentCommandSchema } from "./routes.ts";
 import { closeAllClients } from "./registry.ts";
 import { desktopPaths } from "./openapi/paths.ts";
 import { desktopSchemas } from "./openapi/schemas.ts";
@@ -43,6 +44,23 @@ const desktopModule: AppstrateModule = {
 
   openApiComponentSchemas() {
     return desktopSchemas;
+  },
+
+  openApiSchemas() {
+    return [
+      {
+        method: "POST",
+        path: "/api/desktop/me/command",
+        jsonSchema: z.toJSONSchema(desktopCommandSchema) as Record<string, unknown>,
+        description: "Drive my desktop",
+      },
+      {
+        method: "POST",
+        path: "/internal/desktop-command",
+        jsonSchema: z.toJSONSchema(desktopAgentCommandSchema) as Record<string, unknown>,
+        description: "Agent desktop command",
+      },
+    ];
   },
 
   openApiTags() {

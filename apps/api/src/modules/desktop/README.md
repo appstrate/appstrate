@@ -27,7 +27,7 @@ AFTER the command has left the model:
 
 1. The agent calls `desktop_browser` with
    `{ method: "browser.fill", params: { selector: "#pw", value: "{{password}}" },
-integrationId: "@scope/somesite", substituteParams: true }`.
+integration_id: "@scope/somesite", substitute_params: true }`.
 2. `/internal/desktop-command` verifies the run token, then applies the same
    fail-closed gate as `/internal/integration-credentials`: the running agent
    must DECLARE the integration in its manifest dependencies.

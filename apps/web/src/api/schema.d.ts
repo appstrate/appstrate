@@ -4339,7 +4339,7 @@ export interface paths {
         put?: never;
         /**
          * Dispatch a browser command to the run owner's desktop companion
-         * @description Backs the agent-facing `desktop_browser` MCP tool. Forwards a JSON-RPC command to the Appstrate Desktop client connected for the run's owning user and returns the correlated reply inline. Container-to-host only. Auth via Bearer run token. A run with no owning user (remote or end-user triggered) has no desktop to drive and gets a 403. Supports server-side credential substitution (`integrationId` + `substituteParams`): `{{field}}` placeholders in `params` are resolved from the run's connected credentials for the declared integration, and every reply for the run is scrubbed of the substituted values.
+         * @description Backs the agent-facing `desktop_browser` MCP tool. Forwards a JSON-RPC command to the Appstrate Desktop client connected for the run's owning user and returns the correlated reply inline. Container-to-host only. Auth via Bearer run token. A run with no owning user (remote or end-user triggered) has no desktop to drive and gets a 403. Supports server-side credential substitution (`integration_id` + `substitute_params`): `{{field}}` placeholders in `params` are resolved from the run's connected credentials for the declared integration, and every reply for the run is scrubbed of the substituted values.
          */
         post: operations["dispatchDesktopCommand"];
         delete?: never;
@@ -4943,7 +4943,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description Agent-path variant of DesktopCommandRequest: adds server-side credential substitution. With `integrationId` + `substituteParams`, `{{field}}` placeholders inside `params` strings are replaced by the run's connected credential fields for that integration before dispatch — the values never appear in the agent's context, and every reply for the run is scrubbed of them afterwards. */
+        /** @description Agent-path variant of DesktopCommandRequest: adds server-side credential substitution. With `integration_id` + `substitute_params`, `{{field}}` placeholders inside `params` strings are replaced by the run's connected credential fields for that integration before dispatch — the values never appear in the agent's context, and every reply for the run is scrubbed of them afterwards. */
         DesktopAgentCommandRequest: {
             /**
              * @description Browser primitive to invoke.
@@ -4953,11 +4953,11 @@ export interface components {
             /** @description Method-specific arguments. Strings may contain `{{field}}` placeholders when substitution is enabled; unknown placeholders are left intact. */
             params?: Record<string, never>;
             /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */
-            timeoutMs?: number;
+            timeout_ms?: number;
             /** @description Integration package id (`@scope/name`) whose connected credential fields fill the placeholders. Must be declared in the running agent's dependencies. */
-            integrationId?: string;
-            /** @description Enable `{{field}}` substitution from `integrationId`'s credentials. */
-            substituteParams?: boolean;
+            integration_id?: string;
+            /** @description Enable `{{field}}` substitution from `integration_id`'s credentials. */
+            substitute_params?: boolean;
         };
         /** @description A browser primitive to execute on the user's local Appstrate Desktop client. */
         DesktopCommandRequest: {
@@ -4969,7 +4969,7 @@ export interface components {
             /** @description Method-specific arguments (e.g. `{ url }`, `{ selector, value }`). */
             params?: Record<string, never>;
             /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */
-            timeoutMs?: number;
+            timeout_ms?: number;
         };
         /** @description The desktop client's reply, forwarded verbatim (scrubbed on the agent path). */
         DesktopCommandResponse: {
@@ -19708,8 +19708,8 @@ export interface operations {
                  *         "selector": "#password",
                  *         "value": "{{password}}"
                  *       },
-                 *       "integrationId": "@myorg/somesite",
-                 *       "substituteParams": true
+                 *       "integration_id": "@myorg/somesite",
+                 *       "substitute_params": true
                  *     }
                  */
                 "application/json": components["schemas"]["DesktopAgentCommandRequest"];

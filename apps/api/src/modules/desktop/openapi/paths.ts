@@ -10,6 +10,29 @@
  * the Code ⊆ Spec check.
  */
 
+// The three dispatch-failure statuses, identical on both command routes:
+// 502 desktop-reported error, 503 no desktop connected, 504 reply timeout.
+const dispatchErrorResponses = {
+  "502": {
+    description: "The desktop reported an error executing the command.",
+    content: {
+      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+    },
+  },
+  "503": {
+    description: "No desktop companion is connected for this user.",
+    content: {
+      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+    },
+  },
+  "504": {
+    description: "The desktop did not reply before the timeout elapsed.",
+    content: {
+      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+    },
+  },
+} as const;
+
 export const desktopPaths = {
   "/api/desktop/bridge": {
     get: {
@@ -72,24 +95,7 @@ export const desktopPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "429": { $ref: "#/components/responses/RateLimited" },
-        "502": {
-          description: "The desktop reported an error executing the command.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-        "503": {
-          description: "No desktop companion is connected for this user.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-        "504": {
-          description: "The desktop did not reply before the timeout elapsed.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
+        ...dispatchErrorResponses,
       },
     },
   },
@@ -99,7 +105,7 @@ export const desktopPaths = {
       tags: ["Desktop"],
       summary: "Dispatch a browser command to the run owner's desktop companion",
       description:
-        "Backs the agent-facing `desktop_browser` MCP tool. Forwards a JSON-RPC command to the Appstrate Desktop client connected for the run's owning user and returns the correlated reply inline. Container-to-host only. Auth via Bearer run token. A run with no owning user (remote or end-user triggered) has no desktop to drive and gets a 403. Supports server-side credential substitution (`integrationId` + `substituteParams`): `{{field}}` placeholders in `params` are resolved from the run's connected credentials for the declared integration, and every reply for the run is scrubbed of the substituted values.",
+        "Backs the agent-facing `desktop_browser` MCP tool. Forwards a JSON-RPC command to the Appstrate Desktop client connected for the run's owning user and returns the correlated reply inline. Container-to-host only. Auth via Bearer run token. A run with no owning user (remote or end-user triggered) has no desktop to drive and gets a 403. Supports server-side credential substitution (`integration_id` + `substitute_params`): `{{field}}` placeholders in `params` are resolved from the run's connected credentials for the declared integration, and every reply for the run is scrubbed of the substituted values.",
       security: [{ bearerExecToken: [] }],
       requestBody: {
         required: true,
@@ -109,8 +115,8 @@ export const desktopPaths = {
             example: {
               method: "browser.fill",
               params: { selector: "#password", value: "{{password}}" },
-              integrationId: "@myorg/somesite",
-              substituteParams: true,
+              integration_id: "@myorg/somesite",
+              substitute_params: true,
             },
           },
         },
@@ -131,24 +137,7 @@ export const desktopPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
-        "502": {
-          description: "The desktop reported an error executing the command.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-        "503": {
-          description: "No desktop companion is connected for this user.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-        "504": {
-          description: "The desktop did not reply before the timeout elapsed.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
+        ...dispatchErrorResponses,
       },
     },
   },

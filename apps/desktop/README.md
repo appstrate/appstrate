@@ -2,7 +2,7 @@
 
 > **Status**: experimental. Not shipped, not signed, not on the published roadmap. Ported from the original `electron-poc` branch onto current `main` and re-validated end-to-end on macOS arm64: bridge connected, `desktop_browser` advertised by the sidecar's MCP surface, browser driven from both the user-facing `/api/desktop/me/command` route and a real sidecar tool call.
 >
-> **Not ported**: server-side credential substitution (`providerId` + `substituteParams`, the `{{password}}` templates described below). It relied on the pre-integrations provider model (`resolveManifestProviders`, `getProviderCredentialId`, `resolveCredentialsForProxy`), none of which survive on `main` — reinstating it is a rewrite against the integrations / credential-proxy model, not a port. Until then an agent that fills a password field passes the value in clear through its own context.
+> **Not ported**: server-side credential substitution (`integration_id` + `substituteParams`, the `{{password}}` templates described below). It relied on the pre-integrations provider model (`resolveManifestProviders`, `getProviderCredentialId`, `resolveCredentialsForProxy`), none of which survive on `main` — reinstating it is a rewrite against the integrations / credential-proxy model, not a port. Until then an agent that fills a password field passes the value in clear through its own context.
 
 A desktop companion that lets a remote Appstrate agent drive a local Chromium browser surface on the user's machine, with the user's own cookies, sessions, and saved logins.
 
@@ -90,7 +90,7 @@ Server-side pieces (in the same monorepo branch):
 | `browser.screenshot`      | `webContents.capturePage` → PNG dataURL (auto-spills to MCP `resource_link` over 32 KB)                                                         |
 | `browser.waitForSelector` | Polls `document.querySelector` every 100 ms with configurable timeout (default 10 s, max 120 s)                                                 |
 
-Each can carry `providerId` + `substituteParams: true` so `{{key}}` placeholders inside `params` get resolved server-side from the named provider's credentials.
+Each can carry `integration_id` + `substitute_params: true` so `{{key}}` placeholders inside `params` get resolved server-side from the named provider's credentials.
 
 ## Auth model
 
@@ -119,8 +119,8 @@ Mirrors `provider_call.substituteBody`. Inside `params`, any string containing `
 desktop_browser({
   method: "browser.fill",
   params: { selector: "#password", value: "{{password}}" },
-  providerId: "@scope/somesite",
-  substituteParams: true,
+  integration_id: "@scope/somesite",
+  substitute_params: true,
 });
 ```
 

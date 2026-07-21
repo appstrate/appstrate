@@ -1268,9 +1268,9 @@ function buildSidecarTools(options: MountMcpOptions): {
       const args = rawArgs as {
         method: string;
         params?: unknown;
-        timeoutMs?: number;
-        integrationId?: string;
-        substituteParams?: boolean;
+        timeout_ms?: number;
+        integration_id?: string;
+        substitute_params?: boolean;
       };
       const url = `${config.platformApiUrl}/internal/desktop-command`;
       let res: Response;
@@ -1284,10 +1284,10 @@ function buildSidecarTools(options: MountMcpOptions): {
           body: JSON.stringify({
             method: args.method,
             params: args.params ?? {},
-            ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}),
-            ...(args.integrationId !== undefined ? { integrationId: args.integrationId } : {}),
-            ...(args.substituteParams !== undefined
-              ? { substituteParams: args.substituteParams }
+            ...(args.timeout_ms !== undefined ? { timeout_ms: args.timeout_ms } : {}),
+            ...(args.integration_id !== undefined ? { integration_id: args.integration_id } : {}),
+            ...(args.substitute_params !== undefined
+              ? { substitute_params: args.substitute_params }
               : {}),
           }),
         });

@@ -37,7 +37,12 @@ import { installPackage } from "../../../../services/application-packages.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { integrationConnections } from "@appstrate/db/schema";
 import desktopModule from "../../index.ts";
-import { registerClient, unregisterClient, isConnected } from "../../registry.ts";
+import {
+  registerClient,
+  unregisterClient,
+  isConnected,
+  handleClientReply,
+} from "../../registry.ts";
 import { clearRunSecrets } from "../../secret-scrub.ts";
 
 const app = getTestApp({ modules: [desktopModule] });
@@ -94,8 +99,9 @@ function fakeDesktop(userId: string, reply: unknown | ((frame: { params: unknown
     send(payload: string): void {
       const frame = JSON.parse(payload) as { id: string; method: string; params: unknown };
       sent.push(frame);
-      void Promise.resolve().then(async () => {
-        const { handleClientReply } = await import("../../registry.ts");
+      // Reply on the next tick so the awaiting `sendCommand` promise is
+      // already registered.
+      void Promise.resolve().then(() => {
         const result = typeof reply === "function" ? reply(frame) : reply;
         handleClientReply({ id: frame.id, result });
       });
@@ -308,8 +314,8 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     const res = await post({
       method: "browser.fill",
       params: { selector: "#password", value: "{{password}}" },
-      integrationId: INTEGRATION,
-      substituteParams: true,
+      integration_id: INTEGRATION,
+      substitute_params: true,
     });
 
     expect(res.status).toBe(200);
@@ -331,8 +337,8 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     const res = await post({
       method: "browser.fill",
       params: { selector: "#password", value: "{{password}}" },
-      integrationId: INTEGRATION,
-      substituteParams: true,
+      integration_id: INTEGRATION,
+      substitute_params: true,
     });
 
     expect(res.status).toBe(200);
@@ -349,8 +355,8 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     await post({
       method: "browser.fill",
       params: { selector: "#password", value: "{{password}}" },
-      integrationId: INTEGRATION,
-      substituteParams: true,
+      integration_id: INTEGRATION,
+      substitute_params: true,
     });
 
     // 2. A separate, substitution-free evaluate whose reply carries the
@@ -374,20 +380,20 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     const res = await post({
       method: "browser.fill",
       params: { selector: "#password", value: "{{password}}" },
-      integrationId: OTHER_INTEGRATION,
-      substituteParams: true,
+      integration_id: OTHER_INTEGRATION,
+      substitute_params: true,
     });
 
     expect(res.status).toBe(404);
     expect(connected.sent).toHaveLength(0);
   });
 
-  it("400 when substituteParams is set without integrationId", async () => {
+  it("400 when substitute_params is set without integration_id", async () => {
     connected = fakeDesktop(ctx.user.id, { ok: true });
     const res = await post({
       method: "browser.fill",
       params: { selector: "#password", value: "{{password}}" },
-      substituteParams: true,
+      substitute_params: true,
     });
     expect(res.status).toBe(400);
     expect(connected.sent).toHaveLength(0);
