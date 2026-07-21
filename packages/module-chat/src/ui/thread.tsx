@@ -14,7 +14,6 @@ import {
   MessagePrimitive,
   ComposerPrimitive,
   ActionBarPrimitive,
-  ErrorPrimitive,
   AuiIf,
   useMessage,
   getExternalStoreMessages,
@@ -272,25 +271,32 @@ function TurnLimitNotice() {
   );
 }
 
+const GENERIC_TURN_ERROR = "La génération a échoué.";
+
 /**
- * Failure notice for a PERSISTED errored turn, driven by the turn metadata
- * (`finishReason: "error"` + client-safe `errorText`). The live failure is
- * shown by MessageError (assistant-ui message status — transient, not
- * persisted); this one survives reload. Suppressed while MessageError is
- * visible so a live error isn't shown twice.
+ * THE failure display for a turn — one component, one visual, live or
+ * reloaded. The persisted turn metadata (`finishReason: "error"` + client-safe
+ * `errorText`) is the preferred source since it survives reload; the transient
+ * assistant-ui error status is the fallback for failures that never reached a
+ * finish chunk (e.g. a hard ai-sdk stream error).
  */
-function TurnErrorNotice() {
+function MessageError() {
   const errorText = useMessage((m) => {
-    if (m.status?.type === "incomplete" && m.status.reason === "error") return null;
     const turn = turnMetadataFromMessage(sourceMessage(m));
-    if (turn?.finishReason !== "error") return null;
-    return turn.errorText ?? "La génération a échoué.";
+    if (turn?.finishReason === "error") return turn.errorText ?? GENERIC_TURN_ERROR;
+    if (m.status?.type === "incomplete" && m.status.reason === "error") {
+      const err = m.status.error;
+      return typeof err === "string" && err ? err : GENERIC_TURN_ERROR;
+    }
+    return null;
   });
   if (!errorText) return null;
   return (
-    <div className="text-destructive mt-3 flex items-start gap-2 text-xs" role="alert">
-      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-      <span className="min-w-0 break-words">{errorText}</span>
+    <div
+      role="alert"
+      className="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border px-3 py-2 text-sm break-words"
+    >
+      {errorText}
     </div>
   );
 }
@@ -311,9 +317,8 @@ function AssistantMessage() {
           }}
         />
         <TurnLimitNotice />
-        <TurnErrorNotice />
+        <MessageError />
       </div>
-      <MessageError />
       <div className="mt-1 flex h-7 items-center gap-1">
         {/* Space permanently reserved (fixed h-7 wrapper) and the bar ALWAYS
             mounted, revealed by opacity only. `hideWhenRunning`/`autohide`
@@ -339,18 +344,6 @@ function AssistantMessage() {
 }
 
 // ─── Shared bits ─────────────────────────────────────────────────────────────
-
-// ErrorPrimitive.Root renders unconditionally (a role="alert" div), so gate it
-// on the message error status to avoid an empty box on successful turns.
-function MessageError() {
-  const isError = useMessage((m) => m.status?.type === "incomplete" && m.status.reason === "error");
-  if (!isError) return null;
-  return (
-    <ErrorPrimitive.Root className="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border px-3 py-2 text-sm break-words">
-      <ErrorPrimitive.Message />
-    </ErrorPrimitive.Root>
-  );
-}
 
 // forwardRef + prop spread so `asChild`/Slot-injected handlers (onClick from
 // the action-bar/branch-picker primitives) actually reach the button.
