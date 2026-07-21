@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestContext, authHeaders } from "../../helpers/auth.ts";
+import { account as accountTable, session as sessionTable } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -89,6 +91,44 @@ describe("Authentication", () => {
       // Session cookie should be set
       const setCookie = res.headers.get("set-cookie");
       expect(setCookie).toContain("better-auth.session_token");
+    });
+  });
+
+  // `session.freshAge: 0` (packages/db/src/auth.ts) disables Better Auth's
+  // 24h freshness gate on unlink-account. With 7-day sessions and no
+  // re-authentication flow in the SPA, the default gate made social unlink
+  // 403 (SESSION_NOT_FRESH) for any session older than a day.
+  describe("unlink-account session freshness", () => {
+    it("unlinks a social account with a session older than 24h", async () => {
+      const testUser = await createTestUser();
+
+      // Link a second (social) account so the credential one isn't the last.
+      await db.insert(accountTable).values({
+        id: crypto.randomUUID(),
+        accountId: "google-account-id",
+        providerId: "google",
+        userId: testUser.id,
+      });
+
+      // Age the session past BA's default 24h freshAge.
+      await db
+        .update(sessionTable)
+        .set({ createdAt: new Date(Date.now() - 1000 * 60 * 60 * 48) })
+        .where(eq(sessionTable.userId, testUser.id));
+
+      const res = await app.request("/api/auth/unlink-account", {
+        method: "POST",
+        headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId: "google" }),
+      });
+
+      expect(res.status).toBe(200);
+
+      const remaining = await db
+        .select()
+        .from(accountTable)
+        .where(eq(accountTable.userId, testUser.id));
+      expect(remaining.map((a) => a.providerId)).toEqual(["credential"]);
     });
   });
 });

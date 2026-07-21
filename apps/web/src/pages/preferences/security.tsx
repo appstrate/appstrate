@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useWatch } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Mail } from "lucide-react";
 import { useAppForm } from "../../hooks/use-app-form";
 import { Button } from "@appstrate/ui/components/button";
@@ -113,6 +114,10 @@ function LinkedAccountsSection({
                   try {
                     await unlinkAccount(provider.id);
                     await refetch();
+                  } catch (err: unknown) {
+                    // Surface the failure — previously a rejection here was
+                    // silently swallowed and the button just stopped spinning.
+                    toast.error(err instanceof Error ? err.message : String(err));
                   } finally {
                     setUnlinking(false);
                   }
@@ -272,7 +277,6 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
   const { t } = useTranslation(["settings", "common"]);
   const { features } = useAppConfig();
   const { user, requestPasswordReset } = useAuth();
-  const [success, setSuccess] = useState("");
   const [resetEmailState, setResetEmailState] = useState<"idle" | "sending" | "sent">("idle");
 
   const {
@@ -290,12 +294,13 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
   const newPasswordValue = useWatch({ control, name: "newPassword" });
 
   const onSubmit = async (data: SetPasswordFormData) => {
-    setSuccess("");
     try {
       await client.POST("/api/profile/password", {
         body: { newPassword: data.newPassword },
       });
-      setSuccess(t("preferences.passwordSet"));
+      // Toast, not inline state: the refetch below swaps this form for
+      // PasswordChangeForm, so any inline message would unmount with it.
+      toast.success(t("preferences.passwordSet"));
       reset();
       await onPasswordSet();
     } catch (err: unknown) {
@@ -361,7 +366,6 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
           )}
         </div>
         {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
-        {success && <div className="text-success text-sm">{success}</div>}
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.settingPassword") : t("preferences.setPassword")}
         </Button>
