@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Login-notice signed cookie — the UX notice + anti-loop marker for the
+ * login-link-expiry "restart-in-place" flow.
+ *
+ * ROLE: when a Better Auth-signed login link reaches `/api/oauth/login` after
+ * its `exp` has passed, the handler cannot render the (now useless) form. It
+ * instead sets THIS cookie and bounces the browser through
+ * `/api/auth/oauth2/authorize` to mint a fresh link. The fresh login page then
+ * reads + clears the cookie to:
+ *   1. show an error banner ("link expired, please sign in again"), and
+ *   2. optionally prefill the email the expired link carried, and
+ *   3. act as an anti-redirect-loop marker — a login page that already sees a
+ *      notice cookie must NOT bounce a second time.
+ *
+ * Why a cookie and not a query param: Better Auth's `authorize` endpoint
+ * re-serializes its query string through a Zod whitelist and DROPS any
+ * unknown params, so a `?notice=…` marker cannot survive the
+ * authorize → loginPage round-trip. A cookie rides alongside the redirect
+ * chain untouched.
+ *
+ * The cookie carries NO authority: it is purely display state + a loop guard.
+ * Forging it at worst shows a banner (and suppresses one restart bounce) — it
+ * grants no access, pins no realm, and is never trusted for any security
+ * decision. We still HMAC-sign it (with `BETTER_AUTH_SECRET`) so a malformed /
+ * tampered value is cleanly rejected rather than parsed, but unlike the
+ * pending-client cookie there is nothing to protect, so we skip the
+ * production insecure-`Secure`-flag warning: an unencrypted notice cookie
+ * leaks nothing worth warning about.
+ *
+ * The email is embedded in the payload, which (because emails contain dots)
+ * we serialize as JSON and base64url-encode BEFORE signing. The cookie value
+ * is `<base64urlPayload>.<exp>.<sig>` — base64url and the `<kid>$<hmac>` sig
+ * contain no dots, so splitting on `.` still yields exactly 3 parts (same
+ * 3-part shape as `pending-client-cookie.ts`).
+ *
+ * Scoped to `Path=/api/oauth` — the only routes that issue and read it.
+ */
+
+import { setCookie, deleteCookie, getCookie } from "hono/cookie";
+import type { Context } from "hono";
+import { getEnv } from "@appstrate/env";
+import { signAuthHmac, verifyAuthHmac } from "../../../lib/auth-secrets.ts";
+import type { AppEnv } from "../../../types/index.ts";
+
+const COOKIE_NAME = "oidc_login_notice";
+const COOKIE_PATH = "/api/oauth";
+const COOKIE_MAX_AGE = 60; // 60 seconds — the authorize→login round-trip is
+// sub-second; 60s absorbs slow redirects without leaving a stale banner.
+
+/** The known, closed set of notice payloads this cookie can carry. */
+export type LoginNotice = { code: "login_link_expired"; email?: string };
+
+/**
+ * Serialize + sign `notice` and set the cookie. Safe to call multiple times on
+ * the same request — the latest call wins (browsers overwrite by
+ * (name, path, domain)).
+ */
+export function issueLoginNoticeCookie(c: Context<AppEnv>, notice: LoginNotice): void {
+  const value = buildSignedLoginNoticeValue(notice);
+  const secure = getEnv().APP_URL.startsWith("https://");
+  setCookie(c, COOKIE_NAME, value, {
+    httpOnly: true,
+    sameSite: "Lax",
+    secure,
+    path: COOKIE_PATH,
+    maxAge: COOKIE_MAX_AGE,
+  });
+}
+
+/**
+ * Read + verify the notice cookie, then DELETE it — one-shot semantics. The
+ * cookie is cleared on every call regardless of validity: a garbage or
+ * tampered value must not linger and re-trigger the banner on the next render.
+ * Returns the decoded notice on success, `null` on any failure (missing,
+ * expired, bad sig, malformed payload).
+ */
+export function readAndClearLoginNoticeCookie(c: Context<AppEnv>): LoginNotice | null {
+  const raw = getCookie(c, COOKIE_NAME);
+  // Clear first, unconditionally — even an invalid cookie should be evicted.
+  deleteCookie(c, COOKIE_NAME, { path: COOKIE_PATH });
+  return raw ? parseAndVerify(raw) : null;
+}
+
+// ─── Internals ────────────────────────────────────────────────────────────────
+
+/**
+ * Build the signed cookie value: `<base64urlPayload>.<exp>.<sig>` where
+ * `sig = signAuthHmac(`${base64urlPayload}.${exp}`)`. Exported for unit tests
+ * that need to construct raw values (e.g. an expired `exp`).
+ */
+export function buildSignedLoginNoticeValue(notice: LoginNotice): string {
+  const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
+  const json = JSON.stringify({
+    code: notice.code,
+    ...(notice.email !== undefined ? { email: notice.email } : {}),
+  });
+  const encoded = Buffer.from(json, "utf8").toString("base64url");
+  const signed = `${encoded}.${exp}`;
+  const sig = signAuthHmac(signed);
+  return `${signed}.${sig}`;
+}
+
+function parseAndVerify(raw: string): LoginNotice | null {
+  // Format: `<base64urlPayload>.<exp>.<sig>`. base64url contains no dot and
+  // the `<kid>$<hmac>` sig contains no dot, so a well-formed value splits into
+  // exactly 3 parts.
+  const parts = raw.split(".");
+  if (parts.length !== 3) return null;
+  const [encoded, expStr, sig] = parts as [string, string, string];
+  if (!verifyAuthHmac(`${encoded}.${expStr}`, sig)) return null;
+  const exp = Number.parseInt(expStr, 10);
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
+
+  // Defensive decode + parse — a bad payload yields null, never a throw.
+  let decoded: string;
+  try {
+    decoded = Buffer.from(encoded, "base64url").toString("utf8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+  return narrowNotice(parsed);
+}
+
+/**
+ * Validate the parsed shape without a raw `as` cast on untrusted data. `code`
+ * must be the known literal; `email`, if present, must be a string.
+ */
+function narrowNotice(value: unknown): LoginNotice | null {
+  if (typeof value !== "object" || value === null) return null;
+  const obj = value as Record<string, unknown>;
+  if (obj.code !== "login_link_expired") return null;
+  if (obj.email !== undefined && typeof obj.email !== "string") return null;
+  return obj.email !== undefined
+    ? { code: "login_link_expired", email: obj.email }
+    : { code: "login_link_expired" };
+}
