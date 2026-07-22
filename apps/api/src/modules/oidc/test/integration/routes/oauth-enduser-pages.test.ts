@@ -404,6 +404,10 @@ describe("Public end-user pages — /api/oauth/*", () => {
       const freshExp = Number(freshLogin.searchParams.get("exp"));
       expect(Number.isFinite(freshExp)).toBe(true);
       expect(freshExp).toBeGreaterThan(Math.floor(Date.now() / 1000));
+      // `state` MUST survive the authorize → login round-trip: it is what the
+      // notice cookie's loop guard keys on, and what the SPA's PKCE resume
+      // relies on. Pin it so a BA upgrade dropping it fails loudly here.
+      expect(freshLogin.searchParams.get("state")).toBe("stale");
 
       // Step 3 — GET the fresh login page WITH the notice cookie → 200 normal
       // render carrying the expiry banner, a live CSRF token, and a Set-Cookie

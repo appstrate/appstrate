@@ -173,6 +173,17 @@ describe("login-notice-cookie", () => {
     expect(notice).toEqual({ code: "login_link_expired" });
   });
 
+  it("drops an over-long email (cookie-size guard) instead of storing it", async () => {
+    const app = makeApp();
+    const raw = buildSignedLoginNoticeValue({
+      code: "login_link_expired",
+      email: `${"x".repeat(250)}@a.com`, // 256 chars > RFC 5321's 254 cap
+      state: "abc-123",
+    });
+    const { notice } = await readWithCookie(app, `${COOKIE_NAME}=${raw}`);
+    expect(notice).toEqual({ code: "login_link_expired", state: "abc-123" });
+  });
+
   it("returns null when no cookie is present", async () => {
     const app = makeApp();
     const res = await app.request("/read");

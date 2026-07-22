@@ -71,6 +71,14 @@ export type LoginNotice = { code: "login_link_expired"; email?: string; state?: 
 const MAX_STATE_LENGTH = 256;
 
 /**
+ * Max stored length of `email` — RFC 5321's 254-octet address ceiling. The
+ * email is a prefill convenience only; an over-long value (hostile or typo'd
+ * form input) is dropped rather than allowed to bloat the signed cookie past
+ * the ~4KB browser limit, where the whole cookie would be silently discarded.
+ */
+const MAX_EMAIL_LENGTH = 254;
+
+/**
  * Serialize + sign `notice` and set the cookie. Safe to call multiple times on
  * the same request — the latest call wins (browsers overwrite by
  * (name, path, domain)).
@@ -121,9 +129,13 @@ export function buildSignedLoginNoticeValue(notice: LoginNotice): string {
     notice.state !== undefined && notice.state.length <= MAX_STATE_LENGTH
       ? notice.state
       : undefined;
+  const email =
+    notice.email !== undefined && notice.email.length <= MAX_EMAIL_LENGTH
+      ? notice.email
+      : undefined;
   const json = JSON.stringify({
     code: notice.code,
-    ...(notice.email !== undefined ? { email: notice.email } : {}),
+    ...(email !== undefined ? { email } : {}),
     ...(state !== undefined ? { state } : {}),
   });
   const encoded = Buffer.from(json, "utf8").toString("base64url");

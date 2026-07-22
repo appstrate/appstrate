@@ -889,6 +889,11 @@ export function createOidcRouter() {
     // Email prefill precedence: `login_hint` wins and locks the field; else
     // the email the expired link carried (via the notice) pre-fills it but is
     // NOT locked — the user may correct it.
+    // Known degradation: `login_hint` is not in Better Auth's authorize query
+    // whitelist, so it cannot survive an expiry restart — a locked-email flow
+    // that expires comes back with the email prefilled (via the notice
+    // cookie) but unlocked. Cosmetic only: the field is never an access
+    // control (membership is enforced server-side at sign-in/token mint).
     const body = renderLoginPage({
       queryString: stripErrorFromQueryString(url.search),
       branding: ctx.branding,

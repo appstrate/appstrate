@@ -12,9 +12,16 @@
  *
  * ZERO SECURITY VALUE: the server expiry check stays authoritative. This
  * script never gates anything — it only refreshes early or shows a hint.
- * Client clock skew is safe both ways: a skewed-fast clock refreshes a
- * still-valid link (harmless — a fresh link is minted), a skewed-slow clock
- * lets a stale link through to the server, which catches it and restarts.
+ * Client clock skew is safe both ways: a skewed-slow clock lets a stale link
+ * through to the server, which catches it and restarts; a skewed-fast clock
+ * refreshes a still-valid link, which is harmless once — but a clock fast by
+ * more than the link TTL would see EVERY fresh link as already past deadline
+ * and silently refresh in a tight loop the server cannot detect (each bounce
+ * mints a genuinely fresh link, so the server-side loop guard never engages).
+ * A per-tab `sessionStorage` counter therefore caps consecutive silent
+ * refreshes; past the cap the script degrades to the DIRTY behavior (banner
+ * with a manual refresh link). This also stops an abandoned pristine tab
+ * from re-refreshing forever every ~TTL.
  *
  * CSP: login/register pages target a strict `script-src 'self'`, so the
  * behavior ships as an EXTERNAL asset (served verbatim by
@@ -79,6 +86,28 @@ export const LOGIN_EXPIRY_SCRIPT = `(function () {
   var refreshUrl = form.getAttribute("data-refresh-url");
   if (!isFinite(exp) || !refreshUrl) return;
 
+  // Per-tab cap on consecutive silent refreshes (see file header). Wrapped in
+  // try/catch: sessionStorage can throw in some privacy modes, in which case
+  // the guard degrades to "always at cap" via null (banner instead of loop).
+  var REFRESH_CAP = 3;
+  var REFRESH_KEY = "oidcLoginExpiryRefreshes";
+  function readRefreshCount() {
+    try {
+      var n = Number(sessionStorage.getItem(REFRESH_KEY));
+      return isFinite(n) && n >= 0 ? n : 0;
+    } catch (_e) {
+      return null;
+    }
+  }
+  function bumpRefreshCount(n) {
+    try {
+      sessionStorage.setItem(REFRESH_KEY, String(n + 1));
+      return true;
+    } catch (_e) {
+      return false;
+    }
+  }
+
   // Refresh 30s before the server-side exp so the fresh link is ready
   // before the old one is actually rejected. Client clock skew is safe both
   // ways: early refresh of a valid link is harmless (a new link is minted),
@@ -96,21 +125,31 @@ export const LOGIN_EXPIRY_SCRIPT = `(function () {
     form.removeEventListener("input", onInput);
   }
 
+  function showBanner() {
+    var banner = document.querySelector("[data-expiry-warning]");
+    if (banner) banner.removeAttribute("hidden");
+    disarm();
+  }
+
   function fire() {
     if (done) return;
     if (dirty) {
       // Never yank the page from under a user who is mid-typing — surface a
       // non-blocking banner with a manual refresh link instead.
-      var banner = document.querySelector("[data-expiry-warning]");
-      if (banner) banner.removeAttribute("hidden");
-      disarm();
-    } else {
-      // Pristine form: silently swap to a fresh link. No notice cookie is
-      // set on this path, so the fresh page renders with no banner — the
-      // user never notices.
-      disarm();
-      location.replace(refreshUrl);
+      showBanner();
+      return;
     }
+    // Pristine form: silently swap to a fresh link. No notice cookie is set
+    // on this path, so the fresh page renders with no banner — the user
+    // never notices. Bounded by the per-tab refresh cap; at (or without a
+    // readable) counter, fall back to the banner.
+    var count = readRefreshCount();
+    if (count === null || count >= REFRESH_CAP || !bumpRefreshCount(count)) {
+      showBanner();
+      return;
+    }
+    disarm();
+    location.replace(refreshUrl);
   }
 
   function check() {
