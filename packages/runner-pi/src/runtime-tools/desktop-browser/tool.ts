@@ -39,6 +39,10 @@ export const desktopBrowserTool = defineTool({
     "`browser.download` {url, filename?} — download a file with the page's own session " +
     "(returns {download_id}: poll `browser.download_status` {download_id} until `uploaded`, " +
     "then call the `desktop_download` tool to land it in the workspace). " +
+    "`browser.api_request` {url, method?, headers?, body?, auth_script?} — call the CURRENT " +
+    "page's own API with its session; `auth_script` runs in the page and its return value " +
+    "becomes the Authorization header LOCALLY (it never reaches you — never try to read " +
+    "tokens yourself). Bound to the page's domain. Returns {status, content_type, body}. " +
     "`browser.batch` {steps: [{method, params}, …]} — run up to 40 steps in ONE round-trip, " +
     "stopping at the first failure (result: {completed, results[], error?}); use it to TEST a " +
     "sequence while analyzing a site, then freeze it into a skill file and call the " +
@@ -66,6 +70,7 @@ export const desktopBrowserTool = defineTool({
           "browser.waitForSelector",
           "browser.download",
           "browser.download_status",
+          "browser.api_request",
           "browser.batch",
         ],
         description: "Browser primitive to invoke on the user's local Chromium.",

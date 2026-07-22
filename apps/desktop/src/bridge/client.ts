@@ -25,6 +25,7 @@ import type { WebContents } from "electron";
 import * as api from "./browser-api.ts";
 import * as cdp from "./cdp.ts";
 import { startDownload, type Notify } from "./downloads.ts";
+import { apiRequest } from "./api-request.ts";
 import {
   ERR_EXECUTION,
   ERR_METHOD_NOT_FOUND,
@@ -60,6 +61,7 @@ const handlers: Record<string, Handler> = {
     return null;
   },
   "browser.download": (wc, p, notify) => startDownload(wc, p, notify),
+  "browser.api_request": (wc, p) => apiRequest(wc, p),
   "browser.batch": (wc, p, notify) => runBatch(wc, p, notify),
 };
 

@@ -209,8 +209,22 @@ const BATCHABLE_METHODS = new Set([
   "browser.screenshot",
   "browser.waitForSelector",
   "browser.download",
+  "browser.api_request",
 ]);
 const BATCH_MAX_STEPS = 40;
+
+/**
+ * Methods whose params may carry `{{field}}` credential substitution.
+ * The scrubber protects the RETURN path; this allowlist closes the
+ * OUTBOUND one: substituting into `browser.navigate`'s url (or a
+ * download url) would ship the secret to an attacker-chosen server in
+ * the request line itself. Substituted values must stay local to the
+ * user's machine: a DOM field (`fill`) or an in-page script
+ * (`evaluate` — whose exfiltration surface is bounded by the
+ * integration's `authorized_uris` and will be closed mechanically by
+ * the api_request primitive).
+ */
+const SUBSTITUTABLE_METHODS = new Set(["browser.fill", "browser.evaluate"]);
 
 export const desktopCommandSchema = z.object({
   method: z.enum([
@@ -222,6 +236,7 @@ export const desktopCommandSchema = z.object({
     "browser.waitForSelector",
     "browser.download",
     "browser.download_status",
+    "browser.api_request",
     "browser.batch",
   ]),
   params: z.record(z.string(), z.unknown()).optional(),
@@ -329,6 +344,20 @@ export function createDesktopRouter(): Hono<AppEnv> {
 
     let dispatchedParams: unknown = body.params ?? {};
 
+    // `browser.batch` is exempt here: its allowlist applies PER STEP
+    // inside the batch branch below.
+    if (
+      body.substitute_params &&
+      body.method !== "browser.batch" &&
+      !SUBSTITUTABLE_METHODS.has(body.method)
+    ) {
+      throw invalidRequest(
+        `Substitution is not allowed for ${body.method} — only ` +
+          `${[...SUBSTITUTABLE_METHODS].join(", ")} keep the value on the user's machine`,
+        "substitute_params",
+      );
+    }
+
     // Credential substitution — resolve the run's connected credentials
     // for the named integration and swap `{{field}}` placeholders out of
     // `params` before dispatching. The agent's LLM only ever writes
@@ -420,7 +449,12 @@ export function createDesktopRouter(): Hono<AppEnv> {
       const prepared: Array<{ method: string; params: unknown }> = [];
       for (const st of p.steps) {
         let stepParams: unknown = st.params ?? {};
-        if (fields) stepParams = substituteInValue(stepParams, fields);
+        // Per-step allowlist: only fill/evaluate get their placeholders
+        // resolved; a navigate/download step keeps `{{…}}` literal, so
+        // no secret can ride an outbound URL.
+        if (fields && SUBSTITUTABLE_METHODS.has(st.method!)) {
+          stepParams = substituteInValue(stepParams, fields);
+        }
         if (st.method === "browser.download") {
           const dp = stepParams as {
             url?: string;
