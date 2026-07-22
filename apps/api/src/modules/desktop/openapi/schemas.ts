@@ -18,7 +18,7 @@ const methodProperty = {
     "browser.waitForSelector",
     "browser.download",
     "browser.download_status",
-    "browser.api_request",
+    "browser.capture_credential",
     "browser.batch",
   ],
   description:

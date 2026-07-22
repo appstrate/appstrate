@@ -39,10 +39,12 @@ export const desktopBrowserTool = defineTool({
     "`browser.download` {url, filename?} — download a file with the page's own session " +
     "(returns {download_id}: poll `browser.download_status` {download_id} until `uploaded`, " +
     "then call the `desktop_download` tool to land it in the workspace). " +
-    "`browser.api_request` {url, method?, headers?, body?, auth_script?} — call the CURRENT " +
-    "page's own API with its session; `auth_script` runs in the page and its return value " +
-    "becomes the Authorization header LOCALLY (it never reaches you — never try to read " +
-    "tokens yourself). Bound to the page's domain. Returns {status, content_type, body}. " +
+    "`browser.capture_credential` {integration_id, auth_key, script} — after logging into a " +
+    "site, run `script` in the page to read its session token (or any secret) and store it " +
+    "into the named integration credential, WRITE-ONLY: the value goes straight to the " +
+    "platform credential store (you get back only {captured, fields}), and the rest of the " +
+    "run then reaches the site's API through that integration's `api_call` tool with the " +
+    "token injected server-side — never read tokens into your own context. " +
     "`browser.batch` {steps: [{method, params}, …]} — run up to 40 steps in ONE round-trip, " +
     "stopping at the first failure (result: {completed, results[], error?}); use it to TEST a " +
     "sequence while analyzing a site, then freeze it into a skill file and call the " +
@@ -70,7 +72,7 @@ export const desktopBrowserTool = defineTool({
           "browser.waitForSelector",
           "browser.download",
           "browser.download_status",
-          "browser.api_request",
+          "browser.capture_credential",
           "browser.batch",
         ],
         description: "Browser primitive to invoke on the user's local Chromium.",

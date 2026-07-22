@@ -4969,7 +4969,7 @@ export interface components {
              * @description Browser primitive to invoke. `browser.download` {url, filename?, max_bytes?} orders a download through the page's own session and returns {download_id, state}; `browser.download_status` {download_id} reports started/downloading/uploaded/failed with pct — both are answered by the platform, the bytes travel desktop → storage over HTTPS, never over the control WebSocket. `browser.batch` {steps: [{method, params}, …]} runs up to 40 desktop-executable steps in one round-trip with per-step credential substitution, stopping at the first failure.
              * @enum {string}
              */
-            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status" | "browser.api_request" | "browser.batch";
+            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status" | "browser.capture_credential" | "browser.batch";
             /** @description Method-specific arguments. Strings may contain `{{field}}` placeholders when substitution is enabled; unknown placeholders are left intact. */
             params?: Record<string, never>;
             /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */
@@ -4985,7 +4985,7 @@ export interface components {
              * @description Browser primitive to invoke. `browser.download` {url, filename?, max_bytes?} orders a download through the page's own session and returns {download_id, state}; `browser.download_status` {download_id} reports started/downloading/uploaded/failed with pct — both are answered by the platform, the bytes travel desktop → storage over HTTPS, never over the control WebSocket. `browser.batch` {steps: [{method, params}, …]} runs up to 40 desktop-executable steps in one round-trip with per-step credential substitution, stopping at the first failure.
              * @enum {string}
              */
-            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status" | "browser.api_request" | "browser.batch";
+            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status" | "browser.capture_credential" | "browser.batch";
             /** @description Method-specific arguments (e.g. `{ url }`, `{ selector, value }`). */
             params?: Record<string, never>;
             /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */

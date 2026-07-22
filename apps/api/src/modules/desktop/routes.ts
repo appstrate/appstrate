@@ -29,6 +29,7 @@
  */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../../types/index.ts";
 import { logger } from "../../lib/logger.ts";
@@ -51,6 +52,10 @@ import { verifyRunToken } from "../../routes/internal.ts";
 import { getPackage } from "../../services/package-catalog.ts";
 import { actorFromIds } from "../../lib/actor.ts";
 import { resolveLiveIntegrationCredentials } from "../../services/integration-credentials-resolver.ts";
+import {
+  listIntegrationConnections,
+  saveIntegrationConnection,
+} from "../../services/integration-connections.ts";
 import {
   registerClient,
   unregisterClient,
@@ -209,7 +214,6 @@ const BATCHABLE_METHODS = new Set([
   "browser.screenshot",
   "browser.waitForSelector",
   "browser.download",
-  "browser.api_request",
 ]);
 const BATCH_MAX_STEPS = 40;
 
@@ -221,12 +225,93 @@ const BATCH_MAX_STEPS = 40;
  * the request line itself. Substituted values must stay local to the
  * user's machine: a DOM field (`fill`) or an in-page script
  * (`evaluate` — whose exfiltration surface is bounded by the
- * integration's `authorized_uris` and will be closed mechanically by
- * the api_request primitive).
+ * integration's `authorized_uris`; capturing the session token with
+ * `browser.capture_credential` and reaching the API through `api_call`
+ * removes the need to read tokens in-page at all).
  */
 const SUBSTITUTABLE_METHODS = new Set(["browser.fill", "browser.evaluate"]);
 
 type RunContext = Awaited<ReturnType<typeof verifyRunToken>>["run"];
+
+/**
+ * `browser.capture_credential` handler. Runs an in-page script on the
+ * desktop that returns a `{ field: value }` object, then writes it to
+ * the run actor's connection for `integration_id` / `auth_key` — an
+ * upsert (find the actor's existing row for that auth, else insert).
+ * The value only ever transits desktop → platform → credential store;
+ * the agent receives just the field NAMES back, and the values are
+ * registered for reply-scrubbing as a belt.
+ *
+ * Same fail-closed gate as substitution: the running agent must declare
+ * the integration. This is a genuine new capability (a run writing to
+ * its own credential store), so it stays tightly scoped: the declared
+ * integration only, the run actor's own connection only, write-only.
+ */
+async function captureCredential(
+  c: Context<AppEnv>,
+  run: RunContext,
+  runId: string,
+  body: { params?: unknown; timeout_ms?: number },
+): Promise<Response> {
+  if (!run.userId) {
+    throw forbidden("capture_credential requires a user-owned run");
+  }
+  const p = (body.params ?? {}) as { integration_id?: string; auth_key?: string; script?: string };
+  if (!p.integration_id || !p.auth_key || !p.script) {
+    throw invalidRequest("capture_credential needs integration_id, auth_key and script", "params");
+  }
+  await assertAgentDeclaresIntegration(p.integration_id, run, runId);
+
+  // Dispatch the capture script to the desktop; the returned object is
+  // received HERE (server-side), never forwarded to the agent.
+  let captured: unknown;
+  try {
+    captured = await sendCommand(
+      run.userId,
+      "browser.evaluate",
+      { script: p.script },
+      { timeoutMs: body.timeout_ms },
+    );
+  } catch (err) {
+    throw desktopErrorToApiError(err);
+  }
+  if (!captured || typeof captured !== "object" || Array.isArray(captured)) {
+    throw badGateway("capture script must return an object of { field: value } string pairs");
+  }
+  const credentials: Record<string, string> = {};
+  for (const [k, v] of Object.entries(captured as Record<string, unknown>)) {
+    if (typeof v === "string" && v.length > 0) credentials[k] = v;
+  }
+  if (Object.keys(credentials).length === 0) {
+    throw badGateway("capture script returned no non-empty string fields");
+  }
+
+  const scope = { orgId: run.orgId, applicationId: run.applicationId };
+  const actor = actorFromIds(run.userId, run.endUserId);
+  if (!actor) throw forbidden("capture_credential requires a run actor");
+  // Upsert: reuse the actor's existing row for this (integration, auth),
+  // else insert a fresh one.
+  const existing = await listIntegrationConnections(scope, p.integration_id, actor);
+  const match = existing.find((x) => x.auth_key === p.auth_key);
+  await saveIntegrationConnection(scope, {
+    packageId: p.integration_id,
+    authKey: p.auth_key,
+    accountId: match?.account_id ?? "captured",
+    credentials,
+    actor,
+    ...(match ? { connectionId: match.id } : {}),
+  });
+  // Belt: if any captured value later echoes in a desktop reply, redact it.
+  registerRunSecrets(runId, Object.values(credentials));
+  logger.info("Desktop credential captured", {
+    runId,
+    integrationId: p.integration_id,
+    authKey: p.auth_key,
+    fieldCount: Object.keys(credentials).length,
+    module: "desktop",
+  });
+  return c.json({ result: { captured: true, fields: Object.keys(credentials) } });
+}
 
 /**
  * Resolve the run actor's connected credential fields for an
@@ -276,7 +361,7 @@ export const desktopCommandSchema = z.object({
     "browser.waitForSelector",
     "browser.download",
     "browser.download_status",
-    "browser.api_request",
+    "browser.capture_credential",
     "browser.batch",
   ]),
   params: z.record(z.string(), z.unknown()).optional(),
@@ -383,6 +468,18 @@ export function createDesktopRouter(): Hono<AppEnv> {
     const body = parseBody(desktopAgentCommandSchema, await readJsonBody(c));
 
     let dispatchedParams: unknown = body.params ?? {};
+
+    // `browser.capture_credential` — the write-only path that lands a
+    // freshly-logged-in session token (or any in-page secret) into the
+    // integration credential store, so the rest of the run reaches the
+    // site's API through the normal `api_call` + MITM credential proxy
+    // (server-side injection, cross-host per `authorized_uris`, agent
+    // never sees the value). The captured value travels desktop →
+    // platform server-side and goes STRAIGHT to the store: the agent
+    // gets back only `{ captured: true, fields }`, never a value.
+    if (body.method === "browser.capture_credential") {
+      return captureCredential(c, run, runId, body);
+    }
 
     // `browser.batch` is exempt here: its allowlist applies PER STEP
     // inside the batch branch below.

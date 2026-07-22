@@ -36,6 +36,7 @@ import { signRunToken } from "../../../../lib/run-token.ts";
 import { installPackage } from "../../../../services/application-packages.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { integrationConnections } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import desktopModule from "../../index.ts";
 import { uploadStream } from "@appstrate/db/storage";
 import { clearDownloads, DOWNLOADS_BUCKET, handleDesktopNotification } from "../../downloads.ts";
@@ -569,6 +570,60 @@ describe("Desktop module — POST /internal/desktop-command", () => {
       substitute_params: true,
     });
     expect(res.status).toBe(200);
+  });
+
+  // ─── browser.capture_credential ────────────────────────
+
+  it("captures an in-page token into the credential store, returns only field names", async () => {
+    await seedIntegration(INTEGRATION);
+    connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
+      // The platform dispatches the capture as a browser.evaluate.
+      const script = (frame.params as { script?: string }).script;
+      expect(typeof script).toBe("string");
+      return { access_token: "live-oidc-token-xyz" };
+    });
+
+    const res = await post({
+      method: "browser.capture_credential",
+      params: {
+        integration_id: INTEGRATION,
+        auth_key: "primary",
+        script: "readTokenFromPage()",
+      },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result: { captured: boolean; fields: string[] } };
+    expect(body.result.captured).toBe(true);
+    expect(body.result.fields).toEqual(["access_token"]);
+    // The value NEVER appears in the agent-facing response.
+    expect(JSON.stringify(body)).not.toContain("live-oidc-token-xyz");
+
+    // It landed in the store, injectable for the rest of the run.
+    const conns = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION));
+    const captured = conns.find((c) => c.authKey === "primary");
+    expect(captured).toBeDefined();
+  });
+
+  it("rejects capture for an integration the agent does not declare", async () => {
+    await seedIntegration(OTHER_INTEGRATION);
+    connected = fakeDesktop(ctx.user.id, { access_token: "x" });
+    const res = await post({
+      method: "browser.capture_credential",
+      params: { integration_id: OTHER_INTEGRATION, auth_key: "primary", script: "x()" },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("400 when the capture is missing script/auth_key", async () => {
+    connected = fakeDesktop(ctx.user.id, { access_token: "x" });
+    const res = await post({
+      method: "browser.capture_credential",
+      params: { integration_id: INTEGRATION },
+    });
+    expect(res.status).toBe(400);
   });
 
   // ─── browser.batch ─────────────────────────────────────
