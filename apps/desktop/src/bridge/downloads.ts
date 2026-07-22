@@ -29,7 +29,15 @@ import { ERR_DOWNLOAD_FAILED, ERR_INVALID_PARAMS } from "./protocol.ts";
 
 export interface DownloadParams {
   download_id: string;
-  url: string;
+  /** Direct URL to download. Mutually exclusive with `capture`. */
+  url?: string;
+  /**
+   * Capture mode: no navigation is triggered — the order claims the
+   * NEXT download the page itself starts (blob anchor clicks,
+   * script-triggered downloads with in-page auth). The agent enqueues
+   * the order first, then makes the page click.
+   */
+  capture?: boolean;
   /** Platform-minted PUT target (S3 presigned URL or FS upload-sink URL). */
   upload_url: string;
   /** Signed size ceiling — mirrored locally so an oversized file fails fast. */
@@ -63,14 +71,16 @@ class DownloadError extends Error {
  */
 export function startDownload(wc: WebContents, raw: unknown, notify: Notify): unknown {
   const p = raw as DownloadParams;
-  if (!p || typeof p.download_id !== "string" || typeof p.url !== "string" || !p.upload_url) {
-    throw new DownloadError(ERR_INVALID_PARAMS, "download requires download_id, url, upload_url");
+  if (!p || typeof p.download_id !== "string" || !p.upload_url) {
+    throw new DownloadError(ERR_INVALID_PARAMS, "download requires download_id and upload_url");
   }
-  if (!/^https?:\/\//.test(p.url)) {
-    throw new DownloadError(ERR_INVALID_PARAMS, `not an http(s) URL: ${p.url}`);
+  if (p.capture !== true) {
+    if (typeof p.url !== "string" || !/^https?:\/\//.test(p.url)) {
+      throw new DownloadError(ERR_INVALID_PARAMS, `not an http(s) URL: ${String(p.url)}`);
+    }
   }
   pending.push({ params: p, notify });
-  wc.downloadURL(p.url);
+  if (p.capture !== true) wc.downloadURL(p.url!);
   return { download_id: p.download_id, state: "started" };
 }
 

@@ -441,6 +441,29 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     expect(((await st.json()) as { result: { state: string } }).result.state).toBe("uploaded");
   });
 
+  it("browser.download accepts capture mode (no url — the page will trigger it)", async () => {
+    clearDownloads();
+    connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
+      const p = frame.params as { download_id: string; capture?: boolean; url?: string };
+      expect(p.capture).toBe(true);
+      expect(p.url).toBeUndefined();
+      return { download_id: p.download_id, state: "started" };
+    });
+    const res = await post({
+      method: "browser.download",
+      params: { capture: true, filename: "invoice.pdf" },
+    });
+    expect(res.status).toBe(200);
+    const { result } = (await res.json()) as { result: { state: string } };
+    expect(result.state).toBe("started");
+  });
+
+  it("browser.download without url nor capture is a 400", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    const res = await post({ method: "browser.download", params: { filename: "x.pdf" } });
+    expect(res.status).toBe(400);
+  });
+
   it("a notification from another user cannot advance a download", async () => {
     clearDownloads();
     connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => ({

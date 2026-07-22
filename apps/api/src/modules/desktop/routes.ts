@@ -355,9 +355,23 @@ export function createDesktopRouter(): Hono<AppEnv> {
     // the STATUS is answered from the platform's own record (fed by the
     // desktop's notifications) — no round-trip for polling.
     if (body.method === "browser.download") {
-      const p = (body.params ?? {}) as { url?: string; filename?: string; max_bytes?: number };
-      if (!p.url || typeof p.url !== "string" || !/^https?:\/\//.test(p.url)) {
-        throw invalidRequest("`params.url` must be an http(s) URL", "params");
+      const p = (body.params ?? {}) as {
+        url?: string;
+        capture?: boolean;
+        filename?: string;
+        max_bytes?: number;
+      };
+      // Two trigger modes: a direct URL the desktop navigates to, or
+      // `capture: true` — the order claims the next download the PAGE
+      // starts (blob anchor clicks, in-page authenticated fetches).
+      if (
+        p.capture !== true &&
+        (!p.url || typeof p.url !== "string" || !/^https?:\/\//.test(p.url))
+      ) {
+        throw invalidRequest(
+          "`params.url` must be an http(s) URL (or set `params.capture`)",
+          "params",
+        );
       }
       const { record, uploadUrl, maxBytes } = await createDownload({
         runId,
@@ -371,7 +385,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
           "browser.download",
           {
             download_id: record.downloadId,
-            url: p.url,
+            ...(p.capture === true ? { capture: true } : { url: p.url }),
             filename: record.filename,
             upload_url: uploadUrl,
             max_bytes: maxBytes,
