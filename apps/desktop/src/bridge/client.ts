@@ -61,6 +61,19 @@ const handlers: Record<string, Handler> = {
   },
   "browser.download": (wc, p, notify) => startDownload(wc, p, notify),
   "browser.batch": (wc, p, notify) => runBatch(wc, p, notify),
+  // Capture: runs the caller's script for the credential fields AND
+  // attaches the page URL from `wc.getURL()` — the main-process
+  // committed URL, which the (attacker-controlled) script cannot forge.
+  // The platform checks that URL against the integration's
+  // authorized_uris. Keeping the URL out of the script's return is the
+  // whole point: an object-literal-injection breakout could otherwise
+  // spoof it.
+  "browser.capture": async (wc, p) => {
+    const script = (p as { script?: string })?.script;
+    if (typeof script !== "string") throw new Error("capture requires a `script` string");
+    const fields = await cdp.evaluate(wc, { script });
+    return { url: wc.getURL(), fields };
+  },
 };
 
 /**

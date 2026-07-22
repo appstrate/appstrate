@@ -297,26 +297,26 @@ async function captureCredential(
   // can only capture a site's secret while browsing that same site.
   const integrationUris = await loadIntegrationAuthorizedUris(p.integration_id, run);
 
-  // One dispatch returns BOTH the page URL (for the domain check) and
-  // the captured fields — received HERE (server-side), never forwarded
-  // to the agent. Wrapping the caller's script keeps its return value
-  // under `fields`.
-  const wrapped = `(() => ({ __url: location.href, fields: (${p.script}) }))()`;
+  // `browser.capture` runs the caller's script for the fields AND
+  // attaches `wc.getURL()` — the Electron main-process committed URL,
+  // which the script cannot forge. The URL is NOT taken from the
+  // script's own return (an earlier design injected the script into an
+  // object literal, letting a breakout override the reported URL and
+  // spoof the domain check). Both received HERE, never forwarded to the
+  // agent.
   let raw: unknown;
   try {
     raw = await sendCommand(
       run.userId,
-      "browser.evaluate",
-      { script: wrapped },
-      {
-        timeoutMs: body.timeout_ms,
-      },
+      "browser.capture",
+      { script: p.script },
+      { timeoutMs: body.timeout_ms },
     );
   } catch (err) {
     throw desktopErrorToApiError(err);
   }
-  const envelope = raw as { __url?: unknown; fields?: unknown };
-  const pageUrl = typeof envelope?.__url === "string" ? envelope.__url : "";
+  const envelope = raw as { url?: unknown; fields?: unknown };
+  const pageUrl = typeof envelope?.url === "string" ? envelope.url : "";
   if (!pageUrl || !integrationUris.some((u) => matchesAuthorizedUriSpec(u, pageUrl))) {
     logger.warn("Desktop capture rejected — page outside the integration's authorized_uris", {
       runId,

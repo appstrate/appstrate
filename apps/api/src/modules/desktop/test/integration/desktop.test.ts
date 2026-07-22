@@ -577,13 +577,14 @@ describe("Desktop module — POST /internal/desktop-command", () => {
   it("captures an in-page token into the credential store, returns only field names", async () => {
     await seedIntegration(INTEGRATION);
     connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
-      // The platform wraps the capture as a browser.evaluate returning
-      // { __url, fields } — the page URL must fall in the integration's
+      // The platform dispatches browser.capture; the desktop returns
+      // { url, fields } with the URL from wc.getURL() (trusted, not the
+      // script). The page URL must fall in the integration's
       // authorized_uris (seedIntegration uses https://somesite.example/**).
       const script = (frame.params as { script?: string }).script;
       expect(typeof script).toBe("string");
       return {
-        __url: "https://somesite.example/dashboard",
+        url: "https://somesite.example/dashboard",
         fields: { access_token: "live-oidc-token-xyz" },
       };
     });
@@ -615,7 +616,7 @@ describe("Desktop module — POST /internal/desktop-command", () => {
   it("rejects a capture whose page is outside the integration's authorized_uris", async () => {
     await seedIntegration(INTEGRATION);
     connected = fakeDesktop(ctx.user.id, () => ({
-      __url: "https://bank.example/account",
+      url: "https://bank.example/account",
       fields: { access_token: "stolen-bank-token" },
     }));
     const res = await post({
