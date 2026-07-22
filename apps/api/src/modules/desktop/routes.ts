@@ -54,11 +54,7 @@ import { actorFromIds } from "../../lib/actor.ts";
 import { resolveLiveIntegrationCredentials } from "../../services/integration-credentials-resolver.ts";
 import { readIntegrationManifestForRun } from "../../services/integration-service.ts";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
-import {
-  listIntegrationConnections,
-  saveIntegrationConnection,
-  getIntegrationConnectionCredentialFields,
-} from "../../services/integration-connections.ts";
+import { setRunEphemeralCredentials } from "../../services/run-ephemeral-credentials.ts";
 import {
   registerClient,
   unregisterClient,
@@ -341,29 +337,14 @@ async function captureCredential(
     throw badGateway("capture script returned no non-empty string fields");
   }
 
-  const scope = { orgId: run.orgId, applicationId: run.applicationId };
-  const actor = actorFromIds(run.userId, run.endUserId);
-  if (!actor) throw forbidden("capture_credential requires a run actor");
-  // Upsert + MERGE: reuse the actor's existing row for this (integration,
-  // auth) and merge the captured fields into its credentials, rather than
-  // replacing. This keeps a single connection per integration — the model
-  // the connection cascade enforces (a second connection would trigger a
-  // 412 "pick one" at kickoff) — so a login secret (email/password) and a
-  // captured session token can coexist on ONE connection: substitution
-  // reads the former, api_call injects the latter.
-  const existing = await listIntegrationConnections(scope, p.integration_id, actor);
-  const match = existing.find((x) => x.auth_key === p.auth_key);
-  const priorFields = match
-    ? ((await getIntegrationConnectionCredentialFields(match.id)) ?? {})
-    : {};
-  await saveIntegrationConnection(scope, {
-    packageId: p.integration_id,
-    authKey: p.auth_key,
-    accountId: match?.account_id ?? "captured",
-    credentials: { ...priorFields, ...credentials },
-    actor,
-    ...(match ? { connectionId: match.id } : {}),
-  });
+  // Write to the RUN-SCOPED ephemeral store, NOT the durable connection.
+  // A browser-captured session token is short-lived and re-acquired
+  // every run; persisting it drags in the reconnection lifecycle (a 401
+  // flags needsReconnection → the next kickoff blocks → deadlock) and
+  // the one-connection cascade. Run-scoped, it merges over the durable
+  // login connection at injection time and evaporates with the run:
+  // no persistence, no reconnection, no kickoff block, no stale cache.
+  setRunEphemeralCredentials(runId, p.integration_id, p.auth_key, credentials);
   // Belt: if any captured value later echoes in a desktop reply, redact it.
   registerRunSecrets(runId, Object.values(credentials));
   logger.info("Desktop credential captured", {

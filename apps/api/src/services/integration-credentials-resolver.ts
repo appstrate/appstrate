@@ -31,6 +31,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import { expandScopesGranted } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { getRunEphemeralCredentials } from "./run-ephemeral-credentials.ts";
 
 import { logger } from "../lib/logger.ts";
 import { notFound, gone, internalError, badGateway } from "../lib/errors.ts";
@@ -153,6 +154,16 @@ export async function resolveLiveIntegrationCredentials(
     authKey,
   );
   if (!fields) return out;
+
+  // Merge run-scoped ephemeral fields (browser-captured session tokens)
+  // OVER the durable connection's fields. This is how an in-run acquired
+  // secret reaches the injection path without being persisted: the
+  // durable connection holds only the stable login secret, the captured
+  // token lives run-scoped (see `run-ephemeral-credentials.ts`), and the
+  // delivery template resolves against the merged bag. No-op for
+  // durable-only integrations.
+  const ephemeral = getRunEphemeralCredentials(context.runId, integrationId, authKey);
+  if (ephemeral) fields = { ...fields, ...ephemeral };
 
   let expiresAtEpochMs: number | null = connection.expiresAt
     ? connection.expiresAt.getTime()

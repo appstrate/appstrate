@@ -36,10 +36,13 @@ import { signRunToken } from "../../../../lib/run-token.ts";
 import { installPackage } from "../../../../services/application-packages.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { integrationConnections } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
 import desktopModule from "../../index.ts";
 import { uploadStream } from "@appstrate/db/storage";
 import { clearDownloads, DOWNLOADS_BUCKET, handleDesktopNotification } from "../../downloads.ts";
+import {
+  getRunEphemeralCredentials,
+  clearRunEphemeralCredentials,
+} from "../../../../services/run-ephemeral-credentials.ts";
 import {
   registerClient,
   unregisterClient,
@@ -261,6 +264,7 @@ describe("Desktop module — POST /internal/desktop-command", () => {
   afterEach(() => {
     if (connected) unregisterClient(ctx.user.id, connected.client);
     clearRunSecrets(runId);
+    clearRunEphemeralCredentials();
   });
 
   async function post(body: unknown): Promise<Response> {
@@ -604,13 +608,10 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     // The value NEVER appears in the agent-facing response.
     expect(JSON.stringify(body)).not.toContain("live-oidc-token-xyz");
 
-    // It landed in the store, injectable for the rest of the run.
-    const conns = await db
-      .select()
-      .from(integrationConnections)
-      .where(eq(integrationConnections.integrationId, INTEGRATION));
-    const captured = conns.find((c) => c.authKey === "primary");
-    expect(captured).toBeDefined();
+    // It landed in the RUN-SCOPED ephemeral store (not persisted),
+    // injectable for the rest of the run.
+    const eph = getRunEphemeralCredentials(runId, INTEGRATION, "primary");
+    expect(eph?.access_token).toBe("live-oidc-token-xyz");
   });
 
   it("rejects a capture whose page is outside the integration's authorized_uris", async () => {
@@ -624,12 +625,8 @@ describe("Desktop module — POST /internal/desktop-command", () => {
       params: { integration_id: INTEGRATION, auth_key: "primary", script: "grab()" },
     });
     expect(res.status).toBe(403);
-    // The stolen token was never written to any connection.
-    const conns = await db
-      .select()
-      .from(integrationConnections)
-      .where(eq(integrationConnections.integrationId, INTEGRATION));
-    expect(JSON.stringify(conns)).not.toContain("stolen-bank-token");
+    // The stolen token never reached the ephemeral store.
+    expect(getRunEphemeralCredentials(runId, INTEGRATION, "primary")).toBeNull();
   });
 
   it("rejects capture for an integration the agent does not declare", async () => {
