@@ -57,6 +57,7 @@ import { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 import {
   listIntegrationConnections,
   saveIntegrationConnection,
+  getIntegrationConnectionCredentialFields,
 } from "../../services/integration-connections.ts";
 import {
   registerClient,
@@ -343,15 +344,23 @@ async function captureCredential(
   const scope = { orgId: run.orgId, applicationId: run.applicationId };
   const actor = actorFromIds(run.userId, run.endUserId);
   if (!actor) throw forbidden("capture_credential requires a run actor");
-  // Upsert: reuse the actor's existing row for this (integration, auth),
-  // else insert a fresh one.
+  // Upsert + MERGE: reuse the actor's existing row for this (integration,
+  // auth) and merge the captured fields into its credentials, rather than
+  // replacing. This keeps a single connection per integration — the model
+  // the connection cascade enforces (a second connection would trigger a
+  // 412 "pick one" at kickoff) — so a login secret (email/password) and a
+  // captured session token can coexist on ONE connection: substitution
+  // reads the former, api_call injects the latter.
   const existing = await listIntegrationConnections(scope, p.integration_id, actor);
   const match = existing.find((x) => x.auth_key === p.auth_key);
+  const priorFields = match
+    ? ((await getIntegrationConnectionCredentialFields(match.id)) ?? {})
+    : {};
   await saveIntegrationConnection(scope, {
     packageId: p.integration_id,
     authKey: p.auth_key,
     accountId: match?.account_id ?? "captured",
-    credentials,
+    credentials: { ...priorFields, ...credentials },
     actor,
     ...(match ? { connectionId: match.id } : {}),
   });
