@@ -176,8 +176,19 @@ export async function resolveLiveIntegrationCredentials(
   // flag the connection for re-connect and surface 410 so the sidecar stops
   // retrying and the next-launch readiness gate fires. Shared by both terminal
   // branches so they cannot drift.
+  // An auth marked ephemeral holds a RUN-ACQUIRED secret (a
+  // browser-captured session token, merged from the run-scoped store
+  // above). A 401 on it means "the captured token is stale — re-capture
+  // next run", NOT "the user must reconnect". Flagging needsReconnection
+  // here would be wrong AND self-defeating: it blocks the next kickoff,
+  // but re-capturing requires a run. So an ephemeral auth is never
+  // flagged; its 401 simply propagates.
+  const isEphemeralAuth =
+    ((authDef as { _meta?: Record<string, unknown> })._meta?.["dev.appstrate/ephemeral"] as
+      { enabled?: boolean } | undefined) !== undefined;
+
   const flagTerminalAndThrow = async (reason: string): Promise<never> => {
-    await markIntegrationConnectionNeedsReconnection(connection.id);
+    if (!isEphemeralAuth) await markIntegrationConnectionNeedsReconnection(connection.id);
     logger.warn(
       "Integration credential unrefreshable on forced refresh — flagging needsReconnection",
       {
