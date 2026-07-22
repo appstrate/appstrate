@@ -848,9 +848,11 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         input: {
           type: "object",
           description:
-            "Run input, validated against the agent's input schema (kind:agent). File fields " +
-            "(typed `format: uri` with a `contentMediaType`) accept `document://` and `upload://` " +
-            "URIs directly — pass an attached document's `document://` URI verbatim.",
+            "Run input, validated against the agent's input schema (either kind — for " +
+            "kind:inline, against `manifest.input.schema`). File fields (typed `format: uri` " +
+            "with a `contentMediaType`) accept `document://` and `upload://` URIs directly — " +
+            "pass an attached document's `document://` URI verbatim and the file is streamed " +
+            "into the run's workspace.",
           additionalProperties: true,
         },
         manifest: {
@@ -961,6 +963,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         );
       }
       const body: Record<string, unknown> = { manifest, prompt };
+      if (asRecord(args.input)) body.input = args.input;
       if (asRecord(args.config)) body.config = args.config;
       launchResponse = await dispatchCatalogOperation(ctx, "runInline", { body, signal });
     }

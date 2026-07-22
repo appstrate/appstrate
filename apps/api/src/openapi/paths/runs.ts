@@ -58,8 +58,9 @@ export const runsPaths = {
                   type: "object",
                   description:
                     "Run input values, validated against the agent's input schema. File fields " +
-                    "take `upload://upl_xxx` references (from `createUpload`) or inline " +
-                    "`data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
+                    "take `upload://upl_xxx` references (from `createUpload`), " +
+                    "`document://doc_xxx` references (an existing document the caller can read), " +
+                    "or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
                 },
                 rerun_from: {
                   type: "string",
@@ -388,7 +389,11 @@ export const runsPaths = {
                 },
                 input: {
                   type: "object",
-                  description: "Run input validated against manifest.input.schema (AJV).",
+                  description:
+                    "Run input validated against manifest.input.schema (AJV). File fields take " +
+                    "`upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` " +
+                    "references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs " +
+                    "(≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`.",
                 },
                 config: {
                   type: "object",

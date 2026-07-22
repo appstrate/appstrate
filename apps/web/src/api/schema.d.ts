@@ -6673,7 +6673,7 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`) or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
+                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references (an existing document the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
                     input?: Record<string, never>;
                     /** @description Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required). **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Use `upload://` references when the input must be replayable. */
                     rerun_from?: string;
@@ -17848,7 +17848,7 @@ export interface operations {
                     manifest: Record<string, never>;
                     /** @description Contents of prompt.md — the agent's system prompt. */
                     prompt: string;
-                    /** @description Run input validated against manifest.input.schema (AJV). */
+                    /** @description Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`. */
                     input?: Record<string, never>;
                     /** @description Per-run config overrides validated against manifest.config.schema (AJV). */
                     config?: Record<string, never>;

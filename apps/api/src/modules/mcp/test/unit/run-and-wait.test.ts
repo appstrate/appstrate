@@ -124,6 +124,29 @@ describe("run_and_wait", () => {
     expect(calls.some((c) => c.method === "GET")).toBe(true);
   });
 
+  it("forwards `input` on an inline launch (document:// file fields reach the run)", async () => {
+    const { tool, calls } = makeRunAndWait({
+      launch: () => jsonResponse({ id: "run_inline", status: "pending" }),
+      getRun: [jsonResponse({ id: "run_inline", status: "success" })],
+    });
+
+    await tool.handler(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        input: { screenshot: "document://doc_abc12345" },
+      },
+      noExtra,
+    );
+
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      manifest: { name: "tmp" },
+      prompt: "do it",
+      input: { screenshot: "document://doc_abc12345" },
+    });
+  });
+
   it("returns a resource_link block per document the run published", async () => {
     const { tool } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_7", packageId: "@acme/writer", status: "pending" }),

@@ -122,6 +122,74 @@ describe("POST /api/runs/inline — validation", () => {
   });
 });
 
+describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)", () => {
+  // Inline runs share the agent-route input parser: file fields resolve
+  // `upload://` / `document://` / `data:` URIs before the pipeline fires.
+  // Success would launch the pipeline (out of scope, see the dependency-
+  // resolution suite note), so the wiring is proven through the parser's
+  // pre-pipeline rejections — which the old path (preflight-only, input
+  // silently unresolved) never produced.
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "inlineinput" });
+  });
+
+  async function post(body: unknown) {
+    return app.request("/api/runs/inline", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function manifestWithFileInput() {
+    return {
+      ...validManifest(),
+      input: {
+        schema: {
+          type: "object",
+          required: ["screenshot"],
+          properties: {
+            screenshot: { type: "string", format: "uri", contentMediaType: "image/png" },
+          },
+        },
+      },
+    };
+  }
+
+  it("returns 404 when a document:// input references a missing document", async () => {
+    const res = await post({
+      manifest: manifestWithFileInput(),
+      prompt: "describe the screenshot",
+      input: { screenshot: "document://doc_00000000-0000-0000-0000-000000000000" },
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { detail?: string };
+    expect(body.detail ?? "").toMatch(/document/i);
+  });
+
+  it("returns 400 when a file field carries a non-URI value", async () => {
+    const res = await post({
+      manifest: manifestWithFileInput(),
+      prompt: "describe the screenshot",
+      input: { screenshot: "not-a-file-reference" },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("does not leak a shadow row when input resolution fails", async () => {
+    await post({
+      manifest: manifestWithFileInput(),
+      prompt: "describe the screenshot",
+      input: { screenshot: "document://doc_00000000-0000-0000-0000-000000000000" },
+    });
+    const rows = await db.select().from(packages).where(eq(packages.ephemeral, true));
+    expect(rows).toHaveLength(0);
+  });
+});
+
 describe("POST /api/runs/inline — dependency resolution", () => {
   let ctx: TestContext;
 

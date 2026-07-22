@@ -496,38 +496,66 @@ export function createRunsRouter() {
 
       const body = await readJsonBody(c, inlineRunBodySchema);
 
-      const { runId, packageId } = await triggerInlineRun({
-        orgId,
-        applicationId,
-        actor,
-        body,
-        apiKeyId: c.get("apiKeyId") ?? undefined,
-        traceparent: runTraceparent(c),
-      });
+      // Preflight BEFORE any input document streams — a bad manifest / config
+      // / readiness problem 4xxes without touching storage.
+      const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
 
-      await recordAuditFromContext(c, {
-        action: "run.triggered",
-        resourceType: "run",
-        resourceId: runId,
-        after: { packageId, origin: "inline" },
-      });
+      // Same input machinery as POST /agents/:scope/:name/run: file fields
+      // (`format: uri` + `contentMediaType`) resolve `upload://` /
+      // `document://` / inline `data:` URIs through the container ACL + caps
+      // and stream the bytes into this run's workspace. Minted before parsing
+      // for the same reason as the agent route (documents stream straight
+      // into the run's workspace namespace).
+      const runId = `run_${crypto.randomUUID()}`;
+      try {
+        const parsed = await parseRequestInput(
+          c,
+          runId,
+          preflight.manifest.input?.schema
+            ? asJSONSchemaObject(preflight.manifest.input.schema)
+            : undefined,
+        );
 
-      // 201 + the bare created run resource (#657) — same DTO and serializer
-      // as GET /runs/:id, same status code as the sibling trigger
-      // POST /agents/{scope}/{name}/run. The shadow package id callers used
-      // to read from the `packageId` envelope field is the resource's own
-      // `packageId`. The run row exists once `triggerInlineRun` resolves
-      // (`prepareAndExecuteRun` inserts it before returning).
-      const row = await getRunFull(getAppScope(c), runId, getActor(c));
-      if (!row) {
-        // The shadow run was inserted by `triggerInlineRun` and read back on
-        // the same scope; a miss means a concurrent teardown deleted it. The
-        // 201 contract is the full `Run`, so surface a 500 rather than a
-        // partial id-only body that would lie to the typed client.
-        // Effectively unreachable in normal operation.
-        throw internalError();
+        const { packageId } = await triggerInlineRun({
+          orgId,
+          applicationId,
+          actor,
+          runId,
+          preflight,
+          parsed,
+          apiKeyId: c.get("apiKeyId") ?? undefined,
+          traceparent: runTraceparent(c),
+        });
+
+        await recordAuditFromContext(c, {
+          action: "run.triggered",
+          resourceType: "run",
+          resourceId: runId,
+          after: { packageId, origin: "inline" },
+        });
+
+        // 201 + the bare created run resource (#657) — same DTO and serializer
+        // as GET /runs/:id, same status code as the sibling trigger
+        // POST /agents/{scope}/{name}/run. The shadow package id callers used
+        // to read from the `packageId` envelope field is the resource's own
+        // `packageId`. The run row exists once `triggerInlineRun` resolves
+        // (`prepareAndExecuteRun` inserts it before returning).
+        const row = await getRunFull(getAppScope(c), runId, getActor(c));
+        if (!row) {
+          // The shadow run was inserted by `triggerInlineRun` and read back on
+          // the same scope; a miss means a concurrent teardown deleted it. The
+          // 201 contract is the full `Run`, so surface a 500 rather than a
+          // partial id-only body that would lie to the typed client.
+          // Effectively unreachable in normal operation.
+          throw internalError();
+        }
+        return c.json(row, 201);
+      } catch (err) {
+        // Roll back any input documents streamed into the run workspace before
+        // the run launched — same pre-launch teardown as the agent route.
+        await deleteRunWorkspace(runId);
+        throw err;
       }
-      return c.json(row, 201);
     },
   );
 
