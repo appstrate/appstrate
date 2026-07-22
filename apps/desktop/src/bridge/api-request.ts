@@ -17,11 +17,16 @@
  *   3. The response body is scrubbed of the auth value before leaving
  *      the machine (an API echoing its bearer is rare but real).
  *
- * Exfiltration guard: `url` must live under the same registrable
- * domain as the page the auth was read from — `auth_script` + an
- * attacker URL would otherwise be a token oracle. Heuristic eTLD+1
- * suffix match (api.foo.com vs www.foo.com passes; evil.test fails);
- * not a full Public Suffix List, documented as such.
+ * Exfiltration guard: `url`'s host must EQUAL the host of the page the
+ * auth is read from — `auth_script` + an attacker URL would otherwise
+ * be a token oracle. Exact host match (not eTLD+1): a registrable-domain
+ * heuristic without the Public Suffix List mishandles `foo.co.uk`-style
+ * suffixes, and same-registrable-domain still lets `evil.github.io`
+ * read a token from `victim.github.io`. Exact host is the correct
+ * boundary for a bearer, and costs only that an API on a sibling
+ * subdomain must be reached by navigating there first. IP-literal hosts
+ * are refused outright, and a request with no page loaded is refused
+ * rather than folded into a shared sentinel.
  */
 
 import type { WebContents } from "electron";
@@ -53,9 +58,16 @@ class ApiRequestError extends Error {
 
 const DEFAULT_MAX_BODY = 256 * 1024;
 
-/** Last two DNS labels — a pragmatic eTLD+1 stand-in (documented above). */
-function registrableSuffix(hostname: string): string {
-  return hostname.split(".").slice(-2).join(".");
+/** Normalize a hostname for exact comparison: lowercase, strip a trailing dot. */
+function normalizeHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.$/, "");
+}
+
+/** IPv4-literal, bracketed IPv6, or bare IPv6 — refused so a host can't be an IP. */
+function isIpLiteral(hostname: string): boolean {
+  return (
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.includes(":") || hostname.startsWith("[")
+  );
 }
 
 export async function apiRequest(
@@ -66,12 +78,19 @@ export async function apiRequest(
   if (!p || typeof p.url !== "string" || !/^https:\/\//.test(p.url)) {
     throw new ApiRequestError(ERR_INVALID_PARAMS, "api_request requires an https URL");
   }
-  const pageHost = new URL(wc.getURL() || "https://invalid.invalid").hostname;
-  const targetHost = new URL(p.url).hostname;
-  if (registrableSuffix(pageHost) !== registrableSuffix(targetHost)) {
+  const pageUrl = wc.getURL();
+  if (!pageUrl || !/^https?:\/\//.test(pageUrl)) {
+    throw new ApiRequestError(ERR_INVALID_PARAMS, "api_request needs a loaded https page");
+  }
+  const pageHost = normalizeHost(new URL(pageUrl).hostname);
+  const targetHost = normalizeHost(new URL(p.url).hostname);
+  if (isIpLiteral(pageHost) || isIpLiteral(targetHost)) {
+    throw new ApiRequestError(ERR_INVALID_PARAMS, "api_request refuses IP-literal hosts");
+  }
+  if (pageHost !== targetHost) {
     throw new ApiRequestError(
       ERR_INVALID_PARAMS,
-      `api_request is bound to the page's domain (${registrableSuffix(pageHost)}); refusing ${targetHost}`,
+      `api_request is bound to the page's host (${pageHost}); refusing ${targetHost}`,
     );
   }
 

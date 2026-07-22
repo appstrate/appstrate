@@ -226,6 +226,46 @@ const BATCH_MAX_STEPS = 40;
  */
 const SUBSTITUTABLE_METHODS = new Set(["browser.fill", "browser.evaluate"]);
 
+type RunContext = Awaited<ReturnType<typeof verifyRunToken>>["run"];
+
+/**
+ * Resolve the run actor's connected credential fields for an
+ * integration, gated by the same fail-closed check as
+ * `/internal/integration-credentials` (the agent must declare it), and
+ * register the values for reply-scrubbing. Shared by the single-command
+ * and batch substitution paths so the gate and the scrub-registration
+ * can't drift between them.
+ */
+async function resolveSubstitutionFields(
+  integrationId: string | undefined,
+  run: RunContext,
+  runId: string,
+): Promise<Record<string, string>> {
+  if (!integrationId) {
+    throw invalidRequest(
+      "`integration_id` is required when `substitute_params` is set",
+      "integration_id",
+    );
+  }
+  await assertAgentDeclaresIntegration(integrationId, run, runId);
+  const wire = await resolveLiveIntegrationCredentials(integrationId, {
+    runId,
+    orgId: run.orgId,
+    applicationId: run.applicationId,
+    agentPackageId: run.packageId,
+    actor: actorFromIds(run.userId, run.endUserId),
+    resolvedConnections: run.resolvedConnections,
+    resolvedIntegrationVersions: run.resolvedIntegrationVersions,
+  });
+  const fields: Record<string, string> = {};
+  for (const auth of wire.auths) Object.assign(fields, auth.fields);
+  if (Object.keys(fields).length === 0) {
+    throw notFound(`No credentials available for integration '${integrationId}'`);
+  }
+  registerRunSecrets(runId, Object.values(fields));
+  return fields;
+}
+
 export const desktopCommandSchema = z.object({
   method: z.enum([
     "browser.navigate",
@@ -363,32 +403,11 @@ export function createDesktopRouter(): Hono<AppEnv> {
     // `params` before dispatching. The agent's LLM only ever writes
     // templates; the resolved values go straight to the user's desktop.
     if (body.substitute_params) {
-      if (!body.integration_id) {
-        throw invalidRequest(
-          "`integration_id` is required when `substitute_params` is set",
-          "integration_id",
-        );
-      }
-      await assertAgentDeclaresIntegration(body.integration_id, run, runId);
-      const wire = await resolveLiveIntegrationCredentials(body.integration_id, {
-        runId,
-        orgId: run.orgId,
-        applicationId: run.applicationId,
-        agentPackageId: run.packageId,
-        actor: actorFromIds(run.userId, run.endUserId),
-        resolvedConnections: run.resolvedConnections,
-        resolvedIntegrationVersions: run.resolvedIntegrationVersions,
-      });
-      const fields: Record<string, string> = {};
-      for (const auth of wire.auths) Object.assign(fields, auth.fields);
-      if (Object.keys(fields).length === 0) {
-        throw notFound(`No credentials available for integration '${body.integration_id}'`);
-      }
-      dispatchedParams = substituteInValue(body.params ?? {}, fields);
+      const fields = await resolveSubstitutionFields(body.integration_id, run, runId);
       // From now on, every reply for this run is scrubbed of these
       // values — including replies to later commands (an agent could
       // fill a password and read the field back with a second call).
-      registerRunSecrets(runId, Object.values(fields));
+      dispatchedParams = substituteInValue(body.params ?? {}, fields);
       logger.info("Desktop command credential substitution", {
         runId,
         integrationId: body.integration_id,
@@ -417,28 +436,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
       }
       let fields: Record<string, string> | null = null;
       if (body.substitute_params) {
-        if (!body.integration_id) {
-          throw invalidRequest(
-            "`integration_id` is required when `substitute_params` is set",
-            "integration_id",
-          );
-        }
-        await assertAgentDeclaresIntegration(body.integration_id, run, runId);
-        const wire = await resolveLiveIntegrationCredentials(body.integration_id, {
-          runId,
-          orgId: run.orgId,
-          applicationId: run.applicationId,
-          agentPackageId: run.packageId,
-          actor: actorFromIds(run.userId, run.endUserId),
-          resolvedConnections: run.resolvedConnections,
-          resolvedIntegrationVersions: run.resolvedIntegrationVersions,
-        });
-        fields = {};
-        for (const auth of wire.auths) Object.assign(fields, auth.fields);
-        if (Object.keys(fields).length === 0) {
-          throw notFound(`No credentials available for integration '${body.integration_id}'`);
-        }
-        registerRunSecrets(runId, Object.values(fields));
+        fields = await resolveSubstitutionFields(body.integration_id, run, runId);
         logger.info("Desktop batch credential substitution", {
           runId,
           integrationId: body.integration_id,
