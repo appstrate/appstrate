@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Thin wrappers over `webContents` that expose the 6 browser primitives
- * the remote Appstrate agent can call through the bridge.
+ * DOM-script browser primitives: click, fill, waitForSelector.
  *
- * Kept intentionally minimal — anything more elaborate (frame targeting,
- * cookie introspection, request interception) belongs in a v2 protocol
- * after the POC validates the round-trip.
+ * The React-aware fill (native value setter + input/change events) and
+ * the polling waitForSelector are deliberately script-based — CDP has
+ * no native equivalent for either. navigate/evaluate/screenshot moved
+ * to the CDP-backed implementations in `cdp.ts`, which give them real
+ * load semantics, detailed exceptions and full-page capture.
  */
 
 import type { WebContents } from "electron";
 
-export interface NavigateParams {
-  url: string;
-  timeoutMs?: number;
-}
 export interface ClickParams {
   selector: string;
 }
@@ -22,26 +19,9 @@ export interface FillParams {
   selector: string;
   value: string;
 }
-export interface EvaluateParams {
-  script: string;
-}
 export interface WaitForSelectorParams {
   selector: string;
   timeoutMs?: number;
-}
-
-export async function navigate(wc: WebContents, p: NavigateParams): Promise<{ url: string }> {
-  // Don't `await wc.loadURL()` — its Promise resolves on `did-finish-load`,
-  // which never fires cleanly on modern pages that keep open long-polling
-  // sockets (analytics, hot-reload, presence channels). The HTTP caller
-  // would always time out. We fire the navigation and return as soon as
-  // it's been dispatched; the agent observes completion via
-  // `waitForSelector` or `screenshot` if it needs to.
-  wc.loadURL(p.url).catch(() => {
-    // Ignore loadURL rejections — they fire on navigation aborts (e.g.
-    // user clicks a link while we're loading), not on user-visible errors.
-  });
-  return { url: p.url };
 }
 
 export async function click(wc: WebContents, p: ClickParams): Promise<void> {
@@ -77,15 +57,6 @@ export async function fill(wc: WebContents, p: FillParams): Promise<void> {
     el.dispatchEvent(new Event('change', { bubbles: true }));
   })()`;
   await wc.executeJavaScript(script, true);
-}
-
-export async function evaluate(wc: WebContents, p: EvaluateParams): Promise<unknown> {
-  return wc.executeJavaScript(p.script, true);
-}
-
-export async function screenshot(wc: WebContents): Promise<{ dataUrl: string }> {
-  const image = await wc.capturePage();
-  return { dataUrl: image.toDataURL() };
 }
 
 const DEFAULT_WAIT_MS = 10_000;

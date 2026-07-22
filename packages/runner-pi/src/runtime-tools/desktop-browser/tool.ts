@@ -29,11 +29,12 @@ export const desktopBrowserTool = defineTool({
     "Drive the run owner's local Chromium browser through the Appstrate Desktop bridge — a companion app " +
     "running on the user's machine, with their own cookies and logged-in sessions. " +
     "Methods and their `params`: " +
-    "`browser.navigate` {url} — load a URL (returns on dispatch, not on load completion); " +
+    "`browser.navigate` {url, timeoutMs?} — load a URL and wait for the page load event (returns {loaded:false} instead of hanging when a long-polling page never fires it); " +
     "`browser.click` {selector} — click the first match; " +
     "`browser.fill` {selector, value} — set an input's value (React/Vue-aware); " +
-    "`browser.evaluate` {script} — run JavaScript in the page, returns the JSON-serialisable result; " +
-    "`browser.screenshot` {} — PNG data URL of the visible page; " +
+    "`browser.evaluate` {script} — run JavaScript in the page (promises awaited); a thrown " +
+    "exception comes back with its description and line number; " +
+    "`browser.screenshot` {fullPage?, format?, quality?} — data URL capture, full scrollable page when fullPage; " +
     "`browser.waitForSelector` {selector, timeoutMs?} — poll until the selector exists; " +
     "`browser.download` {url, filename?} — download a file with the page's own session " +
     "(returns {download_id}: poll `browser.download_status` {download_id} until `uploaded`, " +

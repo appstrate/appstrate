@@ -23,6 +23,7 @@
 import { WebSocket } from "ws";
 import type { WebContents } from "electron";
 import * as api from "./browser-api.ts";
+import * as cdp from "./cdp.ts";
 import { startDownload, type Notify } from "./downloads.ts";
 import {
   ERR_EXECUTION,
@@ -43,7 +44,7 @@ export interface BridgeClient {
 type Handler = (wc: WebContents, params: unknown, notify: Notify) => Promise<unknown> | unknown;
 
 const handlers: Record<string, Handler> = {
-  "browser.navigate": (wc, p) => api.navigate(wc, p as api.NavigateParams),
+  "browser.navigate": (wc, p) => cdp.navigate(wc, p as cdp.CdpNavigateParams),
   "browser.click": async (wc, p) => {
     await api.click(wc, p as api.ClickParams);
     return null;
@@ -52,8 +53,8 @@ const handlers: Record<string, Handler> = {
     await api.fill(wc, p as api.FillParams);
     return null;
   },
-  "browser.evaluate": (wc, p) => api.evaluate(wc, p as api.EvaluateParams),
-  "browser.screenshot": (wc) => api.screenshot(wc),
+  "browser.evaluate": (wc, p) => cdp.evaluate(wc, p as cdp.CdpEvaluateParams),
+  "browser.screenshot": (wc, p) => cdp.screenshot(wc, (p ?? {}) as cdp.CdpScreenshotParams),
   "browser.waitForSelector": async (wc, p) => {
     await api.waitForSelector(wc, p as api.WaitForSelectorParams);
     return null;
