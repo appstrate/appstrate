@@ -190,6 +190,19 @@ function createMainWindow(): BaseWindow {
   browserView.webContents.setBackgroundThrottling(false);
   browserView.webContents.loadURL("about:blank");
 
+  // Keep `target="_blank"` / `window.open` navigations IN this pane. By
+  // default Electron spawns a DETACHED native window for them, which the
+  // bridge does not drive (it only pilots this WebContentsView) — a login
+  // that opens in a popup (Revenu Québec's gov auth, most OAuth redirect
+  // flows) would then be invisible to the agent, stranded in a window
+  // nothing controls. Deny the popup and load the URL here instead;
+  // redirect-based flows return to their redirect_uri in this same pane.
+  const paneContents = browserView.webContents;
+  paneContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) void paneContents.loadURL(url);
+    return { action: "deny" };
+  });
+
   // Auto-accept downloads. Any `<a download>` click or programmatic
   // download triggered by the agent (or the user) lands in
   // `~/Documents/AppstrateDesktop/<site-host>/` without a save dialog.
