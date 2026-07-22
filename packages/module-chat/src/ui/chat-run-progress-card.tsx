@@ -40,7 +40,6 @@ import { useLiveElapsedMs } from "./use-elapsed.ts";
 import { useChatHeaders } from "./runtime-context.ts";
 import {
   buildRunPageHref,
-  documentContentHref,
   isTerminalStatus,
   mergeRunDocuments,
   publishedDocumentsFromLogs,
@@ -49,30 +48,8 @@ import {
   type ChatRunDocument,
   type RunStatus,
 } from "./run-events.ts";
+import { downloadChatDocument } from "./document-download.ts";
 import type { ToolPhase } from "./tool-result.ts";
-
-/**
- * Download a document via an authenticated blob fetch. A bare anchor cannot
- * carry the `X-Org-Id` / `X-Application-Id` scoping headers the content route
- * requires, so mirror the run-log fetch: forwarded headers + cookie session,
- * following the `307` transparently.
- */
-async function downloadChatDocument(
-  doc: ChatRunDocument,
-  headers: Record<string, string>,
-): Promise<void> {
-  const res = await fetch(documentContentHref(doc.id), { headers, credentials: "include" });
-  if (!res.ok) return;
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = doc.name;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
 
 /** Row of downloadable document chips surfaced under a run card. */
 function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
@@ -86,7 +63,7 @@ function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            void downloadChatDocument(doc, getHeaders?.() ?? {});
+            void downloadChatDocument(doc.id, doc.name, getHeaders?.() ?? {});
           }}
           title={doc.name}
           className="border-border bg-muted/40 hover:bg-muted text-foreground flex max-w-[16rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs"

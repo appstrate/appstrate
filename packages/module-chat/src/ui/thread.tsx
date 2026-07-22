@@ -45,6 +45,9 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
+import { documentContentHref, resolveAttachmentContent } from "./run-events.ts";
+import { downloadChatDocument } from "./document-download.ts";
+import { useChatHeaders, type GetHeaders } from "./runtime-context.ts";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
@@ -182,6 +185,137 @@ function FileAttachmentPart(props: { filename?: string }) {
   );
 }
 
+// ─── Sent user-message attachments ───────────────────────────────────────────
+// The `@assistant-ui/react-ai-sdk` converter filters user `file` parts OUT of a
+// message's content and re-exposes them as `message.attachments` — so the
+// `File: FileAttachmentPart` Parts mapping above NEVER fires for user messages
+// (it stays correct for assistant file parts). We render sent attachments from
+// the attachments channel instead (`MessagePrimitive.Attachments`).
+
+const ATTACHMENT_CHIP_CLASS =
+  "bg-background text-foreground inline-flex max-w-52 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs";
+
+/** Inert chip: file icon + truncated name, no download (same look as FileAttachmentPart). */
+function InertAttachmentChip({ name }: { name: string }) {
+  return (
+    <div className={ATTACHMENT_CHIP_CLASS}>
+      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
+      <span className="truncate font-medium">{name || "document"}</span>
+    </div>
+  );
+}
+
+/** Clickable chip: file icon + name, click triggers the authenticated download. */
+function DownloadableAttachmentChip({
+  name,
+  onDownload,
+}: {
+  name: string;
+  onDownload: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onDownload}
+      title={`Télécharger ${name || "le document"}`}
+      aria-label={`Télécharger ${name || "le document"}`}
+      className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted`}
+    >
+      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
+      <span className="truncate font-medium">{name || "document"}</span>
+    </button>
+  );
+}
+
+/**
+ * Image attachment: an authenticated fetch of the content route → object URL in
+ * an <img> thumbnail (revoked on unmount). While loading — or if the fetch
+ * fails — it falls back to the downloadable chip. The content route only serves
+ * stored documents, so this is only ever rendered for a resolved `document://`.
+ */
+function ImageAttachmentThumbnail({
+  id,
+  name,
+  getHeaders,
+  onDownload,
+}: {
+  id: string;
+  name: string;
+  getHeaders: GetHeaders | null;
+  onDownload: () => void;
+}) {
+  const [src, setSrc] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    void (async () => {
+      try {
+        const res = await fetch(documentContentHref(id), {
+          headers: getHeaders?.() ?? {},
+          credentials: "include",
+        });
+        if (!res.ok || cancelled) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      } catch {
+        // Fetch failure → stay on the chip fallback (src stays null).
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [id, getHeaders]);
+
+  if (!src) return <DownloadableAttachmentChip name={name} onDownload={onDownload} />;
+  return (
+    <button
+      type="button"
+      onClick={onDownload}
+      title={`Télécharger ${name || "l'image"}`}
+      aria-label={`Télécharger ${name || "l'image"}`}
+    >
+      <img src={src} alt={name || "image"} className="max-h-36 rounded-lg border object-cover" />
+    </button>
+  );
+}
+
+/**
+ * One sent attachment on a user message. A `document://` (server-persisted, or a
+ * reloaded conversation) is interactive: image mime → thumbnail, else a
+ * download chip. An `upload://` (just-sent optimistic, not yet materialized) or
+ * unparseable URI is an inert chip — the content route serves documents only.
+ */
+function SentAttachmentChip() {
+  const getHeaders = useChatHeaders();
+  const name = useAttachment((a) => a.name);
+  const contentType = useAttachment((a) => a.contentType);
+  // The content array reference is stable for a settled attachment, so this
+  // selector doesn't churn re-renders; memo keeps the resolved ref stable too.
+  const content = useAttachment((a) => a.content);
+  const resolved = React.useMemo(() => resolveAttachmentContent(content), [content]);
+
+  if (resolved.kind !== "document") return <InertAttachmentChip name={name} />;
+
+  const docId = resolved.id;
+  const onDownload = () =>
+    void downloadChatDocument(docId, name || "document", getHeaders?.() ?? {});
+
+  if (typeof contentType === "string" && contentType.startsWith("image/")) {
+    return (
+      <ImageAttachmentThumbnail
+        id={docId}
+        name={name}
+        getHeaders={getHeaders}
+        onDownload={onDownload}
+      />
+    );
+  }
+  return <DownloadableAttachmentChip name={name} onDownload={onDownload} />;
+}
+
 function Composer({ slot }: { slot?: React.ReactNode }) {
   // No focus ring on the box: the app's global `textarea:focus` ring is too
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
@@ -276,9 +410,22 @@ function UserMessage() {
 
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col items-end py-2">
-      <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
-        <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
-      </div>
+      {/* Sent attachments render ABOVE the bubble, in their own right-aligned
+          wrap-row. They live on `message.attachments` (the converter's file-part
+          routing), not in the bubble's Parts. Guarded so an attachment-less
+          message renders exactly as before. */}
+      <MessagePrimitive.If hasAttachments>
+        <div className="mb-1 flex max-w-[80%] flex-wrap justify-end gap-1.5">
+          <MessagePrimitive.Attachments components={{ Attachment: SentAttachmentChip }} />
+        </div>
+      </MessagePrimitive.If>
+      {/* The text bubble. Guarded on content so an attachment-only message (no
+          text part) doesn't paint an empty grey pill. */}
+      <MessagePrimitive.If hasContent>
+        <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
+          <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
+        </div>
+      </MessagePrimitive.If>
     </MessagePrimitive.Root>
   );
 }

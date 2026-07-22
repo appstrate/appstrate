@@ -21,6 +21,7 @@
 
 import { z } from "zod";
 import type { RunStatus as DbRunStatus, TerminalRunStatus } from "@appstrate/db/schema";
+import { parseDocumentUri } from "@appstrate/core/document-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -395,6 +396,36 @@ export function mergeRunDocuments(
 /** Content-download URL for a document (the `/content` route handles the 307). */
 export function documentContentHref(id: string): string {
   return `/api/documents/${encodeURIComponent(id)}/content`;
+}
+
+/**
+ * An attachment's resolved content: a downloadable stored document, or an inert
+ * placeholder.
+ *
+ * The `@assistant-ui/react-ai-sdk` converter routes user `file` parts OUT of a
+ * message's content and exposes them as `message.attachments` instead — the
+ * wire URI ends up on the attachment's first content part (the `image` field
+ * for an image part, `data` for a file part). Only a `document://` URI is
+ * downloadable: the content route serves stored documents. A just-sent
+ * optimistic `upload://` URI (materialized to `document://` only in the
+ * server-persisted copy), or anything unparseable, is inert.
+ */
+export type ResolvedAttachment = { kind: "document"; id: string } | { kind: "inert" };
+
+/** Minimal structural view of an assistant-ui attachment content part. */
+interface AttachmentContentPart {
+  type: string;
+  image?: string;
+  data?: string;
+}
+
+export function resolveAttachmentContent(
+  content: readonly AttachmentContentPart[] | undefined,
+): ResolvedAttachment {
+  const part = content?.[0];
+  const uri = part?.type === "image" ? part.image : part?.type === "file" ? part.data : undefined;
+  const id = typeof uri === "string" ? parseDocumentUri(uri) : null;
+  return id ? { kind: "document", id } : { kind: "inert" };
 }
 
 /** Run package id from a launch result (`body.packageId`, then top-level). */

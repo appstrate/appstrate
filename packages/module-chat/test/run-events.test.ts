@@ -20,6 +20,7 @@ import {
   parseRunResource,
   parseRunUpdateFrame,
   publishedDocumentsFromLogs,
+  resolveAttachmentContent,
   safeJsonParse,
   terminalRunLineText,
   visibleLogEntries,
@@ -199,6 +200,34 @@ describe("run-events helpers", () => {
 
   it("builds the document content download URL", () => {
     expect(documentContentHref("doc_1")).toBe("/api/documents/doc_1/content");
+  });
+
+  it("resolves a sent attachment's content to a downloadable document or inert", () => {
+    // Image part: the converter puts the URI in the `image` field.
+    expect(
+      resolveAttachmentContent([
+        { type: "image", image: "document://doc_abcd1234", filename: "photo.png" },
+      ]),
+    ).toEqual({ kind: "document", id: "doc_abcd1234" });
+
+    // File part: the URI lives in the `data` field instead.
+    expect(resolveAttachmentContent([{ type: "file", data: "document://doc_efgh5678" }])).toEqual({
+      kind: "document",
+      id: "doc_efgh5678",
+    });
+
+    // Just-sent optimistic upload:// (not yet materialized to document://) → inert.
+    expect(resolveAttachmentContent([{ type: "file", data: "upload://upl_abcd1234" }])).toEqual({
+      kind: "inert",
+    });
+
+    // Malformed / missing / empty content → inert (never throws).
+    expect(resolveAttachmentContent([{ type: "image", image: "not-a-uri" }])).toEqual({
+      kind: "inert",
+    });
+    expect(resolveAttachmentContent([{ type: "file" }])).toEqual({ kind: "inert" });
+    expect(resolveAttachmentContent([])).toEqual({ kind: "inert" });
+    expect(resolveAttachmentContent(undefined)).toEqual({ kind: "inert" });
   });
 
   it("builds SSE URLs from org/app headers", () => {
