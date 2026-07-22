@@ -17,7 +17,12 @@
 #
 # Paths below are relative to the repo root.
 
-ARG BUN_IMAGE=oven/bun:1.3.14-alpine
+# Pinned BACK to 1.3.13: 1.3.14 standalone binaries (musl/arm64) crash
+# intermittently at boot with a segfault at 0x1C74920 (2 of 6 runs here,
+# same address across different builds and code revisions — so not our
+# code; crash report: bun.report/1.3.14/L_10d9b296…). Re-bump once a
+# fixed Bun ships and a dozen consecutive runs stay clean.
+ARG BUN_IMAGE=oven/bun:1.3.13-alpine
 ARG RUNTIME_IMAGE=alpine:3.21.3
 
 # ── Stage 1 — compile to a single-file binary ─────────────────────
