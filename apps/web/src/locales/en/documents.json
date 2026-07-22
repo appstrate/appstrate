@@ -6,8 +6,6 @@
   "filter.all": "All",
   "filter.agent_output": "Agent outputs",
   "filter.user_upload": "Uploads",
-  "run.inputs": "Inputs",
-  "run.outputs": "Outputs",
   "run.empty": "No documents",
   "run.emptyHint": "This run has no uploaded or produced files.",
   "row.download": "Download",

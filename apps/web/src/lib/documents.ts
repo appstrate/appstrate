@@ -59,22 +59,6 @@ export function mimeIconFor(mime: string): LucideIcon {
 }
 
 /**
- * Split a run's documents into inputs (user uploads consumed by the run) and
- * outputs (agent-produced files). Order within each group is preserved.
- */
-export function groupDocumentsByPurpose<T extends DocumentLike>(
-  docs: readonly T[],
-): { inputs: T[]; outputs: T[] } {
-  const inputs: T[] = [];
-  const outputs: T[] = [];
-  for (const doc of docs) {
-    if (doc.purpose === "user_upload") inputs.push(doc);
-    else outputs.push(doc);
-  }
-  return { inputs, outputs };
-}
-
-/**
  * In-app run-page URL for a document's producing run, or `undefined` when the
  * document has no run container or no package id (e.g. an inline run's ephemeral
  * shadow). `packageId` keeps its `@scope/name` slashes literal to match the

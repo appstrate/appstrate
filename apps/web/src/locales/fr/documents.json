@@ -6,8 +6,6 @@
   "filter.all": "Tous",
   "filter.agent_output": "Produits par les agents",
   "filter.user_upload": "Importés",
-  "run.inputs": "Entrées",
-  "run.outputs": "Sorties",
   "run.empty": "Aucun document",
   "run.emptyHint": "Ce run n'a ni fichier importé ni fichier produit.",
   "row.download": "Télécharger",

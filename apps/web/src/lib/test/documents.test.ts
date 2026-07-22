@@ -2,12 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { File as FileIcon, FileArchive, FileCode, FileImage, FileText } from "lucide-react";
-import {
-  documentRunHref,
-  groupDocumentsByPurpose,
-  mimeIconFor,
-  type DocumentLike,
-} from "../documents.ts";
+import { documentRunHref, mimeIconFor, type DocumentLike } from "../documents.ts";
 
 function doc(overrides: Partial<DocumentLike>): DocumentLike {
   return {
@@ -32,24 +27,6 @@ describe("mimeIconFor", () => {
   it("falls back to the neutral file icon", () => {
     expect(mimeIconFor("application/octet-stream")).toBe(FileIcon);
     expect(mimeIconFor("")).toBe(FileIcon);
-  });
-});
-
-describe("groupDocumentsByPurpose", () => {
-  it("splits uploads from outputs, preserving order", () => {
-    const docs = [
-      doc({ purpose: "user_upload", mime: "a" }),
-      doc({ purpose: "agent_output", mime: "b" }),
-      doc({ purpose: "agent_output", mime: "c" }),
-      doc({ purpose: "user_upload", mime: "d" }),
-    ];
-    const { inputs, outputs } = groupDocumentsByPurpose(docs);
-    expect(inputs.map((d) => d.mime)).toEqual(["a", "d"]);
-    expect(outputs.map((d) => d.mime)).toEqual(["b", "c"]);
-  });
-
-  it("handles an empty list", () => {
-    expect(groupDocumentsByPurpose([])).toEqual({ inputs: [], outputs: [] });
   });
 });
 
