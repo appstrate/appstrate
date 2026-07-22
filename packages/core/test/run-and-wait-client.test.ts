@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   fetchRunDocuments,
+  launchRunAndWait,
   runAndWaitSteps,
   runAndWaitStepsWithDocuments,
 } from "../src/run-and-wait-client.ts";
@@ -310,5 +311,87 @@ describe("run_and_wait client", () => {
         },
       ),
     ).rejects.toThrow("stop");
+  });
+});
+
+describe("launchRunAndWait launch body", () => {
+  function captureLaunch(): {
+    fetchImpl: typeof fetch;
+    captured: () => { url: string; method: string; body: unknown } | undefined;
+  } {
+    let seen: { url: string; method: string; body: unknown } | undefined;
+    const fetchImpl = fakeFetch(async (input, init) => {
+      seen = {
+        url: String(input),
+        method: init?.method ?? "GET",
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      };
+      return jsonResponse({ id: "run_1", status: "pending" });
+    });
+    return { fetchImpl, captured: () => seen };
+  }
+
+  test("kind:inline forwards manifest, prompt, input, and config", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        input: { screenshot: "document://doc_abc12345" },
+        config: { model: "x" },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(captured()).toMatchObject({
+      url: "https://test.local/api/runs/inline",
+      method: "POST",
+      body: {
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        input: { screenshot: "document://doc_abc12345" },
+        config: { model: "x" },
+      },
+    });
+  });
+
+  test("kind:inline omits input when none is provided", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()?.body).toEqual({ manifest: { name: "tmp" }, prompt: "do it" });
+  });
+
+  test("kind:agent forwards input in the launch body", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      { kind: "agent", scope: "@acme", name: "writer", input: { topic: "x" } },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()).toMatchObject({
+      url: "https://test.local/api/agents/%40acme/writer/run",
+      method: "POST",
+      body: { input: { topic: "x" } },
+    });
+  });
+
+  test("exposes the launch HTTP status on success", async () => {
+    const fetchImpl = fakeFetch(async () => jsonResponse({ id: "run_1", status: "pending" }, 201));
+
+    const result = await launchRunAndWait(
+      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result).toMatchObject({ ok: true, launchStatus: 201 });
   });
 });

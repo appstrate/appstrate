@@ -46,6 +46,8 @@ export interface RunAndWaitClientOptions {
 export interface RunAndWaitLaunchResult {
   ok: true;
   launch: RunAndWaitLaunch;
+  /** HTTP status of the launch POST, for the caller's launch-outcome telemetry. */
+  launchStatus: number;
 }
 
 export interface RunAndWaitFailureResult {
@@ -238,6 +240,7 @@ export async function launchRunAndWait(
     }
     launchPath = "/api/runs/inline";
     launchBody = { manifest, prompt };
+    if (asRecord(args.input)) launchBody.input = args.input;
     if (asRecord(args.config)) launchBody.config = args.config;
   } else {
     return {
@@ -274,6 +277,7 @@ export async function launchRunAndWait(
 
   return {
     ok: true,
+    launchStatus: launchRes.status,
     launch: {
       runId,
       launchRecord,

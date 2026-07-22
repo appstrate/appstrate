@@ -36,9 +36,9 @@ import type {
   ReadResourceResult,
 } from "@appstrate/mcp-transport";
 import {
+  launchRunAndWait,
   waitForRunAndWaitCompletion,
   fetchRunDocuments,
-  type RunAndWaitLaunch,
   type RunAndWaitDocument,
 } from "@appstrate/core/run-and-wait-client";
 import { parseDocumentUri } from "@appstrate/core/document-uri";
@@ -754,53 +754,6 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
 // --- run_and_wait ----------------------------------------------------------
 
-/**
- * Build + dispatch a single catalog operation in-process and return the raw
- * Response (NOT a CallToolResult) so a composing tool can read its body. Same
- * trusted self-dispatch + auth-forwarding as `invoke_operation`, minus the
- * model-supplied header plumbing (callers here pass fixed, trusted shapes).
- */
-async function dispatchCatalogOperation(
-  ctx: McpToolContext,
-  operationId: string,
-  opts: {
-    pathParams?: Record<string, unknown>;
-    query?: Record<string, unknown>;
-    body?: unknown;
-    signal?: AbortSignal;
-  },
-): Promise<Response> {
-  const { operations } = getCatalog();
-  const op = operations.get(operationId);
-  if (!op) {
-    // Our hardcoded operationIds (runAgent/runInline/getRun) are always in the
-    // catalog; a miss is a server-side wiring bug, not a model error.
-    throw new McpError(ErrorCode.InternalError, `Operation not found: ${operationId}`);
-  }
-  const path = interpolatePath(op, opts.pathParams ?? {});
-  if (path === null) {
-    throw new McpError(
-      ErrorCode.InternalError,
-      `Missing path params for ${operationId}: ${op.pathParams.join(", ")}`,
-    );
-  }
-  const url = new URL(path, ctx.origin);
-  applyQuery(url, opts.query ?? {});
-
-  const headers = new Headers(ctx.authHeaders);
-  headers.set(...internalDispatchHeader());
-  const sendBody = opts.body !== undefined && METHODS_WITH_BODY.has(op.method);
-  if (sendBody) headers.set("content-type", "application/json");
-
-  const request = new Request(url.toString(), {
-    method: op.method,
-    headers,
-    body: sendBody ? JSON.stringify(opts.body) : undefined,
-    signal: opts.signal,
-  });
-  return ctx.dispatch(request);
-}
-
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (!signal?.aborted) return;
   throw signal.reason ?? new Error("Aborted");
@@ -903,122 +856,60 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       throw new McpError(ErrorCode.InvalidParams, "`kind` must be 'agent' or 'inline'.");
     }
 
-    // --- launch (fire-and-forget; the route returns the created run) ---
-    let launchResponse: Response;
-    if (kind === "agent") {
-      const scope = asString(args.scope);
-      const name = asString(args.name);
-      if (!scope || !name) {
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          outcome: "rejected",
-        });
-        return textResult({ error: "`scope` and `name` are required for kind:'agent'." }, true);
-      }
-      const body: Record<string, unknown> = {};
-      if (asRecord(args.input)) body.input = args.input;
-      if (asRecord(args.config)) body.config = args.config;
-      const query: Record<string, unknown> = {};
-      const version = asString(args.version);
-      if (version) query.version = version;
-      launchResponse = await dispatchCatalogOperation(ctx, "runAgent", {
-        pathParams: { scope, name },
-        query,
-        body: Object.keys(body).length > 0 ? body : undefined,
-        signal,
-      });
-    } else {
-      const manifest = asRecord(args.manifest);
-      if (!manifest) {
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          outcome: "rejected",
-        });
-        return textResult({ error: "`manifest` is required for kind:'inline'." }, true);
-      }
-      // Reject a missing top-level prompt here instead of forwarding a
-      // promptless body to the route: the route's field error alone doesn't
-      // tell the model WHERE the prompt goes, and the observed failure mode
-      // is nesting it inside the manifest (AFPS agents ship a prompt.md, so
-      // models naturally put it there) then retrying blind.
-      const prompt = asString(args.prompt);
-      if (!prompt) {
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          outcome: "rejected",
-        });
-        const nested = typeof manifest.prompt === "string";
-        return textResult(
-          {
-            error: nested
-              ? "`prompt` was found inside `manifest`. It must be a TOP-LEVEL argument of " +
-                "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
-              : "`prompt` is required for kind:'inline'. Pass it as a top-level argument " +
-                "alongside `manifest` (not inside it).",
-          },
-          true,
-        );
-      }
-      const body: Record<string, unknown> = { manifest, prompt };
-      if (asRecord(args.input)) body.input = args.input;
-      if (asRecord(args.config)) body.config = args.config;
-      launchResponse = await dispatchCatalogOperation(ctx, "runInline", { body, signal });
-    }
-
-    // Surface a launch failure (4xx/5xx) verbatim so the model can self-correct
-    // (bad input, unconnected integration, no published version, …).
-    if (launchResponse.status >= 400) {
-      emit(ctx, {
-        tool: "run_and_wait",
-        durationMs: performance.now() - start,
-        method: "POST",
-        status: launchResponse.status,
-        outcome: "invoked",
-      });
-      return readResponse(launchResponse);
-    }
-
-    const launched = (await launchResponse.json().catch(() => undefined)) as unknown;
-    const runId = asString(asRecord(launched)?.id);
-    if (!runId) {
-      emit(ctx, {
-        tool: "run_and_wait",
-        durationMs: performance.now() - start,
-        outcome: "rejected",
-      });
-      return textResult({ error: "Run launch returned no run id.", launch: launched }, true);
-    }
-
-    const runRecord = asRecord(launched) ?? {};
-    const packageId = asString(runRecord.packageId) ?? null;
-    const status = asString(runRecord.status) ?? null;
-    emit(ctx, {
-      tool: "run_and_wait",
-      durationMs: performance.now() - start,
-      operationId: kind === "agent" ? "runAgent" : "runInline",
-      status: launchResponse.status,
-      outcome: "invoked",
-    });
-
-    const waitHeaders = new Headers(ctx.authHeaders);
-    waitHeaders.set(...internalDispatchHeader());
+    // Trusted in-process dispatch: forward the caller's auth + the self-dispatch
+    // marker (same as invoke_operation), and route the launch and poll fetches
+    // back through the platform app. `launchRunAndWait` (shared with the chat
+    // paths) owns the launch body construction + validation for both kinds.
+    const dispatchHeaders = new Headers(ctx.authHeaders);
+    dispatchHeaders.set(...internalDispatchHeader());
     const dispatchFetch = ((input, init) => {
       const request =
         input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
       return ctx.dispatch(request);
     }) as typeof fetch;
-    const launch: RunAndWaitLaunch = {
-      runId,
-      launchRecord: runRecord,
-      startedAtMs: start,
-      preliminary: { id: runId, packageId, status, done: false },
-    };
-    const final = await waitForRunAndWaitCompletion(launch, {
+
+    const launched = await launchRunAndWait(args, {
       origin: ctx.origin,
-      headers: waitHeaders,
+      headers: dispatchHeaders,
+      fetch: dispatchFetch,
+      signal,
+    });
+    if (!launched.ok) {
+      // A launch HTTP failure (payload carries a numeric `status`) reached the
+      // route and it rejected the request (bad input, unconnected integration,
+      // no published version, …) — reported as an `invoked` POST. A pre-dispatch
+      // validation failure (payload carries an `error`) never touched the route.
+      const launchStatus = launched.step.payload.status;
+      if (typeof launchStatus === "number") {
+        emit(ctx, {
+          tool: "run_and_wait",
+          durationMs: performance.now() - start,
+          method: "POST",
+          status: launchStatus,
+          outcome: "invoked",
+        });
+      } else {
+        emit(ctx, {
+          tool: "run_and_wait",
+          durationMs: performance.now() - start,
+          outcome: "rejected",
+        });
+      }
+      return textResult(launched.step.payload, true);
+    }
+
+    const runId = launched.launch.runId;
+    emit(ctx, {
+      tool: "run_and_wait",
+      durationMs: performance.now() - start,
+      operationId: kind === "agent" ? "runAgent" : "runInline",
+      status: launched.launchStatus,
+      outcome: "invoked",
+    });
+
+    const final = await waitForRunAndWaitCompletion(launched.launch, {
+      origin: ctx.origin,
+      headers: dispatchHeaders,
       fetch: dispatchFetch,
       signal,
     });
@@ -1047,7 +938,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
     if (!final.isError) {
       const documents = await fetchRunDocuments(runId, {
         origin: ctx.origin,
-        headers: waitHeaders,
+        headers: dispatchHeaders,
         fetch: dispatchFetch,
         signal,
       });
