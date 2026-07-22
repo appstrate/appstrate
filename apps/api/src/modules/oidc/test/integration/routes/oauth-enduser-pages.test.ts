@@ -454,13 +454,14 @@ describe("Public end-user pages — /api/oauth/*", () => {
       expect(html).not.toContain("readonly");
     });
 
-    it("GET /login with an expired exp AND an existing notice cookie fails visibly (loop guard, no redirect)", async () => {
+    it("GET /login with an expired exp AND a SAME-state notice cookie fails visibly (loop guard, no redirect)", async () => {
       const { clientId } = await registerClient(ctx);
       const pastExp = Math.floor(Date.now() / 1000) - 60;
+      // buildLoginQs sets `state=stale` — a notice carrying the SAME state
+      // means THIS transaction already bounced once; refuse to redirect-loop
+      // and render the terminal page.
       const qs = buildLoginQs(clientId, pastExp);
-      // A valid, non-expired notice cookie already present → we already
-      // bounced once; refuse to redirect-loop and render the terminal page.
-      const notice = buildSignedLoginNoticeValue({ code: "login_link_expired" });
+      const notice = buildSignedLoginNoticeValue({ code: "login_link_expired", state: "stale" });
       const res = await app.request(`/api/oauth/login${qs}`, {
         headers: { cookie: `oidc_login_notice=${notice}` },
         redirect: "manual",
@@ -468,6 +469,54 @@ describe("Public end-user pages — /api/oauth/*", () => {
       expect(res.status).toBe(400);
       const html = await res.text();
       expect(html).toContain("Connexion impossible");
+    });
+
+    it("GET /login with an expired exp and a DIFFERENT-state notice cookie restarts normally (two-tab case)", async () => {
+      const { clientId } = await registerClient(ctx);
+      const pastExp = Math.floor(Date.now() / 1000) - 60;
+      const qs = buildLoginQs(clientId, pastExp); // state=stale
+      // The cookie belongs to ANOTHER tab's transaction (different state) —
+      // this is not a loop, so this tab must bounce like a first restart and
+      // re-key the notice cookie to its own state.
+      const otherTabNotice = buildSignedLoginNoticeValue({
+        code: "login_link_expired",
+        state: "other-tab-state",
+      });
+      const res = await app.request(`/api/oauth/login${qs}`, {
+        headers: { cookie: `oidc_login_notice=${otherTabNotice}` },
+        redirect: "manual",
+      });
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe(`/api/auth/oauth2/authorize${qs}`);
+      expect(findNoticeCookie(res)).toBeDefined();
+    });
+
+    it("GET /login with a non-numeric exp bounces like an expired link (NaN-bypass guard, end-to-end)", async () => {
+      const { clientId } = await registerClient(ctx);
+      // `Number("garbage") < now` is always false — isLoginLinkExpired must
+      // treat non-numeric as expired, and the handler must restart, not 500.
+      const qs =
+        `?client_id=${encodeURIComponent(clientId)}` + `&state=stale&exp=garbage&sig=fakesig`;
+      const res = await app.request(`/api/oauth/login${qs}`, { redirect: "manual" });
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe(`/api/auth/oauth2/authorize${qs}`);
+      expect(findNoticeCookie(res)).toBeDefined();
+    });
+
+    it("HTML-escapes a hostile email carried by the notice cookie (prefill XSS)", async () => {
+      const { clientId } = await registerClient(ctx);
+      // The prefill value is the only sink for the cookie's email — assert
+      // the `html` helper escaping actually neutralizes an injection attempt.
+      const hostile = '"><script>alert(1)</script>';
+      const notice = buildSignedLoginNoticeValue({ code: "login_link_expired", email: hostile });
+      const res = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+        { headers: { cookie: `oidc_login_notice=${notice}` } },
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).not.toContain("<script>alert");
+      expect(html).toContain("&quot;&gt;&lt;script&gt;");
     });
 
     it("GET /login without an exp param still renders normally (BA handles its own signing)", async () => {

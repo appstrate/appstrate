@@ -11,8 +11,13 @@
  * reads + clears the cookie to:
  *   1. show an error banner ("link expired, please sign in again"), and
  *   2. optionally prefill the email the expired link carried, and
- *   3. act as an anti-redirect-loop marker — a login page that already sees a
- *      notice cookie must NOT bounce a second time.
+ *   3. act as an anti-redirect-loop marker — but PER OAUTH TRANSACTION, keyed
+ *      to the `state` param. A genuine loop replays the SAME `state` (the SPA
+ *      mints a unique state per login), so the loop guard only fires when an
+ *      expired login page sees a notice cookie whose `state` matches the
+ *      request's. This avoids a false trip when two independent tabs are each
+ *      on an expired link: tab B's distinct `state` (or absent state) is a
+ *      different transaction, so it restarts normally instead of dead-ending.
  *
  * Why a cookie and not a query param: Better Auth's `authorize` endpoint
  * re-serializes its query string through a Zod whitelist and DROPS any
@@ -49,8 +54,21 @@ const COOKIE_PATH = "/api/oauth";
 const COOKIE_MAX_AGE = 60; // 60 seconds — the authorize→login round-trip is
 // sub-second; 60s absorbs slow redirects without leaving a stale banner.
 
-/** The known, closed set of notice payloads this cookie can carry. */
-export type LoginNotice = { code: "login_link_expired"; email?: string };
+/**
+ * The known, closed set of notice payloads this cookie can carry.
+ *
+ * `state` is the OAuth `state` of the transaction that bounced — the loop
+ * guard compares it against the restarted request's `state` so only a genuine
+ * same-transaction loop (not two independent tabs) trips the terminal page.
+ */
+export type LoginNotice = { code: "login_link_expired"; email?: string; state?: string };
+
+/**
+ * Max stored length of `state`. It exists solely as a loop discriminator, so a
+ * generous cap suffices; an over-long value (never produced by our SPA) is
+ * dropped rather than stored (see `buildSignedLoginNoticeValue`).
+ */
+const MAX_STATE_LENGTH = 256;
 
 /**
  * Serialize + sign `notice` and set the cookie. Safe to call multiple times on
@@ -95,9 +113,18 @@ export function readAndClearLoginNoticeCookie(c: Context<AppEnv>): LoginNotice |
  */
 export function buildSignedLoginNoticeValue(notice: LoginNotice): string {
   const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
+  // Cookie-size guard: drop an abnormally long `state` rather than store it.
+  // Losing it only degrades the loop guard to the pre-`state` behavior (first
+  // expired GET carrying a notice cookie is treated as a loop) — still safe,
+  // just slightly less tab-friendly for the pathological input.
+  const state =
+    notice.state !== undefined && notice.state.length <= MAX_STATE_LENGTH
+      ? notice.state
+      : undefined;
   const json = JSON.stringify({
     code: notice.code,
     ...(notice.email !== undefined ? { email: notice.email } : {}),
+    ...(state !== undefined ? { state } : {}),
   });
   const encoded = Buffer.from(json, "utf8").toString("base64url");
   const signed = `${encoded}.${exp}`;
@@ -134,14 +161,16 @@ function parseAndVerify(raw: string): LoginNotice | null {
 
 /**
  * Validate the parsed shape without a raw `as` cast on untrusted data. `code`
- * must be the known literal; `email`, if present, must be a string.
+ * must be the known literal; `email` and `state`, if present, must be strings.
  */
 function narrowNotice(value: unknown): LoginNotice | null {
   if (typeof value !== "object" || value === null) return null;
   const obj = value as Record<string, unknown>;
   if (obj.code !== "login_link_expired") return null;
   if (obj.email !== undefined && typeof obj.email !== "string") return null;
-  return obj.email !== undefined
-    ? { code: "login_link_expired", email: obj.email }
-    : { code: "login_link_expired" };
+  if (obj.state !== undefined && typeof obj.state !== "string") return null;
+  const notice: LoginNotice = { code: "login_link_expired" };
+  if (obj.email !== undefined) notice.email = obj.email;
+  if (obj.state !== undefined) notice.state = obj.state;
+  return notice;
 }

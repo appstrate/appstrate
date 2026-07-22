@@ -156,6 +156,23 @@ describe("login-notice-cookie", () => {
     expect(setCookie).toContain("Max-Age=0");
   });
 
+  it("round-trips the transaction state via the raw builder", async () => {
+    const app = makeApp();
+    const raw = buildSignedLoginNoticeValue({ code: "login_link_expired", state: "abc-123" });
+    const { notice } = await readWithCookie(app, `${COOKIE_NAME}=${raw}`);
+    expect(notice).toEqual({ code: "login_link_expired", state: "abc-123" });
+  });
+
+  it("drops an over-long state (cookie-size guard) instead of storing it", async () => {
+    const app = makeApp();
+    const raw = buildSignedLoginNoticeValue({
+      code: "login_link_expired",
+      state: "x".repeat(257),
+    });
+    const { notice } = await readWithCookie(app, `${COOKIE_NAME}=${raw}`);
+    expect(notice).toEqual({ code: "login_link_expired" });
+  });
+
   it("returns null when no cookie is present", async () => {
     const app = makeApp();
     const res = await app.request("/read");

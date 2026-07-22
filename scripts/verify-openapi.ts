@@ -1568,6 +1568,7 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   // documented in the spec (oidc/openapi/paths.ts), so it is not an orphan, and
   // there is no POST route. An allowlist entry for either verb would be dead.
   "GET /api/oauth/assets/social-sign-in.js",
+  "GET /api/oauth/assets/login-expiry.js",
   // OIDC device-flow activation pages — server-rendered HTML.
   "GET /activate",
   "POST /activate",

@@ -824,12 +824,19 @@ export function createOidcRouter() {
     // along byte-identical (required — the SPA's PKCE verifier in
     // sessionStorage must keep matching).
     if (isLoginLinkExpired(url.searchParams.get("exp"))) {
-      // Loop guard: a notice cookie still present here means we already
-      // restarted once and the fresh link came back expired — pathological
-      // (the same host mints `exp = now + 600`), so fail visibly instead of
-      // redirect-looping. The `readAndClear` above already evicted the cookie
-      // so a later legitimate visit starts clean.
-      if (notice) {
+      const state = url.searchParams.get("state") ?? undefined;
+      // Loop guard — PER TRANSACTION, keyed to the OAuth `state`. A genuine
+      // loop (restart bounced through `authorize` and the fresh link came
+      // back expired — pathological, the same host mints `exp = now + 600`)
+      // replays the SAME `state`; only then do we fail visibly instead of
+      // redirect-looping. A notice whose `state` differs is a DIFFERENT
+      // transaction — e.g. a second tab also sitting on an expired link —
+      // and restarts normally. Both-undefined counts as a match: a state-less
+      // transaction has no discriminator, and a working loop guard beats
+      // tab-friendliness there (our SPA always sends `state`). The
+      // `readAndClear` above already evicted the cookie so a later
+      // legitimate visit starts clean.
+      if (notice && notice.state === state) {
         return c.html(
           renderErrorPage({
             title: "Connexion impossible",
@@ -840,7 +847,10 @@ export function createOidcRouter() {
           400,
         );
       }
-      issueLoginNoticeCookie(c, { code: "login_link_expired" });
+      issueLoginNoticeCookie(c, {
+        code: "login_link_expired",
+        ...(state !== undefined ? { state } : {}),
+      });
       // Same resume shape as the post-login redirect below: replay the query
       // byte-identical (see the byte-for-byte comment above `stripError…`) —
       // do NOT round-trip through `URLSearchParams`. BA strips the stale
@@ -905,6 +915,13 @@ export function createOidcRouter() {
     if (page instanceof Response) return page;
     const { url, ctx } = page;
     const allowSignup = allowSignupForClient(ctx.client);
+    // Consume any lingering notice cookie — POST never renders the banner, and
+    // discarding here prevents a stale one (from a prior bounce, within its
+    // 60s TTL) from wrongly re-showing on a later GET after a successful
+    // login. The expiry branch below may then issue a fresh cookie: the
+    // delete + set land on the same response in call order, and browsers let
+    // the later same-name cookie win — intentional and safe.
+    readAndClearLoginNoticeCookie(c);
     // Parse the body up-front (before the expiry check) so we can capture the
     // typed email for prefill on the restart bounce. Nothing between the old
     // positions depended on ordering — the expiry block was the first thing in
@@ -913,15 +930,18 @@ export function createOidcRouter() {
     // On an expired login URL, mirror the GET handler: set a notice cookie and
     // bounce back through `/api/auth/oauth2/authorize` with the SAME query
     // string so BA mints a fresh link, instead of dead-ending on a useless
-    // form. Carry the typed email forward for prefill. No loop guard on POST:
-    // the restart always lands on the GET handler, which owns the guard. The
-    // 302 answers a POST but browsers follow it with GET — correct, the target
-    // is a navigation.
+    // form. Carry the typed email forward for prefill, and the transaction
+    // `state` so the GET-side loop guard can discriminate this transaction
+    // from an unrelated tab's. No loop guard on POST: the restart always
+    // lands on the GET handler, which owns the guard. The 302 answers a POST
+    // but browsers follow it with GET — correct, the target is a navigation.
     if (isLoginLinkExpired(url.searchParams.get("exp"))) {
       const email = readFormString(form, "email")?.toLowerCase().trim();
+      const state = url.searchParams.get("state") ?? undefined;
       issueLoginNoticeCookie(c, {
         code: "login_link_expired",
         ...(email ? { email } : {}),
+        ...(state !== undefined ? { state } : {}),
       });
       return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
     }
