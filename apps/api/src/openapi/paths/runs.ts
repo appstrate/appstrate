@@ -1052,7 +1052,11 @@ export const runsPaths = {
                   ],
                 },
                 applicationId: { type: "string", minLength: 1 },
-                input: { type: "object" },
+                input: {
+                  type: "object",
+                  description:
+                    "Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions.",
+                },
                 dependency_overrides: {
                   type: "object",
                   description:
