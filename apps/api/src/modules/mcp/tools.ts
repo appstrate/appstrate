@@ -773,6 +773,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       'inline run (`kind:"inline"`) you MUST therefore (1) declare `"runtime_tools": ["log"]` in ' +
       "the manifest AND (2) instruct the run, in its `prompt`, to call the `log` " +
       "tool to report each meaningful step — otherwise the in-chat run progress component stays empty. " +
+      "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
+      "published as a document when the run ends and returned here as a `resource_link` — when the " +
+      "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
+      "into `outputs/`; content merely returned in the output payload never becomes a document. " +
       "Prefer an existing agent over an inline manifest when one matches the intent.",
     annotations: {
       title: "Run and wait",
