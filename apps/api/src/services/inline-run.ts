@@ -142,10 +142,10 @@ export async function triggerInlineRun(params: {
   const { orgId, applicationId, actor, runId, preflight, parsed, apiKeyId, traceparent } = params;
   const { manifest, prompt, effectiveConfig, modelIdOverride, proxyIdOverride } = preflight;
 
-  // The parser normalizes an absent `input` to `{}`; preserve the preflight's
-  // null so an input-less inline run keeps persisting `runs.input` as NULL.
-  const effectiveInput =
-    parsed.input && Object.keys(parsed.input).length > 0 ? parsed.input : preflight.effectiveInput;
+  // `parseRequestInput` already collapses an effectively-empty input to
+  // `undefined`; map that to NULL so an input-less inline run persists
+  // `runs.input` as SQL NULL — the same representation the agent route uses.
+  const effectiveInput = parsed.input ?? null;
 
   // Reject an unknown/malformed explicit `modelId` with a clean 404 before we
   // mint a shadow package — avoids both a leaked shadow row and the downstream

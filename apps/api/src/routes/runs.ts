@@ -178,7 +178,10 @@ export function createRunsRouter() {
           agent: effectiveAgent,
           orgId,
           actor,
-          input: parsedInput,
+          // `parseRequestInput` collapses an effectively-empty input to
+          // `undefined`; map that to NULL so an input-less run persists
+          // `runs.input` as SQL NULL (one representation across all origins).
+          input: parsedInput ?? null,
           // File metadata for prompt context — the document bytes were already
           // streamed into the run workspace during consume.
           files: uploadedFiles,

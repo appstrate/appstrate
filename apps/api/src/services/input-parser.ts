@@ -902,8 +902,19 @@ export async function parseRequestInput(
       ? body.dependency_overrides
       : undefined;
 
+  // An effectively-empty input (no fields, no files) carries no information —
+  // collapse it to `undefined` so it persists as SQL NULL on `runs.input`,
+  // keeping every trigger origin (agent route, inline run, schedule) on one
+  // representation instead of splitting `{}` vs NULL by code path. This holds
+  // for a `rerun_from` replay of an already-empty input too: replaying nothing
+  // means the same thing. No reader distinguishes `{}` from NULL — the prompt
+  // builder normalizes both to `{}` (run-context-builder), the run DTO hides
+  // the input card for both (run-info-tab), and `resolveRerunInput` coalesces
+  // NULL back to `{}` on the next replay.
+  const normalizedInput = Object.keys(input).length > 0 ? input : undefined;
+
   return {
-    input,
+    input: normalizedInput,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     pendingDocuments: pendingDocuments.length > 0 ? pendingDocuments : undefined,
     modelIdOverride: body.modelId,

@@ -583,7 +583,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
-  it("replays a run with null input as an empty input", async () => {
+  it("replays a run with null input as no input (collapsed to undefined)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-null" });
     const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
     const priorRunId = `run_${crypto.randomUUID()}`;
@@ -595,7 +595,9 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       // No file fields required — empty input passes an empty schema.
       { type: "object", properties: {} },
     );
-    expect(result.input).toEqual({});
+    // An effectively-empty replayed input collapses to `undefined` so it
+    // persists as SQL NULL, matching a fresh input-less trigger.
+    expect(result.input).toBeUndefined();
     expect(result.uploadedFiles).toBeUndefined();
   });
 });
