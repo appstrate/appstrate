@@ -25,8 +25,12 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PanelLeftIcon } from "lucide-react";
 import { Thread } from "./thread.tsx";
-import { ChatHeadersProvider, SelectConversationProvider } from "./runtime-context.ts";
-import type { GetHeaders, SelectConversation } from "./runtime-context.ts";
+import {
+  ChatHeadersProvider,
+  SelectConversationProvider,
+  OpenDocumentProvider,
+} from "./runtime-context.ts";
+import type { GetHeaders, SelectConversation, OpenDocument } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
@@ -74,6 +78,13 @@ export interface ChatPageProps {
    * navigates its URL.
    */
   onConversationChange?: SelectConversation;
+  /**
+   * Opens the host's in-app document preview for a clicked chat document
+   * (attachment thumbnail/chip or a run card's document chip). Provided by the
+   * web shell; when absent (embedded mounts) the chat falls back to the
+   * authenticated download. Delivered to deep tool UIs via context, not props.
+   */
+  onOpenDocument?: OpenDocument;
 }
 
 export function ChatPage({
@@ -81,6 +92,7 @@ export function ChatPage({
   conversationId,
   newChatKey,
   onConversationChange,
+  onOpenDocument,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -151,66 +163,68 @@ export function ChatPage({
   return (
     <ChatHeadersProvider value={getHeaders ?? null}>
       <SelectConversationProvider value={onConversationChange ?? null}>
-        <div className="bg-background flex h-full w-full">
-          <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
-            <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
-          </aside>
+        <OpenDocumentProvider value={onOpenDocument ?? null}>
+          <div className="bg-background flex h-full w-full">
+            <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
+              <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
+            </aside>
 
-          {mobileOpen && (
-            <div className="fixed inset-0 z-40 md:hidden">
-              <div
-                className="absolute inset-0 bg-black/40"
-                onClick={() => setMobileOpen(false)}
-                aria-hidden
-              />
-              <aside
-                className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
-                // Bubble phase, NOT capture: a capture handler would flush
-                // `setMobileOpen(false)` synchronously (discrete event) and
-                // unmount this subtree BEFORE the bubble dispatch, swallowing
-                // the row button's own onClick (select/navigate). In bubble
-                // order the child's handler runs first, then this closes.
-                onClick={(e) => {
-                  if ((e.target as HTMLElement).closest("button")) setMobileOpen(false);
-                }}
-              >
-                <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
-              </aside>
-            </div>
-          )}
-
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-              <button
-                type="button"
-                onClick={() => setMobileOpen(true)}
-                aria-label="Conversations"
-                className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
-              >
-                <PanelLeftIcon className="size-5" />
-              </button>
-              <div className="min-w-0 flex-1">
-                <ActiveConversationTitle activeId={conversationId ?? null} />
+            {mobileOpen && (
+              <div className="fixed inset-0 z-40 md:hidden">
+                <div
+                  className="absolute inset-0 bg-black/40"
+                  onClick={() => setMobileOpen(false)}
+                  aria-hidden
+                />
+                <aside
+                  className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
+                  // Bubble phase, NOT capture: a capture handler would flush
+                  // `setMobileOpen(false)` synchronously (discrete event) and
+                  // unmount this subtree BEFORE the bubble dispatch, swallowing
+                  // the row button's own onClick (select/navigate). In bubble
+                  // order the child's handler runs first, then this closes.
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("button")) setMobileOpen(false);
+                  }}
+                >
+                  <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
+                </aside>
               </div>
+            )}
+
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+                <button
+                  type="button"
+                  onClick={() => setMobileOpen(true)}
+                  aria-label="Conversations"
+                  className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
+                >
+                  <PanelLeftIcon className="size-5" />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <ActiveConversationTitle activeId={conversationId ?? null} />
+                </div>
+              </div>
+              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                <Conversation
+                  key={activeId}
+                  id={activeId}
+                  getHeaders={getHeaders}
+                  isPersisted={isPersisted}
+                  onConversationChange={onConversationChange}
+                  composerSlot={
+                    <ModelSelect
+                      models={models}
+                      selectedId={selectedModel}
+                      onSelect={setSelectedModel}
+                    />
+                  }
+                />
+              </main>
             </div>
-            <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-              <Conversation
-                key={activeId}
-                id={activeId}
-                getHeaders={getHeaders}
-                isPersisted={isPersisted}
-                onConversationChange={onConversationChange}
-                composerSlot={
-                  <ModelSelect
-                    models={models}
-                    selectedId={selectedModel}
-                    onSelect={setSelectedModel}
-                  />
-                }
-              />
-            </main>
           </div>
-        </div>
+        </OpenDocumentProvider>
       </SelectConversationProvider>
     </ChatHeadersProvider>
   );

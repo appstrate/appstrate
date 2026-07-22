@@ -30,6 +30,7 @@ import {
   CheckIcon,
   DownloadIcon,
   ExternalLinkIcon,
+  EyeIcon,
   Loader2Icon,
 } from "lucide-react";
 import { Modal } from "./modal.tsx";
@@ -37,7 +38,7 @@ import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
 import { useLiveElapsedMs } from "./use-elapsed.ts";
-import { useChatHeaders } from "./runtime-context.ts";
+import { useChatHeaders, useOpenDocument } from "./runtime-context.ts";
 import {
   buildRunPageHref,
   isTerminalStatus,
@@ -51,9 +52,14 @@ import {
 import { downloadChatDocument } from "./document-download.ts";
 import type { ToolPhase } from "./tool-result.ts";
 
-/** Row of downloadable document chips surfaced under a run card. */
+/**
+ * Row of document chips surfaced under a run card. With a host opener (web
+ * shell) a chip opens the in-app preview modal (eye glyph); without one
+ * (embedded mounts) it falls back to the authenticated download (download glyph).
+ */
 function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
   const getHeaders = useChatHeaders();
+  const opener = useOpenDocument();
   if (documents.length === 0) return null;
   return (
     <div className="pointer-events-auto flex flex-wrap gap-1.5 px-3 pb-2">
@@ -63,12 +69,17 @@ function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            void downloadChatDocument(doc.id, doc.name, getHeaders?.() ?? {});
+            if (opener) opener({ id: doc.id, name: doc.name });
+            else void downloadChatDocument(doc.id, doc.name, getHeaders?.() ?? {});
           }}
-          title={doc.name}
+          title={opener ? `Aperçu de ${doc.name}` : doc.name}
           className="border-border bg-muted/40 hover:bg-muted text-foreground flex max-w-[16rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
         >
-          <DownloadIcon className="text-muted-foreground size-3 shrink-0" />
+          {opener ? (
+            <EyeIcon className="text-muted-foreground size-3 shrink-0" />
+          ) : (
+            <DownloadIcon className="text-muted-foreground size-3 shrink-0" />
+          )}
           <span className="truncate">{doc.name}</span>
         </button>
       ))}

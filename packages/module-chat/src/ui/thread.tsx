@@ -47,7 +47,7 @@ import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import { documentContentHref, resolveAttachmentContent } from "./run-events.ts";
 import { downloadChatDocument } from "./document-download.ts";
-import { useChatHeaders, type GetHeaders } from "./runtime-context.ts";
+import { useChatHeaders, useOpenDocument, type GetHeaders } from "./runtime-context.ts";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
@@ -205,20 +205,26 @@ function InertAttachmentChip({ name }: { name: string }) {
   );
 }
 
-/** Clickable chip: file icon + name, click triggers the authenticated download. */
+/**
+ * Clickable chip: file icon + name. The click action is supplied by the caller —
+ * open the in-app preview when the host injected an opener, else the
+ * authenticated download — with a matching `actionLabel` (title/aria-label).
+ */
 function DownloadableAttachmentChip({
   name,
-  onDownload,
+  actionLabel,
+  onActivate,
 }: {
   name: string;
-  onDownload: () => void;
+  actionLabel: string;
+  onActivate: () => void;
 }) {
   return (
     <button
       type="button"
-      onClick={onDownload}
-      title={`Télécharger ${name || "le document"}`}
-      aria-label={`Télécharger ${name || "le document"}`}
+      onClick={onActivate}
+      title={actionLabel}
+      aria-label={actionLabel}
       className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted`}
     >
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
@@ -230,19 +236,22 @@ function DownloadableAttachmentChip({
 /**
  * Image attachment: an authenticated fetch of the content route → object URL in
  * an <img> thumbnail (revoked on unmount). While loading — or if the fetch
- * fails — it falls back to the downloadable chip. The content route only serves
+ * fails — it falls back to the clickable chip. The content route only serves
  * stored documents, so this is only ever rendered for a resolved `document://`.
+ * The click action (preview or download) is supplied by the caller.
  */
 function ImageAttachmentThumbnail({
   id,
   name,
   getHeaders,
-  onDownload,
+  actionLabel,
+  onActivate,
 }: {
   id: string;
   name: string;
   getHeaders: GetHeaders | null;
-  onDownload: () => void;
+  actionLabel: string;
+  onActivate: () => void;
 }) {
   const [src, setSrc] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -269,14 +278,12 @@ function ImageAttachmentThumbnail({
     };
   }, [id, getHeaders]);
 
-  if (!src) return <DownloadableAttachmentChip name={name} onDownload={onDownload} />;
+  if (!src)
+    return (
+      <DownloadableAttachmentChip name={name} actionLabel={actionLabel} onActivate={onActivate} />
+    );
   return (
-    <button
-      type="button"
-      onClick={onDownload}
-      title={`Télécharger ${name || "l'image"}`}
-      aria-label={`Télécharger ${name || "l'image"}`}
-    >
+    <button type="button" onClick={onActivate} title={actionLabel} aria-label={actionLabel}>
       <img src={src} alt={name || "image"} className="max-h-36 rounded-lg border object-cover" />
     </button>
   );
@@ -290,6 +297,7 @@ function ImageAttachmentThumbnail({
  */
 function SentAttachmentChip() {
   const getHeaders = useChatHeaders();
+  const opener = useOpenDocument();
   const name = useAttachment((a) => a.name);
   const contentType = useAttachment((a) => a.contentType);
   // The content array reference is stable for a settled attachment, so this
@@ -300,8 +308,15 @@ function SentAttachmentChip() {
   if (resolved.kind !== "document") return <InertAttachmentChip name={name} />;
 
   const docId = resolved.id;
-  const onDownload = () =>
-    void downloadChatDocument(docId, name || "document", getHeaders?.() ?? {});
+  // With a host opener (web shell), a resolved document opens the in-app preview
+  // modal; without one (embedded mounts) it falls back to the authenticated
+  // download. Same choice drives the action and its label.
+  const onActivate = opener
+    ? () => opener({ id: docId, name: name || "document" })
+    : () => void downloadChatDocument(docId, name || "document", getHeaders?.() ?? {});
+  const actionLabel = opener
+    ? `Aperçu de ${name || "le document"}`
+    : `Télécharger ${name || "le document"}`;
 
   if (typeof contentType === "string" && contentType.startsWith("image/")) {
     return (
@@ -309,11 +324,14 @@ function SentAttachmentChip() {
         id={docId}
         name={name}
         getHeaders={getHeaders}
-        onDownload={onDownload}
+        actionLabel={actionLabel}
+        onActivate={onActivate}
       />
     );
   }
-  return <DownloadableAttachmentChip name={name} onDownload={onDownload} />;
+  return (
+    <DownloadableAttachmentChip name={name} actionLabel={actionLabel} onActivate={onActivate} />
+  );
 }
 
 function Composer({ slot }: { slot?: React.ReactNode }) {

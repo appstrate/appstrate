@@ -37,3 +37,20 @@ export const SelectConversationProvider = SelectConversationContext.Provider;
 export function useSelectConversation(): SelectConversation | null {
   return useContext(SelectConversationContext);
 }
+
+/**
+ * Opens the host's in-app document preview (the same modal the documents library
+ * uses). The module owns no preview component — dependency direction is web →
+ * module-chat, so the host injects an opener and the chat delegates to it.
+ * `null` means no opener was provided (embedded mounts): callers must then fall
+ * back to the authenticated download.
+ */
+export type OpenDocument = (doc: { id: string; name: string }) => void;
+
+const OpenDocumentContext = createContext<OpenDocument | null>(null);
+
+export const OpenDocumentProvider = OpenDocumentContext.Provider;
+
+export function useOpenDocument(): OpenDocument | null {
+  return useContext(OpenDocumentContext);
+}

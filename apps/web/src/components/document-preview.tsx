@@ -33,10 +33,12 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DownloadIcon } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
 import { LoadingState, ErrorState } from "./page-states";
-import { useDocument, type DocumentDto } from "../hooks/use-documents";
+import { useDocument, useDocumentDownload } from "../hooks/use-documents";
 
 /**
  * The EXACT iframe sandbox token set for the HTML preview. Exported (and asserted
@@ -86,11 +88,15 @@ export function DocumentPreview({
   open,
   onClose,
 }: {
-  doc: DocumentDto;
+  // Only id + name are needed here (the DTO satisfies this structurally); the
+  // rest is refetched via `useDocument`. Keeping the surface minimal lets the
+  // chat pass a bare `{ id, name }` without importing the full DTO type.
+  doc: { id: string; name: string };
   open: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation("documents");
+  const download = useDocumentDownload();
   // Refetch the DTO on open for a fresh preview token (tokens are short-lived).
   const { data, isLoading, error } = useDocument(doc.id, open);
   const previewUrl = data?.preview_url;
@@ -142,7 +148,18 @@ export function DocumentPreview({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={doc.name} className="h-[85vh] max-w-5xl">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={doc.name}
+      className="h-[85vh] max-w-5xl"
+      actions={
+        <Button variant="outline" onClick={() => void download(doc.id, doc.name)}>
+          <DownloadIcon className="size-4" />
+          {t("row.download")}
+        </Button>
+      }
+    >
       <div className="bg-muted h-full min-h-0 flex-1 overflow-hidden rounded-md border">
         {renderBody()}
       </div>
