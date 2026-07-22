@@ -178,17 +178,19 @@ export async function resolveLiveIntegrationCredentials(
   // branches so they cannot drift.
   // An auth marked ephemeral holds a RUN-ACQUIRED secret (a
   // browser-captured session token, merged from the run-scoped store
-  // above). A 401 on it means "the captured token is stale — re-capture
-  // next run", NOT "the user must reconnect". Flagging needsReconnection
-  // here would be wrong AND self-defeating: it blocks the next kickoff,
-  // but re-capturing requires a run. So an ephemeral auth is never
-  // flagged; its 401 simply propagates.
+  // above). On the forced-refresh path below, the sidecar force-refreshes
+  // AFTER a 401 — and by then capture has populated the run-scoped store,
+  // so the ephemeral merge above already put the fresh token in `fields`.
+  // For such an auth a forced refresh is therefore NOT terminal: we skip
+  // `flagTerminalAndThrow` entirely and fall through to build the delivery
+  // with the fresh token. (Flagging would also be self-defeating — it
+  // blocks the next kickoff, but re-capturing requires a run: deadlock.)
   const isEphemeralAuth =
-    ((authDef as { _meta?: Record<string, unknown> })._meta?.["dev.appstrate/ephemeral"] as
-      { enabled?: boolean } | undefined) !== undefined;
+    (authDef as { _meta?: Record<string, unknown> })._meta?.["dev.appstrate/ephemeral"] !==
+    undefined;
 
   const flagTerminalAndThrow = async (reason: string): Promise<never> => {
-    if (!isEphemeralAuth) await markIntegrationConnectionNeedsReconnection(connection.id);
+    await markIntegrationConnectionNeedsReconnection(connection.id);
     logger.warn(
       "Integration credential unrefreshable on forced refresh — flagging needsReconnection",
       {
@@ -343,13 +345,18 @@ export async function resolveLiveIntegrationCredentials(
       // so the token can never be refreshed. Terminal.
       await flagTerminalAndThrow("no OAuth client or token endpoint");
     }
-  } else if (options.forceRefresh === true) {
+  } else if (options.forceRefresh === true && !isEphemeralAuth) {
     // A FORCED refresh of a NON-oauth2 auth (api_key / basic / a custom auth
     // with no connect.tool re-login handler — those route to re-login in the
     // sidecar and never reach here). There is nothing to refresh and the
     // sidecar only forces a refresh after a 401, so the credential is dead.
     // This is what restores the "any terminal 401 invalidates the connection"
     // guarantee for non-OAuth integrations — without a separate report path.
+    //
+    // Ephemeral auths are exempt (guarded above): their forced refresh
+    // re-reads the run-scoped store (the token was captured mid-run), so
+    // it falls through here and returns the fresh merged credentials — a
+    // 401 is recoverable, not terminal.
     await flagTerminalAndThrow(`auth type '${authDef.type}' is not refreshable`);
   }
 
