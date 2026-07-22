@@ -52,6 +52,8 @@ import { verifyRunToken } from "../../routes/internal.ts";
 import { getPackage } from "../../services/package-catalog.ts";
 import { actorFromIds } from "../../lib/actor.ts";
 import { resolveLiveIntegrationCredentials } from "../../services/integration-credentials-resolver.ts";
+import { readIntegrationManifestForRun } from "../../services/integration-service.ts";
+import { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 import {
   listIntegrationConnections,
   saveIntegrationConnection,
@@ -247,6 +249,30 @@ type RunContext = Awaited<ReturnType<typeof verifyRunToken>>["run"];
  * its own credential store), so it stays tightly scoped: the declared
  * integration only, the run actor's own connection only, write-only.
  */
+/**
+ * Union of an integration's `authorized_uris` across all its auths, at
+ * the version this run froze. The capture page must fall inside it.
+ * Empty (no manifest / no auths) → the caller rejects every page, which
+ * is the safe default for a write-into-credential-store operation.
+ */
+async function loadIntegrationAuthorizedUris(
+  integrationId: string,
+  run: RunContext,
+): Promise<string[]> {
+  const frozen = run.resolvedIntegrationVersions?.[integrationId] ?? null;
+  const loaded = await readIntegrationManifestForRun(integrationId, frozen);
+  if (!loaded.ok) return [];
+  const auths = asRecord(asRecord(loaded.manifest).auths);
+  const uris: string[] = [];
+  for (const auth of Object.values(auths)) {
+    const list = asRecord(auth).authorized_uris;
+    if (Array.isArray(list)) {
+      for (const u of list) if (typeof u === "string") uris.push(u);
+    }
+  }
+  return uris;
+}
+
 async function captureCredential(
   c: Context<AppEnv>,
   run: RunContext,
@@ -262,19 +288,47 @@ async function captureCredential(
   }
   await assertAgentDeclaresIntegration(p.integration_id, run, runId);
 
-  // Dispatch the capture script to the desktop; the returned object is
-  // received HERE (server-side), never forwarded to the agent.
-  let captured: unknown;
+  // The union of the integration's declared `authorized_uris`, across
+  // all its auths. The capture page MUST be inside it (checked below) —
+  // otherwise a run could sit on `bank.com`, capture that session's
+  // token, and file it into ANY declared integration, whose api_call
+  // authorized_uris would then exfiltrate it. Binding the SOURCE page to
+  // the integration's own domain is the missing half of the guard: you
+  // can only capture a site's secret while browsing that same site.
+  const integrationUris = await loadIntegrationAuthorizedUris(p.integration_id, run);
+
+  // One dispatch returns BOTH the page URL (for the domain check) and
+  // the captured fields — received HERE (server-side), never forwarded
+  // to the agent. Wrapping the caller's script keeps its return value
+  // under `fields`.
+  const wrapped = `(() => ({ __url: location.href, fields: (${p.script}) }))()`;
+  let raw: unknown;
   try {
-    captured = await sendCommand(
+    raw = await sendCommand(
       run.userId,
       "browser.evaluate",
-      { script: p.script },
-      { timeoutMs: body.timeout_ms },
+      { script: wrapped },
+      {
+        timeoutMs: body.timeout_ms,
+      },
     );
   } catch (err) {
     throw desktopErrorToApiError(err);
   }
+  const envelope = raw as { __url?: unknown; fields?: unknown };
+  const pageUrl = typeof envelope?.__url === "string" ? envelope.__url : "";
+  if (!pageUrl || !integrationUris.some((u) => matchesAuthorizedUriSpec(u, pageUrl))) {
+    logger.warn("Desktop capture rejected — page outside the integration's authorized_uris", {
+      runId,
+      integrationId: p.integration_id,
+      module: "desktop",
+    });
+    throw forbidden(
+      `capture_credential: the current page is not within '${p.integration_id}' authorized_uris — ` +
+        `you can only capture a site's secret while browsing that site`,
+    );
+  }
+  const captured = envelope.fields;
   if (!captured || typeof captured !== "object" || Array.isArray(captured)) {
     throw badGateway("capture script must return an object of { field: value } string pairs");
   }

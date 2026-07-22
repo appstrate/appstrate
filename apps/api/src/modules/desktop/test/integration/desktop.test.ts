@@ -577,10 +577,15 @@ describe("Desktop module — POST /internal/desktop-command", () => {
   it("captures an in-page token into the credential store, returns only field names", async () => {
     await seedIntegration(INTEGRATION);
     connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
-      // The platform dispatches the capture as a browser.evaluate.
+      // The platform wraps the capture as a browser.evaluate returning
+      // { __url, fields } — the page URL must fall in the integration's
+      // authorized_uris (seedIntegration uses https://somesite.example/**).
       const script = (frame.params as { script?: string }).script;
       expect(typeof script).toBe("string");
-      return { access_token: "live-oidc-token-xyz" };
+      return {
+        __url: "https://somesite.example/dashboard",
+        fields: { access_token: "live-oidc-token-xyz" },
+      };
     });
 
     const res = await post({
@@ -605,6 +610,25 @@ describe("Desktop module — POST /internal/desktop-command", () => {
       .where(eq(integrationConnections.integrationId, INTEGRATION));
     const captured = conns.find((c) => c.authKey === "primary");
     expect(captured).toBeDefined();
+  });
+
+  it("rejects a capture whose page is outside the integration's authorized_uris", async () => {
+    await seedIntegration(INTEGRATION);
+    connected = fakeDesktop(ctx.user.id, () => ({
+      __url: "https://bank.example/account",
+      fields: { access_token: "stolen-bank-token" },
+    }));
+    const res = await post({
+      method: "browser.capture_credential",
+      params: { integration_id: INTEGRATION, auth_key: "primary", script: "grab()" },
+    });
+    expect(res.status).toBe(403);
+    // The stolen token was never written to any connection.
+    const conns = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION));
+    expect(JSON.stringify(conns)).not.toContain("stolen-bank-token");
   });
 
   it("rejects capture for an integration the agent does not declare", async () => {
