@@ -17,16 +17,28 @@
  *   - screenshot: `Page.captureScreenshot` adds full-page capture and
  *     format/quality control.
  *
- * fill/click/waitForSelector stay on the DOM-script path (browser-api.ts):
- * CDP has no native waitForSelector, and the React-aware fill script is
- * battle-tested. The debugger attaches lazily on first use and
+ *   - click/fill: NATIVE input via `Input.dispatchMouseEvent` /
+ *     `Input.insertText` (trusted events, `isTrusted: true`) instead of
+ *     the old in-page `el.click()` / value-setter script, whose
+ *     synthetic events carry `isTrusted: false` — the exact tell anti-bot
+ *     vendors (DataDome, Cloudflare) key on. A DataDome-gated login POST
+ *     that a scripted fill could not clear goes through once the typing
+ *     is a real keyboard stream. Substitution is unchanged: the platform
+ *     resolves `{{field}}` before dispatch, so the bridge types the real
+ *     value and the agent still never sees it.
+ *
+ * Only waitForSelector stays on the DOM-poll path (browser-api.ts): CDP
+ * has no native equivalent. The debugger attaches lazily on first use and
  * re-attaches transparently if something (e.g. opening DevTools, which
  * evicts other debugger clients) detached it.
  */
 
-import type { WebContents } from "electron";
+import { type WebContents } from "electron";
 
 const PROTOCOL_VERSION = "1.3";
+
+/** Ctrl on Win/Linux, Cmd on macOS — the "select all" accelerator. Bitmask per CDP Input. */
+const SELECT_ALL_MODIFIER = process.platform === "darwin" ? 4 /* Meta */ : 2; /* Ctrl */
 
 /**
  * Run `fn` with the debugger attached, then DETACH immediately.
@@ -161,5 +173,158 @@ export async function screenshot(
       ...(p.fullPage ? { captureBeyondViewport: true } : {}),
     })) as { data: string };
     return { dataUrl: `data:image/${format};base64,${res.data}` };
+  });
+}
+
+export interface CdpClickParams {
+  selector: string;
+}
+export interface CdpFillParams {
+  selector: string;
+  value: string;
+}
+
+/**
+ * Resolve a CSS selector to a CDP nodeId (DOM domain must be enabled by
+ * the caller). Throws the same "selector not found" the old script did.
+ */
+async function resolveNode(wc: WebContents, selector: string): Promise<number> {
+  const { root } = (await wc.debugger.sendCommand("DOM.getDocument", { depth: 0 })) as {
+    root: { nodeId: number };
+  };
+  const { nodeId } = (await wc.debugger.sendCommand("DOM.querySelector", {
+    nodeId: root.nodeId,
+    selector,
+  })) as { nodeId: number };
+  if (!nodeId) throw new Error(`selector not found: ${selector}`);
+  return nodeId;
+}
+
+/**
+ * Native click: scroll the element into view, read its box from the DOM
+ * (not a page script), and dispatch a real move → press → release mouse
+ * sequence at its centre. The events are trusted, indistinguishable from
+ * a human pointer — the whole reason this replaces `el.click()`.
+ */
+export async function click(wc: WebContents, p: CdpClickParams): Promise<null> {
+  return withDebugger(wc, async () => {
+    await wc.debugger.sendCommand("DOM.enable");
+    const nodeId = await resolveNode(wc, p.selector);
+    await wc.debugger.sendCommand("DOM.scrollIntoViewIfNeeded", { nodeId });
+    const { model } = (await wc.debugger.sendCommand("DOM.getBoxModel", { nodeId })) as {
+      model: { content: number[] };
+    };
+    // content is a quad [x1,y1, x2,y2, x3,y3, x4,y4]; centre = mean of opposite corners.
+    const q = model.content;
+    const x = (q[0]! + q[4]!) / 2;
+    const y = (q[1]! + q[5]!) / 2;
+    await wc.debugger.sendCommand("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x,
+      y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    });
+    await wc.debugger.sendCommand("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x,
+      y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    });
+    return null;
+  });
+}
+
+/**
+ * Native fill: focus the field, select any existing content with the
+ * platform's select-all accelerator, then stream the value through
+ * `Input.insertText`. insertText fires real beforeinput/input events at
+ * the browser level, so React/Vue controlled inputs see the change AND
+ * the events are trusted. Value arrives already substituted — the bridge
+ * types the real secret, the agent never holds it.
+ */
+export async function fill(wc: WebContents, p: CdpFillParams): Promise<null> {
+  return withDebugger(wc, async () => {
+    await wc.debugger.sendCommand("DOM.enable");
+    const nodeId = await resolveNode(wc, p.selector);
+    await wc.debugger.sendCommand("DOM.scrollIntoViewIfNeeded", { nodeId });
+    await wc.debugger.sendCommand("DOM.focus", { nodeId });
+    // Select existing content (Ctrl/Cmd+A) so insertText replaces it.
+    for (const type of ["keyDown", "keyUp"] as const) {
+      await wc.debugger.sendCommand("Input.dispatchKeyEvent", {
+        type,
+        key: "a",
+        code: "KeyA",
+        windowsVirtualKeyCode: 65,
+        modifiers: SELECT_ALL_MODIFIER,
+      });
+    }
+    await wc.debugger.sendCommand("Input.insertText", { text: p.value });
+    return null;
+  });
+}
+
+export interface CdpSelectOptionParams {
+  selector: string;
+  /** Match an <option> by its `value` attribute. */
+  value?: string;
+  /** Match an <option> by its visible text. */
+  label?: string;
+}
+
+/**
+ * Set a native `<select>`. Unlike click/fill there is no lower-level
+ * path: a native select's dropdown is an OS-drawn popup, not DOM, so no
+ * automation tool (Playwright/Puppeteer included) drives it with the
+ * mouse — they all set `value` and fire `change`. We do the same through
+ * `Runtime.evaluate` (CDP transport, a minimal DOM write). A `<select>`
+ * change carries no keystroke/pointer timing, so it is not an anti-bot
+ * vector. Custom (div/listbox) dropdowns are NOT this: their options are
+ * real DOM, so drive them with `browser.click` (open, then click option).
+ */
+export async function selectOption(
+  wc: WebContents,
+  p: CdpSelectOptionParams,
+): Promise<{ selected: string; label: string }> {
+  if (p.value === undefined && p.label === undefined) {
+    throw new Error("selectOption requires `value` or `label`");
+  }
+  return withDebugger(wc, async () => {
+    const expr = `(() => {
+      const el = document.querySelector(${JSON.stringify(p.selector)});
+      if (!el) throw new Error('selector not found: ' + ${JSON.stringify(p.selector)});
+      if (el.tagName !== 'SELECT') throw new Error('selectOption target is not a <select>: ' + ${JSON.stringify(p.selector)});
+      const opts = Array.from(el.options);
+      const wantValue = ${JSON.stringify(p.value ?? null)};
+      const wantLabel = ${JSON.stringify(p.label ?? null)};
+      let opt = null;
+      if (wantValue !== null) opt = opts.find(o => o.value === wantValue) || null;
+      if (!opt && wantLabel !== null) opt = opts.find(o => (o.textContent || '').trim() === wantLabel) || null;
+      if (!opt && wantValue !== null) opt = opts.find(o => (o.textContent || '').trim() === wantValue) || null;
+      if (!opt) throw new Error('no <option> matching value=' + wantValue + ' label=' + wantLabel);
+      el.value = opt.value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { selected: opt.value, label: (opt.textContent || '').trim() };
+    })()`;
+    const res = (await wc.debugger.sendCommand("Runtime.evaluate", {
+      expression: expr,
+      returnByValue: true,
+    })) as {
+      result?: { value?: { selected: string; label: string } };
+      exceptionDetails?: { exception?: { description?: string }; text?: string };
+    };
+    if (res.exceptionDetails) {
+      throw new Error(
+        res.exceptionDetails.exception?.description ??
+          res.exceptionDetails.text ??
+          "selectOption failed",
+      );
+    }
+    return res.result?.value ?? { selected: "", label: "" };
   });
 }

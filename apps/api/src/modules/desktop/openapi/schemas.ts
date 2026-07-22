@@ -13,6 +13,7 @@ const methodProperty = {
     "browser.navigate",
     "browser.click",
     "browser.fill",
+    "browser.selectOption",
     "browser.evaluate",
     "browser.screenshot",
     "browser.waitForSelector",
@@ -27,6 +28,8 @@ const methodProperty = {
     "`browser.download_status` {download_id} reports " +
     "started/downloading/uploaded/failed with pct — both are answered by the platform, " +
     "the bytes travel desktop → storage over HTTPS, never over the control WebSocket. " +
+    "`browser.selectOption` {selector, value?|label?} sets a native <select> (custom " +
+    "div/listbox dropdowns are DOM — drive those with browser.click instead). " +
     "`browser.batch` {steps: [{method, params}, …]} runs up to 40 desktop-executable steps " +
     "in one round-trip with per-step credential substitution, stopping at the first failure.",
 } as const;

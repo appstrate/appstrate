@@ -30,8 +30,9 @@ export const desktopBrowserTool = defineTool({
     "running on the user's machine, with their own cookies and logged-in sessions. " +
     "Methods and their `params`: " +
     "`browser.navigate` {url, timeoutMs?} — load a URL and wait for the page load event (returns {loaded:false} instead of hanging when a long-polling page never fires it); " +
-    "`browser.click` {selector} — click the first match; " +
-    "`browser.fill` {selector, value} — set an input's value (React/Vue-aware); " +
+    "`browser.click` {selector} — native trusted click on the first match; " +
+    "`browser.fill` {selector, value} — native keystroke input into a field (focus + type, real trusted events); " +
+    "`browser.selectOption` {selector, value?|label?} — set a native <select> dropdown by option value or visible text (for custom div/listbox dropdowns, use browser.click to open then click the option); " +
     "`browser.evaluate` {script} — run JavaScript in the page (promises awaited); a thrown " +
     "exception comes back with its description and line number; " +
     "`browser.screenshot` {fullPage?, format?, quality?} — data URL capture, full scrollable page when fullPage; " +
@@ -67,6 +68,7 @@ export const desktopBrowserTool = defineTool({
           "browser.navigate",
           "browser.click",
           "browser.fill",
+          "browser.selectOption",
           "browser.evaluate",
           "browser.screenshot",
           "browser.waitForSelector",

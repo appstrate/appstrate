@@ -45,14 +45,9 @@ type Handler = (wc: WebContents, params: unknown, notify: Notify) => Promise<unk
 
 const handlers: Record<string, Handler> = {
   "browser.navigate": (wc, p) => cdp.navigate(wc, p as cdp.CdpNavigateParams),
-  "browser.click": async (wc, p) => {
-    await api.click(wc, p as api.ClickParams);
-    return null;
-  },
-  "browser.fill": async (wc, p) => {
-    await api.fill(wc, p as api.FillParams);
-    return null;
-  },
+  "browser.click": (wc, p) => cdp.click(wc, p as cdp.CdpClickParams),
+  "browser.fill": (wc, p) => cdp.fill(wc, p as cdp.CdpFillParams),
+  "browser.selectOption": (wc, p) => cdp.selectOption(wc, p as cdp.CdpSelectOptionParams),
   "browser.evaluate": (wc, p) => cdp.evaluate(wc, p as cdp.CdpEvaluateParams),
   "browser.screenshot": (wc, p) => cdp.screenshot(wc, (p ?? {}) as cdp.CdpScreenshotParams),
   "browser.waitForSelector": async (wc, p) => {
