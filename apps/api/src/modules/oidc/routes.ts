@@ -106,6 +106,7 @@ import {
   renderActivateResultPage,
 } from "./pages/activate.ts";
 import { SOCIAL_SIGN_IN_SCRIPT } from "./pages/social-sign-in-script.ts";
+import { LOGIN_EXPIRY_SCRIPT } from "./pages/login-expiry-script.ts";
 import { getAuth } from "@appstrate/db/auth";
 import { oauthClient, deviceCode } from "@appstrate/db/schema";
 
@@ -780,6 +781,20 @@ export function createOidcRouter() {
     });
   });
 
+  // Client-side expiry-detection helper for the login page. Same static-asset
+  // treatment as social-sign-in.js — external (CSP `script-src 'self'`), zero
+  // user-controlled values, long-cacheable. Source: `pages/login-expiry-script.ts`.
+  router.get("/api/oauth/assets/login-expiry.js", rateLimitByIp(120), () => {
+    return new Response(LOGIN_EXPIRY_SCRIPT, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=3600, must-revalidate",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  });
+
   // ── Public polymorphic login/consent pages ─────────────────────────────────
 
   router.get("/api/oauth/login", rateLimitByIp(60), async (c) => {
@@ -851,6 +866,16 @@ export function createOidcRouter() {
         : undefined;
     // OIDC `login_hint` pins the email (invitation flow) — pre-fill + lock it.
     const loginHint = url.searchParams.get("login_hint")?.toLowerCase().trim() || undefined;
+    // Client-side expiry detection (UX polish, no security value — the server
+    // check above is authoritative). We only reach here when the link is NOT
+    // expired (the expiry branch returned earlier), but still guard
+    // `Number.isFinite` before arming the script. The refresh URL replays the
+    // raw `url.search` through authorize — byte-identical to the server-side
+    // restart redirect (authorize whitelists params, so keeping the raw query
+    // including any `error` is fine and simplest).
+    const expParam = url.searchParams.get("exp");
+    const expUnix = expParam !== null ? Number(expParam) : undefined;
+    const expiryArmed = expUnix !== undefined && Number.isFinite(expUnix);
     // Email prefill precedence: `login_hint` wins and locks the field; else
     // the email the expired link carried (via the notice) pre-fills it but is
     // NOT locked — the user may correct it.
@@ -864,6 +889,7 @@ export function createOidcRouter() {
       error: errorMessage,
       email: loginHint ?? notice?.email,
       lockEmail: !!loginHint,
+      ...(expiryArmed ? { expUnix, refreshUrl: `/api/auth/oauth2/authorize${url.search}` } : {}),
     });
     return c.html(body.value);
   });

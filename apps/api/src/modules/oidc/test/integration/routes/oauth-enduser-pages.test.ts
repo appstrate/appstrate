@@ -488,6 +488,49 @@ describe("Public end-user pages — /api/oauth/*", () => {
       const html = await res.text();
       expect(html).toContain('method="POST"');
     });
+
+    // ── Client-side expiry detection (UX polish, Phase 3) ──────────────────
+    // A valid (future) `exp` arms the external expiry-detection script: the
+    // form carries the signed `exp` + a restart URL through authorize, a
+    // hidden warning banner is rendered, and the script tag is emitted. All
+    // UX only — the server-side expiry restart above stays authoritative.
+
+    it("GET /login with a future exp arms the client-side expiry script", async () => {
+      const { clientId } = await registerClient(ctx);
+      const futureExp = Math.floor(Date.now() / 1000) + 600; // 10 minutes from now
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=fresh&exp=${futureExp}&sig=test`;
+      const res = await app.request(`/api/oauth/login${qs}`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      // The form carries the signed exp for the client script to read.
+      expect(html).toContain(`data-login-exp="${futureExp}"`);
+      // The refresh URL replays through authorize (same restart target as the
+      // server-side bounce).
+      expect(html).toMatch(/data-refresh-url="\/api\/auth\/oauth2\/authorize/);
+      // The (hidden) warning banner exists for the dirty-form path to un-hide.
+      expect(html).toContain("data-expiry-warning");
+      // The external script tag is emitted (CSP-safe, not inline).
+      expect(html).toContain('<script src="/api/oauth/assets/login-expiry.js"');
+    });
+
+    it("GET /login without an exp does NOT arm the client-side expiry script", async () => {
+      const { clientId } = await registerClient(ctx);
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=fresh`;
+      const res = await app.request(`/api/oauth/login${qs}`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).not.toContain("data-login-exp");
+      expect(html).not.toContain("/api/oauth/assets/login-expiry.js");
+    });
+
+    it("GET /api/oauth/assets/login-expiry.js serves the expiry script as JS", async () => {
+      const res = await app.request("/api/oauth/assets/login-expiry.js");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("application/javascript");
+      const body = await res.text();
+      // Sanity: it is the expiry script (reads the form's data attribute).
+      expect(body).toContain("data-login-exp");
+    });
   });
 
   describe("OAuth login session TTL", () => {

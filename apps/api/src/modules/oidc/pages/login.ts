@@ -14,6 +14,7 @@
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import { renderSocialButtons, renderSocialSignInScript } from "./social-sign-in-script.ts";
+import { renderExpiryWarning, renderLoginExpiryScript } from "./login-expiry-script.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
 export interface LoginPageProps {
@@ -49,6 +50,20 @@ export interface LoginPageProps {
    * session email server-side.
    */
   lockEmail?: boolean;
+  /**
+   * Unix seconds `exp` this login link was signed with (Better Auth). When
+   * paired with `refreshUrl`, arms the client-side expiry-detection script
+   * (`login-expiry-script.ts`) which silently refreshes a stale-while-idle
+   * link (or, if the user has typed, shows a non-blocking warning). UX only
+   * — the server expiry check stays authoritative.
+   */
+  expUnix?: number;
+  /**
+   * Restart URL the expiry script navigates to (pristine form) or links to
+   * (dirty form) — the same `/api/auth/oauth2/authorize` + query replay the
+   * server uses to re-mint a fresh link. Required alongside `expUnix`.
+   */
+  refreshUrl?: string;
 }
 
 export function renderLoginPage(props: LoginPageProps): RawHtml {
@@ -74,11 +89,25 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
   const magicLinkUrl = `/api/oauth/magic-link${props.queryString}`;
   const forgotPasswordUrl = `/api/oauth/forgot-password${props.queryString}`;
 
+  // Client-side expiry detection (UX only) is armed when the caller passes
+  // both the signed `exp` and the restart URL. The `<form>` carries them as
+  // data attributes the external script reads; the hidden banner + script
+  // tag are emitted only in that case. See `login-expiry-script.ts`.
+  const expiryEnabled =
+    props.expUnix !== undefined && Number.isFinite(props.expUnix) && !!props.refreshUrl;
+  const refreshUrl = props.refreshUrl ?? "";
+
   const bodyHtml = html`
     <h1>Connexion</h1>
     <p>Connectez-vous pour continuer.</p>
     ${props.error ? html`<div class="error">${props.error}</div>` : null}
-    <form method="POST" action="${action}" autocomplete="on">
+    ${expiryEnabled ? renderExpiryWarning(refreshUrl) : null}
+    <form
+      method="POST"
+      action="${action}"
+      autocomplete="on"
+      ${expiryEnabled ? html`data-login-exp="${String(props.expUnix)}" data-refresh-url="${refreshUrl}"` : null}
+    >
       <input type="hidden" name="_csrf" value="${props.csrfToken}" />
       <input
         type="email"
@@ -113,6 +142,7 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
       }
     </div>
     ${google || github ? renderSocialSignInScript() : null}
+    ${expiryEnabled ? renderLoginExpiryScript() : null}
   `;
   return renderLayout({ branding: props.branding, title, maxWidth: 400, bodyHtml });
 }
