@@ -56,6 +56,10 @@ import {
   clearPendingClientCookie,
   headersWithAuthoritativePendingClient,
 } from "./services/pending-client-cookie.ts";
+import {
+  issueLoginNoticeCookie,
+  readAndClearLoginNoticeCookie,
+} from "./services/login-notice-cookie.ts";
 import { isValidRedirectUri } from "./services/redirect-uri.ts";
 import { resolveBrandingForClient, PLATFORM_DEFAULT_BRANDING } from "./services/branding.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
@@ -788,20 +792,45 @@ export function createOidcRouter() {
     });
     if (page instanceof Response) return page;
     const { url, ctx } = page;
-    // Better Auth signs the redirect with `exp` (Unix seconds). Reject
-    // expired login URLs so stale links cannot create upstream sessions.
+    // Read the one-shot login-notice cookie ONCE for the whole request path.
+    // `readAndClear` has one-shot semantics (it clears on every call), so we
+    // must not call it twice — the loop-guard branch below and the normal
+    // render both consume this single local. A present notice here means the
+    // prior request bounced through `authorize` to mint a fresh link.
+    const notice = readAndClearLoginNoticeCookie(c);
+    // Better Auth signs the redirect with `exp` (Unix seconds). When the login
+    // URL has expired we don't dead-end the user on a useless form — we set a
+    // notice cookie and bounce back through `/api/auth/oauth2/authorize` with
+    // the SAME query string. BA's authorize GET whitelists only OAuth params
+    // (its Zod schema drops the stale `exp`/`sig`/`ba_iat`) and re-redirects to
+    // the login page with a FRESH signed link. This mirrors Keycloak's
+    // auth-session restart. Security is unchanged: the bounce re-runs full
+    // authorize validation and the original `state`/`code_challenge` ride
+    // along byte-identical (required — the SPA's PKCE verifier in
+    // sessionStorage must keep matching).
     if (isLoginLinkExpired(url.searchParams.get("exp"))) {
-      const body = renderLoginPage({
-        queryString: url.search,
-        branding: ctx.branding,
-        csrfToken: "",
-        socialProviders: ctx.socialProviders,
-        smtpEnabled: ctx.features.smtp,
-        allowSignup: allowSignupForClient(ctx.client),
-        error:
-          "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
-      });
-      return c.html(body.value, 400);
+      // Loop guard: a notice cookie still present here means we already
+      // restarted once and the fresh link came back expired — pathological
+      // (the same host mints `exp = now + 600`), so fail visibly instead of
+      // redirect-looping. The `readAndClear` above already evicted the cookie
+      // so a later legitimate visit starts clean.
+      if (notice) {
+        return c.html(
+          renderErrorPage({
+            title: "Connexion impossible",
+            message:
+              "La page de connexion n'a pas pu être rafraîchie. Veuillez relancer la connexion depuis l'application.",
+            branding: ctx.branding,
+          }).value,
+          400,
+        );
+      }
+      issueLoginNoticeCookie(c, { code: "login_link_expired" });
+      // Same resume shape as the post-login redirect below: replay the query
+      // byte-identical (see the byte-for-byte comment above `stripError…`) —
+      // do NOT round-trip through `URLSearchParams`. BA strips the stale
+      // `exp`/`sig` and mints a fresh link.
+      return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
     }
     // Pin the pending client_id in a signed cookie so the BA `beforeSignup`
     // hook can enforce the signup policy on social / magic-link flows that
@@ -812,9 +841,19 @@ export function createOidcRouter() {
     // `signup_disabled` for a closed org-level client. Surface a friendly
     // banner instead of silently rendering a blank login page.
     const errorCode = url.searchParams.get("error");
-    const errorMessage = errorCode ? mapLoginErrorCode(errorCode) : undefined;
+    // Banner precedence: an explicit `?error=` code (social-callback failure)
+    // always wins; otherwise, if we arrived here via an expiry restart, show
+    // the notice banner. `notice` was read once at the top of the handler.
+    const errorMessage = errorCode
+      ? mapLoginErrorCode(errorCode)
+      : notice
+        ? "Ce lien de connexion avait expiré. Veuillez vous reconnecter pour continuer."
+        : undefined;
     // OIDC `login_hint` pins the email (invitation flow) — pre-fill + lock it.
     const loginHint = url.searchParams.get("login_hint")?.toLowerCase().trim() || undefined;
+    // Email prefill precedence: `login_hint` wins and locks the field; else
+    // the email the expired link carried (via the notice) pre-fills it but is
+    // NOT locked — the user may correct it.
     const body = renderLoginPage({
       queryString: stripErrorFromQueryString(url.search),
       branding: ctx.branding,
@@ -823,7 +862,7 @@ export function createOidcRouter() {
       smtpEnabled: ctx.features.smtp,
       allowSignup: allowSignupForClient(ctx.client),
       error: errorMessage,
-      email: loginHint,
+      email: loginHint ?? notice?.email,
       lockEmail: !!loginHint,
     });
     return c.html(body.value);
@@ -840,25 +879,27 @@ export function createOidcRouter() {
     if (page instanceof Response) return page;
     const { url, ctx } = page;
     const allowSignup = allowSignupForClient(ctx.client);
-    // Reject form submissions for expired login URLs — prevents creating a
-    // Better Auth session from a stale link. Render the login page with an
-    // inline error (same as the GET handler) instead of returning JSON —
-    // the browser submitted a form, not an API call.
+    // Parse the body up-front (before the expiry check) so we can capture the
+    // typed email for prefill on the restart bounce. Nothing between the old
+    // positions depended on ordering — the expiry block was the first thing in
+    // the handler — so hoisting `parseBody` here is safe.
+    const form = await c.req.parseBody();
+    // On an expired login URL, mirror the GET handler: set a notice cookie and
+    // bounce back through `/api/auth/oauth2/authorize` with the SAME query
+    // string so BA mints a fresh link, instead of dead-ending on a useless
+    // form. Carry the typed email forward for prefill. No loop guard on POST:
+    // the restart always lands on the GET handler, which owns the guard. The
+    // 302 answers a POST but browsers follow it with GET — correct, the target
+    // is a navigation.
     if (isLoginLinkExpired(url.searchParams.get("exp"))) {
-      const body = renderLoginPage({
-        queryString: url.search,
-        branding: ctx.branding,
-        csrfToken: "",
-        socialProviders: ctx.socialProviders,
-        smtpEnabled: ctx.features.smtp,
-        allowSignup,
-        error:
-          "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
+      const email = readFormString(form, "email")?.toLowerCase().trim();
+      issueLoginNoticeCookie(c, {
+        code: "login_link_expired",
+        ...(email ? { email } : {}),
       });
-      return c.html(body.value, 400);
+      return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
     }
 
-    const form = await c.req.parseBody();
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       const page = renderLoginPage({
         queryString: url.search,

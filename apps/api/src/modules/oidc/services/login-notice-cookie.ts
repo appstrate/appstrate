@@ -70,17 +70,20 @@ export function issueLoginNoticeCookie(c: Context<AppEnv>, notice: LoginNotice):
 }
 
 /**
- * Read + verify the notice cookie, then DELETE it — one-shot semantics. The
- * cookie is cleared on every call regardless of validity: a garbage or
- * tampered value must not linger and re-trigger the banner on the next render.
- * Returns the decoded notice on success, `null` on any failure (missing,
- * expired, bad sig, malformed payload).
+ * Read + verify the notice cookie, then DELETE it — one-shot semantics. Any
+ * PRESENT cookie is cleared regardless of validity: a garbage or tampered
+ * value must not linger and re-trigger the banner on the next render. When no
+ * cookie is present, no clearing header is emitted — this keeps the common
+ * login render free of `Set-Cookie` noise and, on the restart bounce, avoids
+ * stacking a delete + set of the same cookie in one response. Returns the
+ * decoded notice on success, `null` on any failure (missing, expired, bad
+ * sig, malformed payload).
  */
 export function readAndClearLoginNoticeCookie(c: Context<AppEnv>): LoginNotice | null {
   const raw = getCookie(c, COOKIE_NAME);
-  // Clear first, unconditionally — even an invalid cookie should be evicted.
+  if (raw === undefined) return null;
   deleteCookie(c, COOKIE_NAME, { path: COOKIE_PATH });
-  return raw ? parseAndVerify(raw) : null;
+  return parseAndVerify(raw);
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────────

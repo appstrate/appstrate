@@ -24,6 +24,7 @@ import {
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { prefixedId } from "../../../../../lib/ids.ts";
+import { buildSignedLoginNoticeValue } from "../../../services/login-notice-cookie.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -321,23 +322,155 @@ describe("Public end-user pages — /api/oauth/*", () => {
     expect(out).toContain("Email ou mot de passe incorrect");
   });
 
-  // ── Stale login URL protections ────────────────────────────────────────
-  // When a user clicks a stale/bookmarked OAuth login link, the login
-  // endpoint must not create a persistent BA session that would let any
-  // downstream OIDC client silently auto-grant on the next visit.
+  // ── Stale login URL "restart-in-place" flow ─────────────────────────────
+  // When a user clicks a stale/bookmarked OAuth login link we no longer
+  // dead-end them on a useless 400 form. Instead we set a one-shot notice
+  // cookie and 302 back through `/api/auth/oauth2/authorize` with the SAME
+  // query string; Better Auth strips the stale `exp`/`sig` and re-mints a
+  // fresh signed link. The fresh login page reads + clears the cookie to
+  // show an "expired, sign in again" banner (and prefill the email the
+  // expired link carried). A notice cookie already present on an expired GET
+  // is the anti-loop marker → fail visibly instead of redirect-looping.
+  // Crucially the stale link never creates a BA session.
 
-  describe("expired login URL protection (exp param)", () => {
-    it("GET /login with an expired exp param returns 400 with error message", async () => {
+  describe("expired login URL restart-in-place (exp param)", () => {
+    // A full authorize-shaped query string — what a real BA login link
+    // carries (every OAuth param) so it can be replayed to authorize
+    // verbatim. `code_challenge` is the RFC 7636 §4.2 example value (a valid
+    // 43-char S256 challenge) so authorize accepts the PKCE request. Built by
+    // hand (not URLSearchParams) so the byte-identical assertions below hold —
+    // spaces stay `%20`, never `+`.
+    function buildLoginQs(clientId: string, exp: number): string {
+      return (
+        `?response_type=code` +
+        `&client_id=${encodeURIComponent(clientId)}` +
+        `&redirect_uri=${encodeURIComponent("https://acme.example.com/oauth/callback")}` +
+        `&scope=openid` +
+        `&state=stale` +
+        `&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM` +
+        `&code_challenge_method=S256` +
+        `&exp=${exp}` +
+        `&sig=fakesig`
+      );
+    }
+
+    // Read individual Set-Cookie headers (never split on `,` — cookies carry
+    // RFC-1123 `Expires` dates that contain commas).
+    function readSetCookies(res: Response): string[] {
+      const getSetCookie = (res.headers as unknown as { getSetCookie?: () => string[] })
+        .getSetCookie;
+      return typeof getSetCookie === "function" ? getSetCookie.call(res.headers) : [];
+    }
+
+    function findNoticeCookie(res: Response): string | undefined {
+      return readSetCookies(res).find((c) => c.startsWith("oidc_login_notice="));
+    }
+
+    it("GET /login with an expired exp bounces to authorize (byte-identical query) + sets a notice cookie", async () => {
       const { clientId } = await registerClient(ctx);
       const pastExp = Math.floor(Date.now() / 1000) - 60; // 1 minute ago
-      const qs = `?client_id=${encodeURIComponent(clientId)}&state=stale&exp=${pastExp}&sig=fakesig`;
-      const res = await app.request(`/api/oauth/login${qs}`);
-      expect(res.status).toBe(400);
-      const html = await res.text();
-      expect(html).toContain("expiré");
+      const qs = buildLoginQs(clientId, pastExp);
+      const res = await app.request(`/api/oauth/login${qs}`, { redirect: "manual" });
+      expect(res.status).toBe(302);
+      // Byte-identical replay — the query string is forwarded untouched so the
+      // SPA's PKCE `state`/`code_challenge` keep matching.
+      expect(res.headers.get("location")).toBe(`/api/auth/oauth2/authorize${qs}`);
+      // One-shot notice cookie set for the fresh login page to read.
+      expect(findNoticeCookie(res)).toBeDefined();
+      // The stale link never authenticated the user.
+      expect(res.headers.get("set-cookie") ?? "").not.toContain("better-auth.session_token");
     });
 
-    it("GET /login without exp param still renders normally (BA handles its own signing)", async () => {
+    it("the authorize bounce re-mints a FRESH login link whose page shows the banner + clears the cookie", async () => {
+      const { clientId } = await registerClient(ctx);
+      const pastExp = Math.floor(Date.now() / 1000) - 60;
+      const qs = buildLoginQs(clientId, pastExp);
+
+      // Step 1 — expired GET → 302 to authorize + notice cookie.
+      const bounceRes = await app.request(`/api/oauth/login${qs}`, { redirect: "manual" });
+      expect(bounceRes.status).toBe(302);
+      const authorizeLocation = bounceRes.headers.get("location")!;
+      const noticeCookie = findNoticeCookie(bounceRes)!.split(";")[0]!;
+
+      // Step 2 — follow the bounce to BA authorize with NO session. BA drops
+      // the stale exp/sig and 302s back to /api/oauth/login with a FRESH link.
+      const authorizeRes = await app.request(authorizeLocation, {
+        headers: { accept: "text/html" },
+        redirect: "manual",
+      });
+      expect(authorizeRes.status).toBe(302);
+      const freshLogin = new URL(authorizeRes.headers.get("location")!, "http://localhost");
+      expect(freshLogin.pathname).toBe("/api/oauth/login");
+      const freshExp = Number(freshLogin.searchParams.get("exp"));
+      expect(Number.isFinite(freshExp)).toBe(true);
+      expect(freshExp).toBeGreaterThan(Math.floor(Date.now() / 1000));
+
+      // Step 3 — GET the fresh login page WITH the notice cookie → 200 normal
+      // render carrying the expiry banner, a live CSRF token, and a Set-Cookie
+      // that clears the one-shot notice.
+      const freshRes = await app.request(freshLogin.pathname + freshLogin.search, {
+        headers: { cookie: noticeCookie },
+      });
+      expect(freshRes.status).toBe(200);
+      const html = await freshRes.text();
+      expect(html).toContain("avait expiré");
+      const csrf = html.match(/name="_csrf" value="([^"]+)"/);
+      expect(csrf).not.toBeNull();
+      expect(csrf![1]!.length).toBeGreaterThan(0);
+      const cleared = readSetCookies(freshRes).find((c) => c.startsWith("oidc_login_notice="));
+      expect(cleared).toBeDefined();
+      expect(cleared!.toLowerCase()).toContain("max-age=0");
+    });
+
+    it("POST /login with an expired exp bounces to authorize with the typed email captured for prefill", async () => {
+      const { clientId } = await registerClient(ctx);
+      const pastExp = Math.floor(Date.now() / 1000) - 60;
+      const qs = buildLoginQs(clientId, pastExp);
+
+      // The expiry check now runs BEFORE the CSRF check — a stale form
+      // submission (even with a garbage `_csrf`) restarts rather than 403s.
+      const postRes = await app.request(`/api/oauth/login${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "email=someone@example.com&password=x&_csrf=whatever",
+        redirect: "manual",
+      });
+      expect(postRes.status).toBe(302);
+      expect(postRes.headers.get("location")).toBe(`/api/auth/oauth2/authorize${qs}`);
+      // No BA session created from the stale link.
+      expect(postRes.headers.get("set-cookie") ?? "").not.toContain("better-auth.session_token");
+      const noticeCookie = findNoticeCookie(postRes)!.split(";")[0]!;
+
+      // A subsequent (fresh) login page prefills the typed email + banner. The
+      // email came from the notice, NOT `login_hint`, so it stays editable.
+      const freshRes = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+        { headers: { cookie: noticeCookie } },
+      );
+      expect(freshRes.status).toBe(200);
+      const html = await freshRes.text();
+      expect(html).toContain("avait expiré");
+      expect(html).toContain('value="someone@example.com"');
+      expect(html).not.toContain("readonly");
+    });
+
+    it("GET /login with an expired exp AND an existing notice cookie fails visibly (loop guard, no redirect)", async () => {
+      const { clientId } = await registerClient(ctx);
+      const pastExp = Math.floor(Date.now() / 1000) - 60;
+      const qs = buildLoginQs(clientId, pastExp);
+      // A valid, non-expired notice cookie already present → we already
+      // bounced once; refuse to redirect-loop and render the terminal page.
+      const notice = buildSignedLoginNoticeValue({ code: "login_link_expired" });
+      const res = await app.request(`/api/oauth/login${qs}`, {
+        headers: { cookie: `oidc_login_notice=${notice}` },
+        redirect: "manual",
+      });
+      expect(res.status).toBe(400);
+      const html = await res.text();
+      expect(html).toContain("Connexion impossible");
+    });
+
+    it("GET /login without an exp param still renders normally (BA handles its own signing)", async () => {
       const { clientId } = await registerClient(ctx);
       const qs = `?client_id=${encodeURIComponent(clientId)}&state=fresh`;
       const res = await app.request(`/api/oauth/login${qs}`);
@@ -354,21 +487,6 @@ describe("Public end-user pages — /api/oauth/*", () => {
       expect(res.status).toBe(200);
       const html = await res.text();
       expect(html).toContain('method="POST"');
-    });
-
-    it("POST /login with an expired exp param rejects before authenticating", async () => {
-      const { clientId } = await registerClient(ctx);
-      const pastExp = Math.floor(Date.now() / 1000) - 60;
-      const qs = `?client_id=${encodeURIComponent(clientId)}&state=stale&exp=${pastExp}&sig=fake`;
-      const res = await app.request(`/api/oauth/login${qs}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "email=a@b.com&password=hunter2",
-      });
-      expect(res.status).toBe(400);
-      // No Set-Cookie with a session token — the user was never authenticated.
-      const cookies = res.headers.get("set-cookie") ?? "";
-      expect(cookies).not.toContain("better-auth.session_token");
     });
   });
 
