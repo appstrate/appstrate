@@ -60,6 +60,7 @@ import {
   type ReadResourceResult,
   type Resource,
   DESKTOP_DOWNLOAD_TOOL_META_KEY,
+  DESKTOP_BATCH_TOOL_META_KEY,
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { handleLocalDownloadMethod } from "./desktop-downloads.ts";
@@ -1373,8 +1374,77 @@ function buildSidecarTools(options: MountMcpOptions): {
     }),
   };
 
+  // `desktop_batch` — advertised here, executed agent-side
+  // (`runtime-pi/mcp/browser-batch-extension.ts`): the frozen step list
+  // lives in a workspace FILE (typically inside a mounted skill), which
+  // this sidecar cannot read. Same advertise-only pattern as
+  // `desktop_download` / `api_upload`.
+  const desktopBatch: AppstrateToolDefinition = {
+    descriptor: {
+      name: "desktop_batch",
+      description:
+        "Run a FROZEN sequence of desktop_browser steps from a workspace file in ONE round-trip " +
+        "— the deterministic way to drive a known site. `steps_file` is a workspace-relative " +
+        "path (e.g. `.pi/skills/<skill>/batches/login.json`) whose JSON holds " +
+        '`{"steps": [{"method": "browser.…", "params": {…}}, …]}`. `variables` fills `{name}` ' +
+        "placeholders inside step params BEFORE dispatch. Set `integration_id` + " +
+        "`substitute_params` to resolve `{{field}}` credential placeholders server-side, per " +
+        "step — the values never enter your context and replies are scrubbed. Returns " +
+        "`{completed, results[], error?}` (stops at the first failing step, with its index " +
+        "and the detailed exception). Download steps return their `download_id`s — pass them " +
+        "to `desktop_download`. Prefer this over step-by-step calls whenever a skill ships " +
+        "the sequence; compose steps inline with `desktop_browser` `browser.batch` only when " +
+        "ANALYZING a new site.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["steps_file"],
+        properties: {
+          steps_file: {
+            type: "string",
+            description: "Workspace-relative path to the JSON step list.",
+          },
+          variables: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description: "Values for `{name}` placeholders inside the file's step params.",
+          },
+          integration_id: {
+            type: "string",
+            description:
+              "Integration whose connected credentials fill `{{field}}` placeholders " +
+              "(must be declared by this agent).",
+          },
+          substitute_params: {
+            type: "boolean",
+            description: "Enable server-side `{{field}}` substitution, per step.",
+          },
+          timeout_ms: {
+            type: "integer",
+            minimum: 1000,
+            maximum: 120000,
+            description: "Budget for the WHOLE sequence on the desktop (default 30s, max 120s).",
+          },
+        },
+      },
+      _meta: { [DESKTOP_BATCH_TOOL_META_KEY]: {} },
+    },
+    // Advertise-only: execution needs the workspace file, agent-side.
+    handler: async () => ({
+      content: [
+        {
+          type: "text",
+          text:
+            "desktop_batch is executed agent-side (workspace access); a direct sidecar " +
+            "invocation cannot succeed.",
+        },
+      ],
+      isError: true,
+    }),
+  };
+
   return {
-    firstParty: [runHistory, recallMemory, desktopBrowser, desktopDownload],
+    firstParty: [runHistory, recallMemory, desktopBrowser, desktopDownload, desktopBatch],
     makeApiCallTool,
     makeApiUploadTool,
   };

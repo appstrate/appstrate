@@ -37,6 +37,7 @@ import {
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
   DESKTOP_DOWNLOAD_TOOL_META_KEY,
+  DESKTOP_BATCH_TOOL_META_KEY,
 } from "./tool-meta.ts";
 
 export const MAX_TOOL_DESCRIPTION_BYTES = 2048;
@@ -171,7 +172,8 @@ function sanitiseToolMeta(meta: Tool["_meta"]): Tool["_meta"] | undefined {
     if (
       key === API_CALL_TOOL_META_KEY ||
       key === API_UPLOAD_TOOL_META_KEY ||
-      key === DESKTOP_DOWNLOAD_TOOL_META_KEY
+      key === DESKTOP_DOWNLOAD_TOOL_META_KEY ||
+      key === DESKTOP_BATCH_TOOL_META_KEY
     )
       continue;
     out[key] = value;

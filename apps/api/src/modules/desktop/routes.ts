@@ -195,6 +195,23 @@ async function assertAgentDeclaresIntegration(
  * names are snake_case (`integration_id` is integration-domain wire,
  * not one of the universal camelCase carve-outs).
  */
+/**
+ * Step methods a batch may carry — the desktop-executable verbs.
+ * Excludes `browser.batch` (no nesting) and `browser.download_status`
+ * (answered platform-side; polling inside a fire-and-forget sequence
+ * would be meaningless).
+ */
+const BATCHABLE_METHODS = new Set([
+  "browser.navigate",
+  "browser.click",
+  "browser.fill",
+  "browser.evaluate",
+  "browser.screenshot",
+  "browser.waitForSelector",
+  "browser.download",
+]);
+const BATCH_MAX_STEPS = 40;
+
 export const desktopCommandSchema = z.object({
   method: z.enum([
     "browser.navigate",
@@ -205,6 +222,7 @@ export const desktopCommandSchema = z.object({
     "browser.waitForSelector",
     "browser.download",
     "browser.download_status",
+    "browser.batch",
   ]),
   params: z.record(z.string(), z.unknown()).optional(),
   timeout_ms: z.number().int().min(1000).max(120000).optional(),
@@ -348,6 +366,99 @@ export function createDesktopRouter(): Hono<AppEnv> {
         fieldCount: Object.keys(fields).length,
         module: "desktop",
       });
+    }
+
+    // `browser.batch` — a frozen sequence executed desktop-side in one
+    // round-trip. The platform stays the trust boundary: it validates
+    // the step vocabulary, applies credential substitution PER STEP,
+    // mints upload targets for download steps, dispatches the whole
+    // list as ONE WS message, and scrubs the result array.
+    if (body.method === "browser.batch") {
+      const p = (body.params ?? {}) as { steps?: Array<{ method?: string; params?: unknown }> };
+      if (!Array.isArray(p.steps) || p.steps.length === 0) {
+        throw invalidRequest("`params.steps` must be a non-empty array", "params");
+      }
+      if (p.steps.length > BATCH_MAX_STEPS) {
+        throw invalidRequest(`Batch is capped at ${BATCH_MAX_STEPS} steps`, "params");
+      }
+      for (const [i, st] of p.steps.entries()) {
+        if (!st || typeof st.method !== "string" || !BATCHABLE_METHODS.has(st.method)) {
+          throw invalidRequest(`Step ${i}: method not batchable: ${String(st?.method)}`, "params");
+        }
+      }
+      let fields: Record<string, string> | null = null;
+      if (body.substitute_params) {
+        if (!body.integration_id) {
+          throw invalidRequest(
+            "`integration_id` is required when `substitute_params` is set",
+            "integration_id",
+          );
+        }
+        await assertAgentDeclaresIntegration(body.integration_id, run, runId);
+        const wire = await resolveLiveIntegrationCredentials(body.integration_id, {
+          runId,
+          orgId: run.orgId,
+          applicationId: run.applicationId,
+          agentPackageId: run.packageId,
+          actor: actorFromIds(run.userId, run.endUserId),
+          resolvedConnections: run.resolvedConnections,
+          resolvedIntegrationVersions: run.resolvedIntegrationVersions,
+        });
+        fields = {};
+        for (const auth of wire.auths) Object.assign(fields, auth.fields);
+        if (Object.keys(fields).length === 0) {
+          throw notFound(`No credentials available for integration '${body.integration_id}'`);
+        }
+        registerRunSecrets(runId, Object.values(fields));
+        logger.info("Desktop batch credential substitution", {
+          runId,
+          integrationId: body.integration_id,
+          steps: p.steps.length,
+          module: "desktop",
+        });
+      }
+      const prepared: Array<{ method: string; params: unknown }> = [];
+      for (const st of p.steps) {
+        let stepParams: unknown = st.params ?? {};
+        if (fields) stepParams = substituteInValue(stepParams, fields);
+        if (st.method === "browser.download") {
+          const dp = stepParams as {
+            url?: string;
+            capture?: boolean;
+            filename?: string;
+            max_bytes?: number;
+          };
+          if (dp.capture !== true && (!dp.url || !/^https?:\/\//.test(dp.url))) {
+            throw invalidRequest("download step needs `url` or `capture: true`", "params");
+          }
+          const { record, uploadUrl, maxBytes } = await createDownload({
+            runId,
+            userId: run.userId,
+            ...(typeof dp.filename === "string" ? { filename: dp.filename } : {}),
+            ...(typeof dp.max_bytes === "number" ? { maxBytes: dp.max_bytes } : {}),
+          });
+          stepParams = {
+            download_id: record.downloadId,
+            ...(dp.capture === true ? { capture: true } : { url: dp.url }),
+            filename: record.filename,
+            upload_url: uploadUrl,
+            max_bytes: maxBytes,
+          };
+        }
+        prepared.push({ method: st.method!, params: stepParams });
+      }
+      const scrubBatch = (text: string): string => scrubRunSecrets(runId, text) as string;
+      try {
+        const result = await sendCommand(
+          run.userId,
+          "browser.batch",
+          { steps: prepared },
+          { timeoutMs: body.timeout_ms },
+        );
+        return c.json({ result: scrubRunSecrets(runId, result) });
+      } catch (err) {
+        throw desktopErrorToApiError(err, scrubBatch);
+      }
     }
 
     // `browser.download` / `browser.download_status` are platform-mediated:

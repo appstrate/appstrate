@@ -171,7 +171,13 @@ describe("POST /mcp — tools/list", () => {
     expect(res.status).toBe(200);
     const result = res.json.result as { tools: Array<{ name: string }> };
     const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["desktop_browser", "desktop_download", "recall_memory", "run_history"]);
+    expect(names).toEqual([
+      "desktop_batch",
+      "desktop_browser",
+      "desktop_download",
+      "recall_memory",
+      "run_history",
+    ]);
   });
 
   it("declares input schemas matching the legacy contracts", async () => {
@@ -314,6 +320,7 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     expect(first.status).toBe(200);
     const firstResult = first.json.result as { tools: Array<{ name: string }> };
     expect(firstResult.tools.map((t) => t.name).sort()).toEqual([
+      "desktop_batch",
       "desktop_browser",
       "desktop_download",
       "recall_memory",
@@ -325,6 +332,7 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     expect(second.json.error).toBeUndefined();
     const secondResult = second.json.result as { tools: Array<{ name: string }> };
     expect(secondResult.tools.map((t) => t.name).sort()).toEqual([
+      "desktop_batch",
       "desktop_browser",
       "desktop_download",
       "recall_memory",

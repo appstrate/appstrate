@@ -40,6 +40,14 @@ export const API_UPLOAD_TOOL_META_KEY = "dev.appstrate/api-upload";
  */
 export const DESKTOP_DOWNLOAD_TOOL_META_KEY = "dev.appstrate/desktop-download";
 
+/**
+ * `_meta` key marking the `desktop_batch` tool — advertised by the
+ * sidecar but EXECUTED agent-side: the extension reads the frozen step
+ * list from a workspace file (typically inside a mounted skill), which
+ * the sidecar cannot see.
+ */
+export const DESKTOP_BATCH_TOOL_META_KEY = "dev.appstrate/desktop-batch";
+
 /** Payload of {@link API_CALL_TOOL_META_KEY} — the auth-scoped tool key. */
 export interface ApiCallToolMeta {
   tool_key: string;
@@ -93,4 +101,9 @@ export function readApiUploadSiblingKey(tool: ToolMetaCarrier): string | undefin
 /** True when the descriptor carries the desktop_download agent-side-execution marker. */
 export function isDesktopDownloadTool(tool: ToolMetaCarrier): boolean {
   return hasMarker(tool, DESKTOP_DOWNLOAD_TOOL_META_KEY);
+}
+
+/** True when the descriptor carries the desktop_batch agent-side-execution marker. */
+export function isDesktopBatchTool(tool: ToolMetaCarrier): boolean {
+  return hasMarker(tool, DESKTOP_BATCH_TOOL_META_KEY);
 }

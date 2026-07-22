@@ -60,7 +60,70 @@ const handlers: Record<string, Handler> = {
     return null;
   },
   "browser.download": (wc, p, notify) => startDownload(wc, p, notify),
+  "browser.batch": (wc, p, notify) => runBatch(wc, p, notify),
 };
+
+/**
+ * Sequential batch executor — the desktop half of `browser.batch`.
+ * Steps arrive ALREADY substituted (the platform resolves `{{field}}`
+ * per step before dispatch) and download steps arrive already minted
+ * (download_id + upload_url injected platform-side). Runs each step
+ * through the same handlers as single commands, stops at the first
+ * failure, and reports partial results with the failing step's index
+ * and error — the RPC itself succeeds; the batch outcome is data.
+ */
+interface BatchStep {
+  method: string;
+  params?: unknown;
+}
+
+async function runBatch(
+  wc: WebContents,
+  raw: unknown,
+  notify: Notify,
+): Promise<{
+  completed: number;
+  results: unknown[];
+  error?: { step: number; code: number; message: string };
+}> {
+  const steps = (raw as { steps?: BatchStep[] } | undefined)?.steps;
+  if (!Array.isArray(steps) || steps.length === 0) {
+    throw Object.assign(new Error("batch requires a non-empty `steps` array"), {
+      code: ERR_INVALID_PARAMS_CODE,
+    });
+  }
+  const results: unknown[] = [];
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]!;
+    const handler = step.method === "browser.batch" ? undefined : handlers[step.method];
+    if (!handler) {
+      return {
+        completed: i,
+        results,
+        error: {
+          step: i,
+          code: -32601,
+          message: `unknown or non-batchable method: ${step.method}`,
+        },
+      };
+    }
+    try {
+      results.push(await handler(wc, step.params, notify));
+    } catch (err) {
+      const code =
+        err instanceof Error && typeof (err as { code?: unknown }).code === "number"
+          ? (err as unknown as { code: number }).code
+          : -32000;
+      return {
+        completed: i,
+        results,
+        error: { step: i, code, message: err instanceof Error ? err.message : String(err) },
+      };
+    }
+  }
+  return { completed: steps.length, results };
+}
+const ERR_INVALID_PARAMS_CODE = -32602;
 
 async function dispatch(
   wc: WebContents,

@@ -29,6 +29,7 @@ import {
   isApiCallTool,
   isApiUploadTool,
   isDesktopDownloadTool,
+  isDesktopBatchTool,
   readApiCallToolKey,
   readApiUploadSiblingKey,
   type AppstrateMcpClient,
@@ -44,6 +45,7 @@ import {
 import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
 import { buildDesktopDownloadToolFactory } from "./desktop-download-extension.ts";
+import { buildBrowserBatchToolFactory } from "./browser-batch-extension.ts";
 import { resolveApiCallBody, ApiCallBodyResolveError } from "./api-call-body-resolver.ts";
 import { shapeApiCallResponse } from "./api-call-response-resolver.ts";
 
@@ -179,6 +181,18 @@ function buildIntegrationToolFactories(
     if (isDesktopDownloadTool(tool)) {
       factories.push(
         ...buildDesktopDownloadToolFactory({
+          tool,
+          mcp: opts.mcp,
+          workspace: opts.workspace,
+        }),
+      );
+      continue;
+    }
+    // `desktop_batch` — same advertise-only pattern: the frozen step
+    // list is a workspace file (skill mount) only the agent side can read.
+    if (isDesktopBatchTool(tool)) {
+      factories.push(
+        ...buildBrowserBatchToolFactory({
           tool,
           mcp: opts.mcp,
           workspace: opts.workspace,

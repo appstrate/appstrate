@@ -530,6 +530,85 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     expect(denied.status).toBe(404);
   });
 
+  // ─── browser.batch ─────────────────────────────────────
+
+  it("batch: substitutes per step, dispatches ONE frame, scrubs the result array", async () => {
+    await seedIntegration(INTEGRATION);
+    connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
+      const steps = (frame.params as { steps: Array<{ method: string; params: unknown }> }).steps;
+      // La substitution a eu lieu AVANT le fil : la vraie valeur arrive au desktop.
+      const fill = steps[1]!.params as { value: string };
+      expect(fill.value).toBe(SECRET);
+      // Le desktop renvoie un écho du secret : il doit être caviardé au retour.
+      return { completed: steps.length, results: [{ loaded: true }, { echoed: fill.value }] };
+    });
+
+    const res = await post({
+      method: "browser.batch",
+      params: {
+        steps: [
+          { method: "browser.navigate", params: { url: "https://somesite.example/login" } },
+          { method: "browser.fill", params: { selector: "#pw", value: "{{password}}" } },
+        ],
+      },
+      integration_id: INTEGRATION,
+      substitute_params: true,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result: { completed: number; results: Array<Record<string, unknown>> };
+    };
+    expect(body.result.completed).toBe(2);
+    expect(JSON.stringify(body.result)).not.toContain(SECRET);
+    expect(connected.sent).toHaveLength(1);
+  });
+
+  it("batch: a download step gets its upload target minted platform-side", async () => {
+    clearDownloads();
+    connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
+      const steps = (frame.params as { steps: Array<{ params: unknown }> }).steps;
+      const dl = steps[0]!.params as {
+        download_id?: string;
+        upload_url?: string;
+        capture?: boolean;
+      };
+      expect(dl.download_id).toMatch(/^dl_/);
+      expect(dl.upload_url).toContain("token=");
+      expect(dl.capture).toBe(true);
+      return { completed: 1, results: [{ download_id: dl.download_id, state: "started" }] };
+    });
+    const res = await post({
+      method: "browser.batch",
+      params: {
+        steps: [{ method: "browser.download", params: { capture: true, filename: "f.pdf" } }],
+      },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("batch: rejects nested batches and unknown step methods", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    for (const method of ["browser.batch", "browser.download_status", "explode"]) {
+      const res = await post({
+        method: "browser.batch",
+        params: { steps: [{ method, params: {} }] },
+      });
+      expect(res.status).toBe(400);
+    }
+    expect(connected.sent).toHaveLength(0);
+  });
+
+  it("batch: caps the step count", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    const steps = Array.from({ length: 41 }, () => ({
+      method: "browser.evaluate",
+      params: { script: "1" },
+    }));
+    const res = await post({ method: "browser.batch", params: { steps } });
+    expect(res.status).toBe(400);
+    expect(connected.sent).toHaveLength(0);
+  });
+
   it("400 when substitute_params is set without integration_id", async () => {
     connected = fakeDesktop(ctx.user.id, { ok: true });
     const res = await post({
