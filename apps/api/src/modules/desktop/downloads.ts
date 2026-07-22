@@ -33,7 +33,7 @@ const BUCKET = "desktop-downloads";
 const RETENTION_MS = 60 * 60 * 1000;
 const UPLOAD_EXPIRY_SECONDS = 15 * 60;
 /** Default per-download size ceiling — matches the upload sink's design cap. */
-export const DEFAULT_MAX_BYTES = 100 * 1024 * 1024;
+const DEFAULT_MAX_BYTES = 100 * 1024 * 1024;
 
 export type DownloadState = "started" | "downloading" | "uploaded" | "failed";
 

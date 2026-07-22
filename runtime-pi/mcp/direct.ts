@@ -181,7 +181,6 @@ function buildIntegrationToolFactories(
         ...buildDesktopDownloadToolFactory({
           tool,
           mcp: opts.mcp,
-          runId: opts.runId,
           workspace: opts.workspace,
         }),
       );

@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /** Bounded read slice — keeps base64 well under the MCP envelope cap. */
-export const DOWNLOAD_READ_MAX_BYTES = 1024 * 1024;
+const DOWNLOAD_READ_MAX_BYTES = 1024 * 1024;
 
 const TMP_DIR = join(tmpdir(), "appstrate-sidecar-dl");
 const ID_PATTERN = /^dl_[\w-]+$/;

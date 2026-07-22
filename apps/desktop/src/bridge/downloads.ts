@@ -30,7 +30,6 @@ import { ERR_DOWNLOAD_FAILED, ERR_INVALID_PARAMS } from "./protocol.ts";
 export interface DownloadParams {
   download_id: string;
   url: string;
-  filename?: string;
   /** Platform-minted PUT target (S3 presigned URL or FS upload-sink URL). */
   upload_url: string;
   /** Signed size ceiling — mirrored locally so an oversized file fails fast. */

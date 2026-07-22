@@ -32,7 +32,6 @@ export interface BuildDesktopDownloadFactoryOptions {
   /** The advertised `desktop_download` tool from the sidecar's `tools/list`. */
   tool: { name: string; description?: string; inputSchema?: unknown };
   mcp: AppstrateMcpClient;
-  runId: string;
   /** Workspace root the downloaded file is written under (`downloads/`). */
   workspace: string;
 }
@@ -155,7 +154,7 @@ export function buildDesktopDownloadToolFactory(
                     params: { download_id: downloadId, offset, length: READ_CHUNK_BYTES },
                   },
                   abort,
-                )) as { data?: string; length?: number; eof?: boolean };
+                )) as { data?: string; eof?: boolean };
                 const bytes = Buffer.from(slice?.data ?? "", "base64");
                 if (bytes.length > 0) {
                   hash.update(bytes);
