@@ -22,7 +22,8 @@
 import { z } from "zod";
 import type { AppstrateModule } from "@appstrate/core/module";
 import { createDesktopRouter, desktopCommandSchema, desktopAgentCommandSchema } from "./routes.ts";
-import { closeAllClients } from "./registry.ts";
+import { closeAllClients, setNotificationHandler } from "./registry.ts";
+import { handleDesktopNotification } from "./downloads.ts";
 import { desktopPaths } from "./openapi/paths.ts";
 import { desktopSchemas } from "./openapi/schemas.ts";
 
@@ -30,8 +31,10 @@ const desktopModule: AppstrateModule = {
   manifest: { id: "desktop", name: "Desktop Bridge", version: "1.0.0" },
 
   async init() {
-    // Nothing to warm: the client registry is lazy in-memory state and
-    // the module owns no tables.
+    // The module owns no tables; the only wiring is the notification
+    // intake — desktop-initiated JSON-RPC notifications (download
+    // lifecycle) flow from the WS registry into the downloads service.
+    setNotificationHandler(handleDesktopNotification);
   },
 
   createRouter() {
@@ -75,6 +78,7 @@ const desktopModule: AppstrateModule = {
   features: { desktop: true },
 
   async shutdown() {
+    setNotificationHandler(null);
     closeAllClients();
   },
 };

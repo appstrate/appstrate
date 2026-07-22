@@ -4348,6 +4348,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/desktop-download/{downloadId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream a completed desktop download's bytes to the run
+         * @description Container-to-host only, Bearer run token. Streams the bytes the user's desktop uploaded for a `browser.download` order belonging to this run. The sidecar calls this once per download and serves the agent-side `desktop_download` extension from its local copy. 404 for another run's download (run-scoped lookup).
+         */
+        get: operations["fetchDesktopDownload"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/integration-credentials/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -4946,10 +4966,10 @@ export interface components {
         /** @description Agent-path variant of DesktopCommandRequest: adds server-side credential substitution. With `integration_id` + `substitute_params`, `{{field}}` placeholders inside `params` strings are replaced by the run's connected credential fields for that integration before dispatch — the values never appear in the agent's context, and every reply for the run is scrubbed of them afterwards. */
         DesktopAgentCommandRequest: {
             /**
-             * @description Browser primitive to invoke.
+             * @description Browser primitive to invoke. `browser.download` {url, filename?, max_bytes?} orders a download through the page's own session and returns {download_id, state}; `browser.download_status` {download_id} reports started/downloading/uploaded/failed with pct — both are answered by the platform, the bytes travel desktop → storage over HTTPS, never over the control WebSocket.
              * @enum {string}
              */
-            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector";
+            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status";
             /** @description Method-specific arguments. Strings may contain `{{field}}` placeholders when substitution is enabled; unknown placeholders are left intact. */
             params?: Record<string, never>;
             /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */
@@ -4962,10 +4982,10 @@ export interface components {
         /** @description A browser primitive to execute on the user's local Appstrate Desktop client. */
         DesktopCommandRequest: {
             /**
-             * @description Browser primitive to invoke.
+             * @description Browser primitive to invoke. `browser.download` {url, filename?, max_bytes?} orders a download through the page's own session and returns {download_id, state}; `browser.download_status` {download_id} reports started/downloading/uploaded/failed with pct — both are answered by the platform, the bytes travel desktop → storage over HTTPS, never over the control WebSocket.
              * @enum {string}
              */
-            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector";
+            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status";
             /** @description Method-specific arguments (e.g. `{ url }`, `{ selector, value }`). */
             params?: Record<string, never>;
             /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */
@@ -19765,6 +19785,35 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    fetchDesktopDownload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The `download_id` returned by `browser.download`. */
+                downloadId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The raw bytes, streamed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     getIntegrationCredentials: {

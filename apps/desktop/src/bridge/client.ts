@@ -8,9 +8,10 @@
  * then services incoming JSON-RPC requests by dispatching to the
  * `browser-api` wrappers against the supplied `WebContents`.
  *
- * Protocol (subset of JSON-RPC 2.0, no batching):
- *   server → client:  { id: string, method: string, params: unknown }
- *   client → server:  { id: string, result: unknown } | { id: string, error: { message: string } }
+ * Protocol: JSON-RPC 2.0, no batching (see `protocol.ts`):
+ *   server → client:  { jsonrpc, id, method, params }
+ *   client → server:  { jsonrpc, id, result } | { jsonrpc, id, error: { code, message } }
+ *   client → server:  { jsonrpc, method, params }   (notifications: download events)
  *
  * Reconnect: exponential backoff up to 30 s, with a `getCookieHeader()`
  * callback derived fresh on every reconnect attempt. The owner (main.ts)
@@ -22,6 +23,16 @@
 import { WebSocket } from "ws";
 import type { WebContents } from "electron";
 import * as api from "./browser-api.ts";
+import { startDownload, type Notify } from "./downloads.ts";
+import {
+  ERR_EXECUTION,
+  ERR_METHOD_NOT_FOUND,
+  errorResponse,
+  notification,
+  successResponse,
+  type JsonRpcRequest,
+  type JsonRpcResponse,
+} from "./protocol.ts";
 
 const BRIDGE_PATH = "/api/desktop/bridge";
 
@@ -29,23 +40,7 @@ export interface BridgeClient {
   stop(): void;
 }
 
-interface JsonRpcRequest {
-  id: string;
-  method: string;
-  params?: unknown;
-}
-
-interface JsonRpcSuccess {
-  id: string;
-  result: unknown;
-}
-
-interface JsonRpcError {
-  id: string;
-  error: { message: string };
-}
-
-type Handler = (wc: WebContents, params: unknown) => Promise<unknown>;
+type Handler = (wc: WebContents, params: unknown, notify: Notify) => Promise<unknown> | unknown;
 
 const handlers: Record<string, Handler> = {
   "browser.navigate": (wc, p) => api.navigate(wc, p as api.NavigateParams),
@@ -63,22 +58,28 @@ const handlers: Record<string, Handler> = {
     await api.waitForSelector(wc, p as api.WaitForSelectorParams);
     return null;
   },
+  "browser.download": (wc, p, notify) => startDownload(wc, p, notify),
 };
 
 async function dispatch(
   wc: WebContents,
   req: JsonRpcRequest,
-): Promise<JsonRpcSuccess | JsonRpcError> {
+  notify: Notify,
+): Promise<JsonRpcResponse> {
   const handler = handlers[req.method];
   if (!handler) {
-    return { id: req.id, error: { message: `unknown method: ${req.method}` } };
+    return errorResponse(req.id, ERR_METHOD_NOT_FOUND, `unknown method: ${req.method}`);
   }
   try {
-    const result = await handler(wc, req.params);
-    return { id: req.id, result };
+    const result = await handler(wc, req.params, notify);
+    return successResponse(req.id, result);
   } catch (err) {
+    const code =
+      err instanceof Error && typeof (err as { code?: unknown }).code === "number"
+        ? (err as unknown as { code: number }).code
+        : ERR_EXECUTION;
     const message = err instanceof Error ? err.message : String(err);
-    return { id: req.id, error: { message } };
+    return errorResponse(req.id, code, message);
   }
 }
 
@@ -105,6 +106,18 @@ export function start(opts: {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   const url = `${opts.instance.replace(/^http/, "ws")}${BRIDGE_PATH}`;
+
+  // Desktop-initiated JSON-RPC notifications (download.progress /
+  // .completed / .failed). Best-effort: a notification raised while the
+  // socket is down is dropped — the platform's download record then ages
+  // out on its TTL, which the status surface reports as a timeout.
+  const notify: Notify = (method, params) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(notification(method, params)));
+    } else {
+      opts.onError?.(new Error(`notification ${method} dropped: bridge disconnected`));
+    }
+  };
 
   async function connect(): Promise<void> {
     if (stopped) return;
@@ -149,7 +162,7 @@ export function start(opts: {
         return; // malformed → ignore
       }
       if (!req.id || !req.method) return;
-      const response = await dispatch(opts.webContents, req);
+      const response = await dispatch(opts.webContents, req, notify);
       ws?.send(JSON.stringify(response));
     });
 

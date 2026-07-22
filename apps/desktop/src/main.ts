@@ -112,6 +112,7 @@ import {
   type Config,
 } from "./config.ts";
 import { start as startBridge, type BridgeClient } from "./bridge/client.ts";
+import { installDownloadInterceptor } from "./bridge/downloads.ts";
 
 const NAVBAR_HEIGHT = 44;
 
@@ -190,18 +191,7 @@ function createMainWindow(): BaseWindow {
   // POC scope: no allowlist by site, no concurrency cap, no overwrite
   // protection. A shipped app would gate this per-site and surface a
   // tray notification per completed download.
-  browserView.webContents.session.on("will-download", (_event, item) => {
-    let host = "unknown";
-    try {
-      host = new URL(item.getURL()).host;
-    } catch {
-      // best-effort
-    }
-    const baseDir = join(app.getPath("documents"), "AppstrateDesktop", host);
-    const safeName = item.getFilename().replace(/[/\\?%*:|"<>]/g, "_");
-    item.setSavePath(join(baseDir, safeName));
-    _debugLog(`[download] ${item.getURL()} → ${baseDir}/${safeName}\n`);
-  });
+  installDownloadInterceptor(browserView.webContents.session, _debugLog);
 
   // Webapp view — the Appstrate SPA, loaded into a full Chromium surface.
   // This is what the user actually sees and interacts with: org switcher,

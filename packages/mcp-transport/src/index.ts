@@ -332,8 +332,10 @@ export {
 export {
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
+  DESKTOP_DOWNLOAD_TOOL_META_KEY,
   isApiCallTool,
   isApiUploadTool,
+  isDesktopDownloadTool,
   readApiCallToolKey,
   readApiUploadSiblingKey,
   type ApiCallToolMeta,

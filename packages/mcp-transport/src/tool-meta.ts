@@ -32,6 +32,14 @@ export const API_CALL_TOOL_META_KEY = "dev.appstrate/api-call";
 /** `_meta` key marking the resumable `api_upload` tool. */
 export const API_UPLOAD_TOOL_META_KEY = "dev.appstrate/api-upload";
 
+/**
+ * `_meta` key marking the `desktop_download` tool — advertised by the
+ * sidecar (schema in one place) but EXECUTED agent-side: the extension
+ * pulls the downloaded bytes chunk-by-chunk through the sidecar and
+ * writes them into the workspace, which the sidecar cannot see.
+ */
+export const DESKTOP_DOWNLOAD_TOOL_META_KEY = "dev.appstrate/desktop-download";
+
 /** Payload of {@link API_CALL_TOOL_META_KEY} — the auth-scoped tool key. */
 export interface ApiCallToolMeta {
   tool_key: string;
@@ -80,4 +88,9 @@ export function readApiCallToolKey(tool: ToolMetaCarrier): string | undefined {
  */
 export function readApiUploadSiblingKey(tool: ToolMetaCarrier): string | undefined {
   return readMarkerField(tool, API_UPLOAD_TOOL_META_KEY, "api_call_tool_key");
+}
+
+/** True when the descriptor carries the desktop_download agent-side-execution marker. */
+export function isDesktopDownloadTool(tool: ToolMetaCarrier): boolean {
+  return hasMarker(tool, DESKTOP_DOWNLOAD_TOOL_META_KEY);
 }

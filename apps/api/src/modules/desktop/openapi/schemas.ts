@@ -16,8 +16,15 @@ const methodProperty = {
     "browser.evaluate",
     "browser.screenshot",
     "browser.waitForSelector",
+    "browser.download",
+    "browser.download_status",
   ],
-  description: "Browser primitive to invoke.",
+  description:
+    "Browser primitive to invoke. `browser.download` {url, filename?, max_bytes?} orders a " +
+    "download through the page's own session and returns {download_id, state}; " +
+    "`browser.download_status` {download_id} reports " +
+    "started/downloading/uploaded/failed with pct — both are answered by the platform, " +
+    "the bytes travel desktop → storage over HTTPS, never over the control WebSocket.",
 } as const;
 
 const timeoutMsProperty = {

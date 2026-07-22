@@ -28,6 +28,7 @@
 import {
   isApiCallTool,
   isApiUploadTool,
+  isDesktopDownloadTool,
   readApiCallToolKey,
   readApiUploadSiblingKey,
   type AppstrateMcpClient,
@@ -42,6 +43,7 @@ import {
 } from "@appstrate/runner-pi";
 import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
+import { buildDesktopDownloadToolFactory } from "./desktop-download-extension.ts";
 import { resolveApiCallBody, ApiCallBodyResolveError } from "./api-call-body-resolver.ts";
 import { shapeApiCallResponse } from "./api-call-response-resolver.ts";
 
@@ -170,6 +172,21 @@ function buildIntegrationToolFactories(
   }
   for (const tool of advertised) {
     if (claimed.has(tool.name)) continue;
+    // `desktop_download` is advertised by the sidecar but executed
+    // agent-side: the destination is the workspace, which the sidecar
+    // cannot see. Same advertise-only pattern as `api_upload` below;
+    // detected by the `dev.appstrate/desktop-download` `_meta` marker.
+    if (isDesktopDownloadTool(tool)) {
+      factories.push(
+        ...buildDesktopDownloadToolFactory({
+          tool,
+          mcp: opts.mcp,
+          runId: opts.runId,
+          workspace: opts.workspace,
+        }),
+      );
+      continue;
+    }
     // `api_upload` tools are advertised by the sidecar (so the gating +
     // schema live in one place) but executed agent-side: the resolver reads
     // the workspace file, chunks it, and dispatches each chunk back through

@@ -37,11 +37,14 @@ import { installPackage } from "../../../../services/application-packages.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { integrationConnections } from "@appstrate/db/schema";
 import desktopModule from "../../index.ts";
+import { uploadStream } from "@appstrate/db/storage";
+import { clearDownloads, DOWNLOADS_BUCKET, handleDesktopNotification } from "../../downloads.ts";
 import {
   registerClient,
   unregisterClient,
   isConnected,
-  handleClientReply,
+  handleClientFrame,
+  setNotificationHandler,
 } from "../../registry.ts";
 import { clearRunSecrets } from "../../secret-scrub.ts";
 
@@ -103,7 +106,7 @@ function fakeDesktop(userId: string, reply: unknown | ((frame: { params: unknown
       // already registered.
       void Promise.resolve().then(() => {
         const result = typeof reply === "function" ? reply(frame) : reply;
-        handleClientReply({ id: frame.id, result });
+        handleClientFrame(userId, { id: frame.id, result });
       });
     },
     close(): void {},
@@ -206,6 +209,10 @@ describe("Desktop module — POST /internal/desktop-command", () => {
   let runId: string;
   let token: string;
   let connected: ReturnType<typeof fakeDesktop> | null = null;
+
+  // `getTestApp` mounts module routers but does not run module `init()`;
+  // mirror the one piece of init wiring the download tests depend on.
+  setNotificationHandler(handleDesktopNotification);
 
   async function seedIntegration(id: string): Promise<void> {
     await seedPackage({
@@ -386,6 +393,118 @@ describe("Desktop module — POST /internal/desktop-command", () => {
 
     expect(res.status).toBe(404);
     expect(connected.sent).toHaveLength(0);
+  });
+
+  // ─── Téléchargements (plan de contrôle + plan de données) ──────────
+
+  it("browser.download dispatches an upload target and download_status tracks notifications", async () => {
+    clearDownloads();
+    connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
+      const p = frame.params as { download_id: string; upload_url: string };
+      expect(p.upload_url).toContain("token=");
+      return { download_id: p.download_id, state: "started" };
+    });
+
+    const res = await post({
+      method: "browser.download",
+      params: { url: "https://example.com/doc.pdf", filename: "doc.pdf" },
+    });
+    expect(res.status).toBe(200);
+    const { result } = (await res.json()) as {
+      result: { download_id: string; state: string; filename: string };
+    };
+    expect(result.state).toBe("started");
+    expect(result.filename).toBe("doc.pdf");
+
+    // Notification de progression puis de complétion, attribuées au bon user.
+    handleClientFrame(ctx.user.id, {
+      method: "download.progress",
+      params: { download_id: result.download_id, pct: 50 },
+    });
+    let st = await post({
+      method: "browser.download_status",
+      params: { download_id: result.download_id },
+    });
+    expect(((await st.json()) as { result: { state: string; pct: number } }).result).toMatchObject({
+      state: "downloading",
+      pct: 50,
+    });
+
+    handleClientFrame(ctx.user.id, {
+      method: "download.completed",
+      params: { download_id: result.download_id, size: 11, sha256: "abc" },
+    });
+    st = await post({
+      method: "browser.download_status",
+      params: { download_id: result.download_id },
+    });
+    expect(((await st.json()) as { result: { state: string } }).result.state).toBe("uploaded");
+  });
+
+  it("a notification from another user cannot advance a download", async () => {
+    clearDownloads();
+    connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => ({
+      download_id: (frame.params as { download_id: string }).download_id,
+      state: "started",
+    }));
+    const res = await post({ method: "browser.download", params: { url: "https://x.test/a" } });
+    const { result } = (await res.json()) as { result: { download_id: string } };
+
+    handleClientFrame("someone-else", {
+      method: "download.completed",
+      params: { download_id: result.download_id, size: 1, sha256: "x" },
+    });
+    const st = await post({
+      method: "browser.download_status",
+      params: { download_id: result.download_id },
+    });
+    expect(((await st.json()) as { result: { state: string } }).result.state).toBe("started");
+  });
+
+  it("streams the uploaded bytes to the run, and only to the owning run", async () => {
+    clearDownloads();
+    connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => ({
+      download_id: (frame.params as { download_id: string }).download_id,
+      state: "started",
+    }));
+    const res = await post({
+      method: "browser.download",
+      params: { url: "https://x.test/f.bin", filename: "f.bin" },
+    });
+    const { result } = (await res.json()) as { result: { download_id: string } };
+    const id = result.download_id;
+
+    // Le « desktop » dépose les octets dans le storage (plan de données)
+    // puis notifie la complétion.
+    const bytes = new TextEncoder().encode("hello desktop download");
+    await uploadStream(
+      DOWNLOADS_BUCKET,
+      `${runId}/${id}/f.bin`,
+      new Response(bytes).body as ReadableStream<Uint8Array>,
+    );
+    handleClientFrame(ctx.user.id, {
+      method: "download.completed",
+      params: { download_id: id, size: bytes.length, sha256: "s" },
+    });
+
+    const fetched = await app.request(`/internal/desktop-download/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(fetched.status).toBe(200);
+    expect(await fetched.text()).toBe("hello desktop download");
+
+    // Un token d'un AUTRE run ne voit pas ce téléchargement.
+    const otherRun = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      status: "running",
+    });
+    const denied = await app.request(`/internal/desktop-download/${id}`, {
+      headers: { Authorization: `Bearer ${signRunToken(otherRun.id)}` },
+    });
+    expect(denied.status).toBe(404);
   });
 
   it("400 when substitute_params is set without integration_id", async () => {

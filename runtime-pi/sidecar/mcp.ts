@@ -59,8 +59,10 @@ import {
   type CallToolResult,
   type ReadResourceResult,
   type Resource,
+  DESKTOP_DOWNLOAD_TOOL_META_KEY,
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { handleLocalDownloadMethod } from "./desktop-downloads.ts";
 import {
   RUN_HISTORY_INJECTED_TOOL,
   RECALL_MEMORY_INJECTED_TOOL,
@@ -1272,6 +1274,20 @@ function buildSidecarTools(options: MountMcpOptions): {
         integration_id?: string;
         substitute_params?: boolean;
       };
+      // Sidecar-local download methods — the data-plane legs the
+      // agent-side `desktop_download` extension drives. `download_pull`
+      // streams the completed download's bytes from the platform into a
+      // sidecar-local temp file (single platform round-trip); the
+      // extension then reads bounded base64 slices with `download_read`
+      // and releases the temp file with `download_done`. These never
+      // reach `/internal/desktop-command`.
+      if (
+        args.method === "browser.download_pull" ||
+        args.method === "browser.download_read" ||
+        args.method === "browser.download_done"
+      ) {
+        return handleLocalDownloadMethod(args.method, args.params, config, fetchFn);
+      }
       const url = `${config.platformApiUrl}/internal/desktop-command`;
       let res: Response;
       try {
@@ -1308,8 +1324,57 @@ function buildSidecarTools(options: MountMcpOptions): {
     },
   };
 
+  // `desktop_download` — advertised here (schema + gating in one place)
+  // but EXECUTED agent-side (`runtime-pi/mcp/desktop-download-extension.ts`,
+  // routed by the `dev.appstrate/desktop-download` `_meta` marker in
+  // `direct.ts`): the downloaded bytes must land in the workspace, which
+  // this credential-isolated sidecar cannot see. Mirrors `api_upload`.
+  const desktopDownload: AppstrateToolDefinition = {
+    descriptor: {
+      name: "desktop_download",
+      description:
+        "Materialize a completed `browser.download` into the run workspace. Call " +
+        "`desktop_browser` with `browser.download` first (returns a `download_id`), then this " +
+        "tool: it waits for the desktop to finish downloading + uploading, pulls the bytes, " +
+        "writes `downloads/<filename>` in the workspace and returns `{path, size, sha256}`. " +
+        "The bytes never enter your context — use the returned path with file tools or an " +
+        "integration's `api_upload`.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["download_id"],
+        properties: {
+          download_id: {
+            type: "string",
+            description: "The id returned by `browser.download`.",
+          },
+          timeout_ms: {
+            type: "integer",
+            minimum: 1000,
+            maximum: 600000,
+            description: "How long to wait for the download to complete (default 300s).",
+          },
+        },
+      },
+      _meta: { [DESKTOP_DOWNLOAD_TOOL_META_KEY]: {} },
+    },
+    // Advertise-only: execution needs the workspace, which lives
+    // agent-side.
+    handler: async () => ({
+      content: [
+        {
+          type: "text",
+          text:
+            "desktop_download is executed agent-side (workspace access); a direct sidecar " +
+            "invocation cannot succeed.",
+        },
+      ],
+      isError: true,
+    }),
+  };
+
   return {
-    firstParty: [runHistory, recallMemory, desktopBrowser],
+    firstParty: [runHistory, recallMemory, desktopBrowser, desktopDownload],
     makeApiCallTool,
     makeApiUploadTool,
   };

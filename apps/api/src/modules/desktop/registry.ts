@@ -59,10 +59,27 @@ export class DesktopCommandTimeoutError extends Error {
 }
 
 export class DesktopCommandError extends Error {
-  constructor(message: string) {
+  /** JSON-RPC error code reported by the desktop (see apps/desktop/src/bridge/protocol.ts). */
+  readonly code: number | undefined;
+  constructor(message: string, code?: number) {
     super(message);
     this.name = "DesktopCommandError";
+    this.code = code;
   }
+}
+
+/**
+ * Handler for desktop-initiated JSON-RPC notifications (id-less frames:
+ * download.progress / download.completed / download.failed). One
+ * process-wide subscriber — the downloads service registers itself at
+ * module init. Kept as a setter (not an event emitter) because there is
+ * exactly one legitimate consumer.
+ */
+type NotificationHandler = (userId: string, method: string, params: unknown) => void;
+let notificationHandler: NotificationHandler | null = null;
+
+export function setNotificationHandler(handler: NotificationHandler | null): void {
+  notificationHandler = handler;
 }
 
 export function registerClient(client: RegisteredClient): void {
@@ -129,37 +146,59 @@ export async function sendCommand(
       reject(new DesktopCommandTimeoutError(method, timeoutMs));
     }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
-    client.send(JSON.stringify({ id, method, params }));
+    client.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
   });
 
   return result;
 }
 
 /**
- * Called by the WS message handler when the desktop replies. Matches by
- * `id` against the pending map and resolves the awaiting `sendCommand`.
+ * Called by the WS message handler for every frame from a desktop.
+ * JSON-RPC 2.0: a frame WITH an id is a response to a pending command
+ * (matched and resolved); a frame WITHOUT an id but with a method is a
+ * desktop-initiated notification, routed to the registered handler.
  * Unknown ids are logged at debug and dropped — they can happen if a
  * command timed out on our side but the desktop eventually replied.
+ * Legacy pre-2.0 frames (no `jsonrpc` field) are accepted unchanged —
+ * only `id`/`method` shape is inspected.
  */
-export function handleClientReply(reply: {
-  id?: string;
-  result?: unknown;
-  error?: { message?: string };
-}): void {
-  if (!reply.id) return;
-  const entry = pending.get(reply.id);
+export function handleClientFrame(
+  userId: string,
+  frame: {
+    id?: string;
+    method?: string;
+    params?: unknown;
+    result?: unknown;
+    error?: { code?: number; message?: string };
+  },
+): void {
+  if (!frame.id) {
+    if (frame.method && notificationHandler) {
+      try {
+        notificationHandler(userId, frame.method, frame.params);
+      } catch (err) {
+        logger.warn("Desktop registry: notification handler threw", {
+          module: "desktop",
+          method: frame.method,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return;
+  }
+  const entry = pending.get(frame.id);
   if (!entry) {
     logger.debug("Desktop registry: reply for unknown id (likely timed out)", {
       module: "desktop",
-      id: reply.id,
+      id: frame.id,
     });
     return;
   }
-  pending.delete(reply.id);
+  pending.delete(frame.id);
   clearTimeout(entry.timer);
-  if (reply.error) {
-    entry.reject(new DesktopCommandError(reply.error.message ?? "desktop error"));
+  if (frame.error) {
+    entry.reject(new DesktopCommandError(frame.error.message ?? "desktop error", frame.error.code));
   } else {
-    entry.resolve(reply.result);
+    entry.resolve(frame.result);
   }
 }

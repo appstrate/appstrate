@@ -141,4 +141,38 @@ export const desktopPaths = {
       },
     },
   },
+  "/internal/desktop-download/{downloadId}": {
+    get: {
+      operationId: "fetchDesktopDownload",
+      tags: ["Desktop"],
+      summary: "Stream a completed desktop download's bytes to the run",
+      description:
+        "Container-to-host only, Bearer run token. Streams the bytes the user's desktop " +
+        "uploaded for a `browser.download` order belonging to this run. The sidecar calls " +
+        "this once per download and serves the agent-side `desktop_download` extension from " +
+        "its local copy. 404 for another run's download (run-scoped lookup).",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        {
+          name: "downloadId",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "The `download_id` returned by `browser.download`.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "The raw bytes, streamed.",
+          content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
+      },
+    },
+  },
 } as const;

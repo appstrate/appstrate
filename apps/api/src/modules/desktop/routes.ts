@@ -55,13 +55,20 @@ import {
   registerClient,
   unregisterClient,
   sendCommand,
-  handleClientReply,
+  handleClientFrame,
   DesktopNotConnectedError,
   DesktopCommandError,
   DesktopCommandTimeoutError,
   isConnected,
 } from "./registry.ts";
 import { registerRunSecrets, scrubRunSecrets } from "./secret-scrub.ts";
+import {
+  createDownload,
+  getDownloadForRun,
+  toStatusPayload,
+  DOWNLOADS_BUCKET,
+} from "./downloads.ts";
+import { downloadStream as storageDownloadStream } from "@appstrate/db/storage";
 
 /**
  * Translate a registry rejection into the platform's RFC 9457 error
@@ -196,6 +203,8 @@ export const desktopCommandSchema = z.object({
     "browser.evaluate",
     "browser.screenshot",
     "browser.waitForSelector",
+    "browser.download",
+    "browser.download_status",
   ]),
   params: z.record(z.string(), z.unknown()).optional(),
   timeout_ms: z.number().int().min(1000).max(120000).optional(),
@@ -253,7 +262,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
           registerClient(registered);
         },
         onMessage: (evt): void => {
-          let parsed: { id?: string; result?: unknown; error?: { message?: string } };
+          let parsed: { id?: string; method?: string; result?: unknown };
           try {
             const raw = typeof evt.data === "string" ? evt.data : evt.data.toString();
             parsed = JSON.parse(raw);
@@ -261,7 +270,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
             logger.debug("Desktop bridge: dropped malformed message", { module: "desktop" });
             return;
           }
-          handleClientReply(parsed);
+          handleClientFrame(userId, parsed);
         },
         onClose: (): void => {
           if (registered) unregisterClient(userId, registered);
@@ -341,6 +350,49 @@ export function createDesktopRouter(): Hono<AppEnv> {
       });
     }
 
+    // `browser.download` / `browser.download_status` are platform-mediated:
+    // the ORDER goes to the desktop with a freshly minted upload target,
+    // the STATUS is answered from the platform's own record (fed by the
+    // desktop's notifications) — no round-trip for polling.
+    if (body.method === "browser.download") {
+      const p = (body.params ?? {}) as { url?: string; filename?: string; max_bytes?: number };
+      if (!p.url || typeof p.url !== "string" || !/^https?:\/\//.test(p.url)) {
+        throw invalidRequest("`params.url` must be an http(s) URL", "params");
+      }
+      const { record, uploadUrl, maxBytes } = await createDownload({
+        runId,
+        userId: run.userId,
+        ...(typeof p.filename === "string" ? { filename: p.filename } : {}),
+        ...(typeof p.max_bytes === "number" ? { maxBytes: p.max_bytes } : {}),
+      });
+      try {
+        await sendCommand(
+          run.userId,
+          "browser.download",
+          {
+            download_id: record.downloadId,
+            url: p.url,
+            filename: record.filename,
+            upload_url: uploadUrl,
+            max_bytes: maxBytes,
+          },
+          { timeoutMs: body.timeout_ms },
+        );
+      } catch (err) {
+        throw desktopErrorToApiError(err);
+      }
+      return c.json({ result: toStatusPayload(record) });
+    }
+    if (body.method === "browser.download_status") {
+      const p = (body.params ?? {}) as { download_id?: string };
+      if (!p.download_id || typeof p.download_id !== "string") {
+        throw invalidRequest("`params.download_id` is required", "params");
+      }
+      const rec = getDownloadForRun(runId, p.download_id);
+      if (!rec) throw notFound(`Unknown download '${p.download_id}' for this run`);
+      return c.json({ result: toStatusPayload(rec) });
+    }
+
     const scrub = (text: string): string => scrubRunSecrets(runId, text) as string;
     try {
       const result = await sendCommand(run.userId, body.method, dispatchedParams, {
@@ -350,6 +402,30 @@ export function createDesktopRouter(): Hono<AppEnv> {
     } catch (err) {
       throw desktopErrorToApiError(err, scrub);
     }
+  });
+
+  // GET /internal/desktop-download/{downloadId} — the run-side fetch of a
+  // completed download's bytes. Streamed straight from storage (S3 or FS)
+  // with no buffering; run-token auth + run-scoped record lookup, so a
+  // leaked token cannot fetch another run's downloads. The sidecar calls
+  // this once per download and serves the agent-side extension from its
+  // local copy.
+  router.get("/internal/desktop-download/:downloadId", rateLimitByBearer(200), async (c) => {
+    const { runId } = await verifyRunToken(c);
+    const downloadId = c.req.param("downloadId") ?? "";
+    const rec = getDownloadForRun(runId, downloadId);
+    if (!rec) throw notFound(`Unknown download '${downloadId}' for this run`);
+    if (rec.state !== "uploaded") {
+      throw invalidRequest(`Download is '${rec.state}', not 'uploaded'`, "downloadId");
+    }
+    const stream = await storageDownloadStream(DOWNLOADS_BUCKET, rec.storageKey);
+    if (!stream) throw notFound("Download bytes are gone (retention elapsed)");
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/octet-stream",
+        ...(rec.size !== null ? { "Content-Length": String(rec.size) } : {}),
+      },
+    });
   });
 
   return router;
