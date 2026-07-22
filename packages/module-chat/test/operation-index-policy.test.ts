@@ -60,7 +60,7 @@ describe("prepareAiSdkChatStep", () => {
     expect(reached).toBe(false);
   });
 
-  it("disables tools and replaces messages on the reserved final step", () => {
+  it("disables tools and overrides instructions on the reserved final step", () => {
     let reached = false;
     const step = prepareAiSdkChatStep({
       stepNumber: 15,
@@ -72,17 +72,19 @@ describe("prepareAiSdkChatStep", () => {
     });
 
     expect(reached).toBe(true);
+    // The final step swaps the base instructions for the appended final-step
+    // directive (cache-controlled) and resets `messages` to the original history
+    // — no system message rides inside `messages` any more (instructions carries
+    // it, prepended by ai@7 as a system message).
     expect(step).toEqual({
       activeTools: [],
       toolChoice: "none",
-      messages: [
-        aiSdkCachedSystemMessage(`${BASE}\n\n${CHAT_FINAL_STEP_SYSTEM_PROMPT}`),
-        ...modelMessages,
-      ],
+      instructions: aiSdkCachedSystemMessage(`${BASE}\n\n${CHAT_FINAL_STEP_SYSTEM_PROMPT}`),
+      messages: [...modelMessages],
     });
   });
 
-  it("marks the system message as Anthropic-cacheable", () => {
+  it("marks the cache-controlled instructions object as Anthropic-cacheable", () => {
     expect(aiSdkCachedSystemMessage(BASE)).toEqual({
       role: "system",
       content: BASE,

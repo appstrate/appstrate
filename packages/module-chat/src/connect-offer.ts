@@ -153,9 +153,16 @@ export function splitJsonText(text: string): { text: string; offer: ConnectOffer
 }
 
 /**
- * Redact connect links from a `toModelOutput` result ({type:"json"|"content"}).
+ * Redact connect links from a `toModelOutput` result. The AI SDK v7
+ * `ToolResultOutput` union is `text | json | content | error-text | error-json |
+ * execution-denied`; the MCP client's `mcpToModelOutput` only ever emits `json`
+ * or `content`, so those are the live shapes here. `text` (a top-level string
+ * value) is covered too as belt-and-braces — a `toModelOutput` returning it must
+ * not slip a connect link past the model-channel scrub. The `error-*` variants
+ * are produced by the SDK itself (never routed through `toModelOutput`), and
+ * `execution-denied` carries only a denial reason, so neither reaches this walk.
  * Pure, redact-only — the model channel never gets a `connectOffer` field. For
- * `content` text parts we only touch valid JSON (re-stringified only when
+ * `text`/`content` text we only touch valid JSON (re-stringified only when
  * something changed); anything else is returned as-is.
  */
 export function redactConnectLinks(output: unknown): unknown {
@@ -165,6 +172,11 @@ export function redactConnectLinks(output: unknown): unknown {
   if (o.type === "json") {
     const r = splitValue(o.value, 0);
     return r.changed ? { ...o, value: r.value } : output;
+  }
+
+  if (o.type === "text" && typeof o.value === "string") {
+    const r = splitJsonText(o.value);
+    return r.text === o.value ? output : { ...o, value: r.text };
   }
 
   if (o.type === "content" && Array.isArray(o.value)) {

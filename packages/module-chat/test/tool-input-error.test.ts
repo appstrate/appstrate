@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { dynamicTool, jsonSchema, stepCountIs, streamText } from "ai";
+import { dynamicTool, jsonSchema, isStepCount, streamText } from "ai";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import type { LanguageModelV3StreamPart, LanguageModelV3Usage } from "@ai-sdk/provider";
 
@@ -99,7 +99,7 @@ describe("malformed tool input (no repair layer)", () => {
       model,
       tools: { dummy },
       messages: [{ role: "user", content: "call the dummy tool" }],
-      stopWhen: stepCountIs(2),
+      stopWhen: isStepCount(2),
     });
 
     // Draining the whole stream must not throw despite the malformed inputs.

@@ -64,6 +64,21 @@ describe("redactConnectLinks", () => {
     const input = { type: "json", value: { a: 1, b: { c: [2, 3] } } };
     expect(redactConnectLinks(input)).toBe(input);
   });
+
+  it("redacts a connect_url in a {type:'text'} JSON value (belt-and-braces variant)", () => {
+    const out = redactConnectLinks({
+      type: "text",
+      value: JSON.stringify({ ok: true, connect_url: "https://app/connect/start" }),
+    }) as { type: string; value: string };
+    const parsed = JSON.parse(out.value) as { ok: boolean; connect_url: string };
+    expect(parsed.connect_url).toBe(PLACEHOLDER);
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("passes a {type:'text'} non-JSON value through byte-identical", () => {
+    const input = { type: "text", value: "just prose, not JSON" };
+    expect(redactConnectLinks(input)).toBe(input);
+  });
 });
 
 describe("wrapToolModelOutputs", () => {
