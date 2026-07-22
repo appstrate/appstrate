@@ -183,6 +183,11 @@ function createMainWindow(): BaseWindow {
       sandbox: true,
     },
   });
+  // A hidden WebContentsView gets its timers/rAF throttled by Chromium —
+  // which starves Cloudflare Turnstile (and any similar in-page
+  // challenge) while the user is on the webapp pane. Agents drive this
+  // pane precisely when it is NOT being watched: keep it full-speed.
+  browserView.webContents.setBackgroundThrottling(false);
   browserView.webContents.loadURL("about:blank");
 
   // Auto-accept downloads. Any `<a download>` click or programmatic
@@ -205,9 +210,12 @@ function createMainWindow(): BaseWindow {
     },
   });
 
-  // Default: webapp visible, browser+navbar hidden. The bridge still drives
-  // browserView's webContents even when it's not in the view tree — the
-  // user can flip to the browser pane via the tray to watch the agent work.
+  // Default: webapp on TOP, browser pane attached UNDERNEATH (never
+  // detached — a detached view's document reports visibilityState
+  // "hidden" and visibility-gated in-page code like Cloudflare
+  // Turnstile refuses to run; see setActivePane). The user can flip to
+  // the browser pane via the tray to watch the agent work.
+  win.contentView.addChildView(browserView);
   win.contentView.addChildView(webappView);
 
   // Use `win` (closure) instead of `mainWindow` (module-level) — these
@@ -275,29 +283,33 @@ function createMainWindow(): BaseWindow {
 function setActivePane(next: ActivePane): void {
   if (!mainWindow || !webappView || !navView || !browserView) return;
   if (activePane === next) return;
+  // Both panes stay ATTACHED at all times — the inactive one simply
+  // sits underneath (re-adding a child view raises it to the top).
+  // Detaching the browser pane made its document report
+  // `visibilityState: "hidden"`, and visibility-gated in-page code —
+  // Cloudflare Turnstile first among them — then refuses to run, which
+  // silently broke every agent login while the user watched the webapp
+  // pane. An occluded-but-attached view stays "visible" to the DOM.
   const content = mainWindow.contentView;
+  const bounds = mainWindow.getContentBounds();
+  navView.setBounds({ x: 0, y: 0, width: bounds.width, height: NAVBAR_HEIGHT });
+  browserView.setBounds({
+    x: 0,
+    y: NAVBAR_HEIGHT,
+    width: bounds.width,
+    height: bounds.height - NAVBAR_HEIGHT,
+  });
+  webappView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
   if (next === "webapp") {
     content.removeChildView(navView);
-    content.removeChildView(browserView);
+    content.addChildView(browserView);
     content.addChildView(webappView);
   } else {
-    content.removeChildView(webappView);
+    content.addChildView(webappView);
     content.addChildView(navView);
     content.addChildView(browserView);
   }
   activePane = next;
-  const bounds = mainWindow.getContentBounds();
-  if (next === "webapp") {
-    webappView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
-  } else {
-    navView.setBounds({ x: 0, y: 0, width: bounds.width, height: NAVBAR_HEIGHT });
-    browserView.setBounds({
-      x: 0,
-      y: NAVBAR_HEIGHT,
-      width: bounds.width,
-      height: bounds.height - NAVBAR_HEIGHT,
-    });
-  }
   refreshTray();
 }
 

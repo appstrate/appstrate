@@ -28,19 +28,29 @@ import type { WebContents } from "electron";
 
 const PROTOCOL_VERSION = "1.3";
 
-/** WebContents ids whose debugger currently has Page events enabled. */
-const attached = new WeakSet<WebContents>();
-
-async function ensureAttached(wc: WebContents): Promise<void> {
-  if (!wc.debugger.isAttached()) {
-    wc.debugger.attach(PROTOCOL_VERSION);
-    wc.debugger.once("detach", () => {
-      attached.delete(wc);
-    });
-  }
-  if (!attached.has(wc)) {
-    await wc.debugger.sendCommand("Page.enable");
-    attached.add(wc);
+/**
+ * Run `fn` with the debugger attached, then DETACH immediately.
+ *
+ * A permanently attached debugger is an automation tell: Cloudflare
+ * Turnstile stopped auto-solving on the login pages the moment lot-4
+ * shipped with a persistent attach, and anti-bot vendors document CDP
+ * detection. Keeping the attach window to a sub-second burst — and
+ * never during page boot, which is when challenges probe — removes
+ * the signal while keeping CDP's semantics for evaluate/screenshot.
+ */
+async function withDebugger<T>(wc: WebContents, fn: () => Promise<T>): Promise<T> {
+  const wasAttached = wc.debugger.isAttached();
+  if (!wasAttached) wc.debugger.attach(PROTOCOL_VERSION);
+  try {
+    return await fn();
+  } finally {
+    if (!wasAttached) {
+      try {
+        wc.debugger.detach();
+      } catch {
+        // already detached (DevTools eviction) — nothing to release
+      }
+    }
   }
 }
 
@@ -61,32 +71,38 @@ export async function navigate(
   wc: WebContents,
   p: CdpNavigateParams,
 ): Promise<{ url: string; loaded: boolean }> {
-  await ensureAttached(wc);
+  // Deliberately NOT CDP: page boot is exactly when anti-bot challenges
+  // probe for automation signals, so no debugger may be attached here.
+  // Electron's own load events give the same `loaded` semantics.
   const timeoutMs = Math.min(Math.max(p.timeoutMs ?? 10_000, 500), 60_000);
-
-  const loadFired = new Promise<boolean>((resolve) => {
+  const loaded = new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => {
-      wc.debugger.off("message", onMessage);
+      cleanup();
       resolve(false);
     }, timeoutMs);
-    function onMessage(_e: unknown, method: string): void {
-      if (method === "Page.loadEventFired") {
-        clearTimeout(timer);
-        wc.debugger.off("message", onMessage);
-        resolve(true);
-      }
+    const onLoad = (): void => {
+      cleanup();
+      resolve(true);
+    };
+    const onFail = (): void => {
+      cleanup();
+      resolve(false);
+    };
+    function cleanup(): void {
+      clearTimeout(timer);
+      wc.off("did-finish-load", onLoad);
+      wc.off("did-fail-load", onFail);
     }
-    wc.debugger.on("message", onMessage);
+    wc.on("did-finish-load", onLoad);
+    wc.on("did-fail-load", onFail);
   });
-
-  const nav = (await wc.debugger.sendCommand("Page.navigate", { url: p.url })) as {
-    errorText?: string;
-  };
-  if (nav.errorText) {
-    throw new Error(`navigation failed: ${nav.errorText}`);
-  }
-  const loaded = await loadFired;
-  return { url: p.url, loaded };
+  await wc.loadURL(p.url).catch((err: Error & { errno?: number; code?: string }) => {
+    // loadURL rejects on hard navigation failures (DNS, refused) — keep
+    // that signal — but ERR_ABORTED just means a redirect took over.
+    if (err.code !== "ERR_ABORTED")
+      throw new Error(`navigation failed: ${err.code ?? err.message}`);
+  });
+  return { url: p.url, loaded: await loaded };
 }
 
 export interface CdpEvaluateParams {
@@ -99,27 +115,28 @@ export interface CdpEvaluateParams {
  * — the agent sees WHAT broke and WHERE instead of an opaque failure.
  */
 export async function evaluate(wc: WebContents, p: CdpEvaluateParams): Promise<unknown> {
-  await ensureAttached(wc);
-  const res = (await wc.debugger.sendCommand("Runtime.evaluate", {
-    expression: p.script,
-    awaitPromise: true,
-    returnByValue: true,
-    userGesture: true,
-  })) as {
-    result?: { value?: unknown };
-    exceptionDetails?: {
-      text?: string;
-      lineNumber?: number;
-      exception?: { description?: string };
+  return withDebugger(wc, async () => {
+    const res = (await wc.debugger.sendCommand("Runtime.evaluate", {
+      expression: p.script,
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true,
+    })) as {
+      result?: { value?: unknown };
+      exceptionDetails?: {
+        text?: string;
+        lineNumber?: number;
+        exception?: { description?: string };
+      };
     };
-  };
-  if (res.exceptionDetails) {
-    const d = res.exceptionDetails;
-    const description = d.exception?.description ?? d.text ?? "script threw";
-    const line = d.lineNumber !== undefined ? ` (line ${d.lineNumber + 1})` : "";
-    throw new Error(`${description}${line}`);
-  }
-  return res.result?.value ?? null;
+    if (res.exceptionDetails) {
+      const d = res.exceptionDetails;
+      const description = d.exception?.description ?? d.text ?? "script threw";
+      const line = d.lineNumber !== undefined ? ` (line ${d.lineNumber + 1})` : "";
+      throw new Error(`${description}${line}`);
+    }
+    return res.result?.value ?? null;
+  });
 }
 
 export interface CdpScreenshotParams {
@@ -134,14 +151,15 @@ export async function screenshot(
   wc: WebContents,
   p: CdpScreenshotParams = {},
 ): Promise<{ dataUrl: string }> {
-  await ensureAttached(wc);
-  const format = p.format === "jpeg" ? "jpeg" : "png";
-  const res = (await wc.debugger.sendCommand("Page.captureScreenshot", {
-    format,
-    ...(format === "jpeg" && p.quality !== undefined
-      ? { quality: Math.min(Math.max(p.quality, 0), 100) }
-      : {}),
-    ...(p.fullPage ? { captureBeyondViewport: true } : {}),
-  })) as { data: string };
-  return { dataUrl: `data:image/${format};base64,${res.data}` };
+  return withDebugger(wc, async () => {
+    const format = p.format === "jpeg" ? "jpeg" : "png";
+    const res = (await wc.debugger.sendCommand("Page.captureScreenshot", {
+      format,
+      ...(format === "jpeg" && p.quality !== undefined
+        ? { quality: Math.min(Math.max(p.quality, 0), 100) }
+        : {}),
+      ...(p.fullPage ? { captureBeyondViewport: true } : {}),
+    })) as { data: string };
+    return { dataUrl: `data:image/${format};base64,${res.data}` };
+  });
 }
