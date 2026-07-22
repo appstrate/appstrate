@@ -17,12 +17,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
 import { mkdir, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 
 /** Bounded read slice — keeps base64 well under the MCP envelope cap. */
 export const DOWNLOAD_READ_MAX_BYTES = 1024 * 1024;
@@ -88,16 +85,24 @@ export async function handleLocalDownloadMethod(
     await mkdir(TMP_DIR, { recursive: true });
     const path = join(TMP_DIR, id);
     const hash = createHash("sha256");
-    const hashing = new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        hash.update(chunk);
-        controller.enqueue(chunk);
-      },
-    });
-    await pipeline(
-      Readable.fromWeb(res.body.pipeThrough(hashing) as import("node:stream/web").ReadableStream),
-      createWriteStream(path),
-    );
+    // Plain reader loop over fs/promises — deliberately avoids the
+    // node:stream/promises pipeline + TransformStream + Readable.fromWeb
+    // combination: adding those builtins to the standalone sidecar
+    // binary coincided with a Bun segfault at startup (musl/arm64,
+    // Bun 1.3.14). Chunks flow reader → hash → file, never buffered
+    // whole.
+    const reader = res.body.getReader();
+    const out = await open(path, "w");
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        hash.update(value);
+        await out.write(value);
+      }
+    } finally {
+      await out.close();
+    }
     const { size } = await stat(path);
     const entry = { path, size, sha256: hash.digest("hex") };
     pulled.set(id, entry);
