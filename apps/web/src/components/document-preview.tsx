@@ -31,7 +31,7 @@
  * The DTO is refetched on each open so the short-lived preview token is fresh.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DownloadIcon } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -103,9 +103,40 @@ export function DocumentPreview({
   const kind = data?.preview_kind;
   const frameTitle = t("preview.frameTitle", { name: doc.name });
 
+  // The single previewable-vs-download branch for EVERY consumer of this modal.
+  // "Click a document" resolves to: preview when the server minted a
+  // `preview_url`, download otherwise. Library rows gate their eye button on
+  // `previewable`, so they almost never reach the download side here; chat chips
+  // always open blind (no DTO in hand) and rely on this fallback. Keeping the
+  // decision HERE (not duplicated per caller) is the whole point.
+  //
+  // Once-per-open guard: `autoDownloadedRef` is set the moment we fire and reset
+  // only when `open` flips false, so unrelated re-renders (token refetch, parent
+  // state) never re-trigger, and a NEW open of another non-previewable doc — a
+  // fresh false→true transition — fires again.
+  const autoDownloadedRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      autoDownloadedRef.current = false;
+      return;
+    }
+    // Wait until the DTO query settles successfully; a query `error` (403/404)
+    // is NOT a download signal — it keeps the ErrorState below.
+    if (isLoading || error || !data) return;
+    if (data.preview_url) return; // previewable → the modal renders the preview
+    if (autoDownloadedRef.current) return;
+    autoDownloadedRef.current = true;
+    void download(doc.id, doc.name);
+    onClose();
+  }, [open, isLoading, error, data, download, doc.id, doc.name, onClose]);
+
   function renderBody() {
     if (isLoading) return <LoadingState />;
     if (error) return <ErrorState message={getErrorMessage(error)} />;
+    // Non-previewable docs are handled by the auto-download effect above (fire
+    // download + onClose), so this ErrorState is effectively never seen. It
+    // stays only to keep renderBody total for the pathological frame where the
+    // effect hasn't run yet while still mounted.
     if (!previewUrl) return <ErrorState message={t("preview.unavailable")} />;
 
     if (kind === "image") {

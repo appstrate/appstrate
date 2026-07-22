@@ -69,3 +69,13 @@ describe("DocumentPreview kind branching", () => {
     expect(source).toContain("alt={doc.name}");
   });
 });
+
+describe("DocumentPreview non-previewable fallback", () => {
+  it("auto-downloads then closes when a settled DTO has no preview_url", () => {
+    // Non-previewable docs (no server-minted preview_url) must download instead
+    // of showing a dead-end error — the single branch every consumer relies on.
+    expect(source).toContain("if (data.preview_url) return;");
+    expect(source).toContain("void download(doc.id, doc.name)");
+    expect(source).toContain("onClose();");
+  });
+});
