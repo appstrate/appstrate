@@ -179,6 +179,17 @@ describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)
     expect(res.status).toBe(400);
   });
 
+  it("rejects rerun_from with 400 (agent-route concept, not half-applied)", async () => {
+    const res = await post({
+      manifest: validManifest(),
+      prompt: "hi",
+      rerun_from: "run_00000000-0000-0000-0000-000000000000",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { detail?: string };
+    expect(body.detail ?? "").toMatch(/rerun_from/);
+  });
+
   it("does not leak a shadow row when input resolution fails", async () => {
     await post({
       manifest: manifestWithFileInput(),

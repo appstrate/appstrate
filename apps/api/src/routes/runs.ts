@@ -21,7 +21,7 @@ import { mergeAndValidateConfigOverride } from "../services/agent-readiness.ts";
 import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { notFound, conflict, internalError } from "../lib/errors.ts";
+import { invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
@@ -495,6 +495,19 @@ export function createRunsRouter() {
       const actor = getActor(c);
 
       const body = await readJsonBody(c, inlineRunBodySchema);
+
+      // `rerun_from` is an agent-route concept (replay a cataloged agent's
+      // prior input). The inline body schema strips it, but the shared input
+      // parser below reads the raw JSON body — reject it explicitly so a
+      // stray field fails loudly instead of being half-applied (preflight
+      // validates the raw `input`, which a replay would not populate).
+      const rawBody = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+      if (rawBody && "rerun_from" in rawBody) {
+        throw invalidRequest(
+          "`rerun_from` is not supported for inline runs — pass `input` directly",
+          "rerun_from",
+        );
+      }
 
       // Preflight BEFORE any input document streams — a bad manifest / config
       // / readiness problem 4xxes without touching storage.
