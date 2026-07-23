@@ -148,7 +148,9 @@ export function DocumentTile({
               asChild
               variant="ghost"
               size="icon"
-              className="size-8"
+              // The anchor doesn't inherit the buttons' muted color — pin it so
+              // the run link matches the sibling action icons.
+              className="text-muted-foreground size-8"
               title={t("row.openRun")}
               aria-label={t("row.openRun")}
             >
