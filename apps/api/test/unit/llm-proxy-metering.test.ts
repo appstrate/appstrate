@@ -18,6 +18,7 @@ import {
   type MeteredForwardContext,
 } from "../../src/services/llm-proxy/metering.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
+import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import type { UpstreamUsage } from "../../src/services/llm-proxy/types.ts";
 import type { ResolvedModel } from "../../src/services/org-models.ts";
 
@@ -60,6 +61,36 @@ describe("computeCostUsd", () => {
     const usage: UpstreamUsage = { inputTokens: 1_000_000, outputTokens: 0 };
     const cost = { input: 5, output: 10 }; // no cacheRead / cacheWrite
     expect(computeCostUsd(usage, cost)).toBeCloseTo(5, 10);
+  });
+
+  it("bills DeepSeek cache hits at the cache-read rate, not double-counted as input", () => {
+    // End-to-end: parse a DeepSeek-shape usage payload, then price it with the
+    // real DeepSeek V4 Flash rates ($0.14/M input, $0.0028/M cache hit,
+    // $0.28/M output). prompt_tokens = hit + miss = 800k + 200k.
+    const usage = openaiCompletionsAdapter.parseJsonUsage({
+      usage: {
+        prompt_tokens: 1_000_000,
+        completion_tokens: 1_000_000,
+        prompt_cache_hit_tokens: 800_000,
+        prompt_cache_miss_tokens: 200_000,
+      },
+    });
+    expect(usage).toEqual({
+      inputTokens: 200_000, // cache-MISS remainder only
+      outputTokens: 1_000_000,
+      cacheReadTokens: 800_000,
+    });
+
+    const cost = { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 };
+    // Correct: 0.2M×0.14 + 1M×0.28 + 0.8M×0.0028 = 0.028 + 0.28 + 0.00224.
+    const expected = 0.028 + 0.28 + 0.00224;
+    expect(computeCostUsd(usage!, cost)).toBeCloseTo(expected, 10);
+
+    // Guard against the double-count regression: had inputTokens still included
+    // the 800k cache hits, input cost would be 1M×0.14 = 0.14 instead of 0.028
+    // — the whole bill would jump by 0.112. Prove we're NOT there.
+    const doubleCounted = 1_000_000 * 0.14e-6 + 1_000_000 * 0.28e-6 + 800_000 * 0.0028e-6;
+    expect(computeCostUsd(usage!, cost)).toBeLessThan(doubleCounted);
   });
 });
 

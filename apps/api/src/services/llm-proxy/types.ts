@@ -30,8 +30,21 @@ export function buildLlmProxyPrincipal(args: {
     : { kind: "jwt_user", userId: args.userId, orgId: args.orgId };
 }
 
-/** Usage numbers parsed from the upstream response. */
+/**
+ * Usage numbers parsed from the upstream response.
+ *
+ * Cost convention (`computeTokenCost` / `computeCostUsd`): the four token
+ * buckets are DISJOINT and billed independently —
+ * `input×input_rate + output×output_rate + cacheRead×cacheRead_rate +
+ * cacheWrite×cacheWrite_rate`. `inputTokens` is therefore the cache-MISS input
+ * only; it MUST NOT include the cache-read tokens. Anthropic's wire fields are
+ * already disjoint (`input_tokens` excludes `cache_read_input_tokens`), but
+ * OpenAI-compatible `prompt_tokens` includes the cache reads (OpenAI:
+ * `cached_tokens ⊂ prompt_tokens`; DeepSeek: `prompt_tokens = hit + miss`), so
+ * the openai adapter subtracts them out before populating this field.
+ */
 export interface UpstreamUsage {
+  /** Cache-MISS input tokens only — excludes `cacheReadTokens` (see above). */
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens?: number;
