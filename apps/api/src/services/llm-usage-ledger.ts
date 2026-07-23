@@ -139,12 +139,20 @@ export async function recordLlmUsage(
       ? await executor
           .insert(llmUsage)
           .values(values)
-          // Monotonic upsert on the partial unique index: only a strictly higher
-          // cumulative total ever wins, so out-of-order metric events and the
-          // finalize fallback can never regress the recorded cost, and an
-          // equal-total duplicate (finalize landing the same number) is a no-op
-          // that re-emits nothing. Token columns are bumped alongside the cost
-          // so the snapshot stays consistent.
+          // Two-level monotonic upsert on the partial unique index. Runner rows
+          // are cumulative snapshots — tokens and cost grow together — so the row
+          // must only ever advance:
+          //   1. a strictly higher cumulative cost wins; else
+          //   2. an EQUAL cost with a strictly higher total token count wins.
+          // Level 2 is what keeps a zero-cost model (free model / no catalog rate
+          // / zero-rate tokens) correct: its cost stays constant at 0 while token
+          // counts keep climbing, so a cost-only rule would freeze the token
+          // columns at their first values. Both levels use STRICT inequalities, so
+          // an exact duplicate replay (same cost AND same tokens) is a no-op that
+          // re-emits nothing — that idempotence is load-bearing for cursor
+          // consumers. Out-of-order metric events and the finalize fallback can
+          // never regress either dimension. Token columns are bumped alongside the
+          // cost so the snapshot stays consistent.
           .onConflictDoUpdate({
             target: llmUsage.runId,
             targetWhere: sql`source = 'runner' AND run_id IS NOT NULL`,
@@ -155,7 +163,18 @@ export async function recordLlmUsage(
               cacheWriteTokens: sql`EXCLUDED.cache_write_tokens`,
               costUsd: sql`EXCLUDED.cost_usd`,
             },
-            setWhere: sql`EXCLUDED.cost_usd > ${llmUsage.costUsd}`,
+            setWhere: sql`
+              EXCLUDED.cost_usd > ${llmUsage.costUsd}
+              OR (
+                EXCLUDED.cost_usd = ${llmUsage.costUsd}
+                AND EXCLUDED.input_tokens + EXCLUDED.output_tokens
+                      + COALESCE(EXCLUDED.cache_read_tokens, 0)
+                      + COALESCE(EXCLUDED.cache_write_tokens, 0)
+                    > ${llmUsage.inputTokens} + ${llmUsage.outputTokens}
+                      + COALESCE(${llmUsage.cacheReadTokens}, 0)
+                      + COALESCE(${llmUsage.cacheWriteTokens}, 0)
+              )
+            `,
           })
           .returning({ id: llmUsage.id })
       : await executor.insert(llmUsage).values(values).returning({ id: llmUsage.id });

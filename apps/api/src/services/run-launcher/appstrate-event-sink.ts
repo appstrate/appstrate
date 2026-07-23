@@ -348,14 +348,17 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
  * The runner emits cumulative running totals on every `appstrate.metric`
  * event, so the row tracks the latest total seen — concurrent writers
  * (a later metric event, the finalize-time fallback) UPSERT into the
- * partial unique index `uq_llm_usage_runner_run_id`. The conflict
- * clause is monotonic: an UPDATE only takes effect when the incoming
- * `cost_usd` is strictly larger than the stored value, so:
+ * partial unique index `uq_llm_usage_runner_run_id`. The conflict clause
+ * is two-level monotonic: an UPDATE takes effect when the incoming
+ * `cost_usd` is strictly larger than the stored value, OR the cost is
+ * equal and the incoming total token count is strictly larger. The token
+ * tiebreak keeps a zero-cost model's snapshot advancing (cost stays 0
+ * while tokens climb), so:
  *
  *   - rapid-fire metric events keep the row in sync with the latest total
  *   - a finalize-fallback emit with a smaller `result.cost` (e.g. when
  *     a fresh metric already landed) cannot regress the bill
- *   - reorder is safe — the highest-seen cost wins regardless of arrival
+ *   - reorder is safe — the highest-seen total wins regardless of arrival
  *     order
  *
  * Best-effort: metric persistence MUST NOT fail the ingestion path.

@@ -7,9 +7,11 @@
  * three behaviours they all rely on:
  *
  *   1. the plain insert (proxy / chat) — returns the new serial id;
- *   2. the runner's monotonic upsert against `uq_llm_usage_runner_run_id` —
- *      the highest cumulative cost wins, a regressing write is a no-op that
- *      returns null, and the token columns move with the cost;
+ *   2. the runner's two-level monotonic upsert against
+ *      `uq_llm_usage_runner_run_id` — a higher cumulative cost wins, or an equal
+ *      cost with a higher token total (so a zero-cost model still advances), a
+ *      regressing write is a no-op that returns null, an exact duplicate re-emits
+ *      nothing, and the token columns move with the snapshot;
  *   3. the `onUsageRecorded` broadcast — correct context/credential derivation,
  *      never the server-side-only `real_model` / `api`, and no event when the
  *      monotonic upsert did not write.
@@ -397,5 +399,97 @@ describe("recordLlmUsage — onUsageRecorded broadcast", () => {
     await flush();
     expect(lost).toBeNull();
     expect(events).toHaveLength(1);
+  });
+
+  it("zero-cost runner row: an equal cost with a higher token total updates the row AND re-emits", async () => {
+    const run = await seedRun({
+      packageId: "@ledgerevent/agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+    });
+    const base = {
+      source: "runner" as const,
+      orgId: ctx.orgId,
+      runId: run.id,
+      credentialSource: "system" as const,
+    };
+
+    // A free / zero-rate model pins cost at 0 on every cumulative metric event.
+    const id1 = await recordLlmUsage(
+      {
+        ...base,
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 10,
+        cacheWriteTokens: 5,
+        costUsd: 0,
+      },
+      { onConflict: "runner-monotonic" },
+    );
+    await flush();
+    expect(typeof id1).toBe("number");
+    expect(events).toHaveLength(1);
+
+    // Same cost (still 0) but the cumulative token snapshot grew — the token
+    // tiebreak must advance the row (a cost-only rule would freeze the columns)
+    // and re-emit, consistent with a real change.
+    const id2 = await recordLlmUsage(
+      {
+        ...base,
+        inputTokens: 200,
+        outputTokens: 100,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 10,
+        costUsd: 0,
+      },
+      { onConflict: "runner-monotonic" },
+    );
+    await flush();
+    expect(id2).toBe(id1);
+    expect(events).toHaveLength(2);
+
+    const row = await rowById(id1!);
+    expect(row!.costUsd).toBeCloseTo(0, 10);
+    expect(row!.inputTokens).toBe(200);
+    expect(row!.outputTokens).toBe(100);
+    expect(row!.cacheReadTokens).toBe(20);
+    expect(row!.cacheWriteTokens).toBe(10);
+  });
+
+  it("an exact duplicate (same cost AND same tokens) is a no-op that neither updates nor re-emits", async () => {
+    const run = await seedRun({
+      packageId: "@ledgerevent/agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+    });
+    const entry = {
+      source: "runner" as const,
+      orgId: ctx.orgId,
+      runId: run.id,
+      credentialSource: "system" as const,
+      inputTokens: 200,
+      outputTokens: 100,
+      costUsd: 0.5,
+    };
+
+    const id1 = await recordLlmUsage(entry, { onConflict: "runner-monotonic" });
+    await flush();
+    expect(typeof id1).toBe("number");
+    expect(events).toHaveLength(1);
+
+    // Replaying the identical cumulative snapshot must change nothing and fire
+    // nothing — the idempotence cursor consumers rely on (strict inequalities on
+    // both cost and the token tiebreak).
+    const dup = await recordLlmUsage(entry, { onConflict: "runner-monotonic" });
+    await flush();
+    expect(dup).toBeNull();
+    expect(events).toHaveLength(1);
+
+    const row = await rowById(id1!);
+    expect(row!.costUsd).toBeCloseTo(0.5, 10);
+    expect(row!.inputTokens).toBe(200);
+    expect(row!.outputTokens).toBe(100);
   });
 });
