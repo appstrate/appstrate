@@ -29,7 +29,7 @@ import {
   MAX_MEMORY_CONTENT,
 } from "../services/state/package-persistence.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getPackage } from "../services/package-catalog.ts";
+import { getRunEffectiveAgent } from "../services/run-effective-agent.ts";
 import {
   ApiError,
   unauthorized,
@@ -67,6 +67,13 @@ async function verifyRunToken(c: Context): Promise<{
     status: string;
     modelCredentialId: string | null;
     runOrigin: "platform" | "remote";
+    /**
+     * The agent definition the run executes — `"draft"` or a concrete semver
+     * stamped at kickoff (#636). The dependency guards read the manifest AT
+     * this ref so a post-kickoff draft edit cannot retroactively change a
+     * pinned run's authorization set.
+     */
+    versionRef: string | null;
     /**
      * Snapshot of the connection resolver output frozen at run kickoff
      * (#199). The credentials resolver uses it to honour admin pins and
@@ -111,6 +118,7 @@ async function verifyRunToken(c: Context): Promise<{
       status: runs.status,
       modelCredentialId: runs.modelCredentialId,
       runOrigin: runs.runOrigin,
+      versionRef: runs.versionRef,
       resolvedConnections: runs.resolvedConnections,
       resolvedIntegrationVersions: runs.resolvedIntegrationVersions,
     })
@@ -138,6 +146,7 @@ async function verifyRunToken(c: Context): Promise<{
       status: run.status,
       modelCredentialId: run.modelCredentialId ?? null,
       runOrigin: run.runOrigin,
+      versionRef: run.versionRef ?? null,
       resolvedConnections: run.resolvedConnections ?? null,
       resolvedIntegrationVersions: run.resolvedIntegrationVersions ?? null,
     },
@@ -299,13 +308,22 @@ export function createInternalRouter() {
    * application. Same guard used by /mcp-server-bundle and the
    * /integration-credentials endpoints to keep a leaked run token from
    * enumerating integration secrets across the org.
+   *
+   * "The running agent" means the definition the run EXECUTES —
+   * `getRunEffectiveAgent` reads the `package_versions` snapshot when
+   * `runs.version_ref` pins one, the draft otherwise. Reading the mutable
+   * draft here let a post-kickoff draft edit change a pinned run's
+   * authorization set in both directions: a dep removed from the draft
+   * 404'd the boot credential fetch of a scheduled run pinned to a version
+   * that still declares it, and a dep newly added to the draft widened what
+   * a leaked run token of an old pinned run could enumerate.
    */
   async function assertAgentDeclaresIntegration(
     packageId: string,
-    run: { packageId: string; orgId: string; applicationId: string },
+    run: { packageId: string; orgId: string; applicationId: string; versionRef: string | null },
     runId: string,
   ): Promise<void> {
-    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+    const agent = await getRunEffectiveAgent(run);
     if (!agent) throw notFound("Agent not found");
     const deps = asRecord(asRecord(agent.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
@@ -491,6 +509,7 @@ export function createInternalRouter() {
       packageId: string;
       orgId: string;
       applicationId: string;
+      versionRef: string | null;
       resolvedIntegrationVersions: Record<
         string,
         { version: string | null; source: "version" | "draft" | "system" }
@@ -498,7 +517,10 @@ export function createInternalRouter() {
     },
     runId: string,
   ): Promise<void> {
-    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+    // Enumerate the deps of the definition the run EXECUTES (pinned snapshot
+    // when `version_ref` is a concrete semver) — same rationale as
+    // `assertAgentDeclaresIntegration` above.
+    const agent = await getRunEffectiveAgent(run);
     if (!agent) throw notFound("Agent not found");
     const deps = asRecord(asRecord(agent.manifest).dependencies);
     const integrations = asRecord(deps.integrations);

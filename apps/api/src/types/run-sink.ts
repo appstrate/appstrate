@@ -28,6 +28,13 @@ export interface RunSinkContext {
   lastEventSequence: number;
   startedAt: Date;
   /**
+   * The agent definition the run executes — `"draft"` or a concrete semver
+   * stamped at kickoff (#636). Finalize reads the output schema from the
+   * manifest AT this ref (`getRunEffectiveAgent`) so a post-kickoff draft
+   * edit cannot change a pinned run's output contract.
+   */
+  versionRef: string;
+  /**
    * Model source resolved at run creation time (`"system"` for platform-paid
    * models, `"org"` for BYOK). Forwarded to the `afterRun` hook so module
    * billing handlers can distinguish billable from non-billable runs.

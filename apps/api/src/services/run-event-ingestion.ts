@@ -43,7 +43,7 @@ import {
   CHECKPOINT_KEY,
 } from "./state/package-persistence.ts";
 import { actorFromIds } from "../lib/actor.ts";
-import { getPackage } from "./package-catalog.ts";
+import { getRunEffectiveAgent } from "./run-effective-agent.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
@@ -130,6 +130,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       sinkClosedAt: runs.sinkClosedAt,
       lastEventSequence: runs.lastEventSequence,
       startedAt: runs.startedAt,
+      versionRef: runs.versionRef,
       modelSource: runs.modelSource,
     })
     .from(runs)
@@ -143,7 +144,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
   // source agent mid-run nulls the column while the run survives for
   // observability/billing. `RunSinkContext.packageId` is typed as a non-null
   // string, so a raw `row as RunSinkContext` cast would smuggle a runtime null
-  // past every finalize consumer (getPackage, memory/pinned persistence,
+  // past every finalize consumer (getRunEffectiveAgent, memory/pinned persistence,
   // afterRun / onRunStatusChange hook params) — silently skipping finalization
   // side-effects for a deleted-agent run. Recover the agent's `@scope/name`
   // from the INSERT-time snapshot (stamped precisely for this deleted-agent
@@ -316,9 +317,12 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // 1. Flush any buffered events before we close the sink.
   await drainBufferedEvents(run, { allowGaps: true });
 
-  // 2. Load manifest for output-schema validation. `includeEphemeral: true`
-  //    keeps inline-run shadow packages addressable here.
-  const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+  // 2. Load the manifest of the definition the run EXECUTED for output-schema
+  //    validation — the pinned `package_versions` snapshot when `version_ref`
+  //    names one, the draft otherwise. Validating against the mutable draft
+  //    let a post-kickoff schema edit flip a pinned run's outcome (false
+  //    failure on a tightened draft schema, false success on a loosened one).
+  const agent = await getRunEffectiveAgent(run);
 
   // 3. Derive final status + error message. Pure computation — no DB writes
   //    before the CAS so concurrent synthesis + container-posted finalize
