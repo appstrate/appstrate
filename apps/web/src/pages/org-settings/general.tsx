@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Building } from "lucide-react";
+import { Building, HardDrive, AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { formatBytes } from "@appstrate/core/format";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -30,6 +32,20 @@ export function OrgSettingsGeneralPage() {
   const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
+
+  const { data: orgDetail } = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}",
+    { params: { path: { orgId: orgId ?? "" } } },
+    { enabled: !!orgId },
+  );
+  const storage = orgDetail?.storage;
+  const storageLimit = storage?.limit_bytes ?? null;
+  const storagePercent =
+    storage && storageLimit !== null && storageLimit > 0
+      ? Math.min(100, Math.round((storage.used_bytes / storageLimit) * 100))
+      : 0;
+  const storageNearLimit = storageLimit !== null && storagePercent >= 80;
 
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
@@ -112,6 +128,50 @@ export function OrgSettingsGeneralPage() {
           )}
         </div>
       </div>
+
+      {storage && (
+        <>
+          <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
+            {t("orgStorage.section")}
+          </div>
+          <div className="border-border bg-card mb-4 rounded-lg border p-5">
+            <div className="flex items-center gap-3">
+              <HardDrive size={18} className="text-muted-foreground shrink-0" />
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold">{t("orgStorage.title")}</h3>
+                <span className="text-muted-foreground text-sm">
+                  {storage.limit_bytes === null
+                    ? t("orgStorage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
+                    : t("orgStorage.usedOfLimit", {
+                        used: formatBytes(storage.used_bytes),
+                        limit: formatBytes(storage.limit_bytes),
+                      })}
+                </span>
+              </div>
+            </div>
+
+            {storageLimit !== null && (
+              <div className="mt-4">
+                <div className="bg-muted h-2 w-full overflow-hidden rounded-full">
+                  <div
+                    className={`h-full rounded-full ${storageNearLimit ? "bg-warning" : "bg-primary"}`}
+                    style={{ width: `${storagePercent}%` }}
+                  />
+                </div>
+                <div className="text-muted-foreground mt-1 text-right text-xs tabular-nums">
+                  {t("orgStorage.percentUsed", { percent: storagePercent })}
+                </div>
+                {storageNearLimit && (
+                  <Alert variant="warning" className="mt-3">
+                    <AlertTriangle size={16} />
+                    <AlertDescription>{t("orgStorage.nearLimitWarning")}</AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {isAdmin && features.oidc && (
         <>

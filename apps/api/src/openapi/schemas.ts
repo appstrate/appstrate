@@ -238,6 +238,19 @@ export const schemas = {
       name: { type: "string" },
       slug: { type: "string" },
       createdAt: { type: "string", format: "date-time" },
+      storage: {
+        type: "object",
+        description:
+          "Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the org-wide quota (`ORG_STORAGE_QUOTA_BYTES`), or null when unset (unlimited).",
+        required: ["used_bytes", "limit_bytes"],
+        properties: {
+          used_bytes: { type: "integer", description: "Bytes of durable documents stored." },
+          limit_bytes: {
+            type: ["integer", "null"],
+            description: "Quota in bytes, or null when no quota is configured (unlimited).",
+          },
+        },
+      },
       members: {
         type: "array",
         items: { $ref: "#/components/schemas/OrgMember" },
