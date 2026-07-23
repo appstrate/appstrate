@@ -125,20 +125,6 @@ const rawModelProviderCredentialSchema = z.object({
 type RawModelProviderCredential = z.infer<typeof rawModelProviderCredentialSchema>;
 
 /**
- * Provider-declared compatibility aliases that are no longer safe to send as
- * system-model backings. Keep the public preset id stable while routing the
- * upstream call to the supported successor. This is intentionally limited to
- * platform-owned env configuration: BYOK/custom model ids remain operator
- * controlled and are never rewritten behind their back.
- */
-const SYSTEM_MODEL_UPSTREAM_MIGRATIONS: Readonly<Record<string, Readonly<Record<string, string>>>> =
-  {
-    deepseek: {
-      "deepseek-chat": "deepseek-v4-flash",
-    },
-  };
-
-/**
  * Initialize system model provider keys and models from the SYSTEM_PROVIDER_KEYS env var.
  * Call once at boot AFTER `registerModelProviders()` — the env entries
  * resolve their `apiShape` + `baseUrl` from the registry by `providerId`.
@@ -275,18 +261,6 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           }
 
           const modelId = validM.id ?? `${validCredential.id}:${validM.modelId}`;
-          const upstreamModelId =
-            SYSTEM_MODEL_UPSTREAM_MIGRATIONS[validCredential.providerId]?.[validM.modelId] ??
-            validM.modelId;
-          if (upstreamModelId !== validM.modelId) {
-            logger.warn("[model-registry] migrated deprecated system model backing", {
-              modelProviderCredentialId: validCredential.id,
-              presetId: modelId,
-              providerId: validCredential.providerId,
-              fromModelId: validM.modelId,
-              toModelId: upstreamModelId,
-            });
-          }
           mdlMap.set(modelId, {
             id: modelId,
             // Pass through env-supplied label; read path falls back to the
@@ -295,7 +269,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             providerId: validCredential.providerId,
             apiShape,
             baseUrl,
-            modelId: upstreamModelId,
+            modelId: validM.modelId,
             apiKey: validCredential.apiKey,
             credentialId: validCredential.id,
             input: validM.input ?? null,
