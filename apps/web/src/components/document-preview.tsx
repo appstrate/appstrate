@@ -251,7 +251,10 @@ export function DocumentPreview({
       open={open}
       onClose={onClose}
       title={doc.name}
-      className="h-[85vh] max-w-5xl"
+      // DialogContent is a grid with auto rows — pin the body row to the
+      // remaining height (minmax(0,1fr)) so the iframe previews stretch to the
+      // full modal height instead of their intrinsic size.
+      className="h-[85vh] max-w-5xl grid-rows-[auto_minmax(0,1fr)_auto]"
       actions={
         <Button variant="outline" onClick={() => void download(doc.id, doc.name)}>
           <DownloadIcon className="size-4" />
