@@ -452,6 +452,65 @@ describe("run-metric-broadcaster (integration)", () => {
     });
   });
 
+  it("live cost excludes the remote-run mirror row exactly like computeRunCost", async () => {
+    // A remote-origin run on the system llm-proxy records BOTH per-call proxy
+    // rows and the runner's cumulative NULL-credential mirror row covering the
+    // same spend. `computeRunCost` drops the mirror when proxy rows exist; the
+    // broadcaster must show the same value mid-run. Regression for the drifted
+    // local SUM that double-counted here (proxy + mirror) until finalize.
+    const send = mock((_e: RealtimeEvent) => {});
+    const subId = "sub-mirror";
+    trackSubscriber(subId);
+    addSubscriber({
+      id: subId,
+      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      send,
+    });
+
+    // Two per-call proxy rows — the authoritative spend.
+    await db.insert(llmUsage).values([
+      {
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 10,
+        outputTokens: 10,
+        costUsd: 0.01,
+        requestId: `req_${crypto.randomUUID()}`,
+      },
+      {
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 10,
+        outputTokens: 10,
+        costUsd: 0.02,
+        requestId: `req_${crypto.randomUUID()}`,
+      },
+    ]);
+    // The runner's cumulative mirror of that same spend (credential_source
+    // NULL — remote runs resolve no platform model).
+    await db.insert(llmUsage).values({
+      source: "runner",
+      orgId: ctx.orgId,
+      runId,
+      credentialSource: null,
+      inputTokens: 20,
+      outputTokens: 20,
+      costUsd: 0.03,
+    });
+
+    scheduleRunMetricBroadcast(runId);
+    await wait(50);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const costSoFar = eventData(send.mock.calls[0]![0]!, "run_metric").costSoFar as number;
+    // Proxy rows only — never 0.06 (proxy + mirror double-count).
+    expect(costSoFar).toBeCloseTo(0.03, 5);
+  });
+
   it("a vanished run drops its throttle entry to bound the in-memory map", async () => {
     // Simulates the edge case where the run row was deleted (or its
     // `package_id` SET NULL by cascade) between the metric event

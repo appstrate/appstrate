@@ -139,8 +139,6 @@ export function useHostedConnectPopup() {
         // connection without waiting for a window-focus refetch.
         await Promise.all([
           invalidateIntegrationQueries(qc),
-          // Both keys while use-me-connections migrates concurrently.
-          qc.invalidateQueries({ queryKey: ["me-connections"] }),
           qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] }),
         ]);
       } catch (err) {

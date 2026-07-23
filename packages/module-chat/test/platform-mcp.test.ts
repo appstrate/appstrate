@@ -120,7 +120,7 @@ describe("platform MCP run_and_wait wrapper", () => {
     ]);
     expect(calls).toMatchObject([
       {
-        url: "https://test.local/api/agents/%40acme/writer/run",
+        url: "https://test.local/api/agents/@acme/writer/run",
         method: "POST",
         body: { input: { topic: "x" } },
       },

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { encodePackageIdPath } from "./naming.ts";
+
 export const RUN_AND_WAIT_MAX_MS = 30 * 60_000;
 export const RUN_AND_WAIT_BACKOFF_MS = 500;
 const RUN_GET_WAIT_MAX_SECONDS = 55;
@@ -202,9 +204,21 @@ export async function launchRunAndWait(
     const qs = new URLSearchParams();
     const version = asString(args.version);
     if (version) qs.set("version", version);
-    launchPath =
-      `/api/agents/${encodeURIComponent(scope)}/${encodeURIComponent(name)}/run` +
-      (qs.size > 0 ? `?${qs.toString()}` : "");
+    // Canonical package-id path encoding (`@`/`/` stay literal) — never
+    // hand-roll encodeURIComponent on the segments (see naming.ts).
+    let encodedId: string;
+    try {
+      encodedId = encodePackageIdPath(`${scope}/${name}`);
+    } catch {
+      return {
+        ok: false,
+        step: {
+          payload: { error: `Invalid agent reference: ${scope}/${name} (expected @scope/name).` },
+          isError: true,
+        },
+      };
+    }
+    launchPath = `/api/agents/${encodedId}/run` + (qs.size > 0 ? `?${qs.toString()}` : "");
     launchBody = {};
     if (asRecord(args.input)) launchBody.input = args.input;
     if (asRecord(args.config)) launchBody.config = args.config;

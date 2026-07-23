@@ -205,7 +205,12 @@ async function handleProxy(
     throw invalidRequest(`run ${runAttribution.id} has no agent package attribution`);
   }
   const usageContext = runAttribution
-    ? ({ context: "run", packageId: runAttribution.packageId! } as const)
+    ? ({
+        context: "run",
+        packageId: runAttribution.packageId!,
+        runOrigin: runAttribution.runOrigin,
+        modelSource: runAttribution.modelSource,
+      } as const)
     : c.get("firstPartyLoopback")
       ? ({ context: "chat", sessionId: chatSessionId } as const)
       : null;

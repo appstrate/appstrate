@@ -69,7 +69,7 @@ describe("run_and_wait client", () => {
     ]);
     expect(calls).toMatchObject([
       {
-        url: "https://test.local/api/agents/%40acme/writer/run",
+        url: "https://test.local/api/agents/@acme/writer/run",
         method: "POST",
         body: { input: { topic: "x" } },
       },
@@ -123,6 +123,18 @@ describe("run_and_wait client", () => {
     await expect(collectSteps(fetchImpl, { kind: "inline" })).resolves.toEqual([
       { error: "`manifest` is required for kind:'inline'." },
     ]);
+  });
+
+  test("rejects an unparseable agent reference before dispatching", async () => {
+    const fetchImpl = fakeFetch(async () => {
+      throw new Error("should not fetch");
+    });
+
+    // Scope missing its leading `@` — encodePackageIdPath refuses it; the
+    // client must fail fast instead of building a path the routes 404.
+    await expect(
+      collectSteps(fetchImpl, { kind: "agent", scope: "acme", name: "writer" }),
+    ).resolves.toEqual([{ error: "Invalid agent reference: acme/writer (expected @scope/name)." }]);
   });
 
   test("rejects an inline run without a top-level prompt before dispatching", async () => {
@@ -200,7 +212,7 @@ describe("run_and_wait client", () => {
       },
     ]);
     expect(calls).toEqual([
-      "https://test.local/api/agents/%40acme/writer/run",
+      "https://test.local/api/agents/@acme/writer/run",
       "https://test.local/api/runs/run_1?wait=0",
     ]);
   });
@@ -378,7 +390,7 @@ describe("launchRunAndWait launch body", () => {
     );
 
     expect(captured()).toMatchObject({
-      url: "https://test.local/api/agents/%40acme/writer/run",
+      url: "https://test.local/api/agents/@acme/writer/run",
       method: "POST",
       body: { input: { topic: "x" } },
     });
