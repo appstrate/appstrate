@@ -69,7 +69,7 @@ describe("run_and_wait client", () => {
     ]);
     expect(calls).toMatchObject([
       {
-        url: "https://test.local/api/agents/%40acme/writer/run",
+        url: "https://test.local/api/agents/@acme/writer/run",
         method: "POST",
         body: { input: { topic: "x" } },
       },
@@ -200,7 +200,7 @@ describe("run_and_wait client", () => {
       },
     ]);
     expect(calls).toEqual([
-      "https://test.local/api/agents/%40acme/writer/run",
+      "https://test.local/api/agents/@acme/writer/run",
       "https://test.local/api/runs/run_1?wait=0",
     ]);
   });
@@ -378,7 +378,7 @@ describe("launchRunAndWait launch body", () => {
     );
 
     expect(captured()).toMatchObject({
-      url: "https://test.local/api/agents/%40acme/writer/run",
+      url: "https://test.local/api/agents/@acme/writer/run",
       method: "POST",
       body: { input: { topic: "x" } },
     });

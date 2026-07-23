@@ -42,7 +42,7 @@ import { getEnv } from "@appstrate/env";
 export type { IntegrationRefreshContext };
 
 export interface IntegrationRefreshResult {
-  /** Decrypted credentials (snake_case + camelCase aliases). */
+  /** Decrypted credentials — snake_case wire keys only (`projectToStringMap`). */
   fields: Record<string, string>;
   /** Parsed `expires_at` from the token response, or `null` if upstream did not return `expires_in`. */
   expiresAt: Date | null;
