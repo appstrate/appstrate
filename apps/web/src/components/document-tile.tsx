@@ -4,8 +4,8 @@
  * Presentational grid tile for a single document — shared by the run-detail
  * Documents tab and the gallery page. Renders a square media area (an image
  * preview when the document is an image, the mime icon otherwise), the name,
- * size + created time, an optional producing-agent label + run link, and
- * preview / download / delete actions. Behavior (download, delete, gating) is
+ * size + created time, and the action row (optional run link, preview,
+ * download, delete). Behavior (download, delete, gating) is
  * injected by the parent; the only fetching this component does is the
  * authenticated image preview, isolated in `DocumentTileImage` so the hook runs
  * only for eligible images.
@@ -140,25 +140,23 @@ export function DocumentTile({
           <span className="tabular-nums">{formatBytes(doc.size)}</span>
           <span aria-hidden>·</span>
           <span>{formatDateField(doc.createdAt, "datetime")}</span>
-          {showRunLink && doc.packageId ? (
-            <>
-              <span aria-hidden>·</span>
-              <span className="truncate font-mono">{doc.packageId}</span>
-            </>
-          ) : null}
-          {runHref ? (
-            <Link
-              to={runHref}
-              className="hover:text-foreground inline-flex items-center gap-1"
-              title={t("row.openRun")}
-            >
-              <ExternalLinkIcon className="size-3" />
-              {t("row.run")}
-            </Link>
-          ) : null}
         </div>
 
         <div className="mt-auto flex items-center justify-end gap-1 pt-1">
+          {runHref ? (
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              title={t("row.openRun")}
+              aria-label={t("row.openRun")}
+            >
+              <Link to={runHref}>
+                <ExternalLinkIcon className="size-4" />
+              </Link>
+            </Button>
+          ) : null}
           {canPreview ? (
             <Button
               variant="ghost"
