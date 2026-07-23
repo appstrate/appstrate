@@ -18,6 +18,16 @@ agent browser never receives that cookie.
 Remote Appstrate instances require HTTPS. Loopback development may use HTTP.
 Electron permission requests are denied by default.
 
+## Window layout
+
+The local chrome keeps a browser-panel button visible above the Appstrate SPA.
+The button opens the existing agent browser on the right without reloading it.
+The browser chrome can then focus that surface across the full content area or
+return it to the split view. Closing the panel restores the full-width SPA.
+
+`Cmd+Shift+B` opens or closes the panel. The desktop currently owns one browser
+surface and intentionally has no tab manager.
+
 ## Agent contract
 
 The API module must be enabled, and the agent manifest must opt in:
@@ -84,6 +94,7 @@ Install and validate from this directory:
 
 ```bash
 bun install
+bun test test/layout.test.ts
 bun run typecheck
 bun run build
 bun run dev

@@ -3,19 +3,22 @@
 /**
  * Electron main process entry.
  *
- * Two mutually exclusive panes share the BaseWindow contentView:
+ * Three display modes share one BaseWindow contentView:
  *
- *   webapp pane (default, full-window):
+ *   webapp (default):
  *     ┌──────────────────────────────────────────────┐
  *     │   Appstrate SPA loaded at ${INSTANCE}        │  ← webappView
  *     │   User interacts with the platform UI here.  │
  *     └──────────────────────────────────────────────┘
  *
- *   browser pane (toggled via tray):
+ *   split:
+ *     ┌────────────────────────┬─────────────────────┐
+ *     │ Appstrate SPA          │ agent browser       │
+ *     └────────────────────────┴─────────────────────┘
+ *
+ *   browser:
  *     ┌──────────────────────────────────────────────┐
- *     │ ← → ↻  [ https://example.com ]   ⟳           │  ← navView
- *     ├──────────────────────────────────────────────┤
- *     │   browserView — agent-controllable surface   │
+ *     │ agent browser                                │
  *     └──────────────────────────────────────────────┘
  *
  * Authentication lives entirely inside the webapp pane. The user logs
@@ -26,8 +29,8 @@
  *
  * The bridge keeps a direct reference to `browserView.webContents`, so
  * agent commands execute whether or not the browser pane is currently
- * visible. The user flips to the browser pane via the tray to watch the
- * agent work.
+ * visible. The local chrome opens it beside Appstrate or focuses it
+ * across the full content area.
  *
  * Lifecycle:
  *   1. App ready → read the instance URL from config (or prompt via
@@ -111,16 +114,18 @@ import {
 } from "./config.ts";
 import { start as startBridge, type BridgeClient } from "./bridge/client.ts";
 import { installDownloadInterceptor } from "./bridge/downloads.ts";
-
-const NAVBAR_HEIGHT = 44;
-
-type ActivePane = "webapp" | "browser";
+import {
+  calculateDesktopLayout,
+  toggleBrowserFocus,
+  togglePanel,
+  type ViewMode,
+} from "./layout.ts";
 
 let mainWindow: BaseWindow | null = null;
 let navView: WebContentsView | null = null;
 let browserView: WebContentsView | null = null;
 let webappView: WebContentsView | null = null;
-let activePane: ActivePane = "webapp";
+let activePane: ViewMode = "webapp";
 let tray: Tray | null = null;
 let bridge: BridgeClient | null = null;
 let bridgeState: "connecting" | "connected" | "disconnected" = "disconnected";
@@ -147,9 +152,13 @@ function createMainWindow(): BaseWindow {
   const win = new BaseWindow({
     width: 1200,
     height: 800,
+    minWidth: 900,
+    minHeight: 600,
     title: "Appstrate Desktop",
+    titleBarStyle: "hiddenInset",
     icon: resolveAssetPath("icon.png"),
   });
+  win.contentView.setBackgroundColor("#e0e0e0");
 
   // Navbar view — small HTML chrome at the top, talks to main via IPC.
   // contextIsolation + a preload script keep the renderer-to-main channel
@@ -180,6 +189,7 @@ function createMainWindow(): BaseWindow {
   navView.webContents.on("did-fail-load", (_evt, code, desc, url) => {
     _debugLog(`[navbar] did-fail-load (${code}) ${desc} url=${url}\n`);
   });
+  navView.webContents.on("did-finish-load", () => applyLayout(win));
   const navbarPath = resolveRendererPath("navbar.html");
   _debugLog(`[main] loading navbar from: ${navbarPath}\n`);
   navView.webContents.loadFile(navbarPath).catch((err) => {
@@ -243,42 +253,15 @@ function createMainWindow(): BaseWindow {
   // Default: webapp on TOP, browser pane attached UNDERNEATH (never
   // detached — a detached view's document reports visibilityState
   // "hidden" and visibility-gated in-page code like Cloudflare
-  // Turnstile refuses to run; see setActivePane). The user can flip to
-  // the browser pane via the tray to watch the agent work.
+  // Turnstile refuses to run; see setActivePane).
   win.contentView.addChildView(browserView);
   win.contentView.addChildView(webappView);
+  win.contentView.addChildView(navView);
 
-  // Use `win` (closure) instead of `mainWindow` (module-level) — these
-  // helpers run inside createMainWindow's initial layout() call before
-  // the caller assigns `mainWindow = createMainWindow()`. Referencing
-  // `mainWindow` here would silently bail out and leave views at 0×0.
-  const layoutWebapp = (): void => {
-    if (!webappView) return;
-    const bounds = win.getContentBounds();
-    webappView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
-  };
-  const layoutBrowser = (): void => {
-    if (!navView || !browserView) return;
-    const bounds = win.getContentBounds();
-    navView.setBounds({ x: 0, y: 0, width: bounds.width, height: NAVBAR_HEIGHT });
-    browserView.setBounds({
-      x: 0,
-      y: NAVBAR_HEIGHT,
-      width: bounds.width,
-      height: bounds.height - NAVBAR_HEIGHT,
-    });
-  };
-  const layout = (): void => {
-    // Both panes stay attached so browser automation keeps a visible,
-    // paintable surface even while the webapp covers it. Leaving the
-    // inactive browser view at its initial 0×0 bounds makes
-    // capturePage() return an empty image and starves visibility-gated
-    // page code until the user manually switches panes once.
-    layoutWebapp();
-    layoutBrowser();
-  };
-  layout();
-  win.on("resize", layout);
+  // Use `win` here because the initial layout runs before the caller
+  // assigns the module-level `mainWindow`.
+  applyLayout(win);
+  win.on("resize", () => applyLayout(win));
 
   // Push URL + loading state updates to the navbar renderer so the URL
   // bar reflects reality regardless of whether the user, the agent, or
@@ -296,6 +279,20 @@ function createMainWindow(): BaseWindow {
     navView?.webContents.send("nav:loading-changed", false);
   });
 
+  for (const contents of [navView.webContents, browserView.webContents, webappView.webContents]) {
+    contents.on("before-input-event", (event, input) => {
+      if (
+        input.type === "keyDown" &&
+        input.shift &&
+        (input.meta || input.control) &&
+        input.key.toLowerCase() === "b"
+      ) {
+        event.preventDefault();
+        setActivePane(togglePanel(activePane));
+      }
+    });
+  }
+
   win.on("closed", () => {
     mainWindow = null;
     navView = null;
@@ -307,44 +304,38 @@ function createMainWindow(): BaseWindow {
 }
 
 /**
- * Swap the visible pane between the webapp SPA (default) and the
- * agent-controlled browser. The hidden pane is fully detached from the
- * view tree (not just covered) so it doesn't intercept input or eat
- * compositor cycles. The bridge keeps a direct reference to
- * `browserView.webContents` so agent commands still execute even when
- * the user is on the webapp pane — they just don't see them happen
- * until they flip back.
+ * Keep all views attached and non-zero-sized so browser automation stays
+ * paintable when its panel is closed. Z-order selects the visible surface
+ * in the two focused modes; split mode places the surfaces side by side.
  */
-function setActivePane(next: ActivePane): void {
-  if (!mainWindow || !webappView || !navView || !browserView) return;
-  if (activePane === next) return;
-  // Both panes stay ATTACHED at all times — the inactive one simply
-  // sits underneath (re-adding a child view raises it to the top).
-  // Detaching the browser pane made its document report
-  // `visibilityState: "hidden"`, and visibility-gated in-page code —
-  // Cloudflare Turnstile first among them — then refuses to run, which
-  // silently broke every agent login while the user watched the webapp
-  // pane. An occluded-but-attached view stays "visible" to the DOM.
-  const content = mainWindow.contentView;
-  const bounds = mainWindow.getContentBounds();
-  navView.setBounds({ x: 0, y: 0, width: bounds.width, height: NAVBAR_HEIGHT });
-  browserView.setBounds({
-    x: 0,
-    y: NAVBAR_HEIGHT,
-    width: bounds.width,
-    height: bounds.height - NAVBAR_HEIGHT,
-  });
-  webappView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
-  if (next === "webapp") {
-    content.removeChildView(navView);
+function applyLayout(win: BaseWindow): void {
+  if (!webappView || !navView || !browserView) return;
+  const bounds = win.getContentBounds();
+  const layout = calculateDesktopLayout(bounds.width, bounds.height, activePane);
+  navView.setBounds(layout.chrome);
+  webappView.setBounds(layout.webapp);
+  browserView.setBounds(layout.browser);
+
+  const content = win.contentView;
+  if (activePane === "webapp") {
     content.addChildView(browserView);
     content.addChildView(webappView);
   } else {
     content.addChildView(webappView);
-    content.addChildView(navView);
     content.addChildView(browserView);
   }
+  content.addChildView(navView);
+  navView.webContents.send("layout:changed", {
+    mode: activePane,
+    browserWidth: bounds.width - layout.webapp.width,
+  });
+}
+
+function setActivePane(next: ViewMode): void {
+  if (!mainWindow || !webappView || !navView || !browserView) return;
+  if (activePane === next) return;
   activePane = next;
+  applyLayout(mainWindow);
   refreshTray();
 }
 
@@ -372,6 +363,15 @@ function registerNavIpc(): void {
   });
   ipcMain.handle("nav:open-devtools", (): void => {
     browserView?.webContents.openDevTools({ mode: "detach" });
+  });
+  ipcMain.handle("layout:toggle-panel", (): void => {
+    setActivePane(togglePanel(activePane));
+  });
+  ipcMain.handle("layout:toggle-browser-focus", (): void => {
+    setActivePane(toggleBrowserFocus(activePane));
+  });
+  ipcMain.handle("layout:close-browser", (): void => {
+    setActivePane("webapp");
   });
 }
 
@@ -409,7 +409,7 @@ function buildTrayMenu(): Menu {
       enabled: false,
     },
     {
-      label: `Active pane: ${activePane}`,
+      label: `View: ${activePane}`,
       enabled: false,
     },
     { type: "separator" },
@@ -422,14 +422,14 @@ function buildTrayMenu(): Menu {
       },
     },
     {
-      label: "Switch to webapp pane",
-      enabled: activePane !== "webapp",
-      click: (): void => setActivePane("webapp"),
+      label: activePane === "webapp" ? "Open browser panel" : "Close browser panel",
+      accelerator: "CmdOrCtrl+Shift+B",
+      click: (): void => setActivePane(togglePanel(activePane)),
     },
     {
-      label: "Switch to browser pane",
-      enabled: activePane !== "browser",
-      click: (): void => setActivePane("browser"),
+      label: activePane === "browser" ? "Show split view" : "Focus browser",
+      enabled: activePane !== "webapp",
+      click: (): void => setActivePane(toggleBrowserFocus(activePane)),
     },
     { type: "separator" },
     {

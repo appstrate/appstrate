@@ -19,25 +19,61 @@
       .bar {
         display: flex;
         align-items: center;
+        justify-content: flex-end;
+        box-sizing: border-box;
+        width: 100%;
         height: 44px;
+        padding-left: 76px;
+        border-bottom: 1px solid #e0e0e0;
+      }
+      .browser-controls {
+        display: none;
+        align-items: center;
+        box-sizing: border-box;
+        flex: 0 0 auto;
+        height: 100%;
         padding: 0 8px;
         gap: 4px;
-        border-bottom: 1px solid #e0e0e0;
+        border-left: 1px solid #e0e0e0;
+      }
+      .bar[data-mode="split"] .browser-controls,
+      .bar[data-mode="browser"] .browser-controls {
+        display: flex;
+      }
+      .closed-controls {
+        display: flex;
+        align-items: center;
+        height: 100%;
+        padding-right: 8px;
+      }
+      .bar:not([data-mode="webapp"]) .closed-controls {
+        display: none;
       }
       .nav-button {
         background: none;
         border: none;
         cursor: pointer;
-        padding: 6px 10px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        padding: 0;
         border-radius: 6px;
-        font-size: 16px;
         color: #1d1d1f;
-        line-height: 1;
         -webkit-app-region: no-drag;
-        min-width: 32px;
       }
       .nav-button:hover {
         background: #e8e8ed;
+      }
+      .nav-button svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.5;
       }
       .nav-button:disabled {
         opacity: 0.3;
@@ -61,6 +97,15 @@
         border-color: #007aff;
         box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
       }
+      .collapse-icon {
+        display: none;
+      }
+      .bar[data-mode="browser"] .expand-icon {
+        display: none;
+      }
+      .bar[data-mode="browser"] .collapse-icon {
+        display: block;
+      }
       .spinner {
         display: inline-block;
         width: 12px;
@@ -82,26 +127,57 @@
     </style>
   </head>
   <body>
-    <div class="bar">
-      <button class="nav-button" id="back" title="Back">←</button>
-      <button class="nav-button" id="forward" title="Forward">→</button>
-      <button class="nav-button" id="reload" title="Reload">↻</button>
-      <input
-        class="url"
-        id="url"
-        type="text"
-        placeholder="Enter URL or search…"
-        spellcheck="false"
-        autocomplete="off"
-      />
-      <span class="spinner hidden" id="spinner"></span>
+    <div class="bar" id="bar" data-mode="webapp">
+      <div class="closed-controls">
+        <button class="nav-button" id="open-panel" title="Open browser panel">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <rect x="2.5" y="3" width="15" height="14" rx="2"></rect>
+            <path d="M12.5 3v14"></path>
+          </svg>
+        </button>
+      </div>
+      <div class="browser-controls" id="browser-controls">
+        <button class="nav-button" id="back" title="Back">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 5-5 5 5 5"></path></svg>
+        </button>
+        <button class="nav-button" id="forward" title="Forward">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 5 5 5-5 5"></path></svg>
+        </button>
+        <button class="nav-button" id="reload" title="Reload">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M15.5 7.5A6 6 0 1 0 16 12"></path>
+            <path d="M15.5 3.5v4h-4"></path>
+          </svg>
+        </button>
+        <input
+          class="url"
+          id="url"
+          type="text"
+          placeholder="Enter URL or search…"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <span class="spinner hidden" id="spinner"></span>
+        <button class="nav-button" id="focus-browser" title="Focus browser">
+          <svg class="expand-icon" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4"></path>
+          </svg>
+          <svg class="collapse-icon" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M3 7h4V3M17 7h-4V3M3 13h4v4M17 13h-4v4"></path>
+          </svg>
+        </button>
+        <button class="nav-button" id="close-browser" title="Close browser panel">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m5 5 10 10M15 5 5 15"></path>
+          </svg>
+        </button>
+      </div>
     </div>
     <script>
-      console.log("[navbar] script loaded, window.appstrate =", typeof window.appstrate);
-      if (!window.appstrate) {
-        console.error("[navbar] window.appstrate is undefined — preload did not run");
-      }
       const $ = (id) => document.getElementById(id);
+      const bar = $("bar");
+      const browserControls = $("browser-controls");
+      const focusButton = $("focus-browser");
       const urlInput = $("url");
       const spinner = $("spinner");
 
@@ -124,8 +200,10 @@
       $("back").addEventListener("click", () => window.appstrate.back());
       $("forward").addEventListener("click", () => window.appstrate.forward());
       $("reload").addEventListener("click", () => window.appstrate.reload());
+      $("open-panel").addEventListener("click", () => window.appstrate.togglePanel());
+      $("focus-browser").addEventListener("click", () => window.appstrate.toggleBrowserFocus());
+      $("close-browser").addEventListener("click", () => window.appstrate.closeBrowser());
       urlInput.addEventListener("keydown", (e) => {
-        console.log("[navbar] keydown", e.key);
         if (e.key === "Enter") go();
       });
 
@@ -140,6 +218,12 @@
 
       window.appstrate.onLoadingChanged((loading) => {
         spinner.classList.toggle("hidden", !loading);
+      });
+
+      window.appstrate.onLayoutChanged(({ mode, browserWidth }) => {
+        bar.dataset.mode = mode;
+        browserControls.style.width = mode === "browser" ? "100%" : `${browserWidth}px`;
+        focusButton.title = mode === "browser" ? "Show split view" : "Focus browser";
       });
     </script>
   </body>
