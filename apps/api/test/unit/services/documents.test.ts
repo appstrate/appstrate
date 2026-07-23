@@ -11,13 +11,11 @@ import {
   deriveDownloadable,
   wouldExceedOrgQuota,
   retentionExpiry,
-  isDocumentUri,
-  parseDocumentUri,
-  documentUri,
   createHashingCounter,
   toDocumentDto,
   type DocumentRow,
 } from "../../../src/services/documents.ts";
+import { isDocumentUri, parseDocumentUri, documentUri } from "@appstrate/core/document-uri";
 import type { Actor } from "@appstrate/connect";
 
 const userA: Actor = { type: "user", id: "user-a" };

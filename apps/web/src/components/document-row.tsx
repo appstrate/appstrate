@@ -78,7 +78,7 @@ export function DocumentRow({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        {onPreview && (doc.previewable ?? !!doc.preview_url) ? (
+        {onPreview && doc.previewable ? (
           <Button
             variant="ghost"
             size="icon"

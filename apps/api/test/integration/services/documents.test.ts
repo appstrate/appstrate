@@ -576,8 +576,8 @@ describe("documents service + routes", () => {
 
   it("FOR UPDATE re-check: two concurrent run outputs — only the one that fits commits, loser 413", async () => {
     // RUN_MAX_OUTPUT_BYTES = 15 so two 10-byte publishes cannot both land. Both
-    // pass the pre-stream fast-check (run total = 0) and both stream their bytes;
-    // the org `FOR UPDATE` lock serialises the commit re-check, so the second
+    // stream their bytes fully (the per-run cap is no longer checked mid-stream);
+    // the org `FOR UPDATE` lock serialises the commit-time re-check, so the second
     // observes the first's committed total (10) and is rejected (10 + 10 > 15).
     await withEnv("RUN_MAX_OUTPUT_BYTES", "15", async () => {
       const runId = await seedRunRow(scope);
@@ -592,6 +592,30 @@ describe("documents service + routes", () => {
       expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 413 });
 
       // Exactly one row committed, and the org counter reflects only its 10 bytes.
+      const rows = await db.select().from(documents).where(eq(documents.runId, runId));
+      expect(rows).toHaveLength(1);
+      expect(await orgBytesUsed(ctx.orgId)).toBe(10);
+    });
+  });
+
+  it("re-POST of an already-committed file dedups (200) even when the run budget is exhausted", async () => {
+    // Regression: the per-run cap is enforced at commit time only, NOT mid-stream.
+    // A lost-response retry (or sweep rerun) re-publishes an already-committed
+    // file when the run's output total already sits at/over the cap. The retry
+    // must be an idempotent dedup, not a 413 — the mid-stream run-cap check used
+    // to trip first and defeat that idempotency.
+    await withEnv("RUN_MAX_OUTPUT_BYTES", "10", async () => {
+      const runId = await seedRunRow(scope);
+      // First publish lands and consumes the entire run budget (10 of 10 bytes).
+      const first = await publishStream(scope, runId, "out.txt", "0123456789");
+      expect(first.deduped).toBe(false);
+
+      // Same (run, sha256, name) re-POST with the budget fully spent → dedup, not 413.
+      const retry = await publishStream(scope, runId, "out.txt", "0123456789");
+      expect(retry.deduped).toBe(true);
+      expect(retry.row.id).toBe(first.row.id);
+
+      // Exactly one row, counted once — the retry stored no second copy.
       const rows = await db.select().from(documents).where(eq(documents.runId, runId));
       expect(rows).toHaveLength(1);
       expect(await orgBytesUsed(ctx.orgId)).toBe(10);

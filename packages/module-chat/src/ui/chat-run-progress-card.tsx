@@ -49,7 +49,7 @@ import {
   type ChatRunDocument,
   type RunStatus,
 } from "./run-events.ts";
-import { downloadChatDocument } from "./document-download.ts";
+import { documentActivation } from "./doc-activation.ts";
 import type { ToolPhase } from "./tool-result.ts";
 
 /**
@@ -63,26 +63,28 @@ function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
   if (documents.length === 0) return null;
   return (
     <div className="pointer-events-auto flex flex-wrap gap-1.5 px-3 pb-2">
-      {documents.map((doc) => (
-        <button
-          key={doc.id}
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (opener) opener({ id: doc.id, name: doc.name });
-            else void downloadChatDocument(doc.id, doc.name, getHeaders?.() ?? {});
-          }}
-          title={opener ? `Aperçu de ${doc.name}` : doc.name}
-          className="border-border bg-muted/40 hover:bg-muted text-foreground flex max-w-[16rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
-        >
-          {opener ? (
-            <EyeIcon className="text-muted-foreground size-3 shrink-0" />
-          ) : (
-            <DownloadIcon className="text-muted-foreground size-3 shrink-0" />
-          )}
-          <span className="truncate">{doc.name}</span>
-        </button>
-      ))}
+      {documents.map((doc) => {
+        const { onActivate, label } = documentActivation(doc, opener, getHeaders);
+        return (
+          <button
+            key={doc.id}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onActivate();
+            }}
+            title={label}
+            className="border-border bg-muted/40 hover:bg-muted text-foreground flex max-w-[16rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+          >
+            {opener ? (
+              <EyeIcon className="text-muted-foreground size-3 shrink-0" />
+            ) : (
+              <DownloadIcon className="text-muted-foreground size-3 shrink-0" />
+            )}
+            <span className="truncate">{doc.name}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

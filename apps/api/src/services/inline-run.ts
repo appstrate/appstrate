@@ -21,15 +21,12 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import type { InlineRunBody, InlineRunPreflightResult } from "./inline-run-preflight.ts";
-import type { ParsedInput } from "./input-parser.ts";
+import { collectMountedDocumentIds, type ParsedInput } from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import {
-  documentUri,
-  extractDocumentIds,
-  extractDocumentIdsFromText,
-} from "@appstrate/core/document-uri";
+import { documentUri, extractDocumentIdsFromText } from "@appstrate/core/document-uri";
+import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import { validationFailed } from "../lib/errors.ts";
 
 export type { InlineRunBody };
@@ -123,14 +120,21 @@ export function buildShadowLoadedPackage(
  * URIs the run cannot actually read.
  *
  * A run only receives a document when the manifest declares a file input field
- * AND the `document://` URI is passed through the top-level `input` — the
- * platform then streams the file into the workspace under `documents/`. A
- * `document://` URI merely pasted into the sub-agent's prompt text is inert: the
- * runtime has no way to fetch it, so the run launches against dead URIs and the
- * sub-agent silently sees nothing. The chat model has been observed doing
- * exactly this. Fail loudly with a recoverable 400 that names the offending URIs
- * and the exact fix, so the chat model self-corrects (its prompt already retries
- * recoverable field-validation errors) instead of shipping silent garbage.
+ * AND the `document://` URI is passed through the top-level `input` in THAT
+ * field — the platform then streams the file into the workspace under
+ * `documents/`. A `document://` URI merely pasted into the sub-agent's prompt
+ * text — or dropped into a non-file input field — is inert: the runtime has no
+ * way to fetch it, so the run launches against dead URIs and the sub-agent
+ * silently sees nothing. The chat model has been observed doing exactly this.
+ * Fail loudly with a recoverable 400 that names the offending URIs and the exact
+ * fix, so the chat model self-corrects (its prompt already retries recoverable
+ * field-validation errors) instead of shipping silent garbage.
+ *
+ * The covered set is therefore the mounted document ids only —
+ * `collectMountedDocumentIds`, which walks the DECLARED file fields
+ * (`format:"uri"` + `contentMediaType`) via the same `collectFileRefs` logic the
+ * consume path uses — not every `document://` string anywhere in the input JSON.
+ * A URI in a plain string field counts as uncovered because it never mounts.
  *
  * `document://` only, by design: this runs AFTER `parseRequestInput`, which has
  * already rewritten any `upload://` input to a fresh `document://` id the model
@@ -140,10 +144,14 @@ export function buildShadowLoadedPackage(
  * lives in the apps/api uploads service), and the observed live failure is
  * `document://` URIs. Pure — exported for unit tests.
  */
-export function assertPromptDocumentsCoveredByInput(prompt: string, input: unknown): void {
+export function assertPromptDocumentsCoveredByInput(
+  prompt: string,
+  input: unknown,
+  inputSchema: JSONSchemaObject | undefined,
+): void {
   const promptIds = extractDocumentIdsFromText(prompt);
   if (promptIds.length === 0) return;
-  const covered = new Set(extractDocumentIds(input));
+  const covered = collectMountedDocumentIds(inputSchema, input);
   const uncovered = promptIds.filter((id) => !covered.has(id));
   if (uncovered.length === 0) return;
   throw validationFailed([
@@ -198,8 +206,12 @@ export async function triggerInlineRun(params: {
 
   // Reject BEFORE any durable side effect (shadow row, pipeline) when the
   // model-authored prompt names document:// URIs that the resolved input does
-  // not mount — a recoverable 400 the chat model can act on.
-  assertPromptDocumentsCoveredByInput(prompt, effectiveInput);
+  // not mount — a recoverable 400 the chat model can act on. The manifest's
+  // input schema tells the guard which fields actually mount a document.
+  const inputSchema = manifest.input?.schema
+    ? asJSONSchemaObject(manifest.input.schema)
+    : undefined;
+  assertPromptDocumentsCoveredByInput(prompt, effectiveInput, inputSchema);
 
   // Reject an unknown/malformed explicit `modelId` with a clean 404 before we
   // mint a shadow package — avoids both a leaked shadow row and the downstream

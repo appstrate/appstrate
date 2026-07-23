@@ -41,7 +41,6 @@ import {
 import {
   consumeUploadStream,
   peekUploads,
-  isUploadUri,
   parseUploadUri,
   isUnsniffableMime,
   sniffedMimeMatchesDeclared,
@@ -51,14 +50,17 @@ import {
 } from "./uploads.ts";
 import { getRun } from "./state/runs.ts";
 import {
-  isDocumentUri,
-  parseDocumentUri,
-  documentUri,
   getDocumentForActor,
   streamDocumentContent,
   assertWithinDocumentLimits,
   type PendingUploadMaterialization,
 } from "./documents.ts";
+import {
+  isUploadUri,
+  isDocumentUri,
+  parseDocumentUri,
+  documentUri,
+} from "@appstrate/core/document-uri";
 import { getActor } from "../lib/actor.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
@@ -252,6 +254,35 @@ export function collectFileRefs(
     }
   }
   return refs;
+}
+
+/**
+ * The set of `document://` ids a run will actually MOUNT: those placed in a
+ * DECLARED file input field (a `format:"uri"` + `contentMediaType` property in
+ * the manifest input schema). Only these refs are streamed into the run
+ * workspace by `collectFileRefs` / the consume path — a `document://` URI
+ * dropped into any non-file field never mounts. Reuses `collectFileRefs` so the
+ * file-field detection lives in exactly one place (no duplicated schema walk).
+ *
+ * Tolerant: returns an empty set when there is no schema or the input is not a
+ * plain object. Callers pass an input that has already cleared `collectFileRefs`
+ * once (post-parse), so the re-walk cannot surface a new validation error on the
+ * happy path. Pure — exported for the inline-run prompt-coverage guard + tests.
+ */
+export function collectMountedDocumentIds(
+  inputSchema: JSONSchemaObject | undefined,
+  input: unknown,
+): Set<string> {
+  const ids = new Set<string>();
+  if (!inputSchema || input === null || typeof input !== "object" || Array.isArray(input)) {
+    return ids;
+  }
+  for (const ref of collectFileRefs(inputSchema, input as Record<string, unknown>)) {
+    if (ref.kind !== "document") continue;
+    const id = parseDocumentUri(ref.uri);
+    if (id) ids.add(id);
+  }
+  return ids;
 }
 
 // ---------------------------------------------------------------------------

@@ -37,6 +37,7 @@ import {
 } from "@appstrate/db/storage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { StorageAlreadyExistsError } from "@appstrate/core/storage";
+import { UPLOAD_URI_PREFIX, UPLOAD_ID_RE } from "@appstrate/core/document-uri";
 import { getEnv } from "@appstrate/env";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
@@ -51,9 +52,6 @@ const UPLOAD_BUCKET = "uploads";
 const DEFAULT_EXPIRY_SECONDS = 900; // 15 min
 const MAX_FILENAME_LEN = 255;
 const DEFAULT_MAX_SIZE = 100 * 1024 * 1024; // 100 MB absolute ceiling
-
-/** `upload://upl_xxx` — the URI form stored inside agent input JSON. */
-export const UPLOAD_URI_PREFIX = "upload://";
 
 /**
  * Post-consume reuse window in milliseconds. Within `consumedAt + this`, a
@@ -131,19 +129,6 @@ export function sanitizeFilename(name: string): string {
   if (!cleaned) return "file";
   return cleaned.slice(0, MAX_FILENAME_LEN);
 }
-
-/** Is this value a reference to a staged upload? */
-export function isUploadUri(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith(UPLOAD_URI_PREFIX);
-}
-
-/**
- * Strict upload id shape: `upl_` + at least 8 alphanumeric/`_`/`-` characters.
- * `prefixedId("upl")` produces ids well above this threshold, so the bound is
- * safely below the real minimum. Rejects malformed input before it reaches
- * the database SELECT.
- */
-const UPLOAD_ID_RE = /^upl_[A-Za-z0-9_-]{8,}$/;
 
 /**
  * Extract the upload id from an `upload://upl_xxx` URI. Returns null if the

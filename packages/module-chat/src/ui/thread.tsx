@@ -47,7 +47,7 @@ import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import { documentContentHref, resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
-import { downloadChatDocument } from "./document-download.ts";
+import { documentActivation } from "./doc-activation.ts";
 import { useChatHeaders, useOpenDocument, type GetHeaders } from "./runtime-context.ts";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
@@ -323,15 +323,13 @@ function SentAttachmentChip() {
   }
 
   const docId = resolved.id;
-  // With a host opener (web shell), a resolved document opens the in-app preview
-  // modal; without one (embedded mounts) it falls back to the authenticated
-  // download. Same choice drives the action and its label.
-  const onActivate = opener
-    ? () => opener({ id: docId, name: name || "document" })
-    : () => void downloadChatDocument(docId, name || "document", getHeaders?.() ?? {});
-  const actionLabel = opener
-    ? `Aperçu de ${name || "le document"}`
-    : `Télécharger ${name || "le document"}`;
+  // Opener (in-app preview modal, web shell) vs. authenticated download
+  // (embedded mounts) — one shared decision with a matching label.
+  const { onActivate, label: actionLabel } = documentActivation(
+    { id: docId, name },
+    opener,
+    getHeaders,
+  );
 
   if (isImage) {
     return (

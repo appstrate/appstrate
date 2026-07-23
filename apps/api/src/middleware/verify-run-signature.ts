@@ -97,5 +97,11 @@ export const verifyRunSignature = makeRunSignatureGuard(
  * secret authenticates the caller as the run; the body's integrity is captured
  * by the server-computed sha256 returned to the caller. The request body is
  * left completely untouched so the handler can stream it straight to storage.
+ *
+ * Trade-off: because the body is unsigned, within the timestamp tolerance a
+ * captured header set authenticates an ARBITRARY body (up to the file cap) —
+ * accepted because the channel is TLS + per-run-secret gated and the server
+ * echoes the computed sha256 back to the caller; body-signing is not feasible
+ * for a streamed upload.
  */
 export const verifyRunUploadSignature = makeRunSignatureGuard(async () => "");

@@ -111,6 +111,10 @@ export function createRunsRouter() {
       // with this same id.
       const runId = `run_${crypto.randomUUID()}`;
 
+      // Flips true the instant the pipeline launches (run row inserted, workload
+      // dispatched). Past that point the run OWNS its workspace — a later failure
+      // (e.g. the read-back below) must NOT delete a live run's input documents.
+      let launched = false;
       try {
         const inputResult = await parseRequestInput(
           c,
@@ -202,6 +206,8 @@ export function createRunsRouter() {
           runnerKind: runner.kind,
           manifestCache,
         });
+        // Pipeline launched — the run now owns its workspace teardown.
+        launched = true;
 
         await recordAuditFromContext(c, {
           action: "run.triggered",
@@ -235,9 +241,10 @@ export function createRunsRouter() {
       } catch (err) {
         // Roll back any input documents streamed into the run workspace before
         // the run launched (size/MIME mismatch, failed preflight, …). Once
-        // `prepareAndExecuteRun` resolves the run owns its own teardown, so this
-        // only fires on the pre-launch error path. Best-effort + idempotent.
-        await deleteRunWorkspace(runId);
+        // `prepareAndExecuteRun` resolves the run owns its own teardown, so a
+        // post-launch failure (e.g. the read-back throwing) must NOT delete a
+        // live run's workspace. Best-effort + idempotent.
+        if (!launched) await deleteRunWorkspace(runId);
         throw err;
       }
     },
@@ -523,6 +530,10 @@ export function createRunsRouter() {
       // for the same reason as the agent route (documents stream straight
       // into the run's workspace namespace).
       const runId = `run_${crypto.randomUUID()}`;
+      // Flips true the instant `triggerInlineRun` launches the pipeline. Past
+      // that point the run OWNS its workspace — a later failure (e.g. the
+      // read-back below) must NOT delete a live run's input documents.
+      let launched = false;
       try {
         const parsed = await parseRequestInput(
           c,
@@ -542,6 +553,8 @@ export function createRunsRouter() {
           apiKeyId: c.get("apiKeyId") ?? undefined,
           traceparent: runTraceparent(c),
         });
+        // Pipeline launched — the run now owns its workspace teardown.
+        launched = true;
 
         await recordAuditFromContext(c, {
           action: "run.triggered",
@@ -568,8 +581,10 @@ export function createRunsRouter() {
         return c.json(row, 201);
       } catch (err) {
         // Roll back any input documents streamed into the run workspace before
-        // the run launched — same pre-launch teardown as the agent route.
-        await deleteRunWorkspace(runId);
+        // the run launched — same pre-launch teardown as the agent route. Once
+        // `triggerInlineRun` has launched the pipeline the run owns its own
+        // teardown, so a post-launch failure must NOT delete its workspace.
+        if (!launched) await deleteRunWorkspace(runId);
         throw err;
       }
     },

@@ -55,7 +55,6 @@ import {
   PREVIEW_TOKEN_TTL_SECONDS,
 } from "./document-preview.ts";
 import {
-  DOCUMENT_URI_PREFIX,
   DOCUMENT_ID_RE,
   isDocumentUri,
   parseDocumentUri,
@@ -65,11 +64,6 @@ import {
 
 /** Durable documents bucket (distinct from the ephemeral `uploads` bucket). */
 export const DOCUMENTS_BUCKET = "documents";
-
-// Canonical `document://` URI contract lives in @appstrate/core/document-uri
-// (shared with the MCP router, the chat module, and the runtime). Re-exported
-// here to preserve this service's public surface.
-export { DOCUMENT_URI_PREFIX, isDocumentUri, parseDocumentUri, documentUri };
 
 /**
  * Split a `bucket/path/to/object` storage key into its `{ bucket, path }` parts,
@@ -214,11 +208,9 @@ export function retentionExpiry(retentionDays: number | undefined, now = new Dat
   return new Date(now.getTime() + retentionDays * 24 * 60 * 60 * 1000);
 }
 
-/** Mid-stream byte ceilings for {@link createHashingCounter}. */
+/** Mid-stream byte ceiling for {@link createHashingCounter}. */
 export interface HashingCounterCaps {
   perFileCap: number;
-  runOutputCap: number;
-  runOutputUsed: number;
 }
 
 /**
@@ -229,33 +221,29 @@ export interface HashingCounterCaps {
  * only after the pipe resolves). Exported so the streaming-hash contract is
  * unit-testable in isolation.
  *
- * When `caps` is supplied, the stream also enforces byte ceilings mid-stream —
- * the per-file cap and the run's remaining output budget. As soon as either is
- * exceeded the stream errors (aborting the S3 write so no full object lands),
- * with a distinct {@link payloadTooLarge} message per limit so the caller
- * surfaces the right 413. Used by the agent-output ingestion path, which has no
- * declared size to pre-check. Without `caps` it just counts + hashes.
+ * When `caps` is supplied, the stream also enforces the per-file byte ceiling
+ * mid-stream: as soon as it is exceeded the stream errors (aborting the S3 write
+ * so no full object lands), with a {@link payloadTooLarge} message so the caller
+ * surfaces a 413. The per-RUN output cap is deliberately NOT enforced here — it
+ * is checked authoritatively at commit time ({@link commitDocumentRow}) only, so
+ * that a retried publish of an already-committed file can still reach dedup and
+ * return an idempotent 200 instead of tripping a mid-stream 413. Used by the
+ * agent-output ingestion path, which has no declared size to pre-check. Without
+ * `caps` it just counts + hashes.
  */
 export function createHashingCounter(caps?: HashingCounterCaps): {
   stream: TransformStream<Uint8Array, Uint8Array>;
   result: () => { bytes: number; sha256: string };
 } {
   const hasher = new Bun.CryptoHasher("sha256");
-  const runRemaining = caps ? caps.runOutputCap - caps.runOutputUsed : Infinity;
   let bytes = 0;
   let digest: string | null = null;
   const stream = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       bytes += chunk.byteLength;
-      if (caps) {
-        if (bytes > caps.perFileCap) {
-          controller.error(payloadTooLarge(perFileCapMessage(caps.perFileCap)));
-          return;
-        }
-        if (bytes > runRemaining) {
-          controller.error(payloadTooLarge(runOutputCapMessage(caps.runOutputCap)));
-          return;
-        }
+      if (caps && bytes > caps.perFileCap) {
+        controller.error(payloadTooLarge(perFileCapMessage(caps.perFileCap)));
+        return;
       }
       hasher.update(chunk);
       controller.enqueue(chunk);
@@ -502,9 +490,10 @@ async function commitDocumentRow(params: {
   /**
    * Per-run output ceiling ({@link createDocumentFromStream} only). When set,
    * the run's `agent_output` total is re-summed under the same org `FOR UPDATE`
-   * lock and this file is rejected (413) if it would overrun the cap — closing
-   * the race where concurrent publishes each pass the pre-stream check on a
-   * stale total.
+   * lock and this file is rejected (413) if it would overrun the cap. This is
+   * the sole per-run cap enforcement point (the stream no longer pre-checks or
+   * enforces it mid-stream), and the lock serialises concurrent publishes so
+   * each observes the other's committed bytes rather than a stale total.
    */
   runOutputCap?: number;
 }): Promise<DocumentRow> {
@@ -658,9 +647,14 @@ async function findDedupDocument(
  * Ingest an agent-published document from a run's streaming request body into a
  * durable `agent_output` document. Mirrors {@link createDocumentFromUpload} but
  * for the run→platform channel: the bytes arrive as a raw stream (no staged
- * upload), so the caps are enforced mid-stream via {@link createHashingCounter}'s
- * `caps` (per-file + per-run output budget, both 413) and the org quota +
- * counter are committed transactionally via the shared {@link commitDocumentRow}.
+ * upload), so the per-file cap is enforced mid-stream via
+ * {@link createHashingCounter}'s `caps` (413) while the org quota, the per-run
+ * output cap, and the counter are all committed transactionally via the shared
+ * {@link commitDocumentRow}. The per-run cap is enforced at commit time ONLY —
+ * a genuinely-new over-budget file therefore streams fully (bounded by the
+ * per-file cap) before its 413, a deliberate trade-off so a retried publish of
+ * an already-committed file reaches the dedup path below and returns an
+ * idempotent 200 rather than tripping a premature mid-stream run-cap 413.
  *
  * Idempotent for the sweep's at-least-once retries: if this run already
  * published a document with the SAME sha256 AND name, the just-streamed object
@@ -681,11 +675,8 @@ export async function createDocumentFromStream(
   const documentId = prefixedId("doc");
   const storagePath = documentStoragePath(scope, documentId, input.name);
 
-  const runOutputUsed = await runOutputBytesUsed(db, scope, runId);
   const digester = createHashingCounter({
     perFileCap: env.DOCUMENT_MAX_FILE_BYTES,
-    runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
-    runOutputUsed,
   });
 
   try {
@@ -732,8 +723,9 @@ export async function createDocumentFromStream(
       byteCount,
       sha256,
       expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
-      // Authoritative per-run cap re-check under the org lock (the pre-stream
-      // `runOutputUsed` read above is only the fast reject — see commitDocumentRow).
+      // Authoritative (and only) per-run cap check — re-summed under the org
+      // `FOR UPDATE` lock inside commitDocumentRow. Enforced here, not mid-stream,
+      // so a retried publish of an already-committed file reaches dedup first.
       runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
     });
     return { row, deduped: false };
@@ -1185,6 +1177,11 @@ export async function cleanupExpiredDocuments(): Promise<number> {
  * over time. This pass recomputes it from the rows and writes the corrected
  * value only for orgs where it differs (a single correlated UPDATE; floors at 0
  * for orgs whose documents all cascaded away). Returns the number of orgs fixed.
+ *
+ * Under READ COMMITTED this bulk UPDATE can transiently clobber a concurrent
+ * transactional increment (the recomputed SUM is read before the in-flight
+ * insert commits), so the counter may momentarily drift; the next pass
+ * self-heals it — this is a drift safety net, not a serialized counter.
  *
  * Note: the cascade ALSO orphans the corresponding S3 objects. The storage
  * abstraction (`@appstrate/core/storage`) exposes no list/enumerate operation,
