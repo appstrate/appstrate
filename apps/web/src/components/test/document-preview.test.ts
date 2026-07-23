@@ -79,3 +79,39 @@ describe("DocumentPreview non-previewable fallback", () => {
     expect(source).toContain("onClose();");
   });
 });
+
+describe("DocumentPreview markdown rendering", () => {
+  it("renders markdown docs via the sanitized Markdown component, client-side", () => {
+    // Rich markdown must go through the React `Markdown` component (same
+    // sanitization/trust as the run report), never the inert text/plain iframe.
+    expect(source).toContain('import { Markdown } from "./markdown"');
+    expect(source).toContain("function MarkdownPreview(");
+    expect(source).toContain("<MarkdownPreview");
+  });
+
+  it("detects markdown by text/markdown mime (tolerating params) or a .md text-ish file", () => {
+    expect(source).toContain('m === "text/markdown"');
+    expect(source).toContain('m.startsWith("text/markdown;")');
+    expect(source).toContain('name.toLowerCase().endsWith(".md")');
+  });
+
+  it("caps inline markdown at 1 MiB and falls back above it", () => {
+    // Oversized md skips the fetch/render and drops through to the existing
+    // text preview / download path.
+    expect(source).toContain("const INLINE_MARKDOWN_MAX_BYTES = 1_048_576");
+    expect(source).toContain("data.size <= INLINE_MARKDOWN_MAX_BYTES");
+  });
+
+  it("fetches markdown bytes authenticated via the typed client (not the preview URL)", () => {
+    expect(source).toContain('client.GET("/api/documents/{id}/content"');
+    expect(source).toContain('parseAs: "text"');
+  });
+
+  it("gates the markdown branch on isMarkdownDoc so non-markdown kinds are unchanged", () => {
+    // image/pdf/text/html branches are only reached for non-markdown docs.
+    expect(source).toContain("isMarkdownDoc(data.mime, doc.name)");
+    expect(source).toContain('kind === "image"');
+    expect(source).toContain('kind === "pdf"');
+    expect(source).toContain('kind === "text"');
+  });
+});

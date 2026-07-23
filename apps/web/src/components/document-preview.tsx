@@ -37,8 +37,10 @@ import { DownloadIcon } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
+import { Markdown } from "./markdown";
 import { LoadingState, ErrorState } from "./page-states";
 import { useDocument, useDocumentDownload } from "../hooks/use-documents";
+import { client } from "../api/client";
 
 /**
  * The EXACT iframe sandbox token set for the HTML preview. Exported (and asserted
@@ -47,6 +49,65 @@ import { useDocument, useDocumentDownload } from "../hooks/use-documents";
  * iframe is intentionally sandboxless (see file header).
  */
 export const PREVIEW_IFRAME_SANDBOX = "allow-scripts";
+
+/**
+ * Inline-render cap for markdown: at or below this we fetch the doc and render it
+ * with the sanitized `Markdown` component; above it we skip the fetch and fall
+ * back to the existing behavior (plain-text preview or download).
+ */
+const INLINE_MARKDOWN_MAX_BYTES = 1_048_576; // 1 MiB
+
+/**
+ * Markdown detection: an explicit `text/markdown` mime (tolerating a
+ * `; charset=…` parameter) or a `.md` filename served with a text-ish mime
+ * (the preview route relabels markdown as `text/plain` to defeat md→HTML
+ * sniffing — so rich rendering must be decided client-side from mime/name).
+ */
+function isMarkdownDoc(mime: string, name: string): boolean {
+  const m = mime.toLowerCase();
+  if (m === "text/markdown" || m.startsWith("text/markdown;")) return true;
+  return name.toLowerCase().endsWith(".md") && m.startsWith("text/");
+}
+
+/**
+ * Fetch a markdown document's bytes (authenticated via the typed client, which
+ * injects the org/app scope headers) and render them with the sanitized
+ * `Markdown` component — same trust level as the run report (agent-generated
+ * content, rendered client-side). This is the ONLY path that turns markdown into
+ * HTML; the server preview route deliberately serves it as inert `text/plain`.
+ */
+function MarkdownPreview({ id, unavailable }: { id: string; unavailable: string }) {
+  const [state, setState] = useState<{ text?: string; failed?: boolean }>({});
+
+  // A `key`ed remount per doc id gives fresh state, so no synchronous reset.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data, error } = await client.GET("/api/documents/{id}/content", {
+          params: { path: { id } },
+          parseAs: "text",
+        });
+        if (cancelled) return;
+        if (error || data === undefined) setState({ failed: true });
+        else setState({ text: data });
+      } catch {
+        if (!cancelled) setState({ failed: true });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (state.failed) return <ErrorState message={unavailable} />;
+  if (state.text === undefined) return <LoadingState />;
+  return (
+    <div className="bg-background h-full w-full overflow-auto p-4">
+      <Markdown>{state.text}</Markdown>
+    </div>
+  );
+}
 
 /**
  * Fetch a text/plaintext preview and render it in a scrollable monospace `<pre>`.
@@ -138,6 +199,13 @@ export function DocumentPreview({
     // stays only to keep renderBody total for the pathological frame where the
     // effect hasn't run yet while still mounted.
     if (!previewUrl) return <ErrorState message={t("preview.unavailable")} />;
+
+    // Markdown → rich client-side render (below the size cap). Oversized md
+    // falls through to the plain-text preview below. `data` is non-null here
+    // (a truthy `previewUrl` comes from it).
+    if (data && isMarkdownDoc(data.mime, doc.name) && data.size <= INLINE_MARKDOWN_MAX_BYTES) {
+      return <MarkdownPreview key={doc.id} id={doc.id} unavailable={t("preview.unavailable")} />;
+    }
 
     if (kind === "image") {
       return (
