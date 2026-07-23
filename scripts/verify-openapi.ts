@@ -310,6 +310,7 @@ const expectedEndpoints = [
   "POST /api/runs/{runId}/events/heartbeat",
   "GET /api/runs/{runId}/workspace",
   "GET /api/runs/{runId}/documents",
+  "POST /api/runs/{runId}/documents",
   "GET /api/runs/{runId}/documents/{name}",
   "PATCH /api/runs/{runId}/sink/extend",
 
@@ -349,6 +350,12 @@ const expectedEndpoints = [
   // Uploads
   "POST /api/uploads",
   "PUT /api/uploads/_content",
+
+  // Documents (durable document store — inputs + agent outputs)
+  "GET /api/documents",
+  "GET /api/documents/{id}",
+  "DELETE /api/documents/{id}",
+  "GET /api/documents/{id}/content",
 
   // Credential proxy (AFPS BYOI) — registered as router.all() in code,
   // every verb is documented because upstream provider semantics are method-defined.
@@ -1583,6 +1590,11 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   "GET /*",
   // Dev-time docs page served as plain text, not part of the JSON API.
   "GET /llms.txt",
+  // Cookie-less HTML document preview — serves untrusted agent HTML (text/html)
+  // from a hardened, session-less route OUTSIDE /api, authorized by a signed
+  // token in the URL. Not a JSON API endpoint; intentionally undocumented in the
+  // OpenAPI surface (no typed client, no SDK consumer).
+  "GET /preview/documents/{id}",
   // MCP per-org endpoint method-not-allowed catch-all: `app.all(MCP_PATH, …)`
   // throws 405 for every verb other than the documented POST + GET channels.
   // These three are the catch-all, not real endpoints.

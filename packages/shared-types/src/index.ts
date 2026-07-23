@@ -149,6 +149,12 @@ export type EnrichedRun = RunWireDto & {
    * Drives the unread dot on run rows and the per-schedule unread count.
    */
   unread: boolean;
+  /**
+   * Per-run document counts, always present on enriched list rows. `input` is
+   * the number of distinct `document://` references in the run's persisted
+   * input; `output` is the number of documents the run produced.
+   */
+  document_counts: { input: number; output: number };
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
   package_ephemeral?: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */

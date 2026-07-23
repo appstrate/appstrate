@@ -182,10 +182,13 @@ describe("parseRequestInput — inline data: URIs", () => {
       { name: "docs-1.pdf", size: PDF_BYTES.length },
     ]);
 
-    // Only the inline entry is rewritten; the upload reference stays verbatim.
-    expect(result.input?.docs).toEqual([
-      `upload://${uploadId}`,
-      "data:application/pdf;name=docs-1.pdf;base64,",
-    ]);
+    // Both entries are rewritten in the persisted input: the upload:// reference
+    // becomes a durable document:// id (materialization deferred to the run
+    // pipeline — one pending entry), the inline entry becomes its stripped marker.
+    const docs = result.input?.docs as string[];
+    expect(docs[0]).toStartWith("document://doc_");
+    expect(docs[1]).toBe("data:application/pdf;name=docs-1.pdf;base64,");
+    expect(result.pendingDocuments).toHaveLength(1);
+    expect(result.pendingDocuments![0]).toMatchObject({ uploadId });
   });
 });

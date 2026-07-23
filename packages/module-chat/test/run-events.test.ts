@@ -4,18 +4,23 @@ import { describe, expect, it } from "bun:test";
 import {
   buildRunPageHref,
   buildRunSseUrl,
+  documentContentHref,
   extractAgentLabel,
+  extractRunDocuments,
   extractRunId,
   extractRunPackageId,
   extractRunStatus,
   isRunLaunchOp,
   isTerminalStatus,
   mergeLogs,
+  mergeRunDocuments,
   orgAppFromHeaders,
   parseLogListResponse,
   parseRunLogFrame,
   parseRunResource,
   parseRunUpdateFrame,
+  publishedDocumentsFromLogs,
+  resolveAttachmentContent,
   safeJsonParse,
   terminalRunLineText,
   visibleLogEntries,
@@ -127,6 +132,105 @@ describe("run-events helpers", () => {
       { id: 1, text: "first" },
       { id: 3, text: '{"step":2}' },
     ]);
+  });
+
+  it("extracts published documents from the persisted run_and_wait result", () => {
+    // Top-level (run_and_wait tool result shape).
+    expect(
+      extractRunDocuments({
+        id: "run_1",
+        status: "success",
+        done: true,
+        documents: [
+          {
+            id: "doc_1",
+            uri: "document://doc_1",
+            name: "report.html",
+            mime: "text/html",
+            size: 12,
+          },
+        ],
+      }),
+    ).toEqual([
+      { id: "doc_1", uri: "document://doc_1", name: "report.html", mime: "text/html", size: 12 },
+    ]);
+
+    // Nested under the invoke_operation envelope's `body`.
+    expect(
+      extractRunDocuments({
+        body: { id: "run_1", documents: [{ id: "doc_2", uri: "document://doc_2", name: "a.pdf" }] },
+      }),
+    ).toEqual([{ id: "doc_2", uri: "document://doc_2", name: "a.pdf" }]);
+
+    // No documents → empty.
+    expect(extractRunDocuments({ id: "run_1", status: "success" })).toEqual([]);
+    expect(extractRunDocuments(null)).toEqual([]);
+  });
+
+  it("extracts published documents from live document log frames", () => {
+    const logs: RunLogLine[] = [
+      { id: 1, event: "log", message: "working" },
+      {
+        id: 2,
+        type: "result",
+        event: "document",
+        data: {
+          document_id: "doc_9",
+          uri: "document://doc_9",
+          name: "out.csv",
+          mime: "text/csv",
+          size: 40,
+        },
+      },
+      { id: 3, event: "progress" },
+    ];
+    expect(publishedDocumentsFromLogs(logs)).toEqual([
+      { id: "doc_9", uri: "document://doc_9", name: "out.csv", mime: "text/csv", size: 40 },
+    ]);
+  });
+
+  it("merges document lists deduping by id (persisted wins over live)", () => {
+    const persisted = [{ id: "doc_1", uri: "document://doc_1", name: "report.html" }];
+    const live = [
+      { id: "doc_1", uri: "document://doc_1", name: "report.html" },
+      { id: "doc_2", uri: "document://doc_2", name: "data.json" },
+    ];
+    expect(mergeRunDocuments(persisted, live).map((d) => d.id)).toEqual(["doc_1", "doc_2"]);
+  });
+
+  it("builds the document content download URL", () => {
+    expect(documentContentHref("doc_1")).toBe("/api/documents/doc_1/content");
+  });
+
+  it("resolves a sent attachment's content to a downloadable document or inert", () => {
+    // Image part: the converter puts the URI in the `image` field.
+    expect(
+      resolveAttachmentContent([
+        { type: "image", image: "document://doc_abcd1234", filename: "photo.png" },
+      ]),
+    ).toEqual({ kind: "document", id: "doc_abcd1234" });
+
+    // File part: the URI lives in the `data` field instead.
+    expect(resolveAttachmentContent([{ type: "file", data: "document://doc_efgh5678" }])).toEqual({
+      kind: "document",
+      id: "doc_efgh5678",
+    });
+
+    // Just-sent optimistic upload:// (not yet materialized to document://) →
+    // inert, but the raw URI is kept so the staged-image cache can be probed.
+    expect(resolveAttachmentContent([{ type: "file", data: "upload://upl_abcd1234" }])).toEqual({
+      kind: "inert",
+      uri: "upload://upl_abcd1234",
+    });
+
+    // Malformed / missing / empty content → inert (never throws).
+    expect(resolveAttachmentContent([{ type: "image", image: "not-a-uri" }])).toEqual({
+      kind: "inert",
+      uri: "not-a-uri",
+    });
+    expect(resolveAttachmentContent([{ type: "file" }])).toEqual({ kind: "inert" });
+    expect(resolveAttachmentContent([])).toEqual({ kind: "inert" });
+    expect(resolveAttachmentContent(undefined)).toEqual({ kind: "inert" });
   });
 
   it("builds SSE URLs from org/app headers", () => {

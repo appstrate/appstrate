@@ -59,7 +59,9 @@ describe("openaiCompletionsAdapter", () => {
     expect(headers["x-something"]).toBeUndefined();
   });
 
-  it("parses non-streaming JSON usage with prompt/completion tokens", () => {
+  it("parses OpenAI-shape usage, subtracting cached tokens out of inputTokens", () => {
+    // OpenAI: `cached_tokens ⊂ prompt_tokens`, so inputTokens is the cache-MISS
+    // remainder (120 − 32 = 88) — cost bills input and cacheRead disjointly.
     const usage = openaiCompletionsAdapter.parseJsonUsage({
       usage: {
         prompt_tokens: 120,
@@ -68,10 +70,52 @@ describe("openaiCompletionsAdapter", () => {
       },
     });
     expect(usage).toEqual({
-      inputTokens: 120,
+      inputTokens: 88,
       outputTokens: 45,
       cacheReadTokens: 32,
     });
+  });
+
+  it("parses DeepSeek-shape usage (prompt_cache_hit_tokens = cache reads)", () => {
+    // DeepSeek: `prompt_tokens = hit + miss`; hit → cacheReadTokens, and
+    // inputTokens is the miss remainder (200 − 150 = 50).
+    const usage = openaiCompletionsAdapter.parseJsonUsage({
+      usage: {
+        prompt_tokens: 200,
+        completion_tokens: 60,
+        prompt_cache_hit_tokens: 150,
+        prompt_cache_miss_tokens: 50,
+      },
+    });
+    expect(usage).toEqual({
+      inputTokens: 50,
+      outputTokens: 60,
+      cacheReadTokens: 150,
+    });
+  });
+
+  it("prefers the DeepSeek-specific field when both cache sources are present", () => {
+    const usage = openaiCompletionsAdapter.parseJsonUsage({
+      usage: {
+        prompt_tokens: 100,
+        completion_tokens: 10,
+        prompt_cache_hit_tokens: 40,
+        prompt_tokens_details: { cached_tokens: 25 },
+      },
+    });
+    // 40 (DeepSeek) wins over 25 (OpenAI nested); inputTokens = 100 − 40.
+    expect(usage).toEqual({
+      inputTokens: 60,
+      outputTokens: 10,
+      cacheReadTokens: 40,
+    });
+  });
+
+  it("leaves inputTokens untouched when no cache source is present", () => {
+    const usage = openaiCompletionsAdapter.parseJsonUsage({
+      usage: { prompt_tokens: 70, completion_tokens: 30 },
+    });
+    expect(usage).toEqual({ inputTokens: 70, outputTokens: 30 });
   });
 
   it("returns null when usage is missing from the JSON body", () => {
@@ -79,7 +123,7 @@ describe("openaiCompletionsAdapter", () => {
     expect(openaiCompletionsAdapter.parseJsonUsage(null)).toBeNull();
   });
 
-  it("parses SSE usage from the final data frame", () => {
+  it("parses SSE usage from the final data frame (cached subtracted from input)", () => {
     const frames = [
       `data: {"id":"x","choices":[{"delta":{"content":"he"}}]}`,
       `data: {"id":"x","choices":[{"delta":{"content":"llo"}}]}`,
@@ -88,7 +132,7 @@ describe("openaiCompletionsAdapter", () => {
     ];
     const usage = openaiCompletionsAdapter.parseSseUsage(frames);
     expect(usage).toEqual({
-      inputTokens: 10,
+      inputTokens: 8,
       outputTokens: 5,
       cacheReadTokens: 2,
     });

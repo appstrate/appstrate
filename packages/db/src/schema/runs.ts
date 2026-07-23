@@ -36,10 +36,6 @@ import { chatSessions } from "./chat.ts";
 export type RunResultPayload = {
   /** Structured output emitted via the `output` tool (schema-validated). */
   output?: unknown;
-  /** Aggregated markdown report (`report` tool), capped at 256 KiB. */
-  text?: string;
-  /** Present (and `true`) only when `text` was truncated at the cap. */
-  text_truncated?: true;
 };
 
 export const runs = pgTable(

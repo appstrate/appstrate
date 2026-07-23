@@ -25,7 +25,10 @@
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolDefs,
+  buildPublishDocumentDef,
   reEmitRuntimeToolEvents,
+  type DocumentUploader,
+  type RuntimeToolDef,
   type RuntimeToolEvent,
 } from "@appstrate/core/runtime-tool-defs";
 
@@ -64,23 +67,50 @@ export function buildRuntimeToolExtensions(
     ...(opts.runtimeTools !== undefined ? { runtimeTools: opts.runtimeTools } : {}),
     ...(opts.outputSchema !== undefined ? { outputSchema: opts.outputSchema } : {}),
   });
-  return defs.map((def): ExtensionFactory => {
-    return (pi: ExtensionAPI) => {
-      pi.registerTool({
-        name: def.descriptor.name,
-        label: def.descriptor.name,
-        description: def.descriptor.description,
-        parameters: Type.Unsafe<Record<string, unknown>>(def.descriptor.inputSchema),
-        async execute(_toolCallId, params) {
-          const result = await def.handler(params ?? {});
-          reEmitRuntimeToolEvents(result._meta, emit);
-          return {
-            content: result.content.map((c) => ({ type: "text" as const, text: c.text })),
-            details: undefined,
-            ...(result.isError ? { isError: true } : {}),
-          };
-        },
-      });
-    };
-  });
+  return defs.map((def) => runtimeToolExtension(def, emit));
+}
+
+/** Register one {@link RuntimeToolDef} as a Pi extension. */
+function runtimeToolExtension(
+  def: RuntimeToolDef,
+  emit: (event: RuntimeToolEvent) => void,
+): ExtensionFactory {
+  return (pi: ExtensionAPI) => {
+    pi.registerTool({
+      name: def.descriptor.name,
+      label: def.descriptor.name,
+      description: def.descriptor.description,
+      parameters: Type.Unsafe<Record<string, unknown>>(def.descriptor.inputSchema),
+      async execute(_toolCallId, params) {
+        const result = await def.handler(params ?? {});
+        reEmitRuntimeToolEvents(result._meta, emit);
+        return {
+          content: result.content.map((c) => ({ type: "text" as const, text: c.text })),
+          details: undefined,
+          ...(result.isError ? { isError: true } : {}),
+        };
+      },
+    });
+  };
+}
+
+export interface BuildPublishDocumentExtensionOptions {
+  /** Uploads a workspace file to the platform, returning its document metadata. */
+  uploader: DocumentUploader;
+  /** Sink for the `document.published` event the tool emits (defaults to stdout-JSONL). */
+  emit?: (event: RuntimeToolEvent) => void;
+}
+
+/**
+ * Build the `publish_document` Pi extension around an injected uploader. The
+ * uploader (holding the run's HMAC sink signer) is wired in the runtime
+ * entrypoint, so this tool is registered in-process even when the sidecar
+ * hosts the other runtime tools over MCP — the sidecar has no path back to the
+ * platform documents route.
+ */
+export function buildPublishDocumentExtension(
+  opts: BuildPublishDocumentExtensionOptions,
+): ExtensionFactory {
+  const emit = opts.emit ?? defaultStdoutEmit;
+  return runtimeToolExtension(buildPublishDocumentDef(opts.uploader), emit);
 }

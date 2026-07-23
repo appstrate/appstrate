@@ -37,6 +37,7 @@ import {
 } from "@appstrate/db/storage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { StorageAlreadyExistsError } from "@appstrate/core/storage";
+import { UPLOAD_URI_PREFIX, UPLOAD_ID_RE } from "@appstrate/core/document-uri";
 import { getEnv } from "@appstrate/env";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
@@ -51,9 +52,6 @@ const UPLOAD_BUCKET = "uploads";
 const DEFAULT_EXPIRY_SECONDS = 900; // 15 min
 const MAX_FILENAME_LEN = 255;
 const DEFAULT_MAX_SIZE = 100 * 1024 * 1024; // 100 MB absolute ceiling
-
-/** `upload://upl_xxx` — the URI form stored inside agent input JSON. */
-export const UPLOAD_URI_PREFIX = "upload://";
 
 /**
  * Post-consume reuse window in milliseconds. Within `consumedAt + this`, a
@@ -109,35 +107,28 @@ export type UploadStreamSink = (
 // ---------------------------------------------------------------------------
 
 /**
- * Strip path separators + nulls from a user-supplied filename.
+ * Strip path separators + control characters from a user-supplied filename.
  *
  * Defense in depth only — the actual path-traversal block lives in the
  * storage layer (`makeKey()` rejects any raw bucket/path containing `..`
  * or `\0` before touching the filesystem). This helper keeps the stored
  * filename human-readable and prevents a `..` segment from surviving into
  * the final on-disk path even if the storage check ever regressed.
+ *
+ * Control chars (`\x00-\x1f`, `\x7f`) are collapsed too — CR/LF in a name would
+ * otherwise survive into a stored filename and, on the download path, into a
+ * `Content-Disposition` header (a response-splitting / header-injection vector
+ * the presign path's quote-stripping alone does not cover).
  */
 export function sanitizeFilename(name: string): string {
   const cleaned = name
-    .replace(/[/\\\0]/g, "_")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[/\\\x00-\x1f\x7f]/g, "_")
     .replace(/\.\.+/g, ".")
     .trim();
   if (!cleaned) return "file";
   return cleaned.slice(0, MAX_FILENAME_LEN);
 }
-
-/** Is this value a reference to a staged upload? */
-export function isUploadUri(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith(UPLOAD_URI_PREFIX);
-}
-
-/**
- * Strict upload id shape: `upl_` + at least 8 alphanumeric/`_`/`-` characters.
- * `prefixedId("upl")` produces ids well above this threshold, so the bound is
- * safely below the real minimum. Rejects malformed input before it reaches
- * the database SELECT.
- */
-const UPLOAD_ID_RE = /^upl_[A-Za-z0-9_-]{8,}$/;
 
 /**
  * Extract the upload id from an `upload://upl_xxx` URI. Returns null if the

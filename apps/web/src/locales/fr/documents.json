@@ -1,0 +1,22 @@
+{
+  "page.title": "Documents",
+  "page.empty": "Aucun document",
+  "page.emptyHint": "Les fichiers importés dans le chat et produits par vos agents apparaîtront ici.",
+  "page.loadMore": "Charger plus",
+  "filter.all": "Tous",
+  "filter.agent_output": "Produits par les agents",
+  "filter.user_upload": "Importés",
+  "run.empty": "Aucun document",
+  "run.emptyHint": "Ce run n'a ni fichier importé ni fichier produit.",
+  "row.download": "Télécharger",
+  "row.preview": "Aperçu",
+  "row.delete": "Supprimer",
+  "row.openRun": "Ouvrir la page du run",
+  "row.inputDocument": "Utilisé en entrée",
+  "row.outputDocument": "Produit en sortie",
+  "delete.title": "Supprimer le document",
+  "delete.description": "Supprimer « {{name}} » ? Cette action est irréversible.",
+  "delete.success": "Document supprimé.",
+  "preview.frameTitle": "Aperçu de {{name}}",
+  "preview.unavailable": "Ce document ne peut pas être prévisualisé."
+}

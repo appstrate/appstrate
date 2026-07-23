@@ -54,6 +54,7 @@ export const openApiInfo = {
     { name: "Application Packages", description: "Manage packages installed in an application" },
     { name: "End Users", description: "End-user management for headless API" },
     { name: "Uploads", description: "Direct-upload protocol for agent input files" },
+    { name: "Documents", description: "Durable document store — inputs and agent outputs" },
     {
       name: "Credential Proxy",
       description: "Server-side credential injection for external runners (CLI, GitHub Action)",

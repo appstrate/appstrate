@@ -40,6 +40,7 @@ import {
   PiRunner,
   prepareBundleForPi,
   buildRuntimeToolExtensions,
+  buildPublishDocumentExtension,
   deriveProviderFromApi,
   emitRuntimeReady,
   emitBootProgress,
@@ -74,6 +75,7 @@ import {
   type RuntimeEventDrainer,
 } from "@appstrate/core/runtime-event-drain";
 import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
+import { createRunDocumentUploader, sweepOutputs } from "./publish.ts";
 
 /**
  * Synthesise a Bundle the runner can consume when no `.afps` ships
@@ -195,6 +197,19 @@ const sink = new HttpSink({
 // and `result.memories` are complete when the platform ingests the run.
 const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
 const bridgedSink = bridge.sink;
+
+// --- 0b. Document publishing (run → platform) ---
+// sha256s this run has published, shared by the `publish_document` tool and
+// the end-of-run outputs sweep so a file published explicitly is not swept
+// again. The uploader streams a workspace file to POST /api/runs/:id/documents,
+// signed with the same run HMAC as the workspace provisioning fetches.
+const publishedDocumentShas = new Set<string>();
+const uploadRunDocument = createRunDocumentUploader({
+  sinkUrl: env.sink.url,
+  sinkSecret: env.sink.secret,
+  workspace: env.workspaceDir,
+  publishedShas: publishedDocumentShas,
+});
 
 /**
  * Emit a best-effort `appstrate.error` event for a bootstrap failure. We
@@ -519,6 +534,14 @@ await progress(
   },
 );
 
+// The agent's selected runtime tools (`manifest.runtime_tools`), read once from
+// the root package manifest. Reused by the no-sidecar extension registration,
+// the `publish_document` gate, and the PiRunner's terminal-tool decision.
+const declaredRuntimeTools: string[] = bundle
+  ? ((bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
+      ?.runtime_tools ?? [])
+  : [];
+
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
 // implementation forwards to the sidecar's MCP `tools/call` endpoint:
@@ -618,7 +641,7 @@ if (sidecarUrl) {
       // `buildMcpDirectFactories` registers `run_history` and
       // `recall_memory`, plus one forwarding factory per namespaced
       // integration tool (including the generic `{ns}__api_call`). Runtime
-      // tools (log/note/pin/report/output) are executed once by the sidecar and
+      // tools (log/note/pin/output) are executed once by the sidecar and
       // journaled; the drainer pulls them on the run sink after each forwarded
       // call — never trusted from `_meta`.
       //
@@ -698,14 +721,11 @@ if (sidecarUrl) {
   delete process.env.SIDECAR_URL;
 } else {
   // No sidecar attached (skip-sidecar: no integrations + static API key).
-  // The platform runtime tools (output/log/note/pin/report) the agent
+  // The platform runtime tools (output/log/note/pin) the agent
   // selected are normally served by the sidecar over MCP; with no sidecar
   // we register the SAME tool definitions (`@appstrate/core/runtime-tool-defs`)
   // as Pi extensions in-process. Their canonical events are re-emitted into
   // the run sink by the wrapper (default stdout-JSONL → the stdout bridge).
-  const rootManifest = bundle
-    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-    : undefined;
   let outputSchema: Record<string, unknown> | null = null;
   if (process.env.OUTPUT_SCHEMA) {
     try {
@@ -716,7 +736,7 @@ if (sidecarUrl) {
   }
   extensionFactories.push(
     ...buildRuntimeToolExtensions({
-      ...(rootManifest?.runtime_tools ? { runtimeTools: rootManifest.runtime_tools } : {}),
+      ...(declaredRuntimeTools.length > 0 ? { runtimeTools: declaredRuntimeTools } : {}),
       outputSchema,
       emit: (event) => {
         void bridgedSink.handle(event as RunEvent);
@@ -735,6 +755,24 @@ if (sidecarUrl) {
       );
     },
   };
+}
+
+// --- 2e. publish_document runtime tool (opt-in via manifest.runtime_tools) ---
+// Unlike the five pure event-emitter runtime tools (served by the sidecar over
+// MCP, or registered in-process on the no-sidecar path), `publish_document`
+// performs an HTTP upload back to the platform — so it is ALWAYS registered
+// in-process here (the sidecar has no path to the documents route), gated on
+// the agent selecting it. It carries the run's HMAC signer via the injected
+// `uploadRunDocument`; its `document.published` event rides the bridged sink.
+if (declaredRuntimeTools.includes("publish_document")) {
+  extensionFactories.push(
+    buildPublishDocumentExtension({
+      uploader: uploadRunDocument,
+      emit: (event) => {
+        void bridgedSink.handle(event as RunEvent);
+      },
+    }),
+  );
 }
 
 // --- 3. Model + system prompt from env ---
@@ -856,10 +894,6 @@ function buildPiRunner(): PiRunner {
   // communication contract discards anyway. Gated on the manifest selection
   // so a bundle-defined tool that happens to be named `output` (no
   // `runtime_tools` opt-in) keeps the SDK's natural stop.
-  const declaredRuntimeTools = bundle
-    ? ((bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-        ?.runtime_tools ?? [])
-    : [];
   return new PiRunner({
     model,
     apiKey: env.modelApiKey,
@@ -872,29 +906,80 @@ function buildPiRunner(): PiRunner {
   });
 }
 
-// Pi-path final drain. Pi drains each tool call inline (see the note in the
-// factories block above), but the LAST call's single best-effort drain has no
-// subsequent call to retry a transient localhost failure. PiRunner owns its
-// finalize, so we inject the final drain by wrapping the sink: drain-until-empty
-// + bounded retry through the SAME bridged sink the per-call drains use, so the
-// stdout-bridge folds any straggler into its aggregate BEFORE merging it into
-// the finalize POST. Best-effort (`final: true`) — never flips an
-// already-decided run.
-const piEventSink: typeof bridgedSink = runtimeDrainer
-  ? {
-      handle: (event) => bridgedSink.handle(event),
-      finalize: async (result) => {
-        await drainAndEmitInto({
-          drainer: runtimeDrainer,
-          emit: (e) => bridgedSink.handle(e as RunEvent),
-          now: Date.now,
-          runId: AGENT_RUN_ID!,
-          final: true,
-        });
-        await bridgedSink.finalize(result);
-      },
+/** Compiled fallback when the platform did not forward its effective cap. */
+const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Client-side per-file bound for the outputs sweep — the platform's EFFECTIVE
+ * `DOCUMENT_MAX_FILE_BYTES` (forwarded by the run-launcher), falling back to the
+ * compiled 100 MiB default when absent/unparseable. The server is the
+ * authoritative gate (it cuts an over-cap stream mid-flight); this just avoids
+ * streaming a file that is certain to be rejected. Reading the forwarded value
+ * keeps the two in lockstep — an operator who raises the platform cap no longer
+ * sees large deliverables silently skipped here.
+ */
+const OUTPUTS_SWEEP_MAX_FILE_BYTES = ((): number => {
+  const raw = process.env.DOCUMENT_MAX_FILE_BYTES;
+  if (raw !== undefined && raw !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_DOCUMENT_MAX_FILE_BYTES;
+})();
+
+/**
+ * Auto-publish everything under `workspace/outputs/` that was not already
+ * published explicitly. Runs at finalize time, BEFORE the finalize event is
+ * posted, so the swept documents surface as run events. Best-effort — a sweep
+ * failure logs a warning and never blocks finalize (regardless of whether the
+ * `publish_document` tool was enabled).
+ */
+async function runOutputsSweep(): Promise<void> {
+  await sweepOutputs({
+    uploader: uploadRunDocument,
+    workspace: WORKSPACE,
+    publishedShas: publishedDocumentShas,
+    maxFileBytes: OUTPUTS_SWEEP_MAX_FILE_BYTES,
+    emit: (event) => {
+      void bridgedSink.handle(event as RunEvent);
+    },
+    logWarn: (message, data) =>
+      process.stdout.write(
+        `${JSON.stringify({ level: "warn", event: message, ...(data ?? {}) })}\n`,
+      ),
+  }).catch((err) => {
+    // sweepOutputs already swallows per-file failures; this guards the scan
+    // itself so a sweep fault can never abort finalize.
+    process.stderr.write(`[outputs-sweep] ${getErrorMessage(err)}\n`);
+  });
+}
+
+// Pi-path finalize wrapper. Two things must happen before the finalize POST:
+//   1. Final runtime-event drain (sidecar path only) — Pi drains each tool call
+//      inline (see the factories block above), but the LAST call's single
+//      best-effort drain has no subsequent call to retry a transient localhost
+//      failure, so we drain-until-empty + bounded retry through the SAME bridged
+//      sink the per-call drains use.
+//   2. The outputs sweep — auto-publish `workspace/outputs/` deliverables so
+//      their `document.published` events ride the run stream before it closes.
+// PiRunner owns its finalize, so wrapping the sink is the only injection point
+// that runs BEFORE the stdout-bridge merges its aggregate into the finalize POST.
+const piEventSink: typeof bridgedSink = {
+  handle: (event) => bridgedSink.handle(event),
+  finalize: async (result) => {
+    if (runtimeDrainer) {
+      await drainAndEmitInto({
+        drainer: runtimeDrainer,
+        emit: (e) => bridgedSink.handle(e as RunEvent),
+        now: Date.now,
+        runId: AGENT_RUN_ID!,
+        final: true,
+      });
     }
-  : bridgedSink;
+    await runOutputsSweep();
+    await bridgedSink.finalize(result);
+  },
+};
 
 const startTime = Date.now();
 

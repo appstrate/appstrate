@@ -29,11 +29,13 @@ import {
   schedules,
   llmUsage,
   notifications,
+  documents,
   runStatusValues,
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
 } from "@appstrate/db/schema";
+import { extractDocumentIds } from "@appstrate/core/document-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import { listResponse } from "../../lib/list-response.ts";
@@ -47,6 +49,7 @@ import {
 } from "../../lib/jsonb-schemas.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
+import { detachOrDeleteContainedDocuments } from "../documents.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow } from "@appstrate/core/module";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
@@ -127,6 +130,13 @@ function enrichedRunSelect(actor: Actor | null) {
     scheduleName: schedules.name,
     packageEphemeral: packages.ephemeral,
     unread: unreadForActor(actor),
+    // OUTPUT document count — correlated scalar subquery over `documents`,
+    // served by the `idx_documents_run` (run_id-leading) index so the list
+    // read stays a single query with no N+1. Coerced to Number in the mapper
+    // (postgres.js returns count() as a numeric string).
+    outputDocumentCount: sql<number>`(
+      select count(*) from ${documents} where ${documents.runId} = ${runs.id}
+    )`,
   };
 }
 
@@ -165,7 +175,20 @@ type EnrichedRunRow = {
   scheduleName: string | null;
   packageEphemeral: boolean | null;
   unread: boolean;
+  outputDocumentCount: number;
 };
+
+/**
+ * Project a stored `runs.result` payload onto the documented output-only wire
+ * shape. Historical rows may carry the removed #632 `text`/`text_truncated`
+ * keys and no `output`; those — like a NULL result — map to `null`, matching
+ * the OpenAPI contract (`result` is null when no structured output was
+ * emitted) rather than serializing as an empty `{}`.
+ */
+function projectResultOutput(result: { output?: unknown } | null): { output: unknown } | null {
+  const output = result?.output;
+  return output === undefined ? null : { output };
+}
 
 /**
  * Translate a raw Drizzle `runs` row into its public snake_case wire DTO
@@ -203,7 +226,10 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     scheduleId: row.scheduleId,
     status: row.status,
     input: row.input,
-    result: row.result,
+    // Historical rows may carry `text`/`text_truncated` keys from the removed
+    // #632 report channel; project to the documented output-only shape so the
+    // dropped fields never leak onto the wire.
+    result: projectResultOutput(row.result),
     checkpoint: row.checkpoint,
     error: row.error,
     metadata: row.metadata,
@@ -264,6 +290,13 @@ function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
     connections_used: projectConnectionsUsed(r.run.resolvedConnections),
     package_ephemeral: r.packageEphemeral ?? false,
     unread: r.unread,
+    // INPUT = distinct `document://` ids referenced in the run's persisted
+    // input JSON (extractDocumentIds dedupes + tolerates null); OUTPUT =
+    // documents produced by the run (subquery column above).
+    document_counts: {
+      input: extractDocumentIds(r.run.input).length,
+      output: Number(r.outputDocumentCount),
+    },
   };
 }
 
@@ -656,6 +689,17 @@ export async function recordRunDegradedIntegration(
  *
  * One scalar SUM over the `(run_id)` index — cheap even on long runs.
  *
+ * Remote-run mirror exclusion: a remote-origin run whose inference flows through
+ * the system llm-proxy gets BOTH per-call proxy rows (`source='proxy'`, each
+ * with `credential_source` stamped) AND the runner's cumulative side-channel
+ * mirror row (`source='runner'`, `credential_source IS NULL` — remote runs
+ * resolve no platform model so `runs.model_source` is NULL). Both cover the SAME
+ * spend, so summing all rows double-counts (display only — cloud never debits
+ * the NULL runner row). The rule: when a run has proxy rows, drop the
+ * NULL-credential runner mirror. A platform run's runner row carries a
+ * non-NULL `credential_source` (from `runs.model_source`) and stays
+ * authoritative; a remote run with ONLY a runner row (no proxy) keeps it.
+ *
  * `orgId` is mandatory: `llm_usage.run_id` alone is caller-suppliable on the
  * proxy path (`X-Run-Id`), so the aggregate must be structurally inseparable
  * from the tenant — a ledger row whose `org_id` doesn't match the run's org
@@ -669,7 +713,25 @@ export async function computeRunCost(runId: string, orgId: string): Promise<numb
       total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
     })
     .from(llmUsage)
-    .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, orgId)));
+    .where(
+      and(
+        eq(llmUsage.runId, runId),
+        eq(llmUsage.orgId, orgId),
+        // Exclude the runner mirror row (source='runner', credential_source
+        // NULL) ONLY when this run also has proxy rows covering the same spend
+        // — otherwise a remote run with only its runner row would sum to 0.
+        sql`NOT (
+          ${llmUsage.source} = 'runner'
+          AND ${llmUsage.credentialSource} IS NULL
+          AND EXISTS (
+            SELECT 1 FROM ${llmUsage} AS proxy_row
+            WHERE proxy_row.run_id = ${runId}
+              AND proxy_row.org_id = ${orgId}
+              AND proxy_row.source = 'proxy'
+          )
+        )`,
+      ),
+    );
 
   return Number(llm?.total ?? 0);
 }
@@ -764,7 +826,11 @@ export async function getRecentRuns(
       duration: row.duration,
     };
     if (fields.includes("checkpoint")) entry.checkpoint = row.checkpoint;
-    if (fields.includes("result")) entry.result = row.result;
+    // Historical rows may carry `text`/`text_truncated` keys from the removed
+    // #632 report channel; project to the documented output-only shape.
+    if (fields.includes("result")) {
+      entry.result = projectResultOutput(row.result);
+    }
     return entry;
   });
 }
@@ -1012,16 +1078,34 @@ export async function getRun(scope: AppScope, id: string) {
 }
 
 export async function deletePackageRuns(scope: AppScope, packageId: string): Promise<number> {
-  const deleted = await db
-    .delete(runs)
+  // Resolve the run ids first so the documents they contain can be
+  // detach-or-deleted BEFORE the runs are removed — the runs' FK cascade would
+  // otherwise destroy `documents` rows (and their `document_links`) a live
+  // consumer still needs, silently amputating a rerun's inputs.
+  const runRows = await db
+    .select({ id: runs.id })
+    .from(runs)
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
         extra: [eq(runs.packageId, packageId)],
       }),
-    )
-    .returning({ id: runs.id });
+    );
+  if (runRows.length === 0) return 0;
+  const runIds = runRows.map((r) => r.id);
+
+  // Contained-documents teardown in its own transaction, then the runs delete.
+  // Separate statements: a crash between them leaves the docs already handled
+  // (detached or deleted) and the runs still present — the next delete attempt
+  // re-runs both idempotently (re-handling finds nothing left to detach/delete,
+  // the runs delete finishes the job).
+  await detachOrDeleteContainedDocuments({ runIds });
+
+  // Scoped to the SELECTed ids — not the package predicate — so a run created
+  // concurrently after the SELECT is left for the next delete call instead of
+  // being deleted without its documents going through detach-or-delete.
+  const deleted = await db.delete(runs).where(inArray(runs.id, runIds)).returning({ id: runs.id });
   return deleted.length;
 }
 

@@ -33,7 +33,7 @@ import { getActor } from "../lib/actor.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
-import { isValidDependencyOverride } from "../services/input-parser.ts";
+import { isValidDependencyOverride, collectFileRefs } from "../services/input-parser.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
@@ -42,7 +42,7 @@ import { validateConfig, validateInput } from "../services/schema.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { assertApplicationInScope } from "../services/applications.ts";
-import { asJSONSchemaObject } from "@appstrate/core/form";
+import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -134,6 +134,33 @@ const ExtendSinkBodySchema = z
     ttl_seconds: z.number().int().positive().max(86400),
   })
   .strict();
+
+/**
+ * Reject platform-stored file inputs on remote runs. `upload://` and
+ * `document://` file-field values reference bytes the platform holds; a remote
+ * run executes on the caller's host, whose workspace the platform never
+ * provisions — those bytes can never be delivered there, so the remote agent
+ * would silently find no file. Fail loud and early instead. `data:` URIs are
+ * self-contained (the runner materializes them itself) and pass through.
+ * `collectFileRefs` additionally rejects any file-field value that is none of
+ * the three URI forms, which is the desired strictness here.
+ */
+function assertNoPlatformFileRefs(
+  inputSchema: JSONSchemaObject,
+  input: Record<string, unknown>,
+): void {
+  for (const ref of collectFileRefs(inputSchema, input)) {
+    if (ref.kind === "upload" || ref.kind === "document") {
+      throw invalidRequest(
+        `Field '${ref.fieldName}' references a platform-stored file (${ref.kind}://) which is ` +
+          "not supported on remote runs — the run executes on the caller's host, whose workspace " +
+          "the platform does not provision. Inline the content as a " +
+          "'data:<mime>;name=<file>;base64,<payload>' URI instead.",
+        ref.fieldName,
+      );
+    }
+  }
+}
 
 export function createRunsRemoteRouter() {
   const router = new Hono<AppEnv>();
@@ -289,6 +316,14 @@ export function createRunsRemoteRouter() {
           prompt: preflight.prompt,
         });
         return buildShadowLoadedPackage(shadowId, preflight.manifest, preflight.prompt);
+      }
+
+      // Reject platform-stored file inputs (upload:// / document://) that can
+      // never reach a remote host's workspace. Applies to both source shapes:
+      // `agentForRun.manifest` is the resolved manifest in either branch.
+      const fileInputSchema = agentForRun.manifest.input?.schema;
+      if (fileInputSchema) {
+        assertNoPlatformFileRefs(asJSONSchemaObject(fileInputSchema), effectiveInput ?? {});
       }
 
       // Reject an explicit `modelId` override that references no real model

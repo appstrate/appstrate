@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uq_documents_run_output_dedup" ON "documents" USING btree ("run_id","sha256","name") WHERE "documents"."purpose" = 'agent_output';

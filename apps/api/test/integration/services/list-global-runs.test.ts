@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "../../helpers/db.ts";
 import { eq } from "drizzle-orm";
-import { packages } from "@appstrate/db/schema";
+import { packages, documents } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
@@ -180,6 +180,57 @@ describe("listGlobalRuns", () => {
 
     const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: otherApp!.id });
     expect(result.total).toBe(0);
+  });
+
+  async function seedOutputDocument(runId: string) {
+    const docId = `doc_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+    await db.insert(documents).values({
+      id: docId,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      purpose: "agent_output",
+      runId,
+      storageKey: `documents/${ctx.defaultAppId}/${docId}/out.txt`,
+      name: "out.txt",
+      mime: "text/plain",
+      size: 3,
+      sha256: crypto.randomUUID().replace(/-/g, ""),
+    });
+  }
+
+  it("reports document_counts: input from run.input URIs, output from documents rows", async () => {
+    const pkg = await seedPackage({
+      id: `@globalruns/agent-${crypto.randomUUID().slice(0, 8)}`,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
+    // Two distinct input document URIs (one duplicated → deduped to 2), plus a
+    // malformed one that must be ignored by extractDocumentIds.
+    const withDocs = await seedRun({
+      packageId: pkg.id,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "success",
+      startedAt: new Date(),
+      input: {
+        file: "document://doc_aaaaaaaa",
+        again: "document://doc_aaaaaaaa",
+        nested: { other: "document://doc_bbbbbbbb" },
+        bogus: "document://doc_x",
+      },
+    });
+    await seedOutputDocument(withDocs.id);
+    await seedOutputDocument(withDocs.id);
+    await seedOutputDocument(withDocs.id);
+
+    // A run with null input and no documents → both counts zero.
+    const empty = await seedPackageRun();
+
+    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
+
+    expect(byId[withDocs.id]?.document_counts).toEqual({ input: 2, output: 3 });
+    expect(byId[empty.id]?.document_counts).toEqual({ input: 0, output: 0 });
   });
 
   it("orders by startedAt DESC and paginates", async () => {

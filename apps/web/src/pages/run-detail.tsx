@@ -20,6 +20,8 @@ import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
+import { RunDocumentsTab } from "../components/run-documents-tab";
+import { useDocuments } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
@@ -27,7 +29,6 @@ import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
-import { Markdown } from "../components/markdown";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys } from "../lib/query-keys";
 import { MemoryPanel } from "../components/persistence/memory-panel";
@@ -79,19 +80,17 @@ export function RunDetailPage() {
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
-  const { historicalLogs, structuredOutput, structuredReport } = useMemo(() => {
-    if (!logs) return { historicalLogs: [], structuredOutput: null, structuredReport: null };
-    const { entries, output, report } = buildLogEntries(logs);
-    return { historicalLogs: entries, structuredOutput: output, structuredReport: report };
+  const { historicalLogs, structuredOutput } = useMemo(() => {
+    if (!logs) return { historicalLogs: [], structuredOutput: null };
+    const { entries, output } = buildLogEntries(logs);
+    return { historicalLogs: entries, structuredOutput: output };
   }, [logs]);
 
   const execResult = run?.result as {
     output?: Record<string, unknown>;
   } | null;
   const finalOutput = structuredOutput || execResult?.output || null;
-  const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
-  const hasReport = !!structuredReport;
-  const hasResult = !!hasOutput || hasReport;
+  const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
@@ -100,20 +99,23 @@ export function RunDetailPage() {
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
   const hasRunMemory = runMemoryCount > 0;
 
-  // Default tab: "result" if results exist (report and/or output), otherwise "logs".
+  // Document count for the tab badge. The tab body runs the same query (identical
+  // key) so React Query dedups it into a single request.
+  const { data: documentsPage } = useDocuments({ runId, limit: 100 });
+  const documentCount = documentsPage?.data.length ?? 0;
+
+  // Default tab: "result" if the run produced structured output, otherwise "logs".
   // useTabWithHash respects the URL hash if present.
-  const defaultTab = hasResult ? "result" : "logs";
+  const defaultTab = hasOutput ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "memory", "info"] as const,
+    ["result", "logs", "memory", "documents", "info"] as const,
     defaultTab,
   );
-
-  // Result sub-tab: report first if available, otherwise data. User
-  // override is tracked separately so the auto-default can react to late
-  // events without clobbering an explicit click.
-  const autoSubTab: "report" | "data" = hasReport ? "report" : "data";
-  const [userSubTab, setUserSubTab] = useState<"report" | "data" | null>(null);
-  const resultSubTab = userSubTab ?? autoSubTab;
+  // A bookmarked `#result` on a run with no structured output selects a tab
+  // whose trigger/content are gated off — render "logs" instead of a blank
+  // pane. Clamp at render only (the hash stays "result"), so if late SSE flips
+  // `hasOutput` true the Result tab reappears and the user's choice is honored.
+  const effectiveTab = activeTab === "result" && !hasOutput ? "logs" : activeTab;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -138,6 +140,12 @@ export function RunDetailPage() {
           if (prev.some((l) => l.id === entry.id)) return prev;
           return [...prev, entry];
         });
+        // A published document arrives as a `type='result' event='document'`
+        // log frame — invalidate the run's documents list so the tab (and its
+        // badge) picks up the new file without a dedicated SSE channel.
+        if (entry.type === "result" && entry.event === "document") {
+          void qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
+        }
       },
       [qc, orgId, applicationId, runId],
     ),
@@ -232,11 +240,13 @@ export function RunDetailPage() {
 
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
-          value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "memory" | "info")}
+          value={effectiveTab}
+          onValueChange={(v) =>
+            setActiveTab(v as "logs" | "result" | "memory" | "documents" | "info")
+          }
         >
           <TabsList>
-            {hasResult && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
+            {hasOutput && <TabsTrigger value="result">{t("run.tabResult")}</TabsTrigger>}
             <TabsTrigger value="logs">
               {t("run.tabLogs")}
               {allLogs.length > 0 && (
@@ -253,6 +263,14 @@ export function RunDetailPage() {
                 </span>
               </TabsTrigger>
             )}
+            <TabsTrigger value="documents">
+              {t("run.tabDocuments")}
+              {documentCount > 0 && (
+                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                  {documentCount}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="info">{t("run.tabInfo")}</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -302,32 +320,15 @@ export function RunDetailPage() {
         </div>
       </div>
 
-      {activeTab === "result" && hasResult && (
-        <div className="space-y-4">
-          {hasReport && hasOutput && (
-            <Tabs value={resultSubTab} onValueChange={(v) => setUserSubTab(v as "report" | "data")}>
-              <TabsList>
-                <TabsTrigger value="report">{t("run.tabReport")}</TabsTrigger>
-                <TabsTrigger value="data">{t("run.tabResult")}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
+      {effectiveTab === "result" && hasOutput && <JsonView data={finalOutput} />}
 
-          {resultSubTab === "report" && hasReport && (
-            <div className="border-border bg-muted/30 overflow-auto rounded-lg border p-4">
-              <Markdown>{structuredReport}</Markdown>
-            </div>
-          )}
+      {effectiveTab === "logs" && <LogViewer entries={allLogs} />}
 
-          {resultSubTab === "data" && hasOutput && <JsonView data={finalOutput} />}
-        </div>
-      )}
+      {effectiveTab === "memory" && <MemoryPanel packageId={packageId} runId={runId} />}
 
-      {activeTab === "logs" && <LogViewer entries={allLogs} />}
+      {effectiveTab === "documents" && runId && <RunDocumentsTab runId={runId} />}
 
-      {activeTab === "memory" && <MemoryPanel packageId={packageId} runId={runId} />}
-
-      {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
+      {effectiveTab === "info" && <RunInfoTab run={enrichedRun} />}
     </div>
   );
 }

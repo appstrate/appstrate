@@ -181,14 +181,18 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(row).toBeDefined();
     expect(row!.model).toBe(h.presetId);
     expect(row!.realModel).toBe("gpt-4o-2024-08-06");
-    expect(row!.inputTokens).toBe(100);
+    // `cached_tokens ⊂ prompt_tokens`, so the metering row stores the cache-MISS
+    // remainder (100 − 30 = 70) as inputTokens and the 30 cache reads separately
+    // — the two are billed as disjoint buckets, never double-counted.
+    expect(row!.inputTokens).toBe(70);
     expect(row!.outputTokens).toBe(42);
     expect(row!.cacheReadTokens).toBe(30);
     expect(row!.apiKeyId).toBeDefined();
     expect(row!.userId).toBeNull();
     expect(row!.runId).toBeNull();
-    // cost = 100*5/1M + 42*15/1M = 0.0005 + 0.00063 = 0.00113
-    expect(row!.costUsd).toBeCloseTo(0.00113, 6);
+    // cost = 70*5/1M + 42*15/1M + 30*0/1M = 0.00035 + 0.00063 = 0.00098
+    // (the client-facing body still echoes prompt_tokens=100 verbatim, above).
+    expect(row!.costUsd).toBeCloseTo(0.00098, 6);
   });
 
   it("returns 403 when the API key is missing llm-proxy:call scope", async () => {

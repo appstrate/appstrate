@@ -10,7 +10,7 @@
  *      starts, assistant messages, metrics) handed straight to the
  *      configured {@link EventSink}.
  *   2. System tools (`@appstrate/note`, `@appstrate/output`,
- *      `@appstrate/pin`, `@appstrate/log`, `@appstrate/report`)
+ *      `@appstrate/pin`, `@appstrate/log`)
  *      emit canonical domain events via `process.stdout.write(JSON+\n)`
  *      — the legacy stdout-JSONL protocol baked into every system tool
  *      ZIP. Without a bridge, those events never reach the configured
@@ -143,13 +143,6 @@ export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResul
     ...(pinned !== undefined ? { pinned } : {}),
     output: aggregate.output ?? runnerResult.output,
     logs: aggregate.logs.length > 0 ? aggregate.logs : runnerResult.logs,
-    // Append-only markdown report — bridge aggregate wins when set, else
-    // fall back to whatever the runner produced (may also be undefined).
-    ...(aggregate.report !== undefined
-      ? { report: aggregate.report }
-      : runnerResult.report !== undefined
-        ? { report: runnerResult.report }
-        : {}),
     ...(runnerResult.status !== undefined ? { status: runnerResult.status } : {}),
     ...(runnerResult.error !== undefined ? { error: runnerResult.error } : {}),
     ...(runnerResult.durationMs !== undefined ? { durationMs: runnerResult.durationMs } : {}),

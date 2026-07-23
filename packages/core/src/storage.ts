@@ -29,6 +29,21 @@ export interface UploadUrlDescriptor {
   expiresIn: number;
 }
 
+/** Options for creating a direct-download URL. */
+export interface CreateDownloadUrlOptions {
+  /** Seconds until the URL expires. Default: 900 (15 min). */
+  expiresIn?: number;
+  /**
+   * Filename to force in the `Content-Disposition: attachment` of the
+   * downloaded response. When set, the backend binds a
+   * `response-content-disposition` override into the presigned URL so the
+   * browser saves rather than renders the object.
+   */
+  filename?: string;
+  /** MIME to force in the downloaded response's `Content-Type`. */
+  contentType?: string;
+}
+
 /** Options for uploading a file. */
 export interface UploadFileOptions {
   /**
@@ -110,4 +125,18 @@ export interface Storage {
     path: string,
     opts?: CreateUploadUrlOptions,
   ): Promise<UploadUrlDescriptor>;
+  /**
+   * Create a browser-usable URL the client can GET the object's bytes from
+   * directly, without proxying through the API server. For S3 with a public
+   * endpoint configured, this is a pre-signed GET URL (the download analog of
+   * {@link createUploadUrl}'s presign path). Returns `null` when the backend
+   * cannot produce a browser-reachable URL — filesystem storage, and S3 in
+   * proxy mode (no public endpoint, the bucket stays private) — in which case
+   * the caller must proxy-stream the bytes itself.
+   */
+  createDownloadUrl(
+    bucket: string,
+    path: string,
+    opts?: CreateDownloadUrlOptions,
+  ): Promise<string | null>;
 }

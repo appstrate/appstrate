@@ -14,6 +14,7 @@ import {
   Users,
   Boxes,
   MessageSquare,
+  FileText,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -67,6 +68,7 @@ export function NavOrg() {
     ...(features.chat
       ? [{ path: "/chat", label: t("nav.chat"), icon: MessageSquare, badge: chatUnread }]
       : []),
+    { path: "/documents", label: t("nav.documents"), icon: FileText },
   ];
 
   const automationItems: NavItem[] = [

@@ -16,7 +16,12 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
-import type { ChatUsageRecord, SubscriptionChatResolution } from "./chat-contract.ts";
+import type {
+  ChatAttachmentRequest,
+  ChatUsageRecord,
+  ResolvedChatAttachment,
+  SubscriptionChatResolution,
+} from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
@@ -1188,6 +1193,26 @@ export interface PlatformServices {
    * into for the ai-sdk chat path and every agent run.
    */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
+  /**
+   * Resolve a chat composer file attachment to a durable `document://` URI:
+   * materialize an `upload://` staged upload into a chat-session-scoped document
+   * (purpose `user_upload`), or validate that an existing `document://` is
+   * readable by the session owner. The chat module has no DB access, so
+   * materialization + the container-inherited ACL check cross through here.
+   * Rejections (over-cap, over-quota, not-found/foreign document) are thrown as
+   * the platform's RFC 9457 errors, which the chat route surfaces to the user.
+   */
+  resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
+  /**
+   * Detach-or-delete the documents contained by a chat session being deleted. A
+   * session document a run still consumes is detached (`chat_session_id = NULL`)
+   * so the run's rerun still resolves it; an unconsumed one is deleted (row +
+   * org counter + storage object). The chat module has DB access but no storage
+   * access and no documents-service surface, so this crosses through here. Called
+   * by the DELETE session route BEFORE removing the `chat_sessions` row, so the
+   * FK cascade cannot destroy the evidence first.
+   */
+  cleanupSessionDocuments(chatSessionId: string): Promise<void>;
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this for its non-subscription (built-in /

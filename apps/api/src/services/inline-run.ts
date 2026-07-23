@@ -20,10 +20,14 @@ import { packages, runs } from "@appstrate/db/schema";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
-import { runInlinePreflight, type InlineRunBody } from "./inline-run-preflight.ts";
+import type { InlineRunBody, InlineRunPreflightResult } from "./inline-run-preflight.ts";
+import { collectMountedDocumentIds, type ParsedInput } from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { documentUri, extractDocumentIdsFromText } from "@appstrate/core/document-uri";
+import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
+import { validationFailed } from "../lib/errors.ts";
 
 export type { InlineRunBody };
 
@@ -112,12 +116,67 @@ export function buildShadowLoadedPackage(
 }
 
 /**
- * Trigger an inline agent run end-to-end.
+ * Reject an inline run whose model-authored `prompt` references `document://`
+ * URIs the run cannot actually read.
  *
- * Mirrors the route-handler body of `POST /api/runs/inline`: preflight ->
- * insert shadow package -> fire pipeline -> return `{ runId, packageId }`.
- * Both the HTTP route and `PlatformServices.inline.run` call this single
- * implementation so the contract stays in lockstep across surfaces.
+ * A run only receives a document when the manifest declares a file input field
+ * AND the `document://` URI is passed through the top-level `input` in THAT
+ * field — the platform then streams the file into the workspace under
+ * `documents/`. A `document://` URI merely pasted into the sub-agent's prompt
+ * text — or dropped into a non-file input field — is inert: the runtime has no
+ * way to fetch it, so the run launches against dead URIs and the sub-agent
+ * silently sees nothing. The chat model has been observed doing exactly this.
+ * Fail loudly with a recoverable 400 that names the offending URIs and the exact
+ * fix, so the chat model self-corrects (its prompt already retries recoverable
+ * field-validation errors) instead of shipping silent garbage.
+ *
+ * The covered set is therefore the mounted document ids only —
+ * `collectMountedDocumentIds`, which walks the DECLARED file fields
+ * (`format:"uri"` + `contentMediaType`) via the same `collectFileRefs` logic the
+ * consume path uses — not every `document://` string anywhere in the input JSON.
+ * A URI in a plain string field counts as uncovered because it never mounts.
+ *
+ * `document://` only, by design: this runs AFTER `parseRequestInput`, which has
+ * already rewritten any `upload://` input to a fresh `document://` id the model
+ * never saw — so a symmetric `upload://` prompt-vs-input comparison would
+ * false-positive on a correctly-declared upload field. There is also no
+ * core-level canonical `upload://` text-scanner to reuse (the upload parser
+ * lives in the apps/api uploads service), and the observed live failure is
+ * `document://` URIs. Pure — exported for unit tests.
+ */
+export function assertPromptDocumentsCoveredByInput(
+  prompt: string,
+  input: unknown,
+  inputSchema: JSONSchemaObject | undefined,
+): void {
+  const promptIds = extractDocumentIdsFromText(prompt);
+  if (promptIds.length === 0) return;
+  const covered = collectMountedDocumentIds(inputSchema, input);
+  const uncovered = promptIds.filter((id) => !covered.has(id));
+  if (uncovered.length === 0) return;
+  throw validationFailed([
+    {
+      field: "prompt",
+      code: "document_uri_in_prompt",
+      title: "Document URI In Prompt",
+      message:
+        "The run prompt references document:// URIs but the run cannot read documents from " +
+        "prompt text. Declare a file input field in manifest.input.schema " +
+        '({"type":"string","format":"uri","contentMediaType":"<mime>"}) and pass each ' +
+        "document:// URI in the top-level input. Unreferenced: " +
+        uncovered.map(documentUri).join(", "),
+    },
+  ]);
+}
+
+/**
+ * Trigger an inline agent run end-to-end: insert the shadow package and fire
+ * the pipeline. The route owns the earlier stages — `runInlinePreflight`
+ * (manifest shape, config, readiness) then `parseRequestInput` (file fields
+ * resolved through the SAME parser as `POST /agents/:scope/:name/run`:
+ * `upload://` / `document://` / inline `data:` URIs are ACL-checked, capped,
+ * and streamed into the pre-minted `runId`'s workspace) — so inline and
+ * cataloged runs share one input contract.
  *
  * Throws `ApiError` on validation / pipeline failures (same shape the route
  * already emits). Infrastructure errors bubble as-is so the caller's error
@@ -127,30 +186,44 @@ export async function triggerInlineRun(params: {
   orgId: string;
   applicationId: string;
   actor: Actor | null;
-  body: InlineRunBody;
+  /** Pre-minted run id — input documents already live in its workspace namespace. */
+  runId: string;
+  /** Preflight result the route computed BEFORE streaming any input document. */
+  preflight: InlineRunPreflightResult;
+  /** Parsed run input (file fields resolved) from `parseRequestInput`. */
+  parsed: ParsedInput;
   apiKeyId?: string;
   /** W3C `traceparent` of the spawning request — forwarded to the runtime. */
   traceparent?: string;
 }): Promise<{ runId: string; packageId: string }> {
-  const { orgId, applicationId, actor, body, apiKeyId, traceparent } = params;
+  const { orgId, applicationId, actor, runId, preflight, parsed, apiKeyId, traceparent } = params;
+  const { manifest, prompt, effectiveConfig, modelIdOverride, proxyIdOverride } = preflight;
 
-  // ----- 1. Preflight — shape + readiness (no side effects). -----
-  const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
-  const { manifest, prompt, effectiveConfig, effectiveInput, modelIdOverride, proxyIdOverride } =
-    preflight;
+  // `parseRequestInput` already collapses an effectively-empty input to
+  // `undefined`; map that to NULL so an input-less inline run persists
+  // `runs.input` as SQL NULL — the same representation the agent route uses.
+  const effectiveInput = parsed.input ?? null;
+
+  // Reject BEFORE any durable side effect (shadow row, pipeline) when the
+  // model-authored prompt names document:// URIs that the resolved input does
+  // not mount — a recoverable 400 the chat model can act on. The manifest's
+  // input schema tells the guard which fields actually mount a document.
+  const inputSchema = manifest.input?.schema
+    ? asJSONSchemaObject(manifest.input.schema)
+    : undefined;
+  assertPromptDocumentsCoveredByInput(prompt, effectiveInput, inputSchema);
 
   // Reject an unknown/malformed explicit `modelId` with a clean 404 before we
   // mint a shadow package — avoids both a leaked shadow row and the downstream
   // uuid-cast crash.
   await assertExplicitModelExists(orgId, modelIdOverride);
 
-  // ----- 2. Insert shadow row (now that we know the manifest is valid). -----
+  // ----- Insert shadow row (now that we know the manifest is valid). -----
   const createdBy = actor?.type === "user" ? actor.id : null;
   const shadowId = await insertShadowPackage({ orgId, createdBy, manifest, prompt });
   const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt);
 
-  // ----- 3. Fire the pipeline. -----
-  const runId = `run_${crypto.randomUUID()}`;
+  // ----- Fire the pipeline. -----
   try {
     await prepareAndExecuteRun({
       runId,
@@ -158,6 +231,14 @@ export async function triggerInlineRun(params: {
       orgId,
       actor,
       input: effectiveInput,
+      // File metadata for prompt context — the document bytes were already
+      // streamed into the run workspace by `parseRequestInput`.
+      files: parsed.uploadedFiles,
+      // Staged uploads to materialize into durable `documents` rows after the
+      // run row exists (input already rewritten to `document://` ids).
+      pendingDocuments: parsed.pendingDocuments,
+      // `document://` inputs to protect via `document_links` (chaining).
+      consumedDocumentIds: parsed.consumedDocumentIds,
       config: effectiveConfig,
       modelId: modelIdOverride,
       proxyId: proxyIdOverride,

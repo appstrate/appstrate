@@ -96,18 +96,6 @@ export interface FinalizeRunInput {
 /** Key prefix for webhook-id replay dedup. */
 const REPLAY_KEY_PREFIX = "appstrate:remote-run:replay:";
 
-/**
- * Byte cap on the report text persisted into `runs.result.text`. The report
- * channel is unbounded on the runner side (each `report.appended` event
- * concatenates), so finalize bounds what lands in the JSONB column —
- * `runs.result` is read by every getRun/listRuns consumer and must stay
- * row-sized, not document-sized. Beyond the cap the text is truncated at a
- * UTF-8 boundary and `result.text_truncated: true` flags it; the full
- * report remains recoverable from the per-emit `run_logs` rows
- * (type='result', event='report').
- */
-const MAX_RESULT_TEXT_BYTES = 256 * 1024;
-
 // ---------------------------------------------------------------------------
 // DB helpers
 // ---------------------------------------------------------------------------
@@ -428,20 +416,11 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //      - `output` — structured JSON emitted via the `output` tool, validated
   //        against the agent's declared output schema above (a mismatch flips
   //        status to failed but the payload is still stored — never dropped).
-  //      - `text` — the markdown report emitted via the `report` tool. Multiple
-  //        report calls concatenate in call order (joined with `\n` by the
-  //        runner's reducer). Capped at {@link MAX_RESULT_TEXT_BYTES};
-  //        `text_truncated: true` marks a capped value.
-  //    Persisted regardless of terminal status — a run that reported and then
-  //    failed keeps its partial deliverable alongside `status: "failed"`.
+  //    Persisted regardless of terminal status — a run that produced output and
+  //    then failed keeps its partial deliverable alongside `status: "failed"`.
   const resultPayload: Record<string, unknown> = {};
   if (result.output !== null && result.output !== undefined) {
     resultPayload.output = result.output;
-  }
-  if (typeof result.report === "string" && result.report.length > 0) {
-    const { text, truncated } = capUtf8Text(result.report, MAX_RESULT_TEXT_BYTES);
-    resultPayload.text = text;
-    if (truncated) resultPayload.text_truncated = true;
   }
   // Zod boundary on the persisted payload (`runResultSchema`: closed shape,
   // JSON-safe values, 512 KiB cap). `output` is runner-controlled, so the
@@ -813,22 +792,6 @@ export async function synthesiseFinalize(
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Truncate `value` to at most `maxBytes` of UTF-8, never splitting a code
- * point. Exported for unit tests — the byte-boundary handling (multi-byte
- * characters straddling the cap) is the part worth pinning.
- */
-export function capUtf8Text(value: string, maxBytes: number): { text: string; truncated: boolean } {
-  const bytes = Buffer.byteLength(value, "utf8");
-  if (bytes <= maxBytes) return { text: value, truncated: false };
-  const buf = Buffer.from(value, "utf8").subarray(0, maxBytes);
-  // Decoding a slice that ends mid-code-point yields U+FFFD replacement
-  // characters at the tail — strip them so the stored text ends on a clean
-  // character boundary.
-  const text = buf.toString("utf8").replace(/�+$/, "");
-  return { text, truncated: true };
 }
 
 /**

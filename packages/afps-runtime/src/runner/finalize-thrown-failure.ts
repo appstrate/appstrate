@@ -12,7 +12,7 @@
  *      `finally` owns cancellation cleanup, the runner must NOT finalize;
  *   2. surface the failure as a live `appstrate.error` event;
  *   3. best-effort final drain of any runtime events journaled before the
- *      throw (log/note/pin/report/output the agent produced mid-run);
+ *      throw (log/note/pin/output the agent produced mid-run);
  *   4. reduce the captured events into a {@link RunResult}, stamp the
  *      failure error + (optionally) `status = "failed"` + the runner's own
  *      token-usage snapshot, and `finalize` it.

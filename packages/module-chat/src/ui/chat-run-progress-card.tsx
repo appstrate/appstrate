@@ -31,14 +31,44 @@ import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
 import { useLiveElapsedMs } from "./use-elapsed.ts";
+import { useChatHeaders, useOpenDocument } from "./runtime-context.ts";
 import {
   buildRunPageHref,
   isTerminalStatus,
+  mergeRunDocuments,
+  publishedDocumentsFromLogs,
   terminalRunLineText,
   visibleLogEntries,
+  type ChatRunDocument,
   type RunStatus,
 } from "./run-events.ts";
+import { DocumentAttachment } from "./document-attachment.tsx";
 import type { ToolPhase } from "./tool-result.ts";
+
+/**
+ * Row of document attachments surfaced under a run card — the same unified
+ * renderer the thread uses for sent attachments: an image shows a square
+ * thumbnail, anything else a chip. With a host opener (web shell) it opens the
+ * in-app preview; without one (embedded mounts) it falls back to the
+ * authenticated download.
+ */
+function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
+  const getHeaders = useChatHeaders();
+  const opener = useOpenDocument();
+  if (documents.length === 0) return null;
+  return (
+    <div className="pointer-events-auto flex flex-wrap gap-1.5 px-3 pb-2">
+      {documents.map((doc) => (
+        <DocumentAttachment
+          key={doc.id}
+          doc={{ id: doc.id, name: doc.name, mime: doc.mime }}
+          opener={opener}
+          getHeaders={getHeaders}
+        />
+      ))}
+    </div>
+  );
+}
 
 const STATUS_TONE: Record<RunStatus, string> = {
   pending: "text-muted-foreground",
@@ -78,6 +108,7 @@ export function ChatRunProgressCard({
   agentLabel,
   runHref,
   initialPackageId,
+  initialDocuments,
   phase,
   errorText,
   modalTitle,
@@ -88,6 +119,8 @@ export function ChatRunProgressCard({
   agentLabel?: string;
   runHref?: string;
   initialPackageId?: string;
+  /** Documents from the persisted tool result — survive reload; merged with live ones. */
+  initialDocuments?: ChatRunDocument[];
   phase: ToolPhase;
   /** Launch-failure message shown on line 2 when the tool errored without a run id. */
   errorText?: string;
@@ -98,6 +131,13 @@ export function ChatRunProgressCard({
     runId,
     initialStatus,
     initialPackageId,
+  );
+
+  // Documents: the persisted tool-result list (reload-safe) merged with any
+  // that arrive live over the log stream (`document.published` frames).
+  const documents = React.useMemo(
+    () => mergeRunDocuments(initialDocuments ?? [], publishedDocumentsFromLogs(logs)),
+    [initialDocuments, logs],
   );
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
@@ -190,6 +230,12 @@ export function ChatRunProgressCard({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Downloadable document chips (z-10 so they sit above the full-card click
+          target and stay individually clickable). */}
+      <div className="relative z-10">
+        <DocumentChips documents={documents} />
       </div>
 
       {open ? (

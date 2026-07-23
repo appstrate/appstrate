@@ -27,6 +27,10 @@ import {
   resolveSubscriptionChatModel,
   checkUsageAllowed,
 } from "../../services/chat-subscription.ts";
+import {
+  resolveChatAttachment,
+  detachOrDeleteContainedDocuments,
+} from "../../services/documents.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -124,6 +128,13 @@ function buildPlatformServices(): PlatformServices {
     resolveSubscriptionChatModel,
     recordChatUsage,
     checkUsageAllowed,
+    // Chat attachments — materialize a composer upload into a chat-session-scoped
+    // document (or validate an existing document) and hand back its stable
+    // `document://` URI. The module has no DB access, so it crosses here.
+    resolveChatAttachment,
+    // Chat session teardown — detach-or-delete the session's contained documents
+    // before the session row is removed (the module has no DB/storage access).
+    cleanupSessionDocuments: (chatSessionId) => detachOrDeleteContainedDocuments({ chatSessionId }),
   };
 }
 

@@ -66,13 +66,18 @@ export async function buildPlatformSystemPrompt(
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
     timeoutSeconds: plan.timeout,
+    // Deliverables convention (Phase 2): files the agent writes under
+    // `./outputs/` are swept and published as durable run documents at
+    // finalize. Rendered as a platform-managed section BEFORE the raw prompt
+    // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
+    deliverables: true,
     ...(uploads ? { uploads } : {}),
     ...(integrations && integrations.length > 0 ? { integrations } : {}),
   });
 
   // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
   // integration tools, and the platform runtime tools (output/log/note/
-  // pin/report) — are all advertised to the model via MCP `tools/list`
+  // pin) — are all advertised to the model via MCP `tools/list`
   // (name + description + input schema), so the prompt no longer lists
   // them. The Communication contract (rendered above) is the only
   // tool-related instruction the model can't infer from `tools/list`, and

@@ -34,7 +34,7 @@ export const i18nReady = i18n
     supportedLngs: ["fr", "en"],
     defaultNS: "common",
     fallbackNS: "common",
-    ns: ["common", "agents", "settings"],
+    ns: ["common", "agents", "settings", "documents"],
     interpolation: { escapeValue: false },
   });
 

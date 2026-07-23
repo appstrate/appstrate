@@ -4,12 +4,13 @@
 // module package (`@appstrate/module-chat/ui`); this wrapper only injects
 // the shell's org/app scoping headers. Lazy-loaded behind `features.chat`.
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage } from "@appstrate/module-chat/ui";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useSidebarStore } from "../../stores/sidebar-store";
+import { DocumentPreview } from "../../components/document-preview";
 
 export function ChatModulePage() {
   // Auto-collapse the global sidebar while in chat, restore on leave (same
@@ -47,6 +48,11 @@ export function ChatModulePage() {
     () => ({ ...buildScopingHeaders(), "X-Chat-Locale": i18n.language }),
     [i18n],
   );
+  // Clicking a chat document (attachment thumbnail/chip or a run card's document
+  // chip) opens the SAME in-app preview modal the documents library uses. The
+  // chat module delegates via this callback (dependency direction is web →
+  // module-chat, so the module can't import the preview component).
+  const [previewDoc, setPreviewDoc] = useState<{ id: string; name: string } | null>(null);
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
@@ -61,7 +67,11 @@ export function ChatModulePage() {
         conversationId={conversationId ?? null}
         newChatKey={location.key}
         onConversationChange={onConversationChange}
+        onOpenDocument={setPreviewDoc}
       />
+      {previewDoc && (
+        <DocumentPreview doc={previewDoc} open={!!previewDoc} onClose={() => setPreviewDoc(null)} />
+      )}
     </div>
   );
 }

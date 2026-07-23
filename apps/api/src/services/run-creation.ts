@@ -138,9 +138,20 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
 
   // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.
+  //
+  //     `modelSource: null` — a remote-origin run resolves NO platform model at
+  //     creation (the runner executes on its own host with its own model +
+  //     credentials; `runs.model_source` stays NULL — see the createRunRow
+  //     comment below). So the run-surface `beforeUsage` hook is skipped: it is
+  //     not cheaply determinable here whether the run will route inference
+  //     through the system proxy, and any inference that does is metered
+  //     per-call on the proxy rows (`credential_source:"system"`), which carry
+  //     the platform attribution. Gating a remote run's OWN-credential
+  //     inference here would be the spurious-402 bug on the remote path.
   const gates = await runPreflightGates({
     orgId,
     agent: input.agent,
+    modelSource: null,
   });
   if (!gates.ok) return { ok: false, error: gates.error };
   const { agent } = gates;

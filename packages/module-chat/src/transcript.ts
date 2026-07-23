@@ -7,10 +7,12 @@
  *
  * A single user turn is sent verbatim; multiple turns become a labelled
  * `User:`/`Assistant:` transcript so a stateless driver gets the full
- * conversational context. Non-text parts (tool calls, files) are dropped — only
- * text survives into the transcript. The system persona is NOT prepended here:
- * the caller (the Pi chat engine) passes system through the session's own
- * system-prompt arg.
+ * conversational context. Tool-call parts are dropped — only text survives into
+ * the transcript. File attachments are first flattened into model-facing text
+ * lines ({@link messagesWithAttachmentsAsText}), so a `document://` the user
+ * attached reaches the model here exactly as it does on the ai-sdk path. The
+ * system persona is NOT prepended here: the caller (the Pi chat engine) passes
+ * system through the session's own system-prompt arg.
  *
  * KNOWN LIMITATION (lossy vs the ai-sdk path): the ai-sdk chat path feeds the
  * model `convertToModelMessages(messages)` — a structured array preserving tool
@@ -23,9 +25,10 @@
 
 import type { UIMessage } from "ai";
 import { uiMessageText } from "./message-text.ts";
+import { messagesWithAttachmentsAsText } from "./attachments.ts";
 
 export function buildTranscriptPrompt(messages: UIMessage[]): string {
-  const turns = messages
+  const turns = messagesWithAttachmentsAsText(messages)
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => ({ role: m.role, text: uiMessageText(m.parts) }))
     .filter((t) => t.text.length > 0);

@@ -449,6 +449,43 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("\n---\n\nUSER_TEMPLATE_BODY");
   });
 
+  describe("Deliverables section", () => {
+    it("emits the section, pointing at ./outputs/, only when opted in", () => {
+      const withIt = renderPlatformPrompt({ template: "T", context: ctx(), deliverables: true });
+      expect(withIt).toContain("## Deliverables");
+      expect(withIt).toContain("`./outputs/`");
+      expect(withIt).toContain("published automatically as a downloadable");
+
+      const without = renderPlatformPrompt({ template: "T", context: ctx() });
+      expect(without).not.toContain("## Deliverables");
+    });
+
+    it("renders before the raw user prompt (template separator)", () => {
+      const out = renderPlatformPrompt({
+        template: "USER_TEMPLATE_BODY",
+        context: ctx(),
+        deliverables: true,
+      });
+      const deliverablesIdx = out.indexOf("## Deliverables");
+      const sepIdx = out.indexOf("\n---\n\nUSER_TEMPLATE_BODY");
+      expect(deliverablesIdx).toBeGreaterThan(-1);
+      expect(sepIdx).toBeGreaterThan(deliverablesIdx);
+    });
+
+    it("renders before the Output Format section when both are present", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        deliverables: true,
+        outputSchema: { type: "object", properties: { x: { type: "string" } } },
+      });
+      const deliverablesIdx = out.indexOf("## Deliverables");
+      const outputIdx = out.indexOf("## Output Format");
+      expect(deliverablesIdx).toBeGreaterThan(-1);
+      expect(outputIdx).toBeGreaterThan(deliverablesIdx);
+    });
+  });
+
   describe("Output Format section", () => {
     const schema = {
       type: "object",

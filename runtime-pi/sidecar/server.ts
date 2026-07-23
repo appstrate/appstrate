@@ -263,7 +263,7 @@ const runtimeDeps = buildSidecarRuntimeDeps({
   ...(process.env.RUN_ID ? { runId: process.env.RUN_ID } : {}),
 });
 
-// Platform runtime tools (output/log/note/pin/report) the agent selected,
+// Platform runtime tools (output/log/note/pin) the agent selected,
 // hosted in-process as MCP tools on the agent-facing `/mcp` surface — the
 // same transport every other tool uses, so they are no longer Pi-SDK
 // extensions. Static for the run's lifetime (selection + output schema are

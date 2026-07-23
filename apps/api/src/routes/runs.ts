@@ -21,7 +21,7 @@ import { mergeAndValidateConfigOverride } from "../services/agent-readiness.ts";
 import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { notFound, conflict, internalError } from "../lib/errors.ts";
+import { invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
@@ -111,6 +111,10 @@ export function createRunsRouter() {
       // with this same id.
       const runId = `run_${crypto.randomUUID()}`;
 
+      // Flips true the instant the pipeline launches (run row inserted, workload
+      // dispatched). Past that point the run OWNS its workspace — a later failure
+      // (e.g. the read-back below) must NOT delete a live run's input documents.
+      let launched = false;
       try {
         const inputResult = await parseRequestInput(
           c,
@@ -126,6 +130,8 @@ export function createRunsRouter() {
         const {
           input: parsedInput,
           uploadedFiles,
+          pendingDocuments,
+          consumedDocumentIds,
           modelIdOverride,
           proxyIdOverride,
           configOverride,
@@ -177,10 +183,18 @@ export function createRunsRouter() {
           agent: effectiveAgent,
           orgId,
           actor,
-          input: parsedInput,
+          // `parseRequestInput` collapses an effectively-empty input to
+          // `undefined`; map that to NULL so an input-less run persists
+          // `runs.input` as SQL NULL (one representation across all origins).
+          input: parsedInput ?? null,
           // File metadata for prompt context — the document bytes were already
           // streamed into the run workspace during consume.
           files: uploadedFiles,
+          // Staged uploads to materialize into durable `documents` rows after
+          // the run row exists (input already rewritten to `document://` ids).
+          pendingDocuments,
+          // `document://` inputs to protect via `document_links` (chaining).
+          consumedDocumentIds,
           config: mergedConfig,
           configOverride: configOverride ?? null,
           modelId: modelIdOverride ?? preflightModelId,
@@ -195,6 +209,8 @@ export function createRunsRouter() {
           runnerKind: runner.kind,
           manifestCache,
         });
+        // Pipeline launched — the run now owns its workspace teardown.
+        launched = true;
 
         await recordAuditFromContext(c, {
           action: "run.triggered",
@@ -228,9 +244,10 @@ export function createRunsRouter() {
       } catch (err) {
         // Roll back any input documents streamed into the run workspace before
         // the run launched (size/MIME mismatch, failed preflight, …). Once
-        // `prepareAndExecuteRun` resolves the run owns its own teardown, so this
-        // only fires on the pre-launch error path. Best-effort + idempotent.
-        await deleteRunWorkspace(runId);
+        // `prepareAndExecuteRun` resolves the run owns its own teardown, so a
+        // post-launch failure (e.g. the read-back throwing) must NOT delete a
+        // live run's workspace. Best-effort + idempotent.
+        if (!launched) await deleteRunWorkspace(runId);
         throw err;
       }
     },
@@ -492,38 +509,87 @@ export function createRunsRouter() {
 
       const body = await readJsonBody(c, inlineRunBodySchema);
 
-      const { runId, packageId } = await triggerInlineRun({
-        orgId,
-        applicationId,
-        actor,
-        body,
-        apiKeyId: c.get("apiKeyId") ?? undefined,
-        traceparent: runTraceparent(c),
-      });
-
-      await recordAuditFromContext(c, {
-        action: "run.triggered",
-        resourceType: "run",
-        resourceId: runId,
-        after: { packageId, origin: "inline" },
-      });
-
-      // 201 + the bare created run resource (#657) — same DTO and serializer
-      // as GET /runs/:id, same status code as the sibling trigger
-      // POST /agents/{scope}/{name}/run. The shadow package id callers used
-      // to read from the `packageId` envelope field is the resource's own
-      // `packageId`. The run row exists once `triggerInlineRun` resolves
-      // (`prepareAndExecuteRun` inserts it before returning).
-      const row = await getRunFull(getAppScope(c), runId, getActor(c));
-      if (!row) {
-        // The shadow run was inserted by `triggerInlineRun` and read back on
-        // the same scope; a miss means a concurrent teardown deleted it. The
-        // 201 contract is the full `Run`, so surface a 500 rather than a
-        // partial id-only body that would lie to the typed client.
-        // Effectively unreachable in normal operation.
-        throw internalError();
+      // `rerun_from` is an agent-route concept (replay a cataloged agent's
+      // prior input). The inline body schema strips it, but the shared input
+      // parser below reads the raw JSON body — reject it explicitly so a
+      // stray field fails loudly instead of being half-applied (preflight
+      // validates the raw `input`, which a replay would not populate).
+      const rawBody = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+      if (rawBody && "rerun_from" in rawBody) {
+        throw invalidRequest(
+          "`rerun_from` is not supported for inline runs — pass `input` directly",
+          "rerun_from",
+        );
       }
-      return c.json(row, 201);
+
+      // Preflight BEFORE any input document streams — a bad manifest / config
+      // / readiness problem 4xxes without touching storage.
+      const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
+
+      // Same input machinery as POST /agents/:scope/:name/run: file fields
+      // (`format: uri` + `contentMediaType`) resolve `upload://` /
+      // `document://` / inline `data:` URIs through the container ACL + caps
+      // and stream the bytes into this run's workspace. Minted before parsing
+      // for the same reason as the agent route (documents stream straight
+      // into the run's workspace namespace).
+      const runId = `run_${crypto.randomUUID()}`;
+      // Flips true the instant `triggerInlineRun` launches the pipeline. Past
+      // that point the run OWNS its workspace — a later failure (e.g. the
+      // read-back below) must NOT delete a live run's input documents.
+      let launched = false;
+      try {
+        const parsed = await parseRequestInput(
+          c,
+          runId,
+          preflight.manifest.input?.schema
+            ? asJSONSchemaObject(preflight.manifest.input.schema)
+            : undefined,
+        );
+
+        const { packageId } = await triggerInlineRun({
+          orgId,
+          applicationId,
+          actor,
+          runId,
+          preflight,
+          parsed,
+          apiKeyId: c.get("apiKeyId") ?? undefined,
+          traceparent: runTraceparent(c),
+        });
+        // Pipeline launched — the run now owns its workspace teardown.
+        launched = true;
+
+        await recordAuditFromContext(c, {
+          action: "run.triggered",
+          resourceType: "run",
+          resourceId: runId,
+          after: { packageId, origin: "inline" },
+        });
+
+        // 201 + the bare created run resource (#657) — same DTO and serializer
+        // as GET /runs/:id, same status code as the sibling trigger
+        // POST /agents/{scope}/{name}/run. The shadow package id callers used
+        // to read from the `packageId` envelope field is the resource's own
+        // `packageId`. The run row exists once `triggerInlineRun` resolves
+        // (`prepareAndExecuteRun` inserts it before returning).
+        const row = await getRunFull(getAppScope(c), runId, getActor(c));
+        if (!row) {
+          // The shadow run was inserted by `triggerInlineRun` and read back on
+          // the same scope; a miss means a concurrent teardown deleted it. The
+          // 201 contract is the full `Run`, so surface a 500 rather than a
+          // partial id-only body that would lie to the typed client.
+          // Effectively unreachable in normal operation.
+          throw internalError();
+        }
+        return c.json(row, 201);
+      } catch (err) {
+        // Roll back any input documents streamed into the run workspace before
+        // the run launched — same pre-launch teardown as the agent route. Once
+        // `triggerInlineRun` has launched the pipeline the run owns its own
+        // teardown, so a post-launch failure must NOT delete its workspace.
+        if (!launched) await deleteRunWorkspace(runId);
+        throw err;
+      }
     },
   );
 

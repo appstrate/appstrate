@@ -519,19 +519,18 @@ describe("buildEnrichedPrompt — tools and skills", () => {
   it("never renders a Tools section — tools are advertised via MCP tools/list", async () => {
     // The prompt no longer lists tools (a partial/stale in-prompt list
     // would contradict the live tool set). The agent discovers every tool
-    // — bundle, integration, runtime (output/log/note/pin/report), and the
+    // — bundle, integration, runtime (output/log/note/pin), and the
     // platform-injected run_history/recall_memory — from `tools/list`.
     const ctx = baseContext({
       availableTools: [
         { id: "@org/scraper", name: "Web Scraper", description: "Scrapes web pages" },
       ],
-      runtimeTools: ["report"],
+      runtimeTools: ["note"],
     });
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Tools");
     expect(prompt).not.toContain("Web Scraper");
     expect(prompt).not.toContain("run_history");
-    expect(prompt).not.toContain("report");
   });
 
   it("includes available skills", async () => {

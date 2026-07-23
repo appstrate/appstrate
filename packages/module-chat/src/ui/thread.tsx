@@ -13,9 +13,11 @@ import {
   ThreadPrimitive,
   MessagePrimitive,
   ComposerPrimitive,
+  AttachmentPrimitive,
   ActionBarPrimitive,
   AuiIf,
   useMessage,
+  useAttachment,
   getExternalStoreMessages,
 } from "@assistant-ui/react";
 import {
@@ -23,10 +25,14 @@ import {
   ArrowDownIcon,
   CheckIcon,
   CopyIcon,
+  FileIcon,
+  PaperclipIcon,
   SendHorizontalIcon,
   SquareIcon,
+  XIcon,
 } from "lucide-react";
 import { turnLimitReached, turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import { formatBytes } from "@appstrate/core/format";
 import { Button } from "./button.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
@@ -39,6 +45,15 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
+import { resolveAttachmentContent } from "./run-events.ts";
+import { stagedImagePreviewUrl } from "./upload.ts";
+import {
+  DocumentAttachment,
+  isImageMime,
+  ATTACHMENT_CHIP_CLASS,
+  ATTACHMENT_IMAGE_CLASS,
+} from "./document-attachment.tsx";
+import { useChatHeaders, useOpenDocument } from "./runtime-context.ts";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
@@ -140,12 +155,110 @@ function ScrollToBottom() {
   );
 }
 
+/** A pending composer attachment chip: file icon, name, size, remove button. */
+function ComposerAttachmentChip() {
+  const name = useAttachment((a) => a.name);
+  const size = useAttachment((a) => a.file?.size ?? 0);
+  return (
+    <AttachmentPrimitive.Root className="bg-muted flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs">
+      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
+      <span className="max-w-40 truncate font-medium">{name}</span>
+      {size > 0 && <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>}
+      <AttachmentPrimitive.Remove asChild>
+        <button
+          type="button"
+          aria-label="Retirer la pièce jointe"
+          className="text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      </AttachmentPrimitive.Remove>
+    </AttachmentPrimitive.Root>
+  );
+}
+
+/**
+ * A sent file attachment, rendered from a message `file` part. The wire part
+ * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + icon
+ * only (the composer chip shows the size, read from the picked File).
+ */
+function FileAttachmentPart(props: { filename?: string }) {
+  return (
+    <div className="bg-background text-foreground mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs">
+      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
+      <span className="max-w-52 truncate font-medium">{props.filename ?? "document"}</span>
+    </div>
+  );
+}
+
+// ─── Sent user-message attachments ───────────────────────────────────────────
+// The `@assistant-ui/react-ai-sdk` converter filters user `file` parts OUT of a
+// message's content and re-exposes them as `message.attachments` — so the
+// `File: FileAttachmentPart` Parts mapping above NEVER fires for user messages
+// (it stays correct for assistant file parts). We render sent attachments from
+// the attachments channel instead (`MessagePrimitive.Attachments`).
+
+/** Inert chip: file icon + truncated name, no download (same look as FileAttachmentPart). */
+function InertAttachmentChip({ name }: { name: string }) {
+  return (
+    <div className={ATTACHMENT_CHIP_CLASS}>
+      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
+      <span className="truncate font-medium">{name || "document"}</span>
+    </div>
+  );
+}
+
+/**
+ * One sent attachment on a user message. A `document://` (server-persisted, or a
+ * reloaded conversation) is interactive: image mime → thumbnail, else a
+ * download chip. An `upload://` (just-sent optimistic, not yet materialized) or
+ * unparseable URI shows the local File as a thumbnail when it's an image still
+ * held by the runtime, else an inert chip — the content route serves documents
+ * only.
+ */
+function SentAttachmentChip() {
+  const getHeaders = useChatHeaders();
+  const opener = useOpenDocument();
+  const name = useAttachment((a) => a.name);
+  const contentType = useAttachment((a) => a.contentType);
+  // The content array reference is stable for a settled attachment, so this
+  // selector doesn't churn re-renders; memo keeps the resolved ref stable too.
+  const content = useAttachment((a) => a.content);
+  const resolved = React.useMemo(() => resolveAttachmentContent(content), [content]);
+
+  if (resolved.kind !== "document") {
+    // Just-sent optimistic attachment (`upload://`, not yet materialized): the
+    // staged-image cache still holds a local preview of the picked file. Not
+    // interactive — there is no document id to preview or download yet; the
+    // persisted `document://` part takes over on reload.
+    const localSrc = resolved.uri ? stagedImagePreviewUrl(resolved.uri) : undefined;
+    if (localSrc && isImageMime(contentType))
+      return <img src={localSrc} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />;
+    return <InertAttachmentChip name={name} />;
+  }
+
+  // A resolved `document://` is interactive: the unified renderer shows an image
+  // thumbnail or a download/preview chip, resolving the opener-vs-download action.
+  return (
+    <DocumentAttachment
+      doc={{ id: resolved.id, name, mime: contentType }}
+      opener={opener}
+      getHeaders={getHeaders}
+    />
+  );
+}
+
 function Composer({ slot }: { slot?: React.ReactNode }) {
   // No focus ring on the box: the app's global `textarea:focus` ring is too
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
     <ComposerPrimitive.Root className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
+      {/* Pending attachments, above the input. `empty:hidden` collapses the row
+          (and its gap) when nothing is attached. */}
+      <div className="flex flex-wrap gap-1.5 empty:hidden">
+        <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
+      </div>
       <ComposerPrimitive.Input
         rows={1}
         autoFocus
@@ -153,7 +266,19 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
         className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
       />
       <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">{slot}</div>
+        <div className="flex min-w-0 items-center gap-1">
+          <ComposerPrimitive.AddAttachment multiple asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground size-8 shrink-0 rounded-lg"
+              aria-label="Joindre un fichier"
+            >
+              <PaperclipIcon />
+            </Button>
+          </ComposerPrimitive.AddAttachment>
+          <div className="min-w-0">{slot}</div>
+        </div>
         <ThreadPrimitive.If running={false}>
           <ComposerPrimitive.Send asChild>
             <Button size="icon" className="size-8 shrink-0 rounded-lg" aria-label="Envoyer">
@@ -217,9 +342,22 @@ function UserMessage() {
 
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col items-end py-2">
-      <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
-        <MessagePrimitive.Parts />
-      </div>
+      {/* Sent attachments render ABOVE the bubble, in their own right-aligned
+          wrap-row. They live on `message.attachments` (the converter's file-part
+          routing), not in the bubble's Parts. Guarded so an attachment-less
+          message renders exactly as before. */}
+      <MessagePrimitive.If hasAttachments>
+        <div className="mb-1 flex max-w-[80%] flex-wrap justify-end gap-1.5">
+          <MessagePrimitive.Attachments components={{ Attachment: SentAttachmentChip }} />
+        </div>
+      </MessagePrimitive.If>
+      {/* The text bubble. Guarded on content so an attachment-only message (no
+          text part) doesn't paint an empty grey pill. */}
+      <MessagePrimitive.If hasContent>
+        <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
+          <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
+        </div>
+      </MessagePrimitive.If>
     </MessagePrimitive.Root>
   );
 }

@@ -438,29 +438,6 @@ describe("createConsoleSink — human mode", () => {
     expect(streams.stdout).toBe("");
     expect(streams.stderr).toBe("");
   });
-
-  it("renders report.appended content as a stdout line", async () => {
-    const sink = createConsoleSink({});
-    await sink.handle({
-      type: "report.appended",
-      timestamp: 0,
-      runId: RUN_ID,
-      content: "## Section header",
-    } as RunEvent);
-    expect(streams.stdout).toContain("## Section header");
-  });
-
-  it("trims double newlines on report.appended (no extra blank line)", async () => {
-    const sink = createConsoleSink({});
-    await sink.handle({
-      type: "report.appended",
-      timestamp: 0,
-      runId: RUN_ID,
-      content: "trailing newline\n",
-    } as RunEvent);
-    // Exactly one newline at the end — the sink must not double it.
-    expect(streams.stdout).toBe("trailing newline\n");
-  });
 });
 
 // ---------------------------------------------------------------------------

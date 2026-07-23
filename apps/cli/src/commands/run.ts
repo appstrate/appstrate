@@ -318,7 +318,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   });
   const systemPrompt = renderPlatformPrompt(promptInputs);
 
-  // System tools (`@appstrate/output`, `@appstrate/report`, …) read
+  // System tools (`@appstrate/output`, `@appstrate/log`, …) read
   // `AGENT_RUN_ID` from the env when stamping their stdout-JSONL events.
   // The stdout bridge installed below re-stamps events with the canonical
   // `runId` regardless, but exporting the var keeps any tool-side log
@@ -355,7 +355,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
   }
 
-  // ─── 7b. Platform runtime tools (output/log/note/pin/report) ──────────
+  // ─── 7b. Platform runtime tools (output/log/note/pin) ──────────
   // Selected via `manifest.runtime_tools`. With no sidecar (the CLI always
   // runs in-process), register the shared MCP tool definitions
   // (`@appstrate/core/runtime-tool-defs`) as Pi extensions. The default
@@ -402,18 +402,17 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     envValue: process.env.APPSTRATE_VERBOSE,
   });
   // Stdout-JSONL bridge wiring (see `attachStdoutBridge` for the full
-  // rationale). The built-in runtime tools (`output`, `report`, `note`, `pin`)
+  // rationale). The built-in runtime tools (`output`, `log`, `note`, `pin`)
   // emit canonical events via
   // `process.stdout.write(JSON+\n)`. Without the bridge these events
   // never reach the configured sink — they're printed as raw JSON noise
   // and lost. The bridge intercepts stdout, parses canonical events,
   // and folds them into the runner's sink stream so:
-  //   - `--report` mode POSTs `output.emitted` / `report.appended` to
+  //   - `--report` mode POSTs `output.emitted` to
   //     the platform → `run_logs` populated, finalize body carries
-  //     `result.output` / `result.pinned` / `result.report`.
+  //     `result.output` / `result.pinned`.
   //   - Offline mode (no `--report`) still aggregates the events so
-  //     `--output <file>` writes the actual `result.output` and the
-  //     human/JSONL console sink renders the report.
+  //     `--output <file>` writes the actual `result.output`.
   //
   // `writeStdout` trampoline: the console sink needs a writer that
   // bypasses the bridge (otherwise `--json` would re-emit canonical

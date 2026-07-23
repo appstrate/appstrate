@@ -58,8 +58,9 @@ export const runsPaths = {
                   type: "object",
                   description:
                     "Run input values, validated against the agent's input schema. File fields " +
-                    "take `upload://upl_xxx` references (from `createUpload`) or inline " +
-                    "`data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
+                    "take `upload://upl_xxx` references (from `createUpload`), " +
+                    "`document://doc_xxx` references (an existing document the caller can read), " +
+                    "or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
                 },
                 rerun_from: {
                   type: "string",
@@ -388,7 +389,11 @@ export const runsPaths = {
                 },
                 input: {
                   type: "object",
-                  description: "Run input validated against manifest.input.schema (AJV).",
+                  description:
+                    "Run input validated against manifest.input.schema (AJV). File fields take " +
+                    "`upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` " +
+                    "references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs " +
+                    "(≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`.",
                 },
                 config: {
                   type: "object",
@@ -1047,7 +1052,11 @@ export const runsPaths = {
                   ],
                 },
                 applicationId: { type: "string", minLength: 1 },
-                input: { type: "object" },
+                input: {
+                  type: "object",
+                  description:
+                    "Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions.",
+                },
                 dependency_overrides: {
                   type: "object",
                   description:
@@ -1294,11 +1303,6 @@ export const runsPaths = {
                   minimum: 0,
                   description: "Authoritative terminal run cost written to the `runs` row.",
                 },
-                report: {
-                  type: "string",
-                  description:
-                    "Aggregated markdown report — every `report.appended` event's content joined with `\\n` in call order. Persisted (capped at 256 KiB) as `runs.result.text` so getRun exposes the run's deliverable without log scraping.",
-                },
               },
             },
           },
@@ -1443,6 +1447,91 @@ export const runsPaths = {
         "401": { description: "Signature verification failed" },
         "404": { description: "run_not_found | no input documents" },
         "410": { description: "run_sink_closed | run_sink_expired" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+    post: {
+      operationId: "publishRunDocument",
+      tags: ["Runs"],
+      summary: "Publish an agent-produced document (HMAC, streaming)",
+      description:
+        "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 otherwise).",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "X-Document-Name",
+          in: "header",
+          required: true,
+          schema: { type: "string" },
+          description: "Display name for the document (sanitised server-side).",
+        },
+        {
+          name: "Content-Type",
+          in: "header",
+          required: true,
+          schema: { type: "string" },
+          description: "MIME type of the document bytes.",
+        },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/octet-stream": {
+            schema: { type: "string", format: "binary" },
+          },
+        },
+      },
+      security: [],
+      responses: {
+        "201": {
+          description: "Document stored",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["id", "uri", "name", "mime", "size", "sha256"],
+                properties: {
+                  id: { type: "string" },
+                  uri: { type: "string", description: "`document://<id>` durable URI." },
+                  name: { type: "string" },
+                  mime: { type: "string" },
+                  size: { type: "integer" },
+                  sha256: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "200": {
+          description:
+            "Idempotent replay — an identical (run, sha256, name) document already existed; the existing document is returned.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["id", "uri", "name", "mime", "size", "sha256"],
+                properties: {
+                  id: { type: "string" },
+                  uri: { type: "string" },
+                  name: { type: "string" },
+                  mime: { type: "string" },
+                  size: { type: "integer" },
+                  sha256: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { description: "X-Document-Name or Content-Type header missing / empty body" },
+        "401": { description: "Signature verification failed" },
+        "403": { description: "storage_limit_exceeded" },
+        "404": { description: "run_not_found" },
+        "409": { description: "run_not_running" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "413": { description: "Document exceeds the per-file or per-run output limit" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

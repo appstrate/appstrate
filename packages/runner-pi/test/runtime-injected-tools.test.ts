@@ -85,7 +85,7 @@ describe("runtime-tools directory layout", () => {
   it("each injected tool has its own directory with `tool.ts` (no TOOL.md)", async () => {
     const entries = await readdir(RUNTIME_TOOLS_DIR, { withFileTypes: true });
     // `builtin/` holds the in-process built-in runtime tools (output/log/
-    // note/pin/report) — not MCP-forwarding injected tools, so it's excluded.
+    // note/pin) — not MCP-forwarding injected tools, so it's excluded.
     const toolDirs = entries
       .filter((e) => e.isDirectory())
       .map((e) => e.name)

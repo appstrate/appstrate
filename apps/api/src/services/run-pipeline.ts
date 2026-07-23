@@ -13,7 +13,13 @@ import {
 } from "./run-context-builder.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
+import {
+  materializeRunUploads,
+  linkConsumedDocuments,
+  type PendingUploadMaterialization,
+} from "./documents.ts";
 import { getPackageConfig } from "./application-packages.ts";
+import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
@@ -71,6 +77,20 @@ export interface RunPipelineParams {
   actor: Actor | null;
   input?: Record<string, unknown> | null;
   files?: FileReference[];
+  /**
+   * Staged uploads to materialize into durable `documents` rows once the run
+   * row exists (D1). The persisted `input` already references the pre-minted
+   * `document://` ids; the row insert is deferred here because `documents.run_id`
+   * is a hard FK. Set by the POST /run route; unset for scheduler/inline runs.
+   */
+  pendingDocuments?: PendingUploadMaterialization[];
+  /**
+   * The `document://` ids this run consumes as input — written as `document_links`
+   * rows after `createRun` (the run is the FK'd consumer). Chaining-protection
+   * ledger: a consumed doc survives its producer container's deletion via detach.
+   * Set by the run routes; unset for scheduler runs (no user input refs).
+   */
+  consumedDocumentIds?: string[];
   config: Record<string, unknown>;
   /**
    * Per-run override delta — the raw object the caller sent in the request
@@ -306,6 +326,26 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // the ~1.75 s pre-createRun pipeline is decomposable in prod without a tracer.
   const pipelineStart = Date.now();
   const spanAttributes = { "appstrate.run.id": runId, "appstrate.org.id": orgId };
+  // --- Step 0: Resolve the model source for the admission gate ---
+  //
+  // The `beforeUsage` gate must fire ONLY for platform-provided models — an org
+  // running its own credential (BYOK / OAuth subscription) spends no platform
+  // credit and must not be blocked by a cloud credit cap (the spurious-402
+  // bug). Resolve the same model `buildRunContext` will (Step 3) — cheap: system
+  // models are in-memory and DB rows are short-TTL cached, so the later
+  // resolution is a cache hit. `modelId` is the effective preset (per-run
+  // override folded in by the route/scheduler/inline callers), matching the
+  // `params.modelId ?? config.modelId` cascade buildRunContext applies. A run
+  // with no resolvable model (`null`) fails downstream with
+  // `ModelNotConfiguredError`; treating it as non-system here just skips a gate
+  // that would never matter.
+  const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null);
+  const modelSourceForGate: "system" | "org" | null = gateModel
+    ? gateModel.isSystemModel
+      ? "system"
+      : "org"
+    : null;
+
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeUsage hook). Shared with the remote origin in run-creation.ts so
   //     drift across the two paths is impossible — one change surface.
@@ -314,6 +354,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     runPreflightGates({
       orgId,
       agent: params.agent,
+      modelSource: modelSourceForGate,
     }),
   );
   const gatesMs = Date.now() - gatesStart;
@@ -530,6 +571,51 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     ),
   );
   const createMs = Date.now() - createStart;
+
+  // Record the cross-container consumption links (D1) IMMEDIATELY after
+  // `createRun` (`document_links.consumer_run_id` FK needs the run row) —
+  // first thing, so the unprotected window between input-parse (where the doc
+  // was resolved and streamed) and this insert stays as small as possible. A
+  // producer-delete racing through that window deletes the doc unprotected;
+  // the consequence is a rerun 404 on that input — the same contract as an
+  // explicit `DELETE /api/documents/:id`, which also ignores consumers.
+  // Best-effort: the link is protection metadata, not run-critical — a failure
+  // (including the FK violation of the race above) must not fail the run.
+  if (params.consumedDocumentIds?.length) {
+    await linkConsumedDocuments(runId, params.consumedDocumentIds).catch((err) => {
+      logger.warn("failed to write document consumption links", {
+        runId,
+        error: getErrorMessage(err),
+      });
+    });
+  }
+
+  // Materialize the run's staged uploads into durable `documents` rows now the
+  // run row exists (deferred from the input-parser by the `documents.run_id`
+  // FK). NOT best-effort: the persisted run input references these document
+  // ids, so a materialization failure would leave a broken run —
+  // `materializeRunUploads` rolls back the partial batch, fails the run loudly
+  // (via `synthesiseFinalize`), and rethrows, so the caller surfaces the error.
+  if (params.pendingDocuments?.length) {
+    if (actor) {
+      await materializeRunUploads(
+        { orgId, applicationId },
+        actor,
+        runId,
+        agent.id,
+        params.pendingDocuments,
+      );
+    } else {
+      // Invariant: an actor-less run should never carry pending uploads (the
+      // input-parser only stages them for a real actor). Unreachable today, but
+      // silently skipping would strand the persisted `document://` references —
+      // log loudly if it ever regresses.
+      logger.warn("pending documents dropped: run has no actor to attribute them to", {
+        runId,
+        pendingCount: params.pendingDocuments.length,
+      });
+    }
+  }
 
   logger.info("run pipeline timings", {
     runId,

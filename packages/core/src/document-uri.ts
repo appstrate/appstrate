@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Canonical `document://` (and companion `upload://`) URI contract.
+ *
+ * The durable document store addresses every stored file by an opaque,
+ * stable `document://doc_xxx` URI; a staged (not-yet-materialized) upload
+ * carries the ephemeral `upload://upl_xxx` form. Both the platform
+ * (apps/api documents/uploads services + MCP router) and the chat module
+ * validate/parse these URIs, so the pure, dependency-free helpers live here
+ * — one source of truth for the prefix + id shape — rather than being
+ * re-implemented per consumer (the earlier state: four near-identical copies
+ * of the prefix literals and id regex).
+ *
+ * Dependency-free on purpose (no DB/storage imports) so the MCP tool layer,
+ * the chat module, and the runtime can import it without pulling in the
+ * documents service's graph.
+ */
+
+/** `document://doc_xxx` — the opaque, stable URI form of a stored document. */
+export const DOCUMENT_URI_PREFIX = "document://";
+
+/** `upload://upl_xxx` — the ephemeral URI form of a staged (not-yet-materialized) upload. */
+export const UPLOAD_URI_PREFIX = "upload://";
+
+/**
+ * Strict document id shape: `doc_` + ≥8 id chars. `prefixedId("doc")` is well
+ * above this, so the bound is safely below the real minimum. Rejects malformed
+ * input before it reaches any database SELECT. Mirrors the service-side
+ * validator (`apps/api/src/services/documents.ts`).
+ */
+export const DOCUMENT_ID_RE = /^doc_[A-Za-z0-9_-]{8,}$/;
+
+/** Strict upload id shape: `upl_` + ≥8 id chars. Mirrors the uploads service validator. */
+export const UPLOAD_ID_RE = /^upl_[A-Za-z0-9_-]{8,}$/;
+
+/** Is this value a `document://…` reference (prefix only, id not validated)? */
+export function isDocumentUri(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith(DOCUMENT_URI_PREFIX);
+}
+
+/** Is this value an `upload://…` reference (prefix only, id not validated)? */
+export function isUploadUri(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith(UPLOAD_URI_PREFIX);
+}
+
+/**
+ * Does `value` carry an accepted chat-attachment scheme (`upload://` or
+ * `document://`)? Attachments flow only through the document store, never
+ * inline (`data:`) or as arbitrary URLs.
+ */
+export function isAttachmentUri(value: unknown): value is string {
+  return isUploadUri(value) || isDocumentUri(value);
+}
+
+/**
+ * Extract the document id from a `document://doc_xxx` URI, validating the id
+ * shape. Returns null if the prefix is absent or the id is malformed.
+ */
+export function parseDocumentUri(uri: string): string | null {
+  if (!uri.startsWith(DOCUMENT_URI_PREFIX)) return null;
+  const id = uri.slice(DOCUMENT_URI_PREFIX.length);
+  return DOCUMENT_ID_RE.test(id) ? id : null;
+}
+
+/** The `document://` URI for a document id. */
+export function documentUri(id: string): string {
+  return `${DOCUMENT_URI_PREFIX}${id}`;
+}
+
+/**
+ * Walk an arbitrary JSON value (a run's persisted `input`, tool args, …) and
+ * collect the set of document ids referenced by any `document://doc_xxx` string
+ * anywhere within it — nested objects and arrays included. De-duplicated,
+ * insertion-order stable. Every candidate string is validated through
+ * {@link parseDocumentUri}, so a malformed URI is silently skipped (never yields
+ * a bogus id). Pure and dependency-free — the single place that turns a blob of
+ * input JSON into the document ids it consumes (e.g. so a run's document listing
+ * can surface the inputs it was launched with, not only the outputs it produced).
+ */
+export function extractDocumentIds(value: unknown): string[] {
+  const ids = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (typeof node === "string") {
+      const id = parseDocumentUri(node);
+      if (id) ids.add(id);
+    } else if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+    } else if (node !== null && typeof node === "object") {
+      for (const item of Object.values(node)) walk(item);
+    }
+  };
+  walk(value);
+  return [...ids];
+}
+
+/**
+ * Finds `document://doc_xxx` occurrences embedded ANYWHERE inside a free-form
+ * text blob (e.g. a model-authored run prompt) — not only when the whole string
+ * is a bare URI, which is all {@link extractDocumentIds} matches on a leaf
+ * string. Each candidate is re-validated through {@link parseDocumentUri}, so a
+ * too-short / malformed id after the `document://doc_` scheme is silently
+ * skipped. De-duplicated, insertion-order stable.
+ *
+ * Companion to {@link extractDocumentIds}: that one turns structured input JSON
+ * into the document ids it consumes; this one turns prose into the document ids
+ * it *mentions* — the difference the inline-run guard uses to catch a URI pasted
+ * into a sub-agent's prompt (inert — the runtime cannot fetch it) instead of
+ * passed through a declared input file field (mounted into the workspace).
+ */
+export function extractDocumentIdsFromText(text: string): string[] {
+  if (typeof text !== "string" || text.length === 0) return [];
+  const ids = new Set<string>();
+  // `doc_` + ≥1 id char; the strict `{8,}` length is enforced by
+  // parseDocumentUri below so this scan stays permissive at the boundary.
+  const scan = /document:\/\/doc_[A-Za-z0-9_-]+/g;
+  for (const match of text.matchAll(scan)) {
+    const id = parseDocumentUri(match[0]);
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}

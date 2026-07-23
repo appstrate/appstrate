@@ -32,6 +32,7 @@ import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
+import { createDocumentsRouter, createDocumentPreviewRouter } from "./routes/documents.ts";
 import healthRouter from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
@@ -94,8 +95,13 @@ app.use("*", cors({ origin: trustedOrigins, credentials: true }));
 // (up to 100 MB by design), enforced while the body streams to disk: the
 // signed max replaces this cap and chunked encoding cannot bypass it.
 const globalBodyLimit = bodyLimit(env.API_BODY_LIMIT_BYTES);
+// Matches the agent-output ingestion POST — its body is a raw document stream
+// (up to DOCUMENT_MAX_FILE_BYTES, 100 MiB by default) enforced mid-stream by
+// the route's own counting cap, so the global JSON-sized cap must not reject it.
+const RUN_DOCUMENT_UPLOAD_PATH = /^\/api\/runs\/[^/]+\/documents$/;
 app.use("*", async (c, next) => {
   if (c.req.path === "/api/uploads/_content") return next();
+  if (c.req.method === "POST" && RUN_DOCUMENT_UPLOAD_PATH.test(c.req.path)) return next();
   return globalBodyLimit(c, next);
 });
 
@@ -144,6 +150,13 @@ Install the CLI (\`curl -fsSL https://get.appstrate.dev | bash\` or \`bunx appst
 - [Source repository](https://github.com/appstrate/appstrate): Apache-2.0
 `;
 app.get("/llms.txt", (c) => c.text(LLMS_TXT));
+
+// Cookie-less HTML document preview — mounted BEFORE the auth pipeline so no
+// cookie/API-key/org/app middleware ever runs on it. Authorized solely by the
+// short-lived signed token in the URL; serves untrusted agent HTML under a
+// strict CSP + injected meta CSP. Dedicated `/preview/*` namespace, so it never
+// collides with the `/documents` SPA page route below.
+app.route("/", createDocumentPreviewRouter());
 
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
@@ -196,6 +209,7 @@ const APP_SCOPED_PREFIXES = [
   "/api/packages",
   "/api/integrations",
   "/api/uploads",
+  "/api/documents",
 ];
 
 const appContextMiddleware = requireAppContext();
@@ -325,6 +339,7 @@ app.route("/api/end-users", createEndUsersRouter());
 // Public path (no auth middleware — authenticated via HMAC token), rate-limited.
 app.route("/api/uploads/_content", createUploadContentRouter());
 app.route("/api/uploads", createUploadsRouter());
+app.route("/api", createDocumentsRouter());
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());

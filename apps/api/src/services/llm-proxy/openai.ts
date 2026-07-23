@@ -11,10 +11,19 @@
  * a new OpenAI-compatible apiShape is a single call to
  * {@link createOpenAICompatibleAdapter}.
  *
- * Cache-token field: OpenAI surfaces `prompt_tokens_details.cached_tokens`
- * (2024 prompt caching). Mistral and the other OpenAI-completions
- * providers (cerebras, groq, openrouter, xai) do not — they read nothing
- * from `prompt_tokens_details` even if present.
+ * Cache-token field: two shapes are read (only when `readPromptCacheDetails`
+ * is set):
+ *   - OpenAI surfaces `prompt_tokens_details.cached_tokens` (2024 prompt
+ *     caching), where `cached_tokens ⊂ prompt_tokens`.
+ *   - DeepSeek (OpenAI-compatible) surfaces top-level
+ *     `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, where
+ *     `prompt_tokens = hit + miss`.
+ * In BOTH shapes `prompt_tokens` is the TOTAL input (cache reads included), so
+ * this adapter subtracts the cache-read count back out of `inputTokens` — see
+ * the `UpstreamUsage` doc for the disjoint-bucket cost convention. The
+ * DeepSeek-specific top-level field is preferred when both are present.
+ * Mistral and the other OpenAI-completions providers (cerebras, groq,
+ * openrouter, xai) surface neither — nothing is read for them.
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
@@ -25,8 +34,28 @@ interface AdapterOptions {
   apiShape: string;
   /** Inbound header names (lowercase) the adapter forwards to upstream. */
   forwardHeaders?: ReadonlySet<string>;
-  /** Read `prompt_tokens_details.cached_tokens` into `cacheReadTokens` (OpenAI prompt caching). */
+  /**
+   * Read cache-read tokens (OpenAI `prompt_tokens_details.cached_tokens` OR
+   * DeepSeek `prompt_cache_hit_tokens`) into `cacheReadTokens`, subtracting
+   * them out of `inputTokens` so the two never double-count.
+   */
   readPromptCacheDetails?: boolean;
+}
+
+/**
+ * Cache-read token count from an OpenAI-compatible `usage` object, from either
+ * source. DeepSeek's top-level `prompt_cache_hit_tokens` is the more specific
+ * signal (a dedicated field, not a nested detail), so it wins when both are
+ * present. Returns undefined when neither source carries a number.
+ */
+function readCacheReadTokens(u: Record<string, unknown>): number | undefined {
+  const deepseekHit = numberOrUndefined(u["prompt_cache_hit_tokens"]);
+  if (deepseekHit !== undefined) return deepseekHit;
+  const details = (u["prompt_tokens_details"] ?? null) as Record<string, unknown> | null;
+  if (details && typeof details === "object") {
+    return numberOrUndefined(details["cached_tokens"]);
+  }
+  return undefined;
 }
 
 export function createOpenAICompatibleAdapter(opts: AdapterOptions): LlmProxyAdapter {
@@ -60,10 +89,17 @@ export function createOpenAICompatibleAdapter(opts: AdapterOptions): LlmProxyAda
         outputTokens: output ?? 0,
       };
       if (readCache) {
-        const details = (u["prompt_tokens_details"] ?? null) as Record<string, unknown> | null;
-        if (details && typeof details === "object") {
-          const cached = numberOrUndefined(details["cached_tokens"]);
-          if (cached !== undefined) result.cacheReadTokens = cached;
+        const cacheRead = readCacheReadTokens(u);
+        if (cacheRead !== undefined) {
+          result.cacheReadTokens = cacheRead;
+          // `prompt_tokens` counts cache hits + misses in both shapes (OpenAI:
+          // `cached_tokens ⊂ prompt_tokens`; DeepSeek: `prompt_tokens = hit +
+          // miss`). Cost bills `inputTokens` and `cacheReadTokens` as DISJOINT
+          // buckets, so the cache reads must be subtracted out of `inputTokens`
+          // — otherwise they are charged twice (full input rate + cache-read
+          // rate). Clamp at 0 against a malformed upstream where cached >
+          // prompt.
+          result.inputTokens = Math.max(0, result.inputTokens - cacheRead);
         }
       }
       return result;

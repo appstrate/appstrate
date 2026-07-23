@@ -71,6 +71,11 @@ export interface CoreResources {
   // imported as a `.afps`).
   "mcp-servers": "read" | "write" | "delete";
   runs: "read" | "cancel" | "delete";
+  // Durable document store. Reads are ungated (ACL inherited from the run/chat
+  // container at check time, like runs); only `delete` needs a grant —
+  // owner/admin, plus the document's own creator (enforced in the route
+  // handler, not RBAC).
+  documents: "delete";
   schedules: "read" | "write" | "delete";
   // Unified `package_persistence` (checkpoints + memories) with first-class
   // actor scoping. Supersedes the dropped `memories` resource.
@@ -121,6 +126,7 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "skills",
   "mcp-servers",
   "runs",
+  "documents",
   "schedules",
   "persistence",
   "models",

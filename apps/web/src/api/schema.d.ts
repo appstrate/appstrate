@@ -1237,6 +1237,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List documents
+         * @description List the documents visible to the caller in the current application. Members see their own documents (and system-owned ones); end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`. Access is inherited from each document's container (no per-file grants).
+         */
+        get: operations["listDocuments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get document metadata
+         * @description Fetch a document's metadata, including the derived `downloadable` flag. Access is inherited from the document's container; an id the caller cannot read returns 404.
+         */
+        get: operations["getDocument"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a document
+         * @description Delete a document (storage object + row) and release its quota. Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator.
+         */
+        delete: operations["deleteDocument"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download document content
+         * @description Download the document bytes with `Content-Disposition: attachment`. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Gated by the `downloadable` flag — a user upload is served only to its creator (403 otherwise).
+         */
+        get: operations["getDocumentContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/end-users": {
         parameters: {
             query?: never;
@@ -3884,7 +3948,11 @@ export interface paths {
          */
         get: operations["fetchRunDocumentsManifest"];
         put?: never;
-        post?: never;
+        /**
+         * Publish an agent-produced document (HMAC, streaming)
+         * @description Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 otherwise).
+         */
+        post: operations["publishRunDocument"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4750,7 +4818,7 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "report")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5300,14 +5368,10 @@ export interface components {
             input: {
                 [key: string]: unknown;
             } | null;
-            /** @description What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted neither structured output nor a report. Persisted even on failed runs (a run that reported and then failed keeps its partial deliverable). */
+            /** @description What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted no structured output. Persisted even on failed runs (a run that produced output and then failed keeps its partial deliverable). */
             result: {
                 /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
-                /** @description Markdown report emitted via the agent's `report` runtime tool. Multiple report calls are concatenated in call order, joined with newlines. Capped at 256 KiB of UTF-8 — see `text_truncated`. The full untruncated report remains available as individual run-log entries (type='result', event='report'). */
-                text?: string;
-                /** @description Present and `true` when `text` exceeded the 256 KiB cap and was truncated at a UTF-8 character boundary. Absent otherwise. */
-                text_truncated?: boolean;
             } | null;
             checkpoint: {
                 [key: string]: unknown;
@@ -5377,6 +5441,13 @@ export interface components {
             agent_name: string | null;
             /** @description Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline). */
             package_ephemeral: boolean;
+            /** @description Per-run document counts, always present on enriched list responses. Computed server-side: `input` from the distinct `document://` references in the run's persisted input, `output` from the count of documents the run produced. */
+            document_counts: {
+                /** @description Distinct documents referenced as input by the run. */
+                input: number;
+                /** @description Documents produced by the run. */
+                output: number;
+            };
             /** @description Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days). */
             inline_manifest?: {
                 [key: string]: unknown;
@@ -6605,7 +6676,7 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`) or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
+                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references (an existing document the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
                     input?: Record<string, never>;
                     /** @description Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required). **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Use `upload://` references when the input must be replayable. */
                     rerun_from?: string;
@@ -9489,6 +9560,245 @@ export interface operations {
                     "text/html": string;
                 };
             };
+        };
+    };
+    listDocuments: {
+        parameters: {
+            query?: {
+                /** @description Filter by document purpose. */
+                purpose?: "user_upload" | "agent_output";
+                /** @description Filter to documents anchored to this run. */
+                run_id?: string;
+                /** @description Filter to documents produced by this agent package. */
+                packageId?: string;
+                /** @description Filter to documents anchored to this chat session. */
+                chat_session_id?: string;
+                /** @description Keyset cursor — document id to page after (newest-first order). */
+                startingAfter?: string;
+                /** @description Page size (1–100, default 20). */
+                limit?: number;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of documents. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @enum {string} */
+                            object: "document";
+                            /** @description Opaque document id (`doc_…`). */
+                            id: string;
+                            /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
+                            uri: string;
+                            /** @enum {string} */
+                            purpose: "user_upload" | "agent_output";
+                            applicationId: string;
+                            /** @description Run container, or null. */
+                            run_id: string | null;
+                            /** @description Chat-session container, or null. */
+                            chat_session_id: string | null;
+                            /** @description Producing agent package id, or null. */
+                            packageId: string | null;
+                            name: string;
+                            mime: string;
+                            /** @description Size in bytes. */
+                            size: number;
+                            /** @description SHA-256 of the bytes (hex). */
+                            sha256: string;
+                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                            downloadable: boolean;
+                            /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
+                            previewable: boolean;
+                            /**
+                             * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                             * @enum {string|null}
+                             */
+                            preview_kind: "html" | "image" | "pdf" | "text" | null;
+                            /**
+                             * Format: uri
+                             * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                             */
+                            preview_url?: string | null;
+                            /**
+                             * Format: date-time
+                             * @description Retention deadline, or null when permanent.
+                             */
+                            expiresAt: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        }[];
+                        hasMore: boolean;
+                        limit?: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getDocument: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "document";
+                        /** @description Opaque document id (`doc_…`). */
+                        id: string;
+                        /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
+                        uri: string;
+                        /** @enum {string} */
+                        purpose: "user_upload" | "agent_output";
+                        applicationId: string;
+                        /** @description Run container, or null. */
+                        run_id: string | null;
+                        /** @description Chat-session container, or null. */
+                        chat_session_id: string | null;
+                        /** @description Producing agent package id, or null. */
+                        packageId: string | null;
+                        name: string;
+                        mime: string;
+                        /** @description Size in bytes. */
+                        size: number;
+                        /** @description SHA-256 of the bytes (hex). */
+                        sha256: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                        downloadable: boolean;
+                        /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
+                        previewable: boolean;
+                        /**
+                         * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @enum {string|null}
+                         */
+                        preview_kind: "html" | "image" | "pdf" | "text" | null;
+                        /**
+                         * Format: uri
+                         * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         */
+                        preview_url?: string | null;
+                        /**
+                         * Format: date-time
+                         * @description Retention deadline, or null when permanent.
+                         */
+                        expiresAt: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteDocument: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getDocumentContent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document bytes (proxy-stream mode). */
+            200: {
+                headers: {
+                    /** @description attachment; filename=… */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description Redirect to a presigned GET URL (public-endpoint S3 mode). */
+            307: {
+                headers: {
+                    /** @description Presigned URL. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listEndUsers: {
@@ -17548,7 +17858,7 @@ export interface operations {
                     manifest: Record<string, never>;
                     /** @description Contents of prompt.md — the agent's system prompt. */
                     prompt: string;
-                    /** @description Run input validated against manifest.input.schema (AJV). */
+                    /** @description Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`. */
                     input?: Record<string, never>;
                     /** @description Per-run config overrides validated against manifest.config.schema (AJV). */
                     config?: Record<string, never>;
@@ -17798,6 +18108,7 @@ export interface operations {
                         proxyId?: string | null;
                     };
                     applicationId: string;
+                    /** @description Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions. */
                     input?: Record<string, never>;
                     /** @description Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy; any other value replaces the manifest pin. An unsatisfiable pin aborts the run with `dependency_unresolved` (422). */
                     dependency_overrides?: {
@@ -18194,6 +18505,114 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    publishRunDocument: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Display name for the document (sanitised server-side). */
+                "X-Document-Name": string;
+                /** @description MIME type of the document bytes. */
+                "Content-Type": string;
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": Blob;
+            };
+        };
+        responses: {
+            /** @description Idempotent replay — an identical (run, sha256, name) document already existed; the existing document is returned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        uri: string;
+                        name: string;
+                        mime: string;
+                        size: number;
+                        sha256: string;
+                    };
+                };
+            };
+            /** @description Document stored */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @description `document://<id>` durable URI. */
+                        uri: string;
+                        name: string;
+                        mime: string;
+                        size: number;
+                        sha256: string;
+                    };
+                };
+            };
+            /** @description X-Document-Name or Content-Type header missing / empty body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signature verification failed */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description storage_limit_exceeded */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_sink_closed | run_sink_expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Document exceeds the per-file or per-run output limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
     fetchRunDocument: {
         parameters: {
             query?: never;
@@ -18353,8 +18772,6 @@ export interface operations {
                     };
                     /** @description Authoritative terminal run cost written to the `runs` row. */
                     cost?: number;
-                    /** @description Aggregated markdown report — every `report.appended` event's content joined with `\n` in call order. Persisted (capped at 256 KiB) as `runs.result.text` so getRun exposes the run's deliverable without log scraping. */
-                    report?: string;
                 };
             };
         };

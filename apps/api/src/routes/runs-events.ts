@@ -21,10 +21,18 @@ import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
-import { invalidRequest, notFound } from "../lib/errors.ts";
+import { invalidRequest, notFound, conflict } from "../lib/errors.ts";
 import { rateLimitByRunId } from "../middleware/rate-limit.ts";
-import { verifyRunSignature } from "../middleware/verify-run-signature.ts";
+import {
+  verifyRunSignature,
+  verifyRunUploadSignature,
+} from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
+import { createDocumentFromStream } from "../services/documents.ts";
+import { getRunAttribution } from "../services/state/runs.ts";
+import { recordAudit } from "../services/audit.ts";
+import { actorFromIds } from "../lib/actor.ts";
+import { sanitizeFilename } from "../services/uploads.ts";
 import {
   downloadRunWorkspace,
   downloadRunDocumentsManifest,
@@ -130,13 +138,6 @@ const RunResultSchema = z
     // `runs.cost` is correct even when `process.exit()` aborts the
     // metric POST. Degrades to undefined on a bad value.
     cost: z.number().nonnegative().optional().catch(undefined),
-    // Aggregated markdown report — the runner's reducer joins every
-    // `report.appended` event's content with `\n` and ships the result
-    // here. finalize persists it as `runs.result.text` so programmatic
-    // consumers (getRun) read the deliverable without scraping run
-    // logs (issue #632). Cosmetic-grade: a malformed value degrades to
-    // absent rather than failing an already-completed run.
-    report: z.string().optional().catch(undefined),
   })
   .passthrough();
 
@@ -216,7 +217,6 @@ export function createRunsEventsRouter() {
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
       ...(d.usage !== undefined ? { usage: d.usage } : {}),
       ...(d.cost !== undefined ? { cost: d.cost } : {}),
-      ...(d.report !== undefined ? { report: d.report } : {}),
     };
 
     await finalizeRun({ run, result });
@@ -287,6 +287,85 @@ export function createRunsEventsRouter() {
     const manifest = await downloadRunDocumentsManifest(run.id);
     if (!manifest) throw notFound(`no input documents for run ${run.id}`);
     return c.json(manifest);
+  });
+
+  // POST /api/runs/:runId/documents — agent-published run output (Phase 2).
+  //
+  // The agent container streams a file it produced (an HTML report, a CSV, …)
+  // here, either via the `publish_document` runtime tool or the entrypoint's
+  // end-of-run `outputs/` sweep. Authenticated by the SAME run HMAC as the GET
+  // provisioning routes (verified over an empty body so the up-to-100 MiB
+  // payload streams straight to storage without being buffered for the hash).
+  //
+  // The bytes stream through a counting/hashing/cap transform into the durable
+  // `documents` bucket: the per-file cap and per-run output budget cut the
+  // stream mid-flight (413, deleting any partial object), the org quota is
+  // enforced transactionally (403). Idempotent for the sweep's retries: an
+  // identical (run, sha256, name) upload returns the existing document (200).
+  router.post("/runs/:runId/documents", eventLimiter, verifyRunUploadSignature, async (c) => {
+    const run = c.get("run")!;
+
+    // Only a live run may publish — a document arriving after finalize (or
+    // before the run started) has no valid container state to attach to.
+    const [runRow] = await db
+      .select({ status: runs.status, packageId: runs.packageId })
+      .from(runs)
+      .where(eq(runs.id, run.id))
+      .limit(1);
+    if (!runRow) throw notFound(`run ${run.id} not found`);
+    if (runRow.status !== "running") {
+      throw conflict("run_not_running", `run ${run.id} is not running (status: ${runRow.status})`);
+    }
+
+    const rawName = c.req.header("X-Document-Name");
+    if (!rawName) throw invalidRequest("X-Document-Name header is required", "X-Document-Name");
+    const name = sanitizeFilename(rawName);
+
+    const mime = c.req.header("Content-Type");
+    if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
+
+    const body = c.req.raw.body;
+    if (!body) throw invalidRequest("request body is required");
+
+    // Attribution is copied from the run row (never trusted from the agent):
+    // the run's creator + end-user, and the run's producing package.
+    const attribution = await getRunAttribution(run.orgId, run.id);
+    const { row, deduped } = await createDocumentFromStream(
+      { orgId: run.orgId, applicationId: run.applicationId },
+      run.id,
+      { userId: attribution?.userId ?? null, endUserId: attribution?.endUserId ?? null },
+      runRow.packageId,
+      { name, mime, body },
+    );
+
+    // Audit only a genuinely NEW publish (201), never a dedup replay (200).
+    // No request context here (HMAC-run-authenticated, no user session), so
+    // this is the direct-service `recordAudit`, attributed to the run's actor.
+    if (!deduped) {
+      const actor = actorFromIds(attribution?.userId ?? null, attribution?.endUserId ?? null);
+      await recordAudit({
+        orgId: run.orgId,
+        applicationId: run.applicationId,
+        actorType: actor ? actor.type : "system",
+        actorId: actor?.id ?? null,
+        action: "document.published",
+        resourceType: "document",
+        resourceId: row.id,
+        after: { name: row.name, size: row.size, mime: row.mime, runId: run.id },
+      });
+    }
+
+    return c.json(
+      {
+        id: row.id,
+        uri: `document://${row.id}`,
+        name: row.name,
+        mime: row.mime,
+        size: row.size,
+        sha256: row.sha256,
+      },
+      deduped ? 200 : 201,
+    );
   });
 
   // GET /api/runs/:runId/documents/:name — a single input document, streamed

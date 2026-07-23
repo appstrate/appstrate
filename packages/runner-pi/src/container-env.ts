@@ -109,6 +109,17 @@ export interface RuntimePiEnvOptions {
    * container watchdog stays the only backstop.
    */
   timeoutSeconds?: number;
+  /**
+   * Effective per-file document cap (bytes) resolved from the platform's
+   * `DOCUMENT_MAX_FILE_BYTES` env knob. Forwarded as `DOCUMENT_MAX_FILE_BYTES`
+   * so the entrypoint's outputs sweep uses the SAME ceiling the server enforces
+   * on `publish_document` / the `outputs/` sweep — otherwise an operator who
+   * raises the platform cap would see large deliverables silently skipped
+   * client-side (data loss), or a lowered cap would doom uploads mid-stream.
+   * Omitted when absent/non-positive — the entrypoint falls back to its
+   * compiled 100 MiB default.
+   */
+  documentMaxFileBytes?: number;
 }
 
 /**
@@ -200,6 +211,14 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
 
   if (opts.outputSchema !== undefined && opts.outputSchema !== null) {
     env.OUTPUT_SCHEMA = JSON.stringify(opts.outputSchema);
+  }
+
+  if (
+    opts.documentMaxFileBytes !== undefined &&
+    Number.isFinite(opts.documentMaxFileBytes) &&
+    opts.documentMaxFileBytes > 0
+  ) {
+    env.DOCUMENT_MAX_FILE_BYTES = String(opts.documentMaxFileBytes);
   }
 
   if (opts.forwardProxyUrl && !opts.noSidecar) {

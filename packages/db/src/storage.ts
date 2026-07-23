@@ -6,6 +6,7 @@ import { createFileSystemStorage } from "@appstrate/core/storage-fs";
 import type {
   Storage,
   CreateUploadUrlOptions,
+  CreateDownloadUrlOptions,
   UploadFileOptions,
   UploadUrlDescriptor,
 } from "@appstrate/core/storage";
@@ -86,4 +87,12 @@ export function createUploadUrl(
   opts?: CreateUploadUrlOptions,
 ): Promise<UploadUrlDescriptor> {
   return getStore().createUploadUrl(bucket, path, opts);
+}
+
+export function createDownloadUrl(
+  bucket: string,
+  path: string,
+  opts?: CreateDownloadUrlOptions,
+): Promise<string | null> {
+  return getStore().createDownloadUrl(bucket, path, opts);
 }

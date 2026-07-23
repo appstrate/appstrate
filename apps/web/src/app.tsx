@@ -62,6 +62,9 @@ const RunDetailPage = lazy(() =>
   import("./pages/run-detail").then((m) => ({ default: m.RunDetailPage })),
 );
 const RunsPage = lazy(() => import("./pages/runs-page").then((m) => ({ default: m.RunsPage })));
+const DocumentsPage = lazy(() =>
+  import("./pages/documents").then((m) => ({ default: m.DocumentsPage })),
+);
 const SchedulesListPage = lazy(() =>
   import("./pages/schedules-list").then((m) => ({ default: m.SchedulesListPage })),
 );
@@ -622,6 +625,14 @@ export function App() {
               element={
                 <LazyRoute>
                   <RunsPage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/documents"
+              element={
+                <LazyRoute>
+                  <DocumentsPage />
                 </LazyRoute>
               }
             />

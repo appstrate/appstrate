@@ -21,6 +21,7 @@
 
 import { z } from "zod";
 import type { RunStatus as DbRunStatus, TerminalRunStatus } from "@appstrate/db/schema";
+import { parseDocumentUri } from "@appstrate/core/document-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -313,6 +314,121 @@ export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[
     if (text) out.push({ id: line.id, text });
   }
   return out;
+}
+
+/**
+ * A document surfaced in a run card: the stable id + uri (for chaining) plus a
+ * display name. `mime`/`size` are optional (present in the persisted tool
+ * result, absent on some log frames).
+ */
+export interface ChatRunDocument {
+  id: string;
+  uri: string;
+  name: string;
+  mime?: string;
+  size?: number;
+}
+
+function asChatRunDocument(raw: unknown): ChatRunDocument | undefined {
+  const r = asRecord(raw);
+  if (!r) return undefined;
+  // `id` in the tool result; `document_id` in the `document.published` log frame.
+  const id = nonEmptyString(r.id) ?? nonEmptyString(r.document_id);
+  const uri = nonEmptyString(r.uri) ?? (id ? `document://${id}` : undefined);
+  const name = nonEmptyString(r.name);
+  if (!id || !uri || !name) return undefined;
+  const doc: ChatRunDocument = { id, uri, name };
+  const mime = nonEmptyString(r.mime);
+  if (mime) doc.mime = mime;
+  if (typeof r.size === "number") doc.size = r.size;
+  return doc;
+}
+
+/**
+ * Pull the published `documents` list out of a persisted run_and_wait tool
+ * result (`documents` at the top level, or nested under the invoke envelope's
+ * `body`). Empty when the run produced none — survives reload because it reads
+ * the persisted message part, not live state.
+ */
+export function extractRunDocuments(result: unknown): ChatRunDocument[] {
+  const unwrapped = asRecord(unwrapResult(result));
+  if (!unwrapped) return [];
+  const raw = Array.isArray(unwrapped.documents)
+    ? unwrapped.documents
+    : Array.isArray(asRecord(unwrapped.body)?.documents)
+      ? (asRecord(unwrapped.body)!.documents as unknown[])
+      : [];
+  const out: ChatRunDocument[] = [];
+  for (const item of raw) {
+    const doc = asChatRunDocument(item);
+    if (doc) out.push(doc);
+  }
+  return out;
+}
+
+/**
+ * Extract published documents from the live run log stream — the
+ * `type='result' event='document'` frames the sink persists for each
+ * `document.published` event. Lets the card show a chip the moment an agent
+ * publishes, before the run terminates.
+ */
+export function publishedDocumentsFromLogs(logs: readonly RunLogLine[]): ChatRunDocument[] {
+  const out: ChatRunDocument[] = [];
+  for (const line of logs) {
+    if (line.event !== "document") continue;
+    if (!line.data || typeof line.data !== "object") continue;
+    const doc = asChatRunDocument(line.data);
+    if (doc) out.push(doc);
+  }
+  return out;
+}
+
+/** Merge two document lists, deduping by id (first occurrence wins). */
+export function mergeRunDocuments(
+  a: readonly ChatRunDocument[],
+  b: readonly ChatRunDocument[],
+): ChatRunDocument[] {
+  const byId = new Map<string, ChatRunDocument>();
+  for (const doc of [...a, ...b]) if (!byId.has(doc.id)) byId.set(doc.id, doc);
+  return [...byId.values()];
+}
+
+/** Content-download URL for a document (the `/content` route handles the 307). */
+export function documentContentHref(id: string): string {
+  return `/api/documents/${encodeURIComponent(id)}/content`;
+}
+
+/**
+ * An attachment's resolved content: a downloadable stored document, or an inert
+ * placeholder.
+ *
+ * The `@assistant-ui/react-ai-sdk` converter routes user `file` parts OUT of a
+ * message's content and exposes them as `message.attachments` instead — the
+ * wire URI ends up on the attachment's first content part (the `image` field
+ * for an image part, `data` for a file part). Only a `document://` URI is
+ * downloadable: the content route serves stored documents. A just-sent
+ * optimistic `upload://` URI (materialized to `document://` only in the
+ * server-persisted copy), or anything unparseable, is inert — the raw URI is
+ * carried along so the renderer can still resolve a local preview for it (the
+ * staged-image cache is keyed by `upload://` URI).
+ */
+export type ResolvedAttachment = { kind: "document"; id: string } | { kind: "inert"; uri?: string };
+
+/** Minimal structural view of an assistant-ui attachment content part. */
+interface AttachmentContentPart {
+  type: string;
+  image?: string;
+  data?: string;
+}
+
+export function resolveAttachmentContent(
+  content: readonly AttachmentContentPart[] | undefined,
+): ResolvedAttachment {
+  const part = content?.[0];
+  const uri = part?.type === "image" ? part.image : part?.type === "file" ? part.data : undefined;
+  const id = typeof uri === "string" ? parseDocumentUri(uri) : null;
+  if (id) return { kind: "document", id };
+  return typeof uri === "string" ? { kind: "inert", uri } : { kind: "inert" };
 }
 
 /** Run package id from a launch result (`body.packageId`, then top-level). */

@@ -4,7 +4,12 @@
 import { mkdir, unlink, realpath, writeFile, open } from "node:fs/promises";
 import { join, dirname, normalize, resolve as resolvePath } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
+import type {
+  Storage,
+  CreateUploadUrlOptions,
+  CreateDownloadUrlOptions,
+  UploadUrlDescriptor,
+} from "./storage.ts";
 import { StorageAlreadyExistsError } from "./storage.ts";
 
 /**
@@ -358,6 +363,16 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
         makeKey(bucket, path),
         opts,
       );
+    },
+
+    // Filesystem storage has no browser-reachable object URL — the caller
+    // proxy-streams the bytes through the API instead.
+    async createDownloadUrl(
+      _bucket: string,
+      _path: string,
+      _opts?: CreateDownloadUrlOptions,
+    ): Promise<string | null> {
+      return null;
     },
   };
 }

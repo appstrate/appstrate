@@ -115,3 +115,15 @@ export type CredentialSource = z.infer<typeof zCredentialSourceEnum>;
 export const runOriginValues = ["platform", "remote"] as const;
 export const runOriginEnum = pgEnum("run_origin", runOriginValues);
 export const zRunOriginEnum = z.enum(runOriginValues);
+
+/**
+ * What a `documents` row is: `user_upload` (a staged upload materialized into
+ * durable storage when consumed by a run/chat session) or `agent_output` (a
+ * deliverable an agent published from a run). Drives the `downloadable`
+ * derivation — an agent output is served to any actor who can read the
+ * container, a user upload only to its own creator.
+ */
+export const documentPurposeValues = ["user_upload", "agent_output"] as const;
+export const documentPurposeEnum = pgEnum("document_purpose", documentPurposeValues);
+export const zDocumentPurposeEnum = z.enum(documentPurposeValues);
+export type DocumentPurpose = z.infer<typeof zDocumentPurposeEnum>;

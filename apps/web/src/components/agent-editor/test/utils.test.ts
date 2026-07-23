@@ -588,6 +588,13 @@ describe("getRuntimeTools", () => {
   it("tolerates malformed field", () => {
     expect(getRuntimeTools({ runtime_tools: "not-an-array" })).toEqual([]);
   });
+
+  it("drops entries not in the catalog (e.g. a removed `report` tool)", () => {
+    expect(getRuntimeTools({ runtime_tools: ["output", "report", "log"] })).toEqual([
+      "output",
+      "log",
+    ]);
+  });
 });
 
 // ─── Writers emit canonical AFPS keys only ──

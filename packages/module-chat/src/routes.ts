@@ -197,6 +197,11 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // DELETE /api/chat/sessions/:id — delete a session (entries cascade)
   router.delete("/api/chat/sessions/:id", requireModulePermission("chat", "write"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
+    // Detach-or-delete the session's documents BEFORE the session row is removed:
+    // a document a run still consumes is detached (kept); the rest are deleted
+    // (row + counter + storage). Must precede the delete — the chat_session_id FK
+    // cascade would otherwise wipe the documents (and their links) first.
+    await deps.cleanupSessionDocuments(session.id);
     await db.delete(chatSessions).where(eq(chatSessions.id, session.id));
     await notifySessionUpdate(session.id, session.orgId, session.userId);
     return c.body(null, 204);

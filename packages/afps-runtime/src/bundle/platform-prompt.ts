@@ -99,6 +99,15 @@ export interface PlatformPromptOptions {
   /** Uploaded documents surfaced in `## Documents`. */
   uploads?: ReadonlyArray<PromptViewUpload>;
 
+  /**
+   * Opt-in `## Deliverables` section (platform runs only): tells the agent to
+   * write anything it produces for the user under `./outputs/`, which the
+   * platform sweeps and publishes as durable run documents at finalize. Off by
+   * default so the `appstrate run` CLI (no publish target) omits it. Rendered
+   * as a platform-managed section BEFORE the raw prompt.
+   */
+  deliverables?: boolean;
+
   /** Optional pre-built PromptView; skip if you want to let the helper build one. */
   promptView?: PromptView;
 }
@@ -365,6 +374,21 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       sections.push(`- ${mem.content}${date}`);
     }
     sections.push("");
+  }
+
+  // --- Deliverables (platform-managed, opt-in) ---
+  // One concise line so the agent knows where to place anything it produces
+  // for the user; the platform sweeps `./outputs/` at finalize and publishes
+  // each file as a durable run document. Rendered here — before the raw prompt
+  // (and before Output Format) — so the raw user prompt stays strictly last.
+  if (opts.deliverables) {
+    sections.push("## Deliverables\n");
+    sections.push(
+      "Write any file you produce for the user (generated documents, exports, data files) " +
+        "under `./outputs/` — everything there is published automatically as a downloadable " +
+        "document when the run ends. If the user expects a written report or summary, write it " +
+        "as markdown to `./outputs/report.md`.\n",
+    );
   }
 
   // --- Output format ---

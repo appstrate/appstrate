@@ -25,7 +25,12 @@
 
 import type { MiddlewareHandler } from "hono";
 import type { ModuleInitContext, UsageRejection } from "@appstrate/core/module";
-import type { ChatUsageRecord, SubscriptionChatResolution } from "@appstrate/core/chat-contract";
+import type {
+  ChatAttachmentRequest,
+  ChatUsageRecord,
+  ResolvedChatAttachment,
+  SubscriptionChatResolution,
+} from "@appstrate/core/chat-contract";
 
 export interface ChatPlatformDeps {
   /**
@@ -48,6 +53,21 @@ export interface ChatPlatformDeps {
   ): Promise<SubscriptionChatResolution>;
   /** Persist one metered `llm_usage` row for a completed chat turn. */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
+  /**
+   * Resolve a chat composer file attachment (`upload://` or `document://`) to a
+   * durable `document://` URI, materializing the upload into a chat-session-scoped
+   * document server-side (the module has no DB access). Throws the platform's
+   * quota/cap/not-found errors, which the stream route surfaces to the user.
+   */
+  resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
+  /**
+   * Detach-or-delete the documents contained by a chat session being deleted. A
+   * session document a run still consumes is detached (kept, container NULLed);
+   * an unconsumed one is deleted (row + counter + storage). The module has no DB
+   * or storage access, so this crosses through `ctx.services`. Called before the
+   * session row is removed so the FK cascade cannot destroy the evidence first.
+   */
+  cleanupSessionDocuments(chatSessionId: string): Promise<void>;
   /**
    * Admission gate for a non-subscription (built-in / API-key) turn. The
    * platform decides whether the chosen preset is system-provided and, if so,
@@ -90,6 +110,20 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
           // provider, the same safe baseline this module had before.
           Promise.resolve({ subscription: false }),
     recordChatUsage: (record) => (ctx ? ctx.services.recordChatUsage(record) : Promise.resolve()),
+    resolveChatAttachment: (request) =>
+      ctx
+        ? ctx.services.resolveChatAttachment(request)
+        : // No init context (test harness / OSS standalone) → no document store
+          // surface. Text-only turns never reach here; an attachment turn without
+          // the platform wired is a genuine misconfiguration.
+          Promise.reject(new Error("chat attachments require the platform document service")),
+    cleanupSessionDocuments: (chatSessionId) =>
+      ctx
+        ? ctx.services.cleanupSessionDocuments(chatSessionId)
+        : // No init context (test harness / OSS standalone) → no document store
+          // surface; session delete proceeds without document teardown (the FK
+          // cascade still removes any rows). Safe no-op baseline.
+          Promise.resolve(),
     // No init context (test harness / OSS standalone) → no admission gate wired;
     // allow the turn (null), the same safe baseline as before this seam existed.
     checkUsageAllowed: (args) =>

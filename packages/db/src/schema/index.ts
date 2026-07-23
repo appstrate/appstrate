@@ -12,6 +12,7 @@ export * from "./integrations.ts";
 export * from "./integration-pins.ts";
 export * from "./integration-org-defaults.ts";
 export * from "./uploads.ts";
+export * from "./documents.ts";
 export * from "./audit.ts";
 export * from "./webhooks.ts";
 export * from "./oidc.ts";

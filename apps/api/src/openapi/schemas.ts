@@ -568,6 +568,7 @@ export const schemas = {
       "connections_used",
       "package_ephemeral",
       "unread",
+      "document_counts",
     ],
     properties: {
       id: { type: "string" },
@@ -591,21 +592,11 @@ export const schemas = {
       result: {
         type: ["object", "null"],
         description:
-          "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted neither structured output nor a report. Persisted even on failed runs (a run that reported and then failed keeps its partial deliverable).",
+          "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted no structured output. Persisted even on failed runs (a run that produced output and then failed keeps its partial deliverable).",
         properties: {
           output: {
             description:
               "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
-          },
-          text: {
-            type: "string",
-            description:
-              "Markdown report emitted via the agent's `report` runtime tool. Multiple report calls are concatenated in call order, joined with newlines. Capped at 256 KiB of UTF-8 — see `text_truncated`. The full untruncated report remains available as individual run-log entries (type='result', event='report').",
-          },
-          text_truncated: {
-            type: "boolean",
-            description:
-              "Present and `true` when `text` exceeded the 256 KiB cap and was truncated at a UTF-8 character boundary. Absent otherwise.",
           },
         },
       },
@@ -719,6 +710,24 @@ export const schemas = {
         type: "boolean",
         description:
           "Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline).",
+      },
+      document_counts: {
+        type: "object",
+        description:
+          "Per-run document counts, always present on enriched list responses. Computed server-side: `input` from the distinct `document://` references in the run's persisted input, `output` from the count of documents the run produced.",
+        required: ["input", "output"],
+        properties: {
+          input: {
+            type: "integer",
+            minimum: 0,
+            description: "Distinct documents referenced as input by the run.",
+          },
+          output: {
+            type: "integer",
+            minimum: 0,
+            description: "Documents produced by the run.",
+          },
+        },
       },
       inline_manifest: {
         type: ["object", "null"],
@@ -1460,7 +1469,10 @@ export const schemas = {
         properties: {
           runtime_tools: {
             type: "array",
-            items: { type: "string", enum: ["output", "log", "note", "pin", "report"] },
+            items: {
+              type: "string",
+              enum: ["output", "log", "note", "pin", "publish_document"],
+            },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional.",
           },

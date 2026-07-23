@@ -40,7 +40,6 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import {
-  capUtf8Text,
   finalizeRun,
   getRunSinkContext,
   synthesiseFinalize,
@@ -174,6 +173,27 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     // AppstrateEventSink dispatch completed without throwing).
     const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
     expect(logs.length).toBeGreaterThan(0);
+  });
+
+  // Legacy-emitter tolerance guard: the #632 report channel was removed, but an
+  // old remote CLI may still POST a `report.appended` envelope. The sink's
+  // dispatch `default` branch drops unknown event types (no run_logs row) and
+  // the route still acks 200/persisted — the stray event is tolerated, not an error.
+  it("tolerates a stray legacy report.appended envelope — accepted, no run_logs row written", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const envelope = buildEnvelope(runId, "report.appended", { text: "legacy report body" }, 1);
+    const res = await postEvent(runId, envelope);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; outcome: string; sequence: number };
+    expect(body.ok).toBe(true);
+    expect(body.outcome).toBe("persisted");
+    expect(body.sequence).toBe(1);
+
+    // Unknown event type → default branch drops it, no run_logs write-through.
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs.length).toBe(0);
   });
 
   it("dedupes replayed webhook-ids — a second POST with the same id returns replay", async () => {
@@ -546,64 +566,37 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(logs).toHaveLength(1);
   });
 
-  // End-to-end coverage for the `@appstrate/report` system tool.
-  //
-  // Why this lives at the route layer and not just in the sink unit test:
-  // the production bug shipped because the chain Tool → stdout bridge →
-  // HttpSink → POST /events → ingestion → run_logs → UI was only exercised
-  // in isolation, leg by leg. The sink-level test catches the dispatch logic;
-  // this test catches the contract — that an HMAC-signed CloudEvent of
-  // type `report.appended` reaching the public ingestion endpoint actually
-  // produces the `run_logs` row the UI consumes. Same shape as the
-  // production POST a runtime-pi container makes.
-  it("report.appended events persist as run_logs(type='result', event='report')", async () => {
+  // Phase 2: a `document.published` event (emitted by the publish_document
+  // tool / outputs sweep once the documents row already exists) must persist a
+  // run_log so the published document streams over the run_log SSE and replays.
+  it("document.published events persist as run_logs(type='result', event='document')", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
-    const markdown = "# ✅ Export OK\n\n- 6 rows\n- TTC 16 224,96 €";
-
-    const envelope = buildEnvelope(
-      runId,
-      "report.appended",
-      { content: markdown, timestamp: Date.now() },
-      1,
-    );
+    const payload = {
+      document_id: "doc_abc12345",
+      uri: "document://doc_abc12345",
+      name: "report.html",
+      mime: "text/html",
+      size: 1234,
+      sha256: "f".repeat(64),
+    };
+    const envelope = buildEnvelope(runId, "document.published", payload, 1);
     const res = await postEvent(runId, envelope);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { outcome: string };
-    expect(body.outcome).toBe("persisted");
+    expect(((await res.json()) as { outcome: string }).outcome).toBe("persisted");
 
-    const reportLogs = await db
+    const docLogs = await db
       .select()
       .from(runLogs)
-      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "report")));
-    expect(reportLogs).toHaveLength(1);
-    expect(reportLogs[0]!.type).toBe("result");
-    expect(reportLogs[0]!.data).toEqual({ content: markdown });
-  });
-
-  // Multiple report.appended POSTs must all land — the tool docstring
-  // says "Appends markdown content"; concatenation is the UI's job, not
-  // the persistence layer's. Each event becomes its own log row.
-  it("preserves multiple report.appended events as separate ordered rows", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
-
-    const chunks = ["## Step 1", "## Step 2", "## Step 3"];
-    for (let i = 0; i < chunks.length; i++) {
-      const env = buildEnvelope(
-        runId,
-        "report.appended",
-        { content: chunks[i], timestamp: Date.now() },
-        i + 1,
-      );
-      const res = await postEvent(runId, env);
-      expect(res.status).toBe(200);
-    }
-
-    const reportLogs = await db
-      .select()
-      .from(runLogs)
-      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "report")))
-      .orderBy(runLogs.id);
-    expect(reportLogs.map((l) => (l.data as { content: string }).content)).toEqual(chunks);
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "document")));
+    expect(docLogs).toHaveLength(1);
+    expect(docLogs[0]!.type).toBe("result");
+    expect(docLogs[0]!.data).toMatchObject({
+      document_id: "doc_abc12345",
+      uri: "document://doc_abc12345",
+      name: "report.html",
+      mime: "text/html",
+      size: 1234,
+    });
   });
 });
 
@@ -997,8 +990,8 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // re-derive it from the `run_logs` adapter-error trail. The old
   // server-side "adapter-error backstop" (#427) did that archaeology and
   // produced false positives: it failed runs whose agent recovered from a
-  // transient mid-loop error and delivered via `report`/`log` (which
-  // legitimately leave `output === null`). These tests pin that the trail
+  // transient mid-loop error and finished without structured output (which
+  // legitimately leaves `output === null`). These tests pin that the trail
   // never flips a runner-declared `success`.
   // ---------------------------------------------------------------------
   it("trusts a runner-declared failure (status=failed) over inference", async () => {
@@ -1019,9 +1012,9 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   });
 
   it("preserves success when output is null and no error is declared", async () => {
-    // An agent that legitimately has no output schema (delivers via
-    // report/log) finalizes with output=null and status=success. The
-    // platform must not invent a failure.
+    // An agent that legitimately has no output schema (a side-effect run)
+    // finalizes with output=null and status=success. The platform must not
+    // invent a failure.
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
     const res = await postFinalize(runId, {
@@ -1041,7 +1034,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     // Regression for run_fd977eb6 — a transient OpenAI 5xx `server_error`
     // left an `adapter_error` row, but the agent recovered, finished its
     // work, and the runner declared `status: success` (output null because
-    // it delivered via `report`). The trail must NOT override that.
+    // it produced no structured output). The trail must NOT override that.
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
     await db.insert(runLogs).values({
@@ -1057,7 +1050,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       status: "success",
       durationMs: 100,
       usage: { input_tokens: 5_000, output_tokens: 1_423 },
-      // No `output` — delivered via report; runner already declared success.
+      // No `output` — a side-effect run; runner already declared success.
     });
     expect(res.status).toBe(200);
 
@@ -1646,153 +1639,6 @@ describe("remote run.started — emitted at first event, not at row insert", () 
 });
 
 // ---------------------------------------------------------------------------
-// Issue #632 — `runs.result` is the API contract for "what the run produced".
-// The runner's reducer aggregates every `report.appended` event into
-// `RunResult.report` (joined with `\n`) and ships it in the finalize body;
-// finalize persists it as `result.text` so getRun exposes the deliverable
-// without scraping (truncated) run logs.
-// ---------------------------------------------------------------------------
-describe("POST /api/runs/:runId/events/finalize — report → runs.result.text (issue #632)", () => {
-  let ctx: TestContext;
-
-  beforeEach(async () => {
-    await truncateAll();
-    ctx = await createTestContext({ email: "result632@test.dev", orgSlug: "result632-org" });
-    await seedPackage({ orgId: ctx.orgId, id: "@test/report-agent", type: "agent" });
-  });
-
-  it("persists the report text as result.text on a report-only success", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/report-agent");
-
-    // Two report-tool calls — the runner's reducer joins them with `\n`
-    // before finalize, so the platform receives one aggregated string.
-    const report = "## EDI export\n- 42 lines generated\nDrive: https://example.test/file";
-    const res = await postFinalize(runId, {
-      status: "success",
-      durationMs: 100,
-      usage: { input_tokens: 100, output_tokens: 50 },
-      report,
-      // No `output` — the agent only used the report tool. This was the
-      // exact shape that previously left `runs.result` null.
-    });
-    expect(res.status).toBe(200);
-
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("success");
-    const persisted = row?.result as { output?: unknown; text?: string } | null;
-    expect(persisted).not.toBeNull();
-    expect(persisted?.text).toBe(report);
-    expect(persisted).not.toHaveProperty("output");
-    expect(persisted).not.toHaveProperty("text_truncated");
-  });
-
-  it("stores output and text side by side when the agent emitted both", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/report-agent");
-
-    const res = await postFinalize(runId, {
-      status: "success",
-      output: { processed: 42 },
-      report: "Processed 42 items.",
-      durationMs: 100,
-      usage: { input_tokens: 100, output_tokens: 50 },
-    });
-    expect(res.status).toBe(200);
-
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    const persisted = row?.result as { output?: unknown; text?: string } | null;
-    expect(persisted?.output).toEqual({ processed: 42 });
-    expect(persisted?.text).toBe("Processed 42 items.");
-  });
-
-  it("leaves result null when the run emitted neither output nor report", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/report-agent");
-
-    const res = await postFinalize(runId, {
-      status: "success",
-      durationMs: 100,
-      usage: { input_tokens: 100, output_tokens: 50 },
-    });
-    expect(res.status).toBe(200);
-
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("success");
-    expect(row?.result).toBeNull();
-  });
-
-  it("ignores an empty report string — result stays null", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/report-agent");
-
-    const res = await postFinalize(runId, {
-      status: "success",
-      report: "",
-      durationMs: 100,
-      usage: { input_tokens: 100, output_tokens: 50 },
-    });
-    expect(res.status).toBe(200);
-
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.result).toBeNull();
-  });
-
-  it("caps result.text at 256 KiB and flags text_truncated", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/report-agent");
-
-    const cap = 256 * 1024;
-    const oversized = "a".repeat(cap + 1000);
-    const res = await postFinalize(runId, {
-      status: "success",
-      report: oversized,
-      durationMs: 100,
-      usage: { input_tokens: 100, output_tokens: 50 },
-    });
-    expect(res.status).toBe(200);
-
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    const persisted = row?.result as { text?: string; text_truncated?: boolean } | null;
-    expect(persisted?.text?.length).toBe(cap);
-    expect(persisted?.text_truncated).toBe(true);
-  });
-
-  it("keeps result.text on a run that reported and then failed", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/report-agent");
-
-    const res = await postFinalize(runId, {
-      status: "failed",
-      error: { message: "tool crashed after the report" },
-      report: "Partial deliverable before the crash.",
-      durationMs: 100,
-      usage: { input_tokens: 100, output_tokens: 50 },
-    });
-    expect(res.status).toBe(200);
-
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("failed");
-    expect(row?.error).toBe("tool crashed after the report");
-    const persisted = row?.result as { text?: string } | null;
-    expect(persisted?.text).toBe("Partial deliverable before the crash.");
-  });
-
-  it("a malformed report value degrades to absent instead of failing finalize", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/report-agent");
-
-    const res = await postFinalize(runId, {
-      status: "success",
-      output: { ok: true },
-      report: { not: "a string" },
-      durationMs: 100,
-      usage: { input_tokens: 100, output_tokens: 50 },
-    });
-    expect(res.status).toBe(200);
-
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("success");
-    const persisted = row?.result as { output?: unknown; text?: string } | null;
-    expect(persisted?.output).toEqual({ ok: true });
-    expect(persisted).not.toHaveProperty("text");
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Output-schema validation at finalize — declared via `manifest.output.schema`
 // (AFPS). A mismatch flips the run to failed with the validation errors on
 // `runs.error`, but the payload is still persisted on `runs.result` — the
@@ -1813,7 +1659,7 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         version: "0.1.0",
         type: "agent",
         description: "Agent with a declared output schema",
-        runtime_tools: ["output", "report"],
+        runtime_tools: ["output"],
         output: {
           schema: {
             type: "object",
@@ -1849,7 +1695,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
     const res = await postFinalize(runId, {
       status: "success",
       output: { wrong: 1 },
-      report: "I produced something, just not what the schema asked for.",
       durationMs: 100,
       usage: { input_tokens: 100, output_tokens: 50 },
     });
@@ -1858,10 +1703,9 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");
     expect(row?.error).toMatch(/Output validation failed/);
-    const persisted = row?.result as { output?: unknown; text?: string } | null;
+    const persisted = row?.result as { output?: unknown } | null;
     // The non-conforming payload is stored, flagged via status + error.
     expect(persisted?.output).toEqual({ wrong: 1 });
-    expect(persisted?.text).toBe("I produced something, just not what the schema asked for.");
 
     // The validation failure also leaves its structured trail in run_logs.
     const validationLogs = await db
@@ -1874,13 +1718,11 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
   it("output tool never called fails with a tool-not-called message, not a bare validation error", async () => {
     const runId = await seedRunWithSink(ctx, "@test/schema-agent");
 
-    // Agent reported but never emitted structured output (`result.output`
-    // stays null). The empty `{}` only fails because `answer` is required —
-    // the error must say the tool was never called, not imply a malformed
-    // payload.
+    // Agent never emitted structured output (`result.output` stays null). The
+    // empty `{}` only fails because `answer` is required — the error must say
+    // the tool was never called, not imply a malformed payload.
     const res = await postFinalize(runId, {
       status: "success",
-      report: "Done, but I forgot to call output.",
       durationMs: 100,
       usage: { input_tokens: 100, output_tokens: 50 },
     });
@@ -2007,27 +1849,5 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");
     expect(row?.error).toMatch(/without calling the required `output` tool/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// capUtf8Text — byte-boundary behaviour of the result.text cap.
-// ---------------------------------------------------------------------------
-describe("capUtf8Text", () => {
-  it("returns the value untouched when within the cap", () => {
-    expect(capUtf8Text("hello", 16)).toEqual({ text: "hello", truncated: false });
-  });
-
-  it("truncates at the byte cap for ASCII", () => {
-    expect(capUtf8Text("abcdef", 4)).toEqual({ text: "abcd", truncated: true });
-  });
-
-  it("never splits a multi-byte code point", () => {
-    // "é" is 2 bytes in UTF-8 — a 5-byte cap lands mid-character on the
-    // third "é"; the partial byte must be dropped, not decoded as U+FFFD.
-    const { text, truncated } = capUtf8Text("ééé", 5);
-    expect(truncated).toBe(true);
-    expect(text).toBe("éé");
-    expect(text.includes("�")).toBe(false);
   });
 });
