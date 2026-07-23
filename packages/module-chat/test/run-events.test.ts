@@ -216,14 +216,17 @@ describe("run-events helpers", () => {
       id: "doc_efgh5678",
     });
 
-    // Just-sent optimistic upload:// (not yet materialized to document://) → inert.
+    // Just-sent optimistic upload:// (not yet materialized to document://) →
+    // inert, but the raw URI is kept so the staged-image cache can be probed.
     expect(resolveAttachmentContent([{ type: "file", data: "upload://upl_abcd1234" }])).toEqual({
       kind: "inert",
+      uri: "upload://upl_abcd1234",
     });
 
     // Malformed / missing / empty content → inert (never throws).
     expect(resolveAttachmentContent([{ type: "image", image: "not-a-uri" }])).toEqual({
       kind: "inert",
+      uri: "not-a-uri",
     });
     expect(resolveAttachmentContent([{ type: "file" }])).toEqual({ kind: "inert" });
     expect(resolveAttachmentContent([])).toEqual({ kind: "inert" });

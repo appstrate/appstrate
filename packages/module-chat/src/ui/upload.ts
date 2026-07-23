@@ -40,6 +40,21 @@ interface UploadDescriptor {
 }
 
 /**
+ * `upload://` URI → local object URL for images staged this session. Sent-message
+ * attachments are rebuilt from the message's file parts by the react-ai-sdk
+ * converter, so the picked `File` is no longer reachable at render time — this
+ * cache is the only way to show a just-sent image before its `document://` form
+ * lands on reload. Session-scoped by design: a handful of object URLs, reclaimed
+ * with the page (an upload URI is single-shot, so entries are never re-keyed).
+ */
+const stagedImagePreviews = new Map<string, string>();
+
+/** Local preview URL for a staged `upload://` URI, if it was an image. */
+export function stagedImagePreviewUrl(uri: string): string | undefined {
+  return stagedImagePreviews.get(uri);
+}
+
+/**
  * Stage `file` and return its `upload://` URI. Throws on an over-cap file (a
  * localized message the adapter surfaces) or any transport failure.
  */
@@ -79,6 +94,9 @@ export async function uploadComposerFile(
   });
   if (!putRes.ok) {
     throw new Error(`Échec de l'envoi du fichier (${putRes.status}).`);
+  }
+  if (file.type.startsWith("image/")) {
+    stagedImagePreviews.set(desc.uri, URL.createObjectURL(file));
   }
   return desc.uri;
 }

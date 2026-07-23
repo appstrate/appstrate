@@ -46,6 +46,7 @@ import {
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import { documentContentHref, resolveAttachmentContent } from "./run-events.ts";
+import { stagedImagePreviewUrl } from "./upload.ts";
 import { downloadChatDocument } from "./document-download.ts";
 import { useChatHeaders, useOpenDocument, type GetHeaders } from "./runtime-context.ts";
 
@@ -195,6 +196,8 @@ function FileAttachmentPart(props: { filename?: string }) {
 const ATTACHMENT_CHIP_CLASS =
   "bg-background text-foreground inline-flex max-w-52 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs";
 
+const ATTACHMENT_IMAGE_CLASS = "max-h-36 rounded-lg border object-cover";
+
 /** Inert chip: file icon + truncated name, no download (same look as FileAttachmentPart). */
 function InertAttachmentChip({ name }: { name: string }) {
   return (
@@ -284,7 +287,7 @@ function ImageAttachmentThumbnail({
     );
   return (
     <button type="button" onClick={onActivate} title={actionLabel} aria-label={actionLabel}>
-      <img src={src} alt={name || "image"} className="max-h-36 rounded-lg border object-cover" />
+      <img src={src} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />
     </button>
   );
 }
@@ -293,7 +296,9 @@ function ImageAttachmentThumbnail({
  * One sent attachment on a user message. A `document://` (server-persisted, or a
  * reloaded conversation) is interactive: image mime → thumbnail, else a
  * download chip. An `upload://` (just-sent optimistic, not yet materialized) or
- * unparseable URI is an inert chip — the content route serves documents only.
+ * unparseable URI shows the local File as a thumbnail when it's an image still
+ * held by the runtime, else an inert chip — the content route serves documents
+ * only.
  */
 function SentAttachmentChip() {
   const getHeaders = useChatHeaders();
@@ -304,8 +309,18 @@ function SentAttachmentChip() {
   // selector doesn't churn re-renders; memo keeps the resolved ref stable too.
   const content = useAttachment((a) => a.content);
   const resolved = React.useMemo(() => resolveAttachmentContent(content), [content]);
+  const isImage = typeof contentType === "string" && contentType.startsWith("image/");
 
-  if (resolved.kind !== "document") return <InertAttachmentChip name={name} />;
+  if (resolved.kind !== "document") {
+    // Just-sent optimistic attachment (`upload://`, not yet materialized): the
+    // staged-image cache still holds a local preview of the picked file. Not
+    // interactive — there is no document id to preview or download yet; the
+    // persisted `document://` part takes over on reload.
+    const localSrc = resolved.uri ? stagedImagePreviewUrl(resolved.uri) : undefined;
+    if (localSrc && isImage)
+      return <img src={localSrc} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />;
+    return <InertAttachmentChip name={name} />;
+  }
 
   const docId = resolved.id;
   // With a host opener (web shell), a resolved document opens the in-app preview
@@ -318,7 +333,7 @@ function SentAttachmentChip() {
     ? `Aperçu de ${name || "le document"}`
     : `Télécharger ${name || "le document"}`;
 
-  if (typeof contentType === "string" && contentType.startsWith("image/")) {
+  if (isImage) {
     return (
       <ImageAttachmentThumbnail
         id={docId}

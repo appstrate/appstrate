@@ -408,9 +408,11 @@ export function documentContentHref(id: string): string {
  * for an image part, `data` for a file part). Only a `document://` URI is
  * downloadable: the content route serves stored documents. A just-sent
  * optimistic `upload://` URI (materialized to `document://` only in the
- * server-persisted copy), or anything unparseable, is inert.
+ * server-persisted copy), or anything unparseable, is inert — the raw URI is
+ * carried along so the renderer can still resolve a local preview for it (the
+ * staged-image cache is keyed by `upload://` URI).
  */
-export type ResolvedAttachment = { kind: "document"; id: string } | { kind: "inert" };
+export type ResolvedAttachment = { kind: "document"; id: string } | { kind: "inert"; uri?: string };
 
 /** Minimal structural view of an assistant-ui attachment content part. */
 interface AttachmentContentPart {
@@ -425,7 +427,8 @@ export function resolveAttachmentContent(
   const part = content?.[0];
   const uri = part?.type === "image" ? part.image : part?.type === "file" ? part.data : undefined;
   const id = typeof uri === "string" ? parseDocumentUri(uri) : null;
-  return id ? { kind: "document", id } : { kind: "inert" };
+  if (id) return { kind: "document", id };
+  return typeof uri === "string" ? { kind: "inert", uri } : { kind: "inert" };
 }
 
 /** Run package id from a launch result (`body.packageId`, then top-level). */
