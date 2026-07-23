@@ -5441,6 +5441,13 @@ export interface components {
             agent_name: string | null;
             /** @description Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline). */
             package_ephemeral: boolean;
+            /** @description Per-run document counts, always present on enriched list responses. Computed server-side: `input` from the distinct `document://` references in the run's persisted input, `output` from the count of documents the run produced. */
+            document_counts: {
+                /** @description Distinct documents referenced as input by the run. */
+                input: number;
+                /** @description Documents produced by the run. */
+                output: number;
+            };
             /** @description Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days). */
             inline_manifest?: {
                 [key: string]: unknown;

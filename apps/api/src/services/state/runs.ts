@@ -28,10 +28,12 @@ import {
   schedules,
   llmUsage,
   notifications,
+  documents,
   runStatusValues,
   activeRunStatusValues,
   type RunStatus,
 } from "@appstrate/db/schema";
+import { extractDocumentIds } from "@appstrate/core/document-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import { listResponse } from "../../lib/list-response.ts";
@@ -124,6 +126,13 @@ function enrichedRunSelect(actor: Actor | null) {
     scheduleName: schedules.name,
     packageEphemeral: packages.ephemeral,
     unread: unreadForActor(actor),
+    // OUTPUT document count — correlated scalar subquery over `documents`,
+    // served by the `idx_documents_run` (run_id-leading) index so the list
+    // read stays a single query with no N+1. Coerced to Number in the mapper
+    // (postgres.js returns count() as a numeric string).
+    outputDocumentCount: sql<number>`(
+      select count(*) from ${documents} where ${documents.runId} = ${runs.id}
+    )`,
   };
 }
 
@@ -162,6 +171,7 @@ type EnrichedRunRow = {
   scheduleName: string | null;
   packageEphemeral: boolean | null;
   unread: boolean;
+  outputDocumentCount: number;
 };
 
 /**
@@ -276,6 +286,13 @@ function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
     connections_used: projectConnectionsUsed(r.run.resolvedConnections),
     package_ephemeral: r.packageEphemeral ?? false,
     unread: r.unread,
+    // INPUT = distinct `document://` ids referenced in the run's persisted
+    // input JSON (extractDocumentIds dedupes + tolerates null); OUTPUT =
+    // documents produced by the run (subquery column above).
+    document_counts: {
+      input: extractDocumentIds(r.run.input).length,
+      output: Number(r.outputDocumentCount),
+    },
   };
 }
 

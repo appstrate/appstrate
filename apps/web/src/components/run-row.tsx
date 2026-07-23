@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Shield } from "lucide-react";
+import { Shield, FileInput, FileOutput } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
@@ -46,6 +46,9 @@ export function RunRow({
   const time = isRunning ? elapsed : run.duration;
   const duration = time ? `${(time / 1000).toFixed(1)}s` : "";
 
+  const inputDocs = run.document_counts.input;
+  const outputDocs = run.document_counts.output;
+
   const content = (
     <div className="flex min-w-0 flex-1 items-center gap-2">
       {run.runNumber != null && (
@@ -81,6 +84,24 @@ export function RunRow({
         <Shield size={12} className="text-muted-foreground hidden shrink-0 sm:block" />
       )}
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        {inputDocs > 0 && (
+          <span
+            className="text-muted-foreground flex items-center gap-0.5 text-xs"
+            title={t("run.inputDocuments", { count: inputDocs })}
+          >
+            <FileInput size={12} className="shrink-0" />
+            {inputDocs}
+          </span>
+        )}
+        {outputDocs > 0 && (
+          <span
+            className="text-muted-foreground flex items-center gap-0.5 text-xs"
+            title={t("run.outputDocuments", { count: outputDocs })}
+          >
+            <FileOutput size={12} className="shrink-0" />
+            {outputDocs}
+          </span>
+        )}
         {duration && (
           <span className="text-muted-foreground hidden font-mono text-xs sm:inline">
             {duration}

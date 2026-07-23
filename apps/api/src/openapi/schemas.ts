@@ -568,6 +568,7 @@ export const schemas = {
       "connections_used",
       "package_ephemeral",
       "unread",
+      "document_counts",
     ],
     properties: {
       id: { type: "string" },
@@ -709,6 +710,24 @@ export const schemas = {
         type: "boolean",
         description:
           "Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline).",
+      },
+      document_counts: {
+        type: "object",
+        description:
+          "Per-run document counts, always present on enriched list responses. Computed server-side: `input` from the distinct `document://` references in the run's persisted input, `output` from the count of documents the run produced.",
+        required: ["input", "output"],
+        properties: {
+          input: {
+            type: "integer",
+            minimum: 0,
+            description: "Distinct documents referenced as input by the run.",
+          },
+          output: {
+            type: "integer",
+            minimum: 0,
+            description: "Documents produced by the run.",
+          },
+        },
       },
       inline_manifest: {
         type: ["object", "null"],

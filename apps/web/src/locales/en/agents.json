@@ -112,6 +112,8 @@
   "runs.deletedAgentBadge": "Deleted",
   "runs.deletedAgentTitle": "The source agent has been deleted. The run is kept for history but cannot be re-run.",
   "runs.detailsExpired": "Details expired",
+  "run.inputDocuments": "{{count}} input document(s)",
+  "run.outputDocuments": "{{count}} output document(s)",
   "run.rerun": "Re-run",
   "run.degradedIntegrations.title": "Connection lost during this run",
   "run.degradedIntegrations.message": "These integrations returned an authentication error and must be reconnected before the next launch.",
