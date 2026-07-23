@@ -48,10 +48,12 @@ export interface DownloadRecord {
   size: number | null;
   sha256: string | null;
   error: { code: number; message: string } | null;
+  maxBytes: number;
   createdAt: number;
 }
 
 const records = new Map<string, DownloadRecord>();
+let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
 function sweep(now: number): void {
   for (const [id, rec] of records) {
@@ -59,6 +61,26 @@ function sweep(now: number): void {
       records.delete(id);
       void storageDelete(BUCKET, rec.storageKey).catch(() => {});
     }
+  }
+}
+
+export function startDownloadSweeper(): void {
+  if (sweepTimer) return;
+  sweepTimer = setInterval(() => sweep(Date.now()), Math.min(RETENTION_MS, 60_000));
+  sweepTimer.unref?.();
+}
+
+export function stopDownloadSweeper(): void {
+  if (!sweepTimer) return;
+  clearInterval(sweepTimer);
+  sweepTimer = null;
+}
+
+export function clearDownloadsForRun(runId: string): void {
+  for (const [id, rec] of records) {
+    if (rec.runId !== runId) continue;
+    records.delete(id);
+    void storageDelete(BUCKET, rec.storageKey).catch(() => {});
   }
 }
 
@@ -98,6 +120,7 @@ export async function createDownload(opts: {
     size: null,
     sha256: null,
     error: null,
+    maxBytes,
     createdAt: now,
   };
   records.set(downloadId, record);
@@ -109,6 +132,7 @@ export async function createDownload(opts: {
  * must not be able to probe (or fetch) another run's downloads.
  */
 export function getDownloadForRun(runId: string, downloadId: string): DownloadRecord | null {
+  sweep(Date.now());
   const rec = records.get(downloadId);
   if (!rec || rec.runId !== runId) return null;
   return rec;
@@ -121,6 +145,7 @@ export function getDownloadForRun(runId: string, downloadId: string): DownloadRe
  * the desktop can only ever affect its own orders.
  */
 export function handleDesktopNotification(userId: string, method: string, params: unknown): void {
+  sweep(Date.now());
   const p = params as {
     download_id?: string;
     pct?: number;
@@ -147,10 +172,27 @@ export function handleDesktopNotification(userId: string, method: string, params
       }
       return;
     case "download.completed":
+      if (rec.state === "uploaded" || rec.state === "failed") return;
+      if (
+        typeof p.size !== "number" ||
+        !Number.isSafeInteger(p.size) ||
+        p.size < 0 ||
+        p.size > rec.maxBytes ||
+        typeof p.sha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(p.sha256)
+      ) {
+        rec.state = "failed";
+        rec.error = {
+          code: -32001,
+          message: "desktop reported invalid or oversized download metadata",
+        };
+        void storageDelete(BUCKET, rec.storageKey).catch(() => {});
+        return;
+      }
       rec.state = "uploaded";
       rec.pct = 100;
-      rec.size = typeof p.size === "number" ? p.size : null;
-      rec.sha256 = typeof p.sha256 === "string" ? p.sha256 : null;
+      rec.size = p.size;
+      rec.sha256 = p.sha256;
       logger.info("Desktop download uploaded", {
         module: "desktop",
         runId: rec.runId,
@@ -159,6 +201,7 @@ export function handleDesktopNotification(userId: string, method: string, params
       });
       return;
     case "download.failed":
+      if (rec.state === "uploaded" || rec.state === "failed") return;
       rec.state = "failed";
       rec.error = {
         code: typeof p.code === "number" ? p.code : -32000,
@@ -194,6 +237,7 @@ export function toStatusPayload(rec: DownloadRecord): Record<string, unknown> {
 
 /** Test-only: reset the store between cases. */
 export function clearDownloads(): void {
+  for (const rec of records.values()) void storageDelete(BUCKET, rec.storageKey).catch(() => {});
   records.clear();
 }
 

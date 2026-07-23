@@ -112,6 +112,8 @@ export interface AppDeps {
    * answers an empty batch.
    */
   runtimeEventJournal?: RuntimeEventJournal;
+  /** Exact runtime capability selection from the agent manifest. */
+  runtimeTools?: readonly string[];
 }
 
 /**
@@ -793,6 +795,7 @@ export function createApp(deps: AppDeps): Hono {
     tokenBudget,
     apiCallLimit,
     proxyDeps,
+    runtimeTools: deps.runtimeTools ?? ["desktop_browser", "desktop_browser_evaluate"],
     ...(deps.additionalMcpToolsProvider
       ? { additionalToolsProvider: deps.additionalMcpToolsProvider }
       : {}),

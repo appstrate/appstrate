@@ -33,6 +33,16 @@ const dispatchErrorResponses = {
   },
 } as const;
 
+const leaseConflictResponse = {
+  description:
+    "The user's browser is leased by another run, or the run attempted to mix arbitrary JavaScript with credential substitution.",
+  content: {
+    "application/problem+json": {
+      schema: { $ref: "#/components/schemas/ProblemDetail" },
+    },
+  },
+} as const;
+
 export const desktopPaths = {
   "/api/desktop/bridge": {
     get: {
@@ -40,10 +50,11 @@ export const desktopPaths = {
       tags: ["Desktop"],
       summary: "Open the desktop bridge WebSocket",
       description:
-        "WebSocket upgrade. The Appstrate Desktop client connects here with the Better Auth session cookie of the webapp pane it embeds; the resolved user is registered as the owner of that bridge. One connection per user — a new one displaces the previous. Org context is not required (a desktop belongs to a person, not an organization). Over the socket the platform sends `{ id, method, params }` frames and the client replies `{ id, result }` or `{ id, error }`.",
+        "WebSocket upgrade. The native client supplies the current bridge protocol query parameter and the Better Auth session cookie from its isolated webapp partition. One connection per user. Frames are JSON-RPC 2.0 and bounded to 16 MiB.",
       responses: {
         "101": { description: "Switching protocols — the bridge is open." },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "426": { description: "The desktop bridge protocol version is missing or incompatible." },
       },
     },
   },
@@ -94,6 +105,7 @@ export const desktopPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "409": leaseConflictResponse,
         "429": { $ref: "#/components/responses/RateLimited" },
         ...dispatchErrorResponses,
       },
@@ -135,6 +147,7 @@ export const desktopPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": leaseConflictResponse,
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
         ...dispatchErrorResponses,

@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Runtime tools catalog — the closed set of first-party tools the agent
- * runtime injects in-process (formerly the `@appstrate/{output,log,note,
- * pin,report}` `tool` packages, now baked into the runtime image).
+ * Runtime capability catalog: the closed set of first-party tools and
+ * privileged bridge capabilities an agent may select.
  *
  * Every tool is opt-in per agent via the manifest's top-level
  * `runtime_tools: string[]` field — none is injected by default. The editor
@@ -17,7 +16,7 @@
  * This is the single source of truth shared by:
  *   - `@appstrate/core/validation` — the `runtime_tools` enum
  *   - the agent editor (checklist labels)
- *   - the runner (`packages/runner-pi` built-in factory filter)
+ *   - the runner and sidecar tool filters
  */
 
 /**
@@ -25,7 +24,15 @@
  * leads the list (it materialises the run result) but is not auto-injected;
  * validation requires it only when an output schema is declared.
  */
-export const SELECTABLE_RUNTIME_TOOLS = ["output", "log", "note", "pin", "report"] as const;
+export const SELECTABLE_RUNTIME_TOOLS = [
+  "output",
+  "log",
+  "note",
+  "pin",
+  "report",
+  "desktop_browser",
+  "desktop_browser_evaluate",
+] as const;
 
 /** A tool the agent author may enable/disable. */
 export type SelectableRuntimeTool = (typeof SELECTABLE_RUNTIME_TOOLS)[number];
@@ -63,6 +70,16 @@ export const RUNTIME_TOOL_CATALOG: readonly RuntimeToolCatalogEntry[] = [
     id: "report",
     displayName: "Report",
     description: "Append markdown content to the run report.",
+  },
+  {
+    id: "desktop_browser",
+    displayName: "Desktop browser",
+    description: "Drive the run owner's local browser within declared URI boundaries.",
+  },
+  {
+    id: "desktop_browser_evaluate",
+    displayName: "Desktop browser JavaScript",
+    description: "Allow arbitrary page JavaScript in the desktop browser. Use only when required.",
   },
 ];
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { orgRoleEnum } from "@appstrate/db/schema";
+import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -1460,9 +1461,23 @@ export const schemas = {
         properties: {
           runtime_tools: {
             type: "array",
-            items: { type: "string", enum: ["output", "log", "note", "pin", "report"] },
+            items: { type: "string", enum: [...SELECTABLE_RUNTIME_TOOLS] },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional.",
+          },
+          desktop_browser: {
+            type: "object",
+            required: ["authorized_uris"],
+            properties: {
+              authorized_uris: {
+                type: "array",
+                minItems: 1,
+                items: { type: "string", minLength: 1 },
+                description:
+                  "URI patterns the desktop browser may navigate to or otherwise target.",
+              },
+            },
+            description: "Required URI boundary when `runtime_tools` contains `desktop_browser`.",
           },
         },
       },

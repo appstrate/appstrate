@@ -274,9 +274,10 @@ const runtimeDeps = buildSidecarRuntimeDeps({
 // runner drains `GET /runtime-events` and re-emits on its single sink — one
 // execution, transport-agnostic, no `_meta` reliance.
 const runtimeEventJournal = new RuntimeEventJournal();
+const selectedRuntimeTools = readRuntimeToolsFromEnv();
 const runtimeToolDefs = journalRuntimeToolDefs(
   buildRuntimeToolDefs({
-    runtimeTools: readRuntimeToolsFromEnv(),
+    runtimeTools: selectedRuntimeTools,
     outputSchema: readOutputSchemaFromEnv(),
   }),
   runtimeEventJournal,
@@ -347,6 +348,7 @@ const app = createApp({
   integrationBootPromise,
   integrationBootReportProvider: () => integrationBootReport,
   runtimeEventJournal,
+  runtimeTools: selectedRuntimeTools,
 });
 
 logger.info("Sidecar proxy listening", { port, integrationsDeclared: specs?.length ?? 0 });

@@ -22,6 +22,10 @@
 
 import { defineTool } from "../define.ts";
 
+const EVALUATE_METHOD_DESCRIPTION =
+  "`browser.evaluate` {script} — run JavaScript in the page (promises awaited); a thrown " +
+  "exception comes back with its description and line number; ";
+
 export const desktopBrowserTool = defineTool({
   id: "desktop_browser",
   name: "desktop_browser",
@@ -33,15 +37,16 @@ export const desktopBrowserTool = defineTool({
     "`browser.click` {selector} — native trusted click on the first match; " +
     "`browser.fill` {selector, value} — native keystroke input into a field (focus + type, real trusted events); " +
     "`browser.selectOption` {selector, value?|label?} — set a native <select> dropdown by option value or visible text (for custom div/listbox dropdowns, use browser.click to open then click the option); " +
-    "`browser.evaluate` {script} — run JavaScript in the page (promises awaited); a thrown " +
-    "exception comes back with its description and line number; " +
+    EVALUATE_METHOD_DESCRIPTION +
     "`browser.screenshot` {fullPage?, format?, quality?} — data URL capture, full scrollable page when fullPage; " +
     "`browser.waitForSelector` {selector, timeoutMs?} — poll until the selector exists; " +
-    "`browser.download` {url, filename?} — download a file with the page's own session " +
+    "`browser.download` {url?, selector?, filename?} — download a direct URL, or atomically " +
+    "click a page control identified by selector, with the page's own session " +
     "(returns {download_id}: poll `browser.download_status` {download_id} until `uploaded`, " +
     "then call the `desktop_download` tool to land it in the workspace). " +
-    "`browser.capture_credential` {integration_id, auth_key, script} — after logging into a " +
-    "site, run `script` in the page to read its session token (or any secret) and store it " +
+    "`browser.capture_credential` {integration_id, auth_key, fields} — after logging into a " +
+    "site, read named credential fields from declarative browser storage sources. Each field is " +
+    '`{source: "local_storage"|"session_storage"|"cookie", key, json_path?}`. Store it ' +
     "into the named integration credential, WRITE-ONLY: the value goes straight to the " +
     "platform credential store (you get back only {captured, fields}), and the rest of the " +
     "run then reaches the site's API through that integration's `api_call` tool with the " +
@@ -50,13 +55,15 @@ export const desktopBrowserTool = defineTool({
     "stopping at the first failure (result: {completed, results[], error?}); use it to TEST a " +
     "sequence while analyzing a site, then freeze it into a skill file and call the " +
     "`desktop_batch` tool instead. " +
-    "Returns 503 when no desktop is connected for this user. Prefer reading a page's own API " +
-    "(extract its token via `browser.evaluate`, then call the REST endpoint) over clicking through pages. " +
+    "Returns 503 when no desktop is connected for this user. Use " +
+    "`browser.capture_credential` followed by the integration's credential-injecting `api_call` " +
+    "instead of reading tokens into your context. " +
     "Credential substitution: set `integration_id` (an integration declared by this agent) + " +
     "`substitute_params: true`, and every `{{field}}` placeholder inside `params` strings is replaced " +
     "server-side with the connected credential's field value AFTER your call leaves this context — " +
-    "write `{{password}}`, never ask for the real value. You cannot read substituted values back: " +
-    "every reply of this run is scrubbed of them.",
+    "write `{{password}}`, never ask for the real value. Substitution is accepted only by " +
+    "`browser.fill`; arbitrary scripts never receive credential values. Replies are scrubbed " +
+    "as defence in depth.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -103,6 +110,28 @@ export const desktopBrowserTool = defineTool({
         description:
           "Enable server-side `{{field}}` substitution from `integration_id`'s connected " +
           "credentials. The real values never appear in your context.",
+      },
+    },
+  },
+});
+
+const desktopProperties = desktopBrowserTool.parameters.properties as Record<string, unknown>;
+const desktopMethod = desktopProperties.method as {
+  enum: readonly string[];
+  [key: string]: unknown;
+};
+
+/** Agent-facing contract for the safer base capability, without arbitrary page JavaScript. */
+export const desktopBrowserToolWithoutEvaluate = defineTool({
+  ...desktopBrowserTool,
+  description: desktopBrowserTool.description.replace(EVALUATE_METHOD_DESCRIPTION, ""),
+  parameters: {
+    ...desktopBrowserTool.parameters,
+    properties: {
+      ...desktopProperties,
+      method: {
+        ...desktopMethod,
+        enum: desktopMethod.enum.filter((method) => method !== "browser.evaluate"),
       },
     },
   },

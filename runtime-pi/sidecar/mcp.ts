@@ -67,7 +67,7 @@ import { handleLocalDownloadMethod } from "./desktop-downloads.ts";
 import {
   RUN_HISTORY_INJECTED_TOOL,
   RECALL_MEMORY_INJECTED_TOOL,
-  DESKTOP_BROWSER_INJECTED_TOOL,
+  runtimeInjectedToolsForSelection,
 } from "@appstrate/runner-pi/runtime-tools";
 import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
@@ -671,6 +671,9 @@ function buildSidecarTools(options: MountMcpOptions): {
 } {
   const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = options;
   const { config, fetchFn } = proxyDeps;
+  const selectedDesktopBrowser = runtimeInjectedToolsForSelection(options.runtimeTools).find(
+    (tool) => tool.name === "desktop_browser",
+  );
   // Input schema for the generic `{ns}__api_call` per-integration tool —
   // the integration is implied by the tool name, so the request carries no
   // integration identifier (just target + method + headers + body).
@@ -1262,10 +1265,10 @@ function buildSidecarTools(options: MountMcpOptions): {
     // (the single source consumed by the runtime Pi-tool registration).
     // The handler stays local to the sidecar.
     descriptor: {
-      name: DESKTOP_BROWSER_INJECTED_TOOL.name,
-      description: DESKTOP_BROWSER_INJECTED_TOOL.description,
-      inputSchema:
-        DESKTOP_BROWSER_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
+      name: selectedDesktopBrowser?.name ?? "desktop_browser",
+      description: selectedDesktopBrowser?.description ?? "",
+      inputSchema: (selectedDesktopBrowser?.parameters ??
+        {}) as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
     handler: async (rawArgs) => {
       const args = rawArgs as {
@@ -1444,7 +1447,11 @@ function buildSidecarTools(options: MountMcpOptions): {
   };
 
   return {
-    firstParty: [runHistory, recallMemory, desktopBrowser, desktopDownload, desktopBatch],
+    firstParty: [
+      runHistory,
+      recallMemory,
+      ...(selectedDesktopBrowser ? [desktopBrowser, desktopDownload, desktopBatch] : []),
+    ],
     makeApiCallTool,
     makeApiUploadTool,
   };
@@ -2049,6 +2056,8 @@ export interface MountMcpOptions {
    * `_meta` payload records the accounting.
    */
   tokenBudget: TokenBudget;
+  /** Exact runtime capability selection from the agent manifest. */
+  runtimeTools?: readonly string[];
   /**
    * Run-scoped fan-out limiter for `api_call`. Caps the number of
    * concurrent upstream HTTP hops a single run can issue at once.

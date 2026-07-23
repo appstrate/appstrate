@@ -178,6 +178,36 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
+  it("requires an URI boundary for the desktop_browser runtime tool", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        runtime_tools: ["desktop_browser"],
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(" ")).toContain("desktop_browser.authorized_uris");
+  });
+
+  it("accepts a bounded desktop_browser capability", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        runtime_tools: ["desktop_browser"],
+        desktop_browser: { authorized_uris: ["https://example.com/**"] },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("requires desktop_browser when arbitrary desktop evaluate is selected", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        runtime_tools: ["desktop_browser_evaluate"],
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(" ")).toContain("desktop_browser_evaluate requires desktop_browser");
+  });
+
   it("agent with integrations declared as bare version string (canonical §4.1 form)", () => {
     const result = validateManifest(
       validAgentManifest({

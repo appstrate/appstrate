@@ -19,22 +19,42 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Textarea } from "@appstrate/ui/components/textarea";
 
 interface RuntimeToolsGroupProps {
   /** Currently selected runtime tool ids (manifest.runtime_tools). */
   selected: string[];
   onChange: (next: string[]) => void;
+  desktopAuthorizedUris: string[];
+  onDesktopAuthorizedUrisChange: (next: string[]) => void;
 }
 
-export function RuntimeToolsGroup({ selected, onChange }: RuntimeToolsGroupProps) {
+export function RuntimeToolsGroup({
+  selected,
+  onChange,
+  desktopAuthorizedUris,
+  onDesktopAuthorizedUrisChange,
+}: RuntimeToolsGroupProps) {
   const { t } = useTranslation(["agents", "common"]);
   const selectedSet = new Set(selected);
 
   const toggle = (id: string) => {
     if (selectedSet.has(id)) {
-      onChange(selected.filter((s) => s !== id));
+      onChange(
+        selected.filter(
+          (selectedId) =>
+            selectedId !== id &&
+            !(id === "desktop_browser" && selectedId === "desktop_browser_evaluate"),
+        ),
+      );
     } else {
-      onChange([...selected, id]);
+      onChange([
+        ...selected,
+        ...(id === "desktop_browser_evaluate" && !selectedSet.has("desktop_browser")
+          ? ["desktop_browser"]
+          : []),
+        id,
+      ]);
     }
   };
 
@@ -79,6 +99,27 @@ export function RuntimeToolsGroup({ selected, onChange }: RuntimeToolsGroupProps
               </span>
             </label>
           ))}
+          {selectedSet.has("desktop_browser") && (
+            <label className="mt-2 flex flex-col gap-1 text-xs">
+              <span className="font-medium">Desktop browser authorized URIs</span>
+              <Textarea
+                value={desktopAuthorizedUris.join("\n")}
+                onChange={(event) =>
+                  onDesktopAuthorizedUrisChange(
+                    event.target.value
+                      .split("\n")
+                      .map((line) => line.trim())
+                      .filter(Boolean),
+                  )
+                }
+                placeholder={"https://portal.example.com/**\nhttps://auth.example.com/**"}
+                rows={3}
+              />
+              <span className="text-muted-foreground">
+                One URI pattern per line. Required before the agent can be saved.
+              </span>
+            </label>
+          )}
         </div>
       </div>
     </div>

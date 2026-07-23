@@ -1226,7 +1226,7 @@ export interface paths {
         };
         /**
          * Open the desktop bridge WebSocket
-         * @description WebSocket upgrade. The Appstrate Desktop client connects here with the Better Auth session cookie of the webapp pane it embeds; the resolved user is registered as the owner of that bridge. One connection per user — a new one displaces the previous. Org context is not required (a desktop belongs to a person, not an organization). Over the socket the platform sends `{ id, method, params }` frames and the client replies `{ id, result }` or `{ id, error }`.
+         * @description WebSocket upgrade. The native client supplies the current bridge protocol query parameter and the Better Auth session cookie from its isolated webapp partition. One connection per user. Frames are JSON-RPC 2.0 and bounded to 16 MiB.
          */
         get: operations["connectDesktopBridge"];
         put?: never;
@@ -4847,7 +4847,12 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "report")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "report" | "desktop_browser" | "desktop_browser_evaluate")[];
+            /** @description Required URI boundary when `runtime_tools` contains `desktop_browser`. */
+            desktop_browser?: {
+                /** @description URI patterns the desktop browser may navigate to or otherwise target. */
+                authorized_uris: string[];
+            };
         };
         AgentSkillRef: {
             id: string;
@@ -4966,7 +4971,7 @@ export interface components {
         /** @description Agent-path variant of DesktopCommandRequest: adds server-side credential substitution. With `integration_id` + `substitute_params`, `{{field}}` placeholders inside `params` strings are replaced by the run's connected credential fields for that integration before dispatch — the values never appear in the agent's context, and every reply for the run is scrubbed of them afterwards. */
         DesktopAgentCommandRequest: {
             /**
-             * @description Browser primitive to invoke. `browser.download` {url, filename?, max_bytes?} orders a download through the page's own session and returns {download_id, state}; `browser.download_status` {download_id} reports started/downloading/uploaded/failed with pct — both are answered by the platform, the bytes travel desktop → storage over HTTPS, never over the control WebSocket. `browser.selectOption` {selector, value?|label?} sets a native <select> (custom div/listbox dropdowns are DOM — drive those with browser.click instead). `browser.batch` {steps: [{method, params}, …]} runs up to 40 desktop-executable steps in one round-trip with per-step credential substitution, stopping at the first failure.
+             * @description Agent browser primitive. `browser.download` {url?|selector?, filename?, max_bytes?} downloads a direct URL or atomically clicks a page control and returns {download_id, state}; `browser.download_status` {download_id} reports started/downloading/uploaded/failed with pct — both are answered by the platform, the bytes travel desktop → storage over HTTPS, never over the control WebSocket. `browser.selectOption` {selector, value?|label?} sets a native <select> (custom div/listbox dropdowns are DOM — drive those with browser.click instead). `browser.batch` {steps: [{method, params}, …]} runs up to 40 desktop-executable steps in one round-trip with per-step credential substitution, stopping at the first failure.
              * @enum {string}
              */
             method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.selectOption" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status" | "browser.capture_credential" | "browser.batch";
@@ -4982,10 +4987,10 @@ export interface components {
         /** @description A browser primitive to execute on the user's local Appstrate Desktop client. */
         DesktopCommandRequest: {
             /**
-             * @description Browser primitive to invoke. `browser.download` {url, filename?, max_bytes?} orders a download through the page's own session and returns {download_id, state}; `browser.download_status` {download_id} reports started/downloading/uploaded/failed with pct — both are answered by the platform, the bytes travel desktop → storage over HTTPS, never over the control WebSocket. `browser.selectOption` {selector, value?|label?} sets a native <select> (custom div/listbox dropdowns are DOM — drive those with browser.click instead). `browser.batch` {steps: [{method, params}, …]} runs up to 40 desktop-executable steps in one round-trip with per-step credential substitution, stopping at the first failure.
+             * @description Direct browser primitive available to the authenticated desktop owner.
              * @enum {string}
              */
-            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.selectOption" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status" | "browser.capture_credential" | "browser.batch";
+            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.selectOption" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector";
             /** @description Method-specific arguments (e.g. `{ url }`, `{ selector, value }`). */
             params?: Record<string, never>;
             /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */
@@ -9615,6 +9620,13 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            /** @description The desktop bridge protocol version is missing or incompatible. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     sendMyDesktopCommand: {
@@ -9656,6 +9668,15 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            /** @description The user's browser is leased by another run, or the run attempted to mix arbitrary JavaScript with credential substitution. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             429: components["responses"]["RateLimited"];
             /** @description The desktop reported an error executing the command. */
             502: {
@@ -19756,6 +19777,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The user's browser is leased by another run, or the run attempted to mix arbitrary JavaScript with credential substitution. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
             /** @description The desktop reported an error executing the command. */

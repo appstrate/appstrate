@@ -8,11 +8,19 @@ import {
 } from "../src/runtime-tools-catalog.ts";
 
 describe("runtime-tools-catalog", () => {
-  it("SELECTABLE set is exactly [output, log, note, pin, report]", () => {
+  it("SELECTABLE set includes platform tools and desktop capabilities", () => {
     // Guards against drift with runner-pi's local SELECTABLE_RUNTIME_TOOLS,
     // which duplicates this list (the published runner package must not take
     // a hard @appstrate/core dependency). If you change one, change both.
-    expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin", "report"]);
+    expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual([
+      "output",
+      "log",
+      "note",
+      "pin",
+      "report",
+      "desktop_browser",
+      "desktop_browser_evaluate",
+    ]);
   });
 
   it("output is present in the catalog and selectable like every other tool", () => {

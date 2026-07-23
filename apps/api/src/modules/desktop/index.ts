@@ -13,17 +13,30 @@
  *     the `desktop_browser` runtime tool, with server-side credential
  *     substitution so agents never see secret values.
  *
- * Disabled (not in `MODULES`): zero footprint — no routes, and the
- * `desktop_browser` tool (always present in runtime images) surfaces a
- * clean 404 to the agent. The module owns no tables: connected clients
- * live in an in-memory registry keyed by userId.
+ * Disabled (not in `MODULES`): zero API footprint. The sidecar exposes
+ * desktop tools only for agents that selected the manifest capability.
+ * The module owns no tables: connected clients live in an in-memory
+ * registry keyed by userId.
  */
 
 import { z } from "zod";
-import type { AppstrateModule } from "@appstrate/core/module";
-import { createDesktopRouter, desktopCommandSchema, desktopAgentCommandSchema } from "./routes.ts";
-import { closeAllClients, setNotificationHandler } from "./registry.ts";
-import { handleDesktopNotification } from "./downloads.ts";
+import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
+import {
+  createDesktopRouter,
+  desktopCommandSchema,
+  desktopAgentCommandSchema,
+  clearRunDesktopPolicy,
+} from "./routes.ts";
+import { closeAllClients, sendCommand, setNotificationHandler } from "./registry.ts";
+import {
+  clearDownloadsForRun,
+  handleDesktopNotification,
+  startDownloadSweeper,
+  stopDownloadSweeper,
+} from "./downloads.ts";
+import { clearRunSecrets } from "./secret-scrub.ts";
+import { clearRunEphemeralCredentials } from "../../services/run-ephemeral-credentials.ts";
+import { clearDesktopLeases, releaseDesktopLeaseByRun } from "./lease.ts";
 import { desktopPaths } from "./openapi/paths.ts";
 import { desktopSchemas } from "./openapi/schemas.ts";
 
@@ -35,6 +48,7 @@ const desktopModule: AppstrateModule = {
     // intake — desktop-initiated JSON-RPC notifications (download
     // lifecycle) flow from the WS registry into the downloads service.
     setNotificationHandler(handleDesktopNotification);
+    startDownloadSweeper();
   },
 
   createRouter() {
@@ -77,9 +91,28 @@ const desktopModule: AppstrateModule = {
 
   features: { desktop: true },
 
+  events: {
+    onRunStatusChange: async (params: RunStatusChangeParams) => {
+      if (params.status === "started") return;
+      const releasedUserIds = releaseDesktopLeaseByRun(params.runId);
+      clearRunSecrets(params.runId);
+      clearRunEphemeralCredentials(params.runId);
+      clearRunDesktopPolicy(params.runId);
+      clearDownloadsForRun(params.runId);
+      await Promise.allSettled(
+        releasedUserIds.map((userId) =>
+          sendCommand(userId, "browser.release", {}, { timeoutMs: 5_000 }),
+        ),
+      );
+    },
+  },
+
   async shutdown() {
     setNotificationHandler(null);
+    stopDownloadSweeper();
     closeAllClients();
+    clearDesktopLeases();
+    clearRunDesktopPolicy();
   },
 };
 

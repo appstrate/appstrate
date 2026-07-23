@@ -180,6 +180,24 @@ describe("POST /mcp — tools/list", () => {
     ]);
   });
 
+  it("omits every desktop tool when the capability is not selected", async () => {
+    const app = createApp(makeDeps({ runtimeTools: [] }));
+    const res = await rpc(app, { method: "tools/list" });
+    const result = res.json.result as { tools: Array<{ name: string }> };
+    expect(result.tools.map((tool) => tool.name).sort()).toEqual(["recall_memory", "run_history"]);
+  });
+
+  it("omits evaluate from the base desktop capability contract", async () => {
+    const app = createApp(makeDeps({ runtimeTools: ["desktop_browser"] }));
+    const res = await rpc(app, { method: "tools/list" });
+    const result = res.json.result as {
+      tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
+    };
+    const browser = result.tools.find((tool) => tool.name === "desktop_browser")!;
+    const method = browser.inputSchema.properties.method as { enum: string[] };
+    expect(method.enum).not.toContain("browser.evaluate");
+  });
+
   it("declares input schemas matching the legacy contracts", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });

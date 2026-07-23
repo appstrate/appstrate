@@ -34,6 +34,7 @@ interface RegisteredClient {
 }
 
 interface PendingCommand {
+  userId: string;
   resolve(result: unknown): void;
   reject(err: Error): void;
   timer: ReturnType<typeof setTimeout>;
@@ -89,6 +90,7 @@ export function registerClient(client: RegisteredClient): void {
       module: "desktop",
       userId: client.userId,
     });
+    rejectPendingForUser(client.userId, new DesktopNotConnectedError(client.userId));
     previous.close();
   }
   clients.set(client.userId, client);
@@ -106,6 +108,7 @@ export function unregisterClient(userId: string, client: RegisteredClient): void
   const current = clients.get(userId);
   if (current === client) {
     clients.delete(userId);
+    rejectPendingForUser(userId, new DesktopNotConnectedError(userId));
     logger.info("Desktop registry: client unregistered", {
       module: "desktop",
       userId,
@@ -126,13 +129,27 @@ export function isConnected(userId: string): boolean {
 export function closeAllClients(): void {
   for (const client of clients.values()) client.close();
   clients.clear();
+  for (const [id, entry] of pending) {
+    clearTimeout(entry.timer);
+    entry.reject(new DesktopNotConnectedError(entry.userId));
+    pending.delete(id);
+  }
+}
+
+function rejectPendingForUser(userId: string, error: Error): void {
+  for (const [id, entry] of pending) {
+    if (entry.userId !== userId) continue;
+    clearTimeout(entry.timer);
+    entry.reject(error);
+    pending.delete(id);
+  }
 }
 
 export async function sendCommand(
   userId: string,
   method: string,
   params: unknown,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; authorizedUris?: readonly string[] },
 ): Promise<unknown> {
   const client = clients.get(userId);
   if (!client) throw new DesktopNotConnectedError(userId);
@@ -145,8 +162,16 @@ export async function sendCommand(
       pending.delete(id);
       reject(new DesktopCommandTimeoutError(method, timeoutMs));
     }, timeoutMs);
-    pending.set(id, { resolve, reject, timer });
-    client.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+    pending.set(id, { userId, resolve, reject, timer });
+    client.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method,
+        params,
+        ...(opts?.authorizedUris ? { meta: { authorized_uris: opts.authorizedUris } } : {}),
+      }),
+    );
   });
 
   return result;
@@ -191,6 +216,14 @@ export function handleClientFrame(
     logger.debug("Desktop registry: reply for unknown id (likely timed out)", {
       module: "desktop",
       id: frame.id,
+    });
+    return;
+  }
+  if (entry.userId !== userId) {
+    logger.warn("Desktop registry: reply id belongs to another user", {
+      module: "desktop",
+      id: frame.id,
+      userId,
     });
     return;
   }

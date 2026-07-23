@@ -20,6 +20,7 @@ import {
   RECALL_MEMORY_INJECTED_TOOL,
   RUN_HISTORY_INJECTED_TOOL,
   RUNTIME_INJECTED_TOOLS,
+  runtimeInjectedToolsForSelection,
   type RuntimeInjectedTool,
 } from "../src/runtime-tools/index.ts";
 import { defineTool } from "../src/runtime-tools/define.ts";
@@ -33,6 +34,35 @@ describe("RUNTIME_INJECTED_TOOLS", () => {
       RECALL_MEMORY_INJECTED_TOOL,
       DESKTOP_BROWSER_INJECTED_TOOL,
     ]);
+  });
+
+  it("only exposes desktop_browser when the agent selected it", () => {
+    expect(runtimeInjectedToolsForSelection([]).map((tool) => tool.name)).toEqual([
+      "run_history",
+      "recall_memory",
+    ]);
+    expect(
+      runtimeInjectedToolsForSelection(["desktop_browser"]).map((tool) => tool.name),
+    ).toContain("desktop_browser");
+  });
+
+  it("only describes evaluate when the dedicated capability is selected", () => {
+    const base = runtimeInjectedToolsForSelection(["desktop_browser"]).find(
+      (tool) => tool.name === "desktop_browser",
+    )!;
+    const elevated = runtimeInjectedToolsForSelection([
+      "desktop_browser",
+      "desktop_browser_evaluate",
+    ]).find((tool) => tool.name === "desktop_browser")!;
+    const baseMethod = (
+      (base.parameters.properties as Record<string, unknown>).method as { enum: string[] }
+    ).enum;
+    const elevatedMethod = (
+      (elevated.parameters.properties as Record<string, unknown>).method as { enum: string[] }
+    ).enum;
+    expect(baseMethod).not.toContain("browser.evaluate");
+    expect(base.description).not.toContain("`browser.evaluate`");
+    expect(elevatedMethod).toContain("browser.evaluate");
   });
 
   it("each descriptor has all the fields consumers expect", () => {

@@ -44,6 +44,7 @@ import {
   badGateway,
   serviceUnavailable,
   internalError,
+  conflict,
   parseBody,
 } from "../../lib/errors.ts";
 import { upgradeWebSocket } from "../../lib/websocket.ts";
@@ -67,12 +68,20 @@ import {
 } from "./registry.ts";
 import { registerRunSecrets, scrubRunSecrets } from "./secret-scrub.ts";
 import {
+  acquireDesktopLease,
+  releaseDesktopLease,
+  recordDesktopExposure,
+  DesktopLeaseConflictError,
+  DesktopExposureConflictError,
+} from "./lease.ts";
+import {
   createDownload,
   getDownloadForRun,
   toStatusPayload,
   DOWNLOADS_BUCKET,
 } from "./downloads.ts";
 import { downloadStream as storageDownloadStream } from "@appstrate/db/storage";
+import { DESKTOP_BRIDGE_MAX_FRAME_BYTES, DESKTOP_BRIDGE_PROTOCOL_VERSION } from "./protocol.ts";
 
 /**
  * Translate a registry rejection into the platform's RFC 9457 error
@@ -84,6 +93,15 @@ import { downloadStream as storageDownloadStream } from "@appstrate/db/storage";
  * value back into the agent's context.
  */
 export function desktopErrorToApiError(err: unknown, scrub?: (text: string) => string): ApiError {
+  if (err instanceof DesktopLeaseConflictError) {
+    return conflict(
+      "desktop_in_use",
+      "This desktop browser is already controlled by another active run",
+    );
+  }
+  if (err instanceof DesktopExposureConflictError) {
+    return conflict("desktop_secret_boundary", err.message);
+  }
   if (err instanceof DesktopNotConnectedError) {
     return serviceUnavailable("No Appstrate Desktop connected for this user");
   }
@@ -163,6 +181,92 @@ export function substituteInValue(value: unknown, fields: Record<string, string>
   return value;
 }
 
+type RunContext = Awaited<ReturnType<typeof verifyRunToken>>["run"];
+
+interface RunDesktopPolicy {
+  runtimeTools: ReadonlySet<string>;
+  integrations: ReadonlySet<string>;
+  authorizedUris: readonly string[];
+  touchedAt: number;
+}
+
+const POLICY_RETENTION_MS = 6 * 60 * 60 * 1000;
+const policyByRun = new Map<string, RunDesktopPolicy>();
+
+async function loadRunDesktopPolicy(run: RunContext, runId: string): Promise<RunDesktopPolicy> {
+  const cached = policyByRun.get(runId);
+  if (cached) {
+    cached.touchedAt = Date.now();
+    return cached;
+  }
+  const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+  if (!agent) throw notFound("Agent not found");
+  const manifest = asRecord(agent.manifest);
+  const runtimeToolsRaw = manifest.runtime_tools;
+  const integrations = asRecord(asRecord(manifest.dependencies).integrations);
+  const authorizedUrisRaw = asRecord(manifest.desktop_browser).authorized_uris;
+  const policy: RunDesktopPolicy = {
+    runtimeTools: new Set(
+      Array.isArray(runtimeToolsRaw)
+        ? runtimeToolsRaw.filter((value): value is string => typeof value === "string")
+        : [],
+    ),
+    integrations: new Set(Object.keys(integrations)),
+    authorizedUris: Array.isArray(authorizedUrisRaw)
+      ? authorizedUrisRaw.filter((value): value is string => typeof value === "string")
+      : [],
+    touchedAt: Date.now(),
+  };
+  policyByRun.set(runId, policy);
+  const now = Date.now();
+  for (const [id, entry] of policyByRun) {
+    if (now - entry.touchedAt > POLICY_RETENTION_MS) policyByRun.delete(id);
+  }
+  return policy;
+}
+
+export function clearRunDesktopPolicy(runId?: string): void {
+  if (runId === undefined) {
+    policyByRun.clear();
+    return;
+  }
+  policyByRun.delete(runId);
+}
+
+async function assertDesktopCapability(
+  run: RunContext,
+  runId: string,
+  method: string,
+  steps?: Array<{ method?: string }>,
+): Promise<RunDesktopPolicy> {
+  const policy = await loadRunDesktopPolicy(run, runId);
+  if (!policy.runtimeTools.has("desktop_browser") || policy.authorizedUris.length === 0) {
+    throw forbidden(
+      "This agent did not declare desktop_browser with a non-empty authorized_uris boundary",
+    );
+  }
+  const usesEvaluate =
+    method === "browser.evaluate" ||
+    steps?.some((step) => step?.method === "browser.evaluate") === true;
+  if (usesEvaluate && !policy.runtimeTools.has("desktop_browser_evaluate")) {
+    throw forbidden("browser.evaluate requires the desktop_browser_evaluate capability");
+  }
+  return policy;
+}
+
+function assertAuthorizedTarget(
+  policy: RunDesktopPolicy,
+  target: unknown,
+  param = "params.url",
+): void {
+  if (
+    typeof target !== "string" ||
+    !policy.authorizedUris.some((spec) => matchesAuthorizedUriSpec(spec, target))
+  ) {
+    throw forbidden(`Desktop target is outside the agent's authorized_uris boundary: ${param}`);
+  }
+}
+
 /**
  * Same fail-closed gate as the core `/internal/integration-credentials`
  * endpoints (`routes/internal.ts`): the running agent must DECLARE the
@@ -173,18 +277,15 @@ export function substituteInValue(value: unknown, fields: Record<string, string>
  */
 async function assertAgentDeclaresIntegration(
   integrationId: string,
-  run: { packageId: string; orgId: string },
+  run: RunContext,
   runId: string,
 ): Promise<void> {
-  const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
-  if (!agent) throw notFound("Agent not found");
-  const deps = asRecord(asRecord(agent.manifest).dependencies);
-  const integrations = asRecord(deps.integrations);
-  if (!(integrationId in integrations)) {
+  const policy = await loadRunDesktopPolicy(run, runId);
+  if (!policy.integrations.has(integrationId)) {
     logger.warn("Desktop substitution rejected — integration not declared by agent", {
       runId,
       integrationId,
-      agentId: agent.id,
+      agentId: run.packageId,
       module: "desktop",
     });
     throw notFound(`Integration '${integrationId}' is not a dependency of the running agent`);
@@ -223,52 +324,48 @@ const BATCH_MAX_STEPS = 40;
  * OUTBOUND one: substituting into `browser.navigate`'s url (or a
  * download url) would ship the secret to an attacker-chosen server in
  * the request line itself. Substituted values must stay local to the
- * user's machine: a DOM field (`fill`) or an in-page script
- * (`evaluate` — whose exfiltration surface is bounded by the
- * integration's `authorized_uris`; capturing the session token with
- * `browser.capture_credential` and reaching the API through `api_call`
- * removes the need to read tokens in-page at all).
+ * user's machine: a DOM field written by the trusted `fill` primitive.
+ * Arbitrary `evaluate` scripts are deliberately excluded: a script can
+ * transform a secret before returning it or send it over the network,
+ * neither of which exact-value reply scrubbing can prevent.
  */
-const SUBSTITUTABLE_METHODS = new Set(["browser.fill", "browser.evaluate"]);
+const SUBSTITUTABLE_METHODS = new Set(["browser.fill"]);
 
-type RunContext = Awaited<ReturnType<typeof verifyRunToken>>["run"];
+type CaptureSource = {
+  source: "local_storage" | "session_storage" | "cookie";
+  key: string;
+  json_path?: Array<string | number>;
+};
+
+interface IntegrationCapturePolicy {
+  authorizedUris: string[];
+  credentialFields: ReadonlySet<string>;
+}
 
 /**
- * `browser.capture_credential` handler. Runs an in-page script on the
- * desktop that returns a `{ field: value }` object, then writes it to
- * the run actor's connection for `integration_id` / `auth_key` — an
- * upsert (find the actor's existing row for that auth, else insert).
- * The value only ever transits desktop → platform → credential store;
- * the agent receives just the field NAMES back, and the values are
- * registered for reply-scrubbing as a belt.
- *
- * Same fail-closed gate as substitution: the running agent must declare
- * the integration. This is a genuine new capability (a run writing to
- * its own credential store), so it stays tightly scoped: the declared
- * integration only, the run actor's own connection only, write-only.
+ * Load the exact auth selected for capture. The source URL and output
+ * field names are both bound to that auth rather than to a union across
+ * the integration.
  */
-/**
- * Union of an integration's `authorized_uris` across all its auths, at
- * the version this run froze. The capture page must fall inside it.
- * Empty (no manifest / no auths) → the caller rejects every page, which
- * is the safe default for a write-into-credential-store operation.
- */
-async function loadIntegrationAuthorizedUris(
+async function loadIntegrationCapturePolicy(
   integrationId: string,
+  authKey: string,
   run: RunContext,
-): Promise<string[]> {
+): Promise<IntegrationCapturePolicy | null> {
   const frozen = run.resolvedIntegrationVersions?.[integrationId] ?? null;
   const loaded = await readIntegrationManifestForRun(integrationId, frozen);
-  if (!loaded.ok) return [];
+  if (!loaded.ok) return null;
   const auths = asRecord(asRecord(loaded.manifest).auths);
-  const uris: string[] = [];
-  for (const auth of Object.values(auths)) {
-    const list = asRecord(auth).authorized_uris;
-    if (Array.isArray(list)) {
-      for (const u of list) if (typeof u === "string") uris.push(u);
-    }
-  }
-  return uris;
+  const auth = asRecord(auths[authKey]);
+  if (Object.keys(auth).length === 0) return null;
+  const authorizedUrisRaw = auth.authorized_uris;
+  const properties = asRecord(asRecord(asRecord(auth.credentials).schema).properties);
+  return {
+    authorizedUris: Array.isArray(authorizedUrisRaw)
+      ? authorizedUrisRaw.filter((value): value is string => typeof value === "string")
+      : [],
+    credentialFields: new Set(Object.keys(properties)),
+  };
 }
 
 async function captureCredential(
@@ -280,42 +377,72 @@ async function captureCredential(
   if (!run.userId) {
     throw forbidden("capture_credential requires a user-owned run");
   }
-  const p = (body.params ?? {}) as { integration_id?: string; auth_key?: string; script?: string };
-  if (!p.integration_id || !p.auth_key || !p.script) {
-    throw invalidRequest("capture_credential needs integration_id, auth_key and script", "params");
+  const p = (body.params ?? {}) as {
+    integration_id?: string;
+    auth_key?: string;
+    fields?: Record<string, CaptureSource>;
+  };
+  if (!p.integration_id || !p.auth_key || !p.fields) {
+    throw invalidRequest("capture_credential needs integration_id, auth_key and fields", "params");
   }
   await assertAgentDeclaresIntegration(p.integration_id, run, runId);
 
-  // The union of the integration's declared `authorized_uris`, across
-  // all its auths. The capture page MUST be inside it (checked below) —
-  // otherwise a run could sit on `bank.com`, capture that session's
-  // token, and file it into ANY declared integration, whose api_call
-  // authorized_uris would then exfiltrate it. Binding the SOURCE page to
-  // the integration's own domain is the missing half of the guard: you
-  // can only capture a site's secret while browsing that same site.
-  const integrationUris = await loadIntegrationAuthorizedUris(p.integration_id, run);
+  const capturePolicy = await loadIntegrationCapturePolicy(p.integration_id, p.auth_key, run);
+  if (!capturePolicy) {
+    throw notFound(`Unknown auth '${p.auth_key}' for integration '${p.integration_id}'`);
+  }
+  const sourceEntries = Object.entries(p.fields);
+  if (sourceEntries.length === 0 || sourceEntries.length > 16) {
+    throw invalidRequest("capture_credential fields must contain 1 to 16 entries", "params.fields");
+  }
+  for (const [field, source] of sourceEntries) {
+    if (!capturePolicy.credentialFields.has(field)) {
+      throw invalidRequest(
+        `Field '${field}' is not declared by auth '${p.auth_key}' credentials.schema`,
+        "params.fields",
+      );
+    }
+    if (
+      !source ||
+      !["local_storage", "session_storage", "cookie"].includes(source.source) ||
+      typeof source.key !== "string" ||
+      source.key.length === 0 ||
+      source.key.length > 256 ||
+      (source.json_path !== undefined &&
+        (!Array.isArray(source.json_path) ||
+          source.json_path.length > 8 ||
+          source.json_path.some(
+            (part) =>
+              (typeof part !== "string" && typeof part !== "number") ||
+              (typeof part === "string" && part.length > 128),
+          )))
+    ) {
+      throw invalidRequest(`Invalid declarative source for field '${field}'`, "params.fields");
+    }
+  }
 
-  // `browser.capture` runs the caller's script for the fields AND
-  // attaches `wc.getURL()` — the Electron main-process committed URL,
-  // which the script cannot forge. The URL is NOT taken from the
-  // script's own return (an earlier design injected the script into an
-  // object literal, letting a breakout override the reported URL and
-  // spoof the domain check). Both received HERE, never forwarded to the
-  // agent.
+  // Electron evaluates only a fixed storage reader. The agent supplies
+  // data selectors, never executable JavaScript.
   let raw: unknown;
   try {
     raw = await sendCommand(
       run.userId,
       "browser.capture",
-      { script: p.script },
-      { timeoutMs: body.timeout_ms },
+      { fields: p.fields },
+      {
+        timeoutMs: body.timeout_ms,
+        authorizedUris: capturePolicy.authorizedUris,
+      },
     );
   } catch (err) {
     throw desktopErrorToApiError(err);
   }
   const envelope = raw as { url?: unknown; fields?: unknown };
   const pageUrl = typeof envelope?.url === "string" ? envelope.url : "";
-  if (!pageUrl || !integrationUris.some((u) => matchesAuthorizedUriSpec(u, pageUrl))) {
+  if (
+    !pageUrl ||
+    !capturePolicy.authorizedUris.some((spec) => matchesAuthorizedUriSpec(spec, pageUrl))
+  ) {
     logger.warn("Desktop capture rejected — page outside the integration's authorized_uris", {
       runId,
       integrationId: p.integration_id,
@@ -328,14 +455,25 @@ async function captureCredential(
   }
   const captured = envelope.fields;
   if (!captured || typeof captured !== "object" || Array.isArray(captured)) {
-    throw badGateway("capture script must return an object of { field: value } string pairs");
+    throw badGateway("desktop capture must return an object of { field: value } string pairs");
   }
   const credentials: Record<string, string> = {};
+  let totalBytes = 0;
   for (const [k, v] of Object.entries(captured as Record<string, unknown>)) {
-    if (typeof v === "string" && v.length > 0) credentials[k] = v;
+    if (!capturePolicy.credentialFields.has(k) || !(k in p.fields)) continue;
+    if (typeof v !== "string" || v.length === 0) continue;
+    const bytes = Buffer.byteLength(v);
+    if (bytes > 64 * 1024) {
+      throw badGateway(`captured field '${k}' exceeds the 64 KiB limit`);
+    }
+    totalBytes += bytes;
+    if (totalBytes > 256 * 1024) {
+      throw badGateway("captured credential exceeds the 256 KiB total limit");
+    }
+    credentials[k] = v;
   }
   if (Object.keys(credentials).length === 0) {
-    throw badGateway("capture script returned no non-empty string fields");
+    throw badGateway("desktop capture returned no non-empty string fields");
   }
 
   // Write to the RUN-SCOPED ephemeral store, NOT the durable connection.
@@ -396,25 +534,37 @@ async function resolveSubstitutionFields(
   return fields;
 }
 
-export const desktopCommandSchema = z.object({
-  method: z.enum([
-    "browser.navigate",
-    "browser.click",
-    "browser.fill",
-    "browser.selectOption",
-    "browser.evaluate",
-    "browser.screenshot",
-    "browser.waitForSelector",
-    "browser.download",
-    "browser.download_status",
-    "browser.capture_credential",
-    "browser.batch",
-  ]),
+const DIRECT_BROWSER_METHODS = [
+  "browser.navigate",
+  "browser.click",
+  "browser.fill",
+  "browser.selectOption",
+  "browser.evaluate",
+  "browser.screenshot",
+  "browser.waitForSelector",
+] as const;
+
+const AGENT_BROWSER_METHODS = [
+  ...DIRECT_BROWSER_METHODS,
+  "browser.download",
+  "browser.download_status",
+  "browser.capture_credential",
+  "browser.batch",
+] as const;
+
+const commandFields = {
   params: z.record(z.string(), z.unknown()).optional(),
   timeout_ms: z.number().int().min(1000).max(120000).optional(),
+};
+
+export const desktopCommandSchema = z.object({
+  method: z.enum(DIRECT_BROWSER_METHODS),
+  ...commandFields,
 });
 
-export const desktopAgentCommandSchema = desktopCommandSchema.extend({
+export const desktopAgentCommandSchema = z.object({
+  method: z.enum(AGENT_BROWSER_METHODS),
+  ...commandFields,
   integration_id: z.string().optional(),
   substitute_params: z.boolean().optional(),
 });
@@ -425,6 +575,42 @@ async function readJsonBody(c: { req: { json(): Promise<unknown> } }): Promise<u
   } catch {
     throw invalidRequest("Invalid JSON body");
   }
+}
+
+function boundedDownloadStream(
+  source: ReadableStream<Uint8Array>,
+  maxBytes: number,
+  expectedBytes: number | null,
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  let seen = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (expectedBytes !== null && seen !== expectedBytes) {
+            controller.error(new Error("stored download size does not match desktop metadata"));
+          } else {
+            controller.close();
+          }
+          return;
+        }
+        seen += value.byteLength;
+        if (seen > maxBytes) {
+          await reader.cancel("download exceeded signed size ceiling");
+          controller.error(new Error("stored download exceeds signed size ceiling"));
+          return;
+        }
+        controller.enqueue(value);
+      } catch (err) {
+        controller.error(err);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
 }
 
 export function createDesktopRouter(): Hono<AppEnv> {
@@ -440,6 +626,14 @@ export function createDesktopRouter(): Hono<AppEnv> {
           origin,
         });
         throw forbidden("Origin not allowed for the desktop bridge");
+      }
+      if (c.req.query("protocol") !== DESKTOP_BRIDGE_PROTOCOL_VERSION) {
+        throw new ApiError({
+          status: 426,
+          code: "desktop_protocol_mismatch",
+          title: "Upgrade Required",
+          detail: `Desktop bridge protocol ${DESKTOP_BRIDGE_PROTOCOL_VERSION} is required`,
+        });
       }
       await next();
     },
@@ -465,10 +659,14 @@ export function createDesktopRouter(): Hono<AppEnv> {
           };
           registerClient(registered);
         },
-        onMessage: (evt): void => {
+        onMessage: (evt, ws): void => {
           let parsed: { id?: string; method?: string; result?: unknown };
           try {
             const raw = typeof evt.data === "string" ? evt.data : evt.data.toString();
+            if (Buffer.byteLength(raw) > DESKTOP_BRIDGE_MAX_FRAME_BYTES) {
+              ws.close(1009, "desktop bridge frame too large");
+              return;
+            }
             parsed = JSON.parse(raw);
           } catch {
             logger.debug("Desktop bridge: dropped malformed message", { module: "desktop" });
@@ -496,13 +694,18 @@ export function createDesktopRouter(): Hono<AppEnv> {
     const user = c.get("user");
     if (!user) throw unauthorized("Authentication required");
     const body = parseBody(desktopCommandSchema, await readJsonBody(c));
+    const leaseOwner = "manual";
     try {
+      const { requiresReset } = acquireDesktopLease(user.id, leaseOwner);
+      if (requiresReset) await sendCommand(user.id, "browser.reset", {});
       const result = await sendCommand(user.id, body.method, body.params ?? {}, {
         timeoutMs: body.timeout_ms,
       });
       return c.json({ result });
     } catch (err) {
       throw desktopErrorToApiError(err);
+    } finally {
+      releaseDesktopLease(user.id, leaseOwner);
     }
   });
 
@@ -512,6 +715,52 @@ export function createDesktopRouter(): Hono<AppEnv> {
       throw forbidden("Run has no owning user — the desktop bridge requires a user-owned run");
     }
     const body = parseBody(desktopAgentCommandSchema, await readJsonBody(c));
+    const batchSteps =
+      body.method === "browser.batch"
+        ? ((body.params ?? {}) as { steps?: Array<{ method?: string; params?: unknown }> }).steps
+        : undefined;
+    const policy = await assertDesktopCapability(run, runId, body.method, batchSteps);
+    if (body.method === "browser.navigate") {
+      assertAuthorizedTarget(policy, (body.params as { url?: unknown } | undefined)?.url);
+    } else if (body.method === "browser.download") {
+      const download = body.params as { url?: unknown; selector?: unknown } | undefined;
+      if (typeof download?.url === "string") {
+        assertAuthorizedTarget(policy, download.url);
+      }
+    } else if (Array.isArray(batchSteps)) {
+      for (const [index, step] of batchSteps.entries()) {
+        if (step?.method === "browser.navigate") {
+          assertAuthorizedTarget(
+            policy,
+            (step.params as { url?: unknown } | undefined)?.url,
+            `params.steps[${index}].params.url`,
+          );
+        }
+        if (step?.method === "browser.download") {
+          const download = step.params as { url?: unknown; selector?: unknown } | undefined;
+          if (typeof download?.url === "string") {
+            assertAuthorizedTarget(policy, download.url, `params.steps[${index}].params.url`);
+          }
+        }
+      }
+    }
+
+    // Status polling reads platform state and never touches Electron.
+    // Every command that does drive the single browser surface first
+    // acquires the run's exclusive lease.
+    if (body.method !== "browser.download_status") {
+      if (!isConnected(run.userId)) {
+        throw serviceUnavailable("No Appstrate Desktop connected for this user");
+      }
+      try {
+        const { requiresReset } = acquireDesktopLease(run.userId, runId);
+        if (requiresReset) {
+          await sendCommand(run.userId, "browser.reset", {}, { timeoutMs: body.timeout_ms });
+        }
+      } catch (err) {
+        throw desktopErrorToApiError(err);
+      }
+    }
 
     let dispatchedParams: unknown = body.params ?? {};
 
@@ -524,7 +773,29 @@ export function createDesktopRouter(): Hono<AppEnv> {
     // platform server-side and goes STRAIGHT to the store: the agent
     // gets back only `{ captured: true, fields }`, never a value.
     if (body.method === "browser.capture_credential") {
+      try {
+        recordDesktopExposure(run.userId, runId, "credential_substitution");
+      } catch (err) {
+        throw desktopErrorToApiError(err);
+      }
       return captureCredential(c, run, runId, body);
+    }
+
+    const requestsEvaluate =
+      body.method === "browser.evaluate" ||
+      (Array.isArray(batchSteps) && batchSteps.some((step) => step?.method === "browser.evaluate"));
+    if (requestsEvaluate && body.substitute_params) {
+      throw invalidRequest(
+        "browser.evaluate and credential substitution cannot be combined in one command",
+        "substitute_params",
+      );
+    }
+    if (requestsEvaluate) {
+      try {
+        recordDesktopExposure(run.userId, runId, "arbitrary_evaluate");
+      } catch (err) {
+        throw desktopErrorToApiError(err);
+      }
     }
 
     // `browser.batch` is exempt here: its allowlist applies PER STEP
@@ -545,8 +816,13 @@ export function createDesktopRouter(): Hono<AppEnv> {
     // for the named integration and swap `{{field}}` placeholders out of
     // `params` before dispatching. The agent's LLM only ever writes
     // templates; the resolved values go straight to the user's desktop.
-    if (body.substitute_params) {
+    if (body.substitute_params && body.method !== "browser.batch") {
       const fields = await resolveSubstitutionFields(body.integration_id, run, runId);
+      try {
+        recordDesktopExposure(run.userId, runId, "credential_substitution");
+      } catch (err) {
+        throw desktopErrorToApiError(err);
+      }
       // From now on, every reply for this run is scrubbed of these
       // values — including replies to later commands (an agent could
       // fill a password and read the field back with a second call).
@@ -580,6 +856,11 @@ export function createDesktopRouter(): Hono<AppEnv> {
       let fields: Record<string, string> | null = null;
       if (body.substitute_params) {
         fields = await resolveSubstitutionFields(body.integration_id, run, runId);
+        try {
+          recordDesktopExposure(run.userId, runId, "credential_substitution");
+        } catch (err) {
+          throw desktopErrorToApiError(err);
+        }
         logger.info("Desktop batch credential substitution", {
           runId,
           integrationId: body.integration_id,
@@ -590,21 +871,24 @@ export function createDesktopRouter(): Hono<AppEnv> {
       const prepared: Array<{ method: string; params: unknown }> = [];
       for (const st of p.steps) {
         let stepParams: unknown = st.params ?? {};
-        // Per-step allowlist: only fill/evaluate get their placeholders
-        // resolved; a navigate/download step keeps `{{…}}` literal, so
-        // no secret can ride an outbound URL.
+        // Per-step allowlist: only fill gets its placeholders resolved;
+        // every other step keeps `{{…}}` literal, so neither an outbound
+        // URL nor arbitrary page JavaScript can receive a secret.
         if (fields && SUBSTITUTABLE_METHODS.has(st.method!)) {
           stepParams = substituteInValue(stepParams, fields);
         }
         if (st.method === "browser.download") {
           const dp = stepParams as {
             url?: string;
-            capture?: boolean;
+            selector?: string;
             filename?: string;
             max_bytes?: number;
           };
-          if (dp.capture !== true && (!dp.url || !/^https?:\/\//.test(dp.url))) {
-            throw invalidRequest("download step needs `url` or `capture: true`", "params");
+          if (
+            (!dp.url || !/^https?:\/\//.test(dp.url)) &&
+            (!dp.selector || typeof dp.selector !== "string")
+          ) {
+            throw invalidRequest("download step needs an http(s) `url` or `selector`", "params");
           }
           const { record, uploadUrl, maxBytes } = await createDownload({
             runId,
@@ -614,7 +898,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
           });
           stepParams = {
             download_id: record.downloadId,
-            ...(dp.capture === true ? { capture: true } : { url: dp.url }),
+            ...(dp.selector ? { selector: dp.selector } : { url: dp.url }),
             filename: record.filename,
             upload_url: uploadUrl,
             max_bytes: maxBytes,
@@ -628,7 +912,10 @@ export function createDesktopRouter(): Hono<AppEnv> {
           run.userId,
           "browser.batch",
           { steps: prepared },
-          { timeoutMs: body.timeout_ms },
+          {
+            timeoutMs: body.timeout_ms,
+            authorizedUris: policy.authorizedUris,
+          },
         );
         return c.json({ result: scrubRunSecrets(runId, result) });
       } catch (err) {
@@ -643,19 +930,16 @@ export function createDesktopRouter(): Hono<AppEnv> {
     if (body.method === "browser.download") {
       const p = (body.params ?? {}) as {
         url?: string;
-        capture?: boolean;
+        selector?: string;
         filename?: string;
         max_bytes?: number;
       };
-      // Two trigger modes: a direct URL the desktop navigates to, or
-      // `capture: true` — the order claims the next download the PAGE
-      // starts (blob anchor clicks, in-page authenticated fetches).
       if (
-        p.capture !== true &&
-        (!p.url || typeof p.url !== "string" || !/^https?:\/\//.test(p.url))
+        (!p.url || typeof p.url !== "string" || !/^https?:\/\//.test(p.url)) &&
+        (!p.selector || typeof p.selector !== "string")
       ) {
         throw invalidRequest(
-          "`params.url` must be an http(s) URL (or set `params.capture`)",
+          "`params.url` must be an http(s) URL, or `params.selector` must identify the download control",
           "params",
         );
       }
@@ -671,12 +955,15 @@ export function createDesktopRouter(): Hono<AppEnv> {
           "browser.download",
           {
             download_id: record.downloadId,
-            ...(p.capture === true ? { capture: true } : { url: p.url }),
+            ...(p.selector ? { selector: p.selector } : { url: p.url }),
             filename: record.filename,
             upload_url: uploadUrl,
             max_bytes: maxBytes,
           },
-          { timeoutMs: body.timeout_ms },
+          {
+            timeoutMs: body.timeout_ms,
+            authorizedUris: policy.authorizedUris,
+          },
         );
       } catch (err) {
         throw desktopErrorToApiError(err);
@@ -697,6 +984,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
     try {
       const result = await sendCommand(run.userId, body.method, dispatchedParams, {
         timeoutMs: body.timeout_ms,
+        authorizedUris: policy.authorizedUris,
       });
       return c.json({ result: scrubRunSecrets(runId, result) });
     } catch (err) {
@@ -720,10 +1008,11 @@ export function createDesktopRouter(): Hono<AppEnv> {
     }
     const stream = await storageDownloadStream(DOWNLOADS_BUCKET, rec.storageKey);
     if (!stream) throw notFound("Download bytes are gone (retention elapsed)");
-    return new Response(stream, {
+    return new Response(boundedDownloadStream(stream, rec.maxBytes, rec.size), {
       headers: {
         "Content-Type": "application/octet-stream",
-        ...(rec.size !== null ? { "Content-Length": String(rec.size) } : {}),
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": `attachment; filename="${rec.filename.replace(/["\\]/g, "_")}"`,
       },
     });
   });

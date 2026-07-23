@@ -268,6 +268,24 @@ function AgentEditorInner({
           leadingItems={
             <RuntimeToolsGroup
               selected={getRuntimeTools(state.manifest)}
+              desktopAuthorizedUris={(() => {
+                const desktop = state.manifest.desktop_browser as
+                  { authorized_uris?: unknown } | undefined;
+                return Array.isArray(desktop?.authorized_uris)
+                  ? desktop.authorized_uris.filter(
+                      (value): value is string => typeof value === "string",
+                    )
+                  : [];
+              })()}
+              onDesktopAuthorizedUrisChange={(next) => {
+                setState((s) => ({
+                  ...s,
+                  manifest: {
+                    ...s.manifest,
+                    desktop_browser: { authorized_uris: next },
+                  },
+                }));
+              }}
               onChange={(next) => {
                 setState((s) => {
                   const m = { ...s.manifest };

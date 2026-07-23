@@ -240,6 +240,13 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // validation, prompt builder, sidecar tool registration) and namespacing
   // it would be disproportionate.
   runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
+  // URI boundary for the opt-in desktop browser. Browser access is a
+  // strong capability and must never silently mean unrestricted network.
+  desktop_browser: z
+    .object({
+      authorized_uris: z.array(z.string().min(1)).min(1),
+    })
+    .optional(),
 });
 
 /**
@@ -256,6 +263,24 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
   // shared `refineIntegrationsConfiguration` to avoid drift).
   refineIntegrationsConfiguration(m, ctx);
 
+  const runtimeToolIds = (m as { runtime_tools?: unknown }).runtime_tools;
+  const selected = Array.isArray(runtimeToolIds) ? runtimeToolIds : [];
+  if (selected.includes("desktop_browser") && !m.desktop_browser) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["desktop_browser"],
+      message:
+        "desktop_browser.authorized_uris is required when the desktop_browser runtime tool is enabled.",
+    });
+  }
+  if (selected.includes("desktop_browser_evaluate") && !selected.includes("desktop_browser")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["runtime_tools"],
+      message: "desktop_browser_evaluate requires desktop_browser.",
+    });
+  }
+
   const outputSchema = (m as { output?: { schema?: unknown } }).output?.schema;
   const hasOutputSchema =
     outputSchema != null &&
@@ -263,8 +288,7 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
     Object.keys(outputSchema as object).length > 0;
   if (!hasOutputSchema) return;
 
-  const runtimeTools = (m as { runtime_tools?: unknown }).runtime_tools;
-  const selectsOutput = Array.isArray(runtimeTools) && runtimeTools.includes("output");
+  const selectsOutput = Array.isArray(runtimeToolIds) && runtimeToolIds.includes("output");
   if (!selectsOutput) {
     ctx.addIssue({
       code: "custom",

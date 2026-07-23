@@ -530,6 +530,9 @@ await progress(
 // in 2d below.
 
 const sidecarUrl = env.sidecarUrl;
+const rootManifest = bundle
+  ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
+  : undefined;
 
 // Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
 // executes each runtime tool ONCE and journals its canonical events; the Pi
@@ -636,6 +639,7 @@ if (sidecarUrl) {
         mcp: mcpClient,
         runId: AGENT_RUN_ID,
         workspace: WORKSPACE,
+        runtimeTools: rootManifest?.runtime_tools ?? [],
         ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
         emit: (event) => {
           void bridgedSink.handle(event as RunEvent);
@@ -703,9 +707,6 @@ if (sidecarUrl) {
   // we register the SAME tool definitions (`@appstrate/core/runtime-tool-defs`)
   // as Pi extensions in-process. Their canonical events are re-emitted into
   // the run sink by the wrapper (default stdout-JSONL → the stdout bridge).
-  const rootManifest = bundle
-    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-    : undefined;
   let outputSchema: Record<string, unknown> | null = null;
   if (process.env.OUTPUT_SCHEMA) {
     try {

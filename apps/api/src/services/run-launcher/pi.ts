@@ -203,11 +203,13 @@ async function runPlatformContainerImpl(
     // is the ONLY path that routes agent egress through it — skipping the
     // sidecar would silently drop the proxy and leak the host IP.
     const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
+    const needsDesktopSidecar = plan.runtimeTools?.includes("desktop_browser") === true;
     // A model alias MUST route through the sidecar — that's the only place the
     // `model` alias→real swap happens. Skipping it would hand the agent the
     // real backing id (in its own request) and the provider's real endpoint.
     skipSidecar =
       !hasIntegrations &&
+      !needsDesktopSidecar &&
       !!llmConfig.apiKey &&
       !isOauthCredential &&
       !plan.proxyUrl &&

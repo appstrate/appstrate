@@ -65,6 +65,7 @@ export {
   RUN_HISTORY_INJECTED_TOOL,
   RECALL_MEMORY_INJECTED_TOOL,
   RUNTIME_INJECTED_TOOLS,
+  runtimeInjectedToolsForSelection,
   type RuntimeInjectedTool,
 } from "./runtime-tools/index.ts";
 

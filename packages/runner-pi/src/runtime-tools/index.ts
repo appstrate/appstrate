@@ -21,9 +21,10 @@
 
 import { runHistoryTool } from "./run-history/tool.ts";
 import { recallMemoryTool } from "./recall-memory/tool.ts";
-import { desktopBrowserTool } from "./desktop-browser/tool.ts";
+import { desktopBrowserTool, desktopBrowserToolWithoutEvaluate } from "./desktop-browser/tool.ts";
+import type { RuntimeInjectedTool } from "./types.ts";
 
-export type { RuntimeInjectedTool } from "./types.ts";
+export type { RuntimeInjectedTool };
 
 export { runHistoryTool as RUN_HISTORY_INJECTED_TOOL };
 export { recallMemoryTool as RECALL_MEMORY_INJECTED_TOOL };
@@ -43,3 +44,21 @@ export const RUNTIME_INJECTED_TOOLS = [
   recallMemoryTool,
   desktopBrowserTool,
 ] as const;
+
+/** Runtime-injected tools visible for one agent's manifest selection. */
+export function runtimeInjectedToolsForSelection(
+  runtimeTools: readonly string[] | undefined,
+): ReadonlyArray<RuntimeInjectedTool> {
+  const selected = runtimeTools ?? [];
+  return [
+    runHistoryTool,
+    recallMemoryTool,
+    ...(selected.includes("desktop_browser")
+      ? [
+          selected.includes("desktop_browser_evaluate")
+            ? desktopBrowserTool
+            : desktopBrowserToolWithoutEvaluate,
+        ]
+      : []),
+  ];
+}

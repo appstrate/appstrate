@@ -38,7 +38,7 @@ import { Type, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolFactories,
   callToolResultToPi,
-  RUNTIME_INJECTED_TOOLS,
+  runtimeInjectedToolsForSelection,
   spillResourcesToWorkspace,
   type RuntimeEventEmitter,
 } from "@appstrate/runner-pi";
@@ -72,6 +72,8 @@ interface BuildMcpDirectFactoriesOptions {
    * credential-isolated sidecar.
    */
   workspace: string;
+  /** Agent-selected manifest runtime tools. */
+  runtimeTools?: readonly string[];
   /**
    * Runtime-event drainer (`@appstrate/core/runtime-event-drain`). The sidecar
    * executes each runtime tool (log/note/pin/report/output) ONCE and journals
@@ -102,7 +104,8 @@ export async function buildMcpDirectFactories(
   // runtime tool to that list automatically updates this guard.
   const { tools } = await opts.mcp.listTools();
   const advertised = new Set(tools.map((t) => t.name));
-  const expected = RUNTIME_INJECTED_TOOLS.map((t) => t.name);
+  const selectedInjectedTools = runtimeInjectedToolsForSelection(opts.runtimeTools);
+  const expected = selectedInjectedTools.map((t) => t.name);
   for (const name of expected) {
     if (!advertised.has(name)) {
       throw new Error(
@@ -118,6 +121,7 @@ export async function buildMcpDirectFactories(
       mcp: opts.mcp,
       runId: opts.runId,
       emit: opts.emit,
+      tools: selectedInjectedTools,
     }),
   );
   // Phase 1.4 — integration tools. The sidecar's McpHost multiplexes
@@ -125,7 +129,7 @@ export async function buildMcpDirectFactories(
   // entries (`{ns}__{tool}`). We mirror them as Pi tools that forward
   // verbatim to the sidecar's MCP `tools/call`. Any name we already
   // wired above (run_history / recall_memory) is skipped.
-  const claimedNames = new Set<string>(RUNTIME_INJECTED_TOOLS.map((t) => t.name));
+  const claimedNames = new Set<string>(selectedInjectedTools.map((t) => t.name));
   factories.push(...buildIntegrationToolFactories(tools, claimedNames, opts));
   return factories;
 }

@@ -325,9 +325,8 @@ function buildReportDef(): RuntimeToolDef {
   };
 }
 
-const RUNTIME_TOOL_BUILDERS: Record<
-  SelectableRuntimeTool,
-  (outputSchema: Record<string, unknown> | null) => RuntimeToolDef
+const RUNTIME_TOOL_BUILDERS: Partial<
+  Record<SelectableRuntimeTool, (outputSchema: Record<string, unknown> | null) => RuntimeToolDef>
 > = {
   output: (s) => buildOutputDef(s),
   log: () => buildLogDef(),
@@ -352,7 +351,12 @@ export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): Runtime
       selected.push(entry as SelectableRuntimeTool);
     }
   }
-  return selected.map((name) => RUNTIME_TOOL_BUILDERS[name](outputSchema));
+  return selected.flatMap((name) => {
+    const build = RUNTIME_TOOL_BUILDERS[name];
+    // Desktop capabilities are selected through the same manifest
+    // catalog but hosted by the dedicated bridge tool surface.
+    return build ? [build(outputSchema)] : [];
+  });
 }
 
 /**

@@ -5,9 +5,7 @@
  * spec's `components.schemas` when the module is loaded.
  */
 
-// Shared between the two command-request schemas — the user-facing one
-// and the agent-path one differ only by the substitution fields.
-const methodProperty = {
+const directMethodProperty = {
   type: "string",
   enum: [
     "browser.navigate",
@@ -17,14 +15,22 @@ const methodProperty = {
     "browser.evaluate",
     "browser.screenshot",
     "browser.waitForSelector",
+  ],
+  description: "Direct browser primitive available to the authenticated desktop owner.",
+} as const;
+
+const agentMethodProperty = {
+  type: "string",
+  enum: [
+    ...directMethodProperty.enum,
     "browser.download",
     "browser.download_status",
     "browser.capture_credential",
     "browser.batch",
   ],
   description:
-    "Browser primitive to invoke. `browser.download` {url, filename?, max_bytes?} orders a " +
-    "download through the page's own session and returns {download_id, state}; " +
+    "Agent browser primitive. `browser.download` {url?|selector?, filename?, max_bytes?} " +
+    "downloads a direct URL or atomically clicks a page control and returns {download_id, state}; " +
     "`browser.download_status` {download_id} reports " +
     "started/downloading/uploaded/failed with pct — both are answered by the platform, " +
     "the bytes travel desktop → storage over HTTPS, never over the control WebSocket. " +
@@ -47,7 +53,7 @@ export const desktopSchemas = {
     required: ["method"],
     description: "A browser primitive to execute on the user's local Appstrate Desktop client.",
     properties: {
-      method: methodProperty,
+      method: directMethodProperty,
       params: {
         type: "object",
         description: "Method-specific arguments (e.g. `{ url }`, `{ selector, value }`).",
@@ -65,7 +71,7 @@ export const desktopSchemas = {
       "before dispatch — the values never appear in the agent's context, and every reply " +
       "for the run is scrubbed of them afterwards.",
     properties: {
-      method: methodProperty,
+      method: agentMethodProperty,
       params: {
         type: "object",
         description:

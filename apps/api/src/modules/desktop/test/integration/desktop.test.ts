@@ -51,6 +51,8 @@ import {
   setNotificationHandler,
 } from "../../registry.ts";
 import { clearRunSecrets } from "../../secret-scrub.ts";
+import { clearDesktopLeases } from "../../lease.ts";
+import { clearRunDesktopPolicy } from "../../routes.ts";
 
 const app = getTestApp({ modules: [desktopModule] });
 
@@ -72,6 +74,16 @@ function buildAgentManifest(declaredIntegrations: string[]): Record<string, unkn
     type: "agent",
     schema_version: "0.1",
     display_name: "Desktop Test Agent",
+    runtime_tools: ["desktop_browser", "desktop_browser_evaluate"],
+    desktop_browser: {
+      authorized_uris: [
+        "https://example.com/**",
+        "https://somesite.example/**",
+        "https://x.test/**",
+        "https://evil.test/**",
+        "https://bank.example/**",
+      ],
+    },
     dependencies: { integrations: deps },
     integrations: sel,
   };
@@ -86,7 +98,7 @@ function buildIntegrationManifest(id: string) {
       primary: {
         type: "api_key",
         authorizedUris: ["https://somesite.example/**"],
-        credentialFields: ["password"],
+        credentialFields: ["password", "access_token"],
         delivery: httpHeaderDelivery({ name: "Authorization", field: "password" }),
       },
     },
@@ -179,6 +191,15 @@ describe("Desktop module — /api/desktop/me/*", () => {
     expect(res.status).toBe(400);
   });
 
+  it("does not expose agent-only mediated methods on the user command route", async () => {
+    const res = await app.request("/api/desktop/me/command", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "browser.capture_credential", params: {} }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   // CSWSH: the upgrade is a cookie-authenticated GET that CORS does not
   // cover, so a page on another origin could otherwise register itself
   // as the victim's desktop — displacing their real client and
@@ -189,6 +210,13 @@ describe("Desktop module — /api/desktop/me/*", () => {
     });
     expect(res.status).toBe(403);
     expect(isConnected(ctx.user.id)).toBe(false);
+  });
+
+  it("requires an explicit compatible bridge protocol version", async () => {
+    const res = await app.request("/api/desktop/bridge", {
+      headers: { ...authHeaders(ctx), Upgrade: "websocket" },
+    });
+    expect(res.status).toBe(426);
   });
 
   it("never reaches another user's desktop", async () => {
@@ -265,6 +293,8 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     if (connected) unregisterClient(ctx.user.id, connected.client);
     clearRunSecrets(runId);
     clearRunEphemeralCredentials();
+    clearDesktopLeases();
+    clearRunDesktopPolicy();
   });
 
   async function post(body: unknown): Promise<Response> {
@@ -289,6 +319,38 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     const res = await post({ method: "browser.evaluate", params: { script: "document.title" } });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ result: { title: "Example Domain" } });
+  });
+
+  it("rejects navigation outside the agent's authorized_uris", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    const res = await post({
+      method: "browser.navigate",
+      params: { url: "https://not-allowed.example/private" },
+    });
+    expect(res.status).toBe(403);
+    expect(connected.sent).toHaveLength(0);
+  });
+
+  it("rejects a second run trying to control the same browser", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    expect((await post({ method: "browser.screenshot" })).status).toBe(200);
+    const otherRun = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      status: "running",
+    });
+    const res = await app.request("/internal/desktop-command", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${signRunToken(otherRun.id)}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ method: "browser.screenshot" }),
+    });
+    expect(res.status).toBe(409);
+    expect(connected.sent).toHaveLength(1);
   });
 
   it("returns 503 when the owner has no desktop connected", async () => {
@@ -359,7 +421,7 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     expect(body.result.echoed).toContain("[redacted:");
   });
 
-  it("scrubs LATER replies too — reading the field back cannot exfiltrate", async () => {
+  it("blocks arbitrary evaluate after credential substitution", async () => {
     await seedIntegration(INTEGRATION);
     connected = fakeDesktop(ctx.user.id, { filled: true });
 
@@ -371,8 +433,8 @@ describe("Desktop module — POST /internal/desktop-command", () => {
       substitute_params: true,
     });
 
-    // 2. A separate, substitution-free evaluate whose reply carries the
-    // secret (the desktop "reads the input back").
+    // 2. A separate evaluate cannot run after a credential reached the
+    // page. Scrubbing remains defense in depth, not the primary boundary.
     unregisterClient(ctx.user.id, connected.client);
     connected = fakeDesktop(ctx.user.id, { value: SECRET });
     const res = await post({
@@ -380,9 +442,8 @@ describe("Desktop module — POST /internal/desktop-command", () => {
       params: { script: "document.querySelector('#password').value" },
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { result: { value: string } };
-    expect(body.result.value).not.toContain(SECRET);
+    expect(res.status).toBe(409);
+    expect(connected.sent).toHaveLength(0);
   });
 
   it("404 when the integration is not declared by the running agent", async () => {
@@ -437,7 +498,7 @@ describe("Desktop module — POST /internal/desktop-command", () => {
 
     handleClientFrame(ctx.user.id, {
       method: "download.completed",
-      params: { download_id: result.download_id, size: 11, sha256: "abc" },
+      params: { download_id: result.download_id, size: 11, sha256: "a".repeat(64) },
     });
     st = await post({
       method: "browser.download_status",
@@ -446,24 +507,24 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     expect(((await st.json()) as { result: { state: string } }).result.state).toBe("uploaded");
   });
 
-  it("browser.download accepts capture mode (no url — the page will trigger it)", async () => {
+  it("browser.download accepts an atomic page selector trigger", async () => {
     clearDownloads();
     connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
-      const p = frame.params as { download_id: string; capture?: boolean; url?: string };
-      expect(p.capture).toBe(true);
+      const p = frame.params as { download_id: string; selector?: string; url?: string };
+      expect(p.selector).toBe("#invoice-download");
       expect(p.url).toBeUndefined();
       return { download_id: p.download_id, state: "started" };
     });
     const res = await post({
       method: "browser.download",
-      params: { capture: true, filename: "invoice.pdf" },
+      params: { selector: "#invoice-download", filename: "invoice.pdf" },
     });
     expect(res.status).toBe(200);
     const { result } = (await res.json()) as { result: { state: string } };
     expect(result.state).toBe("started");
   });
 
-  it("browser.download without url nor capture is a 400", async () => {
+  it("browser.download without url nor selector is a 400", async () => {
     connected = fakeDesktop(ctx.user.id, { ok: true });
     const res = await post({ method: "browser.download", params: { filename: "x.pdf" } });
     expect(res.status).toBe(400);
@@ -512,7 +573,7 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     );
     handleClientFrame(ctx.user.id, {
       method: "download.completed",
-      params: { download_id: id, size: bytes.length, sha256: "s" },
+      params: { download_id: id, size: bytes.length, sha256: "b".repeat(64) },
     });
 
     const fetched = await app.request(`/internal/desktop-download/${id}`, {
@@ -550,6 +611,19 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     expect(connected.sent).toHaveLength(0);
   });
 
+  it("refuses substitution inside arbitrary browser.evaluate JavaScript", async () => {
+    await seedIntegration(INTEGRATION);
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    const res = await post({
+      method: "browser.evaluate",
+      params: { script: 'btoa("{{password}}")' },
+      integration_id: INTEGRATION,
+      substitute_params: true,
+    });
+    expect(res.status).toBe(400);
+    expect(connected.sent).toHaveLength(0);
+  });
+
   it("batch: substitutes fill steps but leaves navigate placeholders literal", async () => {
     await seedIntegration(INTEGRATION);
     connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
@@ -576,17 +650,34 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     expect(res.status).toBe(200);
   });
 
+  it("batch: rejects evaluate mixed with credential substitution", async () => {
+    await seedIntegration(INTEGRATION);
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    const res = await post({
+      method: "browser.batch",
+      params: {
+        steps: [{ method: "browser.evaluate", params: { script: 'btoa("{{password}}")' } }],
+      },
+      integration_id: INTEGRATION,
+      substitute_params: true,
+    });
+    expect(res.status).toBe(400);
+    expect(connected.sent).toHaveLength(0);
+  });
+
   // ─── browser.capture_credential ────────────────────────
 
   it("captures an in-page token into the credential store, returns only field names", async () => {
     await seedIntegration(INTEGRATION);
     connected = fakeDesktop(ctx.user.id, (frame: { params: unknown }) => {
       // The platform dispatches browser.capture; the desktop returns
-      // { url, fields } with the URL from wc.getURL() (trusted, not the
-      // script). The page URL must fall in the integration's
+      // { url, fields } with the URL from wc.getURL(). The page URL
+      // must fall in the integration's
       // authorized_uris (seedIntegration uses https://somesite.example/**).
-      const script = (frame.params as { script?: string }).script;
-      expect(typeof script).toBe("string");
+      const fields = (frame.params as { fields?: Record<string, unknown> }).fields;
+      expect(fields).toEqual({
+        access_token: { source: "local_storage", key: "session", json_path: ["access_token"] },
+      });
       return {
         url: "https://somesite.example/dashboard",
         fields: { access_token: "live-oidc-token-xyz" },
@@ -598,7 +689,13 @@ describe("Desktop module — POST /internal/desktop-command", () => {
       params: {
         integration_id: INTEGRATION,
         auth_key: "primary",
-        script: "readTokenFromPage()",
+        fields: {
+          access_token: {
+            source: "local_storage",
+            key: "session",
+            json_path: ["access_token"],
+          },
+        },
       },
     });
     expect(res.status).toBe(200);
@@ -622,7 +719,11 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     }));
     const res = await post({
       method: "browser.capture_credential",
-      params: { integration_id: INTEGRATION, auth_key: "primary", script: "grab()" },
+      params: {
+        integration_id: INTEGRATION,
+        auth_key: "primary",
+        fields: { access_token: { source: "cookie", key: "session" } },
+      },
     });
     expect(res.status).toBe(403);
     // The stolen token never reached the ephemeral store.
@@ -634,18 +735,37 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     connected = fakeDesktop(ctx.user.id, { access_token: "x" });
     const res = await post({
       method: "browser.capture_credential",
-      params: { integration_id: OTHER_INTEGRATION, auth_key: "primary", script: "x()" },
+      params: {
+        integration_id: OTHER_INTEGRATION,
+        auth_key: "primary",
+        fields: { access_token: { source: "cookie", key: "session" } },
+      },
     });
     expect(res.status).toBe(404);
   });
 
-  it("400 when the capture is missing script/auth_key", async () => {
+  it("400 when the capture is missing fields/auth_key", async () => {
     connected = fakeDesktop(ctx.user.id, { access_token: "x" });
     const res = await post({
       method: "browser.capture_credential",
       params: { integration_id: INTEGRATION },
     });
     expect(res.status).toBe(400);
+  });
+
+  it("rejects capture fields absent from the selected auth schema", async () => {
+    await seedIntegration(INTEGRATION);
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    const res = await post({
+      method: "browser.capture_credential",
+      params: {
+        integration_id: INTEGRATION,
+        auth_key: "primary",
+        fields: { undeclared: { source: "cookie", key: "session" } },
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(connected.sent).toHaveLength(0);
   });
 
   // ─── browser.batch ─────────────────────────────────────
@@ -688,17 +808,17 @@ describe("Desktop module — POST /internal/desktop-command", () => {
       const dl = steps[0]!.params as {
         download_id?: string;
         upload_url?: string;
-        capture?: boolean;
+        selector?: string;
       };
       expect(dl.download_id).toMatch(/^dl_/);
       expect(dl.upload_url).toContain("token=");
-      expect(dl.capture).toBe(true);
+      expect(dl.selector).toBe("#export");
       return { completed: 1, results: [{ download_id: dl.download_id, state: "started" }] };
     });
     const res = await post({
       method: "browser.batch",
       params: {
-        steps: [{ method: "browser.download", params: { capture: true, filename: "f.pdf" } }],
+        steps: [{ method: "browser.download", params: { selector: "#export", filename: "f.pdf" } }],
       },
     });
     expect(res.status).toBe(200);
