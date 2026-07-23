@@ -8,8 +8,8 @@
  * to UI subscribers).
  *
  * Why a separate module — the broadcaster reads
- * `runs (org_id, application_id, package_id)` and aggregates
- * `llm_usage.cost_usd` for the run. Doing that inline in
+ * `runs (org_id, application_id, package_id)` and aggregates the run's
+ * ledger cost via {@link computeRunCost}. Doing that inline in
  * {@link PersistingEventSink} would couple the metric write-through to
  * the broadcast read path (two extra queries inside the ingestion hot
  * path) and force the throttle state into the per-event sink instances
@@ -37,9 +37,10 @@
  */
 
 import { db } from "@appstrate/db/client";
-import { runs, llmUsage } from "@appstrate/db/schema";
-import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { runs } from "@appstrate/db/schema";
+import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { notifyRunMetric, type RunMetricNotifyPayload } from "@appstrate/db/notify";
+import { computeRunCost } from "./state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -181,19 +182,12 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
   // missing package id.
   if (!runRow.packageId) return null;
 
-  // CRIT-07: scope the ledger SUM by (run_id, org_id) — `llm_usage.run_id`
-  // is caller-suppliable on the proxy path (`X-Run-Id`), so a legacy row
-  // whose org_id doesn't match the run's org must never inflate this run's
-  // broadcast/persisted cost. Mirrors `computeRunCost` (the finalize-time
-  // read path); the composite FK `(run_id, org_id) → runs(id, org_id)`
-  // enforces the same invariant at the DB level for new rows. `runRow.orgId`
-  // is already loaded above — no extra query.
-  const [costRow] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
-    })
-    .from(llmUsage)
-    .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, runRow.orgId)));
+  // Delegate to `computeRunCost` — the single read path for aggregate run
+  // cost. It carries the (run_id, org_id) tenant scoping (CRIT-07) AND the
+  // remote-run mirror-row exclusion; a local SUM here would have to mirror
+  // both filters and had already drifted once (missing the mirror exclusion,
+  // double-counting live cost for remote runs on the system proxy).
+  const costSoFar = await computeRunCost(runId, runRow.orgId);
 
   return {
     run_id: runId,
@@ -201,6 +195,6 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
     application_id: runRow.applicationId,
     package_id: runRow.packageId,
     token_usage: (runRow.tokenUsage as RunMetricNotifyPayload["token_usage"]) ?? null,
-    cost_so_far: Number(costRow?.total ?? 0),
+    cost_so_far: costSoFar,
   };
 }
