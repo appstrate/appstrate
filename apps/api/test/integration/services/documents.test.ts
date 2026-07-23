@@ -431,6 +431,78 @@ describe("documents service + routes", () => {
     expect(byAdmin.status).toBe(204);
   });
 
+  it("POST /:id/keep clears the expiry for creator and admin, forbidden otherwise", async () => {
+    // A member (no documents:delete) who creates a document.
+    const member = await createTestUser({ email: "keeper@docs.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const memberActor: Actor = { type: "user", id: member.id };
+    const memberHeaders = authHeaders({ ...ctx, cookie: member.cookie });
+
+    // A second member who is neither the creator nor an admin.
+    const stranger = await createTestUser({ email: "keepstranger@docs.test" });
+    await addOrgMember(ctx.orgId, stranger.id, "member");
+    const strangerHeaders = authHeaders({ ...ctx, cookie: stranger.cookie });
+
+    const runId = await seedRunRow(scope);
+    const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+
+    const makeExpiringDoc = async () => {
+      const up = await stageUpload(scope, member.id, "k.txt", new TextEncoder().encode("keepme"));
+      const doc = await createDocumentFromUpload(scope, memberActor, up, { runId });
+      await db.update(documents).set({ expiresAt: soon }).where(eq(documents.id, doc.id));
+      return doc;
+    };
+
+    // Stranger (member, not creator) → 403, expiry untouched.
+    const doc1 = await makeExpiringDoc();
+    const forbid = await app.request(`/api/documents/${doc1.id}/keep`, {
+      method: "POST",
+      headers: strangerHeaders,
+    });
+    expect(forbid.status).toBe(403);
+    const [stillExpiring] = await db.select().from(documents).where(eq(documents.id, doc1.id));
+    expect(stillExpiring!.expiresAt).not.toBeNull();
+
+    // Creator (member) → 200, expiresAt cleared in the DB + on the wire.
+    const byCreator = await app.request(`/api/documents/${doc1.id}/keep`, {
+      method: "POST",
+      headers: memberHeaders,
+    });
+    expect(byCreator.status).toBe(200);
+    expect(((await byCreator.json()) as { expiresAt: string | null }).expiresAt).toBeNull();
+    const [kept] = await db.select().from(documents).where(eq(documents.id, doc1.id));
+    expect(kept!.expiresAt).toBeNull();
+    // Idempotent: keeping an already-permanent document is a no-op 200.
+    const again = await app.request(`/api/documents/${doc1.id}/keep`, {
+      method: "POST",
+      headers: memberHeaders,
+    });
+    expect(again.status).toBe(200);
+    // The keep wrote an audit event for the change.
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "document.kept"), eq(auditEvents.resourceId, doc1.id)));
+    expect(audit).toHaveLength(1);
+
+    // Admin/owner (ctx.user) keeps a member's document via documents:delete.
+    const doc2 = await makeExpiringDoc();
+    const byAdmin = await app.request(`/api/documents/${doc2.id}/keep`, {
+      method: "POST",
+      headers: authHeaders(ctx),
+    });
+    expect(byAdmin.status).toBe(200);
+    const [keptByAdmin] = await db.select().from(documents).where(eq(documents.id, doc2.id));
+    expect(keptByAdmin!.expiresAt).toBeNull();
+
+    // Unknown id → 404.
+    const missing = await app.request(`/api/documents/doc_missing123/keep`, {
+      method: "POST",
+      headers: authHeaders(ctx),
+    });
+    expect(missing.status).toBe(404);
+  });
+
   it("GC deletes only expired documents and decrements the quota", async () => {
     const runId = await seedRunRow(scope);
     const upExpired = await stageUpload(scope, ctx.user.id, "e.txt", new TextEncoder().encode("e"));

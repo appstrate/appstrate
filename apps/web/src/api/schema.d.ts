@@ -1301,6 +1301,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents/{id}/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep a document (clear its expiry)
+         * @description Pin a document so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator. Idempotent — keeping an already-permanent document is a no-op that returns 200 with the unchanged document. An id the caller cannot read returns 404.
+         */
+        post: operations["keepDocument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/end-users": {
         parameters: {
             query?: never;
@@ -5128,6 +5148,13 @@ export interface components {
             slug?: string;
             /** Format: date-time */
             createdAt?: string;
+            /** @description Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the org-wide quota (`ORG_STORAGE_QUOTA_BYTES`), or null when unset (unlimited). */
+            storage?: {
+                /** @description Bytes of durable documents stored. */
+                used_bytes: number;
+                /** @description Quota in bytes, or null when no quota is configured (unlimited). */
+                limit_bytes: number | null;
+            };
             members?: components["schemas"]["OrgMember"][];
             invitations?: components["schemas"]["OrgInvitationInfo"][];
         };
@@ -9794,6 +9821,82 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    keepDocument: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document, with `expiresAt` now null. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "document";
+                        /** @description Opaque document id (`doc_…`). */
+                        id: string;
+                        /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
+                        uri: string;
+                        /** @enum {string} */
+                        purpose: "user_upload" | "agent_output";
+                        applicationId: string;
+                        /** @description Run container, or null. */
+                        run_id: string | null;
+                        /** @description Chat-session container, or null. */
+                        chat_session_id: string | null;
+                        /** @description Producing agent package id, or null. */
+                        packageId: string | null;
+                        name: string;
+                        mime: string;
+                        /** @description Size in bytes. */
+                        size: number;
+                        /** @description SHA-256 of the bytes (hex). */
+                        sha256: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                        downloadable: boolean;
+                        /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
+                        previewable: boolean;
+                        /**
+                         * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @enum {string|null}
+                         */
+                        preview_kind: "html" | "image" | "pdf" | "text" | null;
+                        /**
+                         * Format: uri
+                         * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         */
+                        preview_url?: string | null;
+                        /**
+                         * Format: date-time
+                         * @description Retention deadline, or null when permanent.
+                         */
+                        expiresAt: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    };
+                };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

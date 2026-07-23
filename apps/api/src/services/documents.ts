@@ -1261,6 +1261,30 @@ export async function deleteDocument(scope: AppScope, docId: string): Promise<vo
   await deleteStorageObject(row.storageKey);
 }
 
+/**
+ * Clear a document's retention deadline (`expires_at = NULL`) — the "keep"/pin
+ * action (GitLab model): a document a caller explicitly keeps is exempted from
+ * the expiry GC and never swept. Idempotent: pinning an already-permanent
+ * document (NULL `expires_at`) is a no-op that returns the row unchanged.
+ * Org+app scoped; authorization (creator OR `documents:delete`) is enforced by
+ * the caller (same rule as delete). Returns the updated row.
+ */
+export async function clearDocumentExpiry(scope: AppScope, docId: string): Promise<DocumentRow> {
+  const [row] = await db
+    .update(documents)
+    .set({ expiresAt: null })
+    .where(
+      and(
+        eq(documents.id, docId),
+        eq(documents.orgId, scope.orgId),
+        eq(documents.applicationId, scope.applicationId),
+      ),
+    )
+    .returning(documentSelect);
+  if (!row) throw notFound(`Document '${docId}' not found`);
+  return row as DocumentRow;
+}
+
 /** Delete a storage object addressed by its `bucket/path` storage key. Best-effort. */
 async function deleteStorageObject(storageKey: string): Promise<void> {
   const parsed = parseStorageKey(storageKey);

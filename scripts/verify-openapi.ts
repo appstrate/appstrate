@@ -355,6 +355,7 @@ const expectedEndpoints = [
   "GET /api/documents",
   "GET /api/documents/{id}",
   "DELETE /api/documents/{id}",
+  "POST /api/documents/{id}/keep",
   "GET /api/documents/{id}/content",
 
   // Credential proxy (AFPS BYOI) — registered as router.all() in code,

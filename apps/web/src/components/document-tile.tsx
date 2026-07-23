@@ -15,20 +15,51 @@ import { createElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
+  ClockIcon,
   DownloadIcon,
   ExternalLinkIcon,
   EyeIcon,
   FileInput,
   FileOutput,
+  PinIcon,
   Trash2Icon,
 } from "lucide-react";
 import { isImageMime, useDocumentImageSrc } from "@appstrate/module-chat/ui";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
+import { cn } from "@appstrate/ui/cn";
 import { formatDateField } from "../lib/markdown";
 import { buildScopingHeaders } from "../lib/scoping-headers";
-import { mimeIconFor, documentRunHref } from "../lib/documents";
+import { mimeIconFor, documentRunHref, documentExpiryInfo } from "../lib/documents";
 import type { DocumentDto } from "../hooks/use-documents";
+
+/**
+ * Relative-expiry badge — rendered only for a document carrying a retention
+ * deadline. Amber inside the 7-day warning window (or already past), muted
+ * otherwise. Sub-day deadlines read in hours, everything else in whole days.
+ */
+function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
+  const { t } = useTranslation("documents");
+  const info = documentExpiryInfo(expiresAt);
+  if (!info) return null;
+  const label = info.expired
+    ? t("expiry.expired")
+    : info.days >= 1
+      ? t("expiry.inDays", { count: info.days })
+      : t("expiry.inHours", { count: info.hours });
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1",
+        info.soon ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground",
+      )}
+      title={label}
+    >
+      <ClockIcon className="size-3" aria-hidden />
+      {label}
+    </span>
+  );
+}
 
 /**
  * Render the mime's Lucide icon. `createElement` (not a PascalCase const from
@@ -66,6 +97,7 @@ export function DocumentTile({
   doc,
   onDownload,
   onDelete,
+  onKeep,
   onPreview,
   showRunLink,
   direction,
@@ -74,6 +106,11 @@ export function DocumentTile({
   onDownload: (id: string, name: string) => void;
   /** When provided, a delete button is rendered (visibility is the parent's call). */
   onDelete?: (doc: DocumentDto) => void;
+  /**
+   * When provided AND the doc still has an expiry, a "keep" (pin) button is
+   * rendered that clears the retention deadline. Visibility is the parent's call.
+   */
+  onKeep?: (doc: DocumentDto) => void;
   /** When provided and the doc is previewable, a preview button is rendered. */
   onPreview?: (doc: DocumentDto) => void;
   /** Show the producing-agent label + a link to its run (gallery). */
@@ -140,6 +177,12 @@ export function DocumentTile({
           <span className="tabular-nums">{formatBytes(doc.size)}</span>
           <span aria-hidden>·</span>
           <span>{formatDateField(doc.createdAt, "datetime")}</span>
+          {doc.expiresAt ? (
+            <>
+              <span aria-hidden>·</span>
+              <ExpiryBadge expiresAt={doc.expiresAt} />
+            </>
+          ) : null}
         </div>
 
         <div className="mt-auto flex items-center justify-end gap-1 pt-1">
@@ -181,6 +224,18 @@ export function DocumentTile({
               onClick={() => onDownload(doc.id, doc.name)}
             >
               <DownloadIcon className="size-4" />
+            </Button>
+          ) : null}
+          {onKeep && doc.expiresAt ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground size-8"
+              title={t("row.keep")}
+              aria-label={t("row.keep")}
+              onClick={() => onKeep(doc)}
+            >
+              <PinIcon className="size-4" />
             </Button>
           ) : null}
           {onDelete ? (

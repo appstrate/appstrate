@@ -19154,6 +19154,155 @@
         }
       }
     },
+    "/api/documents/{id}/keep": {
+      "post": {
+        "operationId": "keepDocument",
+        "tags": ["Documents"],
+        "summary": "Keep a document (clear its expiry)",
+        "description": "Pin a document so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator. Idempotent — keeping an already-permanent document is a no-op that returns 200 with the unchanged document. An id the caller cannot read returns 404.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document, with `expiresAt` now null.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "object",
+                    "id",
+                    "uri",
+                    "purpose",
+                    "applicationId",
+                    "run_id",
+                    "chat_session_id",
+                    "packageId",
+                    "name",
+                    "mime",
+                    "size",
+                    "sha256",
+                    "downloadable",
+                    "previewable",
+                    "preview_kind",
+                    "expiresAt",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["document"]
+                    },
+                    "id": {
+                      "type": "string",
+                      "description": "Opaque document id (`doc_…`)."
+                    },
+                    "uri": {
+                      "type": "string",
+                      "description": "Stable `document://doc_…` reference — pass in a run's file input field."
+                    },
+                    "purpose": {
+                      "type": "string",
+                      "enum": ["user_upload", "agent_output"]
+                    },
+                    "applicationId": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": ["string", "null"],
+                      "description": "Run container, or null."
+                    },
+                    "chat_session_id": {
+                      "type": ["string", "null"],
+                      "description": "Chat-session container, or null."
+                    },
+                    "packageId": {
+                      "type": ["string", "null"],
+                      "description": "Producing agent package id, or null."
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "description": "Size in bytes."
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "description": "SHA-256 of the bytes (hex)."
+                    },
+                    "downloadable": {
+                      "type": "boolean",
+                      "description": "Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator."
+                    },
+                    "previewable": {
+                      "type": "boolean",
+                      "description": "Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below)."
+                    },
+                    "preview_kind": {
+                      "type": ["string", "null"],
+                      "enum": ["html", "image", "pdf", "text", null],
+                      "description": "How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row."
+                    },
+                    "preview_url": {
+                      "type": ["string", "null"],
+                      "format": "uri",
+                      "description": "Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox=\"allow-scripts\"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin."
+                    },
+                    "expiresAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "Retention deadline, or null when permanent."
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
     "/api/documents/{id}/content": {
       "get": {
         "operationId": "getDocumentContent",
@@ -21164,6 +21313,21 @@
             "type": "string",
             "format": "date-time"
           },
+          "storage": {
+            "type": "object",
+            "description": "Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the org-wide quota (`ORG_STORAGE_QUOTA_BYTES`), or null when unset (unlimited).",
+            "required": ["used_bytes", "limit_bytes"],
+            "properties": {
+              "used_bytes": {
+                "type": "integer",
+                "description": "Bytes of durable documents stored."
+              },
+              "limit_bytes": {
+                "type": ["integer", "null"],
+                "description": "Quota in bytes, or null when no quota is configured (unlimited)."
+              }
+            }
+          },
           "members": {
             "type": "array",
             "items": {
@@ -21651,7 +21815,8 @@
           "schedule_name",
           "connections_used",
           "package_ephemeral",
-          "unread"
+          "unread",
+          "document_counts"
         ],
         "properties": {
           "id": {
@@ -21816,6 +21981,23 @@
           "package_ephemeral": {
             "type": "boolean",
             "description": "Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline)."
+          },
+          "document_counts": {
+            "type": "object",
+            "description": "Per-run document counts, always present on enriched list responses. Computed server-side: `input` from the distinct `document://` references in the run's persisted input, `output` from the count of documents the run produced.",
+            "required": ["input", "output"],
+            "properties": {
+              "input": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Distinct documents referenced as input by the run."
+              },
+              "output": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Documents produced by the run."
+              }
+            }
           },
           "inline_manifest": {
             "type": ["object", "null"],
