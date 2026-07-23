@@ -73,8 +73,8 @@ export interface RunDocumentUploaderDeps {
  * `POST /api/runs/:id/documents` (never buffering it), records the returned
  * sha256 in {@link RunDocumentUploaderDeps.publishedShas}, and returns the
  * durable document metadata. Throws a clear `Error` on a missing file, a path
- * escape, a workspace symlink, or a non-2xx response so the tool surfaces it as
- * a tool error.
+ * resolving outside the allowed roots (through symlinks or not), or a non-2xx
+ * response so the tool surfaces it as a tool error.
  */
 export function createRunDocumentUploader(
   deps: RunDocumentUploaderDeps,
@@ -83,9 +83,10 @@ export function createRunDocumentUploader(
   const url = deps.sinkUrl.replace(/\/events$/, "/documents");
 
   return async (relPath, name) => {
-    // Same path safety as the api_call / api_upload resolvers: root-membership,
-    // traversal, and symlink refusal via a single lstat gate. A non-existent
-    // file surfaces as the lstat ENOENT — no separate `exists()` probe needed.
+    // The exact path-safety contract of the api_call / api_upload resolvers:
+    // full symlink resolution, then root-membership (workspace + /tmp) on the
+    // canonical target; dangling symlinks are refused by the lstat gate. A
+    // non-existent file surfaces as the lstat ENOENT — no `exists()` probe.
     const { absPath } = await resolveSafeFile(deps.workspace, relPath);
     const documentName = name ?? path.basename(absPath);
 

@@ -130,21 +130,35 @@ describe("createRunDocumentUploader", () => {
     await expect(makeUploader(new Set())("nope.txt")).rejects.toThrow(/ENOENT/);
   });
 
-  it("rejects a path escaping the workspace", async () => {
-    await expect(makeUploader(new Set())("../secret.txt")).rejects.toThrow(
+  it("rejects a path escaping the allowed roots", async () => {
+    // `resolveSafeFile` allows the workspace plus `/tmp` (the same contract as
+    // api_call/api_upload — see ABSOLUTE_ALLOWED_ROOTS). `/etc` is under
+    // neither on any platform, so the traversal is rejected deterministically —
+    // a `../`-relative target could still land inside `/tmp` on Linux CI,
+    // where tmpdir-based test workspaces live.
+    await expect(makeUploader(new Set())("../../../../../../etc/passwd")).rejects.toThrow(
       /outside the allowed roots/,
     );
   });
 
-  it("rejects a symlink pointing outside the workspace, uploading nothing", async () => {
-    // A symlink INSIDE the workspace whose target sits outside it: a lexical
-    // guard would pass (the link path is under the workspace), but the file
-    // it resolves to is not — `resolveSafeFile` refuses it via its lstat gate.
-    const outside = await mkdtemp(path.join(tmpdir(), "publish-outside-"));
-    await writeFile(path.join(outside, "secret.txt"), new TextEncoder().encode("secret"));
-    await symlink(path.join(outside, "secret.txt"), path.join(workspace, "link.txt"));
+  it("rejects a symlink pointing outside the allowed roots, uploading nothing", async () => {
+    // A symlink INSIDE the workspace whose target sits outside every allowed
+    // root: a lexical guard would pass (the link path is under the workspace),
+    // but `resolveSafeFile` canonicalizes through the link and rejects the
+    // resolved target. The target must be outside `/tmp` too — an in-/tmp
+    // target is legitimately readable (same contract as api_call fromFile).
+    await symlink("/etc/passwd", path.join(workspace, "link.txt"));
 
-    await expect(makeUploader(new Set())("link.txt")).rejects.toThrow();
+    await expect(makeUploader(new Set())("link.txt")).rejects.toThrow(/outside the allowed roots/);
+    expect(config.received).toHaveLength(0);
+  });
+
+  it("rejects a dangling symlink via the lstat gate, uploading nothing", async () => {
+    // A dangling link cannot be realpathed end-to-end, so the canonical path
+    // keeps the link as its final component and the lstat symlink gate fires.
+    await symlink(path.join(workspace, "nope-target.txt"), path.join(workspace, "dangling.txt"));
+
+    await expect(makeUploader(new Set())("dangling.txt")).rejects.toThrow(/symlink/);
     expect(config.received).toHaveLength(0);
   });
 
