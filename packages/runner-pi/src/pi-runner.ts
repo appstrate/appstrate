@@ -110,6 +110,13 @@ export interface PiRunnerOptions {
   /** Pi SDK thinking level. Defaults to `"medium"`. */
   thinkingLevel?: "low" | "medium" | "high";
   /**
+   * Preferred provider transport. Platform runs routed through Appstrate's
+   * HTTP-only sidecar set this to `"sse"` so Codex does not first attempt a
+   * WebSocket handshake through a proxy that cannot carry it. Direct runner
+   * consumers keep the SDK's `"auto"` default.
+   */
+  transport?: "auto" | "sse" | "websocket";
+  /**
    * Tool names whose first successful execution ends the run. When one of
    * these tools completes without error the runner aborts the Pi session
    * instead of paying one more LLM round-trip for a trailing text-only turn
@@ -439,6 +446,7 @@ export class PiRunner implements Runner {
       resourceLoader,
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
+        ...(this.opts.transport ? { transport: this.opts.transport } : {}),
         compaction: derivePiCompactionSettings(model, process.env),
         // Pi SDK's built-in retry (Retry-After honoring + jitter) covers
         // transient 429/5xx upstream — including OpenAI's mid-stream 5xx

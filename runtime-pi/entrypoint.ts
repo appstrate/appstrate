@@ -868,6 +868,11 @@ function buildPiRunner(): PiRunner {
     agentDir: "/tmp/pi-agent",
     extensionFactories,
     authStoragePath: "/tmp/pi-auth/auth.json",
+    // The sidecar LLM gateway is an HTTP reverse proxy. pi-ai's Codex
+    // transport now tries WebSocket first in "auto" mode; that handshake is
+    // a GET and cannot be relayed to the POST-only Codex responses endpoint.
+    // Platform containers always use the sidecar, so select SSE explicitly.
+    transport: "sse",
     ...(declaredRuntimeTools.includes("output") ? { terminalTools: ["output"] } : {}),
   });
 }
