@@ -29,7 +29,6 @@ import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
-import { Markdown } from "../components/markdown";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys } from "../lib/query-keys";
 import { MemoryPanel } from "../components/persistence/memory-panel";
@@ -81,19 +80,17 @@ export function RunDetailPage() {
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
-  const { historicalLogs, structuredOutput, structuredReport } = useMemo(() => {
-    if (!logs) return { historicalLogs: [], structuredOutput: null, structuredReport: null };
-    const { entries, output, report } = buildLogEntries(logs);
-    return { historicalLogs: entries, structuredOutput: output, structuredReport: report };
+  const { historicalLogs, structuredOutput } = useMemo(() => {
+    if (!logs) return { historicalLogs: [], structuredOutput: null };
+    const { entries, output } = buildLogEntries(logs);
+    return { historicalLogs: entries, structuredOutput: output };
   }, [logs]);
 
   const execResult = run?.result as {
     output?: Record<string, unknown>;
   } | null;
   const finalOutput = structuredOutput || execResult?.output || null;
-  const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
-  const hasReport = !!structuredReport;
-  const hasResult = !!hasOutput || hasReport;
+  const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
@@ -107,20 +104,13 @@ export function RunDetailPage() {
   const { data: documentsPage } = useDocuments({ runId, limit: 100 });
   const documentCount = documentsPage?.data.length ?? 0;
 
-  // Default tab: "result" if results exist (report and/or output), otherwise "logs".
+  // Default tab: "result" if the run produced structured output, otherwise "logs".
   // useTabWithHash respects the URL hash if present.
-  const defaultTab = hasResult ? "result" : "logs";
+  const defaultTab = hasOutput ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
     ["result", "logs", "memory", "documents", "info"] as const,
     defaultTab,
   );
-
-  // Result sub-tab: report first if available, otherwise data. User
-  // override is tracked separately so the auto-default can react to late
-  // events without clobbering an explicit click.
-  const autoSubTab: "report" | "data" = hasReport ? "report" : "data";
-  const [userSubTab, setUserSubTab] = useState<"report" | "data" | null>(null);
-  const resultSubTab = userSubTab ?? autoSubTab;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -251,7 +241,7 @@ export function RunDetailPage() {
           }
         >
           <TabsList>
-            {hasResult && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
+            {hasOutput && <TabsTrigger value="result">{t("run.tabResult")}</TabsTrigger>}
             <TabsTrigger value="logs">
               {t("run.tabLogs")}
               {allLogs.length > 0 && (
@@ -325,26 +315,7 @@ export function RunDetailPage() {
         </div>
       </div>
 
-      {activeTab === "result" && hasResult && (
-        <div className="space-y-4">
-          {hasReport && hasOutput && (
-            <Tabs value={resultSubTab} onValueChange={(v) => setUserSubTab(v as "report" | "data")}>
-              <TabsList>
-                <TabsTrigger value="report">{t("run.tabReport")}</TabsTrigger>
-                <TabsTrigger value="data">{t("run.tabResult")}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-
-          {resultSubTab === "report" && hasReport && (
-            <div className="border-border bg-muted/30 overflow-auto rounded-lg border p-4">
-              <Markdown>{structuredReport}</Markdown>
-            </div>
-          )}
-
-          {resultSubTab === "data" && hasOutput && <JsonView data={finalOutput} />}
-        </div>
-      )}
+      {activeTab === "result" && hasOutput && <JsonView data={finalOutput} />}
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
