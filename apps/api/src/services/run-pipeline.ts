@@ -19,6 +19,7 @@ import {
   type PendingUploadMaterialization,
 } from "./documents.ts";
 import { getPackageConfig } from "./application-packages.ts";
+import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
@@ -325,6 +326,26 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // the ~1.75 s pre-createRun pipeline is decomposable in prod without a tracer.
   const pipelineStart = Date.now();
   const spanAttributes = { "appstrate.run.id": runId, "appstrate.org.id": orgId };
+  // --- Step 0: Resolve the model source for the admission gate ---
+  //
+  // The `beforeUsage` gate must fire ONLY for platform-provided models — an org
+  // running its own credential (BYOK / OAuth subscription) spends no platform
+  // credit and must not be blocked by a cloud credit cap (the spurious-402
+  // bug). Resolve the same model `buildRunContext` will (Step 3) — cheap: system
+  // models are in-memory and DB rows are short-TTL cached, so the later
+  // resolution is a cache hit. `modelId` is the effective preset (per-run
+  // override folded in by the route/scheduler/inline callers), matching the
+  // `params.modelId ?? config.modelId` cascade buildRunContext applies. A run
+  // with no resolvable model (`null`) fails downstream with
+  // `ModelNotConfiguredError`; treating it as non-system here just skips a gate
+  // that would never matter.
+  const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null);
+  const modelSourceForGate: "system" | "org" | null = gateModel
+    ? gateModel.isSystemModel
+      ? "system"
+      : "org"
+    : null;
+
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeUsage hook). Shared with the remote origin in run-creation.ts so
   //     drift across the two paths is impossible — one change surface.
@@ -333,6 +354,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     runPreflightGates({
       orgId,
       agent: params.agent,
+      modelSource: modelSourceForGate,
     }),
   );
   const gatesMs = Date.now() - gatesStart;

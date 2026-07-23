@@ -29,6 +29,28 @@ export type PreflightGateError = { code: string; message: string; status?: numbe
 export interface PreflightGatesInput {
   orgId: string;
   agent: LoadedPackage;
+  /**
+   * Where the run's resolved model comes from, decided SERVER-SIDE by the
+   * caller (platform pipeline: `resolveModel(...).isSystemModel`; remote: never
+   * resolves a platform model → `null`). Governs the `beforeUsage` admission
+   * hook: it fires ONLY for a platform-provided (`"system"`) model — the same
+   * rule the chat surface applies (`checkUsageAllowed` → `isSystemModel`).
+   *
+   *   - `"system"` → platform credential is spent → dispatch `beforeUsage` so a
+   *     metering module (cloud) can enforce credit caps.
+   *   - `"org"` → the org spends its OWN credential (BYOK / OAuth subscription)
+   *     → never platform-metered → skip the hook (spending a run gate here is
+   *     the spurious-402 bug this guards against).
+   *   - `null` → a remote-origin run resolves no platform model at creation
+   *     (the runner executes on its own host with its own model + credentials),
+   *     so it is not cheaply determinable whether it will route inference
+   *     through the system proxy. We skip the run-surface hook; any system-proxy
+   *     inference a remote run does make is metered per-call on the proxy rows
+   *     (`credential_source:"system"`), which carry the attribution.
+   *   - `undefined` → unresolved (no caller currently omits it) → treated as
+   *     non-system → skip.
+   */
+  modelSource?: "system" | "org" | null;
 }
 
 /** Per-sub-gate wall-clock timings (ms), surfaced for the pipeline timing log. */
@@ -135,9 +157,14 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
     };
   }
 
-  // 4. `beforeUsage` module hook (run surface).
+  // 4. `beforeUsage` module hook (run surface) — ONLY for platform-provided
+  //    ("system") models. A run on the org's OWN model (BYOK / OAuth
+  //    subscription) or a remote-origin run (own host + credentials) spends no
+  //    platform credit, so gating it here is the spurious-402 the model-source
+  //    check prevents. Mirrors the chat surface (`checkUsageAllowed`). See
+  //    `PreflightGatesInput.modelSource` for the full per-value rationale.
   let beforeUsageHookMs = 0;
-  if (hasHook("beforeUsage")) {
+  if (input.modelSource === "system" && hasHook("beforeUsage")) {
     const hookStart = Date.now();
     const rejection = await callHook("beforeUsage", {
       orgId,
