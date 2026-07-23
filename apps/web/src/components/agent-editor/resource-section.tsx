@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef } from "react";
+import { type ChangeEvent, type ReactNode, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -58,17 +58,13 @@ export function VersionSelect({
   const { data: versions, isLoading } = usePackageVersions(type, packageId);
   const available = useMemo(() => versions?.filter((v) => !v.yanked), [versions]);
   const ranges = useMemo(() => available?.map((v) => caretRange(v.version)) ?? [], [available]);
-  const latestRange = ranges[0];
 
-  // If the stored value isn't one of the offered ranges (yanked version
-  // pinned in the manifest, exact pin typed by hand, etc.), migrate it
-  // to caret-of-latest so the Select doesn't render blank. Does NOT fire
-  // for fresh values produced by the editor itself.
-  useEffect(() => {
-    if (!latestRange) return;
-    if (ranges.includes(value)) return;
-    onChange(latestRange);
-  }, [latestRange, ranges, value]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A stored value outside the offered caret ranges (exact pin typed by
+  // hand, yanked version pinned in the manifest, etc.) is rendered as its
+  // own option instead of being silently rewritten to caret-of-latest:
+  // the pin is the operator's intent and opening the editor must never
+  // mutate the draft. Picking a listed range replaces it explicitly.
+  const outOfListValue = value && !ranges.includes(value) ? value : null;
 
   if (isLoading) return <Spinner />;
   if (!available || available.length === 0) {
@@ -85,6 +81,7 @@ export function VersionSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
+        {outOfListValue && <SelectItem value={outOfListValue}>{outOfListValue}</SelectItem>}
         {available.map((v) => (
           <SelectItem key={v.id} value={caretRange(v.version)}>
             {caretRange(v.version)}
