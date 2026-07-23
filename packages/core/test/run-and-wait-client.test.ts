@@ -125,6 +125,18 @@ describe("run_and_wait client", () => {
     ]);
   });
 
+  test("rejects an unparseable agent reference before dispatching", async () => {
+    const fetchImpl = fakeFetch(async () => {
+      throw new Error("should not fetch");
+    });
+
+    // Scope missing its leading `@` — encodePackageIdPath refuses it; the
+    // client must fail fast instead of building a path the routes 404.
+    await expect(
+      collectSteps(fetchImpl, { kind: "agent", scope: "acme", name: "writer" }),
+    ).resolves.toEqual([{ error: "Invalid agent reference: acme/writer (expected @scope/name)." }]);
+  });
+
   test("rejects an inline run without a top-level prompt before dispatching", async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error("should not fetch");
