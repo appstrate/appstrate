@@ -448,11 +448,19 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //     row, the other is a no-op via ON CONFLICT DO NOTHING — no
   //     pre-check needed.
   if (typeof result.cost === "number" && result.cost > 0) {
-    await writeRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
-      cost: result.cost,
-      usage: validatedUsage,
-      modelSource: run.modelSource,
-    });
+    await writeRunnerLedgerRow(
+      { orgId: run.orgId, applicationId: run.applicationId },
+      run.id,
+      {
+        cost: result.cost,
+        usage: validatedUsage,
+        modelSource: run.modelSource,
+      },
+      // Do not settle the run until its authoritative cumulative snapshot is
+      // directly visible. The Cloud cursor claims a runner row once by serial
+      // id and cannot safely observe a later asynchronous update to that id.
+      { required: true },
+    );
   }
 
   const cost = await computeRunCost(run.id, run.orgId);

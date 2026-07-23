@@ -40,6 +40,7 @@ import { initScheduleWorker } from "../services/scheduler.ts";
 import { initInlineCompactionWorker } from "../services/inline-compaction.ts";
 import { initOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
 import { initPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
+import { initLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { startRunWatchdog } from "../services/run-watchdog.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -261,6 +262,11 @@ export async function boot(): Promise<void> {
 
   // Parallel init: orchestrator, scheduler, and DB cleanups are all independent
   const parallelInits: Promise<void>[] = [
+    // Billing correctness barrier: unlike ancillary workers, this init is not
+    // caught/degraded. Boot must fail if the durable metering recovery channel
+    // is unavailable; otherwise a transient ledger write failure after
+    // provider spend could be lost permanently.
+    initLlmUsageRetryWorker(),
     orchestrator.initialize().catch((err) => {
       logger.warn("Could not initialize container orchestrator", {
         error: getErrorMessage(err),

@@ -24,7 +24,7 @@ import type { ChatUsageRecord, SubscriptionChatResolution } from "@appstrate/cor
 import type { UsageRejection } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeTokenCost } from "@appstrate/afps-runtime/runner";
-import { recordLlmUsage } from "./llm-usage-ledger.ts";
+import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { loadModel, modelNeedsReconnection } from "./org-models.ts";
 import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
@@ -124,33 +124,36 @@ export async function resolveSubscriptionChatModel(
  */
 export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
   try {
-    await recordLlmUsage({
-      source: "proxy",
-      orgId: record.orgId,
-      userId: record.userId,
-      chatSessionId: record.chatSessionId,
-      model: record.presetId,
-      realModel: record.modelId,
-      api: record.apiShape,
-      credentialSource: "org",
-      inputTokens: record.inputTokens,
-      outputTokens: record.outputTokens,
-      cacheReadTokens: record.cacheReadTokens ?? null,
-      cacheWriteTokens: record.cacheWriteTokens ?? null,
-      costUsd: computeTokenCost(
-        {
-          input_tokens: record.inputTokens,
-          output_tokens: record.outputTokens,
-          cache_read_input_tokens: record.cacheReadTokens ?? 0,
-          cache_creation_input_tokens: record.cacheWriteTokens ?? 0,
-        },
-        record.cost,
-      ),
-      durationMs: record.durationMs,
-      // Chat turns aren't retried at the CLI layer, but proxy-source rows carry
-      // a request_id by the ledger check constraint — mint a fresh one.
-      requestId: crypto.randomUUID(),
-    });
+    await recordLlmUsageReliably(
+      {
+        source: "proxy",
+        orgId: record.orgId,
+        userId: record.userId,
+        chatSessionId: record.chatSessionId,
+        model: record.presetId,
+        realModel: record.modelId,
+        api: record.apiShape,
+        credentialSource: "org",
+        inputTokens: record.inputTokens,
+        outputTokens: record.outputTokens,
+        cacheReadTokens: record.cacheReadTokens ?? null,
+        cacheWriteTokens: record.cacheWriteTokens ?? null,
+        costUsd: computeTokenCost(
+          {
+            input_tokens: record.inputTokens,
+            output_tokens: record.outputTokens,
+            cache_read_input_tokens: record.cacheReadTokens ?? 0,
+            cache_creation_input_tokens: record.cacheWriteTokens ?? 0,
+          },
+          record.cost,
+        ),
+        durationMs: record.durationMs,
+        // Stable across durable retries; the partial unique index makes an
+        // uncertain post-commit acknowledgement idempotent.
+        requestId: crypto.randomUUID(),
+      },
+      { onConflict: "proxy-idempotent" },
+    );
   } catch (err) {
     logger.error("chat: failed to record llm usage", {
       orgId: record.orgId,

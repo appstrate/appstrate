@@ -9,14 +9,14 @@
  *     encoding would make the caller re-decode plaintext → ZlibError);
  *   - tap the teed SSE stream to extract usage WITHOUT buffering the whole
  *     response;
- *   - insert a usage row whose cost is Σ(tokens × cost/1e6), swallowing DB
- *     errors so a metering failure never breaks a successful LLM call.
+ *   - insert a usage row whose cost is Σ(tokens × cost/1e6), handing transient
+ *     DB failures to the durable usage-retry queue.
  */
 
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeTokenCost } from "@appstrate/afps-runtime/runner";
-import { recordLlmUsage } from "../llm-usage-ledger.ts";
+import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 import {
@@ -163,14 +163,22 @@ export interface RecordUsageInputs {
 
 /**
  * Insert one `llm_usage` row (source="proxy") via the single ledger writer.
- * Metering failures MUST NOT break a successful LLM call — the caller already
- * consumed the response bytes — so DB errors are logged and swallowed (ops
- * reconcile from upstream invoices).
+ * A transient DB failure is durably queued with the same request id; if BOTH
+ * Postgres and the retry queue are unavailable, the error propagates instead of
+ * silently losing billable usage.
  */
 export async function recordProxyUsage(inputs: RecordUsageInputs): Promise<void> {
-  if (!inputs.usage) return;
-  try {
-    await recordLlmUsage({
+  if (!inputs.usage) {
+    logger.error("llm-proxy: successful response contained no parseable usage", {
+      orgId: inputs.principal.orgId,
+      presetId: inputs.presetId,
+      credentialSource: inputs.resolved.isSystemModel ? "system" : "org",
+    });
+    return;
+  }
+
+  await recordLlmUsageReliably(
+    {
       source: "proxy",
       orgId: inputs.principal.orgId,
       apiKeyId: inputs.principal.kind === "api_key" ? inputs.principal.apiKeyId : null,
@@ -196,17 +204,12 @@ export async function recordProxyUsage(inputs: RecordUsageInputs): Promise<void>
       cacheWriteTokens: inputs.usage.cacheWriteTokens ?? null,
       costUsd: computeCostUsd(inputs.usage, inputs.resolved.cost ?? null),
       durationMs: inputs.durationMs,
-      // Fresh UUID per upstream call — satisfies the partial-unique index on
-      // (source='proxy', request_id). CLI-level retries land as new rows.
+      // Stable across durable retries. `proxy-idempotent` maps an uncertain
+      // post-commit acknowledgement to a no-op on replay.
       requestId: crypto.randomUUID(),
-    });
-  } catch (err) {
-    logger.error("llm-proxy: failed to record usage", {
-      orgId: inputs.principal.orgId,
-      presetId: inputs.presetId,
-      error: getErrorMessage(err),
-    });
-  }
+    },
+    { onConflict: "proxy-idempotent" },
+  );
 }
 
 export function computeCostUsd(usage: UpstreamUsage, cost: ModelCost | null): number {
@@ -396,9 +399,10 @@ export async function forwardMeteredResponse(
     void tapSseUsage(tapStream, adapter)
       .then(meter)
       .catch((err: unknown) => {
-        // Metering tap is best-effort and out-of-band of the client stream; a
-        // parse/insert failure must surface in logs, not vanish into an
-        // unhandled rejection (silent usage under-counting otherwise).
+        // The tap is out-of-band of the client stream. Direct DB failures are
+        // normally recovered by the durable retry queue; reaching this catch
+        // means parsing failed or both persistence channels failed, and must
+        // surface loudly rather than become an unhandled rejection.
         logger.error(`${logLabel}: SSE usage metering failed`, {
           runId: ctx.runId,
           presetId: ctx.presetId,
@@ -452,9 +456,9 @@ export async function forwardMeteredResponse(
     });
   }
 
-  // The upstream body is fully buffered, so awaiting the insert costs ~1ms and
-  // removes the observable race (recordProxyUsage swallows its own DB errors, and
-  // no-ops on null usage). Streaming uses `void` deliberately — already on wire.
+  // The upstream body is fully buffered, so awaiting the insert (or durable
+  // retry enqueue) removes the observable race. Streaming uses `void`
+  // deliberately — its bytes are already on the wire.
   await meter(adapter.parseJsonUsage(parsed));
 
   const headers = buildClientHeaders(upstream.headers, swap);

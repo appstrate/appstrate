@@ -893,9 +893,11 @@ export interface AuthStrategy {
 
 /**
  * Parameters passed to the `beforeUsage` hook — a discriminated union over the
- * usage surface. `run` carries the agent package id and the org's current
- * running-run count (so a module can apply concurrency-aware admission); `chat`
- * carries the session id (null for an ephemeral turn with no persisted session).
+ * usage surface. `run` carries the agent package id and the projected in-flight
+ * count INCLUDING the run being admitted (so a module can apply
+ * concurrency-aware admission without treating the first run as zero cost);
+ * `chat` carries the session id (null for an ephemeral turn with no persisted
+ * session).
  */
 export type BeforeUsageParams =
   | { orgId: string; context: "run"; packageId: string; runningCount: number }

@@ -56,6 +56,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, forbidden, notFound } from "../lib/errors.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { getRunAttribution } from "../services/state/runs.ts";
+import { enforceSystemProxyAdmission } from "../services/system-proxy-admission.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
 import {
   proxyLlmCall,
@@ -70,6 +71,7 @@ import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/t
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
+import { ACTIVE_RUN_STATUSES } from "@appstrate/db/schema";
 
 export function createLlmProxyRouter() {
   const router = new Hono<AppEnv>();
@@ -145,12 +147,14 @@ export function createLlmProxyRouter() {
  *      API-key principals are app-scoped infrastructure identities (the run
  *      may legitimately carry a user/end-user actor or a sibling key), so the
  *      org + application boundary is their enforcement line.
+ *   4. The run is still active. A terminal run id must not become a reusable
+ *      billing context for arbitrary post-run system-model calls.
  */
 async function assertRunAttributable(
   c: Context<AppEnv>,
   runId: string,
   principal: LlmProxyPrincipal,
-): Promise<void> {
+): Promise<NonNullable<Awaited<ReturnType<typeof getRunAttribution>>>> {
   const run = await getRunAttribution(principal.orgId, runId);
   if (!run) {
     throw notFound(`run ${runId} not found`);
@@ -162,6 +166,10 @@ async function assertRunAttributable(
   if (principal.kind === "jwt_user" && run.userId !== principal.userId) {
     throw forbidden("X-Run-Id does not reference a run owned by the calling user");
   }
+  if (!ACTIVE_RUN_STATUSES.has(run.status)) {
+    throw invalidRequest(`run ${runId} is no longer active`);
+  }
+  return run;
 }
 
 async function handleProxy(
@@ -192,9 +200,15 @@ async function handleProxy(
   // `llm_usage.run_id` → `computeRunCost` → `runs.cost`. Validate it against
   // the principal BEFORE the upstream call so a caller with `llm-proxy:call`
   // cannot bill LLM cost onto an arbitrary (even cross-tenant) run.
-  if (runId) {
-    await assertRunAttributable(c, runId, principal);
+  const runAttribution = runId ? await assertRunAttributable(c, runId, principal) : null;
+  if (runAttribution && !runAttribution.packageId) {
+    throw invalidRequest(`run ${runAttribution.id} has no agent package attribution`);
   }
+  const usageContext = runAttribution
+    ? ({ context: "run", packageId: runAttribution.packageId! } as const)
+    : c.get("firstPartyLoopback")
+      ? ({ context: "chat", sessionId: chatSessionId } as const)
+      : null;
 
   const buf = await c.req.arrayBuffer();
   if (buf.byteLength === 0) {
@@ -213,6 +227,8 @@ async function handleProxy(
       incomingHeaders: c.req.raw.headers,
       rawBody,
       maxRequestBytes: limits.max_request_bytes,
+      beforeSystemUpstream: (resolved) =>
+        enforceSystemProxyAdmission({ orgId, resolved, usageContext }),
     });
 
     const durationMs = Date.now() - started;

@@ -170,7 +170,10 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
       orgId,
       context: "run",
       packageId: agent.id,
-      runningCount,
+      // The DB count is observed before this run is inserted. Admission needs
+      // the projected in-flight count INCLUDING the run being considered;
+      // otherwise the first run of an org is checked with a zero-cost estimate.
+      runningCount: runningCount + 1,
     });
     beforeUsageHookMs = Date.now() - hookStart;
     if (rejection) {
