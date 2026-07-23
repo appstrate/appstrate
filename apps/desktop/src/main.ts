@@ -83,23 +83,21 @@ function resolveAssetPath(filename: string): string {
   return join(__dirname, "assets", filename);
 }
 
-// Enable Chromium's remote debugging port so external tooling (Chrome
-// MCP, Playwright, raw CDP clients) can attach to the BrowserView with
-// the user's logged-in session intact. MUST be set before app.whenReady.
-// POC scope: hardcoded port 9222 + bound to localhost only via the
-// default Electron behaviour. For a shipped app this would be opt-in.
-app.commandLine.appendSwitch("remote-debugging-port", "9222");
-app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+// External CDP exposes every renderer and its authenticated session.
+// Keep it strictly opt-in for local source builds; packaged apps never
+// open a debugging listener.
+if (!app.isPackaged && process.env.APPSTRATE_DESKTOP_REMOTE_DEBUG === "1") {
+  app.commandLine.appendSwitch("remote-debugging-port", "9222");
+  app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+}
 
-// POC debug: tee everything to a tail-able file regardless of how
-// Electron is launched (GUI apps don't reliably print to stdout).
-import { appendFileSync } from "node:fs";
+// Opt-in asynchronous diagnostics. Production does no synchronous disk
+// I/O on the Electron main thread.
+import { appendFile } from "node:fs";
+const debugLogPath = join(app.getPath("logs"), "appstrate-desktop.log");
 const _debugLog = (msg: string): void => {
-  try {
-    appendFileSync("/tmp/electron-debug.log", `[${new Date().toISOString()}] ${msg}`);
-  } catch {
-    // best-effort
-  }
+  if (process.env.APPSTRATE_DESKTOP_DEBUG_LOG !== "1") return;
+  appendFile(debugLogPath, `[${new Date().toISOString()}] ${msg}`, () => {});
 };
 import {
   readConfigFile,
@@ -129,6 +127,21 @@ let bridgeState: "connecting" | "connected" | "disconnected" = "disconnected";
 /** Last resolved config — kept around so the tray menu can render the
  * profile list without rereading the file on every refresh. */
 let currentConfig: Config | null = null;
+
+/**
+ * The Appstrate UI and agent-driven browser are separate trust domains.
+ * Distinct persistent partitions prevent an agent from navigating to the
+ * Appstrate origin and inheriting the UI's Better Auth session.
+ */
+function persistentPartition(kind: "webapp" | "browser"): string {
+  const profile = encodeURIComponent(currentConfig?.defaultProfile ?? "default");
+  return `persist:appstrate-${kind}-${profile}`;
+}
+
+function denyRemotePermissions(ses: Electron.Session): void {
+  ses.setPermissionCheckHandler(() => false);
+  ses.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+}
 
 function createMainWindow(): BaseWindow {
   const win = new BaseWindow({
@@ -181,8 +194,10 @@ function createMainWindow(): BaseWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      partition: persistentPartition("browser"),
     },
   });
+  denyRemotePermissions(browserView.webContents.session);
   // A hidden WebContentsView gets its timers/rAF throttled by Chromium —
   // which starves Cloudflare Turnstile (and any similar in-page
   // challenge) while the user is on the webapp pane. Agents drive this
@@ -220,8 +235,10 @@ function createMainWindow(): BaseWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      partition: persistentPartition("webapp"),
     },
   });
+  denyRemotePermissions(webappView.webContents.session);
 
   // Default: webapp on TOP, browser pane attached UNDERNEATH (never
   // detached — a detached view's document reports visibilityState
@@ -252,8 +269,13 @@ function createMainWindow(): BaseWindow {
     });
   };
   const layout = (): void => {
-    if (activePane === "webapp") layoutWebapp();
-    else layoutBrowser();
+    // Both panes stay attached so browser automation keeps a visible,
+    // paintable surface even while the webapp covers it. Leaving the
+    // inactive browser view at its initial 0×0 bounds makes
+    // capturePage() return an empty image and starves visibility-gated
+    // page code until the user manually switches panes once.
+    layoutWebapp();
+    layoutBrowser();
   };
   layout();
   win.on("resize", layout);

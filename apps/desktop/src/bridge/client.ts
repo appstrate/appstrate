@@ -21,7 +21,7 @@
  */
 
 import { WebSocket } from "ws";
-import type { WebContents } from "electron";
+import type { Event, WebContents } from "electron";
 import * as api from "./browser-api.ts";
 import * as cdp from "./cdp.ts";
 import { startDownload, type Notify } from "./downloads.ts";
@@ -35,15 +35,134 @@ import {
   type JsonRpcResponse,
 } from "./protocol.ts";
 
-const BRIDGE_PATH = "/api/desktop/bridge";
+const BRIDGE_PROTOCOL_VERSION = "1";
+const BRIDGE_PATH = `/api/desktop/bridge?protocol=${BRIDGE_PROTOCOL_VERSION}`;
+const MAX_WS_PAYLOAD_BYTES = 16 * 1024 * 1024;
 
 export interface BridgeClient {
   stop(): void;
 }
 
-type Handler = (wc: WebContents, params: unknown, notify: Notify) => Promise<unknown> | unknown;
+type Handler = (
+  wc: WebContents,
+  params: unknown,
+  notify: Notify,
+  authorizedUris: readonly string[],
+) => Promise<unknown> | unknown;
+
+function matchesAuthorizedUri(spec: string, target: string): boolean {
+  try {
+    const escaped = spec.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = `^${escaped
+      .split("**")
+      .map((segment) => segment.replace(/\*/g, "[^/]*"))
+      .join(".*")}$`;
+    return new RegExp(pattern).test(new URL(target).href);
+  } catch {
+    return false;
+  }
+}
+
+function assertAuthorizedBrowserState(
+  wc: WebContents,
+  method: string,
+  params: unknown,
+  authorizedUris: readonly string[],
+): void {
+  if (method === "browser.reset" || authorizedUris.length === 0) return;
+  const p = (params ?? {}) as { url?: unknown };
+  const target =
+    method === "browser.navigate" || (method === "browser.download" && typeof p.url === "string")
+      ? p.url
+      : wc.getURL();
+  if (
+    typeof target !== "string" ||
+    !authorizedUris.some((spec) => matchesAuthorizedUri(spec, target))
+  ) {
+    throw new Error(`browser command outside authorized_uris: ${method}`);
+  }
+}
+
+interface CaptureSource {
+  source: "local_storage" | "session_storage" | "cookie";
+  key: string;
+  json_path?: Array<string | number>;
+}
+
+async function captureDeclarativeFields(
+  wc: WebContents,
+  raw: unknown,
+): Promise<{ url: string; fields: Record<string, string> }> {
+  const sources = (raw as { fields?: Record<string, CaptureSource> } | undefined)?.fields;
+  if (!sources || typeof sources !== "object" || Array.isArray(sources)) {
+    throw new Error("capture requires a declarative `fields` object");
+  }
+  const startUrl = wc.getURL();
+  const fields: Record<string, string> = {};
+  const storageSources: Record<string, CaptureSource> = {};
+  for (const [field, source] of Object.entries(sources)) {
+    if (source.source === "cookie") {
+      const cookies = await wc.session.cookies.get({ url: startUrl, name: source.key });
+      const value = cookies[0]?.value;
+      if (value) fields[field] = applyJsonPath(value, source.json_path);
+    } else {
+      storageSources[field] = source;
+    }
+  }
+  if (Object.keys(storageSources).length > 0) {
+    const script = `(() => {
+      const sources = ${JSON.stringify(storageSources)};
+      const out = {};
+      for (const [field, source] of Object.entries(sources)) {
+        const storage = source.source === "local_storage" ? localStorage : sessionStorage;
+        let value = storage.getItem(source.key);
+        if (value == null) continue;
+        if (Array.isArray(source.json_path) && source.json_path.length > 0) {
+          try {
+            value = JSON.parse(value);
+            for (const part of source.json_path) value = value?.[part];
+          } catch {
+            continue;
+          }
+        }
+        if (typeof value === "string" && value.length > 0) out[field] = value;
+      }
+      return out;
+    })()`;
+    const captured = await cdp.evaluate(wc, { script });
+    if (captured && typeof captured === "object" && !Array.isArray(captured)) {
+      for (const [field, value] of Object.entries(captured as Record<string, unknown>)) {
+        if (typeof value === "string" && value.length > 0) fields[field] = value;
+      }
+    }
+  }
+  if (wc.getURL() !== startUrl) {
+    throw new Error("page navigated while credentials were being captured");
+  }
+  return { url: startUrl, fields };
+}
+
+function applyJsonPath(value: string, path: Array<string | number> | undefined): string {
+  if (!path || path.length === 0) return value;
+  let current: unknown;
+  try {
+    current = JSON.parse(value);
+  } catch {
+    return "";
+  }
+  for (const part of path) {
+    if (!current || typeof current !== "object") return "";
+    current = (current as Record<string | number, unknown>)[part];
+  }
+  return typeof current === "string" ? current : "";
+}
 
 const handlers: Record<string, Handler> = {
+  "browser.release": () => null,
+  "browser.reset": async (wc) => {
+    await wc.loadURL("about:blank");
+    return null;
+  },
   "browser.navigate": (wc, p) => cdp.navigate(wc, p as cdp.CdpNavigateParams),
   "browser.click": (wc, p) => cdp.click(wc, p as cdp.CdpClickParams),
   "browser.fill": (wc, p) => cdp.fill(wc, p as cdp.CdpFillParams),
@@ -54,21 +173,15 @@ const handlers: Record<string, Handler> = {
     await api.waitForSelector(wc, p as api.WaitForSelectorParams);
     return null;
   },
-  "browser.download": (wc, p, notify) => startDownload(wc, p, notify),
-  "browser.batch": (wc, p, notify) => runBatch(wc, p, notify),
-  // Capture: runs the caller's script for the credential fields AND
-  // attaches the page URL from `wc.getURL()` — the main-process
-  // committed URL, which the (attacker-controlled) script cannot forge.
-  // The platform checks that URL against the integration's
-  // authorized_uris. Keeping the URL out of the script's return is the
-  // whole point: an object-literal-injection breakout could otherwise
-  // spoof it.
-  "browser.capture": async (wc, p) => {
-    const script = (p as { script?: string })?.script;
-    if (typeof script !== "string") throw new Error("capture requires a `script` string");
-    const fields = await cdp.evaluate(wc, { script });
-    return { url: wc.getURL(), fields };
-  },
+  "browser.download": (wc, p, notify) =>
+    startDownload(wc, p, notify, async (selector) => {
+      await cdp.click(wc, { selector });
+    }),
+  "browser.batch": (wc, p, notify, authorizedUris) => runBatch(wc, p, notify, authorizedUris),
+  // Capture accepts selectors only. The implementation owns the fixed
+  // storage-reading script so agent-controlled JavaScript never enters
+  // this write-only credential path.
+  "browser.capture": (wc, p) => captureDeclarativeFields(wc, p),
 };
 
 /**
@@ -89,6 +202,7 @@ async function runBatch(
   wc: WebContents,
   raw: unknown,
   notify: Notify,
+  authorizedUris: readonly string[],
 ): Promise<{
   completed: number;
   results: unknown[];
@@ -116,7 +230,8 @@ async function runBatch(
       };
     }
     try {
-      results.push(await handler(wc, step.params, notify));
+      assertAuthorizedBrowserState(wc, step.method, step.params, authorizedUris);
+      results.push(await handler(wc, step.params, notify, authorizedUris));
     } catch (err) {
       const code =
         err instanceof Error && typeof (err as { code?: unknown }).code === "number"
@@ -143,7 +258,9 @@ async function dispatch(
     return errorResponse(req.id, ERR_METHOD_NOT_FOUND, `unknown method: ${req.method}`);
   }
   try {
-    const result = await handler(wc, req.params, notify);
+    const authorizedUris = req.meta?.authorized_uris ?? [];
+    assertAuthorizedBrowserState(wc, req.method, req.params, authorizedUris);
+    const result = await handler(wc, req.params, notify, authorizedUris);
     return successResponse(req.id, result);
   } catch (err) {
     const code =
@@ -176,6 +293,20 @@ export function start(opts: {
   let ws: WebSocket | null = null;
   let backoffMs = 1_000;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let connectGeneration = 0;
+  let commandChain: Promise<void> = Promise.resolve();
+  let activeAuthorizedUris: readonly string[] = [];
+
+  const guardNavigation = (event: Event, target: string): void => {
+    if (
+      activeAuthorizedUris.length > 0 &&
+      !activeAuthorizedUris.some((spec) => matchesAuthorizedUri(spec, target))
+    ) {
+      event.preventDefault();
+      opts.onError?.(new Error(`blocked navigation outside authorized_uris: ${target}`));
+    }
+  };
+  opts.webContents.on("will-navigate", guardNavigation);
 
   const url = `${opts.instance.replace(/^http/, "ws")}${BRIDGE_PATH}`;
 
@@ -191,8 +322,18 @@ export function start(opts: {
     }
   };
 
+  function scheduleReconnect(): void {
+    if (stopped || reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void connect();
+    }, backoffMs);
+    backoffMs = Math.min(backoffMs * 2, 30_000);
+  }
+
   async function connect(): Promise<void> {
     if (stopped) return;
+    const generation = ++connectGeneration;
     opts.onStateChange?.("connecting");
 
     // Fresh cookie on every connect. The caller reads it from the webapp
@@ -206,27 +347,34 @@ export function start(opts: {
       opts.onError?.(err);
       cookieHeader = null;
     }
+    // `stop()` may have run while the asynchronous cookie read was in
+    // flight. A generation check prevents that stale attempt from
+    // creating a freshly authenticated socket after sign-out.
+    if (stopped || generation !== connectGeneration) return;
     if (!cookieHeader) {
       opts.onStateChange?.("disconnected");
-      // Schedule a retry — cookie may show up later (user signs in in the
-      // webapp pane, network heals, etc.).
-      if (!stopped) {
-        reconnectTimer = setTimeout(() => void connect(), backoffMs);
-        backoffMs = Math.min(backoffMs * 2, 30_000);
-      }
+      // Cookie may show up later (user signs in in the webapp pane,
+      // network heals, etc.).
+      scheduleReconnect();
       return;
     }
 
-    ws = new WebSocket(url, {
+    const socket = new WebSocket(url, {
       headers: { Cookie: cookieHeader },
+      maxPayload: MAX_WS_PAYLOAD_BYTES,
     });
+    ws = socket;
 
-    ws.on("open", () => {
+    socket.on("open", () => {
+      if (stopped || ws !== socket) {
+        socket.close();
+        return;
+      }
       backoffMs = 1_000;
       opts.onStateChange?.("connected");
     });
 
-    ws.on("message", async (raw) => {
+    socket.on("message", (raw) => {
       let req: JsonRpcRequest;
       try {
         req = JSON.parse(raw.toString()) as JsonRpcRequest;
@@ -234,18 +382,30 @@ export function start(opts: {
         return; // malformed → ignore
       }
       if (!req.id || !req.method) return;
-      const response = await dispatch(opts.webContents, req, notify);
-      ws?.send(JSON.stringify(response));
+      // Browser operations share one WebContents and one transient CDP
+      // debugger. Serial execution prevents navigation/input races and a
+      // command detaching the debugger while another still uses it.
+      commandChain = commandChain
+        .then(async () => {
+          if (stopped || socket.readyState !== WebSocket.OPEN) return;
+          activeAuthorizedUris = req.meta?.authorized_uris ?? [];
+          const response = await dispatch(opts.webContents, req, notify);
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(response));
+          }
+        })
+        .catch((err) => opts.onError?.(err));
     });
 
-    ws.on("close", () => {
+    socket.on("close", () => {
+      if (ws !== socket) return;
+      ws = null;
       opts.onStateChange?.("disconnected");
       if (stopped) return;
-      reconnectTimer = setTimeout(() => void connect(), backoffMs);
-      backoffMs = Math.min(backoffMs * 2, 30_000);
+      scheduleReconnect();
     });
 
-    ws.on("error", (err) => {
+    socket.on("error", (err) => {
       // 'close' will fire next; surface the error so the owner can log
       // it (silently swallowing makes "WS dies after token expiry" near-
       // impossible to debug). Reconnect handling stays in the 'close'
@@ -259,8 +419,15 @@ export function start(opts: {
   return {
     stop(): void {
       stopped = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      ws?.close();
+      connectGeneration++;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      const socket = ws;
+      ws = null;
+      opts.webContents.removeListener("will-navigate", guardNavigation);
+      socket?.close();
     },
   };
 }

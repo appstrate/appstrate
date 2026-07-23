@@ -14,8 +14,8 @@
  *     behavior must remain the worst case, not a hang.
  *   - evaluate: `Runtime.evaluate` surfaces the thrown exception with
  *     its description and line number instead of an opaque failure.
- *   - screenshot: `Page.captureScreenshot` adds full-page capture and
- *     format/quality control.
+ *   - screenshot: Electron's native viewport capture avoids a debugger
+ *     round-trip; `Page.captureScreenshot` is reserved for full-page capture.
  *
  *   - click/fill: NATIVE input via `Input.dispatchMouseEvent` /
  *     `Input.insertText` (trusted events, `isTrusted: true`) instead of
@@ -36,6 +36,7 @@
 import { type WebContents } from "electron";
 
 const PROTOCOL_VERSION = "1.3";
+const DEBUGGER_COMMAND_TIMEOUT_MS = 20_000;
 
 /** Ctrl on Win/Linux, Cmd on macOS — the "select all" accelerator. Bitmask per CDP Input. */
 const SELECT_ALL_MODIFIER = process.platform === "darwin" ? 4 /* Meta */ : 2; /* Ctrl */
@@ -53,9 +54,19 @@ const SELECT_ALL_MODIFIER = process.platform === "darwin" ? 4 /* Meta */ : 2; /*
 async function withDebugger<T>(wc: WebContents, fn: () => Promise<T>): Promise<T> {
   const wasAttached = wc.debugger.isAttached();
   if (!wasAttached) wc.debugger.attach(PROTOCOL_VERSION);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await fn();
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`CDP command timed out after ${DEBUGGER_COMMAND_TIMEOUT_MS}ms`)),
+          DEBUGGER_COMMAND_TIMEOUT_MS,
+        );
+      }),
+    ]);
   } finally {
+    if (timer) clearTimeout(timer);
     if (!wasAttached) {
       try {
         wc.debugger.detach();
@@ -163,8 +174,18 @@ export async function screenshot(
   wc: WebContents,
   p: CdpScreenshotParams = {},
 ): Promise<{ dataUrl: string }> {
+  const format = p.format === "jpeg" ? "jpeg" : "png";
+  if (!p.fullPage) {
+    const image = await wc.capturePage();
+    if (image.isEmpty()) {
+      throw new Error("screenshot failed: browser surface is empty");
+    }
+    const data =
+      format === "jpeg" ? image.toJPEG(Math.min(Math.max(p.quality ?? 80, 0), 100)) : image.toPNG();
+    return { dataUrl: `data:image/${format};base64,${data.toString("base64")}` };
+  }
+
   return withDebugger(wc, async () => {
-    const format = p.format === "jpeg" ? "jpeg" : "png";
     const res = (await wc.debugger.sendCommand("Page.captureScreenshot", {
       format,
       ...(format === "jpeg" && p.quality !== undefined

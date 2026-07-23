@@ -29,6 +29,7 @@ export interface JsonRpcRequest {
   id: string;
   method: string;
   params?: unknown;
+  meta?: { authorized_uris?: string[] };
 }
 
 export interface JsonRpcErrorObject {

@@ -10,11 +10,10 @@
  * so authenticated URLs work), then STREAMED over HTTPS to the
  * platform-minted upload URL (S3 presigned PUT, or the FS upload sink).
  *
- * Correlation: `session.will-download` fires for every download in the
- * pane, agent-triggered or user-clicked. Agent downloads are correlated
- * FIFO — `browser.download` pushes a pending entry, the next
- * `will-download` claims it. User-initiated downloads (no pending entry)
- * keep the historical behavior: saved under ~/Documents/AppstrateDesktop.
+ * Correlation: direct URL orders match the DownloadItem URL. Authenticated
+ * page downloads use a selector that the same command clicks immediately
+ * after registering a short-lived pending order. There is no long open
+ * FIFO window in which an unrelated user download can be claimed.
  */
 
 import { createHash } from "node:crypto";
@@ -29,15 +28,10 @@ import { ERR_DOWNLOAD_FAILED, ERR_INVALID_PARAMS } from "./protocol.ts";
 
 export interface DownloadParams {
   download_id: string;
-  /** Direct URL to download. Mutually exclusive with `capture`. */
+  /** Direct URL to download. Mutually exclusive with `selector`. */
   url?: string;
-  /**
-   * Capture mode: no navigation is triggered — the order claims the
-   * NEXT download the page itself starts (blob anchor clicks,
-   * script-triggered downloads with in-page auth). The agent enqueues
-   * the order first, then makes the page click.
-   */
-  capture?: boolean;
+  /** Selector clicked atomically after the order is registered. */
+  selector?: string;
   /** Platform-minted PUT target (S3 presigned URL or FS upload-sink URL). */
   upload_url: string;
   /** Signed size ceiling — mirrored locally so an oversized file fails fast. */
@@ -49,10 +43,12 @@ export type Notify = (method: string, params: unknown) => void;
 interface PendingDownload {
   params: DownloadParams;
   notify: Notify;
+  expiresAt: number;
+  timer: ReturnType<typeof setTimeout>;
 }
 
-/** FIFO of agent-ordered downloads awaiting their `will-download` event. */
 const pending: PendingDownload[] = [];
+const PENDING_TIMEOUT_MS = 10_000;
 
 class DownloadError extends Error {
   constructor(
@@ -69,18 +65,49 @@ class DownloadError extends Error {
  * triggers the download through the page's session (cookies included),
  * then returns immediately — completion is reported via notifications.
  */
-export function startDownload(wc: WebContents, raw: unknown, notify: Notify): unknown {
+export async function startDownload(
+  wc: WebContents,
+  raw: unknown,
+  notify: Notify,
+  clickSelector: (selector: string) => Promise<void>,
+): Promise<unknown> {
   const p = raw as DownloadParams;
   if (!p || typeof p.download_id !== "string" || !p.upload_url) {
     throw new DownloadError(ERR_INVALID_PARAMS, "download requires download_id and upload_url");
   }
-  if (p.capture !== true) {
+  if (typeof p.selector !== "string") {
     if (typeof p.url !== "string" || !/^https?:\/\//.test(p.url)) {
-      throw new DownloadError(ERR_INVALID_PARAMS, `not an http(s) URL: ${String(p.url)}`);
+      throw new DownloadError(ERR_INVALID_PARAMS, "download requires an http(s) url or selector");
     }
   }
-  pending.push({ params: p, notify });
-  if (p.capture !== true) wc.downloadURL(p.url!);
+  const entry: PendingDownload = {
+    params: p,
+    notify,
+    expiresAt: Date.now() + PENDING_TIMEOUT_MS,
+    timer: setTimeout(() => {
+      const index = pending.indexOf(entry);
+      if (index < 0) return;
+      pending.splice(index, 1);
+      notify("download.failed", {
+        download_id: p.download_id,
+        code: ERR_DOWNLOAD_FAILED,
+        message: "download did not start within 10 seconds",
+      });
+    }, PENDING_TIMEOUT_MS),
+  };
+  pending.push(entry);
+  try {
+    if (p.selector !== undefined) {
+      await clickSelector(p.selector);
+    } else {
+      wc.downloadURL(p.url!);
+    }
+  } catch (err) {
+    clearTimeout(entry.timer);
+    const index = pending.indexOf(entry);
+    if (index >= 0) pending.splice(index, 1);
+    throw err;
+  }
   return { download_id: p.download_id, state: "started" };
 }
 
@@ -92,7 +119,22 @@ export function startDownload(wc: WebContents, raw: unknown, notify: Notify): un
  */
 export function installDownloadInterceptor(session: Session, debugLog: (m: string) => void): void {
   session.on("will-download", (_event, item) => {
-    const agentOrder = pending.shift();
+    const now = Date.now();
+    for (let i = pending.length - 1; i >= 0; i--) {
+      if (pending[i]!.expiresAt <= now) {
+        clearTimeout(pending[i]!.timer);
+        pending.splice(i, 1);
+      }
+    }
+    const itemUrl = item.getURL();
+    const itemUrlChain = item.getURLChain();
+    const matchingIndex = pending.findIndex(
+      ({ params }) =>
+        params.selector !== undefined ||
+        params.url === itemUrl ||
+        (params.url !== undefined && itemUrlChain.includes(params.url)),
+    );
+    const agentOrder = matchingIndex >= 0 ? pending.splice(matchingIndex, 1)[0] : undefined;
     if (!agentOrder) {
       // User-initiated download — historical behavior.
       let host = "unknown";
@@ -109,6 +151,7 @@ export function installDownloadInterceptor(session: Session, debugLog: (m: strin
     }
 
     const { params, notify } = agentOrder;
+    clearTimeout(agentOrder.timer);
     const id = params.download_id;
     const tmpPath = join(tmpdir(), "appstrate-desktop", `${id}.part`);
     void mkdir(join(tmpdir(), "appstrate-desktop"), { recursive: true });

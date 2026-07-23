@@ -139,6 +139,11 @@ export function normalizeInstance(raw: string): string {
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new Error(`Instance URL must use http(s): ${raw}`);
   }
+  const isLoopback =
+    url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if (url.protocol === "http:" && !isLoopback) {
+    throw new Error(`Remote Appstrate instances must use HTTPS: ${raw}`);
+  }
   return `${url.protocol}//${url.host}`;
 }
 
