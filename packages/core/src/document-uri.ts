@@ -67,3 +67,29 @@ export function parseDocumentUri(uri: string): string | null {
 export function documentUri(id: string): string {
   return `${DOCUMENT_URI_PREFIX}${id}`;
 }
+
+/**
+ * Walk an arbitrary JSON value (a run's persisted `input`, tool args, …) and
+ * collect the set of document ids referenced by any `document://doc_xxx` string
+ * anywhere within it — nested objects and arrays included. De-duplicated,
+ * insertion-order stable. Every candidate string is validated through
+ * {@link parseDocumentUri}, so a malformed URI is silently skipped (never yields
+ * a bogus id). Pure and dependency-free — the single place that turns a blob of
+ * input JSON into the document ids it consumes (e.g. so a run's document listing
+ * can surface the inputs it was launched with, not only the outputs it produced).
+ */
+export function extractDocumentIds(value: unknown): string[] {
+  const ids = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (typeof node === "string") {
+      const id = parseDocumentUri(node);
+      if (id) ids.add(id);
+    } else if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+    } else if (node !== null && typeof node === "object") {
+      for (const item of Object.values(node)) walk(item);
+    }
+  };
+  walk(value);
+  return [...ids];
+}

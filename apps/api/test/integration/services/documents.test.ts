@@ -90,7 +90,7 @@ async function stageUpload(
 /** Seed a minimal run row in the given scope. */
 async function seedRunRow(
   scope: { orgId: string; applicationId: string },
-  extra: { endUserId?: string } = {},
+  extra: { endUserId?: string; input?: Record<string, unknown> } = {},
 ): Promise<string> {
   const id = `run_${crypto.randomUUID()}`;
   await db.insert(runs).values({
@@ -99,6 +99,7 @@ async function seedRunRow(
     applicationId: scope.applicationId,
     status: "running",
     endUserId: extra.endUserId ?? null,
+    input: extra.input ?? null,
     // Sink context so the materialization-failure path can route its terminal
     // transition through `synthesiseFinalize` (getRunSinkContext requires a
     // non-null sink secret; finalize never decrypts it). Mirrors production,
@@ -295,6 +296,87 @@ describe("documents service + routes", () => {
     });
     const flist = (await filtered.json()) as { data: { id: string }[] };
     expect(flist.data.map((d) => d.id)).toEqual([docA.id]);
+  });
+
+  it("run_id filter returns produced outputs AND input documents referenced in runs.input", async () => {
+    // docA: a chat-session user_upload consumed by the run as input (its own
+    // container is the chat session, so runId is NULL — it would be missed by a
+    // plain `documents.run_id = run` filter).
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    const upA = await stageUpload(scope, ctx.user.id, "in.txt", new TextEncoder().encode("input"));
+    const docA = await createDocumentFromUpload(scope, userActor, upA, {
+      chatSessionId: sessionId,
+    });
+
+    // The run references docA in its persisted input and produces docB.
+    const runId = await seedRunRow(scope, { input: { file: `document://${docA.id}` } });
+    const { row: docB } = await publishStream(scope, runId, "out.txt", "produced");
+
+    const page = await listDocumentsForActor(scope, userActor, { runId });
+    const ids = page.data.map((d) => d.id);
+    expect(ids).toContain(docA.id); // consumed input
+    expect(ids).toContain(docB.id); // produced output
+  });
+
+  it("run_id filter with no input refs returns only produced documents (unchanged behavior)", async () => {
+    const runId = await seedRunRow(scope);
+    const { row: docB } = await publishStream(scope, runId, "out.txt", "produced");
+    // A document on a different run must never bleed into the filter.
+    const otherRun = await seedRunRow(scope);
+    await publishStream(scope, otherRun, "other.txt", "other");
+
+    const page = await listDocumentsForActor(scope, userActor, { runId });
+    expect(page.data.map((d) => d.id)).toEqual([docB.id]);
+  });
+
+  it("run_id filter finds document refs nested in objects and arrays", async () => {
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    const upA = await stageUpload(scope, ctx.user.id, "n.txt", new TextEncoder().encode("nested"));
+    const docA = await createDocumentFromUpload(scope, userActor, upA, {
+      chatSessionId: sessionId,
+    });
+
+    const runId = await seedRunRow(scope, { input: { a: { b: [`document://${docA.id}`] } } });
+    const page = await listDocumentsForActor(scope, userActor, { runId });
+    expect(page.data.map((d) => d.id)).toContain(docA.id);
+  });
+
+  it("a document ref in input that belongs to another org is not returned (org scope holds)", async () => {
+    // A durable document in a DIFFERENT org.
+    const other = await createTestContext({ orgSlug: "otherorg2" });
+    const otherScope = { orgId: other.orgId, applicationId: other.defaultAppId };
+    const otherActor: Actor = { type: "user", id: other.user.id };
+    const otherRun = await seedRunRow(otherScope);
+    const upX = await stageUpload(
+      otherScope,
+      other.user.id,
+      "x.txt",
+      new TextEncoder().encode("x"),
+    );
+    const foreign = await createDocumentFromUpload(otherScope, otherActor, upX, {
+      runId: otherRun,
+    });
+
+    // Our run references the foreign document id in its input — the id resolves,
+    // but the documents query is org-scoped, so it must not surface it.
+    const runId = await seedRunRow(scope, { input: { file: `document://${foreign.id}` } });
+    const { row: docB } = await publishStream(scope, runId, "out.txt", "produced");
+
+    const page = await listDocumentsForActor(scope, userActor, { runId });
+    const ids = page.data.map((d) => d.id);
+    expect(ids).toContain(docB.id);
+    expect(ids).not.toContain(foreign.id);
+  });
+
+  it("a nonexistent document ref in input is simply absent (no error)", async () => {
+    const missingUri = `document://doc_${crypto.randomUUID()}`;
+    const runId = await seedRunRow(scope, { input: { file: missingUri } });
+    const { row: docB } = await publishStream(scope, runId, "out.txt", "produced");
+
+    const page = await listDocumentsForActor(scope, userActor, { runId });
+    expect(page.data.map((d) => d.id)).toEqual([docB.id]);
   });
 
   it("DELETE allowed for creator and for admin, forbidden otherwise", async () => {

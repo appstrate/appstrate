@@ -60,6 +60,7 @@ import {
   isDocumentUri,
   parseDocumentUri,
   documentUri,
+  extractDocumentIds,
 } from "@appstrate/core/document-uri";
 
 /** Durable documents bucket (distinct from the ephemeral `uploads` bucket). */
@@ -977,6 +978,28 @@ export interface ListDocumentsFilters {
 }
 
 /**
+ * The `run_id` filter clause for the document gallery. A run's documents are not
+ * only the ones it PRODUCED (`documents.run_id = run`) — a run also CONSUMES
+ * documents passed as input (`document://doc_xxx` references in `runs.input`),
+ * whose own container is wherever they were first materialized (a chat session,
+ * or another run). So the filter is the union: rows anchored to the run, OR rows
+ * whose id is referenced by the run's input JSONB.
+ *
+ * The run lookup is `getRun(scope, runId)` — the SAME org+app scoping every other
+ * run read uses — so a run id from another org/app resolves to null and its input
+ * refs never widen the result (no cross-tenant leak; the referenced-id `inArray`
+ * is AND-ed with the caller's org/app/actor scope on `documents` regardless).
+ * When the run has no input or no document refs, this collapses to the original
+ * plain `run_id =` equality — behavior unchanged.
+ */
+async function runContainerFilter(scope: AppScope, runId: string): Promise<SQL> {
+  const run = await getRun(scope, runId);
+  const inputDocIds = run ? extractDocumentIds(run.input) : [];
+  if (inputDocIds.length === 0) return eq(documents.runId, runId);
+  return or(eq(documents.runId, runId), inArray(documents.id, inputDocIds))!;
+}
+
+/**
  * Org+app-scoped document gallery, with container-inherited visibility (D7 —
  * consistent with `getDocumentForActor`):
  *
@@ -1007,7 +1030,7 @@ export async function listDocumentsForActor(
   ];
   if (filters.purpose) conditions.push(eq(documents.purpose, filters.purpose));
   if (filters.packageId) conditions.push(eq(documents.packageId, filters.packageId));
-  if (filters.runId) conditions.push(eq(documents.runId, filters.runId));
+  if (filters.runId) conditions.push(await runContainerFilter(scope, filters.runId));
   if (filters.chatSessionId) conditions.push(eq(documents.chatSessionId, filters.chatSessionId));
 
   if (filters.startingAfter) {
