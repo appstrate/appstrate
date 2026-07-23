@@ -60,6 +60,14 @@ export interface ChatPlatformDeps {
    * quota/cap/not-found errors, which the stream route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
+  /**
+   * Detach-or-delete the documents contained by a chat session being deleted. A
+   * session document a run still consumes is detached (kept, container NULLed);
+   * an unconsumed one is deleted (row + counter + storage). The module has no DB
+   * or storage access, so this crosses through `ctx.services`. Called before the
+   * session row is removed so the FK cascade cannot destroy the evidence first.
+   */
+  cleanupSessionDocuments(chatSessionId: string): Promise<void>;
 }
 
 /**
@@ -96,5 +104,12 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
           // surface. Text-only turns never reach here; an attachment turn without
           // the platform wired is a genuine misconfiguration.
           Promise.reject(new Error("chat attachments require the platform document service")),
+    cleanupSessionDocuments: (chatSessionId) =>
+      ctx
+        ? ctx.services.cleanupSessionDocuments(chatSessionId)
+        : // No init context (test harness / OSS standalone) → no document store
+          // surface; session delete proceeds without document teardown (the FK
+          // cascade still removes any rows). Safe no-op baseline.
+          Promise.resolve(),
   };
 }

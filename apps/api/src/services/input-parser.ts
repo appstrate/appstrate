@@ -120,6 +120,15 @@ export interface ParsedInput {
    * `documents.run_id` is a hard FK. Empty/undefined for runs with no uploads.
    */
   pendingDocuments?: PendingUploadMaterialization[];
+  /**
+   * The `document://` ids this run consumes as input (D1 chaining protection).
+   * Written as `document_links` rows once the run row exists (`run-pipeline.ts`,
+   * after `createRun` — `document_links.consumer_run_id` is a hard FK), the same
+   * deferral as `pendingDocuments`. Every resolved `document://` input ref
+   * qualifies: a brand-new run is never a doc's own container. Undefined when the
+   * run consumes no documents.
+   */
+  consumedDocumentIds?: string[];
 }
 
 interface RunRequestBody {
@@ -569,6 +578,7 @@ export async function parseRequestInput(
   }
   let uploadedFiles: FileReference[] = [];
   let pendingDocuments: PendingUploadMaterialization[] = [];
+  let consumedDocumentIds: string[] = [];
 
   if (inputSchema) {
     const refs = collectFileRefs(inputSchema, input);
@@ -596,6 +606,12 @@ export async function parseRequestInput(
         if (!id) throw invalidRequest(`Invalid document URI '${ref.uri}'`, ref.fieldName);
         return { ref, id };
       });
+
+    // Every resolved `document://` input ref is a consumption link (D1): the run
+    // is brand-new, so it is never any of these docs' own container. Persisted as
+    // `document_links` after `createRun` (run-pipeline), protecting the doc from
+    // its producer's deletion. The ACL check below still gates the run itself.
+    consumedDocumentIds = docRefs.map(({ id }) => id);
 
     // Decode inline data: URIs up front — the per-file cap is enforced inside
     // parseDataUri (pre-decode on the base64 length, post-decode on the bytes),
@@ -948,6 +964,7 @@ export async function parseRequestInput(
     input: normalizedInput,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     pendingDocuments: pendingDocuments.length > 0 ? pendingDocuments : undefined,
+    consumedDocumentIds: consumedDocumentIds.length > 0 ? consumedDocumentIds : undefined,
     modelIdOverride: body.modelId,
     proxyIdOverride: body.proxyId,
     configOverride: body.config,

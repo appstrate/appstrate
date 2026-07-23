@@ -1071,4 +1071,14 @@ export interface PlatformServices {
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
+  /**
+   * Detach-or-delete the documents contained by a chat session being deleted. A
+   * session document a run still consumes is detached (`chat_session_id = NULL`)
+   * so the run's rerun still resolves it; an unconsumed one is deleted (row +
+   * org counter + storage object). The chat module has DB access but no storage
+   * access and no documents-service surface, so this crosses through here. Called
+   * by the DELETE session route BEFORE removing the `chat_sessions` row, so the
+   * FK cascade cannot destroy the evidence first.
+   */
+  cleanupSessionDocuments(chatSessionId: string): Promise<void>;
 }

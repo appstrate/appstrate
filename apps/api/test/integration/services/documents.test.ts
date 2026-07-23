@@ -17,6 +17,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   documents,
+  documentLinks,
   organizations,
   runs,
   uploads,
@@ -35,8 +36,9 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedEndUser, seedApiKey } from "../../helpers/seed.ts";
+import { seedEndUser, seedApiKey, seedPackage } from "../../helpers/seed.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
+import { deletePackageRuns } from "../../../src/services/state/runs.ts";
 import {
   createDocumentFromUpload,
   createDocumentFromStream,
@@ -44,6 +46,8 @@ import {
   listDocumentsForActor,
   materializeRunUploads,
   cleanupExpiredDocuments,
+  detachOrDeleteContainedDocuments,
+  linkConsumedDocuments,
 } from "../../../src/services/documents.ts";
 
 /** Run `fn` with an env var temporarily overridden (cache reset around it). */
@@ -90,7 +94,7 @@ async function stageUpload(
 /** Seed a minimal run row in the given scope. */
 async function seedRunRow(
   scope: { orgId: string; applicationId: string },
-  extra: { endUserId?: string; input?: Record<string, unknown> } = {},
+  extra: { endUserId?: string; input?: Record<string, unknown>; packageId?: string } = {},
 ): Promise<string> {
   const id = `run_${crypto.randomUUID()}`;
   await db.insert(runs).values({
@@ -99,6 +103,7 @@ async function seedRunRow(
     applicationId: scope.applicationId,
     status: "running",
     endUserId: extra.endUserId ?? null,
+    packageId: extra.packageId ?? null,
     input: extra.input ?? null,
     // Sink context so the materialization-failure path can route its terminal
     // transition through `synthesiseFinalize` (getRunSinkContext requires a
@@ -795,5 +800,186 @@ describe("documents service + routes", () => {
     expect(((await over.json()) as { limit: number }).limit).toBe(20);
     const inRange = await app.request(`/api/documents?limit=50`, { headers: authHeaders(ctx) });
     expect(((await inRange.json()) as { limit: number }).limit).toBe(50);
+  });
+
+  // -------------------------------------------------------------------------
+  // Chaining protection — document_links + detach-or-delete on container teardown
+  // -------------------------------------------------------------------------
+
+  it("detaches a consumed document when its producer's runs are deleted (chaining survives)", async () => {
+    // Producer package P, run A produces docX. A separate consumer run B (a
+    // different package, so it is NOT in the deleted set) consumes docX — recorded
+    // as a document_links row.
+    await seedPackage({ id: "@chain/producer", orgId: ctx.orgId });
+    await seedPackage({ id: "@chain/consumer", orgId: ctx.orgId });
+    const runA = await seedRunRow(scope, { packageId: "@chain/producer" });
+    const runB = await seedRunRow(scope, { packageId: "@chain/consumer" });
+    const { row: docX } = await publishStream(scope, runA, "shared.txt", "shared bytes");
+    await db.insert(documentLinks).values({ documentId: docX.id, consumerRunId: runB });
+
+    const usedBefore = await orgBytesUsed(ctx.orgId);
+
+    await deletePackageRuns(scope, "@chain/producer");
+
+    // Producer run gone; docX survives, DETACHED (both containers NULL), bytes +
+    // counter untouched, and still resolvable for a member (org-wide read).
+    const [gone] = await db.select().from(runs).where(eq(runs.id, runA));
+    expect(gone).toBeUndefined();
+    const [row] = await db.select().from(documents).where(eq(documents.id, docX.id));
+    expect(row).toBeDefined();
+    expect(row!.runId).toBeNull();
+    expect(row!.chatSessionId).toBeNull();
+    expect(await orgBytesUsed(ctx.orgId)).toBe(usedBefore);
+    const resolved = await getDocumentForActor(scope, userActor, docX.id);
+    expect(resolved?.row.id).toBe(docX.id);
+    // A detached `agent_output` stays org-readable + listed for ANY member (it
+    // always was, via its run container) — unlike a detached user_upload.
+    const stranger = await createTestUser({ email: "stranger@producer.test" });
+    await addOrgMember(ctx.orgId, stranger.id, "member");
+    const strangerActor: Actor = { type: "user", id: stranger.id };
+    expect((await getDocumentForActor(scope, strangerActor, docX.id))?.row.id).toBe(docX.id);
+    expect((await listDocumentsForActor(scope, strangerActor, {})).data.map((d) => d.id)).toContain(
+      docX.id,
+    );
+    // The consumer run + its link are untouched — a rerun still finds the doc.
+    const links = await db
+      .select()
+      .from(documentLinks)
+      .where(eq(documentLinks.documentId, docX.id));
+    expect(links).toHaveLength(1);
+  });
+
+  it("deletes an unconsumed document when its runs are deleted (row + counter + storage)", async () => {
+    await seedPackage({ id: "@chain/solo", orgId: ctx.orgId });
+    const runA = await seedRunRow(scope, { packageId: "@chain/solo" });
+    const { row: docX } = await publishStream(scope, runA, "orphan.txt", "orphan bytes");
+    const [bucket, ...rest] = docX.storageKey.split("/");
+    expect(await downloadStream(bucket!, rest.join("/"))).not.toBeNull();
+
+    await deletePackageRuns(scope, "@chain/solo");
+
+    const [row] = await db.select().from(documents).where(eq(documents.id, docX.id));
+    expect(row).toBeUndefined();
+    expect(await orgBytesUsed(ctx.orgId)).toBe(0);
+    // Storage object purged post-commit (awaited by the helper before it returns).
+    expect(await downloadStream(bucket!, rest.join("/"))).toBeNull();
+  });
+
+  it("detaches a chat-session document consumed by a run when the session is deleted", async () => {
+    // A chat-session user_upload consumed by a run (link row). Deleting the
+    // session detaches the doc (kept) rather than cascade-deleting it.
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    const up = await stageUpload(scope, ctx.user.id, "att.txt", new TextEncoder().encode("attach"));
+    const doc = await createDocumentFromUpload(scope, userActor, up, { chatSessionId: sessionId });
+    const runB = await seedRunRow(scope);
+    await db.insert(documentLinks).values({ documentId: doc.id, consumerRunId: runB });
+
+    const usedBefore = await orgBytesUsed(ctx.orgId);
+    await detachOrDeleteContainedDocuments({ chatSessionId: sessionId });
+
+    const [row] = await db.select().from(documents).where(eq(documents.id, doc.id));
+    expect(row).toBeDefined();
+    expect(row!.chatSessionId).toBeNull();
+    expect(row!.runId).toBeNull();
+    expect(await orgBytesUsed(ctx.orgId)).toBe(usedBefore);
+    // Conservative invariant: a detached `user_upload` stays creator-only FULLY
+    // (metadata included) — deletion must not widen it. The creator still resolves
+    // + downloads it; another member cannot resolve it at all (404-null), and it
+    // does not appear in that member's list, while it stays in the creator's.
+    const creatorActor: Actor = { type: "user", id: ctx.user.id };
+    const asCreator = await getDocumentForActor(scope, creatorActor, doc.id);
+    expect(asCreator?.row.id).toBe(doc.id);
+    expect(asCreator?.downloadable).toBe(true);
+    expect((await listDocumentsForActor(scope, creatorActor, {})).data.map((d) => d.id)).toContain(
+      doc.id,
+    );
+
+    const stranger = await createTestUser({ email: "stranger@chain.test" });
+    await addOrgMember(ctx.orgId, stranger.id, "member");
+    const strangerActor: Actor = { type: "user", id: stranger.id };
+    expect(await getDocumentForActor(scope, strangerActor, doc.id)).toBeNull();
+    expect(
+      (await listDocumentsForActor(scope, strangerActor, {})).data.map((d) => d.id),
+    ).not.toContain(doc.id);
+  });
+
+  it("deletes an unconsumed chat-session document when the session is deleted", async () => {
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    const up = await stageUpload(scope, ctx.user.id, "solo.txt", new TextEncoder().encode("solo"));
+    const doc = await createDocumentFromUpload(scope, userActor, up, { chatSessionId: sessionId });
+
+    await detachOrDeleteContainedDocuments({ chatSessionId: sessionId });
+
+    const [row] = await db.select().from(documents).where(eq(documents.id, doc.id));
+    expect(row).toBeUndefined();
+    expect(await orgBytesUsed(ctx.orgId)).toBe(0);
+  });
+
+  it("rejects a document with both containers set (chk_documents_single_container)", async () => {
+    const runId = await seedRunRow(scope);
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+    await expect(
+      (async () =>
+        db.insert(documents).values({
+          id: `doc_${crypto.randomUUID()}`,
+          orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
+          purpose: "agent_output",
+          runId,
+          chatSessionId: sessionId,
+          storageKey: "documents/x/y/z.txt",
+          name: "z.txt",
+          mime: "text/plain",
+          size: 3,
+          sha256: "abc",
+        }))(),
+    ).rejects.toThrow();
+  });
+
+  it("linkConsumedDocuments records consumption links idempotently", async () => {
+    const producerRun = await seedRunRow(scope);
+    const { row: doc } = await publishStream(scope, producerRun, "src.txt", "src");
+    const consumerRun = await seedRunRow(scope);
+
+    await linkConsumedDocuments(consumerRun, [doc.id]);
+    // Re-link is a no-op (onConflictDoNothing) — the sweep/rerun idempotency.
+    await linkConsumedDocuments(consumerRun, [doc.id]);
+
+    const links = await db
+      .select()
+      .from(documentLinks)
+      .where(eq(documentLinks.consumerRunId, consumerRun));
+    expect(links).toHaveLength(1);
+    expect(links[0]!.documentId).toBe(doc.id);
+  });
+
+  it("a detached document is not readable by another end-user", async () => {
+    const euOwner = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const euOther = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const ownerActor: Actor = { type: "end_user", id: euOwner.id };
+
+    // An end-user's run produces a doc; a live consumer keeps it alive on delete.
+    await seedPackage({ id: "@chain/eu", orgId: ctx.orgId });
+    const runA = await seedRunRow(scope, { packageId: "@chain/eu", endUserId: euOwner.id });
+    const { row: doc } = await publishStream(scope, runA, "eu.txt", "eu bytes", {
+      userId: null,
+      endUserId: euOwner.id,
+    });
+    const runB = await seedRunRow(scope, { endUserId: euOwner.id });
+    await db.insert(documentLinks).values({ documentId: doc.id, consumerRunId: runB });
+
+    await deletePackageRuns(scope, "@chain/eu");
+
+    // Detached now. The owning end-user still resolves it; another end-user cannot
+    // (the detached-branch end-user guard mirrors the run-container guard).
+    const [row] = await db.select().from(documents).where(eq(documents.id, doc.id));
+    expect(row!.runId).toBeNull();
+    const asOwner = await getDocumentForActor(scope, ownerActor, doc.id);
+    expect(asOwner?.row.id).toBe(doc.id);
+    const asOther = await getDocumentForActor(scope, { type: "end_user", id: euOther.id }, doc.id);
+    expect(asOther).toBeNull();
   });
 });

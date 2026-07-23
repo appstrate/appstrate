@@ -22,9 +22,21 @@
  * `organizations.documents_bytes_used`.
  */
 
-import { and, eq, lt, desc, or, isNull, isNotNull, inArray, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  eq,
+  lt,
+  desc,
+  or,
+  isNull,
+  isNotNull,
+  inArray,
+  notInArray,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { documents, organizations, chatSessions } from "@appstrate/db/schema";
+import { documents, documentLinks, organizations, chatSessions } from "@appstrate/db/schema";
 import type { DocumentPurpose } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
@@ -892,6 +904,19 @@ export async function getDocumentForActor(
       .where(and(eq(chatSessions.id, row.chatSessionId), eq(chatSessions.orgId, scope.orgId)))
       .limit(1);
     if (!session || session.userId !== actor.id) return null;
+  } else {
+    // Detached (both containers NULL — the legal state under
+    // `chk_documents_single_container`): no container to inherit an ACL from.
+    // Org+app already matched above; apply the same end-user guard the run
+    // container would (an end_user reads only its own rows).
+    if (actor.type === "end_user" && row.endUserId !== actor.id) return null;
+    // Conservative invariant: a detached `user_upload` is creator-only, fully
+    // (metadata included) — never widened by deletion. `deriveDownloadable` IS
+    // the creator check for a `user_upload` (true only for its creator), so a
+    // non-creator resolves it to null. A detached `agent_output` stays
+    // org-readable (deriveDownloadable is always true for it). This intentionally
+    // also narrows a run-origin detached upload to creator-only — least surprise.
+    if (row.purpose === "user_upload" && !deriveDownloadable(row, actor)) return null;
   }
 
   return { row: row as DocumentRow, downloadable: deriveDownloadable(row, actor) };
@@ -1016,9 +1041,23 @@ export async function listDocumentsForActor(
     eq(documents.applicationId, scope.applicationId),
     actor.type === "end_user"
       ? actorScopeFilter(actor, { userId: documents.userId, endUserId: documents.endUserId })
-      : // Members: all run-contained docs; chat-contained only from own sessions
-        // (chat docs carry their session owner as `userId`).
-        or(isNull(documents.chatSessionId), eq(documents.userId, actor.id))!,
+      : // Members — three visibility arms so a detached (both containers NULL)
+        // `user_upload` is NOT widened by deletion (it was creator-only in its
+        // chat/run origin and stays so):
+        //   1. run-contained (run_id set) → org-wide, mirroring the runs list;
+        //   2. own rows (user_id = me) → own chat docs + own detached uploads;
+        //   3. detached `agent_output` → org-readable (it always was, via its run).
+        // A chat-contained doc (chat_session_id set, run_id null) is covered by
+        // arm 2 only — unchanged owner-only visibility.
+        or(
+          isNotNull(documents.runId),
+          eq(documents.userId, actor.id),
+          and(
+            isNull(documents.runId),
+            isNull(documents.chatSessionId),
+            eq(documents.purpose, "agent_output"),
+          ),
+        )!,
   ];
   if (filters.purpose) conditions.push(eq(documents.purpose, filters.purpose));
   if (filters.packageId) conditions.push(eq(documents.packageId, filters.packageId));
@@ -1068,8 +1107,120 @@ export async function listDocumentsForActor(
 }
 
 // ---------------------------------------------------------------------------
+// Consumption links (D1 chaining protection)
+// ---------------------------------------------------------------------------
+
+/**
+ * Record the cross-container consumption links for a run's `document://` inputs.
+ * Called once the consumer run row exists (`document_links.consumer_run_id` is a
+ * hard FK). Idempotent (`onConflictDoNothing`) — a rerun or retried trigger
+ * re-links the same (document, run) pairs harmlessly. Self-links are impossible
+ * by construction: the consumer run is brand-new, so it is never any input
+ * document's own container.
+ */
+export async function linkConsumedDocuments(runId: string, documentIds: string[]): Promise<void> {
+  if (documentIds.length === 0) return;
+  await db
+    .insert(documentLinks)
+    .values(documentIds.map((documentId) => ({ documentId, consumerRunId: runId })))
+    .onConflictDoNothing();
+}
+
+// ---------------------------------------------------------------------------
 // Delete
 // ---------------------------------------------------------------------------
+
+/**
+ * Container-teardown for a deleted run set or chat session: decide, per contained
+ * document, whether to DETACH it (a live consumer outside the deleted set still
+ * references it — the "durable & chainable" promise) or DELETE it (nothing else
+ * needs it). Replaces the blind FK cascade for these two user-driven delete paths
+ * so a consumed doc survives its producer's deletion, and an unconsumed one frees
+ * its bytes + storage object.
+ *
+ *  - PROTECTED (run variant): a `document_links` row whose `consumer_run_id` is
+ *    NOT in the deleted set — a live run still consumes it → detach (`run_id =
+ *    NULL`); bytes, counter, and id untouched.
+ *  - PROTECTED (chat variant): ANY link at all — the consumer is always a run,
+ *    never the chat session itself → detach (`chat_session_id = NULL`).
+ *  - UNPROTECTED → delete the row + decrement the org counter (one transaction),
+ *    then best-effort delete the storage object after commit (same contract as
+ *    {@link deleteDocument}).
+ *
+ * The select + detach + delete + counter all run in ONE transaction. The caller
+ * MUST invoke this BEFORE deleting the runs/session, else the FK cascade destroys
+ * the `documents` rows (and their links) before this can consult them.
+ */
+export async function detachOrDeleteContainedDocuments(
+  container: { runIds: string[] } | { chatSessionId: string },
+): Promise<void> {
+  const runIds = "runIds" in container ? container.runIds : null;
+  // An empty run set contains nothing — skip the transaction entirely.
+  if (runIds && runIds.length === 0) return;
+  const chatSessionId = runIds ? null : (container as { chatSessionId: string }).chatSessionId;
+
+  const containedWhere = runIds
+    ? inArray(documents.runId, runIds)
+    : eq(documents.chatSessionId, chatSessionId!);
+
+  const deletedKeys = await db.transaction(async (tx) => {
+    const contained = await tx.select({ id: documents.id }).from(documents).where(containedWhere);
+    if (contained.length === 0) return [] as string[];
+    const containedIds = contained.map((d) => d.id);
+
+    // Protected = still referenced by a live consumer outside the deleted set.
+    // One query (not per-row): the contained doc ids that carry such a link.
+    const protectedRows = await tx
+      .selectDistinct({ documentId: documentLinks.documentId })
+      .from(documentLinks)
+      .where(
+        runIds
+          ? and(
+              inArray(documentLinks.documentId, containedIds),
+              notInArray(documentLinks.consumerRunId, runIds),
+            )
+          : inArray(documentLinks.documentId, containedIds),
+      );
+    const protectedSet = new Set(protectedRows.map((r) => r.documentId));
+
+    const detachIds = containedIds.filter((id) => protectedSet.has(id));
+    const deleteIds = containedIds.filter((id) => !protectedSet.has(id));
+
+    // Protected → detach: NULL the container, everything else preserved.
+    if (detachIds.length > 0) {
+      await tx
+        .update(documents)
+        .set(runIds ? { runId: null } : { chatSessionId: null })
+        .where(inArray(documents.id, detachIds));
+    }
+
+    if (deleteIds.length === 0) return [] as string[];
+
+    // Unprotected → delete rows + fold freed bytes back per org (a run set is one
+    // org in practice, but group defensively — mirrors cleanupExpiredDocuments).
+    const removed = await tx.delete(documents).where(inArray(documents.id, deleteIds)).returning({
+      orgId: documents.orgId,
+      size: documents.size,
+      storageKey: documents.storageKey,
+    });
+    const perOrg = new Map<string, number>();
+    for (const r of removed) perOrg.set(r.orgId, (perOrg.get(r.orgId) ?? 0) + r.size);
+    for (const [orgId, bytes] of perOrg) {
+      await tx
+        .update(organizations)
+        .set({
+          documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${bytes}, 0)`,
+        })
+        .where(eq(organizations.id, orgId));
+    }
+    return removed.map((r) => r.storageKey);
+  });
+
+  // Best-effort storage purge AFTER commit — a leftover object is harmless (the
+  // counter is the quota's source of truth); same fire-and-forget-with-warn
+  // contract as deleteDocument.
+  for (const storageKey of deletedKeys) await deleteStorageObject(storageKey);
+}
 
 /**
  * Delete a document: drop the storage object, delete the row, and decrement the

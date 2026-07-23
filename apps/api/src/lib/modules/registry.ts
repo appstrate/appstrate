@@ -23,7 +23,10 @@ import { getClientIp } from "../client-ip.ts";
 import { listLlmUsageForRun } from "../../services/state/runs.ts";
 import { dispatchInProcess } from "../platform-app.ts";
 import { recordChatUsage, resolveSubscriptionChatModel } from "../../services/chat-subscription.ts";
-import { resolveChatAttachment } from "../../services/documents.ts";
+import {
+  resolveChatAttachment,
+  detachOrDeleteContainedDocuments,
+} from "../../services/documents.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -122,6 +125,9 @@ function buildPlatformServices(): PlatformServices {
     // document (or validate an existing document) and hand back its stable
     // `document://` URI. The module has no DB access, so it crosses here.
     resolveChatAttachment,
+    // Chat session teardown — detach-or-delete the session's contained documents
+    // before the session row is removed (the module has no DB/storage access).
+    cleanupSessionDocuments: (chatSessionId) => detachOrDeleteContainedDocuments({ chatSessionId }),
   };
 }
 

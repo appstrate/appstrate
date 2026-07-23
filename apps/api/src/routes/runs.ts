@@ -131,6 +131,7 @@ export function createRunsRouter() {
           input: parsedInput,
           uploadedFiles,
           pendingDocuments,
+          consumedDocumentIds,
           modelIdOverride,
           proxyIdOverride,
           configOverride,
@@ -192,6 +193,8 @@ export function createRunsRouter() {
           // Staged uploads to materialize into durable `documents` rows after
           // the run row exists (input already rewritten to `document://` ids).
           pendingDocuments,
+          // `document://` inputs to protect via `document_links` (chaining).
+          consumedDocumentIds,
           config: mergedConfig,
           configOverride: configOverride ?? null,
           modelId: modelIdOverride ?? preflightModelId,

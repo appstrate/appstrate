@@ -237,6 +237,8 @@ export async function triggerInlineRun(params: {
       // Staged uploads to materialize into durable `documents` rows after the
       // run row exists (input already rewritten to `document://` ids).
       pendingDocuments: parsed.pendingDocuments,
+      // `document://` inputs to protect via `document_links` (chaining).
+      consumedDocumentIds: parsed.consumedDocumentIds,
       config: effectiveConfig,
       modelId: modelIdOverride,
       proxyId: proxyIdOverride,

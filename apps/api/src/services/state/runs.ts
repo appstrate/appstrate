@@ -47,6 +47,7 @@ import {
 } from "../../lib/jsonb-schemas.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
+import { detachOrDeleteContainedDocuments } from "../documents.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 import type {
@@ -1045,6 +1046,30 @@ export async function getRun(scope: AppScope, id: string) {
 }
 
 export async function deletePackageRuns(scope: AppScope, packageId: string): Promise<number> {
+  // Resolve the run ids first so the documents they contain can be
+  // detach-or-deleted BEFORE the runs are removed — the runs' FK cascade would
+  // otherwise destroy `documents` rows (and their `document_links`) a live
+  // consumer still needs, silently amputating a rerun's inputs.
+  const runRows = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(
+      scopedWhere(runs, {
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
+        extra: [eq(runs.packageId, packageId)],
+      }),
+    );
+  if (runRows.length === 0) return 0;
+  const runIds = runRows.map((r) => r.id);
+
+  // Contained-documents teardown in its own transaction, then the runs delete.
+  // Separate statements: a crash between them leaves the docs already handled
+  // (detached or deleted) and the runs still present — the next delete attempt
+  // re-runs both idempotently (re-handling finds nothing left to detach/delete,
+  // the runs delete finishes the job).
+  await detachOrDeleteContainedDocuments({ runIds });
+
   const deleted = await db
     .delete(runs)
     .where(

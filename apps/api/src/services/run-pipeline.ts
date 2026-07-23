@@ -13,7 +13,11 @@ import {
 } from "./run-context-builder.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
-import { materializeRunUploads, type PendingUploadMaterialization } from "./documents.ts";
+import {
+  materializeRunUploads,
+  linkConsumedDocuments,
+  type PendingUploadMaterialization,
+} from "./documents.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -79,6 +83,13 @@ export interface RunPipelineParams {
    * is a hard FK. Set by the POST /run route; unset for scheduler/inline runs.
    */
   pendingDocuments?: PendingUploadMaterialization[];
+  /**
+   * The `document://` ids this run consumes as input — written as `document_links`
+   * rows after `createRun` (the run is the FK'd consumer). Chaining-protection
+   * ledger: a consumed doc survives its producer container's deletion via detach.
+   * Set by the run routes; unset for scheduler runs (no user input refs).
+   */
+  consumedDocumentIds?: string[];
   config: Record<string, unknown>;
   /**
    * Per-run override delta — the raw object the caller sent in the request
@@ -564,6 +575,19 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         pendingCount: params.pendingDocuments.length,
       });
     }
+  }
+
+  // Record the cross-container consumption links (D1) now the consumer run row
+  // exists (`document_links.consumer_run_id` FK). Best-effort: the link is
+  // protection metadata, not run-critical — a failure must not fail the run (the
+  // doc merely loses this consumer's detach protection).
+  if (params.consumedDocumentIds?.length) {
+    await linkConsumedDocuments(runId, params.consumedDocumentIds).catch((err) => {
+      logger.warn("failed to write document consumption links", {
+        runId,
+        error: getErrorMessage(err),
+      });
+    });
   }
 
   logger.info("run pipeline timings", {

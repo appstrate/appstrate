@@ -45,6 +45,11 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.recordChatUsage).toBe("function");
   });
 
+  it("wires the chat document seam (resolveChatAttachment + cleanupSessionDocuments)", () => {
+    expect(typeof services.resolveChatAttachment).toBe("function");
+    expect(typeof services.cleanupSessionDocuments).toBe("function");
+  });
+
   it("wires the org query helpers (getOrgAdminEmails + getOrgName)", () => {
     expect(typeof ctx.getOrgAdminEmails).toBe("function");
     expect(typeof ctx.getOrgName).toBe("function");
