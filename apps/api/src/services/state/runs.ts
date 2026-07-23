@@ -689,6 +689,17 @@ export async function recordRunDegradedIntegration(
  *
  * One scalar SUM over the `(run_id)` index — cheap even on long runs.
  *
+ * Remote-run mirror exclusion: a remote-origin run whose inference flows through
+ * the system llm-proxy gets BOTH per-call proxy rows (`source='proxy'`, each
+ * with `credential_source` stamped) AND the runner's cumulative side-channel
+ * mirror row (`source='runner'`, `credential_source IS NULL` — remote runs
+ * resolve no platform model so `runs.model_source` is NULL). Both cover the SAME
+ * spend, so summing all rows double-counts (display only — cloud never debits
+ * the NULL runner row). The rule: when a run has proxy rows, drop the
+ * NULL-credential runner mirror. A platform run's runner row carries a
+ * non-NULL `credential_source` (from `runs.model_source`) and stays
+ * authoritative; a remote run with ONLY a runner row (no proxy) keeps it.
+ *
  * `orgId` is mandatory: `llm_usage.run_id` alone is caller-suppliable on the
  * proxy path (`X-Run-Id`), so the aggregate must be structurally inseparable
  * from the tenant — a ledger row whose `org_id` doesn't match the run's org
@@ -702,7 +713,25 @@ export async function computeRunCost(runId: string, orgId: string): Promise<numb
       total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
     })
     .from(llmUsage)
-    .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, orgId)));
+    .where(
+      and(
+        eq(llmUsage.runId, runId),
+        eq(llmUsage.orgId, orgId),
+        // Exclude the runner mirror row (source='runner', credential_source
+        // NULL) ONLY when this run also has proxy rows covering the same spend
+        // — otherwise a remote run with only its runner row would sum to 0.
+        sql`NOT (
+          ${llmUsage.source} = 'runner'
+          AND ${llmUsage.credentialSource} IS NULL
+          AND EXISTS (
+            SELECT 1 FROM ${llmUsage} AS proxy_row
+            WHERE proxy_row.run_id = ${runId}
+              AND proxy_row.org_id = ${orgId}
+              AND proxy_row.source = 'proxy'
+          )
+        )`,
+      ),
+    );
 
   return Number(llm?.total ?? 0);
 }
