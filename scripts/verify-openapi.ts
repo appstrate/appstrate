@@ -293,6 +293,7 @@ const expectedEndpoints = [
   // Meta
   "GET /api/openapi.json",
   "GET /api/docs",
+  "GET /api/version",
 
   // Notifications
   "GET /api/notifications",

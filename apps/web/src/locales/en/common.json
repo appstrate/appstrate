@@ -32,6 +32,8 @@
   "nav.library": "Library",
   "nav.appSettings": "App Settings",
   "nav.credits": "Credits",
+  "nav.updateAvailable": "Update available: {{version}}",
+  "nav.updateAvailableTooltip": "A newer Appstrate release is available — open the upgrade guide",
   "btn.cancel": "Cancel",
   "btn.save": "Save",
   "btn.delete": "Delete",
