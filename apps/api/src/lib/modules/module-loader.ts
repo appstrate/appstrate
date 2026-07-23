@@ -504,7 +504,7 @@ export async function applyModuleFeatures(base: AppConfig): Promise<AppConfig> {
  * `manifest.dependencies` topological sort) defines priority — modules with
  * no dependencies keep the order they appear in `MODULES`.
  *
- * Example: `MODULES=cloud,quota` — if both provide `beforeRun`,
+ * Example: `MODULES=cloud,quota` — if both provide `beforeUsage`,
  * cloud runs first. To force ordering regardless of env order, add
  * `dependencies: ["cloud"]` on quota so the topo sort always places cloud
  * earlier.

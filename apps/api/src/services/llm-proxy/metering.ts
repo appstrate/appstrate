@@ -13,11 +13,10 @@
  *     errors so a metering failure never breaks a successful LLM call.
  */
 
-import { db } from "@appstrate/db/client";
-import { llmUsage } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeTokenCost } from "@appstrate/afps-runtime/runner";
+import { recordLlmUsage } from "../llm-usage-ledger.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 import {
@@ -149,6 +148,12 @@ export async function tapSseUsage(
 export interface RecordUsageInputs {
   principal: LlmProxyPrincipal;
   runId: string | null;
+  /**
+   * Chat session this call belongs to, propagated from the VALIDATED loopback
+   * bearer's claims (never a spoofable header). Only set for chat's built-in
+   * (ai-sdk → proxy) path; null for headless/CLI proxy calls.
+   */
+  chatSessionId: string | null;
   /** The Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
   presetId: string;
   resolved: ResolvedModel;
@@ -157,15 +162,15 @@ export interface RecordUsageInputs {
 }
 
 /**
- * Insert one `llm_usage` row (source="proxy"). Metering failures MUST NOT
- * break a successful LLM call — the caller already consumed the response
- * bytes — so DB errors are logged and swallowed (ops reconcile from upstream
- * invoices).
+ * Insert one `llm_usage` row (source="proxy") via the single ledger writer.
+ * Metering failures MUST NOT break a successful LLM call — the caller already
+ * consumed the response bytes — so DB errors are logged and swallowed (ops
+ * reconcile from upstream invoices).
  */
 export async function recordProxyUsage(inputs: RecordUsageInputs): Promise<void> {
   if (!inputs.usage) return;
   try {
-    await db.insert(llmUsage).values({
+    await recordLlmUsage({
       source: "proxy",
       orgId: inputs.principal.orgId,
       apiKeyId: inputs.principal.kind === "api_key" ? inputs.principal.apiKeyId : null,
@@ -174,11 +179,17 @@ export async function recordProxyUsage(inputs: RecordUsageInputs): Promise<void>
       // `principal.orgId` — the route validates the caller-supplied
       // `X-Run-Id` before the upstream call (`assertRunAttributable`), and
       // the composite FK `llm_usage(run_id, org_id) → runs(id, org_id)`
-      // enforces it structurally for every new row.
+      // enforces it structurally for every new row. A row is attributed to at
+      // most one context (ledger check `llm_usage_context_single`), so a
+      // run-pinned call never also carries a chat session id — runId wins.
       runId: inputs.runId,
+      chatSessionId: inputs.runId ? null : inputs.chatSessionId,
       model: inputs.presetId,
       realModel: inputs.resolved.modelId,
       api: inputs.resolved.apiShape,
+      // Which credential set reached the provider: platform (system) models vs
+      // the org's own key. The resolved model already carries the flag.
+      credentialSource: inputs.resolved.isSystemModel ? "system" : "org",
       inputTokens: inputs.usage.inputTokens,
       outputTokens: inputs.usage.outputTokens,
       cacheReadTokens: inputs.usage.cacheReadTokens ?? null,
@@ -217,6 +228,8 @@ export function computeCostUsd(usage: UpstreamUsage, cost: ModelCost | null): nu
 export interface MeteredForwardContext {
   principal: LlmProxyPrincipal;
   runId: string | null;
+  /** Chat session (from the validated loopback token) — see {@link RecordUsageInputs.chatSessionId}. */
+  chatSessionId: string | null;
   /** The Appstrate preset id (stored as `llm_usage.model`). */
   presetId: string;
   resolved: ResolvedModel;
@@ -342,6 +355,7 @@ export async function forwardMeteredResponse(
     recordProxyUsage({
       principal: ctx.principal,
       runId: ctx.runId,
+      chatSessionId: ctx.chatSessionId,
       presetId: ctx.presetId,
       resolved: ctx.resolved,
       usage,

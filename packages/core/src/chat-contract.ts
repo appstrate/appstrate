@@ -63,6 +63,12 @@ export type SubscriptionChatResolution =
 export interface ChatUsageRecord {
   orgId: string;
   userId: string;
+  /**
+   * Chat session the turn belongs to — stored as `llm_usage.chat_session_id`.
+   * Null for an ephemeral turn with no persisted session (the row is then
+   * un-attributed to any context).
+   */
+  chatSessionId: string | null;
   /** Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
   presetId: string;
   /** Real upstream model id — stored as `llm_usage.real_model`. */
@@ -73,7 +79,14 @@ export interface ChatUsageRecord {
   outputTokens: number;
   cacheReadTokens?: number | null;
   cacheWriteTokens?: number | null;
-  costUsd: number;
+  /**
+   * Model's catalog per-token pricing ({@link SubscriptionChatModel.cost}
+   * shape), or null when the catalog has none. The platform seam computes the
+   * equivalent USD cost from this + the token counts using the SAME shared
+   * formula as the proxy/runner paths — the chat engine passes rates, not a
+   * pre-computed dollar figure, so all three producers can't drift.
+   */
+  cost: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null;
   durationMs: number;
 }
 

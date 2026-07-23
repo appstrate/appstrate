@@ -66,6 +66,7 @@ describe("proxyLlmCall — OAuth-subscription rejection", () => {
           userId: ctx.user.id,
         },
         runId: null,
+        chatSessionId: null,
         upstreamPath: "/v1/responses",
         incomingHeaders: new Headers(),
         rawBody: new TextEncoder().encode(JSON.stringify({ model: model.id })),

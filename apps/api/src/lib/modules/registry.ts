@@ -20,9 +20,13 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { getClientIp } from "../client-ip.ts";
-import { listLlmUsageForRun } from "../../services/state/runs.ts";
+import { listLlmUsage, getSettledFrontierId } from "../../services/state/runs.ts";
 import { dispatchInProcess } from "../platform-app.ts";
-import { recordChatUsage, resolveSubscriptionChatModel } from "../../services/chat-subscription.ts";
+import {
+  recordChatUsage,
+  resolveSubscriptionChatModel,
+  checkUsageAllowed,
+} from "../../services/chat-subscription.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -86,13 +90,13 @@ export function getModuleRegistry(): string[] {
 /**
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
- * minimal — `runs.listLlmUsage` (the cloud billing module's per-run ledger
- * read), `inProcess.dispatch`, and the chat seam
- * (`resolveSubscriptionChatModel` + `recordChatUsage`) by which the chat module
- * drives the single generic in-process Pi chat engine for oauth-subscription
- * models and meters it — the module resolves credentials/tokens + records usage
- * through here because it has no DB access. See the `PlatformServices` doc in
- * core for the razor and the history of the previous (chat-era) broad surface.
+ * minimal — `usage.list` / `usage.settledFrontier` (the cloud metering module's cursor
+ * sweep of the `llm_usage` ledger), `inProcess.dispatch`, and the chat seam
+ * (`resolveSubscriptionChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
+ * which the chat module drives the single generic in-process Pi chat engine,
+ * meters it, and gates admission — the module resolves credentials/tokens,
+ * records usage, and gates through here because it has no DB access. See the
+ * `PlatformServices` doc in core for the razor.
  */
 function buildPlatformServices(): PlatformServices {
   return {
@@ -105,18 +109,21 @@ function buildPlatformServices(): PlatformServices {
       // that tag telemetry or key rate buckets by IP get identical semantics.
       clientIp: getClientIp,
     },
-    runs: {
-      listLlmUsage: listLlmUsageForRun,
+    usage: {
+      list: listLlmUsage,
+      settledFrontier: getSettledFrontierId,
     },
     inProcess: {
       // In-process self-dispatch through the full platform middleware chain.
       dispatch: dispatchInProcess,
     },
     // Chat seam — the chat module resolves a subscription model's real binding +
-    // fresh token (credential resolution stays server-side) and meters each turn
-    // through these, since it has no DB access.
+    // fresh token (credential resolution stays server-side), meters each turn,
+    // and gates non-subscription admission through these, since it has no DB
+    // access.
     resolveSubscriptionChatModel,
     recordChatUsage,
+    checkUsageAllowed,
   };
 }
 

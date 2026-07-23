@@ -55,8 +55,8 @@ import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { db, type Db } from "@appstrate/db/client";
-import { llmUsage } from "@appstrate/db/schema";
-import { sql } from "drizzle-orm";
+import type { UsageRecordedParams } from "@appstrate/core/module";
+import { recordLlmUsage, type CredentialSource } from "../llm-usage-ledger.ts";
 import type { AppScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
@@ -77,6 +77,12 @@ export interface PersistingEventSinkOptions {
    * ledger writes.
    */
   writeLedger?: boolean;
+  /**
+   * Run's model source (`"system"` platform-provided, `"org"` BYOK, or null)
+   * — stamped as `llm_usage.credential_source` on the runner row so the
+   * attribution matches the proxy path. Only consulted when {@link writeLedger}.
+   */
+  modelSource?: string | null;
 }
 
 export type AggregatingEventSinkOptions = Pick<PersistingEventSinkOptions, "scope" | "runId">;
@@ -94,11 +100,13 @@ export class PersistingEventSink implements EventSink {
   protected readonly scope: AppScope;
   protected lastAdapterError: string | null = null;
   private readonly writeLedger: boolean;
+  private readonly modelSource: string | null;
 
   constructor(opts: PersistingEventSinkOptions) {
     this.scope = opts.scope;
     this.runId = opts.runId;
     this.writeLedger = opts.writeLedger ?? false;
+    this.modelSource = opts.modelSource ?? null;
   }
 
   async handle(event: RunEvent): Promise<void> {
@@ -121,6 +129,7 @@ export class PersistingEventSink implements EventSink {
   protected async persist(event: RunEvent): Promise<void> {
     const adapterError = await persistRunEvent(db, this.scope, this.runId, event, {
       writeLedger: this.writeLedger,
+      modelSource: this.modelSource,
     });
     if (adapterError !== null) this.lastAdapterError = adapterError;
   }
@@ -136,13 +145,22 @@ export class PersistingEventSink implements EventSink {
  *
  * Returns the `appstrate.error.message` if this event was one, so the
  * caller can update its own `lastAdapterError` cache.
+ *
+ * When `executor` is a transaction and the caller must not broadcast the
+ * `onUsageRecorded` event until that transaction commits, it passes
+ * `opts.deferEmit`; the ledger write threads it straight through to
+ * {@link recordLlmUsage} (see {@link writeRunnerLedgerRow}).
  */
 export async function persistRunEvent(
   executor: Db,
   scope: AppScope,
   runId: string,
   event: RunEvent,
-  opts: { writeLedger?: boolean } = {},
+  opts: {
+    writeLedger?: boolean;
+    modelSource?: string | null;
+    deferEmit?: (event: UsageRecordedParams) => void;
+  } = {},
 ): Promise<string | null> {
   switch (event.type) {
     case "output.emitted": {
@@ -228,7 +246,12 @@ export async function persistRunEvent(
       // is best-effort by its own contract (see writeRunnerLedgerRow's
       // try/catch) so it never aborts the surrounding transaction.
       if (opts.writeLedger) {
-        await writeRunnerLedgerRow(scope, runId, { cost, usage }, executor);
+        await writeRunnerLedgerRow(
+          scope,
+          runId,
+          { cost, usage, modelSource: opts.modelSource },
+          { executor, deferEmit: opts.deferEmit },
+        );
         // Best-effort live broadcast — never blocks the ingestion hot
         // path nor fails it. The broadcaster throttles per-run to
         // avoid flooding SSE subscribers under bursty metric emission
@@ -325,18 +348,27 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
  * The runner emits cumulative running totals on every `appstrate.metric`
  * event, so the row tracks the latest total seen — concurrent writers
  * (a later metric event, the finalize-time fallback) UPSERT into the
- * partial unique index `uq_llm_usage_runner_run_id`. The conflict
- * clause is monotonic: an UPDATE only takes effect when the incoming
- * `cost_usd` is at least as large as the stored value, so:
+ * partial unique index `uq_llm_usage_runner_run_id`. The conflict clause
+ * is two-level monotonic: an UPDATE takes effect when the incoming
+ * `cost_usd` is strictly larger than the stored value, OR the cost is
+ * equal and the incoming total token count is strictly larger. The token
+ * tiebreak keeps a zero-cost model's snapshot advancing (cost stays 0
+ * while tokens climb), so:
  *
  *   - rapid-fire metric events keep the row in sync with the latest total
  *   - a finalize-fallback emit with a smaller `result.cost` (e.g. when
  *     a fresh metric already landed) cannot regress the bill
- *   - reorder is safe — the highest-seen cost wins regardless of arrival
+ *   - reorder is safe — the highest-seen total wins regardless of arrival
  *     order
  *
  * Best-effort: metric persistence MUST NOT fail the ingestion path.
  * Errors are logged.
+ *
+ * `opts.executor` writes inside the ingestion transaction; `opts.deferEmit`
+ * (paired with it) collects the `onUsageRecorded` event so the ingestion layer
+ * broadcasts it AFTER commit instead of inside the open transaction — see
+ * {@link recordLlmUsage}. The finalize-fallback caller passes neither: it runs
+ * outside any transaction, so the event fires inline the instant the row commits.
  */
 export async function writeRunnerLedgerRow(
   scope: AppScope,
@@ -344,48 +376,52 @@ export async function writeRunnerLedgerRow(
   row: {
     cost: number | null;
     usage: TokenUsage | null;
+    /** Run's model source — stamped as `credential_source` (see below). */
+    modelSource?: string | null;
   },
-  executor: Db = db,
+  opts: {
+    /** Executor — pass the ingestion transaction on the metric hot path. */
+    executor?: Db;
+    /**
+     * Deferred-emit collector threaded through to {@link recordLlmUsage}. Set
+     * by the transactional metric path so the broadcast happens post-commit.
+     */
+    deferEmit?: (event: UsageRecordedParams) => void;
+  } = {},
 ): Promise<void> {
   // Skip degenerate events with neither usage nor cost — nothing to bill
   // or audit.
   if (row.cost === null && !row.usage) return;
 
   try {
-    await executor
-      .insert(llmUsage)
-      .values({
+    // The single ledger writer performs the monotonic upsert against the
+    // partial unique index (highest cumulative total wins) and broadcasts
+    // `onUsageRecorded` (deferred to post-commit when `deferEmit` is set).
+    // Best-effort by contract: metric persistence MUST NOT fail the ingestion
+    // path, so errors are logged, never rethrown.
+    await recordLlmUsage(
+      {
         source: "runner",
         orgId: scope.orgId,
         runId,
+        credentialSource: coerceCredentialSource(row.modelSource),
         inputTokens: row.usage?.input_tokens ?? 0,
         outputTokens: row.usage?.output_tokens ?? 0,
         cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
         cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
         costUsd: row.cost ?? 0,
-      })
-      // Upsert via the partial unique index. `setWhere` keeps the
-      // update monotonic — only the highest-seen cumulative total ever
-      // wins, so out-of-order metric events and the finalize fallback
-      // can never regress the recorded cost. Token columns are bumped
-      // alongside the cost so the snapshot stays internally consistent
-      // (cost ≥ stored cost ⇒ tokens are at least as large too).
-      .onConflictDoUpdate({
-        target: llmUsage.runId,
-        targetWhere: sql`source = 'runner' AND run_id IS NOT NULL`,
-        set: {
-          inputTokens: sql`EXCLUDED.input_tokens`,
-          outputTokens: sql`EXCLUDED.output_tokens`,
-          cacheReadTokens: sql`EXCLUDED.cache_read_tokens`,
-          cacheWriteTokens: sql`EXCLUDED.cache_write_tokens`,
-          costUsd: sql`EXCLUDED.cost_usd`,
-        },
-        setWhere: sql`EXCLUDED.cost_usd >= ${llmUsage.costUsd}`,
-      });
+      },
+      { executor: opts.executor, onConflict: "runner-monotonic", deferEmit: opts.deferEmit },
+    );
   } catch (err) {
     logger.error("Failed to write runner ledger row", {
       runId,
       error: getErrorMessage(err),
     });
   }
+}
+
+/** Narrow a run's free-form `model_source` to the `credential_source` enum. */
+function coerceCredentialSource(modelSource: string | null | undefined): CredentialSource | null {
+  return modelSource === "system" || modelSource === "org" ? modelSource : null;
 }

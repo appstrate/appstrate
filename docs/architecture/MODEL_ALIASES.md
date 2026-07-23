@@ -40,8 +40,8 @@ the alias never reaches upstream. Two layers hide the backing from users:
      calls).
 
 The usage ledger (`llm_usage`) keeps the real id privately in `real_model` for
-billing/audit; the only service accessor (`listLlmUsageForRun`) projects just
-`id`/`costUsd`/`source`.
+billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as
+`PlatformServices.usage.list`) never projects `real_model`/`api`.
 
 ## Error surfaces: synthesize, never scrub
 

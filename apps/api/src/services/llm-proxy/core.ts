@@ -40,6 +40,12 @@ export interface ProxyCallInputs {
   principal: LlmProxyPrincipal;
   /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
   runId: string | null;
+  /**
+   * Forwarded to `llm_usage.chat_session_id`. Read from the VALIDATED loopback
+   * bearer's claims (chat's built-in ai-sdk path), never a spoofable header;
+   * null for headless/CLI proxy calls.
+   */
+  chatSessionId: string | null;
   /** Request URL path *after* the route prefix, e.g. `/v1/chat/completions`. */
   upstreamPath: string;
   incomingHeaders: Headers;
@@ -255,7 +261,14 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   return forwardMeteredResponse(
     upstream,
     inputs.adapter,
-    { principal: inputs.principal, runId: inputs.runId, presetId, resolved, started },
+    {
+      principal: inputs.principal,
+      runId: inputs.runId,
+      chatSessionId: inputs.chatSessionId,
+      presetId,
+      resolved,
+      started,
+    },
     {
       swap,
       cache: cacheKeyForWrite

@@ -11,7 +11,7 @@
  * pass through here — they go straight to {@link prepareAndExecuteRun}
  * from `runs.ts` / `scheduler.ts` / `inline-run.ts`. Both paths share the
  * same building blocks: `runPreflightGates` (rate/concurrency/timeout +
- * `beforeRun` hook), the connection-cascade resolver, the state-layer
+ * `beforeUsage` hook), the connection-cascade resolver, the state-layer
  * `createRun` insert, and the `onRunStatusChange` event.
  *
  * Spec: docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md §6.2.
@@ -136,7 +136,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
     };
   }
 
-  // --- Shared preflight: rate, concurrency, timeout cap, beforeRun hook.
+  // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.
   const gates = await runPreflightGates({
     orgId,
@@ -224,6 +224,16 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   //     sink bookkeeping consistently across both origins).
   const agentDenorm = extractRunAgentDenorm(agent);
 
+  // Note: `modelSource` is deliberately NOT stamped on remote runs — this path
+  // resolves no platform model (the CLI/runner executes on its own host with
+  // its own model + credentials), so `runs.model_source` stays NULL. Runner
+  // ledger rows (source="runner") inherit that NULL `credential_source` and are
+  // therefore never attributed to platform credentials. That is the invariant
+  // that prevents double-counting: a remote run's system-model inference flows
+  // through `/api/llm-proxy`, whose proxy rows ARE stamped
+  // `credential_source:"system"` and carry the attribution; the null-stamped
+  // runner row is the un-attributed mirror. (The platform path resolves a model
+  // at creation and stamps `modelSource` — see `run-context-builder.ts`.)
   await createRunRow(
     { orgId, applicationId },
     {

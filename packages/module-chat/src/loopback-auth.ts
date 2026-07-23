@@ -66,6 +66,12 @@ interface LoopbackClaims extends LoopbackIdentity {
   permissions: string[];
   /** Whether the token grants the first-party-loopback capability. */
   firstPartyLoopback: boolean;
+  /**
+   * Chat session this token's usage should be attributed to. Signed INTO the
+   * claims so the llm-proxy reads it from a validated token, never a spoofable
+   * header. Absent on the MCP bearer and on ephemeral (unpersisted) turns.
+   */
+  chatSessionId?: string | null;
 }
 
 function sign(payload: string): string {
@@ -78,6 +84,7 @@ function mint(
   permissions: readonly string[],
   firstPartyLoopback: boolean,
   ttlMs: number,
+  chatSessionId?: string | null,
 ): string {
   const payload = Buffer.from(
     JSON.stringify({
@@ -85,6 +92,7 @@ function mint(
       exp: Date.now() + ttlMs,
       permissions: [...permissions],
       firstPartyLoopback,
+      ...(chatSessionId ? { chatSessionId } : {}),
     } satisfies LoopbackClaims),
   ).toString("base64url");
   return `chatloop_${payload}.${sign(payload)}`;
@@ -99,8 +107,17 @@ function mint(
  * — blocking run long-polls) passes a longer `ttlMs`. The token stays
  * least-privilege and process-local either way.
  */
-export function mintLoopbackToken(identity: LoopbackIdentity, opts?: { ttlMs?: number }): string {
-  return mint(identity, INFERENCE_PERMISSIONS, true, opts?.ttlMs ?? TOKEN_TTL_MS);
+export function mintLoopbackToken(
+  identity: LoopbackIdentity,
+  opts?: { ttlMs?: number; chatSessionId?: string | null },
+): string {
+  return mint(
+    identity,
+    INFERENCE_PERMISSIONS,
+    true,
+    opts?.ttlMs ?? TOKEN_TTL_MS,
+    opts?.chatSessionId,
+  );
 }
 
 /**
@@ -167,6 +184,12 @@ export const chatLoopbackStrategy: AuthStrategy = {
       // is server-minted from a process-local secret (see top-of-file rationale).
       firstPartyLoopback: claims.firstPartyLoopback === true,
       permissions,
+      // Surface the signed chat-session attribution as opaque strategy metadata
+      // (→ `c.get("authExtra")`). The llm-proxy stamps it on the usage row; only
+      // present on the inference bearer for a persisted turn.
+      ...(typeof claims.chatSessionId === "string"
+        ? { extra: { chatSessionId: claims.chatSessionId } }
+        : {}),
     };
   },
 };

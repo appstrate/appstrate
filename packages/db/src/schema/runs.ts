@@ -17,11 +17,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
-import { runStatusEnum, llmUsageSourceEnum, runOriginEnum } from "./enums.ts";
+import { runStatusEnum, llmUsageSourceEnum, runOriginEnum, credentialSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
 import { apiKeys, organizations, modelProviderCredentials } from "./organizations.ts";
 import { packages } from "./packages.ts";
+import { chatSessions } from "./chat.ts";
 
 /**
  * Closed shape of the `runs.result` terminal payload written by
@@ -456,6 +457,14 @@ export const llmUsage = pgTable(
     runId: text("run_id").references(() => runs.id, {
       onDelete: "cascade",
     }),
+    // Chat attribution — set on rows metered for a chat turn (source='proxy',
+    // run_id NULL). Cascades with the session, mirroring the run_id FK above:
+    // a ledger row has no analytical value once its context is gone. A row is
+    // attributable to at most one context — see the run_id/chat_session_id
+    // single-context check below.
+    chatSessionId: text("chat_session_id").references(() => chatSessions.id, {
+      onDelete: "cascade",
+    }),
     // Preset id the caller asked for (what the CLI / client picked from
     // the model catalog). Kept alongside `realModel` for audit. Required
     // for proxy rows, optional for runner rows (the runner may not know
@@ -465,12 +474,18 @@ export const llmUsage = pgTable(
     // preset via `loadModel()`. Optional on runner rows. SERVER-SIDE ONLY —
     // for an aliased model this is the hidden backing id; never serialize it
     // on any caller-facing surface (route, DTO, SSE, webhook) —
-    // `listLlmUsageForRun` deliberately selects only id/costUsd/source. Same
+    // `listLlmUsage` deliberately never selects real_model/api. Same
     // for `api` below (backing protocol family).
     realModel: text("real_model"),
     // Protocol family: "openai-completions", "anthropic-messages", …
     // Optional on runner rows.
     api: text("api"),
+    // Which credential set reached the upstream provider: platform-provided
+    // ("system") or the org's own key/subscription ("org"). Nullable: every
+    // new row is stamped, but rows predating this column stay NULL. Historical
+    // run rows are backfilled from `runs.model_source`; chat / un-attributed
+    // rows stay NULL (a downstream consumer treats NULL as non-attributable).
+    credentialSource: credentialSourceEnum("credential_source"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     cacheReadTokens: integer("cache_read_tokens"),
@@ -487,6 +502,7 @@ export const llmUsage = pgTable(
     index("idx_llm_usage_api_key_id").on(table.apiKeyId),
     index("idx_llm_usage_user_id").on(table.userId),
     index("idx_llm_usage_run_id").on(table.runId),
+    index("idx_llm_usage_chat_session_id").on(table.chatSessionId),
     index("idx_llm_usage_org_created").on(table.orgId, table.createdAt),
     // Proxy-source dedup: request_id is unique across all proxy rows.
     uniqueIndex("uq_llm_usage_proxy_request_id")
@@ -512,6 +528,18 @@ export const llmUsage = pgTable(
       columns: [table.runId, table.orgId],
       foreignColumns: [runs.id, runs.orgId],
     }).onDelete("cascade"),
+    // Tenant-integrity FK for chat attribution — mirror of the CRIT-07 run FK
+    // above: a ledger row's `chat_session_id` is inseparable from its `org_id`,
+    // so a caller-supplied session id can never attribute spend onto another
+    // tenant's session. NULL `chat_session_id` rows pass (MATCH SIMPLE). Also
+    // created NOT VALID in the migration (Drizzle cannot express NOT VALID) so
+    // existing rows are never scanned at apply time. ON DELETE CASCADE mirrors
+    // the single-column `chat_session_id` FK above.
+    foreignKey({
+      name: "llm_usage_chat_session_id_org_id_fk",
+      columns: [table.chatSessionId, table.orgId],
+      foreignColumns: [chatSessions.id, chatSessions.orgId],
+    }).onDelete("cascade"),
     // INSERT invariant: exactly one principal. After FK cleanup (api_key /
     // user deleted) both may become NULL — the row survives for audit /
     // billing retention, so we don't enforce "exactly one" forever.
@@ -519,6 +547,9 @@ export const llmUsage = pgTable(
     // Source-consistency invariants.
     check("llm_usage_proxy_has_request_id", sql`source <> 'proxy' OR request_id IS NOT NULL`),
     check("llm_usage_runner_has_run_id", sql`source <> 'runner' OR run_id IS NOT NULL`),
+    // Attribution is to at most one context: a ledger row belongs to a run OR
+    // a chat session, never both.
+    check("llm_usage_context_single", sql`run_id IS NULL OR chat_session_id IS NULL`),
   ],
 );
 

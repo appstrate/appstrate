@@ -59,8 +59,8 @@ describe("runPreflightGates", () => {
     });
     expect(res.ok).toBe(true);
     if (res.ok) {
-      // No `beforeRun` hook is registered in core tests → hook timing is 0.
-      expect(res.timings.beforeRunHookMs).toBe(0);
+      // No `beforeUsage` hook is registered in core tests → hook timing is 0.
+      expect(res.timings.beforeUsageHookMs).toBe(0);
       expect(typeof res.timings.rateLimitMs).toBe("number");
       expect(typeof res.timings.concurrencyMs).toBe("number");
       expect(res.timings.rateLimitMs).toBeGreaterThanOrEqual(0);

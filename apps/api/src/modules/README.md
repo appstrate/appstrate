@@ -85,13 +85,13 @@ or `ctx.applyMigrations` — those were removed in core 2.23.0.
 2. Better Auth tables (jwks, oauth_clients, …) are resolved by the adapter
    directly from the core barrel — no module-side registration.
 3. Core never imports from `apps/api/src/modules/`. If core needs data from a
-   module, use a hook (`beforeRun`, `afterRun`) — never a direct import. A
+   module, use a hook (`beforeUsage`, `afterRun`) — never a direct import. A
    module reads another module's data via the platform API/events, never a
    cross-module SQL join.
 4. **Need a separate tenant?** A module that must own a physically isolated
    database (e.g. the proprietary `@appstrate/cloud` module) runs its own
    database and migrations, and reads platform data through `ctx.services`
-   (e.g. `services.runs.listLlmUsage`), never a cross-DB join.
+   (e.g. `services.usage.list`), never a cross-DB join.
 
 ## Permissions
 
@@ -206,7 +206,7 @@ Full design: `docs/architecture/OBSERVABILITY.md`.
 
 ## Hooks and events
 
-- **Hooks** (`callHook`, first-match-wins): `beforeRun`, `afterRun`, `beforeSignup`. The first module that provides a hook is called, subsequent modules are skipped. `beforeRun` gates a run, `afterRun` returns a metadata patch persisted on the final run record, `beforeSignup` gates signup.
+- **Hooks** (`callHook`, first-match-wins): `beforeUsage`, `afterRun`, `beforeSignup`. The first module that provides a hook is called, subsequent modules are skipped. `beforeUsage` gates metered LLM usage on a surface — a discriminated union over `run` (agent run) and `chat` (chat turn); `afterRun` returns a metadata patch persisted on the final run record, `beforeSignup` gates signup.
 - **Events** (`emitEvent`, broadcast-to-all): `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`. Handlers run for side effects only; errors in one handler are isolated and do not block others.
 
 Names are defined in `packages/core/src/module.ts` (`ModuleHooks`, `ModuleEvents`). To add a new hook or event, update that file first so both platform and modules see the same contract.
