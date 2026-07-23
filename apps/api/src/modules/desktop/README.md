@@ -1,89 +1,75 @@
 # Desktop module
 
-Bridge between platform-hosted agents and a Chromium surface running on the
-user's own machine — the Appstrate Desktop Electron companion (`apps/desktop/`).
-The agent stays in its sandbox; the browser, its cookies and its logged-in
-sessions stay on the user's hardware.
+Experimental bridge between an agent run and a Chromium surface on the run
+owner's machine. Enable the API module with `MODULES=<default>,desktop`.
 
-**Status: experimental, opt-in.** Not in the default `MODULES`. Enable with
-`MODULES=<default>,desktop`.
+## Agent opt-in
+
+The module being enabled is not enough. An agent must explicitly select the
+runtime capability and declare its network boundary:
+
+```json
+{
+  "runtime_tools": ["desktop_browser"],
+  "desktop_browser": {
+    "authorized_uris": ["https://portal.example.com/**"]
+  }
+}
+```
+
+`browser.evaluate` additionally requires `desktop_browser_evaluate`. Keep that
+capability disabled unless arbitrary page JavaScript is essential.
+
+When `desktop_browser` is absent, the launcher may skip the sidecar and the
+sidecar does not advertise `desktop_browser`, `desktop_download` or
+`desktop_batch`.
 
 ## Surfaces
 
-| Route                            | Auth           | What                                                               |
-| -------------------------------- | -------------- | ------------------------------------------------------------------ |
-| `GET /api/desktop/bridge`        | session cookie | WebSocket upgrade the desktop app connects to (one per user)       |
-| `GET /api/desktop/me/status`     | cookie/API key | is MY desktop connected                                            |
-| `POST /api/desktop/me/command`   | cookie/API key | drive my own desktop (smoke tests, CLI) — no substitution          |
-| `POST /internal/desktop-command` | run token      | agent path, backs the `desktop_browser` runtime tool, substitution |
+| Route                                | Auth           | Purpose                                          |
+| ------------------------------------ | -------------- | ------------------------------------------------ |
+| `GET /api/desktop/bridge?protocol=1` | session cookie | versioned WebSocket used by the native client    |
+| `GET /api/desktop/me/status`         | user auth      | report whether the caller's desktop is connected |
+| `POST /api/desktop/me/command`       | user auth      | direct smoke-test primitives only                |
+| `POST /internal/desktop-command`     | run token      | capability-gated agent path                      |
+| `GET /internal/desktop-download/:id` | run token      | bounded download stream owned by the run         |
 
-All `/api/desktop/*` routes are user-scoped and org-agnostic (whitelisted in
-core `skipOrgContext` — path-based, harmless when the module is off).
+The public command route deliberately excludes platform-mediated methods such
+as credential capture, download status and batch execution.
 
-## Credential substitution — how agents use passwords they can never read
+## Security invariants
 
-The agent's LLM writes `{{field}}` placeholders; the platform resolves them
-AFTER the command has left the model:
+- The webapp and agent browser use different persistent Electron partitions.
+  The agent browser cannot inherit the Better Auth session.
+- Remote CDP is disabled unless a source build explicitly opts in.
+- Electron permission requests default to denied.
+- Remote Appstrate instances require HTTPS. Loopback development may use HTTP.
+- The WebSocket validates the origin, protocol version and frame size.
+- Pending commands are tied to the authenticated socket and fail immediately
+  on disconnect.
+- One process-local lease lets only one run control a user's browser. Terminal
+  run events clear the lease, policy cache, secrets, ephemeral credentials and
+  downloads. A five-minute idle expiry is the crash fallback.
+- Every agent command carries its declared URI boundary. The desktop checks
+  the current page or target and blocks top-level navigation outside it.
+- Credential substitution is restricted to `browser.fill`. A run cannot mix
+  substituted credentials with arbitrary `browser.evaluate`, in either order.
+- `browser.capture_credential` is declarative. It accepts cookie,
+  `localStorage` or `sessionStorage` selectors, validates the exact auth and
+  credential schema, applies field and byte limits, and returns field names
+  only. It never executes agent-provided JavaScript.
+- Captured credentials remain in the run-scoped ephemeral store and are
+  deleted on terminal status.
+- Downloads use either an authorized direct URL or a selector clicked by the
+  same command. Pending correlation expires after ten seconds. Completion
+  metadata, terminal transitions and size ceilings are validated server-side,
+  and retrieval remains bounded while streaming.
 
-1. The agent calls `desktop_browser` with
-   `{ method: "browser.fill", params: { selector: "#pw", value: "{{password}}" },
-integration_id: "@scope/somesite", substitute_params: true }`.
-2. `/internal/desktop-command` verifies the run token, then applies the same
-   fail-closed gate as `/internal/integration-credentials`: the running agent
-   must DECLARE the integration in its manifest dependencies.
-3. `resolveLiveIntegrationCredentials` decrypts the run actor's connection for
-   that integration; every `{{field}}` in `params` is replaced server-side.
-4. The resolved values travel platform → WS → desktop → DOM. They never enter
-   the agent container, the sidecar reply, or the LLM context.
-5. **Both directions are covered**: every value ever substituted for a run is
-   remembered (`secret-scrub.ts`) and redacted from EVERY subsequent desktop
-   reply of that run. An agent that fills a password and then evaluates
-   `document.querySelector('#pw').value` gets `[redacted:substituted-credential]`
-   back, not the secret.
+Reply scrubbing remains defense in depth. The primary boundary is preventing
+arbitrary JavaScript from sharing a run with substituted or captured secrets.
 
-Credentials-wise, a site without an API is just an integration with an
-`api_key`/`custom` auth declaring the fields (`email`, `password`, …) and no
-tools — the user connects it once via the normal connect flow, agents fill
-login forms with placeholders forever after.
+## Process-local boundary
 
-## Security model
-
-- **CSWSH origin guard** on the WS upgrade: a cookie-carrying handshake is not
-  covered by CORS; browser-borne upgrades must come from `TRUSTED_ORIGINS` /
-  `APP_URL`. No `Origin` (native clients, e.g. the Electron bridge) passes —
-  that attack class is browser-only. `SameSite=lax` already blocks modern
-  browsers; the guard is the second lock.
-- **One desktop per user, keyed by userId**: the internal route dispatches to
-  the RUN OWNER's desktop only; user-scoped routes only ever reach the
-  caller's own client. Runs without an owning user (end-user / remote) get 403.
-- **Substitution gate**: run token + agent-declares-integration + actor-scoped
-  connection resolution — a leaked run token cannot enumerate or exfiltrate
-  other integrations' secrets.
-- **Reply scrubbing**: see above — closes the read-back exfiltration path.
-- Error messages from the desktop are scrubbed too before reaching the agent.
-
-## Coupling with runtime images
-
-`desktop_browser` is registered in `RUNTIME_INJECTED_TOOLS`
-(`packages/runner-pi/src/runtime-tools/`), and `buildMcpDirectFactories`
-refuses to start a run when the sidecar doesn't advertise every listed tool —
-so runtime images MUST be rebuilt when the tool list changes
-(`bun run docker:build:sidecar && bun run docker:build:runtime`). The tool is
-always present in the image; with the module disabled, calling it surfaces a
-clean 404 from `/internal/desktop-command`.
-
-## Process-local state
-
-The client registry and the scrub store live in process memory:
-
-- multi-replica deployments need sticky routing or a Redis fan-out (not built);
-- `bun --hot` empties both while clients keep their sockets — restart the API
-  without `--hot` after touching bridge code, or the tray says "connected"
-  while the platform says 503.
-
-## Not built (yet)
-
-- Redis fan-out for multi-replica.
-- UI surface (the SPA gets `features.desktop` but nothing consumes it).
-- Per-integration allowlist of which METHODS may carry substituted values
-  (today any method can; the scrubber is the backstop).
+The registry, leases and run-scoped stores intentionally remain process-local.
+A multi-replica deployment therefore needs sticky routing. Redis fan-out is
+not part of this experimental scope.

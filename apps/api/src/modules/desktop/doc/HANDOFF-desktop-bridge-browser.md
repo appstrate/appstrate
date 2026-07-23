@@ -1,94 +1,119 @@
-# Handoff — Pont desktop / browser Appstrate
+# Handoff du pont desktop et browser
 
-Reprise dans une autre conversation. État au 2026-07-23. Branche **`feat/desktop-bridge`** (worktree `worktrees/desktop-bridge`), instance de test **3100** (profil CLI `anon3100`, org TRACTR `23418a66`, app `app_6bc16f98`). L'app desktop Electron pointe sur 3100 (profil `bridge-3100`), port de debug CDP **9222**.
+État consolidé au 2026-07-23 sur `feat/desktop-bridge`.
 
----
+Ce document décrit le contrat actuel du code. Les expériences RQ, LesPAC,
+Craigslist et Kijiji ont servi à valider l'approche, mais leurs packages et
+scripts opérateur ne constituent pas le contrat du bridge.
 
-## 1. LIVRÉ (code committé + poussé sur `feat/desktop-bridge`)
+## Contrat produit
 
-### Saisie native (commit `8793fe66`)
+Le module API reste expérimental et opt-in via `MODULES`. Chaque agent doit
+aussi déclarer sa capacité:
 
-`browser.click` / `browser.fill` réécrits en **CDP natif** (`Input.dispatchMouseEvent`, `DOM.focus`+select-all+`Input.insertText`) → événements `isTrusted:true` au lieu de l'injection JS (`el.click()`/value-setter, `isTrusted:false`). C'était le tell détecté par les anti-bots. Ajout **`browser.selectOption`** (`<select>` natif ; garde-fou not-a-select). Injection JS supprimée de `browser-api.ts` (reste `waitForSelector`, gardé en `executeJavaScript` exprès : lecture seule, pas d'attach debugger = empreinte anti-bot plus faible qu'une version CDP).
+```json
+{
+  "runtime_tools": ["desktop_browser"],
+  "desktop_browser": {
+    "authorized_uris": ["https://portal.example.com/**"]
+  }
+}
+```
 
-- 3 endroits synchronisés pour toute nouvelle méthode : `apps/desktop/src/bridge/client.ts` (handler), `apps/api/src/modules/desktop/routes.ts` (enum `desktopCommandSchema` + `BATCHABLE_METHODS`) + `openapi/schemas.ts`, `packages/runner-pi/src/runtime-tools/desktop-browser/tool.ts` (schéma tool sidecar, **compilé dans l'image `appstrate-sidecar`** → `bun run build-sidecar` + restart 3100 requis pour l'exposer).
-- Types frontend régénérés (commit `8179dd7a`, `bun run generate:api`).
+`browser.evaluate` demande en plus `desktop_browser_evaluate`. Cette capacité
+est volontairement séparée car elle exécute du JavaScript arbitraire dans une
+session utilisateur.
 
-### Window handler (commit `a616db20`)
+Sans `desktop_browser`, le sidecar ne publie aucun outil desktop et le launcher
+peut conserver son chemin sans sidecar.
 
-`setWindowOpenHandler` sur le panneau navigateur (`main.ts`) : les liens `target="_blank"` / `window.open` **restent dans le panneau piloté** (deny popup + `loadURL`) au lieu de créer une fenêtre native détachée que le pont ne pilote pas. Indispensable pour les logins qui s'ouvrent en popup (RQ gov, la plupart des OAuth par redirection).
+## Architecture actuelle
 
-### Doc (commit `ebb805ef`)
+1. L'app Electron charge le SPA et le browser agent dans deux partitions
+   persistantes distinctes.
+2. Le bridge natif se connecte à
+   `/api/desktop/bridge?protocol=1` avec la session du panneau SPA.
+3. Le sidecar appelle `/internal/desktop-command` avec le token du run.
+4. L'API vérifie la capacité, les URI, le propriétaire et le bail exclusif du
+   browser.
+5. La commande JSON-RPC est exécutée séquentiellement sur le panneau browser.
+6. La réponse revient au run, avec scrubbing des valeurs sensibles en défense
+   additionnelle.
 
-`doc/concepts-nouveaux.md` : le credential éphémère run-scoped + la chaîne de sécurité (substitution allowlist + scrubbing + capture liée aux `authorized_uris` + garde CSWSH).
+Le registre, le bail, les credentials éphémères, les secrets de scrubbing et
+les téléchargements restent en mémoire dans le processus API.
 
----
+## Invariants de sécurité
 
-## 2. PROUVÉ / EXPLORÉ (tests, pas du code repo — packages sur 3100)
+- La session Better Auth du SPA n'est pas présente dans le browser agent.
+- Le CDP distant est désactivé en production. En développement, il faut
+  explicitement définir `APPSTRATE_DESKTOP_REMOTE_DEBUG=1`.
+- Les permissions Electron sont refusées par défaut.
+- HTTP est accepté uniquement sur loopback. Une instance distante doit être
+  en HTTPS.
+- Le WebSocket vérifie l'origine, la version du protocole et la taille des
+  frames.
+- Une déconnexion rejette immédiatement les commandes en attente.
+- Un seul run contrôle le browser d'un utilisateur. Un second run reçoit 409.
+- Le browser est remis sur `about:blank` lors d'un changement de propriétaire.
+- Chaque commande agent transporte les `authorized_uris`. Le desktop vérifie
+  la page ou la cible et bloque les navigations principales hors périmètre.
+- La substitution de credentials est limitée à `browser.fill`.
+- Un même run ne peut pas combiner substitution ou capture de credentials avec
+  `browser.evaluate`, quel que soit l'ordre.
+- `browser.capture_credential` accepte uniquement des sources déclaratives:
+  cookie, `localStorage`, `sessionStorage`, avec chemin JSON optionnel.
+- La capture vérifie l'intégration déclarée, l'auth exacte, ses
+  `authorized_uris`, les champs de `credentials.schema` et les limites de
+  taille.
+- Les credentials capturés restent éphémères et sont supprimés au statut
+  terminal du run.
 
-### Généricité de l'archi credentials — 3 sites d'annonces
+## Téléchargements
 
-Login à identifiants cachés (substitution serveur, agent aveugle) prouvé sur **LesPAC, Craigslist, Kijiji** (packages `@tractr/{lespac,craigslist,kijiji}` + agents login sur 3100).
+`browser.download` propose deux formes:
 
-- **Insight anti-bot majeur** : DataDome/Cloudflare gardent la **navigation** (chargement de page), pas la **frappe** dans un champ déjà rendu. Hybride qui marche : navigation organique (humain ou Claude via CDP), puis remplissage programmatique en aveugle.
-- **chrome-devtools MCP vs Electron** : sur Revenu Québec (Cloudflare), le Chrome du chrome-devtools MCP (`navigator.webdriver=true`, CDP permanent) est **bloqué** ; le browser Electron de l'app **passe** (même IP). C'est l'empreinte du navigateur qui compte.
+- une URL directe déjà autorisée;
+- un `selector`, enregistré puis cliqué par la même commande.
 
-### Automatisation Revenu Québec entreprise (gros morceau)
+L'ancien `capture: true`, qui laissait une fenêtre FIFO ouverte pour le
+prochain téléchargement, est supprimé. La corrélation expire après dix
+secondes. Les transitions terminales sont immuables, la taille et le SHA-256
+annoncés sont validés, le flux servi au run reste borné.
 
-Voir mémoire projet `appstrate-rq-entreprise-automation`. Packages sur 3100 (sources scratchpad `classifieds/rq-entreprise-*`) :
+Les octets passent par le storage en HTTPS, jamais par le WebSocket.
 
-- `@tractr/rq-entreprise` (intégration `custom` : `identifiant`+`mot_de_passe`).
-- `@tractr/rq-entreprise-web` v1.3.0 (skill) : login figé clicSÉQUR express (formulaire ASP.NET `AuthUtilisateur`, `batches/login.json`) + recette récupération communications + §6 données structurées + dossier **`scripts/`** (bulk opérateur CDP, paiements-export, boucle in-page + README).
-- `@tractr/rq-entreprise-login` v1.1.0 (connexion seule).
-- `@tractr/rq-entreprise-sync` v1.3.0 (archive communications → Drive, idempotent par hash).
-- **Login validé** : entrée organique revenuquebec.ca/entreprises → clicSÉQUR express (SAML → `services.mrq.gouv.qc.ca/AUTHLM/IdentificationUtilisateur.aspx`, Cloudflare franchi) → fill `#AuthUtilisateur1_...txtCodeUtils`/`txtMotPasse` → **2FA code courriel** lu dans Gmail (`@appstrate/gmail` api_call, `from:nepasrepondre@revenuquebec.ca`, regex `code de vérification est le suivant\s*:\s*(\d{6,8})`, arrive chez olivier@tractr.net) → dashboard.
-- **Découverte clé** : documents ET messages = le même objet = PDF du **Centre de communications** `SX00A02`. Deux endpoints (à réémettre depuis la session du browser, Cloudflare bloque un client HTTP externe) : liste `AfficherListeCommunicationsEntreprise?PageSize=300&SortBy=Date` (fragment HTML, hash via `OuvrirCommunicationPdf\/([a-f0-9]+)`) + PDF `OuvrirCommunicationPdf/{hash}`.
-- **Archive livrée** : **90 PDF** (2018→2026, 21 Mo) sur Drive `__Automations/Revenu Québec entreprise/Communications/` (nomenclature `AAAA-MM-JJ_dossier_objet.pdf`, **sans hash8** — voir §4). Backfill fait EN DIRECT via CDP opérateur (`/tmp/rq-bulk2.js`, `/tmp/rq-recon.js`).
-- **+1 attestation** (`SX00J604`) dans `Attestations/`. Passe de vérif : RL-1 (logiciel externe, rien dans le portail), avis d'opposition (vide), contrats (NA), fichiers de taxes (action) → rien d'autre à fetch.
-- **Données structurées → Drive `Données/`** (HTML scrapé, pas d'API JSON) : `paiements.csv` (132 paiements consolidés 2016→2026, endpoint `SX00N02/ConsulterPaiementsEntreprise/<route>`, table consolidée, un fetch, libellés collés à retirer) ; `releve-de-compte.json` (soldes courants tous 0). Déclarations/remboursements = recettes draftées dans skill §6, à confirmer.
-- Carte complète du portail : `scratchpad/rq-entreprise-map.md` (sous-agent Opus `rq-mapper`).
+## Nettoyage de fin de run
 
-### Diagnostic « pourquoi l'agent ne récupère pas les 90 en un run »
+Sur `success`, `failed`, `timeout` ou `cancelled`, le module libère:
 
-Longue investigation, conclusions **mesurées** :
+- le bail desktop;
+- le cache de politique du manifeste;
+- les secrets de scrubbing;
+- les credentials éphémères;
+- les fichiers et records de téléchargement du run.
 
-- Test `@tractr/bulk-upload-test` : un agent boucle **200 `api_upload`** sans problème → « le LLM ne peut pas boucler » = **FAUX**.
-- Le sous-débit du sync RQ (2-13/run) = **bug de dédup dans le prompt** (il croyait tout présent). **Corrigé** par idempotence + nommage **par hash8**. Re-runs additifs prouvés : 0→10→49→90, puis no-op.
-- Le plafond « ~quelques dizaines par run » du sync RQ vient du **budget agentique cumulé** du workflow lourd (download+upload interleaved via le pont), PAS du retour de liste. Un prompt « léger » (retours minimaux) a été testé → **n'a rien débloqué** (toujours ~13) et a régressé le listing. Donc leanness/`toFile` ≠ le levier.
+Un TTL reste présent pour couvrir un crash ou un événement terminal manquant.
 
----
+## Fichiers de référence
 
-## 3. ARCHITECTURE — murs à connaître (le cœur du raisonnement)
+- `apps/api/src/modules/desktop/routes.ts`
+- `apps/api/src/modules/desktop/lease.ts`
+- `apps/api/src/modules/desktop/registry.ts`
+- `apps/api/src/modules/desktop/downloads.ts`
+- `apps/desktop/src/main.ts`
+- `apps/desktop/src/bridge/client.ts`
+- `apps/desktop/src/bridge/downloads.ts`
+- `packages/runner-pi/src/runtime-tools/desktop-browser/tool.ts`
 
-Le sandbox de l'agent est **muré des deux côtés**, par conception :
+Le README du module contient le résumé opérationnel. `concepts-nouveaux.md`
+reste une note historique et ne doit pas remplacer le contrat ci-dessus.
 
-- **Browser** : l'agent n'atteint le Chromium que par l'outil `desktop_browser` (MCP, piloté LLM), PAS par CDP direct. `browser.evaluate` = CDP `Runtime.evaluate` standard (comme Playwright), **sans credentials** (utilise la session/cookies du browser). Le download depuis un site connecté ne coûte donc AUCUN credential.
-- **Credentials** : les jetons (Drive…) vivent dans le sidecar (credential-proxy). `SIDECAR_URL` est **effacé** de l'env agent après bootstrap (`runtime-pi/entrypoint.ts:698`, commentaire explicite) pour que `bash` ne puisse pas joindre le sidecar. Seule porte crédentialée = les tools MCP `api_call`/`api_upload` (un appel LLM par action).
-- **Le sidecar ne peut PAS écrire dans le workspace** (`mcp.ts:1331` : `desktop_download` est agent-side pour ça, « mirrors api_upload »). Donc un `toFile` sur `browser.evaluate` devrait être géré **agent-side**, pas dans le handler sidecar → pas un simple calque d'`api_call`.
-- Conséquence : une **boucle déterministe** dans le sandbox est impossible (ni browser ni creds accessibles à `bash`). Les scripts opérateur (`scripts/` du skill, `/tmp/rq-*.js`) tournent sur le Mac (CDP 9222 + mount Drive), HORS agent. Pour du bulk fiable DÉCLENCHÉ par l'agent, la boucle doit vivre dans du **code de confiance** = une primitive (voir §5).
+## Hors scope confirmé
 
-Contraste **moi (Claude Code opérateur)** vs **agent** : je tourne sur le Mac non sandboxé (CDP 9222 direct + mount Drive local + `gog`), donc mes scripts font tout ; l'agent est isolé et passe par les tools MCP.
-
----
-
-## 4. À FAIRE / EN SUSPENS
-
-- **Réconcilier les noms de la vraie archive** : `Communications/` (90 PDF) est nommé SANS `_hash8`, mais le sync v1.3.0 reconnaît les présents PAR `_hash8`. Donc relancer le sync sur ce dossier re-téléchargerait tout. Fix : renommer les 90 existants pour ajouter `_hash8` (script opérateur matchant la liste live), OU repartir sur dossier vide.
-- **RQ citoyen** (SAG Keycloak `authentification.quebec.ca`, realm `sqin`, client `RQ_MDC`) : package séparé PAS fait. Le login citoyen est OIDC/Keycloak (username/password) avec 2FA niveau-assurance-2 ; formulaire `#username`/`#password` derrière un bandeau cookies « J'accepte ».
-- **Deep link `appstrate://` + lancement à la connexion du Mac** : identifié depuis longtemps, jamais construit (l'app desktop ne s'ouvre pas toute seule si fermée).
-- **Ouvrir la PR upstream** de `feat/desktop-bridge` (branche poussée, PR non ouverte).
-- Skill §6 (déclarations/remboursements structurés) : recettes draftées, sélecteurs à confirmer en direct.
-
-## 5. ABANDONNÉ / DÉCIDÉ DE NE PAS FAIRE (avec raison)
-
-- **`responseMode:{toFile}` sur `browser.evaluate`** : envisagé pour sortir la liste du contexte. **Abandonné** après mesure : (a) ça n'aurait pas débloqué le 90-en-un-run (le levier n'était pas là) ; (b) pas un simple calque d'`api_call` car le sidecar ne peut pas écrire le workspace (faudrait de l'agent-side). Les gros résultats (>256 Ko) débordent DÉJÀ en `resource_link`. KDY : on a mesuré avant de coder, et on n'a pas codé.
-- **Primitive `bulk-download-vers-workspace` / `api_upload`-en-liste** : c'EST la seule vraie solution pour un bulk one-shot fiable à l'échelle DÉCLENCHÉ par l'agent (boucle dans du code de confiance : `browser.download_batch` côté pont + upload en lot côté sidecar). **NON construite** — jugée optionnelle car les **re-runs additifs idempotents suffisent** pour l'usage réel (incrémental + backfill en 2-3 passes). À reprendre si un vrai besoin one-shot-à-l'échelle émerge. Ne PAS l'implémenter en surchargeant `api_upload` (casse l'invariant « 1 tool = 1 requête HTTP » du credential-proxy) ; tool frère dédié, ou download qui dépose directement vers la destination.
-- **Redis fan-out multi-replica** et **signature/notarisation de l'app** : explicitement hors scope (dit par Olivier : « on fait pas redi et signature »).
-
-## 6. OPÉRATIONNEL
-
-- **Segfault Bun intermittent** du sidecar (« Runner stopped reporting — no heartbeat for 60s ») frappe ~1 run sur 2 AVANT toute action ; **retry suffit** systématiquement. Pas nos packages.
-- « `@tractr/X: api_call exposed 0 tools` » est NORMAL pour un agent qui n'utilise pas `api_call` sur cette intégration (login-demo).
-- Sessions RQ **expirent vite** (ASP.NET/ADFS) → redirection login. Re-login : `appstrate -p anon3100 run @tractr/rq-entreprise-login --remote` (retry si segfault). Toujours **valider qu'on est sur la bonne page avant de scraper** (sinon on ramasse la page de login — bug rencontré 2×).
-- Helpers CDP opérateur dans `/tmp` : `rq-eval.js` (eval one-shot, WS dans `/tmp/rq-pane-ws.txt`), `rq-netlog.js` (logger réseau → `/tmp/rq-net.jsonl`), `rq-bulk2.js`/`rq-recon.js` (backfill PDF), `cdp-drive.js`/`cdp-inspect.js` (navigation directe). Re-dériver la cible : `curl -s localhost:9222/json | python3 -c "...filter entreprises.revenuquebec..." > /tmp/rq-pane-ws.txt`.
-- Google Drive + Gmail connectés + actifs sur 3100 (org TRACTR). Le **mount Drive local** (`~/Library/CloudStorage/GoogleDrive-olivier@tractr.net/Mon disque/`) synchronise ce qu'on y écrit → utile pour les backfills opérateur.
-- Mémoires liées : `[[appstrate-desktop-bridge]]`, `[[appstrate-desktop-bridge-classifieds-test]]`, `[[appstrate-rq-entreprise-automation]]`.
+- Redis et fan-out multi-réplique;
+- signature et notarisation;
+- primitive bulk;
+- deep link;
+- lancement automatique à la connexion;
+- support Windows et Linux.

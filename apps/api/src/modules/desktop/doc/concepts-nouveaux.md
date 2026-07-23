@@ -1,4 +1,9 @@
-# Pont desktop — les concepts nouveaux dans le corps
+# Pont desktop, note historique
+
+> Cette note conserve le raisonnement exploratoire initial. Elle n'est plus le
+> contrat d'implémentation. En particulier, la capture par script et le FIFO
+> `capture: true` ont été supprimés. La source de vérité actuelle est
+> `HANDOFF-desktop-bridge-browser.md`, puis le README du module.
 
 Ce document explique **uniquement ce qui s'éloigne du modèle Appstrate d'avant**.
 Le reste (modules auto-découverts, intégrations AFPS, delivery HTTP, credential
