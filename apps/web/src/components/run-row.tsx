@@ -46,8 +46,10 @@ export function RunRow({
   const time = isRunning ? elapsed : run.duration;
   const duration = time ? `${(time / 1000).toFixed(1)}s` : "";
 
-  const inputDocs = run.document_counts.input;
-  const outputDocs = run.document_counts.output;
+  // Optional-chained so a run frame from an older server (rollout window) can't
+  // take down the whole list — the icons just stay hidden.
+  const inputDocs = run.document_counts?.input ?? 0;
+  const outputDocs = run.document_counts?.output ?? 0;
 
   const content = (
     <div className="flex min-w-0 flex-1 items-center gap-2">

@@ -26,6 +26,7 @@ import { isImageMime, useDocumentImageSrc } from "@appstrate/module-chat/ui";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { formatDateField } from "../lib/markdown";
+import { buildScopingHeaders } from "../lib/scoping-headers";
 import { mimeIconFor, documentRunHref } from "../lib/documents";
 import type { DocumentDto } from "../hooks/use-documents";
 
@@ -51,10 +52,12 @@ function MimePlaceholder({ mime }: { mime: string }) {
  * Image branch: the authenticated cover-cropped preview, falling back to the
  * mime placeholder while the fetch is in flight or on failure (src null). Kept
  * as its own component so the fetch hook only runs for eligible images (hooks
- * can't be called conditionally). Web uses cookie auth → no header provider.
+ * can't be called conditionally). Cookie auth alone is not enough — the content
+ * route resolves the org/app context from the scoping headers, like every other
+ * web API call.
  */
 function DocumentTileImage({ doc }: { doc: DocumentDto }) {
-  const src = useDocumentImageSrc(doc.id, null);
+  const src = useDocumentImageSrc(doc.id, buildScopingHeaders);
   if (!src) return <MimePlaceholder mime={doc.mime} />;
   return <img src={src} alt={doc.name} className="size-full object-cover" />;
 }
