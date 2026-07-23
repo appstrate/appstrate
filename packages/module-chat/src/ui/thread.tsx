@@ -45,10 +45,15 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-import { documentContentHref, resolveAttachmentContent } from "./run-events.ts";
+import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
-import { documentActivation } from "./doc-activation.ts";
-import { useChatHeaders, useOpenDocument, type GetHeaders } from "./runtime-context.ts";
+import {
+  DocumentAttachment,
+  isImageMime,
+  ATTACHMENT_CHIP_CLASS,
+  ATTACHMENT_IMAGE_CLASS,
+} from "./document-attachment.tsx";
+import { useChatHeaders, useOpenDocument } from "./runtime-context.ts";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
@@ -193,11 +198,6 @@ function FileAttachmentPart(props: { filename?: string }) {
 // (it stays correct for assistant file parts). We render sent attachments from
 // the attachments channel instead (`MessagePrimitive.Attachments`).
 
-const ATTACHMENT_CHIP_CLASS =
-  "bg-background text-foreground inline-flex max-w-52 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs";
-
-const ATTACHMENT_IMAGE_CLASS = "max-h-36 rounded-lg border object-cover";
-
 /** Inert chip: file icon + truncated name, no download (same look as FileAttachmentPart). */
 function InertAttachmentChip({ name }: { name: string }) {
   return (
@@ -205,90 +205,6 @@ function InertAttachmentChip({ name }: { name: string }) {
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
       <span className="truncate font-medium">{name || "document"}</span>
     </div>
-  );
-}
-
-/**
- * Clickable chip: file icon + name. The click action is supplied by the caller —
- * open the in-app preview when the host injected an opener, else the
- * authenticated download — with a matching `actionLabel` (title/aria-label).
- */
-function DownloadableAttachmentChip({
-  name,
-  actionLabel,
-  onActivate,
-}: {
-  name: string;
-  actionLabel: string;
-  onActivate: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onActivate}
-      title={actionLabel}
-      aria-label={actionLabel}
-      className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted`}
-    >
-      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="truncate font-medium">{name || "document"}</span>
-    </button>
-  );
-}
-
-/**
- * Image attachment: an authenticated fetch of the content route → object URL in
- * an <img> thumbnail (revoked on unmount). While loading — or if the fetch
- * fails — it falls back to the clickable chip. The content route only serves
- * stored documents, so this is only ever rendered for a resolved `document://`.
- * The click action (preview or download) is supplied by the caller.
- */
-function ImageAttachmentThumbnail({
-  id,
-  name,
-  getHeaders,
-  actionLabel,
-  onActivate,
-}: {
-  id: string;
-  name: string;
-  getHeaders: GetHeaders | null;
-  actionLabel: string;
-  onActivate: () => void;
-}) {
-  const [src, setSrc] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    void (async () => {
-      try {
-        const res = await fetch(documentContentHref(id), {
-          headers: getHeaders?.() ?? {},
-          credentials: "include",
-        });
-        if (!res.ok || cancelled) return;
-        const blob = await res.blob();
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setSrc(objectUrl);
-      } catch {
-        // Fetch failure → stay on the chip fallback (src stays null).
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [id, getHeaders]);
-
-  if (!src)
-    return (
-      <DownloadableAttachmentChip name={name} actionLabel={actionLabel} onActivate={onActivate} />
-    );
-  return (
-    <button type="button" onClick={onActivate} title={actionLabel} aria-label={actionLabel}>
-      <img src={src} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />
-    </button>
   );
 }
 
@@ -309,7 +225,6 @@ function SentAttachmentChip() {
   // selector doesn't churn re-renders; memo keeps the resolved ref stable too.
   const content = useAttachment((a) => a.content);
   const resolved = React.useMemo(() => resolveAttachmentContent(content), [content]);
-  const isImage = typeof contentType === "string" && contentType.startsWith("image/");
 
   if (resolved.kind !== "document") {
     // Just-sent optimistic attachment (`upload://`, not yet materialized): the
@@ -317,33 +232,19 @@ function SentAttachmentChip() {
     // interactive — there is no document id to preview or download yet; the
     // persisted `document://` part takes over on reload.
     const localSrc = resolved.uri ? stagedImagePreviewUrl(resolved.uri) : undefined;
-    if (localSrc && isImage)
+    if (localSrc && isImageMime(contentType))
       return <img src={localSrc} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />;
     return <InertAttachmentChip name={name} />;
   }
 
-  const docId = resolved.id;
-  // Opener (in-app preview modal, web shell) vs. authenticated download
-  // (embedded mounts) — one shared decision with a matching label.
-  const { onActivate, label: actionLabel } = documentActivation(
-    { id: docId, name },
-    opener,
-    getHeaders,
-  );
-
-  if (isImage) {
-    return (
-      <ImageAttachmentThumbnail
-        id={docId}
-        name={name}
-        getHeaders={getHeaders}
-        actionLabel={actionLabel}
-        onActivate={onActivate}
-      />
-    );
-  }
+  // A resolved `document://` is interactive: the unified renderer shows an image
+  // thumbnail or a download/preview chip, resolving the opener-vs-download action.
   return (
-    <DownloadableAttachmentChip name={name} actionLabel={actionLabel} onActivate={onActivate} />
+    <DocumentAttachment
+      doc={{ id: resolved.id, name, mime: contentType }}
+      opener={opener}
+      getHeaders={getHeaders}
+    />
   );
 }
 

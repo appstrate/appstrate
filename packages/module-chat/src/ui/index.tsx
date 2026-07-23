@@ -45,6 +45,16 @@ import { useSessions } from "./use-sessions.ts";
 import { subscribeModel, getSelectedModel, setSelectedModel } from "./model-store.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 
+// The unified chat document renderer + its helpers, re-exported so the web shell
+// (Phase 2) can reuse the same square-thumbnail treatment for its own document
+// surfaces.
+export {
+  DocumentAttachment,
+  isImageMime,
+  useDocumentImageSrc,
+  ATTACHMENT_IMAGE_CLASS,
+} from "./document-attachment.tsx";
+
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
 // background tabs, and marking a conversation read the user is not looking at

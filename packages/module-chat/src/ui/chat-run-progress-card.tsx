@@ -25,14 +25,7 @@
  */
 
 import * as React from "react";
-import {
-  AlertTriangleIcon,
-  CheckIcon,
-  DownloadIcon,
-  ExternalLinkIcon,
-  EyeIcon,
-  Loader2Icon,
-} from "lucide-react";
+import { AlertTriangleIcon, CheckIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
@@ -49,13 +42,15 @@ import {
   type ChatRunDocument,
   type RunStatus,
 } from "./run-events.ts";
-import { documentActivation } from "./doc-activation.ts";
+import { DocumentAttachment } from "./document-attachment.tsx";
 import type { ToolPhase } from "./tool-result.ts";
 
 /**
- * Row of document chips surfaced under a run card. With a host opener (web
- * shell) a chip opens the in-app preview modal (eye glyph); without one
- * (embedded mounts) it falls back to the authenticated download (download glyph).
+ * Row of document attachments surfaced under a run card — the same unified
+ * renderer the thread uses for sent attachments: an image shows a square
+ * thumbnail, anything else a chip. With a host opener (web shell) it opens the
+ * in-app preview; without one (embedded mounts) it falls back to the
+ * authenticated download.
  */
 function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
   const getHeaders = useChatHeaders();
@@ -63,28 +58,14 @@ function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
   if (documents.length === 0) return null;
   return (
     <div className="pointer-events-auto flex flex-wrap gap-1.5 px-3 pb-2">
-      {documents.map((doc) => {
-        const { onActivate, label } = documentActivation(doc, opener, getHeaders);
-        return (
-          <button
-            key={doc.id}
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onActivate();
-            }}
-            title={label}
-            className="border-border bg-muted/40 hover:bg-muted text-foreground flex max-w-[16rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
-          >
-            {opener ? (
-              <EyeIcon className="text-muted-foreground size-3 shrink-0" />
-            ) : (
-              <DownloadIcon className="text-muted-foreground size-3 shrink-0" />
-            )}
-            <span className="truncate">{doc.name}</span>
-          </button>
-        );
-      })}
+      {documents.map((doc) => (
+        <DocumentAttachment
+          key={doc.id}
+          doc={{ id: doc.id, name: doc.name, mime: doc.mime }}
+          opener={opener}
+          getHeaders={getHeaders}
+        />
+      ))}
     </div>
   );
 }
