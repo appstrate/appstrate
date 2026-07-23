@@ -42,7 +42,7 @@
     "@tanstack/react-virtual": "^3.14.6",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "better-auth": "1.7.0-beta.4",
+    "better-auth": "1.7.0-rc.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
