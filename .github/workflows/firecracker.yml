@@ -233,7 +233,7 @@ jobs:
         if: >-
           always() && steps.kernel-cache.outputs.cache-hit != 'true' &&
           hashFiles('data/firecracker/vmlinux') != ''
-        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.4.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
         with:
           path: data/firecracker/vmlinux
           key: fc-kernel-${{ runner.arch }}-${{ hashFiles('apps/api/src/modules/firecracker/scripts/build-kernel.sh') }}
