@@ -1633,7 +1633,7 @@
                   },
                   "rerun_from": {
                     "type": "string",
-                    "description": "Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required). **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Use `upload://` references when the input must be replayable."
+                    "description": "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `document://` references, so later reruns reuse the same documents without depending on upload retention. Existing `document://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable."
                   },
                   "modelId": {
                     "type": "string",
@@ -1752,7 +1752,11 @@
                   "api_key_name": null,
                   "schedule_name": null,
                   "connections_used": null,
-                  "package_ephemeral": false
+                  "package_ephemeral": false,
+                  "document_counts": {
+                    "input": 0,
+                    "output": 0
+                  }
                 }
               }
             }
@@ -2163,6 +2167,10 @@
                   "schedule_name": null,
                   "connections_used": null,
                   "package_ephemeral": true,
+                  "document_counts": {
+                    "input": 0,
+                    "output": 0
+                  },
                   "inline_manifest": {
                     "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
                     "name": "@inline/one-shot",
@@ -2610,7 +2618,11 @@
                   "api_key_name": null,
                   "schedule_name": "Weekday morning sort",
                   "connections_used": null,
-                  "package_ephemeral": false
+                  "package_ephemeral": false,
+                  "document_counts": {
+                    "input": 0,
+                    "output": 0
+                  }
                 }
               }
             }
@@ -2838,7 +2850,11 @@
                   "api_key_name": null,
                   "schedule_name": null,
                   "connections_used": null,
-                  "package_ephemeral": false
+                  "package_ephemeral": false,
+                  "document_counts": {
+                    "input": 0,
+                    "output": 0
+                  }
                 }
               }
             }
@@ -3281,7 +3297,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and the authoritative terminal cost-tracking fields `usage` (token usage) and `cost`.",
+                "description": "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Older runners may also send the deprecated markdown `report` aggregate.",
                 "properties": {
                   "memories": {
                     "type": "array"
@@ -3292,6 +3308,11 @@
                   "output": {},
                   "logs": {
                     "type": "array"
+                  },
+                  "report": {
+                    "type": "string",
+                    "deprecated": true,
+                    "description": "Deprecated report-tool markdown aggregate. New agents publish markdown documents."
                   },
                   "error": {
                     "type": "object",
@@ -19113,7 +19134,7 @@
         "operationId": "deleteDocument",
         "tags": ["Documents"],
         "summary": "Delete a document",
-        "description": "Delete a document (storage object + row) and release its quota. Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator.",
+        "description": "Delete a document (storage object + row) and release its quota. Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator. A document referenced by a run cannot be deleted until those consumer runs are removed.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19147,6 +19168,24 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Document is still referenced by one or more consumer runs.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                },
+                "example": {
+                  "type": "about:blank",
+                  "title": "Conflict",
+                  "status": 409,
+                  "detail": "This document is referenced by one or more runs and cannot be deleted",
+                  "code": "document_in_use",
+                  "requestId": "req_abc123"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -21843,10 +21882,20 @@
           },
           "result": {
             "type": ["object", "null"],
-            "description": "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted no structured output. Persisted even on failed runs (a run that produced output and then failed keeps its partial deliverable).",
+            "description": "What the run produced. Structured output is primary; deprecated report-tool runs may also carry markdown in `text`. `null` while the run is in flight or when no result was emitted.",
             "properties": {
               "output": {
                 "description": "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped."
+              },
+              "text": {
+                "type": "string",
+                "deprecated": true,
+                "description": "Compatibility field for markdown emitted by the deprecated `report` runtime tool. New agents should publish a markdown document."
+              },
+              "text_truncated": {
+                "type": "boolean",
+                "deprecated": true,
+                "description": "Present and true when deprecated report text exceeded the 256 KiB storage cap."
               }
             }
           },
@@ -23109,7 +23158,7 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "enum": ["output", "log", "note", "pin", "publish_document"]
+                  "enum": ["output", "log", "note", "pin", "report", "publish_document"]
                 },
                 "description": "Appstrate top-level extension: runtime tools the agent may use. Optional."
               }

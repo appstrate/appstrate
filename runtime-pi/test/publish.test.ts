@@ -100,7 +100,7 @@ let workspace: string;
 beforeEach(async () => {
   config = { status: 201, statusQueue: [], received: [] };
   // `realpath`: on macOS `tmpdir()` (`/var/folders/…`) is a symlink to
-  // `/private/var/folders/…`. `resolveSafeFile` canonicalizes the workspace
+  // `/private/var/folders/…`. The resolver canonicalizes the workspace
   // root before comparing resolved paths to it, so an unresolved root makes
   // every path look like a symlink escape. Real runs mount a real directory;
   // only the fixture needs this.
@@ -149,23 +149,25 @@ describe("createRunDocumentUploader", () => {
   });
 
   it("rejects a path escaping the allowed roots", async () => {
-    // `resolveSafeFile` allows the workspace plus `/tmp` (the same contract as
-    // api_call/api_upload — see ABSOLUTE_ALLOWED_ROOTS). `/etc` is under
-    // neither on any platform, so the traversal is rejected deterministically —
-    // a `../`-relative target could still land inside `/tmp` on Linux CI,
-    // where tmpdir-based test workspaces live.
     await expect(makeUploader(new Set())("../../../../../../etc/passwd")).rejects.toThrow(
       /outside the allowed roots/,
     );
   });
 
+  it("rejects absolute paths, including files under /tmp", async () => {
+    const scratch = await realpath(await mkdtemp(path.join(tmpdir(), "publish-outside-")));
+    const outsideFile = path.join(scratch, "secret.txt");
+    await writeFile(outsideFile, "not a workspace artifact");
+
+    await expect(makeUploader(new Set())(outsideFile)).rejects.toThrow(/workspace-relative/);
+    expect(config.received).toHaveLength(0);
+  });
+
   it("rejects a symlink pointing outside the allowed roots, uploading nothing", async () => {
-    // A symlink INSIDE the workspace whose target sits outside every allowed
-    // root: a lexical guard would pass (the link path is under the workspace),
-    // but `resolveSafeFile` canonicalizes through the link and rejects the
-    // resolved target. The target must be outside `/tmp` too — an in-/tmp
-    // target is legitimately readable (same contract as api_call fromFile).
-    await symlink("/etc/passwd", path.join(workspace, "link.txt"));
+    const scratch = await realpath(await mkdtemp(path.join(tmpdir(), "publish-link-outside-")));
+    const outsideFile = path.join(scratch, "secret.txt");
+    await writeFile(outsideFile, "not a workspace artifact");
+    await symlink(outsideFile, path.join(workspace, "link.txt"));
 
     await expect(makeUploader(new Set())("link.txt")).rejects.toThrow(/outside the allowed roots/);
     expect(config.received).toHaveLength(0);

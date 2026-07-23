@@ -66,6 +66,7 @@ export {
   resolveBodyForFetch,
   resolveSafeFile,
   resolveSafePath,
+  resolveWorkspaceFile,
   serializeFetchResponse,
   type MakeApiCallToolOptions,
   type ApiCallContext,

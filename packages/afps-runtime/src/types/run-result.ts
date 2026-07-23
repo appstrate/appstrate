@@ -67,6 +67,11 @@ export interface RunResult {
    * include those, only the runner's view.
    */
   cost?: number;
+  /**
+   * Concatenated markdown emitted by the deprecated `report` runtime tool.
+   * Retained for compatibility; new agents should publish durable documents.
+   */
+  report?: string;
 }
 
 /**

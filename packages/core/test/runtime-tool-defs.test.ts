@@ -62,12 +62,25 @@ describe("buildRuntimeToolDefs — event payloads", () => {
     ]);
   });
 
+  it("report remains available as a deprecated compatibility emitter", async () => {
+    const def = defsByName(["report"]).get("report")!;
+    expect(def.descriptor.description).toContain("Deprecated compatibility");
+    const result = await def.handler({ content: "# Legacy report" });
+    expect(eventsOf(result._meta)).toEqual([
+      {
+        type: "report.appended",
+        content: "# Legacy report",
+        timestamp: expect.any(Number),
+      },
+    ]);
+  });
+
   // Regression (#run_300c5118): every emitted canonical event MUST carry a
   // numeric `timestamp`. The reducer copies it into RunResult.logs, where the
   // finalize endpoint requires a number — an undefined timestamp failed the
   // whole run over the sidecar/MCP re-emit path.
   it("stamps a numeric timestamp on every emitted event", async () => {
-    for (const name of ["log", "note", "pin", "output"]) {
+    for (const name of ["log", "note", "pin", "report", "output"]) {
       const def = defsByName([name]).get(name)!;
       const args =
         name === "pin"

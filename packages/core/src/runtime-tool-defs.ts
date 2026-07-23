@@ -3,7 +3,7 @@
 
 /**
  * Runtime tool definitions — the platform's first-party "runtime tools"
- * (`output` / `log` / `note` / `pin`) expressed as
+ * (`output` / `log` / `note` / `pin`, plus the deprecated `report`) expressed as
  * transport-neutral, Pi-agnostic MCP tool definitions.
  *
  * These were previously Pi-SDK extension factories baked into the runtime
@@ -22,7 +22,7 @@
  *
  * Both adapters share this module's per-tool logic (input schema +
  * validation + the canonical run events each call produces), so there is a
- * single source of truth for the four tools.
+ * single source of truth for these event-emitter tools.
  *
  * Event delivery: a tool call NEVER emits directly. It returns the
  * canonical run events under the result `_meta` key
@@ -67,6 +67,7 @@ export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
   "log.written",
   "memory.added",
   "pinned.set",
+  "report.appended",
   // Emitted by the `publish_document` tool (and the entrypoint outputs sweep)
   // once a run document has been stored on the platform. Carries the durable
   // document metadata so ingestion persists a run_log the UI/chat can render.
@@ -309,6 +310,29 @@ function buildPinDef(): RuntimeToolDef {
   };
 }
 
+function buildReportDef(): RuntimeToolDef {
+  return {
+    descriptor: {
+      name: "report",
+      description:
+        "Deprecated compatibility tool for existing agents. Appends markdown to the run report. " +
+        "For new agents, write report.md under outputs/ or call publish_document instead.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["content"],
+        properties: {
+          content: { type: "string", description: "Markdown content to append to the report" },
+        },
+      },
+    },
+    handler: async (rawArgs) => {
+      const { content } = (rawArgs ?? {}) as { content: string };
+      return withEvents("Report content recorded", [{ type: "report.appended", content }]);
+    },
+  };
+}
+
 const RUNTIME_TOOL_BUILDERS: Record<
   EventEmitterRuntimeTool,
   (outputSchema: Record<string, unknown> | null) => RuntimeToolDef
@@ -317,6 +341,7 @@ const RUNTIME_TOOL_BUILDERS: Record<
   log: () => buildLogDef(),
   note: () => buildNoteDef(),
   pin: () => buildPinDef(),
+  report: () => buildReportDef(),
 };
 
 /**

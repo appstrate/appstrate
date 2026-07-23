@@ -857,6 +857,56 @@ export async function resolveSafeFile(
   return { absPath, stat };
 }
 
+/**
+ * Resolve an existing file strictly inside the workspace. Unlike
+ * {@link resolveSafeFile}, this intentionally does not admit the shared
+ * container scratch roots such as `/tmp`, and it rejects absolute paths even
+ * when they happen to point back into the workspace. Use this for tool
+ * contracts that explicitly promise a workspace-relative path.
+ */
+export async function resolveWorkspaceFile(
+  workspace: string,
+  rel: string,
+): Promise<{ absPath: string; stat: import("node:fs").Stats }> {
+  if (typeof rel !== "string" || rel.length === 0) {
+    throw new ResolverError(
+      "RESOLVER_PATH_INVALID",
+      "resolveWorkspaceFile: path must be a non-empty string",
+      { workspace, relative: rel },
+    );
+  }
+
+  const wsRoot = await realpathOrAbs(workspace);
+  if (nodePath.isAbsolute(rel)) {
+    throw new ResolverError(
+      "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS",
+      `path must be workspace-relative.\n  got:     ${JSON.stringify(rel)}\n  allowed: ${wsRoot}`,
+      { workspace, relative: rel, allowedRoots: [wsRoot] },
+    );
+  }
+
+  const candidate = nodePath.resolve(wsRoot, rel);
+  const canonical = await canonicalizePath(candidate);
+  if (!isUnderAnyRoot(canonical, [wsRoot])) {
+    const viaSymlink = canonical !== candidate;
+    throw new ResolverError(
+      "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS",
+      formatOutsideRootsError(rel, canonical, [wsRoot], viaSymlink),
+      { workspace, relative: rel, resolved: canonical, allowedRoots: [wsRoot], viaSymlink },
+    );
+  }
+
+  const stat = await fsPromises.lstat(canonical);
+  if (stat.isSymbolicLink()) {
+    throw new ResolverError("RESOLVER_PATH_SYMLINK_REFUSED", `Refusing to follow symlink: ${rel}`, {
+      workspace,
+      rel,
+      resolved: canonical,
+    });
+  }
+  return { absPath: canonical, stat };
+}
+
 export interface ResolveBodyStreamOptions {
   allowFromFile?: boolean;
   transformString?: (input: string) => string;

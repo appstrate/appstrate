@@ -96,6 +96,9 @@ export interface FinalizeRunInput {
 /** Key prefix for webhook-id replay dedup. */
 const REPLAY_KEY_PREFIX = "appstrate:remote-run:replay:";
 
+/** Maximum deprecated report aggregate persisted in `runs.result.text`. */
+const MAX_RESULT_TEXT_BYTES = 256 * 1024;
+
 // ---------------------------------------------------------------------------
 // DB helpers
 // ---------------------------------------------------------------------------
@@ -409,18 +412,17 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     }
   }
 
-  // 4. Build the persisted result payload — matches the legacy platform shape
-  //    so existing consumers of `runs.result.output` keep working.
-  //
-  //    `result` is the API contract for "what the run produced" (issue #632):
-  //      - `output` — structured JSON emitted via the `output` tool, validated
-  //        against the agent's declared output schema above (a mismatch flips
-  //        status to failed but the payload is still stored — never dropped).
-  //    Persisted regardless of terminal status — a run that produced output and
-  //    then failed keeps its partial deliverable alongside `status: "failed"`.
+  // 4. Build the persisted result payload. Structured output remains primary.
+  //    The deprecated report aggregate is retained so existing agents and
+  //    historical API consumers are not broken by the document migration.
   const resultPayload: Record<string, unknown> = {};
   if (result.output !== null && result.output !== undefined) {
     resultPayload.output = result.output;
+  }
+  if (typeof result.report === "string" && result.report.length > 0) {
+    const { text, truncated } = capUtf8Text(result.report, MAX_RESULT_TEXT_BYTES);
+    resultPayload.text = text;
+    if (truncated) resultPayload.text_truncated = true;
   }
   // Zod boundary on the persisted payload (`runResultSchema`: closed shape,
   // JSON-safe values, 512 KiB cap). `output` is runner-controlled, so the
@@ -432,6 +434,39 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     const parsedResult = runResultSchema.safeParse(resultPayload);
     if (parsedResult.success) {
       resultToPersist = parsedResult.data;
+    } else if ("output" in resultPayload && "text" in resultPayload) {
+      // Restoring the compatibility report must never make a structured
+      // output that fitted the historical 512 KiB boundary disappear. If the
+      // combined payload is too large, keep the primary output and drop only
+      // the deprecated aggregate. If output itself is invalid/oversized, keep
+      // the bounded report as the final fallback.
+      const outputOnly = runResultSchema.safeParse({ output: resultPayload.output });
+      if (outputOnly.success) {
+        resultToPersist = outputOnly.data;
+        logger.warn("finalize: dropping deprecated report from oversized runs.result payload", {
+          runId: run.id,
+        });
+      } else {
+        const reportOnly = runResultSchema.safeParse({
+          text: resultPayload.text,
+          ...("text_truncated" in resultPayload
+            ? { text_truncated: resultPayload.text_truncated }
+            : {}),
+        });
+        if (reportOnly.success) {
+          resultToPersist = reportOnly.data;
+          logger.warn("finalize: dropping invalid output but preserving deprecated report", {
+            runId: run.id,
+            reason: outputOnly.error.issues[0]?.message ?? "validation failed",
+          });
+        }
+      }
+      if (resultToPersist === null) {
+        logger.warn("finalize: dropping invalid runs.result payload", {
+          runId: run.id,
+          reason: parsedResult.error.issues[0]?.message ?? "validation failed",
+        });
+      }
     } else {
       logger.warn("finalize: dropping invalid runs.result payload", {
         runId: run.id,
@@ -792,6 +827,14 @@ export async function synthesiseFinalize(
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Truncate UTF-8 text without ending on a partial code point. */
+export function capUtf8Text(value: string, maxBytes: number): { text: string; truncated: boolean } {
+  const bytes = new TextEncoder().encode(value);
+  if (bytes.byteLength <= maxBytes) return { text: value, truncated: false };
+  const text = new TextDecoder().decode(bytes.subarray(0, maxBytes)).replace(/�+$/, "");
+  return { text, truncated: true };
 }
 
 /**

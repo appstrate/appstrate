@@ -118,6 +118,17 @@ describe("createConsoleSink — human mode", () => {
     expect(streams.stdout).toContain("doing stuff");
   });
 
+  it("renders deprecated report markdown in human mode", async () => {
+    const sink = createConsoleSink({});
+    await sink.handle({
+      type: "report.appended",
+      timestamp: 0,
+      runId: RUN_ID,
+      content: "# Legacy report",
+    } as RunEvent);
+    expect(streams.stdout).toBe("# Legacy report\n");
+  });
+
   it("writes tool progress with tool name on stdout", async () => {
     const sink = createConsoleSink({});
     await sink.handle(progressEvent("Tool: read_file", { tool: "read_file" }));

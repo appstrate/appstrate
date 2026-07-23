@@ -43,6 +43,7 @@ import {
   finalizeRun,
   getRunSinkContext,
   synthesiseFinalize,
+  capUtf8Text,
 } from "../../../src/services/run-event-ingestion.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
@@ -175,14 +176,10 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(logs.length).toBeGreaterThan(0);
   });
 
-  // Legacy-emitter tolerance guard: the #632 report channel was removed, but an
-  // old remote CLI may still POST a `report.appended` envelope. The sink's
-  // dispatch `default` branch drops unknown event types (no run_logs row) and
-  // the route still acks 200/persisted — the stray event is tolerated, not an error.
-  it("tolerates a stray legacy report.appended envelope — accepted, no run_logs row written", async () => {
+  it("persists a deprecated report.appended envelope for older runners", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
-    const envelope = buildEnvelope(runId, "report.appended", { text: "legacy report body" }, 1);
+    const envelope = buildEnvelope(runId, "report.appended", { content: "legacy report body" }, 1);
     const res = await postEvent(runId, envelope);
 
     expect(res.status).toBe(200);
@@ -191,9 +188,10 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(body.outcome).toBe("persisted");
     expect(body.sequence).toBe(1);
 
-    // Unknown event type → default branch drops it, no run_logs write-through.
     const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
-    expect(logs.length).toBe(0);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.event).toBe("report");
+    expect(logs[0]!.data).toEqual({ content: "legacy report body" });
   });
 
   it("dedupes replayed webhook-ids — a second POST with the same id returns replay", async () => {
@@ -634,6 +632,27 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(persisted?.output).toEqual({ answer: 42 });
   });
 
+  it("persists the deprecated report aggregate for compatibility", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+    const res = await postFinalize(runId, {
+      memories: [],
+      output: null,
+      logs: [],
+      report: "# Legacy report",
+      status: "success",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.result).toEqual({ text: "# Legacy report" });
+  });
+
+  it("caps deprecated report text on a UTF-8 boundary", () => {
+    expect(capUtf8Text("éé", 3)).toEqual({ text: "é", truncated: true });
+    expect(capUtf8Text("éé", 4)).toEqual({ text: "éé", truncated: false });
+  });
+
   // Regression (#run_300c5118): a cosmetic/non-essential field in the finalize
   // body must NEVER fail an already-completed run. Before the fix, a `log`
   // entry missing its `timestamp` (the built-in `log` tool over the
@@ -807,6 +826,23 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.status).toBe("success");
     expect(row?.sinkClosedAt).not.toBeNull();
     expect(row?.result).toBeNull();
+  });
+
+  it("does not let a compatibility report evict an otherwise valid structured output", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+    const output = { blob: "x".repeat(300 * 1024) };
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output,
+      report: "r".repeat(256 * 1024),
+      durationMs: 5,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.result).toEqual({ output });
   });
 
   it("idempotent — once the sink is closed, further finalize POSTs reject with 410", async () => {

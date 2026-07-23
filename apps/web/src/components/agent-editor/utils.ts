@@ -135,10 +135,9 @@ export function defaultIntegrationManifest(
  * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS) —
  * the built-in runtime tools the agent author opted into (all opt-in,
  * `output` included). Tolerates a missing or malformed field by returning an
- * empty array. Entries not in the current catalog (e.g. a removed `report`
- * tool still listed in an older manifest) are dropped on read, so the editor
- * normalises them away instead of blocking the save on the manifest's
- * `runtime_tools` enum validation.
+ * empty array. The deprecated `report` id remains valid and is preserved for
+ * older manifests even though it is hidden from the editor catalog; genuinely
+ * unknown entries are dropped so they cannot block a later save.
  */
 export function getRuntimeTools(m: Record<string, unknown>): string[] {
   const raw = m.runtime_tools;

@@ -138,6 +138,9 @@ const RunResultSchema = z
     // `runs.cost` is correct even when `process.exit()` aborts the
     // metric POST. Degrades to undefined on a bad value.
     cost: z.number().nonnegative().optional().catch(undefined),
+    // Deprecated report-channel aggregate. Kept tolerant so older runners can
+    // finalize successfully while new agents publish markdown documents.
+    report: z.string().optional().catch(undefined),
   })
   .passthrough();
 
@@ -221,6 +224,7 @@ export function createRunsEventsRouter() {
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
       ...(d.usage !== undefined ? { usage: d.usage } : {}),
       ...(d.cost !== undefined ? { cost: d.cost } : {}),
+      ...(d.report !== undefined ? { report: d.report } : {}),
     };
 
     await finalizeRun({ run, result });

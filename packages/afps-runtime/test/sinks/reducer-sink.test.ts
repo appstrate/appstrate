@@ -52,6 +52,13 @@ describe("createReducerSink", () => {
     ]);
   });
 
+  it("concatenates deprecated report chunks in event order", async () => {
+    const { sink, snapshot } = createReducerSink();
+    await sink.handle(event("report.appended", { content: "# First" }));
+    await sink.handle(event("report.appended", { content: "Second" }));
+    expect(snapshot().report).toBe("# First\nSecond");
+  });
+
   it("ignores third-party event types in the snapshot", async () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("custom.thing", { payload: 42 }));

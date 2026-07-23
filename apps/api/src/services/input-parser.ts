@@ -17,10 +17,10 @@
  *    agent with a small file input in a single call — no createUpload + signed
  *    PUT round-trips.
  *
- * Alternatively the body may carry `rerun_from: <run_id>` instead of `input`:
- * the prior run's persisted input (upload URIs included) is replayed through
- * the exact same pipeline — uploads stay re-consumable for a retention window
- * after their first consume, so re-running the same input needs no re-upload.
+ * Alternatively the body may carry `rerun_from: <run_id>` instead of `input`.
+ * Staged uploads are rewritten to durable `document://` URIs in persisted run
+ * input, so replay resolves the same documents without an upload-retention
+ * dependency.
  *
  * Either way the run ends up with a `FileReference` (metadata only — no
  * buffer) per document on the parsed input.
@@ -122,11 +122,10 @@ export interface ParsedInput {
   pendingDocuments?: PendingUploadMaterialization[];
   /**
    * The `document://` ids this run consumes as input (D1 chaining protection).
-   * Written as `document_links` rows once the run row exists (`run-pipeline.ts`,
-   * after `createRun` — `document_links.consumer_run_id` is a hard FK), the same
-   * deferral as `pendingDocuments`. Every resolved `document://` input ref
-   * qualifies: a brand-new run is never a doc's own container. Undefined when the
-   * run consumes no documents.
+   * Passed into `createRun`, which locks and revalidates every document before
+   * inserting the run and its `document_links` rows in one transaction. Every
+   * resolved `document://` input ref qualifies: a brand-new run is never a
+   * doc's own container. Undefined when the run consumes no documents.
    */
   consumedDocumentIds?: string[];
 }
@@ -135,11 +134,11 @@ interface RunRequestBody {
   input?: Record<string, unknown>;
   /**
    * Run id whose persisted `input` to replay verbatim on this run (wire field
-   * `rerun_from`, mutually exclusive with `input`). File fields keep their
-   * `upload://` URIs in `runs.input`, and consumed uploads stay re-consumable
-   * for `UPLOAD_RETENTION_HOURS` after first consume — so a cancelled (or
-   * completed) run can be re-triggered with the same documents and different
-   * overrides (`modelId`, `config`, `?version`) in one call, no re-upload.
+   * `rerun_from`, mutually exclusive with `input`). Consumed staged uploads
+   * are persisted as durable `document://` URIs, so a cancelled (or completed)
+   * run can be re-triggered with the same documents and different overrides
+   * (`modelId`, `config`, `?version`) in one call, no re-upload and no
+   * dependency on upload retention.
    */
   rerun_from?: string;
   modelId?: string;
@@ -500,9 +499,8 @@ export async function mapWithConcurrency<T, R>(
  * as a missing run), end-users can only replay their own runs, and the prior
  * run must belong to the agent being triggered (its input schema is the one
  * the replayed input was validated against). The returned input flows through
- * the exact same consume + validation pipeline as a fresh request — any
- * `upload://` URI it carries is re-consumed (valid within the post-consume
- * reuse window) and the JSON is re-validated against the current schema.
+ * the exact same consume + validation pipeline as a fresh request and the JSON
+ * is re-validated against the current schema.
  */
 async function resolveRerunInput(
   c: Context,
@@ -609,8 +607,8 @@ export async function parseRequestInput(
 
     // Every resolved `document://` input ref is a consumption link (D1): the run
     // is brand-new, so it is never any of these docs' own container. Persisted as
-    // `document_links` after `createRun` (run-pipeline), protecting the doc from
-    // its producer's deletion. The ACL check below still gates the run itself.
+    // `document_links` atomically with `createRun`, protecting the doc from its
+    // producer's deletion. The ACL check below still gates the run itself.
     consumedDocumentIds = docRefs.map(({ id }) => id);
 
     // Decode inline data: URIs up front — the per-file cap is enforced inside
@@ -631,7 +629,7 @@ export async function parseRequestInput(
             `Field '${ref.fieldName}' was provided as an inline data: URI on the original run — ` +
               "inline inputs are materialized into the run workspace and stripped from the stored " +
               "input, so they cannot be replayed via rerun_from. Re-send the file in `input` " +
-              "(staged upload:// references stay replayable for the retention window).",
+              "(staged upload:// references are converted to durable document:// references).",
           );
         }
         return { ref, file: parseDataUri(ref.uri, ref.fieldName) };

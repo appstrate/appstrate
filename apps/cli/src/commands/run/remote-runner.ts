@@ -704,6 +704,14 @@ function runLogToRunEvent(log: RemoteRunLog): RunEvent | null {
     };
   }
 
+  // `result/report` — deprecated report(content) runtime-tool emit.
+  if (log.type === "result" && log.event === "report") {
+    const content =
+      isPlainObject(log.data) && typeof log.data.content === "string" ? log.data.content : null;
+    if (content === null) return null;
+    return { ...envelope, type: "report.appended", content };
+  }
+
   // `system/adapter_error` — fatal runtime error (e.g. ingestion-side
   // adapter raised an unhandled exception). The local sink renders this
   // with `⚠` yellow on stderr.
@@ -772,13 +780,17 @@ function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
  * matching `RunResult.output`. The status is mapped one-to-one.
  */
 function buildRunResultPayload(record: RemoteRunRecord, status: TerminalRunStatus): RunResult {
+  const storedResult = isPlainObject(record.result) ? record.result : null;
   const result: RunResult = {
     memories: [],
     pinned: {},
-    output: record.result ?? null,
+    output: storedResult && "output" in storedResult ? storedResult.output : null,
     logs: [],
     status,
   };
+  if (storedResult && typeof storedResult.text === "string") {
+    result.report = storedResult.text;
+  }
   if (record.error) {
     result.error = { code: "remote_run_error", message: record.error };
   }

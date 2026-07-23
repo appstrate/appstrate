@@ -200,7 +200,8 @@ export const documentsPaths = {
       summary: "Delete a document",
       description:
         "Delete a document (storage object + row) and release its quota. Allowed for a caller " +
-        "with the `documents:delete` permission (owner/admin) or the document's own creator.",
+        "with the `documents:delete` permission (owner/admin) or the document's own creator. " +
+        "A document referenced by a run cannot be deleted until those consumer runs are removed.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -214,6 +215,22 @@ export const documentsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Document is still referenced by one or more consumer runs.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Conflict",
+                status: 409,
+                detail: "This document is referenced by one or more runs and cannot be deleted",
+                code: "document_in_use",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

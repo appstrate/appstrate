@@ -605,11 +605,23 @@ export const schemas = {
       result: {
         type: ["object", "null"],
         description:
-          "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted no structured output. Persisted even on failed runs (a run that produced output and then failed keeps its partial deliverable).",
+          "What the run produced. Structured output is primary; deprecated report-tool runs may also carry markdown in `text`. `null` while the run is in flight or when no result was emitted.",
         properties: {
           output: {
             description:
               "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
+          },
+          text: {
+            type: "string",
+            deprecated: true,
+            description:
+              "Compatibility field for markdown emitted by the deprecated `report` runtime tool. New agents should publish a markdown document.",
+          },
+          text_truncated: {
+            type: "boolean",
+            deprecated: true,
+            description:
+              "Present and true when deprecated report text exceeded the 256 KiB storage cap.",
           },
         },
       },
@@ -1484,7 +1496,7 @@ export const schemas = {
             type: "array",
             items: {
               type: "string",
-              enum: ["output", "log", "note", "pin", "publish_document"],
+              enum: ["output", "log", "note", "pin", "report", "publish_document"],
             },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional.",
