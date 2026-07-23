@@ -386,8 +386,9 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push(
       "Write any file you produce for the user (generated documents, exports, data files) " +
         "under `./outputs/` — everything there is published automatically as a downloadable " +
-        "document when the run ends. If the user expects a written report or summary, write it " +
-        "as markdown to `./outputs/report.md`.\n",
+        "document when the run ends. Hidden files (dotfiles, and anything under a hidden " +
+        "directory) are ignored by this automatic publish. If the user expects a written " +
+        "report or summary, write it as markdown to `./outputs/report.md`.\n",
     );
   }
 

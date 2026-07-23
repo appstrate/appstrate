@@ -22,7 +22,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { invalidRequest, notFound, conflict } from "../lib/errors.ts";
-import { rateLimitByRunId } from "../middleware/rate-limit.ts";
+import { rateLimitByRunId, rateLimitRunDocuments } from "../middleware/rate-limit.ts";
 import {
   verifyRunSignature,
   verifyRunUploadSignature,
@@ -168,6 +168,10 @@ export function createRunsEventsRouter() {
   // factory (points, windowSec) — seconds window with the burst cap gives
   // per-second bucket semantics, simple and predictable.
   const eventLimiter = rateLimitByRunId(limits.burst, 1);
+  // Uploads get their own per-run budget (30 in any 6s window ≈ 5/s sustained,
+  // burst 30) so the finalize `outputs/` sweep's many small POSTs never exhaust
+  // — or get starved by — the high-rate event-ingestion budget above.
+  const documentLimiter = rateLimitRunDocuments(30, 6);
 
   router.post("/runs/:runId/events", eventLimiter, verifyRunSignature, async (c) => {
     // verifyRunSignature populated these. The runtime assertion is a
@@ -302,7 +306,7 @@ export function createRunsEventsRouter() {
   // stream mid-flight (413, deleting any partial object), the org quota is
   // enforced transactionally (403). Idempotent for the sweep's retries: an
   // identical (run, sha256, name) upload returns the existing document (200).
-  router.post("/runs/:runId/documents", eventLimiter, verifyRunUploadSignature, async (c) => {
+  router.post("/runs/:runId/documents", documentLimiter, verifyRunUploadSignature, async (c) => {
     const run = c.get("run")!;
 
     // Only a live run may publish — a document arriving after finalize (or

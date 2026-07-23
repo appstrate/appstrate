@@ -50,6 +50,44 @@ function guessMime(filePath: string): string {
   return MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
 }
 
+/** Total upload attempts (1 initial + 2 retries) before a file is abandoned. */
+const MAX_UPLOAD_ATTEMPTS = 3;
+/** Base backoff between retries; doubled per attempt, plus small jitter. */
+const RETRY_BASE_MS = 250;
+/** Fixed slice of the per-attempt timeout — covers connect + server processing. */
+const UPLOAD_TIMEOUT_BASE_MS = 30_000;
+/** Pessimistic floor throughput used to size the timeout from the file size. */
+const UPLOAD_TIMEOUT_FLOOR_BYTES_PER_SEC = 1024 * 1024; // 1 MiB/s
+
+/**
+ * Per-attempt upload timeout: a fixed base (connect + server processing) plus
+ * time for the bytes at a deliberately pessimistic floor throughput, so a large
+ * but healthy upload is never cut short while a truly stuck socket still aborts.
+ * Pure function of the byte count so it is trivially unit-testable.
+ */
+export function uploadTimeoutMs(fileBytes: number): number {
+  const bytes = Math.max(0, fileBytes);
+  return UPLOAD_TIMEOUT_BASE_MS + Math.ceil((bytes / UPLOAD_TIMEOUT_FLOOR_BYTES_PER_SEC) * 1000);
+}
+
+/** Jittered exponential backoff for retry attempt `n` (1-based). */
+function backoffMs(attempt: number): number {
+  return RETRY_BASE_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * RETRY_BASE_MS);
+}
+
+/** Ceiling on an honoured `Retry-After` — a huge (or hostile) value must not stall finalize. */
+const RETRY_AFTER_CAP_MS = 30_000;
+
+/** Parse a `Retry-After` header (delta-seconds or HTTP-date) to milliseconds, capped. */
+function parseRetryAfterMs(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs >= 0) return Math.min(secs * 1000, RETRY_AFTER_CAP_MS);
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) return Math.min(Math.max(0, date - Date.now()), RETRY_AFTER_CAP_MS);
+  return undefined;
+}
+
 export interface RunDocumentUploaderDeps {
   /** The run-scoped event sink URL (`…/api/runs/:id/events`). `/events` is swapped for `/documents`. */
   sinkUrl: string;
@@ -65,6 +103,8 @@ export interface RunDocumentUploaderDeps {
   publishedShas: Set<string>;
   /** Injected for tests; defaults to the global `fetch`. */
   fetchFn?: typeof fetch;
+  /** Injected for tests to skip real backoff waits; defaults to `setTimeout`. */
+  sleepFn?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -72,14 +112,18 @@ export interface RunDocumentUploaderDeps {
  * tool and the outputs sweep both call. It streams the file straight to
  * `POST /api/runs/:id/documents` (never buffering it), records the returned
  * sha256 in {@link RunDocumentUploaderDeps.publishedShas}, and returns the
- * durable document metadata. Throws a clear `Error` on a missing file, a path
- * resolving outside the allowed roots (through symlinks or not), or a non-2xx
- * response so the tool surfaces it as a tool error.
+ * durable document metadata. Retryable failures (network error, per-attempt
+ * timeout, 5xx, 429 — honouring `Retry-After`) are retried up to
+ * {@link MAX_UPLOAD_ATTEMPTS} times with jittered backoff; a definitive 4xx
+ * (413/409/401/403) fails fast. Throws a clear `Error` on a missing file, a
+ * path resolving outside the allowed roots (through symlinks or not), or an
+ * abandoned upload so the tool surfaces it as a tool error.
  */
 export function createRunDocumentUploader(
   deps: RunDocumentUploaderDeps,
 ): (relPath: string, name?: string) => Promise<PublishedDocument> {
   const fetchFn = deps.fetchFn ?? fetch;
+  const sleep = deps.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const url = deps.sinkUrl.replace(/\/events$/, "/documents");
 
   return async (relPath, name) => {
@@ -89,27 +133,55 @@ export function createRunDocumentUploader(
     // non-existent file surfaces as the lstat ENOENT — no `exists()` probe.
     const { absPath } = await resolveSafeFile(deps.workspace, relPath);
     const documentName = name ?? path.basename(absPath);
+    const contentType = guessMime(absPath);
+    // Size the per-attempt timeout from the payload once — the file is not
+    // re-read between attempts (the body stream is rebuilt each try).
+    const timeoutMs = uploadTimeoutMs(Bun.file(absPath).size);
 
-    const headers: Record<string, string> = {
-      ...sign({
-        msgId: randomUUID(),
-        timestampSec: Math.floor(Date.now() / 1000),
-        body: "",
-        secret: deps.sinkSecret,
-      }),
-      "Content-Type": guessMime(absPath),
-      "X-Document-Name": documentName,
-    };
+    // Retry loop: 3 attempts on retryable failures (network error, timeout,
+    // 5xx, 429). Definitive 4xx (413 payload cap, 409 run-not-running, 401/403)
+    // throw immediately — a retry cannot change the outcome. `lastError` carries
+    // the most recent failure into the abandonment message.
+    let lastError = "";
+    for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
+      const headers: Record<string, string> = {
+        ...sign({
+          msgId: randomUUID(),
+          timestampSec: Math.floor(Date.now() / 1000),
+          body: "",
+          secret: deps.sinkSecret,
+        }),
+        "Content-Type": contentType,
+        "X-Document-Name": documentName,
+      };
 
-    const res = await fetchFn(url, {
-      method: "POST",
-      headers,
-      body: Bun.file(absPath).stream(),
-      // Streaming a request body requires the half-duplex opt-in.
-      duplex: "half",
-    } as RequestInit & { duplex: "half" });
+      let res: Response;
+      try {
+        res = await fetchFn(url, {
+          method: "POST",
+          headers,
+          body: Bun.file(absPath).stream(),
+          // Streaming a request body requires the half-duplex opt-in.
+          duplex: "half",
+          // A timed-out attempt aborts (TimeoutError) and counts as retryable.
+          signal: AbortSignal.timeout(timeoutMs),
+        } as RequestInit & { duplex: "half" });
+      } catch (err) {
+        // Network failure or timeout — retryable.
+        lastError = getErrorMessage(err);
+        if (attempt < MAX_UPLOAD_ATTEMPTS) {
+          await sleep(backoffMs(attempt));
+          continue;
+        }
+        break;
+      }
 
-    if (!res.ok) {
+      if (res.ok) {
+        const doc = (await res.json()) as PublishedDocument;
+        deps.publishedShas.add(doc.sha256);
+        return doc;
+      }
+
       let detail = `HTTP ${res.status}`;
       try {
         const text = await res.text();
@@ -117,12 +189,22 @@ export function createRunDocumentUploader(
       } catch {
         // ignore — status alone is enough
       }
-      throw new Error(`upload of '${relPath}' failed — ${detail}`);
+      lastError = detail;
+
+      const retryable = res.status === 429 || res.status >= 500;
+      if (!retryable) {
+        throw new Error(`upload of '${relPath}' failed — ${detail}`);
+      }
+      if (attempt >= MAX_UPLOAD_ATTEMPTS) break;
+      // Honour `Retry-After` on 429 when present, else jittered backoff.
+      const retryAfterMs =
+        res.status === 429 ? parseRetryAfterMs(res.headers.get("retry-after")) : undefined;
+      await sleep(retryAfterMs ?? backoffMs(attempt));
     }
 
-    const doc = (await res.json()) as PublishedDocument;
-    deps.publishedShas.add(doc.sha256);
-    return doc;
+    throw new Error(
+      `upload of '${relPath}' failed after ${MAX_UPLOAD_ATTEMPTS} attempts — ${lastError}`,
+    );
   };
 }
 
@@ -149,6 +231,9 @@ export interface SweepOutputsDeps {
   logWarn?: (message: string, data?: Record<string, unknown>) => void;
 }
 
+/** Max files uploaded concurrently by a single sweep — bounds container egress. */
+const SWEEP_CONCURRENCY = 3;
+
 /**
  * Auto-publish every file the agent wrote under `workspace/outputs/` that was
  * not already published by this run. Runs after the agent session ends but
@@ -170,9 +255,17 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<void> {
     return;
   }
 
-  for (const rel of entries) {
+  const publishEntry = async (rel: string): Promise<void> => {
     const abs = path.join(outputsDir, rel);
     try {
+      // Skip hidden files by default: any path segment starting with `.`
+      // (a dotfile like `.env`/`.netrc`, or anything under a hidden dir like
+      // `.git/`). The implicit sweep must not exfiltrate these as org-visible
+      // documents — only the explicit `publish_document` tool may publish them.
+      if (rel.split(path.sep).some((seg) => seg.startsWith("."))) {
+        deps.logWarn?.("outputs sweep skipped hidden file", { file: rel });
+        return;
+      }
       // `lstat` (not `stat`) so a symlink is not followed: its target could sit
       // outside the workspace, and the uploader would refuse it anyway. Skip it
       // here with a warning rather than let it reach the uploader as a per-file
@@ -180,28 +273,53 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<void> {
       const stat = await fs.lstat(abs);
       if (stat.isSymbolicLink()) {
         deps.logWarn?.("outputs sweep skipped symlink", { file: rel });
-        continue;
+        return;
       }
-      if (!stat.isFile()) continue;
+      if (!stat.isFile()) return;
       if (stat.size > deps.maxFileBytes) {
         deps.logWarn?.("outputs sweep skipped oversized file", {
           file: rel,
           size: stat.size,
           maxFileBytes: deps.maxFileBytes,
         });
-        continue;
+        return;
       }
       const sha = await fileSha256(abs);
-      if (deps.publishedShas.has(sha)) continue; // already published by this run
-
-      const doc = await deps.uploader(path.join("outputs", rel), path.basename(rel));
-      await deps.emit(documentPublishedEvent(doc));
+      if (deps.publishedShas.has(sha)) return; // already published by this run
+      // Reserve the sha before the async upload: with SWEEP_CONCURRENCY > 1,
+      // two same-content files would otherwise both pass the check above and
+      // publish twice. Rolled back on failure so a dropped file is not
+      // remembered as published.
+      deps.publishedShas.add(sha);
+      try {
+        const doc = await deps.uploader(path.join("outputs", rel), path.basename(rel));
+        await deps.emit(documentPublishedEvent(doc));
+      } catch (err) {
+        deps.publishedShas.delete(sha);
+        throw err;
+      }
     } catch (err) {
-      // Best-effort: a single file's failure must not abort the sweep or the run.
-      deps.logWarn?.("outputs sweep failed to publish a file", {
+      // Best-effort: a single file's failure must not abort the sweep or the
+      // run. The uploader has already exhausted its retries, so this deliverable
+      // is DROPPED — surface it clearly (name + last error/attempt count).
+      deps.logWarn?.("outputs sweep dropped a deliverable (upload failed)", {
         file: rel,
         error: getErrorMessage(err),
       });
     }
-  }
+  };
+
+  // Bounded worker pool: publish up to SWEEP_CONCURRENCY files at once. A shared
+  // cursor hands each worker the next entry; each entry is self-contained
+  // (own try/catch), so one failure never stalls the pool.
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < entries.length) {
+      const rel = entries[cursor++]!;
+      await publishEntry(rel);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(SWEEP_CONCURRENCY, entries.length) }, () => worker()),
+  );
 }

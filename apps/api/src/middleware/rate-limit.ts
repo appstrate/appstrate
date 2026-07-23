@@ -191,3 +191,16 @@ export const rateLimitByRunId = createRateLimitMiddleware({
   extractKey: (c) => `run-event:${c.req.param("runId") ?? "unknown"}`,
   emitHeaders: false,
 });
+
+/**
+ * Per-run rate limiter for document uploads (`POST /api/runs/:runId/documents`),
+ * kept SEPARATE from `rateLimitByRunId` (event ingestion): the end-of-run
+ * `outputs/` sweep can burst many small file uploads at once and must neither
+ * consume the run's event-stream budget nor be throttled by it (a shared
+ * limiter would let a sweep 429 itself). Same runId-keyed anti-evasion property.
+ */
+export const rateLimitRunDocuments = createRateLimitMiddleware({
+  category: "run-document",
+  extractKey: (c) => `run-document:${c.req.param("runId") ?? "unknown"}`,
+  emitHeaders: false,
+});

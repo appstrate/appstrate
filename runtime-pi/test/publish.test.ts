@@ -17,7 +17,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { verify } from "@appstrate/afps-runtime/events";
 import { buildPublishDocumentDef } from "@appstrate/core/runtime-tool-defs";
-import { createRunDocumentUploader, sweepOutputs } from "../publish.ts";
+import { createRunDocumentUploader, sweepOutputs, uploadTimeoutMs } from "../publish.ts";
+import type { RunDocumentUploaderDeps } from "../publish.ts";
 
 const SECRET = "test-run-secret-0123456789";
 
@@ -29,8 +30,12 @@ interface Received {
 }
 
 interface ServerConfig {
-  /** HTTP status to answer with (2xx → success JSON, else error). */
+  /** Default HTTP status when `statusQueue` is empty (2xx → success JSON, else error). */
   status: number;
+  /** Per-request status sequence (consumed FIFO) — drives retry scenarios. */
+  statusQueue: number[];
+  /** `Retry-After` header value to attach to a 429 response, if set. */
+  retryAfter?: string;
   received: Received[];
 }
 
@@ -66,8 +71,13 @@ beforeAll(() => {
         sha256,
         size: bytes.byteLength,
       });
-      if (config.status < 200 || config.status >= 300) {
-        return new Response(`error ${config.status}`, { status: config.status });
+      const status = config.statusQueue.length > 0 ? config.statusQueue.shift()! : config.status;
+      if (status < 200 || status >= 300) {
+        const headers: Record<string, string> = {};
+        if (status === 429 && config.retryAfter !== undefined) {
+          headers["retry-after"] = config.retryAfter;
+        }
+        return new Response(`error ${status}`, { status, headers });
       }
       const id = `doc_${sha256.slice(0, 12)}`;
       return Response.json({
@@ -88,7 +98,7 @@ afterAll(() => server.stop(true));
 let workspace: string;
 
 beforeEach(async () => {
-  config = { status: 201, received: [] };
+  config = { status: 201, statusQueue: [], received: [] };
   // `realpath`: on macOS `tmpdir()` (`/var/folders/…`) is a symlink to
   // `/private/var/folders/…`. `resolveSafeFile` canonicalizes the workspace
   // root before comparing resolved paths to it, so an unresolved root makes
@@ -97,8 +107,16 @@ beforeEach(async () => {
   workspace = await realpath(await mkdtemp(path.join(tmpdir(), "publish-test-")));
 });
 
-function makeUploader(publishedShas: Set<string>) {
-  return createRunDocumentUploader({ sinkUrl, sinkSecret: SECRET, workspace, publishedShas });
+function makeUploader(publishedShas: Set<string>, overrides?: Partial<RunDocumentUploaderDeps>) {
+  return createRunDocumentUploader({
+    sinkUrl,
+    sinkSecret: SECRET,
+    workspace,
+    publishedShas,
+    // No real backoff waits in tests; retry-specific cases inject a recorder.
+    sleepFn: async () => {},
+    ...overrides,
+  });
 }
 
 describe("createRunDocumentUploader", () => {
@@ -166,6 +184,66 @@ describe("createRunDocumentUploader", () => {
     config.status = 413;
     await writeFile(path.join(workspace, "big.txt"), new TextEncoder().encode("x"));
     await expect(makeUploader(new Set())("big.txt")).rejects.toThrow(/413/);
+  });
+
+  it("retries a 5xx then succeeds", async () => {
+    // First attempt 500, second 201 — the file is published after one retry.
+    config.statusQueue = [500, 201];
+    const bytes = new TextEncoder().encode("retry-me");
+    await writeFile(path.join(workspace, "r.txt"), bytes);
+    const shas = new Set<string>();
+
+    const doc = await makeUploader(shas)("r.txt");
+
+    expect(doc.sha256).toBe(sha256Hex(bytes));
+    expect(config.received).toHaveLength(2); // one failed + one successful attempt
+    expect(shas.has(doc.sha256)).toBe(true);
+  });
+
+  it("does not retry a definitive 413", async () => {
+    config.statusQueue = [413, 201]; // second entry must never be reached
+    await writeFile(path.join(workspace, "cap.txt"), new TextEncoder().encode("x"));
+
+    await expect(makeUploader(new Set())("cap.txt")).rejects.toThrow(/413/);
+    expect(config.received).toHaveLength(1); // stopped after the first attempt
+  });
+
+  it("honours Retry-After on a 429 before retrying", async () => {
+    config.statusQueue = [429, 201];
+    config.retryAfter = "2"; // seconds
+    await writeFile(path.join(workspace, "throttled.txt"), new TextEncoder().encode("y"));
+    const slept: number[] = [];
+
+    const doc = await makeUploader(new Set(), {
+      sleepFn: async (ms) => {
+        slept.push(ms);
+      },
+    })("throttled.txt");
+
+    expect(doc.name).toBe("throttled.txt");
+    expect(config.received).toHaveLength(2);
+    // The 429's Retry-After (2s) drove the wait, not the default backoff.
+    expect(slept).toEqual([2000]);
+  });
+
+  it("abandons after 3 failed attempts with a clear error", async () => {
+    config.status = 500; // every attempt fails
+    await writeFile(path.join(workspace, "doomed.txt"), new TextEncoder().encode("z"));
+
+    await expect(makeUploader(new Set())("doomed.txt")).rejects.toThrow(/after 3 attempts/);
+    expect(config.received).toHaveLength(3);
+  });
+});
+
+describe("uploadTimeoutMs", () => {
+  it("is a fixed base plus time proportional to the byte count", () => {
+    // 0 bytes → just the base; larger files add ~1s per MiB (1 MiB/s floor).
+    expect(uploadTimeoutMs(0)).toBe(30_000);
+    expect(uploadTimeoutMs(1024 * 1024)).toBe(31_000);
+    expect(uploadTimeoutMs(10 * 1024 * 1024)).toBe(40_000);
+    // Monotonic and never below the base, even for a negative/garbage size.
+    expect(uploadTimeoutMs(-5)).toBe(30_000);
+    expect(uploadTimeoutMs(5 * 1024 * 1024)).toBeGreaterThan(uploadTimeoutMs(1024 * 1024));
   });
 });
 
@@ -300,7 +378,56 @@ describe("sweepOutputs", () => {
     });
 
     expect(events).toHaveLength(0);
-    expect(warnings.some((w) => /failed to publish/.test(w))).toBe(true);
+    expect(warnings.some((w) => /dropped a deliverable/.test(w))).toBe(true);
+  });
+
+  it("skips a hidden dotfile at the root and publishes regular files", async () => {
+    await seedOutput(".env", "SECRET=shh");
+    await seedOutput("report.md", "# ok");
+    const shas = new Set<string>();
+    const warnings: string[] = [];
+    const events: Array<Record<string, unknown>> = [];
+
+    await sweepOutputs({
+      uploader: makeUploader(shas),
+      workspace,
+      publishedShas: shas,
+      maxFileBytes: 1024,
+      emit: (e) => {
+        events.push(e);
+      },
+      logWarn: (m) => warnings.push(m),
+    });
+
+    // Only the regular file was published; the dotfile never reached the server.
+    expect(config.received).toHaveLength(1);
+    expect(config.received[0]!.name).toBe("report.md");
+    expect(events).toHaveLength(1);
+    expect(warnings.some((w) => /hidden file/.test(w))).toBe(true);
+  });
+
+  it("skips a file nested inside a hidden directory", async () => {
+    await seedOutput(".git/config", "[core]");
+    await seedOutput("data.csv", "a,b");
+    const shas = new Set<string>();
+    const warnings: string[] = [];
+    const events: Array<Record<string, unknown>> = [];
+
+    await sweepOutputs({
+      uploader: makeUploader(shas),
+      workspace,
+      publishedShas: shas,
+      maxFileBytes: 1024,
+      emit: (e) => {
+        events.push(e);
+      },
+      logWarn: (m) => warnings.push(m),
+    });
+
+    // The file under `.git/` is excluded; the normal file is published.
+    expect(config.received).toHaveLength(1);
+    expect(config.received[0]!.name).toBe("data.csv");
+    expect(warnings.some((w) => /hidden file/.test(w))).toBe(true);
   });
 });
 
@@ -330,5 +457,18 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     const def = buildPublishDocumentDef(makeUploader(new Set()));
     const result = await def.handler({});
     expect(result.isError).toBe(true);
+  });
+
+  it("still publishes an explicitly-chosen dotfile (hidden filter is sweep-only)", async () => {
+    // The hidden-file exclusion applies ONLY to the implicit outputs sweep; an
+    // agent deliberately publishing a dotfile via the tool is honoured.
+    await writeFile(path.join(workspace, ".config"), new TextEncoder().encode("k=v"));
+    const def = buildPublishDocumentDef(makeUploader(new Set()));
+
+    const result = await def.handler({ path: ".config" });
+
+    expect(result.isError).toBeUndefined();
+    expect(config.received).toHaveLength(1);
+    expect(config.received[0]!.name).toBe(".config");
   });
 });
