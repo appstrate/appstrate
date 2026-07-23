@@ -21,7 +21,9 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
+import { eq } from "drizzle-orm";
+import { packages } from "@appstrate/db/schema";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
@@ -240,5 +242,64 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     });
 
     expect(res.status).toBe(404);
+  });
+
+  it("ALLOW: a version-pinned run keeps bundle access when the draft dropped the integration dep", async () => {
+    // Regression (@tractr/fathom-glenn class): the guard must enumerate the
+    // deps of the manifest the run EXECUTES. Published agent 2.0.0 declares
+    // the integration referencing MCP_SERVER; the draft no longer does. A run
+    // pinned to 2.0.0 must still fetch the server bundle at boot.
+    await seedLocalIntegration(true);
+    await seedMcpServerWithBundle(MCP_SERVER, SERVER_BUNDLE_BYTES);
+
+    const pinnedManifest = {
+      name: AGENT,
+      version: "2.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Test Agent",
+      dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+      integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
+    };
+    await seedPackageVersion({ packageId: AGENT, version: "2.0.0", manifest: pinnedManifest });
+    await db
+      .update(packages)
+      .set({
+        draftManifest: {
+          name: AGENT,
+          version: "2.0.1",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Test Agent",
+          dependencies: { integrations: {} },
+          integrations_configuration: {},
+        },
+      })
+      .where(eq(packages.id, AGENT));
+
+    const pinnedRun = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      status: "running",
+      versionRef: "2.0.0",
+    });
+    const pinnedToken = signRunToken(pinnedRun.id);
+
+    // The pinned run reads the 2.0.0 dep set → ALLOW.
+    const res = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}`, {
+      headers: { Authorization: `Bearer ${pinnedToken}` },
+    });
+    expect(res.status).toBe(200);
+    expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual(
+      Array.from(SERVER_BUNDLE_BYTES),
+    );
+
+    // The original draft-ref run (beforeEach) now sees an empty draft dep set → DENY.
+    const draftRes = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(draftRes.status).toBe(404);
   });
 });
