@@ -330,6 +330,15 @@ export interface IntegrationSpawnSpec {
    */
   apiCalls?: readonly ApiCallSpec[];
   /**
+   * True when the integration manifest declares at least one `api_call`
+   * capability, before the agent's tool selection is applied. The sidecar
+   * needs this distinction because `apiCalls` contains only selected tools:
+   * a serverless credential-only integration may intentionally declare none,
+   * while a declared capability filtered down to zero is likely a
+   * configuration mistake.
+   */
+  declaresApiCall?: boolean;
+  /**
    * Env vars to inject on the spawned subprocess. Resolved from
    * `manifest.auths.{key}.delivery.env` by the platform — values are
    * the live OAuth access_token / API key. Sensitive: never logged.

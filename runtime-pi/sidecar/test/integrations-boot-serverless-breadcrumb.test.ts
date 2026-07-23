@@ -4,10 +4,9 @@
  * Tests for `pushServerlessReadyBreadcrumb` — the serverless (`sourceKind:
  * "none"`) branch breadcrumb.
  *
- * A serverless integration whose config didn't list `"api_call"` exposes zero
- * tools and is effectively non-functional. It must surface as a `warn` with an
- * actionable message rather than the success-toned `api_call ready` breadcrumb,
- * which is indistinguishable in tone from the healthy `(N tools)` case.
+ * A credential-only integration may intentionally expose zero tools, while an
+ * integration that declares `api_call` but whose agent config omits it is
+ * misconfigured. The spawn spec preserves that distinction.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -15,20 +14,28 @@ import type { IntegrationBootBreadcrumb } from "@appstrate/core/sidecar-types";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { pushServerlessReadyBreadcrumb } from "../integrations-boot.ts";
 
-function serverlessSpec(): IntegrationSpawnSpec {
+function serverlessSpec(declaresApiCall = false): IntegrationSpawnSpec {
   return {
     integrationId: "@tractr/google-drive",
     namespace: "google_drive",
     sourceKind: "none",
     manifest: { name: "@tractr/google-drive", version: "1.0.0" },
+    ...(declaresApiCall ? { declaresApiCall: true } : {}),
     spawnEnv: {},
   } as IntegrationSpawnSpec;
 }
 
 describe("pushServerlessReadyBreadcrumb", () => {
-  it("warns when 0 tools were exposed", () => {
+  it("stays quiet when api_call is not declared", () => {
     const breadcrumbs: IntegrationBootBreadcrumb[] = [];
     pushServerlessReadyBreadcrumb(serverlessSpec(), 0, 12, breadcrumbs);
+
+    expect(breadcrumbs).toHaveLength(0);
+  });
+
+  it("warns when a declared api_call was filtered down to 0 tools", () => {
+    const breadcrumbs: IntegrationBootBreadcrumb[] = [];
+    pushServerlessReadyBreadcrumb(serverlessSpec(true), 0, 12, breadcrumbs);
 
     expect(breadcrumbs).toHaveLength(1);
     expect(breadcrumbs[0]!.level).toBe("warn");
@@ -46,14 +53,14 @@ describe("pushServerlessReadyBreadcrumb", () => {
 
   it("never uses the success-toned 'ready' wording for 0 tools", () => {
     const breadcrumbs: IntegrationBootBreadcrumb[] = [];
-    pushServerlessReadyBreadcrumb(serverlessSpec(), 0, 5, breadcrumbs);
+    pushServerlessReadyBreadcrumb(serverlessSpec(true), 0, 5, breadcrumbs);
 
     expect(breadcrumbs[0]!.message).not.toContain("ready");
   });
 
   it("emits an info 'ready' breadcrumb for a single tool (singular)", () => {
     const breadcrumbs: IntegrationBootBreadcrumb[] = [];
-    pushServerlessReadyBreadcrumb(serverlessSpec(), 1, 8, breadcrumbs);
+    pushServerlessReadyBreadcrumb(serverlessSpec(true), 1, 8, breadcrumbs);
 
     expect(breadcrumbs).toHaveLength(1);
     expect(breadcrumbs[0]!.level).toBe("info");
@@ -68,7 +75,7 @@ describe("pushServerlessReadyBreadcrumb", () => {
 
   it("emits an info 'ready' breadcrumb for multiple tools (plural)", () => {
     const breadcrumbs: IntegrationBootBreadcrumb[] = [];
-    pushServerlessReadyBreadcrumb(serverlessSpec(), 2, 3, breadcrumbs);
+    pushServerlessReadyBreadcrumb(serverlessSpec(true), 2, 3, breadcrumbs);
 
     expect(breadcrumbs).toHaveLength(1);
     expect(breadcrumbs[0]!.level).toBe("info");

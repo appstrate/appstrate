@@ -244,7 +244,8 @@ async function resolveOne(
   // silently drop a selected capability. Picking either name grants both.
   const wildcardSelection = isToolsWildcard(effectiveSelection);
   const selectedTools = wildcardSelection ? null : new Set(effectiveSelection ?? []);
-  const apiCalls: ApiCallSpec[] = getApiCallConfigs(manifest)
+  const declaredApiCalls = getApiCallConfigs(manifest);
+  const apiCalls: ApiCallSpec[] = declaredApiCalls
     .filter(
       (cfg) =>
         wildcardSelection ||
@@ -521,6 +522,7 @@ async function resolveOne(
         : {}),
     },
     ...(apiCalls.length > 0 ? { apiCalls } : {}),
+    ...(declaredApiCalls.length > 0 ? { declaresApiCall: true } : {}),
     // R8a defensive filter — surface `manifest.hidden_tools` to the
     // sidecar so the McpHost can drop them from `tools/list` at runtime,
     // independent of whether the install-time catalog resolver already

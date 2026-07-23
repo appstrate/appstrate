@@ -1079,15 +1079,13 @@ export function hiddenToolsForNativeUpstream(
 
 /**
  * Breadcrumb for the serverless (`sourceKind: "none"`) branch, where the
- * in-process `api_call` server is the integration's entire surface.
+ * in-process `api_call` server is the integration's only integration-owned
+ * tool surface.
  *
- * When `toolCount === 0` the integration is effectively non-functional: the
- * config (`integrations_configuration[id].tools`) didn't list `"api_call"`, so
- * the resolver filtered everything and nothing is callable. The agent silently
- * falls back to read/bash and the run looks healthy until it fails its job.
- * Emit a `warn` with an actionable message instead of a success-toned "ready"
- * breadcrumb, so the misconfiguration is self-diagnosing. Keep the
- * `ready (N tools)` wording only for `N > 0`.
+ * A zero-tool serverless integration is valid when its manifest does not
+ * declare `api_call`: runtime tools such as `desktop_browser` may still use its
+ * connected credentials through server-side substitution. Only warn when the
+ * manifest did declare `api_call` and the agent selection filtered it out.
  */
 export function pushServerlessReadyBreadcrumb(
   spec: IntegrationSpawnSpec,
@@ -1096,6 +1094,7 @@ export function pushServerlessReadyBreadcrumb(
   breadcrumbs: IntegrationBootBreadcrumb[],
 ): void {
   if (toolCount === 0) {
+    if (!spec.declaresApiCall) return;
     breadcrumbs.push({
       message: `${spec.integrationId}: api_call exposed 0 tools — nothing callable. Check integrations_configuration["${spec.integrationId}"].tools (a serverless integration must list "api_call").`,
       level: "warn",

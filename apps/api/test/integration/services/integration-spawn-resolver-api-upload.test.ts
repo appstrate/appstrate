@@ -164,6 +164,7 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
   it("tools: [] grants neither api_call nor api_upload", async () => {
     const spec = await seedAndResolve(ctx, { uploadProtocols: PROTOCOLS, tools: [] });
     expect(spec.apiCalls).toBeUndefined();
+    expect(spec.declaresApiCall).toBe(true);
   });
 
   it("api_upload on an auth without upload_protocols grants nothing", async () => {
