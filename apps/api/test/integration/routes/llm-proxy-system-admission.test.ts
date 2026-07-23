@@ -75,11 +75,14 @@ async function buildHarness(): Promise<Harness> {
     orgId: ctx.orgId,
     type: "agent",
   });
+  // Remote origin — the run shape this admission seam exists for. Platform
+  // runs are admitted once at preflight and skip the proxy-side hook.
   const run = await seedRun({
     packageId: pkg.id,
     orgId: ctx.orgId,
     applicationId: ctx.defaultAppId,
     status: "running",
+    runOrigin: "remote",
   });
   return { ctx, apiKey: key.rawKey, runId: run.id };
 }
@@ -170,6 +173,58 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
         runningCount: 1,
       },
     ]);
+  });
+
+  it("does not re-dispatch beforeUsage for a platform-origin run (already gated at preflight)", async () => {
+    // Same rejecting module as the remote-run 402 test — but the run is
+    // platform-origin, so the proxy admission must NOT gate it a second time:
+    // the call reaches upstream and the hook records zero dispatches.
+    const h = await buildHarness();
+    const platformRun = await seedRun({
+      packageId: "@system/proxy-agent",
+      orgId: h.ctx.orgId,
+      applicationId: h.ctx.defaultAppId,
+      status: "running",
+      runOrigin: "platform",
+    });
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances(
+      [
+        gateModule(
+          { code: "quota_exceeded", message: "Credit quota exceeded", status: 402 },
+          calls,
+        ),
+      ],
+      fakeInitCtx(),
+    );
+
+    let upstreamHit = false;
+    globalThis.fetch = (async () => {
+      upstreamHit = true;
+      return new Response(
+        JSON.stringify({
+          id: "c1",
+          object: "chat.completion",
+          model: "upstream-system-model",
+          choices: [{ index: 0, message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: { ...headers(h, false), "x-run-id": platformRun.id },
+      body: JSON.stringify({
+        model: SYSTEM_PRESET,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(upstreamHit).toBe(true);
+    expect(calls).toHaveLength(0);
   });
 
   it("refuses an unattributed raw system call while leaving BYOK semantics untouched", async () => {

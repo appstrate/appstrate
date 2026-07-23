@@ -18,7 +18,9 @@ import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError } from "../lib/errors.ts";
 
 export type SystemProxyUsageContext =
-  { context: "run"; packageId: string } | { context: "chat"; sessionId: string | null } | null;
+  | { context: "run"; packageId: string; runOrigin: "platform" | "remote" }
+  | { context: "chat"; sessionId: string | null }
+  | null;
 
 export async function enforceSystemProxyAdmission(args: {
   orgId: string;
@@ -43,12 +45,21 @@ export async function enforceSystemProxyAdmission(args: {
     });
   }
 
-  // `gateChatUsage` already called `beforeUsage` once for this exact turn
+  // `checkUsageAllowed` already called `beforeUsage` once for this exact turn
   // before minting the inference loopback token. Calling it again here would
   // duplicate hook side effects and quota reads. The signed loopback identity
   // is still load-bearing: it is what distinguishes chat from an unattributed
   // raw proxy call.
   if (args.usageContext.context === "chat") return;
+
+  // A platform-origin run was already admitted once at preflight
+  // (run-preflight-gates.ts) — its per-call proxy usage stays attributed, but
+  // re-dispatching the hook here would gate the same run twice and duplicate
+  // quota reads on every LLM call. Only remote runs, which skip the preflight
+  // gate (model unknown at creation), are admitted at the proxy. This makes
+  // the "each run is gated by exactly one entry point" invariant explicit in
+  // code instead of relying on platform runs never carrying X-Run-Id here.
+  if (args.usageContext.runOrigin !== "remote") return;
 
   const params = {
     orgId: args.orgId,
