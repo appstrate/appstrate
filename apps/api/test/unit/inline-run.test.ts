@@ -12,8 +12,13 @@ import {
   isInlineShadowPackageId,
   generateShadowPackageId,
   buildShadowLoadedPackage,
+  assertPromptDocumentsCoveredByInput,
 } from "../../src/services/inline-run.ts";
+import { ApiError } from "../../src/lib/errors.ts";
 import type { AgentManifest } from "../../src/types/index.ts";
+
+const DOC_A = "document://doc_aaaaaaaa";
+const DOC_B = "document://doc_bbbbbbbb";
 
 describe("inline-run helpers", () => {
   describe("INLINE_SHADOW_SCOPE", () => {
@@ -90,6 +95,60 @@ describe("inline-run helpers", () => {
     it("carries no resolved-skill projection", () => {
       const loaded = buildShadowLoadedPackage("@inline/r-3", manifest, "p");
       expect(loaded).not.toHaveProperty("skills");
+    });
+  });
+
+  describe("assertPromptDocumentsCoveredByInput", () => {
+    it("rejects a prompt document:// URI absent from the input", () => {
+      let caught: unknown;
+      try {
+        assertPromptDocumentsCoveredByInput(`Read the file at ${DOC_A} please.`, null);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(ApiError);
+      const apiErr = caught as ApiError;
+      expect(apiErr.status).toBe(400);
+      expect(apiErr.code).toBe("validation_failed");
+      expect(apiErr.fieldErrors?.[0]?.code).toBe("document_uri_in_prompt");
+      // The offending URI is named so the model knows what to move into input.
+      expect(apiErr.fieldErrors?.[0]?.message).toContain(DOC_A);
+    });
+
+    it("names every uncovered URI when several are pasted into the prompt", () => {
+      let caught: unknown;
+      try {
+        assertPromptDocumentsCoveredByInput(`Images: ${DOC_A} and ${DOC_B}`, null);
+      } catch (err) {
+        caught = err;
+      }
+      const msg = (caught as ApiError).fieldErrors?.[0]?.message ?? "";
+      expect(msg).toContain(DOC_A);
+      expect(msg).toContain(DOC_B);
+    });
+
+    it("passes when the same URI appears in both prompt and input", () => {
+      expect(() =>
+        assertPromptDocumentsCoveredByInput(`Read ${DOC_A}`, { file: DOC_A }),
+      ).not.toThrow();
+    });
+
+    it("passes when every prompt URI is covered even if input carries extras", () => {
+      expect(() =>
+        assertPromptDocumentsCoveredByInput(`Read ${DOC_A}`, { a: DOC_A, b: DOC_B }),
+      ).not.toThrow();
+    });
+
+    it("rejects when only some prompt URIs are covered by input", () => {
+      expect(() =>
+        assertPromptDocumentsCoveredByInput(`${DOC_A} and ${DOC_B}`, { file: DOC_A }),
+      ).toThrow(ApiError);
+    });
+
+    it("passes for a prompt with no document:// URIs", () => {
+      expect(() =>
+        assertPromptDocumentsCoveredByInput("Summarise the user's recent emails.", null),
+      ).not.toThrow();
     });
   });
 });

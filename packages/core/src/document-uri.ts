@@ -93,3 +93,30 @@ export function extractDocumentIds(value: unknown): string[] {
   walk(value);
   return [...ids];
 }
+
+/**
+ * Finds `document://doc_xxx` occurrences embedded ANYWHERE inside a free-form
+ * text blob (e.g. a model-authored run prompt) — not only when the whole string
+ * is a bare URI, which is all {@link extractDocumentIds} matches on a leaf
+ * string. Each candidate is re-validated through {@link parseDocumentUri}, so a
+ * too-short / malformed id after the `document://doc_` scheme is silently
+ * skipped. De-duplicated, insertion-order stable.
+ *
+ * Companion to {@link extractDocumentIds}: that one turns structured input JSON
+ * into the document ids it consumes; this one turns prose into the document ids
+ * it *mentions* — the difference the inline-run guard uses to catch a URI pasted
+ * into a sub-agent's prompt (inert — the runtime cannot fetch it) instead of
+ * passed through a declared input file field (mounted into the workspace).
+ */
+export function extractDocumentIdsFromText(text: string): string[] {
+  if (typeof text !== "string" || text.length === 0) return [];
+  const ids = new Set<string>();
+  // `doc_` + ≥1 id char; the strict `{8,}` length is enforced by
+  // parseDocumentUri below so this scan stays permissive at the boundary.
+  const scan = /document:\/\/doc_[A-Za-z0-9_-]+/g;
+  for (const match of text.matchAll(scan)) {
+    const id = parseDocumentUri(match[0]);
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}

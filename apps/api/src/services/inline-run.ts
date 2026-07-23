@@ -25,6 +25,12 @@ import type { ParsedInput } from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import {
+  documentUri,
+  extractDocumentIds,
+  extractDocumentIdsFromText,
+} from "@appstrate/core/document-uri";
+import { validationFailed } from "../lib/errors.ts";
 
 export type { InlineRunBody };
 
@@ -113,6 +119,49 @@ export function buildShadowLoadedPackage(
 }
 
 /**
+ * Reject an inline run whose model-authored `prompt` references `document://`
+ * URIs the run cannot actually read.
+ *
+ * A run only receives a document when the manifest declares a file input field
+ * AND the `document://` URI is passed through the top-level `input` — the
+ * platform then streams the file into the workspace under `documents/`. A
+ * `document://` URI merely pasted into the sub-agent's prompt text is inert: the
+ * runtime has no way to fetch it, so the run launches against dead URIs and the
+ * sub-agent silently sees nothing. The chat model has been observed doing
+ * exactly this. Fail loudly with a recoverable 400 that names the offending URIs
+ * and the exact fix, so the chat model self-corrects (its prompt already retries
+ * recoverable field-validation errors) instead of shipping silent garbage.
+ *
+ * `document://` only, by design: this runs AFTER `parseRequestInput`, which has
+ * already rewritten any `upload://` input to a fresh `document://` id the model
+ * never saw — so a symmetric `upload://` prompt-vs-input comparison would
+ * false-positive on a correctly-declared upload field. There is also no
+ * core-level canonical `upload://` text-scanner to reuse (the upload parser
+ * lives in the apps/api uploads service), and the observed live failure is
+ * `document://` URIs. Pure — exported for unit tests.
+ */
+export function assertPromptDocumentsCoveredByInput(prompt: string, input: unknown): void {
+  const promptIds = extractDocumentIdsFromText(prompt);
+  if (promptIds.length === 0) return;
+  const covered = new Set(extractDocumentIds(input));
+  const uncovered = promptIds.filter((id) => !covered.has(id));
+  if (uncovered.length === 0) return;
+  throw validationFailed([
+    {
+      field: "prompt",
+      code: "document_uri_in_prompt",
+      title: "Document URI In Prompt",
+      message:
+        "The run prompt references document:// URIs but the run cannot read documents from " +
+        "prompt text. Declare a file input field in manifest.input.schema " +
+        '({"type":"string","format":"uri","contentMediaType":"<mime>"}) and pass each ' +
+        "document:// URI in the top-level input. Unreferenced: " +
+        uncovered.map(documentUri).join(", "),
+    },
+  ]);
+}
+
+/**
  * Trigger an inline agent run end-to-end: insert the shadow package and fire
  * the pipeline. The route owns the earlier stages — `runInlinePreflight`
  * (manifest shape, config, readiness) then `parseRequestInput` (file fields
@@ -146,6 +195,11 @@ export async function triggerInlineRun(params: {
   // `undefined`; map that to NULL so an input-less inline run persists
   // `runs.input` as SQL NULL — the same representation the agent route uses.
   const effectiveInput = parsed.input ?? null;
+
+  // Reject BEFORE any durable side effect (shadow row, pipeline) when the
+  // model-authored prompt names document:// URIs that the resolved input does
+  // not mount — a recoverable 400 the chat model can act on.
+  assertPromptDocumentsCoveredByInput(prompt, effectiveInput);
 
   // Reject an unknown/malformed explicit `modelId` with a clean 404 before we
   // mint a shadow package — avoids both a leaked shadow row and the downstream

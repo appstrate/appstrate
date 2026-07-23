@@ -199,6 +199,23 @@ describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)
     const rows = await db.select().from(packages).where(eq(packages.ephemeral, true));
     expect(rows).toHaveLength(0);
   });
+
+  it("returns 400 when the prompt references a document:// URI the input does not mount", async () => {
+    // The observed chat failure mode: URIs pasted into the sub-agent's prompt
+    // text with no input at all — the run would launch against dead URIs.
+    const res = await post({
+      manifest: validManifest(),
+      prompt:
+        "Read this image: document://doc_627ff7c8-f102-41e2-9c8d-136f8bbc00f5 and describe it.",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: { code?: string; field?: string }[] };
+    expect(body.errors?.[0]?.code).toBe("document_uri_in_prompt");
+    expect(body.errors?.[0]?.field).toBe("prompt");
+    // No durable side effect on rejection.
+    const rows = await db.select().from(packages).where(eq(packages.ephemeral, true));
+    expect(rows).toHaveLength(0);
+  });
 });
 
 describe("POST /api/runs/inline — dependency resolution", () => {
