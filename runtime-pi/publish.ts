@@ -23,6 +23,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { sign } from "@appstrate/afps-runtime/events";
+import { resolveSafeFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { documentPublishedEvent } from "@appstrate/core/runtime-tool-defs";
 import type { PublishedDocument } from "@appstrate/core/runtime-tool-defs";
@@ -67,25 +68,13 @@ export interface RunDocumentUploaderDeps {
 }
 
 /**
- * Resolve a caller-supplied relative path to an absolute path guaranteed to sit
- * inside the workspace. Rejects traversal (`../…`) and absolute escapes.
- */
-function resolveInWorkspace(workspace: string, relPath: string): string {
-  const abs = path.resolve(workspace, relPath);
-  const root = path.resolve(workspace);
-  if (abs !== root && !abs.startsWith(root + path.sep)) {
-    throw new Error(`path '${relPath}' escapes the workspace`);
-  }
-  return abs;
-}
-
-/**
  * Build the `uploadRunDocument(path, name?)` function the `publish_document`
  * tool and the outputs sweep both call. It streams the file straight to
  * `POST /api/runs/:id/documents` (never buffering it), records the returned
  * sha256 in {@link RunDocumentUploaderDeps.publishedShas}, and returns the
  * durable document metadata. Throws a clear `Error` on a missing file, a path
- * escape, or a non-2xx response so the tool surfaces it as a tool error.
+ * escape, a workspace symlink, or a non-2xx response so the tool surfaces it as
+ * a tool error.
  */
 export function createRunDocumentUploader(
   deps: RunDocumentUploaderDeps,
@@ -94,12 +83,11 @@ export function createRunDocumentUploader(
   const url = deps.sinkUrl.replace(/\/events$/, "/documents");
 
   return async (relPath, name) => {
-    const abs = resolveInWorkspace(deps.workspace, relPath);
-    const file = Bun.file(abs);
-    if (!(await file.exists())) {
-      throw new Error(`file '${relPath}' does not exist in the workspace`);
-    }
-    const documentName = name ?? path.basename(abs);
+    // Same path safety as the api_call / api_upload resolvers: root-membership,
+    // traversal, and symlink refusal via a single lstat gate. A non-existent
+    // file surfaces as the lstat ENOENT — no separate `exists()` probe needed.
+    const { absPath } = await resolveSafeFile(deps.workspace, relPath);
+    const documentName = name ?? path.basename(absPath);
 
     const headers: Record<string, string> = {
       ...sign({
@@ -108,14 +96,14 @@ export function createRunDocumentUploader(
         body: "",
         secret: deps.sinkSecret,
       }),
-      "Content-Type": guessMime(abs),
+      "Content-Type": guessMime(absPath),
       "X-Document-Name": documentName,
     };
 
     const res = await fetchFn(url, {
       method: "POST",
       headers,
-      body: file.stream(),
+      body: Bun.file(absPath).stream(),
       // Streaming a request body requires the half-duplex opt-in.
       duplex: "half",
     } as RequestInit & { duplex: "half" });
@@ -184,7 +172,15 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<void> {
   for (const rel of entries) {
     const abs = path.join(outputsDir, rel);
     try {
-      const stat = await fs.stat(abs);
+      // `lstat` (not `stat`) so a symlink is not followed: its target could sit
+      // outside the workspace, and the uploader would refuse it anyway. Skip it
+      // here with a warning rather than let it reach the uploader as a per-file
+      // error.
+      const stat = await fs.lstat(abs);
+      if (stat.isSymbolicLink()) {
+        deps.logWarn?.("outputs sweep skipped symlink", { file: rel });
+        continue;
+      }
       if (!stat.isFile()) continue;
       if (stat.size > deps.maxFileBytes) {
         deps.logWarn?.("outputs sweep skipped oversized file", {

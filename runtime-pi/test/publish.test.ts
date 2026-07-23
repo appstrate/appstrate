@@ -12,7 +12,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, symlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { verify } from "@appstrate/afps-runtime/events";
@@ -89,7 +89,12 @@ let workspace: string;
 
 beforeEach(async () => {
   config = { status: 201, received: [] };
-  workspace = await mkdtemp(path.join(tmpdir(), "publish-test-"));
+  // `realpath`: on macOS `tmpdir()` (`/var/folders/…`) is a symlink to
+  // `/private/var/folders/…`. `resolveSafeFile` canonicalizes the workspace
+  // root before comparing resolved paths to it, so an unresolved root makes
+  // every path look like a symlink escape. Real runs mount a real directory;
+  // only the fixture needs this.
+  workspace = await realpath(await mkdtemp(path.join(tmpdir(), "publish-test-")));
 });
 
 function makeUploader(publishedShas: Set<string>) {
@@ -122,11 +127,25 @@ describe("createRunDocumentUploader", () => {
   });
 
   it("throws on a missing file", async () => {
-    await expect(makeUploader(new Set())("nope.txt")).rejects.toThrow(/does not exist/);
+    await expect(makeUploader(new Set())("nope.txt")).rejects.toThrow(/ENOENT/);
   });
 
   it("rejects a path escaping the workspace", async () => {
-    await expect(makeUploader(new Set())("../secret.txt")).rejects.toThrow(/escapes the workspace/);
+    await expect(makeUploader(new Set())("../secret.txt")).rejects.toThrow(
+      /outside the allowed roots/,
+    );
+  });
+
+  it("rejects a symlink pointing outside the workspace, uploading nothing", async () => {
+    // A symlink INSIDE the workspace whose target sits outside it: a lexical
+    // guard would pass (the link path is under the workspace), but the file
+    // it resolves to is not — `resolveSafeFile` refuses it via its lstat gate.
+    const outside = await mkdtemp(path.join(tmpdir(), "publish-outside-"));
+    await writeFile(path.join(outside, "secret.txt"), new TextEncoder().encode("secret"));
+    await symlink(path.join(outside, "secret.txt"), path.join(workspace, "link.txt"));
+
+    await expect(makeUploader(new Set())("link.txt")).rejects.toThrow();
+    expect(config.received).toHaveLength(0);
   });
 
   it("surfaces a non-2xx response as an error", async () => {
@@ -183,6 +202,37 @@ describe("sweepOutputs", () => {
 
     expect(config.received).toHaveLength(0);
     expect(events).toHaveLength(0);
+  });
+
+  it("skips a symlink under outputs/ with a warning and publishes regular files", async () => {
+    // outputs/ holds one real file + one symlink to an outside target. The
+    // sweep must publish the real file and skip the symlink with a warning —
+    // never following it to the outside target (`lstat`, not `stat`).
+    const outside = await mkdtemp(path.join(tmpdir(), "publish-outside-"));
+    await writeFile(path.join(outside, "secret.txt"), new TextEncoder().encode("secret"));
+    await seedOutput("real.txt", "real-content");
+    await symlink(path.join(outside, "secret.txt"), path.join(workspace, "outputs", "link.txt"));
+
+    const shas = new Set<string>();
+    const warnings: string[] = [];
+    const events: Array<Record<string, unknown>> = [];
+
+    await sweepOutputs({
+      uploader: makeUploader(shas),
+      workspace,
+      publishedShas: shas,
+      maxFileBytes: 1024,
+      emit: (e) => {
+        events.push(e);
+      },
+      logWarn: (m) => warnings.push(m),
+    });
+
+    // Only the regular file reached the server; the symlink never did.
+    expect(config.received).toHaveLength(1);
+    expect(config.received[0]!.name).toBe("real.txt");
+    expect(events).toHaveLength(1);
+    expect(warnings.some((w) => /symlink/.test(w))).toBe(true);
   });
 
   it("skips an oversized file with a warning and never throws", async () => {
