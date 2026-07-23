@@ -2,7 +2,7 @@
 
 /**
  * Shared documents panel — the purpose tab strip, loading/error/empty states,
- * the DocumentRow list, and the delete + preview modals. Used by both the
+ * the DocumentTile grid, and the delete + preview modals. Used by both the
  * gallery page and the run-detail Documents tab. Data fetching and pagination
  * stay with the caller; this component is fed an already-resolved list and owns
  * only the delete/preview interaction (download + delete gating live here since
@@ -18,7 +18,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { useDeleteDocument, useDocumentDownload, type DocumentDto } from "../hooks/use-documents";
 import { usePermissions } from "../hooks/use-permissions";
 import { LoadingState, ErrorState, EmptyState } from "./page-states";
-import { DocumentRow } from "./document-row";
+import { DocumentTile } from "./document-tile";
 import { DocumentPreview } from "./document-preview";
 import { ConfirmModal } from "./confirm-modal";
 
@@ -34,6 +34,7 @@ export function DocumentListPanel({
   onPurposeChange,
   empty,
   showRunLink,
+  runId,
   footer,
   onDeleted,
 }: {
@@ -43,9 +44,15 @@ export function DocumentListPanel({
   purpose: PurposeFilter;
   onPurposeChange: (p: PurposeFilter) => void;
   empty: { message: string; hint?: string; compact?: boolean };
-  /** Gallery rows link to the producing run. */
+  /** Gallery tiles link to the producing run. */
   showRunLink?: boolean;
-  /** Gallery's "Load more" control, rendered after the list. */
+  /**
+   * Run-tab only: the run this panel belongs to. When set, each tile shows an
+   * input/output badge — a doc anchored to this run is an output, anything else
+   * (a differently-anchored or unanchored upload) is an input the run consumed.
+   */
+  runId?: string;
+  /** Gallery's "Load more" control, rendered after the grid. */
   footer?: ReactNode;
   /** Let the caller prune its own list (e.g. the gallery's page accumulator). */
   onDeleted?: (id: string) => void;
@@ -102,17 +109,20 @@ export function DocumentListPanel({
           icon={FileText}
         />
       ) : (
-        <div className="flex flex-col gap-2">
-          {documents.map((doc) => (
-            <DocumentRow
-              key={doc.id}
-              doc={doc}
-              onDownload={download}
-              onDelete={onDelete}
-              onPreview={setPreviewDoc}
-              showRunLink={showRunLink}
-            />
-          ))}
+        <div className="flex flex-col gap-3">
+          <div className="grid [grid-template-columns:repeat(auto-fill,minmax(10rem,1fr))] gap-3">
+            {documents.map((doc) => (
+              <DocumentTile
+                key={doc.id}
+                doc={doc}
+                onDownload={download}
+                onDelete={onDelete}
+                onPreview={setPreviewDoc}
+                showRunLink={showRunLink}
+                direction={runId ? (doc.run_id === runId ? "output" : "input") : undefined}
+              />
+            ))}
+          </div>
           {footer}
         </div>
       )}

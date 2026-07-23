@@ -13,6 +13,8 @@
   "row.delete": "Supprimer",
   "row.run": "Run",
   "row.openRun": "Ouvrir la page du run",
+  "row.inputDocument": "Utilisé en entrée",
+  "row.outputDocument": "Produit en sortie",
   "delete.title": "Supprimer le document",
   "delete.description": "Supprimer « {{name}} » ? Cette action est irréversible.",
   "delete.success": "Document supprimé.",

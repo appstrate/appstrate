@@ -1,0 +1,199 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Presentational grid tile for a single document — shared by the run-detail
+ * Documents tab and the gallery page. Renders a square media area (an image
+ * preview when the document is an image, the mime icon otherwise), the name,
+ * size + created time, an optional producing-agent label + run link, and
+ * preview / download / delete actions. Behavior (download, delete, gating) is
+ * injected by the parent; the only fetching this component does is the
+ * authenticated image preview, isolated in `DocumentTileImage` so the hook runs
+ * only for eligible images.
+ */
+
+import { createElement } from "react";
+import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
+import {
+  DownloadIcon,
+  ExternalLinkIcon,
+  EyeIcon,
+  FileInput,
+  FileOutput,
+  Trash2Icon,
+} from "lucide-react";
+import { isImageMime, useDocumentImageSrc } from "@appstrate/module-chat/ui";
+import { Button } from "@appstrate/ui/components/button";
+import { formatBytes } from "@appstrate/core/format";
+import { formatDateField } from "../lib/markdown";
+import { mimeIconFor, documentRunHref } from "../lib/documents";
+import type { DocumentDto } from "../hooks/use-documents";
+
+/**
+ * Render the mime's Lucide icon. `createElement` (not a PascalCase const from
+ * the helper) keeps `react-hooks/static-components` happy — the rule flags a
+ * component derived from a helper call during render.
+ */
+function MimeIcon({ mime, className }: { mime: string; className?: string }) {
+  return createElement(mimeIconFor(mime), { className });
+}
+
+/** Centered mime-icon placeholder — the non-image media, and the image fallback. */
+function MimePlaceholder({ mime }: { mime: string }) {
+  return (
+    <div className="flex size-full items-center justify-center">
+      <MimeIcon mime={mime} className="text-muted-foreground size-10" />
+    </div>
+  );
+}
+
+/**
+ * Image branch: the authenticated cover-cropped preview, falling back to the
+ * mime placeholder while the fetch is in flight or on failure (src null). Kept
+ * as its own component so the fetch hook only runs for eligible images (hooks
+ * can't be called conditionally). Web uses cookie auth → no header provider.
+ */
+function DocumentTileImage({ doc }: { doc: DocumentDto }) {
+  const src = useDocumentImageSrc(doc.id, null);
+  if (!src) return <MimePlaceholder mime={doc.mime} />;
+  return <img src={src} alt={doc.name} className="size-full object-cover" />;
+}
+
+export function DocumentTile({
+  doc,
+  onDownload,
+  onDelete,
+  onPreview,
+  showRunLink,
+  direction,
+}: {
+  doc: DocumentDto;
+  onDownload: (id: string, name: string) => void;
+  /** When provided, a delete button is rendered (visibility is the parent's call). */
+  onDelete?: (doc: DocumentDto) => void;
+  /** When provided and the doc is previewable, a preview button is rendered. */
+  onPreview?: (doc: DocumentDto) => void;
+  /** Show the producing-agent label + a link to its run (gallery). */
+  showRunLink?: boolean;
+  /** Run tab only: whether this run consumed the doc (input) or produced it (output). */
+  direction?: "input" | "output";
+}) {
+  const { t } = useTranslation("documents");
+  const runHref = showRunLink ? documentRunHref(doc) : undefined;
+
+  const canPreview = !!onPreview && doc.previewable;
+  // Media click mirrors the primary action: preview when available, else the
+  // authenticated download when the content is reachable.
+  const activate = canPreview
+    ? () => onPreview(doc)
+    : doc.downloadable
+      ? () => onDownload(doc.id, doc.name)
+      : undefined;
+  const activateLabel = canPreview ? t("row.preview") : t("row.download");
+
+  // Gate the image fetch on downloadable — an un-downloadable doc (another
+  // member's upload) would 403, so fall straight to the mime placeholder.
+  const showImage = doc.downloadable && isImageMime(doc.mime);
+
+  const media = (
+    <>
+      {showImage ? <DocumentTileImage doc={doc} /> : <MimePlaceholder mime={doc.mime} />}
+      {direction ? (
+        <span
+          className="bg-background/80 text-muted-foreground absolute top-1 left-1 rounded border p-1 backdrop-blur"
+          title={t(direction === "output" ? "row.outputDocument" : "row.inputDocument")}
+        >
+          {direction === "output" ? (
+            <FileOutput className="size-3.5" />
+          ) : (
+            <FileInput className="size-3.5" />
+          )}
+        </span>
+      ) : null}
+    </>
+  );
+
+  return (
+    <div className="border-border bg-card flex flex-col overflow-hidden rounded-lg border">
+      {activate ? (
+        <button
+          type="button"
+          onClick={activate}
+          title={activateLabel}
+          aria-label={activateLabel}
+          className="bg-muted hover:bg-muted/70 relative block aspect-square w-full"
+        >
+          {media}
+        </button>
+      ) : (
+        <div className="bg-muted relative aspect-square w-full">{media}</div>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1 p-2">
+        <span className="truncate text-sm font-medium" title={doc.name}>
+          {doc.name}
+        </span>
+        <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+          <span className="tabular-nums">{formatBytes(doc.size)}</span>
+          <span aria-hidden>·</span>
+          <span>{formatDateField(doc.createdAt, "datetime")}</span>
+          {showRunLink && doc.packageId ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="truncate font-mono">{doc.packageId}</span>
+            </>
+          ) : null}
+          {runHref ? (
+            <Link
+              to={runHref}
+              className="hover:text-foreground inline-flex items-center gap-1"
+              title={t("row.openRun")}
+            >
+              <ExternalLinkIcon className="size-3" />
+              {t("row.run")}
+            </Link>
+          ) : null}
+        </div>
+
+        <div className="mt-auto flex items-center justify-end gap-1 pt-1">
+          {canPreview ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              title={t("row.preview")}
+              aria-label={t("row.preview")}
+              onClick={() => onPreview(doc)}
+            >
+              <EyeIcon className="size-4" />
+            </Button>
+          ) : null}
+          {doc.downloadable ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              title={t("row.download")}
+              aria-label={t("row.download")}
+              onClick={() => onDownload(doc.id, doc.name)}
+            >
+              <DownloadIcon className="size-4" />
+            </Button>
+          ) : null}
+          {onDelete ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-destructive size-8"
+              title={t("row.delete")}
+              aria-label={t("row.delete")}
+              onClick={() => onDelete(doc)}
+            >
+              <Trash2Icon className="size-4" />
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}

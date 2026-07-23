@@ -13,6 +13,8 @@
   "row.delete": "Delete",
   "row.run": "Run",
   "row.openRun": "Open the run page",
+  "row.inputDocument": "Used as input",
+  "row.outputDocument": "Produced as output",
   "delete.title": "Delete document",
   "delete.description": "Delete “{{name}}”? This cannot be undone.",
   "delete.success": "Document deleted.",

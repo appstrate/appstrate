@@ -33,6 +33,7 @@ export function RunDocumentsTab({ runId }: { runId: string }) {
       purpose={purpose}
       onPurposeChange={setPurpose}
       empty={{ message: t("run.empty"), hint: t("run.emptyHint"), compact: true }}
+      runId={runId}
     />
   );
 }
