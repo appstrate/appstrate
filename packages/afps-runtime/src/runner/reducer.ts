@@ -84,6 +84,10 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
         timestamp: canonical.timestamp,
       });
       return;
+    case "report.appended":
+      result.report =
+        result.report === undefined ? canonical.content : `${result.report}\n${canonical.content}`;
+      return;
     case "appstrate.progress":
     case "appstrate.error":
     case "appstrate.metric":

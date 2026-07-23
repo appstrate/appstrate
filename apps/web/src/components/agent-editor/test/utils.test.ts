@@ -589,9 +589,10 @@ describe("getRuntimeTools", () => {
     expect(getRuntimeTools({ runtime_tools: "not-an-array" })).toEqual([]);
   });
 
-  it("drops entries not in the catalog (e.g. a removed `report` tool)", () => {
+  it("preserves the deprecated `report` tool for backwards compatibility", () => {
     expect(getRuntimeTools({ runtime_tools: ["output", "report", "log"] })).toEqual([
       "output",
+      "report",
       "log",
     ]);
   });

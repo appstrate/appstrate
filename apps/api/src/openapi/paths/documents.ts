@@ -200,7 +200,8 @@ export const documentsPaths = {
       summary: "Delete a document",
       description:
         "Delete a document (storage object + row) and release its quota. Allowed for a caller " +
-        "with the `documents:delete` permission (owner/admin) or the document's own creator.",
+        "with the `documents:delete` permission (owner/admin) or the document's own creator. " +
+        "A document referenced by a run cannot be deleted until those consumer runs are removed.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -210,6 +211,54 @@ export const documentsPaths = {
         "204": {
           description: "Deleted.",
           headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Document is still referenced by one or more consumer runs.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Conflict",
+                status: 409,
+                detail: "This document is referenced by one or more runs and cannot be deleted",
+                code: "document_in_use",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
+  "/api/documents/{id}/keep": {
+    post: {
+      operationId: "keepDocument",
+      tags: ["Documents"],
+      summary: "Keep a document (clear its expiry)",
+      description:
+        "Pin a document so it is never swept by the retention GC: clears its `expires_at` " +
+        "(sets it to null / permanent). Allowed for a caller with the `documents:delete` " +
+        "permission (owner/admin) or the document's own creator. Idempotent — keeping an " +
+        "already-permanent document is a no-op that returns 200 with the unchanged document. " +
+        "An id the caller cannot read returns 404.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "The document, with `expiresAt` now null.",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: { "application/json": { schema: documentSchema } },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

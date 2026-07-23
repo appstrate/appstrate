@@ -32,14 +32,17 @@ export function formatToolArgs(args: Record<string, unknown>): string {
 
 /**
  * Transform raw run logs into LogEntry[], merging consecutive text-only
- * progress entries and extracting structured output data.
+ * progress entries and extracting structured output plus deprecated report
+ * chunks retained for backwards compatibility.
  */
 export function buildLogEntries(rawLogs: RawLog[]): {
   entries: LogEntry[];
   output: Record<string, unknown> | null;
+  report: string | null;
 } {
   const entries: LogEntry[] = [];
   let output: Record<string, unknown> | null = null;
+  const reportChunks: string[] = [];
   let lastWasPlainText = false;
 
   for (const log of rawLogs) {
@@ -48,8 +51,8 @@ export function buildLogEntries(rawLogs: RawLog[]): {
       Object.assign(output, log.data);
       lastWasPlainText = false;
     } else if (log.event === "report" && log.type === "result") {
-      // Historical rows of the removed `report` runtime-tool channel: skip
-      // them so they never fall through to the generic log-entry rendering.
+      const content = log.data?.content;
+      if (typeof content === "string") reportChunks.push(content);
       lastWasPlainText = false;
     } else if (log.event === "run_completed") {
       lastWasPlainText = false;
@@ -77,7 +80,11 @@ export function buildLogEntries(rawLogs: RawLog[]): {
     }
   }
 
-  return { entries, output };
+  return {
+    entries,
+    output,
+    report: reportChunks.length > 0 ? reportChunks.join("\n") : null,
+  };
 }
 
 export function formatTimestamp(d: Date | string | null | undefined, lang: string): string {

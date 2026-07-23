@@ -141,7 +141,7 @@ function recordSummary(over: Partial<RemoteRunRecord> = {}): RemoteRunRecord {
     packageId: "@system/hello-world",
     applicationId: "app_1",
     orgId: "org_1",
-    result: { ok: true },
+    result: { output: { ok: true } },
     error: null,
     cost: 0.0123,
     startedAt: "2026-04-29T10:00:00Z",
@@ -419,7 +419,11 @@ describe("runRemote — happy path", () => {
         },
         "GET /api/runs/run_4": {
           status: 200,
-          body: recordSummary({ id: "run_4", status: "success", result: { final: 42 } }),
+          body: recordSummary({
+            id: "run_4",
+            status: "success",
+            result: { output: { final: 42 } },
+          }),
         },
       },
       calls,
@@ -511,6 +515,15 @@ describe("runRemote — happy path", () => {
                 data: { greeting: "hi" },
                 level: "info",
               },
+              {
+                id: 3,
+                runId: "run_5",
+                type: "result",
+                event: "report",
+                message: null,
+                data: { content: "# Legacy report" },
+                level: "info",
+              },
             ] satisfies RemoteRunLog[],
             hasMore: false,
           },
@@ -521,6 +534,10 @@ describe("runRemote — happy path", () => {
             id: "run_5",
             status: "success",
             tokenUsage: { input_tokens: 10, output_tokens: 20 },
+            result: {
+              output: { greeting: "hi" },
+              text: "# Legacy report",
+            },
           }),
         },
       },
@@ -535,12 +552,13 @@ describe("runRemote — happy path", () => {
 
     // The remote runner emits the same canonical event vocabulary as
     // the local path — `appstrate.progress`, `output.emitted`,
-    // `appstrate.metric`, `appstrate.finalize` — plus its own
+    // `report.appended`, `appstrate.metric`, `appstrate.finalize` — plus its own
     // `appstrate.remote.triggered` envelope as the very first line so
     // jq pipelines can pick the run id without parsing logs.
     expect(types[0]).toBe("appstrate.remote.triggered");
     expect(types).toContain("appstrate.progress");
     expect(types).toContain("output.emitted");
+    expect(types).toContain("report.appended");
     expect(types).toContain("appstrate.metric");
     expect(types).toContain("appstrate.finalize");
 
@@ -548,6 +566,8 @@ describe("runRemote — happy path", () => {
     const metric = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.metric");
     expect(metric.usage).toEqual({ input_tokens: 10, output_tokens: 20 });
     expect(metric.cost).toBe(0.0123);
+    const finalized = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.finalize");
+    expect(finalized.result.report).toBe("# Legacy report");
   });
 });
 

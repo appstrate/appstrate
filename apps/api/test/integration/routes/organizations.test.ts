@@ -240,6 +240,49 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(403);
     });
+
+    it("exposes storage usage with a null limit when no quota is configured (issue #945)", async () => {
+      const ctx = await createTestContext();
+      // Simulate stored documents by bumping the transactional byte counter.
+      await db
+        .update(organizations)
+        .set({ documentsBytesUsed: 2048 })
+        .where(eq(organizations.id, ctx.orgId));
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        headers: { Cookie: ctx.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.storage).toEqual({ used_bytes: 2048, limit_bytes: null });
+    });
+
+    it("reports the org quota as limit_bytes when ORG_STORAGE_QUOTA_BYTES is set (issue #945)", async () => {
+      const ctx = await createTestContext();
+      await db
+        .update(organizations)
+        .set({ documentsBytesUsed: 500 })
+        .where(eq(organizations.id, ctx.orgId));
+
+      const snapshot = process.env.ORG_STORAGE_QUOTA_BYTES;
+      const { _resetCacheForTesting } = await import("@appstrate/env");
+      process.env.ORG_STORAGE_QUOTA_BYTES = "10000";
+      _resetCacheForTesting();
+      try {
+        const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+          headers: { Cookie: ctx.cookie },
+        });
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as any;
+        expect(body.storage).toEqual({ used_bytes: 500, limit_bytes: 10000 });
+      } finally {
+        if (snapshot === undefined) delete process.env.ORG_STORAGE_QUOTA_BYTES;
+        else process.env.ORG_STORAGE_QUOTA_BYTES = snapshot;
+        _resetCacheForTesting();
+      }
+    });
   });
 
   describe("PUT /api/orgs/:orgId", () => {

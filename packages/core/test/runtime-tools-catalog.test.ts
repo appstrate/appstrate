@@ -17,14 +17,15 @@ describe("runtime-tools-catalog", () => {
       "log",
       "note",
       "pin",
+      "report",
       "publish_document",
     ]);
   });
 
-  it("EVENT_EMITTER set is exactly the four pure event-emitter tools", () => {
+  it("EVENT_EMITTER set includes the deprecated report compatibility tool", () => {
     // These are the tools `buildRuntimeToolDefs` builds standalone;
     // `publish_document` is deliberately excluded (it needs an injected uploader).
-    expect([...EVENT_EMITTER_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin"]);
+    expect([...EVENT_EMITTER_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin", "report"]);
   });
 
   it("output is present in the catalog and selectable like every other tool", () => {
@@ -33,8 +34,15 @@ describe("runtime-tools-catalog", () => {
     expect(isSelectableRuntimeTool("output")).toBe(true);
   });
 
-  it("catalog ids == SELECTABLE_RUNTIME_TOOLS, in listing order", () => {
-    expect(RUNTIME_TOOL_CATALOG.map((e) => e.id)).toEqual([...SELECTABLE_RUNTIME_TOOLS]);
+  it("hides deprecated report from the new-agent catalog", () => {
+    expect(RUNTIME_TOOL_CATALOG.map((e) => e.id)).toEqual([
+      "output",
+      "log",
+      "note",
+      "pin",
+      "publish_document",
+    ]);
+    expect(isSelectableRuntimeTool("report")).toBe(true);
   });
 
   it("isSelectableRuntimeTool accepts every catalog id only", () => {

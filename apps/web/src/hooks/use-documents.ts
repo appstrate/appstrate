@@ -77,6 +77,19 @@ export function useDeleteDocument() {
 }
 
 /**
+ * Keep ("pin") a document — clear its retention deadline so the expiry GC never
+ * sweeps it. Same authorization as delete (creator or `documents:delete`).
+ * Invalidates the document queries on success so the pinned row reloads without
+ * its expiry badge.
+ */
+export function useKeepDocument() {
+  const qc = useQueryClient();
+  return $api.useMutation("post", "/api/documents/{id}/keep", {
+    onSuccess: () => invalidateDocuments(qc),
+  });
+}
+
+/**
  * Download a document's bytes. Uses the typed client with `parseAs: "blob"` so
  * the org/app scoping headers are injected by the client middleware (a bare
  * anchor navigation cannot send them) and the `307` to a presigned URL is

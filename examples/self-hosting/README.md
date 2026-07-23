@@ -495,6 +495,18 @@ Apply with `aws s3api put-bucket-lifecycle-configuration` (R2: same API).
 The bundled MinIO needs nothing — it expires stale multipart uploads after
 24 h on its own.
 
+### Bring-your-own S3 with IAM roles: presigned URLs and temporary credentials
+
+A presigned S3 URL is only valid until the **earlier** of its own expiry and
+the expiration of the credentials that signed it. In direct-presign mode
+(`S3_PUBLIC_ENDPOINT` set), Appstrate mints download/upload URLs on demand
+with a 15-minute expiry. If the platform authenticates to S3 through
+temporary credentials (an IAM role / STS session) instead of a static access
+key, a URL signed shortly before the session rotates dies early — the
+symptom is a `403` on a link that should still be valid. Use a static access
+key, or ensure the credential session lifetime comfortably exceeds 15
+minutes and links are used promptly after being requested.
+
 Other production notes:
 
 - Use strong, unique secrets for all `*_SECRET` and `*_PASSWORD` variables

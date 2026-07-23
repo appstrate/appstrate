@@ -27,7 +27,7 @@
  * standalone (sidecar MCP surface + no-sidecar Pi extensions) — they need no
  * injected dependency.
  */
-export const EVENT_EMITTER_RUNTIME_TOOLS = ["output", "log", "note", "pin"] as const;
+export const EVENT_EMITTER_RUNTIME_TOOLS = ["output", "log", "note", "pin", "report"] as const;
 
 /** An event-emitter runtime tool (no injected dependency to build). */
 export type EventEmitterRuntimeTool = (typeof EVENT_EMITTER_RUNTIME_TOOLS)[number];
@@ -58,7 +58,12 @@ export interface RuntimeToolCatalogEntry {
   readonly description: string;
 }
 
-/** Display metadata for every runtime tool, in listing order. */
+/**
+ * Display metadata for runtime tools offered to new agents. The deprecated
+ * `report` tool remains selectable at the manifest/runtime boundary for
+ * backwards compatibility, but is intentionally hidden here: new agents
+ * should publish `report.md` as a document instead.
+ */
 export const RUNTIME_TOOL_CATALOG: readonly RuntimeToolCatalogEntry[] = [
   {
     id: "output",

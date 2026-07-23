@@ -238,6 +238,19 @@ export const schemas = {
       name: { type: "string" },
       slug: { type: "string" },
       createdAt: { type: "string", format: "date-time" },
+      storage: {
+        type: "object",
+        description:
+          "Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the org-wide quota (`ORG_STORAGE_QUOTA_BYTES`), or null when unset (unlimited).",
+        required: ["used_bytes", "limit_bytes"],
+        properties: {
+          used_bytes: { type: "integer", description: "Bytes of durable documents stored." },
+          limit_bytes: {
+            type: ["integer", "null"],
+            description: "Quota in bytes, or null when no quota is configured (unlimited).",
+          },
+        },
+      },
       members: {
         type: "array",
         items: { $ref: "#/components/schemas/OrgMember" },
@@ -592,11 +605,23 @@ export const schemas = {
       result: {
         type: ["object", "null"],
         description:
-          "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted no structured output. Persisted even on failed runs (a run that produced output and then failed keeps its partial deliverable).",
+          "What the run produced. Structured output is primary; deprecated report-tool runs may also carry markdown in `text`. `null` while the run is in flight or when no result was emitted.",
         properties: {
           output: {
             description:
               "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
+          },
+          text: {
+            type: "string",
+            deprecated: true,
+            description:
+              "Compatibility field for markdown emitted by the deprecated `report` runtime tool. New agents should publish a markdown document.",
+          },
+          text_truncated: {
+            type: "boolean",
+            deprecated: true,
+            description:
+              "Present and true when deprecated report text exceeded the 256 KiB storage cap.",
           },
         },
       },
@@ -1471,7 +1496,7 @@ export const schemas = {
             type: "array",
             items: {
               type: "string",
-              enum: ["output", "log", "note", "pin", "publish_document"],
+              enum: ["output", "log", "note", "pin", "report", "publish_document"],
             },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional.",

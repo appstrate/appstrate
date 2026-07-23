@@ -31,6 +31,13 @@ interface OrgResult {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Running total of durable document bytes stored by this org
+   * (`organizations.documents_bytes_used`) — the value the synchronous
+   * `ORG_STORAGE_QUOTA_BYTES` gate is checked against. Surfaced so the org
+   * settings screen can show consumption against the quota.
+   */
+  documentsBytesUsed: number;
 }
 
 function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
@@ -41,6 +48,7 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     createdBy: row.createdBy ?? "",
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
+    documentsBytesUsed: row.documentsBytesUsed,
   };
 }
 

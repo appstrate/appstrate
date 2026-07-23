@@ -22,6 +22,7 @@ describe("isCanonicalRunEvent", () => {
       { ...baseEnvelope, type: "pinned.set", key: "persona", content: "agent A" },
       { ...baseEnvelope, type: "output.emitted", data: { ok: true } },
       { ...baseEnvelope, type: "log.written", level: "info", message: "x" },
+      { ...baseEnvelope, type: "report.appended", content: "# Report" },
       { ...baseEnvelope, type: "appstrate.progress", message: "running" },
       { ...baseEnvelope, type: "appstrate.error", message: "boom" },
       {
@@ -42,6 +43,9 @@ describe("isCanonicalRunEvent", () => {
         content: "x",
         scope: "global",
       } as RunEvent),
+    ).toBe(false);
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "report.appended", content: 42 } as RunEvent),
     ).toBe(false);
     expect(
       isCanonicalRunEvent({
@@ -273,9 +277,9 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    // 7 reserved namespaces (memory/pinned/output/log + appstrate.{progress,error,metric})
+    // 8 reserved namespaces (memory/pinned/output/log/report + appstrate.*)
     // + 5 run lifecycle events (run.{started,success,failed,timeout,cancelled}, #278 item I).
-    expect(arr.length).toBe(12);
+    expect(arr.length).toBe(13);
     expect(new Set(arr).size).toBe(arr.length);
   });
 });

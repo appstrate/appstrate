@@ -25,6 +25,7 @@
 import {
   and,
   eq,
+  gt,
   lt,
   desc,
   or,
@@ -32,6 +33,7 @@ import {
   isNotNull,
   inArray,
   notInArray,
+  notExists,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -53,7 +55,13 @@ import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
-import { invalidRequest, notFound, payloadTooLarge, storageLimitExceeded } from "../lib/errors.ts";
+import {
+  conflict,
+  invalidRequest,
+  notFound,
+  payloadTooLarge,
+  storageLimitExceeded,
+} from "../lib/errors.ts";
 import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { consumeUploadStream, peekUploads, sanitizeFilename, parseUploadUri } from "./uploads.ts";
 import { sanitizeStorageKey } from "./file-storage.ts";
@@ -1107,26 +1115,6 @@ export async function listDocumentsForActor(
 }
 
 // ---------------------------------------------------------------------------
-// Consumption links (D1 chaining protection)
-// ---------------------------------------------------------------------------
-
-/**
- * Record the cross-container consumption links for a run's `document://` inputs.
- * Called once the consumer run row exists (`document_links.consumer_run_id` is a
- * hard FK). Idempotent (`onConflictDoNothing`) — a rerun or retried trigger
- * re-links the same (document, run) pairs harmlessly. Self-links are impossible
- * by construction: the consumer run is brand-new, so it is never any input
- * document's own container.
- */
-export async function linkConsumedDocuments(runId: string, documentIds: string[]): Promise<void> {
-  if (documentIds.length === 0) return;
-  await db
-    .insert(documentLinks)
-    .values(documentIds.map((documentId) => ({ documentId, consumerRunId: runId })))
-    .onConflictDoNothing();
-}
-
-// ---------------------------------------------------------------------------
 // Delete
 // ---------------------------------------------------------------------------
 
@@ -1164,7 +1152,11 @@ export async function detachOrDeleteContainedDocuments(
     : eq(documents.chatSessionId, chatSessionId!);
 
   const deletedKeys = await db.transaction(async (tx) => {
-    const contained = await tx.select({ id: documents.id }).from(documents).where(containedWhere);
+    const contained = await tx
+      .select({ id: documents.id })
+      .from(documents)
+      .where(containedWhere)
+      .for("update");
     if (contained.length === 0) return [] as string[];
     const containedIds = contained.map((d) => d.id);
 
@@ -1231,9 +1223,68 @@ export async function detachOrDeleteContainedDocuments(
  * (owner/admin permission OR creator) is enforced by the caller.
  */
 export async function deleteDocument(scope: AppScope, docId: string): Promise<void> {
+  const storageKey = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ storageKey: documents.storageKey })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.id, docId),
+          eq(documents.orgId, scope.orgId),
+          eq(documents.applicationId, scope.applicationId),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (!row) throw notFound(`Document '${docId}' not found`);
+
+    const [liveLink] = await tx
+      .select({ documentId: documentLinks.documentId })
+      .from(documentLinks)
+      .where(eq(documentLinks.documentId, docId))
+      .limit(1);
+    if (liveLink) {
+      throw conflict(
+        "document_in_use",
+        "This document is referenced by one or more runs and cannot be deleted",
+      );
+    }
+
+    const deleted = await tx
+      .delete(documents)
+      .where(
+        and(
+          eq(documents.id, docId),
+          eq(documents.orgId, scope.orgId),
+          eq(documents.applicationId, scope.applicationId),
+        ),
+      )
+      .returning({ size: documents.size });
+    if (deleted.length === 0) throw notFound(`Document '${docId}' not found`);
+    await tx
+      .update(organizations)
+      .set({
+        documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${deleted[0]!.size}, 0)`,
+      })
+      .where(eq(organizations.id, scope.orgId));
+    return row.storageKey;
+  });
+
+  await deleteStorageObject(storageKey);
+}
+
+/**
+ * Clear a document's retention deadline (`expires_at = NULL`) — the "keep"/pin
+ * action (GitLab model): a document a caller explicitly keeps is exempted from
+ * the expiry GC and never swept. Idempotent: pinning an already-permanent
+ * document (NULL `expires_at`) is a no-op that returns the row unchanged.
+ * Org+app scoped; authorization (creator OR `documents:delete`) is enforced by
+ * the caller (same rule as delete). Returns the updated row.
+ */
+export async function clearDocumentExpiry(scope: AppScope, docId: string): Promise<DocumentRow> {
   const [row] = await db
-    .select({ storageKey: documents.storageKey, size: documents.size })
-    .from(documents)
+    .update(documents)
+    .set({ expiresAt: null })
     .where(
       and(
         eq(documents.id, docId),
@@ -1241,24 +1292,9 @@ export async function deleteDocument(scope: AppScope, docId: string): Promise<vo
         eq(documents.applicationId, scope.applicationId),
       ),
     )
-    .limit(1);
+    .returning(documentSelect);
   if (!row) throw notFound(`Document '${docId}' not found`);
-
-  await db.transaction(async (tx) => {
-    const deleted = await tx
-      .delete(documents)
-      .where(and(eq(documents.id, docId), eq(documents.orgId, scope.orgId)))
-      .returning({ size: documents.size });
-    if (deleted.length === 0) return; // concurrent delete won the race — no double decrement
-    await tx
-      .update(organizations)
-      .set({
-        documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${deleted[0]!.size}, 0)`,
-      })
-      .where(eq(organizations.id, scope.orgId));
-  });
-
-  await deleteStorageObject(row.storageKey);
+  return row as DocumentRow;
 }
 
 /** Delete a storage object addressed by its `bucket/path` storage key. Best-effort. */
@@ -1278,29 +1314,52 @@ async function deleteStorageObject(storageKey: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Delete documents whose retention deadline has passed (`expiresAt < now()`),
- * in batches: drop the storage objects, then delete the rows and decrement the
- * per-org counters in one transaction per batch. Mirrors `cleanupExpiredUploads`.
- * Returns the number of rows removed.
+ * Delete unreferenced documents whose retention deadline has passed
+ * (`expiresAt < now()`), in batches. Linked documents remain durable until
+ * their consumer runs disappear. Rows are locked before links are checked, so
+ * run creation and GC cannot race. Database state commits before the
+ * best-effort storage purge. Returns the number of rows removed.
  */
 export async function cleanupExpiredDocuments(): Promise<number> {
   let totalRemoved = 0;
   while (true) {
-    const expired = await db
-      .select({ id: documents.id, storageKey: documents.storageKey })
-      .from(documents)
-      .where(and(isNotNull(documents.expiresAt), lt(documents.expiresAt, new Date())))
-      .limit(500);
-    if (expired.length === 0) break;
+    const removed = await db.transaction(async (tx) => {
+      const expired = await tx
+        .select({ id: documents.id })
+        .from(documents)
+        .where(
+          and(
+            isNotNull(documents.expiresAt),
+            lt(documents.expiresAt, new Date()),
+            notExists(
+              tx
+                .select({ documentId: documentLinks.documentId })
+                .from(documentLinks)
+                .where(eq(documentLinks.documentId, documents.id)),
+            ),
+          ),
+        )
+        .limit(500)
+        .for("update", { skipLocked: true });
+      if (expired.length === 0) return [];
 
-    await Promise.all(expired.map((row) => deleteStorageObject(row.storageKey)));
+      const ids = expired.map((r) => r.id);
+      const linked = await tx
+        .selectDistinct({ documentId: documentLinks.documentId })
+        .from(documentLinks)
+        .where(inArray(documentLinks.documentId, ids));
+      const linkedIds = new Set(linked.map((row) => row.documentId));
+      const removableIds = ids.filter((id) => !linkedIds.has(id));
+      if (removableIds.length === 0) return [];
 
-    const ids = expired.map((r) => r.id);
-    await db.transaction(async (tx) => {
       const removed = await tx
         .delete(documents)
-        .where(inArray(documents.id, ids))
-        .returning({ orgId: documents.orgId, size: documents.size });
+        .where(inArray(documents.id, removableIds))
+        .returning({
+          orgId: documents.orgId,
+          size: documents.size,
+          storageKey: documents.storageKey,
+        });
       // Fold the removed bytes back per org (a batch may span orgs).
       const perOrg = new Map<string, number>();
       for (const r of removed) perOrg.set(r.orgId, (perOrg.get(r.orgId) ?? 0) + r.size);
@@ -1312,9 +1371,12 @@ export async function cleanupExpiredDocuments(): Promise<number> {
           })
           .where(eq(organizations.id, orgId));
       }
+      return removed;
     });
-    totalRemoved += expired.length;
-    if (expired.length < 500) break;
+    if (removed.length === 0) break;
+    await Promise.all(removed.map((row) => deleteStorageObject(row.storageKey)));
+    totalRemoved += removed.length;
+    if (removed.length < 500) break;
   }
   return totalRemoved;
 }
@@ -1326,13 +1388,10 @@ export async function cleanupExpiredDocuments(): Promise<number> {
  * (run / chat-session / end-user / application / org removed) drops `documents`
  * rows WITHOUT running the app-level decrement — so the counter can drift high
  * over time. This pass recomputes it from the rows and writes the corrected
- * value only for orgs where it differs (a single correlated UPDATE; floors at 0
- * for orgs whose documents all cascaded away). Returns the number of orgs fixed.
- *
- * Under READ COMMITTED this bulk UPDATE can transiently clobber a concurrent
- * transactional increment (the recomputed SUM is read before the in-flight
- * insert commits), so the counter may momentarily drift; the next pass
- * self-heals it — this is a drift safety net, not a serialized counter.
+ * value only for orgs where it differs. Each organization row is locked before
+ * its SUM is read. Document writes use the same organization lock for quota
+ * accounting, so reconciliation cannot clobber a concurrent increment or
+ * decrement. Returns the number of orgs fixed.
  *
  * Note: the cascade ALSO orphans the corresponding S3 objects. The storage
  * abstraction (`@appstrate/core/storage`) exposes no list/enumerate operation,
@@ -1341,13 +1400,47 @@ export async function cleanupExpiredDocuments(): Promise<number> {
  * recompute. See docs/architecture/DOCUMENTS.md.
  */
 export async function reconcileOrgDocumentBytes(): Promise<number> {
-  const recomputed = sql<number>`COALESCE((SELECT SUM(${documents.size}) FROM ${documents} WHERE ${documents.orgId} = ${organizations.id}), 0)`;
-  const fixed = await db
-    .update(organizations)
-    .set({ documentsBytesUsed: recomputed })
-    .where(sql`${organizations.documentsBytesUsed} <> ${recomputed}`)
-    .returning({ id: organizations.id });
-  return fixed.length;
+  let fixed = 0;
+  let cursor: string | null = null;
+
+  while (true) {
+    const orgRows = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(cursor ? gt(organizations.id, cursor) : undefined)
+      .orderBy(organizations.id)
+      .limit(100);
+    if (orgRows.length === 0) break;
+
+    for (const { id } of orgRows) {
+      const corrected = await db.transaction(async (tx) => {
+        const [org] = await tx
+          .select({ documentsBytesUsed: organizations.documentsBytesUsed })
+          .from(organizations)
+          .where(eq(organizations.id, id))
+          .for("update");
+        if (!org) return false;
+
+        const [sumRow] = await tx
+          .select({ bytes: sql<number>`COALESCE(SUM(${documents.size}), 0)` })
+          .from(documents)
+          .where(eq(documents.orgId, id));
+        const bytes = Number(sumRow?.bytes ?? 0);
+        if (org.documentsBytesUsed === bytes) return false;
+
+        await tx
+          .update(organizations)
+          .set({ documentsBytesUsed: bytes })
+          .where(eq(organizations.id, id));
+        return true;
+      });
+      if (corrected) fixed += 1;
+    }
+
+    cursor = orgRows.at(-1)!.id;
+  }
+
+  return fixed;
 }
 
 /** Aligned with the upload sweep cadence. */

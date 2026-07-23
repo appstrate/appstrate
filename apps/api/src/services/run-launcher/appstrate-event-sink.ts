@@ -196,6 +196,14 @@ export async function persistRunEvent(
       return null;
     }
 
+    case "report.appended": {
+      const content = typeof event.content === "string" ? event.content : null;
+      if (content !== null) {
+        await appendRunLog(scope, runId, "result", "report", null, { content }, "info", executor);
+      }
+      return null;
+    }
+
     case "document.published": {
       // A run document was stored on the platform (via the `publish_document`
       // tool or the entrypoint outputs sweep). The `documents` row already

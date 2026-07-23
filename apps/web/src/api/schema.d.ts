@@ -1273,7 +1273,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a document
-         * @description Delete a document (storage object + row) and release its quota. Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator.
+         * @description Delete a document (storage object + row) and release its quota. Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator. A document referenced by a run cannot be deleted until those consumer runs are removed.
          */
         delete: operations["deleteDocument"];
         options?: never;
@@ -1295,6 +1295,26 @@ export interface paths {
         get: operations["getDocumentContent"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep a document (clear its expiry)
+         * @description Pin a document so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator. Idempotent — keeping an already-permanent document is a no-op that returns 200 with the unchanged document. An id the caller cannot read returns 404.
+         */
+        post: operations["keepDocument"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4818,7 +4838,7 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "report" | "publish_document")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5128,6 +5148,13 @@ export interface components {
             slug?: string;
             /** Format: date-time */
             createdAt?: string;
+            /** @description Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the org-wide quota (`ORG_STORAGE_QUOTA_BYTES`), or null when unset (unlimited). */
+            storage?: {
+                /** @description Bytes of durable documents stored. */
+                used_bytes: number;
+                /** @description Quota in bytes, or null when no quota is configured (unlimited). */
+                limit_bytes: number | null;
+            };
             members?: components["schemas"]["OrgMember"][];
             invitations?: components["schemas"]["OrgInvitationInfo"][];
         };
@@ -5368,10 +5395,20 @@ export interface components {
             input: {
                 [key: string]: unknown;
             } | null;
-            /** @description What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted no structured output. Persisted even on failed runs (a run that produced output and then failed keeps its partial deliverable). */
+            /** @description What the run produced. Structured output is primary; deprecated report-tool runs may also carry markdown in `text`. `null` while the run is in flight or when no result was emitted. */
             result: {
                 /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
+                /**
+                 * @deprecated
+                 * @description Compatibility field for markdown emitted by the deprecated `report` runtime tool. New agents should publish a markdown document.
+                 */
+                text?: string;
+                /**
+                 * @deprecated
+                 * @description Present and true when deprecated report text exceeded the 256 KiB storage cap.
+                 */
+                text_truncated?: boolean;
             } | null;
             checkpoint: {
                 [key: string]: unknown;
@@ -6678,7 +6715,7 @@ export interface operations {
                 "application/json": {
                     /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references (an existing document the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
                     input?: Record<string, never>;
-                    /** @description Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required). **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Use `upload://` references when the input must be replayable. */
+                    /** @description Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `document://` references, so later reruns reuse the same documents without depending on upload retention. Existing `document://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable. */
                     rerun_from?: string;
                     /** @description Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses. */
                     modelId?: string;
@@ -6761,7 +6798,11 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": null,
                      *       "connections_used": null,
-                     *       "package_ephemeral": false
+                     *       "package_ephemeral": false,
+                     *       "document_counts": {
+                     *         "input": 0,
+                     *         "output": 0
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -9756,6 +9797,25 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Document is still referenced by one or more consumer runs. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "about:blank",
+                     *       "title": "Conflict",
+                     *       "status": 409,
+                     *       "detail": "This document is referenced by one or more runs and cannot be deleted",
+                     *       "code": "document_in_use",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -9794,6 +9854,82 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    keepDocument: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document, with `expiresAt` now null. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "document";
+                        /** @description Opaque document id (`doc_…`). */
+                        id: string;
+                        /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
+                        uri: string;
+                        /** @enum {string} */
+                        purpose: "user_upload" | "agent_output";
+                        applicationId: string;
+                        /** @description Run container, or null. */
+                        run_id: string | null;
+                        /** @description Chat-session container, or null. */
+                        chat_session_id: string | null;
+                        /** @description Producing agent package id, or null. */
+                        packageId: string | null;
+                        name: string;
+                        mime: string;
+                        /** @description Size in bytes. */
+                        size: number;
+                        /** @description SHA-256 of the bytes (hex). */
+                        sha256: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                        downloadable: boolean;
+                        /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
+                        previewable: boolean;
+                        /**
+                         * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @enum {string|null}
+                         */
+                        preview_kind: "html" | "image" | "pdf" | "text" | null;
+                        /**
+                         * Format: uri
+                         * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         */
+                        preview_url?: string | null;
+                        /**
+                         * Format: date-time
+                         * @description Retention deadline, or null when permanent.
+                         */
+                        expiresAt: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    };
+                };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -17926,6 +18062,10 @@ export interface operations {
                      *       "schedule_name": null,
                      *       "connections_used": null,
                      *       "package_ephemeral": true,
+                     *       "document_counts": {
+                     *         "input": 0,
+                     *         "output": 0
+                     *       },
                      *       "inline_manifest": {
                      *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
                      *         "name": "@inline/one-shot",
@@ -18274,7 +18414,11 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": "Weekday morning sort",
                      *       "connections_used": null,
-                     *       "package_ephemeral": false
+                     *       "package_ephemeral": false,
+                     *       "document_counts": {
+                     *         "input": 0,
+                     *         "output": 0
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -18374,7 +18518,11 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": null,
                      *       "connections_used": null,
-                     *       "package_ephemeral": false
+                     *       "package_ephemeral": false,
+                     *       "document_counts": {
+                     *         "input": 0,
+                     *         "output": 0
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -18756,6 +18904,11 @@ export interface operations {
                     pinned?: Record<string, never>;
                     output?: unknown;
                     logs?: unknown[];
+                    /**
+                     * @deprecated
+                     * @description Deprecated report-tool markdown aggregate. New agents publish markdown documents.
+                     */
+                    report?: string;
                     error?: {
                         message?: string;
                         stack?: string;

@@ -16,7 +16,12 @@ import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
-import { useDeleteDocument, useDocumentDownload, type DocumentDto } from "../hooks/use-documents";
+import {
+  useDeleteDocument,
+  useDocumentDownload,
+  useKeepDocument,
+  type DocumentDto,
+} from "../hooks/use-documents";
 import { usePermissions } from "../hooks/use-permissions";
 import { LoadingState, ErrorState, EmptyState } from "./page-states";
 import { DocumentTile } from "./document-tile";
@@ -38,6 +43,7 @@ export function DocumentListPanel({
   runId,
   footer,
   onDeleted,
+  onKept,
 }: {
   documents: DocumentDto[];
   isLoading: boolean;
@@ -57,11 +63,18 @@ export function DocumentListPanel({
   footer?: ReactNode;
   /** Let the caller prune its own list (e.g. the gallery's page accumulator). */
   onDeleted?: (id: string) => void;
+  /**
+   * Let the caller patch its own list after a "keep" (e.g. the gallery's page
+   * accumulator, whose older pages the query invalidation does not refetch) so
+   * the pinned row loses its expiry badge without a full remount.
+   */
+  onKept?: (id: string) => void;
 }) {
   const { t } = useTranslation("documents");
   const { isMember } = usePermissions();
   const download = useDocumentDownload();
   const deleteDoc = useDeleteDocument();
+  const keepDoc = useKeepDocument();
   const location = useLocation();
   const navigate = useNavigate();
   const [pendingDelete, setPendingDelete] = useState<DocumentDto | null>(null);
@@ -92,6 +105,22 @@ export function DocumentListPanel({
   };
 
   const onDelete = isMember ? (doc: DocumentDto) => setPendingDelete(doc) : undefined;
+
+  // Keep ("pin") — clears the document's expiry. Same member gate as delete; the
+  // server enforces the real creator-OR-permission rule.
+  const onKeep = isMember
+    ? (doc: DocumentDto) =>
+        keepDoc.mutate(
+          { params: { path: { id: doc.id } } },
+          {
+            onSuccess: () => {
+              toast.success(t("keep.success"));
+              onKept?.(doc.id);
+            },
+            onError: (err) => toast.error(getErrorMessage(err)),
+          },
+        )
+    : undefined;
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
@@ -144,6 +173,7 @@ export function DocumentListPanel({
                 doc={doc}
                 onDownload={download}
                 onDelete={onDelete}
+                onKeep={onKeep}
                 onPreview={(d) => setPreviewParam(d.id)}
                 showRunLink={showRunLink}
                 direction={runId ? (doc.run_id === runId ? "output" : "input") : undefined}

@@ -28,6 +28,7 @@ import {
   getDocumentForActor,
   listDocumentsForActor,
   deleteDocument,
+  clearDocumentExpiry,
   toDocumentDto,
   streamDocumentContent,
   loadDocumentForPreview,
@@ -159,6 +160,40 @@ export function createDocumentsRouter() {
       before: { name: row.name, size: row.size, mime: row.mime, purpose: row.purpose },
     });
     return c.body(null, 204);
+  });
+
+  // POST /api/documents/:id/keep — "keep"/pin: clear the document's retention
+  // deadline (`expires_at = NULL`) so the expiry GC never sweeps it. Same
+  // authorization as delete (the `documents:delete` permission OR the document's
+  // own creator). Idempotent — pinning an already-permanent document is a no-op
+  // that returns 200 with the (unchanged) document. Returns the updated DTO.
+  router.post("/documents/:id/keep", rateLimit(60), async (c) => {
+    const scope = getAppScope(c);
+    const actor = getActor(c);
+    const resolved = await getDocumentForActor(scope, actor, c.req.param("id")!);
+    if (!resolved) throw notFound("Document not found");
+    const { row } = resolved;
+
+    const hasPermission = c.get("permissions")?.has("documents:delete") ?? false;
+    const isCreator = actor.type === "user" ? row.userId === actor.id : row.endUserId === actor.id;
+    if (!hasPermission && !isCreator) {
+      throw forbidden("Only the document creator or an admin can keep this document");
+    }
+
+    const wasExpiring = row.expiresAt !== null;
+    const updated = await clearDocumentExpiry(scope, row.id);
+    // Only audit an actual change (a no-op pin of an already-permanent document
+    // writes no audit event).
+    if (wasExpiring) {
+      await recordAuditFromContext(c, {
+        action: "document.kept",
+        resourceType: "document",
+        resourceId: row.id,
+        before: { expiresAt: row.expiresAt?.toISOString() ?? null },
+        after: { expiresAt: null },
+      });
+    }
+    return c.json(toDocumentDto(updated, actor, resolved.downloadable));
   });
 
   return router;

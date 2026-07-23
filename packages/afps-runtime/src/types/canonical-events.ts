@@ -99,6 +99,16 @@ export interface LogWrittenEvent extends BaseEnvelope {
   message: string;
 }
 
+/**
+ * Deprecated `report` runtime tool event. Kept canonical so existing bundles
+ * and historical remote-run logs continue to round-trip while new agents use
+ * durable markdown documents.
+ */
+export interface ReportAppendedEvent extends BaseEnvelope {
+  type: "report.appended";
+  content: string;
+}
+
 /** `appstrate.progress` — runner-emitted lifecycle breadcrumb (container started, runtime ready, …). */
 export interface AppstrateProgressEvent extends BaseEnvelope {
   type: "appstrate.progress";
@@ -194,6 +204,7 @@ export type CanonicalRunEvent =
   | PinnedSetEvent
   | OutputEmittedEvent
   | LogWrittenEvent
+  | ReportAppendedEvent
   | AppstrateProgressEvent
   | AppstrateErrorEvent
   | AppstrateMetricEvent
@@ -209,6 +220,7 @@ export const CANONICAL_EVENT_TYPES = [
   "pinned.set",
   "output.emitted",
   "log.written",
+  "report.appended",
   "appstrate.progress",
   "appstrate.error",
   "appstrate.metric",
@@ -256,6 +268,8 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
         typeof e.message === "string"
       );
     }
+    case "report.appended":
+      return typeof (event as Record<string, unknown>).content === "string";
     case "appstrate.progress":
     case "appstrate.error":
       return typeof (event as Record<string, unknown>).message === "string";

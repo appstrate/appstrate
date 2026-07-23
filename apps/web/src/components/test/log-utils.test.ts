@@ -20,11 +20,8 @@ describe("buildLogEntries — output extraction", () => {
   });
 });
 
-describe("buildLogEntries — historical report rows (removed channel)", () => {
-  // Old runs still carry `run_logs(type='result', event='report')` rows from
-  // the removed `report` runtime-tool channel. They must be skipped, not
-  // rendered as truncated generic log lines.
-  it("produces no entry for a historical report row", () => {
+describe("buildLogEntries — historical report rows", () => {
+  it("extracts and concatenates report markdown without generic log entries", () => {
     const logs: RawLog[] = [
       {
         type: "result",
@@ -32,9 +29,16 @@ describe("buildLogEntries — historical report rows (removed channel)", () => {
         event: "report",
         data: { content: "# Hello\n\nWorld" },
       },
+      {
+        type: "result",
+        level: "info",
+        event: "report",
+        data: { content: "Second chunk" },
+      },
     ];
-    const { entries } = buildLogEntries(logs);
+    const { entries, report } = buildLogEntries(logs);
     expect(entries).toEqual([]);
+    expect(report).toBe("# Hello\n\nWorld\nSecond chunk");
   });
 });
 

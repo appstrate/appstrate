@@ -254,6 +254,13 @@ function createHumanSink(opts: SinkOptions, writeStdout: (chunk: string) => void
           writeStdout(green(`✓ output: ${JSON.stringify(event.data ?? {})}\n`));
           return;
         }
+        case "report.appended": {
+          const content = String(event.content ?? "");
+          if (content.length > 0) {
+            writeStdout(content.endsWith("\n") ? content : content + "\n");
+          }
+          return;
+        }
         default: {
           // Be quiet about low-signal events (log.written, pinned.set)
           // by default — JSONL mode exposes them fully.

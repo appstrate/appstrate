@@ -85,6 +85,7 @@ describe("isStdoutEventLine", () => {
     expect(isStdoutEventLine({ type: "output.emitted", data: { ok: true } })).toBe(true);
     expect(isStdoutEventLine({ type: "memory.added", content: "m" })).toBe(true);
     expect(isStdoutEventLine({ type: "log.written", level: "info", message: "x" })).toBe(true);
+    expect(isStdoutEventLine({ type: "report.appended", content: "# Report" })).toBe(true);
   });
 
   it("rejects primitives, arrays, null, and untyped objects", () => {
@@ -115,6 +116,7 @@ describe("isStdoutEventLine", () => {
     // `pinned.set` requires non-empty string key + content presence.
     expect(isStdoutEventLine({ type: "pinned.set", key: "", content: "x" })).toBe(false);
     expect(isStdoutEventLine({ type: "pinned.set", key: "k" })).toBe(false);
+    expect(isStdoutEventLine({ type: "report.appended", content: 42 })).toBe(false);
   });
 });
 
@@ -129,6 +131,7 @@ describe("mergeTerminalResult", () => {
       pinned: { checkpoint: { content: { step: 2 } } },
       output: { foo: "bar" },
       logs: [{ level: "info", message: "x", timestamp: 100 }],
+      report: "aggregate report",
     };
     const runner: RunResult = {
       memories: [{ content: "old" }],
@@ -137,12 +140,14 @@ describe("mergeTerminalResult", () => {
       logs: [{ level: "info", message: "y", timestamp: 50 }],
       status: "success",
       durationMs: 123,
+      report: "runner report",
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.memories).toEqual([{ content: "hello" }]);
     expect(merged.pinned!.checkpoint).toEqual({ content: { step: 2 } });
     expect(merged.output).toEqual({ foo: "bar" });
     expect(merged.logs).toEqual([{ level: "info", message: "x", timestamp: 100 }]);
+    expect(merged.report).toBe("aggregate report");
     // Terminal metadata always comes from the runner.
     expect(merged.status).toBe("success");
     expect(merged.durationMs).toBe(123);
@@ -157,6 +162,7 @@ describe("mergeTerminalResult", () => {
       logs: [{ level: "warn", message: "w", timestamp: 1 }],
       status: "failed",
       error: { message: "boom" },
+      report: "runner report",
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.memories).toEqual([{ content: "r" }]);
@@ -165,6 +171,7 @@ describe("mergeTerminalResult", () => {
     expect(merged.logs).toHaveLength(1);
     expect(merged.status).toBe("failed");
     expect(merged.error).toEqual({ message: "boom" });
+    expect(merged.report).toBe("runner report");
   });
 
   it("omits status / error / durationMs when runner did not provide them", () => {

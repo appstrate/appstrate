@@ -30,6 +30,7 @@ import {
   llmUsage,
   notifications,
   documents,
+  documentLinks,
   runStatusValues,
   activeRunStatusValues,
   terminalRunStatusValues,
@@ -47,7 +48,7 @@ import {
   runConfigOverrideSchema,
   runLogDataSchema,
 } from "../../lib/jsonb-schemas.ts";
-import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { ApiError, conflict, invalidRequest } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedDocuments } from "../documents.ts";
 import { normalizeScope } from "@appstrate/core/naming";
@@ -179,18 +180,6 @@ type EnrichedRunRow = {
 };
 
 /**
- * Project a stored `runs.result` payload onto the documented output-only wire
- * shape. Historical rows may carry the removed #632 `text`/`text_truncated`
- * keys and no `output`; those — like a NULL result — map to `null`, matching
- * the OpenAPI contract (`result` is null when no structured output was
- * emitted) rather than serializing as an empty `{}`.
- */
-function projectResultOutput(result: { output?: unknown } | null): { output: unknown } | null {
-  const output = result?.output;
-  return output === undefined ? null : { output };
-}
-
-/**
  * Translate a raw Drizzle `runs` row into its public snake_case wire DTO
  * (`@appstrate/shared-types` `RunWireDto`). This is the single bridge
  * between internal storage and external JSON, and it is responsible for
@@ -226,10 +215,7 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     scheduleId: row.scheduleId,
     status: row.status,
     input: row.input,
-    // Historical rows may carry `text`/`text_truncated` keys from the removed
-    // #632 report channel; project to the documented output-only shape so the
-    // dropped fields never leak onto the wire.
-    result: projectResultOutput(row.result),
+    result: row.result,
     checkpoint: row.checkpoint,
     error: row.error,
     metadata: row.metadata,
@@ -396,6 +382,13 @@ interface CreateRunParams {
   packageId: string;
   actor: Actor | null;
   input: Record<string, unknown> | null;
+  /**
+   * Existing durable documents referenced by the run input. These rows are
+   * locked, revalidated in the app scope, and linked to the new run inside the
+   * same transaction as the run INSERT. This closes the resolve/create race:
+   * either every input document is protected by a link, or no run is created.
+   */
+  consumedDocumentIds?: string[];
   scheduleId?: string;
   versionLabel?: string;
   versionRef?: string;
@@ -489,8 +482,31 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
   const { id, packageId, actor, input } = params;
 
   await db.transaction(async (tx) => {
-    // Order matters: acquire the per-org concurrency lock before the per-package
-    // run_number lock (consistent lock ordering across callers → no deadlock).
+    const consumedDocumentIds = [...new Set(params.consumedDocumentIds ?? [])];
+    if (consumedDocumentIds.length > 0) {
+      const available = await tx
+        .select({ id: documents.id })
+        .from(documents)
+        .where(
+          and(
+            inArray(documents.id, consumedDocumentIds),
+            eq(documents.orgId, scope.orgId),
+            eq(documents.applicationId, scope.applicationId),
+          ),
+        )
+        .for("update");
+      if (available.length !== consumedDocumentIds.length) {
+        throw conflict(
+          "document_unavailable",
+          "One or more input documents were deleted before the run could be created",
+        );
+      }
+    }
+
+    // Among the admission locks, order matters: acquire the per-org concurrency
+    // lock before the per-package run_number lock (consistent ordering across
+    // callers → no deadlock). Input documents are locked first so deletion
+    // cannot slip between validation and the atomic link insert below.
     await enforceOrgConcurrencyCap(tx, scope);
     await acquireRunNumberLock(tx, scope, packageId);
     const runNumber = await nextRunNumber(tx, scope, packageId);
@@ -539,6 +555,18 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
         ? { resolvedIntegrationVersions: params.resolvedIntegrationVersions }
         : {}),
     });
+
+    if (consumedDocumentIds.length > 0) {
+      await tx
+        .insert(documentLinks)
+        .values(
+          consumedDocumentIds.map((documentId) => ({
+            documentId,
+            consumerRunId: id,
+          })),
+        )
+        .onConflictDoNothing();
+    }
   });
 }
 
@@ -834,11 +862,7 @@ export async function getRecentRuns(
       duration: row.duration,
     };
     if (fields.includes("checkpoint")) entry.checkpoint = row.checkpoint;
-    // Historical rows may carry `text`/`text_truncated` keys from the removed
-    // #632 report channel; project to the documented output-only shape.
-    if (fields.includes("result")) {
-      entry.result = projectResultOutput(row.result);
-    }
+    if (fields.includes("result")) entry.result = row.result;
     return entry;
   });
 }

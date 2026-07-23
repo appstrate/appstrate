@@ -65,7 +65,7 @@ export const runsPaths = {
                 rerun_from: {
                   type: "string",
                   description:
-                    "Run id whose `input` to replay verbatim on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). File fields keep their `upload://` URIs in the stored input, and consumed uploads stay re-consumable for `UPLOAD_RETENTION_HOURS` (default 24 h) after their first consume — so a cancelled or completed run can be re-triggered with the same documents and different overrides (`modelId`, `config`, `?version`, `connection_overrides`) in a single call, without re-uploading. Returns 410 `upload_expired` when a referenced upload's reuse window has elapsed (re-upload required). **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Use `upload://` references when the input must be replayable.",
+                    "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `document://` references, so later reruns reuse the same documents without depending on upload retention. Existing `document://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable.",
                 },
                 modelId: {
                   type: "string",
@@ -163,6 +163,7 @@ export const runsPaths = {
                 schedule_name: null,
                 connections_used: null,
                 package_ephemeral: false,
+                document_counts: { input: 0, output: 0 },
               },
             },
           },
@@ -482,6 +483,7 @@ export const runsPaths = {
                 schedule_name: null,
                 connections_used: null,
                 package_ephemeral: true,
+                document_counts: { input: 0, output: 0 },
                 inline_manifest: {
                   $schema: "https://schemas.afps.dev/v0/agent.schema.json",
                   name: "@inline/one-shot",
@@ -785,6 +787,7 @@ export const runsPaths = {
                 schedule_name: "Weekday morning sort",
                 connections_used: null,
                 package_ephemeral: false,
+                document_counts: { input: 0, output: 0 },
               },
             },
           },
@@ -951,6 +954,7 @@ export const runsPaths = {
                 schedule_name: null,
                 connections_used: null,
                 package_ephemeral: false,
+                document_counts: { input: 0, output: 0 },
               },
             },
           },
@@ -1270,12 +1274,18 @@ export const runsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and the authoritative terminal cost-tracking fields `usage` (token usage) and `cost`.",
+                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Older runners may also send the deprecated markdown `report` aggregate.",
               properties: {
                 memories: { type: "array" },
                 pinned: { type: "object" },
                 output: {},
                 logs: { type: "array" },
+                report: {
+                  type: "string",
+                  deprecated: true,
+                  description:
+                    "Deprecated report-tool markdown aggregate. New agents publish markdown documents.",
+                },
                 error: {
                   type: "object",
                   properties: {

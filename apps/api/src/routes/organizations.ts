@@ -197,11 +197,22 @@ async function buildOrgDetail(orgId: string) {
     throw notFound("Organization not found");
   }
 
+  // Storage consumption vs. the (optional) org-wide quota. `limit_bytes` is
+  // null when `ORG_STORAGE_QUOTA_BYTES` is unset (OSS = unlimited); the same
+  // env source the documents service gates writes against
+  // (`assertWithinOrgQuota`). `used_bytes` is the transactionally-maintained
+  // `organizations.documents_bytes_used` counter.
+  const storageQuota = getEnv().ORG_STORAGE_QUOTA_BYTES;
+
   return {
     id: org.id,
     name: org.name,
     slug: org.slug,
     createdAt: org.createdAt,
+    storage: {
+      used_bytes: org.documentsBytesUsed,
+      limit_bytes: storageQuota ?? null,
+    },
     members: members.map((m) => ({
       userId: m.userId,
       role: m.role,

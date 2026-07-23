@@ -13,11 +13,7 @@ import {
 } from "./run-context-builder.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
-import {
-  materializeRunUploads,
-  linkConsumedDocuments,
-  type PendingUploadMaterialization,
-} from "./documents.ts";
+import { materializeRunUploads, type PendingUploadMaterialization } from "./documents.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
@@ -567,28 +563,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         // Drop it for aliases; the operator audit trail already recorded the
         // create. Non-aliased runs keep it for the connections/credentials panel.
         modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
+        consumedDocumentIds: params.consumedDocumentIds,
       },
     ),
   );
   const createMs = Date.now() - createStart;
-
-  // Record the cross-container consumption links (D1) IMMEDIATELY after
-  // `createRun` (`document_links.consumer_run_id` FK needs the run row) —
-  // first thing, so the unprotected window between input-parse (where the doc
-  // was resolved and streamed) and this insert stays as small as possible. A
-  // producer-delete racing through that window deletes the doc unprotected;
-  // the consequence is a rerun 404 on that input — the same contract as an
-  // explicit `DELETE /api/documents/:id`, which also ignores consumers.
-  // Best-effort: the link is protection metadata, not run-critical — a failure
-  // (including the FK violation of the race above) must not fail the run.
-  if (params.consumedDocumentIds?.length) {
-    await linkConsumedDocuments(runId, params.consumedDocumentIds).catch((err) => {
-      logger.warn("failed to write document consumption links", {
-        runId,
-        error: getErrorMessage(err),
-      });
-    });
-  }
 
   // Materialize the run's staged uploads into durable `documents` rows now the
   // run row exists (deferred from the input-parser by the `documents.run_id`

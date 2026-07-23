@@ -77,6 +77,9 @@ function DocumentsPageContent() {
         empty={{ message: t("page.empty"), hint: t("page.emptyHint") }}
         showRunLink
         onDeleted={(id) => setLoadedPages((prev) => prev.filter((d) => d.id !== id))}
+        onKept={(id) =>
+          setLoadedPages((prev) => prev.map((d) => (d.id === id ? { ...d, expiresAt: null } : d)))
+        }
         footer={
           hasMore && (
             <Button
