@@ -83,7 +83,6 @@ async function flushMicrotasks(): Promise<void> {
 describe("isStdoutEventLine", () => {
   it("accepts a structurally valid canonical event", () => {
     expect(isStdoutEventLine({ type: "output.emitted", data: { ok: true } })).toBe(true);
-    expect(isStdoutEventLine({ type: "report.appended", content: "hello" })).toBe(true);
     expect(isStdoutEventLine({ type: "memory.added", content: "m" })).toBe(true);
     expect(isStdoutEventLine({ type: "log.written", level: "info", message: "x" })).toBe(true);
   });
@@ -116,8 +115,6 @@ describe("isStdoutEventLine", () => {
     // `pinned.set` requires non-empty string key + content presence.
     expect(isStdoutEventLine({ type: "pinned.set", key: "", content: "x" })).toBe(false);
     expect(isStdoutEventLine({ type: "pinned.set", key: "k" })).toBe(false);
-    // `report.appended` requires string content.
-    expect(isStdoutEventLine({ type: "report.appended", content: 42 })).toBe(false);
   });
 });
 
@@ -221,27 +218,6 @@ describe("mergeTerminalResult", () => {
   it("omits cost when runner did not provide it", () => {
     const merged = mergeTerminalResult(emptyRunResult(), emptyRunResult());
     expect("cost" in merged).toBe(false);
-  });
-
-  it("prefers aggregate.report over runner.report", () => {
-    const merged = mergeTerminalResult(
-      { ...emptyRunResult(), report: "from bridge" },
-      { ...emptyRunResult(), report: "from runner" },
-    );
-    expect(merged.report).toBe("from bridge");
-  });
-
-  it("falls back to runner.report when bridge aggregated none", () => {
-    const merged = mergeTerminalResult(emptyRunResult(), {
-      ...emptyRunResult(),
-      report: "from runner",
-    });
-    expect(merged.report).toBe("from runner");
-  });
-
-  it("omits report when neither side provided one", () => {
-    const merged = mergeTerminalResult(emptyRunResult(), emptyRunResult());
-    expect("report" in merged).toBe(false);
   });
 });
 
@@ -542,28 +518,6 @@ describe("attachStdoutBridge — aggregation via finalize", () => {
     const final = underlying.finalized!;
     expect(final.pinned).toEqual({ persona: { content: "agent persona" } });
     expect(final.pinned!.checkpoint).toBeUndefined();
-    bridge.restore();
-  });
-
-  it("aggregates report.appended into result.report (joined with newlines)", async () => {
-    const underlying = recordingSink();
-    const stdout = makeFakeStdout();
-    const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
-
-    stdout.write.call(
-      null as never,
-      '{"type":"report.appended","content":"chunk 1","timestamp":1}\n',
-    );
-    stdout.write.call(
-      null as never,
-      '{"type":"report.appended","content":"chunk 2","timestamp":2}\n',
-    );
-    await flushMicrotasks();
-
-    await bridge.sink.finalize({ ...emptyRunResult(), status: "success" });
-
-    const final = underlying.finalized!;
-    expect(final.report).toBe("chunk 1\nchunk 2");
     bridge.restore();
   });
 });

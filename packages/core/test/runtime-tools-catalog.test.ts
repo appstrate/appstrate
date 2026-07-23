@@ -17,15 +17,14 @@ describe("runtime-tools-catalog", () => {
       "log",
       "note",
       "pin",
-      "report",
       "publish_document",
     ]);
   });
 
-  it("EVENT_EMITTER set is exactly the five pure event-emitter tools", () => {
+  it("EVENT_EMITTER set is exactly the four pure event-emitter tools", () => {
     // These are the tools `buildRuntimeToolDefs` builds standalone;
     // `publish_document` is deliberately excluded (it needs an injected uploader).
-    expect([...EVENT_EMITTER_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin", "report"]);
+    expect([...EVENT_EMITTER_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin"]);
   });
 
   it("output is present in the catalog and selectable like every other tool", () => {

@@ -120,7 +120,7 @@ export function applySpecToSidecarEnv(
   if (spec.integrations && spec.integrations.length > 0) {
     target.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
   }
-  // Platform runtime tools (output/log/note/pin/report) the sidecar hosts
+  // Platform runtime tools (output/log/note/pin) the sidecar hosts
   // as in-process MCP tools, plus the output schema they validate against.
   if (spec.runtimeTools && spec.runtimeTools.length > 0) {
     target.RUNTIME_TOOLS_JSON = JSON.stringify(spec.runtimeTools);

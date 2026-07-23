@@ -70,7 +70,7 @@ interface BuildMcpDirectFactoriesOptions {
   workspace: string;
   /**
    * Runtime-event drainer (`@appstrate/core/runtime-event-drain`). The sidecar
-   * executes each runtime tool (log/note/pin/report/output) ONCE and journals
+   * executes each runtime tool (log/note/pin/output) ONCE and journals
    * its canonical events; after every forwarded tool call this drains the
    * journal and re-emits on the run's sink. Pi's MCP transport preserves the
    * result `_meta`, but the runner drains the journal anyway — single source
@@ -277,7 +277,7 @@ function buildIntegrationToolFactories(
             isError: result.isError === true,
             timestamp: Date.now(),
           });
-          // First-party runtime tools (output/log/note/pin/report) are executed
+          // First-party runtime tools (output/log/note/pin) are executed
           // ONCE by the sidecar, which journals their canonical events. Drain
           // the journal after every forwarded call and re-emit on the run's
           // sink — single source of

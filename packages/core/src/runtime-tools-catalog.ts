@@ -4,7 +4,7 @@
 /**
  * Runtime tools catalog — the closed set of first-party tools the agent
  * runtime injects in-process (formerly the `@appstrate/{output,log,note,
- * pin,report}` `tool` packages, now baked into the runtime image).
+ * pin}` `tool` packages, now baked into the runtime image).
  *
  * Every tool is opt-in per agent via the manifest's top-level
  * `runtime_tools: string[]` field — none is injected by default. The editor
@@ -27,7 +27,7 @@
  * standalone (sidecar MCP surface + no-sidecar Pi extensions) — they need no
  * injected dependency.
  */
-export const EVENT_EMITTER_RUNTIME_TOOLS = ["output", "log", "note", "pin", "report"] as const;
+export const EVENT_EMITTER_RUNTIME_TOOLS = ["output", "log", "note", "pin"] as const;
 
 /** An event-emitter runtime tool (no injected dependency to build). */
 export type EventEmitterRuntimeTool = (typeof EVENT_EMITTER_RUNTIME_TOOLS)[number];
@@ -79,11 +79,6 @@ export const RUNTIME_TOOL_CATALOG: readonly RuntimeToolCatalogEntry[] = [
     id: "pin",
     displayName: "Pin",
     description: "Upsert a named slot pinned into the system prompt on every run.",
-  },
-  {
-    id: "report",
-    displayName: "Report",
-    description: "Append markdown content to the run report.",
   },
   {
     id: "publish_document",

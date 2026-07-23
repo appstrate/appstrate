@@ -16,6 +16,7 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
+import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import {
   isToolsWildcard,
   parseManifestIntegrations,
@@ -134,11 +135,14 @@ export function defaultIntegrationManifest(
  * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS) —
  * the built-in runtime tools the agent author opted into (all opt-in,
  * `output` included). Tolerates a missing or malformed field by returning an
- * empty array.
+ * empty array. Entries not in the current catalog (e.g. a removed `report`
+ * tool still listed in an older manifest) are dropped on read, so the editor
+ * normalises them away instead of blocking the save on the manifest's
+ * `runtime_tools` enum validation.
  */
 export function getRuntimeTools(m: Record<string, unknown>): string[] {
   const raw = m.runtime_tools;
-  return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
+  return Array.isArray(raw) ? raw.filter(isSelectableRuntimeTool) : [];
 }
 
 /**

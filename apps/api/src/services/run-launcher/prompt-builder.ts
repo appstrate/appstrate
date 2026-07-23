@@ -77,7 +77,7 @@ export async function buildPlatformSystemPrompt(
 
   // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
   // integration tools, and the platform runtime tools (output/log/note/
-  // pin/report) — are all advertised to the model via MCP `tools/list`
+  // pin) — are all advertised to the model via MCP `tools/list`
   // (name + description + input schema), so the prompt no longer lists
   // them. The Communication contract (rendered above) is the only
   // tool-related instruction the model can't infer from `tools/list`, and

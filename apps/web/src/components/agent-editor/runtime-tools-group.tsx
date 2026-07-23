@@ -6,8 +6,8 @@
  * (system) integration entry: bordered card, name + system badge, and a
  * per-tool checklist mirroring `IntegrationToolPicker`'s tool list.
  *
- * Backed by the platform runtime tools (`output`/`log`/`note`/`pin`/
- * `report`), which are MCP tool definitions hosted by the sidecar
+ * Backed by the platform runtime tools (`output`/`log`/`note`/`pin`),
+ * which are MCP tool definitions hosted by the sidecar
  * (`@appstrate/core/runtime-tool-defs`) — NOT an installable AFPS
  * integration. So unlike real integrations there is no version, no auth,
  * and no connection: the group is always present (a checked, disabled

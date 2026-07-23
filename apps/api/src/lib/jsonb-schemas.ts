@@ -68,18 +68,15 @@ export const scheduleInputSchema = z
 /**
  * `runs.result` — terminal payload persisted by `finalizeRun`. Closed shape:
  * `output` (runner-produced structured output, validated against the agent's
- * declared output schema upstream), `text` (the markdown report, already
- * capped at 256 KiB by finalize) and the `text_truncated` flag. Unknown keys
- * are stripped (Zod object default); the byte cap bounds the row-sized JSONB
- * column against a runaway runner payload. Applied with `.safeParse()` at the
- * finalize write — an invalid payload degrades to `null` + a warn log, never
- * fails the terminal transition of an already-completed run.
+ * declared output schema upstream). Unknown keys are stripped (Zod object
+ * default); the byte cap bounds the row-sized JSONB column against a runaway
+ * runner payload. Applied with `.safeParse()` at the finalize write — an
+ * invalid payload degrades to `null` + a warn log, never fails the terminal
+ * transition of an already-completed run.
  */
 export const runResultSchema = z
   .object({
     output: jsonValueSchema.optional(),
-    text: z.string().optional(),
-    text_truncated: z.literal(true).optional(),
   })
   .superRefine(withByteCap(512 * KB));
 

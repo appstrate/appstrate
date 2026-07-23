@@ -3,7 +3,7 @@
 
 /**
  * Runtime tool definitions — the platform's first-party "runtime tools"
- * (`output` / `log` / `note` / `pin` / `report`) expressed as
+ * (`output` / `log` / `note` / `pin`) expressed as
  * transport-neutral, Pi-agnostic MCP tool definitions.
  *
  * These were previously Pi-SDK extension factories baked into the runtime
@@ -22,7 +22,7 @@
  *
  * Both adapters share this module's per-tool logic (input schema +
  * validation + the canonical run events each call produces), so there is a
- * single source of truth for the five tools.
+ * single source of truth for the four tools.
  *
  * Event delivery: a tool call NEVER emits directly. It returns the
  * canonical run events under the result `_meta` key
@@ -46,7 +46,7 @@ import type { RunAndWaitDocument } from "./run-and-wait-client.ts";
 /**
  * MCP `_meta` key under which a runtime tool call surfaces the canonical
  * run events it produced (`output.emitted`, `log.written`, `memory.added`,
- * `pinned.set`, `report.appended`). The agent-side bridge reads this key
+ * `pinned.set`). The agent-side bridge reads this key
  * and re-emits each event into the run's event sink.
  *
  * AFPS (Phase F1): reverse-DNS namespace — `_meta` keys must be
@@ -67,7 +67,6 @@ export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
   "log.written",
   "memory.added",
   "pinned.set",
-  "report.appended",
   // Emitted by the `publish_document` tool (and the entrypoint outputs sweep)
   // once a run document has been stored on the platform. Carries the durable
   // document metadata so ingestion persists a run_log the UI/chat can render.
@@ -310,29 +309,6 @@ function buildPinDef(): RuntimeToolDef {
   };
 }
 
-function buildReportDef(): RuntimeToolDef {
-  return {
-    descriptor: {
-      name: "report",
-      description:
-        "MANDATORY — call at least once before finishing. Appends markdown content to the run report. " +
-        "Each call appends to the report (separated by newlines). Use markdown formatting for structure.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["content"],
-        properties: {
-          content: { type: "string", description: "Markdown content to append to the report" },
-        },
-      },
-    },
-    handler: async (rawArgs) => {
-      const { content } = (rawArgs ?? {}) as { content: string };
-      return withEvents("Report content recorded", [{ type: "report.appended", content }]);
-    },
-  };
-}
-
 const RUNTIME_TOOL_BUILDERS: Record<
   EventEmitterRuntimeTool,
   (outputSchema: Record<string, unknown> | null) => RuntimeToolDef
@@ -341,7 +317,6 @@ const RUNTIME_TOOL_BUILDERS: Record<
   log: () => buildLogDef(),
   note: () => buildNoteDef(),
   pin: () => buildPinDef(),
-  report: () => buildReportDef(),
 };
 
 /**

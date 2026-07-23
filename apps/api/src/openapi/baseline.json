@@ -1629,7 +1629,7 @@
                 "properties": {
                   "input": {
                     "type": "object",
-                    "description": "Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`) or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded)."
+                    "description": "Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references (an existing document the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded)."
                   },
                   "rerun_from": {
                     "type": "string",
@@ -2059,7 +2059,7 @@
                   },
                   "input": {
                     "type": "object",
-                    "description": "Run input validated against manifest.input.schema (AJV)."
+                    "description": "Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`."
                   },
                   "config": {
                     "type": "object",
@@ -2971,7 +2971,8 @@
                     "minLength": 1
                   },
                   "input": {
-                    "type": "object"
+                    "type": "object",
+                    "description": "Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions."
                   },
                   "dependency_overrides": {
                     "type": "object",
@@ -3337,10 +3338,6 @@
                     "type": "number",
                     "minimum": 0,
                     "description": "Authoritative terminal run cost written to the `runs` row."
-                  },
-                  "report": {
-                    "type": "string",
-                    "description": "Aggregated markdown report — every `report.appended` event's content joined with `\\n` in call order. Persisted (capped at 256 KiB) as `runs.result.text` so getRun exposes the run's deliverable without log scraping."
                   }
                 }
               }
@@ -21681,18 +21678,10 @@
           },
           "result": {
             "type": ["object", "null"],
-            "description": "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted neither structured output nor a report. Persisted even on failed runs (a run that reported and then failed keeps its partial deliverable).",
+            "description": "What the run produced — the stable API contract for the run's deliverable, set when the run reaches a terminal status. `null` while the run is in flight, and on terminal runs that emitted no structured output. Persisted even on failed runs (a run that produced output and then failed keeps its partial deliverable).",
             "properties": {
               "output": {
                 "description": "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped."
-              },
-              "text": {
-                "type": "string",
-                "description": "Markdown report emitted via the agent's `report` runtime tool. Multiple report calls are concatenated in call order, joined with newlines. Capped at 256 KiB of UTF-8 — see `text_truncated`. The full untruncated report remains available as individual run-log entries (type='result', event='report')."
-              },
-              "text_truncated": {
-                "type": "boolean",
-                "description": "Present and `true` when `text` exceeded the 256 KiB cap and was truncated at a UTF-8 character boundary. Absent otherwise."
               }
             }
           },
@@ -22938,7 +22927,7 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "enum": ["output", "log", "note", "pin", "report", "publish_document"]
+                  "enum": ["output", "log", "note", "pin", "publish_document"]
                 },
                 "description": "Appstrate top-level extension: runtime tools the agent may use. Optional."
               }

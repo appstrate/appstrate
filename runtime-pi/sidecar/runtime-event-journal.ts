@@ -6,7 +6,7 @@
  *
  * The sidecar runs each runtime tool's handler exactly once (see
  * `journalRuntimeToolDefs`). The canonical events that handler produces
- * (`log.written`, `memory.added`, `pinned.set`, `report.appended`,
+ * (`log.written`, `memory.added`, `pinned.set`,
  * `output.emitted`) are appended here, each stamped with a monotonic sequence.
  * The Pi runner DRAINs this journal over HTTP
  * (`GET /runtime-events?after=<cursor>`) and re-emits on its single run-event

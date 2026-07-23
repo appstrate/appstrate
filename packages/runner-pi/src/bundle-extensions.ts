@@ -42,7 +42,7 @@ export async function prepareBundleForPi(
   const piDir = path.join(opts.workspaceDir, ".pi");
 
   // Materialise each skill dep package under its .pi/ subtree. Runtime tools
-  // (output/log/note/pin/report) are NOT handled here — they are MCP tool
+  // (output/log/note/pin) are NOT handled here — they are MCP tool
   // definitions (`@appstrate/core/runtime-tool-defs`) hosted by the sidecar or
   // registered as Pi extensions by the no-sidecar call site via
   // `buildRuntimeToolExtensions`. This helper is skills-only.

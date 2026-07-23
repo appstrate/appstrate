@@ -11,7 +11,7 @@
  *   1. **Tool-event capture (online).** A canonical event written by a
  *      system tool to `process.stdout` reaches the HTTP sink, the
  *      finalize body merges the bridge's aggregate so `result.output`
- *      / `result.report` are non-empty.
+ *      is non-empty.
  *   2. **Tool-event capture (offline).** Without an HTTP sink, the
  *      console sink's `--output <file>` mode writes a finalize JSON
  *      whose `result.output` matches what the tool emitted.
@@ -23,7 +23,7 @@
  *
  * No actual runner / LLM / Pi SDK is started — these tests stand in for
  * the runner by directly writing the JSONL events that `@appstrate/output`
- * and `@appstrate/report` would write at runtime, then driving finalize.
+ * would write at runtime, then driving finalize.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -136,7 +136,7 @@ async function flushMicrotasks(): Promise<void> {
 
 /**
  * Simulate a system tool emission (the legacy stdout-JSONL protocol).
- * Same shape `@appstrate/output` and `@appstrate/report` write at
+ * Same shape `@appstrate/output` and `@appstrate/log` write at
  * runtime: object stamped with `timestamp` + `runId`, terminated by `\n`.
  */
 function emitFromTool(stdout: FakeStdout, event: Record<string, unknown>): void {
@@ -168,34 +168,21 @@ describe("CLI wiring — online (HttpSink composed with ConsoleSink)", () => {
     wiring.bridge.restore();
   });
 
-  it("propagates report.appended to the HTTP sink", async () => {
-    const wiring = buildCliWiring({ withReporting: true });
-
-    emitFromTool(wiring.stdout, { type: "report.appended", content: "## Heading" });
-    emitFromTool(wiring.stdout, { type: "report.appended", content: "body line" });
-    await flushMicrotasks();
-
-    expect(wiring.http!.events).toHaveLength(2);
-    expect(wiring.http!.events.map((e) => e.type)).toEqual(["report.appended", "report.appended"]);
-  });
-
-  it("merges the bridge aggregate into the finalize body (output + report)", async () => {
+  it("merges the bridge aggregate into the finalize body (output)", async () => {
     const wiring = buildCliWiring({ withReporting: true });
 
     emitFromTool(wiring.stdout, { type: "output.emitted", data: { ok: true } });
-    emitFromTool(wiring.stdout, { type: "report.appended", content: "all done" });
     await flushMicrotasks();
 
     // Runner finalises with its OWN (incomplete) result — the bridge
-    // must merge the aggregated output/report into the payload sent
-    // to the HTTP sink.
+    // must merge the aggregated output into the payload sent to the
+    // HTTP sink.
     await wiring.sink.finalize({ ...emptyRunResult(), status: "success", durationMs: 42 });
 
     const final = wiring.http!.finalized!;
     expect(final.status).toBe("success");
     expect(final.durationMs).toBe(42);
     expect(final.output).toEqual({ ok: true });
-    expect(final.report).toBe("all done");
   });
 
   it("ignores foreign JSON written to stdout by subprocesses", async () => {
@@ -277,18 +264,16 @@ describe("CLI wiring — offline (no HttpSink)", () => {
       const wiring = buildCliWiring({ outputPath: outPath, withReporting: false });
 
       emitFromTool(wiring.stdout, { type: "output.emitted", data: { offline: true } });
-      emitFromTool(wiring.stdout, { type: "report.appended", content: "offline run done" });
       await flushMicrotasks();
 
       // Runner's terminal payload is empty — the bridge's aggregate is
-      // what makes `result.output` / `result.report` non-null on disk.
+      // what makes `result.output` non-null on disk.
       await wiring.sink.finalize({ ...emptyRunResult(), status: "success" });
 
       const written = await fs.readFile(outPath, "utf8");
       const parsed = JSON.parse(written) as RunResult;
       expect(parsed.status).toBe("success");
       expect(parsed.output).toEqual({ offline: true });
-      expect(parsed.report).toBe("offline run done");
 
       wiring.bridge.restore();
     } finally {

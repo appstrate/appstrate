@@ -183,8 +183,8 @@ export interface RunRemoteOptions {
    * Optional path — final RunResult JSON written here. Shape parity
    * with the local path's `--output`: top-level keys match the AFPS
    * `RunResult` (`memories`, `pinned`, `output`, `logs`, `error`,
-   * `status`, `durationMs`, `cost`). `memories`, `pinned`, `logs`, and
-   * `report` are emitted as empty defaults — the remote path does not
+   * `status`, `durationMs`, `cost`). `memories`, `pinned`, and `logs`
+   * are emitted as empty defaults — the remote path does not
    * have a server-side endpoint surfacing the runner's reduced AFPS
    * state, only `runs.result`. Two remote-only extras (`runId`,
    * `instance`) are added for debuggability.
@@ -704,19 +704,6 @@ function runLogToRunEvent(log: RemoteRunLog): RunEvent | null {
     };
   }
 
-  // `result/report` — `report(content)` system tool emit. Platform
-  // wraps the markdown in `{ content }` to keep the JSONB column
-  // structured; we unwrap it here so the canonical event matches the
-  // shape the local runner emits.
-  if (log.type === "result" && log.event === "report") {
-    const content =
-      isPlainObject(log.data) && typeof (log.data as { content?: unknown }).content === "string"
-        ? (log.data as { content: string }).content
-        : null;
-    if (content === null) return null;
-    return { ...envelope, type: "report.appended", content };
-  }
-
   // `system/adapter_error` — fatal runtime error (e.g. ingestion-side
   // adapter raised an unhandled exception). The local sink renders this
   // with `⚠` yellow on stderr.
@@ -778,7 +765,7 @@ function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
  * Reconstruct a {@link RunResult} from the run record + terminal status,
  * matching the shape `EventSink.finalize` consumes locally. Fields the
  * record cannot reconstruct (`memories`, `pinned` named slots,
- * per-event `logs`, `report` aggregate) are emitted as empty defaults — the
+ * per-event `logs`) are emitted as empty defaults — the
  * dashboard remains the source of truth for those surfaces. `usage` is
  * reconstructed from the run row when present and otherwise explicit zero.
  * `output` carries `runs.result` (the AFPS `output()` value),

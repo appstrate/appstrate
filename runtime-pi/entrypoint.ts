@@ -641,7 +641,7 @@ if (sidecarUrl) {
       // `buildMcpDirectFactories` registers `run_history` and
       // `recall_memory`, plus one forwarding factory per namespaced
       // integration tool (including the generic `{ns}__api_call`). Runtime
-      // tools (log/note/pin/report/output) are executed once by the sidecar and
+      // tools (log/note/pin/output) are executed once by the sidecar and
       // journaled; the drainer pulls them on the run sink after each forwarded
       // call — never trusted from `_meta`.
       //
@@ -721,7 +721,7 @@ if (sidecarUrl) {
   delete process.env.SIDECAR_URL;
 } else {
   // No sidecar attached (skip-sidecar: no integrations + static API key).
-  // The platform runtime tools (output/log/note/pin/report) the agent
+  // The platform runtime tools (output/log/note/pin) the agent
   // selected are normally served by the sidecar over MCP; with no sidecar
   // we register the SAME tool definitions (`@appstrate/core/runtime-tool-defs`)
   // as Pi extensions in-process. Their canonical events are re-emitted into

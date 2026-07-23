@@ -286,7 +286,7 @@ async function runPlatformContainerImpl(
       ...(plan.integrations && plan.integrations.length > 0
         ? { integrations: plan.integrations }
         : {}),
-      // Platform runtime tools (output/log/note/pin/report) the sidecar
+      // Platform runtime tools (output/log/note/pin) the sidecar
       // hosts as in-process MCP tools — unified with the integration tool
       // surface. The no-sidecar path reads the same selection from the
       // bundle manifest instead.

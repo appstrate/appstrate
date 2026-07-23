@@ -17,10 +17,10 @@ function registerOne(factory: (pi: any) => void) {
 
 describe("buildRuntimeToolExtensions", () => {
   it("builds one Pi factory per selected runtime tool", () => {
-    const factories = buildRuntimeToolExtensions({ runtimeTools: ["log", "report"] });
+    const factories = buildRuntimeToolExtensions({ runtimeTools: ["log", "note"] });
     expect(factories).toHaveLength(2);
     const names = factories.map((f) => registerOne(f).name);
-    expect(names.sort()).toEqual(["log", "report"]);
+    expect(names.sort()).toEqual(["log", "note"]);
   });
 
   it("runs the shared handler and re-emits its canonical events via emit", async () => {

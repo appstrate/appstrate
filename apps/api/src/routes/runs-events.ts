@@ -138,13 +138,6 @@ const RunResultSchema = z
     // `runs.cost` is correct even when `process.exit()` aborts the
     // metric POST. Degrades to undefined on a bad value.
     cost: z.number().nonnegative().optional().catch(undefined),
-    // Aggregated markdown report — the runner's reducer joins every
-    // `report.appended` event's content with `\n` and ships the result
-    // here. finalize persists it as `runs.result.text` so programmatic
-    // consumers (getRun) read the deliverable without scraping run
-    // logs (issue #632). Cosmetic-grade: a malformed value degrades to
-    // absent rather than failing an already-completed run.
-    report: z.string().optional().catch(undefined),
   })
   .passthrough();
 
@@ -224,7 +217,6 @@ export function createRunsEventsRouter() {
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
       ...(d.usage !== undefined ? { usage: d.usage } : {}),
       ...(d.cost !== undefined ? { cost: d.cost } : {}),
-      ...(d.report !== undefined ? { report: d.report } : {}),
     };
 
     await finalizeRun({ run, result });

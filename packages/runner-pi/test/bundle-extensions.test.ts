@@ -68,7 +68,7 @@ describe("prepareBundleForPi — skills/ install", () => {
   });
 
   it("registers no runtime tools — they are MCP defs hosted elsewhere", async () => {
-    // Runtime tools (output/log/note/pin/report) are no longer Pi extensions
+    // Runtime tools (output/log/note/pin) are no longer Pi extensions
     // built here: they are transport-neutral MCP defs
     // (`@appstrate/core/runtime-tool-defs`) served by the sidecar or
     // registered by the no-sidecar call site via `buildRuntimeToolExtensions`.

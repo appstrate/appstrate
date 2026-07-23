@@ -200,7 +200,10 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     scheduleId: row.scheduleId,
     status: row.status,
     input: row.input,
-    result: row.result,
+    // Historical rows may carry `text`/`text_truncated` keys from the removed
+    // #632 report channel; project to the documented output-only shape so the
+    // dropped fields never leak onto the wire.
+    result: row.result == null ? row.result : { output: row.result.output },
     checkpoint: row.checkpoint,
     error: row.error,
     metadata: row.metadata,
@@ -761,7 +764,11 @@ export async function getRecentRuns(
       duration: row.duration,
     };
     if (fields.includes("checkpoint")) entry.checkpoint = row.checkpoint;
-    if (fields.includes("result")) entry.result = row.result;
+    // Historical rows may carry `text`/`text_truncated` keys from the removed
+    // #632 report channel; project to the documented output-only shape.
+    if (fields.includes("result")) {
+      entry.result = row.result == null ? row.result : { output: row.result.output };
+    }
     return entry;
   });
 }
