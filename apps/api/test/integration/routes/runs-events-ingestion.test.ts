@@ -172,6 +172,27 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(logs.length).toBeGreaterThan(0);
   });
 
+  // Legacy-emitter tolerance guard: the #632 report channel was removed, but an
+  // old remote CLI may still POST a `report.appended` envelope. The sink's
+  // dispatch `default` branch drops unknown event types (no run_logs row) and
+  // the route still acks 200/persisted — the stray event is tolerated, not an error.
+  it("tolerates a stray legacy report.appended envelope — accepted, no run_logs row written", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const envelope = buildEnvelope(runId, "report.appended", { text: "legacy report body" }, 1);
+    const res = await postEvent(runId, envelope);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; outcome: string; sequence: number };
+    expect(body.ok).toBe(true);
+    expect(body.outcome).toBe("persisted");
+    expect(body.sequence).toBe(1);
+
+    // Unknown event type → default branch drops it, no run_logs write-through.
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs.length).toBe(0);
+  });
+
   it("dedupes replayed webhook-ids — a second POST with the same id returns replay", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
     const envelope = buildEnvelope(

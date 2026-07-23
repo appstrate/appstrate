@@ -1469,6 +1469,31 @@ describe("Runs API", () => {
       expect(body.connections_used).toBeNull();
     });
 
+    it("GET /api/runs/:id maps a text-only historical result to null (removed #632 report channel)", async () => {
+      await seedAgent({
+        id: "@runorg/legacy-result-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const run = await seedRun({
+        packageId: "@runorg/legacy-result-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        // Historical rows persisted the removed report channel's `text`/
+        // `text_truncated` keys with no `output`; the wire mapper must project
+        // those (like a NULL result) to null, never an empty `{}`.
+        result: { text: "legacy report body", text_truncated: false } as never,
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.result).toBeNull();
+    });
+
     it("GET /api/runs/:id returns endUserName for end-user runs", async () => {
       await seedAgent({ id: "@runorg/eu-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const eu = await seedEndUser({

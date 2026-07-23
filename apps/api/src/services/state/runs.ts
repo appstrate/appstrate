@@ -165,6 +165,18 @@ type EnrichedRunRow = {
 };
 
 /**
+ * Project a stored `runs.result` payload onto the documented output-only wire
+ * shape. Historical rows may carry the removed #632 `text`/`text_truncated`
+ * keys and no `output`; those — like a NULL result — map to `null`, matching
+ * the OpenAPI contract (`result` is null when no structured output was
+ * emitted) rather than serializing as an empty `{}`.
+ */
+function projectResultOutput(result: { output?: unknown } | null): { output: unknown } | null {
+  const output = result?.output;
+  return output === undefined ? null : { output };
+}
+
+/**
  * Translate a raw Drizzle `runs` row into its public snake_case wire DTO
  * (`@appstrate/shared-types` `RunWireDto`). This is the single bridge
  * between internal storage and external JSON, and it is responsible for
@@ -203,7 +215,7 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     // Historical rows may carry `text`/`text_truncated` keys from the removed
     // #632 report channel; project to the documented output-only shape so the
     // dropped fields never leak onto the wire.
-    result: row.result == null ? row.result : { output: row.result.output },
+    result: projectResultOutput(row.result),
     checkpoint: row.checkpoint,
     error: row.error,
     metadata: row.metadata,
@@ -767,7 +779,7 @@ export async function getRecentRuns(
     // Historical rows may carry `text`/`text_truncated` keys from the removed
     // #632 report channel; project to the documented output-only shape.
     if (fields.includes("result")) {
-      entry.result = row.result == null ? row.result : { output: row.result.output };
+      entry.result = projectResultOutput(row.result);
     }
     return entry;
   });

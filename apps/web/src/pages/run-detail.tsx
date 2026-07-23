@@ -111,6 +111,11 @@ export function RunDetailPage() {
     ["result", "logs", "memory", "documents", "info"] as const,
     defaultTab,
   );
+  // A bookmarked `#result` on a run with no structured output selects a tab
+  // whose trigger/content are gated off — render "logs" instead of a blank
+  // pane. Clamp at render only (the hash stays "result"), so if late SSE flips
+  // `hasOutput` true the Result tab reappears and the user's choice is honored.
+  const effectiveTab = activeTab === "result" && !hasOutput ? "logs" : activeTab;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -235,7 +240,7 @@ export function RunDetailPage() {
 
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
-          value={activeTab}
+          value={effectiveTab}
           onValueChange={(v) =>
             setActiveTab(v as "logs" | "result" | "memory" | "documents" | "info")
           }
@@ -315,15 +320,15 @@ export function RunDetailPage() {
         </div>
       </div>
 
-      {activeTab === "result" && hasOutput && <JsonView data={finalOutput} />}
+      {effectiveTab === "result" && hasOutput && <JsonView data={finalOutput} />}
 
-      {activeTab === "logs" && <LogViewer entries={allLogs} />}
+      {effectiveTab === "logs" && <LogViewer entries={allLogs} />}
 
-      {activeTab === "memory" && <MemoryPanel packageId={packageId} runId={runId} />}
+      {effectiveTab === "memory" && <MemoryPanel packageId={packageId} runId={runId} />}
 
-      {activeTab === "documents" && runId && <RunDocumentsTab runId={runId} />}
+      {effectiveTab === "documents" && runId && <RunDocumentsTab runId={runId} />}
 
-      {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
+      {effectiveTab === "info" && <RunInfoTab run={enrichedRun} />}
     </div>
   );
 }
