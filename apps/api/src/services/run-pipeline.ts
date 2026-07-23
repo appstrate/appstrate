@@ -550,6 +550,24 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   );
   const createMs = Date.now() - createStart;
 
+  // Record the cross-container consumption links (D1) IMMEDIATELY after
+  // `createRun` (`document_links.consumer_run_id` FK needs the run row) —
+  // first thing, so the unprotected window between input-parse (where the doc
+  // was resolved and streamed) and this insert stays as small as possible. A
+  // producer-delete racing through that window deletes the doc unprotected;
+  // the consequence is a rerun 404 on that input — the same contract as an
+  // explicit `DELETE /api/documents/:id`, which also ignores consumers.
+  // Best-effort: the link is protection metadata, not run-critical — a failure
+  // (including the FK violation of the race above) must not fail the run.
+  if (params.consumedDocumentIds?.length) {
+    await linkConsumedDocuments(runId, params.consumedDocumentIds).catch((err) => {
+      logger.warn("failed to write document consumption links", {
+        runId,
+        error: getErrorMessage(err),
+      });
+    });
+  }
+
   // Materialize the run's staged uploads into durable `documents` rows now the
   // run row exists (deferred from the input-parser by the `documents.run_id`
   // FK). NOT best-effort: the persisted run input references these document
@@ -575,19 +593,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         pendingCount: params.pendingDocuments.length,
       });
     }
-  }
-
-  // Record the cross-container consumption links (D1) now the consumer run row
-  // exists (`document_links.consumer_run_id` FK). Best-effort: the link is
-  // protection metadata, not run-critical — a failure must not fail the run (the
-  // doc merely loses this consumer's detach protection).
-  if (params.consumedDocumentIds?.length) {
-    await linkConsumedDocuments(runId, params.consumedDocumentIds).catch((err) => {
-      logger.warn("failed to write document consumption links", {
-        runId,
-        error: getErrorMessage(err),
-      });
-    });
   }
 
   logger.info("run pipeline timings", {

@@ -1073,16 +1073,10 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   // the runs delete finishes the job).
   await detachOrDeleteContainedDocuments({ runIds });
 
-  const deleted = await db
-    .delete(runs)
-    .where(
-      scopedWhere(runs, {
-        orgId: scope.orgId,
-        applicationId: scope.applicationId,
-        extra: [eq(runs.packageId, packageId)],
-      }),
-    )
-    .returning({ id: runs.id });
+  // Scoped to the SELECTed ids — not the package predicate — so a run created
+  // concurrently after the SELECT is left for the next delete call instead of
+  // being deleted without its documents going through detach-or-delete.
+  const deleted = await db.delete(runs).where(inArray(runs.id, runIds)).returning({ id: runs.id });
   return deleted.length;
 }
 
