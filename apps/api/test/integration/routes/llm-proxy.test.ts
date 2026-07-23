@@ -823,6 +823,11 @@ describe("POST /api/llm-proxy/* — X-Run-Id run-attribution guard (CRIT-07)", (
     expect(row).toBeDefined();
     expect(row!.orgId).toBe(h.ctx.orgId);
     expect(row!.inputTokens).toBe(11);
+    // Attribution stamping (unified metering): the run path pins run_id and
+    // stamps credential_source from the resolved model (an org-owned preset →
+    // "org"), and NEVER carries a chat session id (a proxy row is single-context).
+    expect(row!.credentialSource).toBe("org");
+    expect(row!.chatSessionId).toBeNull();
   });
 });
 

@@ -34,6 +34,7 @@ import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
 import { runWithSpan, recordRunDuration, recordRunTerminal } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
+import { emitUsageRecorded } from "./llm-usage-ledger.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
@@ -43,12 +44,12 @@ import {
   CHECKPOINT_KEY,
 } from "./state/package-persistence.ts";
 import { actorFromIds } from "../lib/actor.ts";
-import { getPackage } from "./package-catalog.ts";
+import { getRunEffectiveAgent } from "./run-effective-agent.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
-import type { RunStatusChangeParams } from "@appstrate/core/module";
+import type { RunStatusChangeParams, UsageRecordedParams } from "@appstrate/core/module";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import { gone } from "@appstrate/core/api-errors";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
@@ -118,6 +119,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       sinkClosedAt: runs.sinkClosedAt,
       lastEventSequence: runs.lastEventSequence,
       startedAt: runs.startedAt,
+      versionRef: runs.versionRef,
       modelSource: runs.modelSource,
     })
     .from(runs)
@@ -131,7 +133,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
   // source agent mid-run nulls the column while the run survives for
   // observability/billing. `RunSinkContext.packageId` is typed as a non-null
   // string, so a raw `row as RunSinkContext` cast would smuggle a runtime null
-  // past every finalize consumer (getPackage, memory/pinned persistence,
+  // past every finalize consumer (getRunEffectiveAgent, memory/pinned persistence,
   // afterRun / onRunStatusChange hook params) — silently skipping finalization
   // side-effects for a deleted-agent run. Recover the agent's `@scope/name`
   // from the INSERT-time snapshot (stamped precisely for this deleted-agent
@@ -304,9 +306,12 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // 1. Flush any buffered events before we close the sink.
   await drainBufferedEvents(run, { allowGaps: true });
 
-  // 2. Load manifest for output-schema validation. `includeEphemeral: true`
-  //    keeps inline-run shadow packages addressable here.
-  const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+  // 2. Load the manifest of the definition the run EXECUTED for output-schema
+  //    validation — the pinned `package_versions` snapshot when `version_ref`
+  //    names one, the draft otherwise. Validating against the mutable draft
+  //    let a post-kickoff schema edit flip a pinned run's outcome (false
+  //    failure on a tightened draft schema, false success on a loosened one).
+  const agent = await getRunEffectiveAgent(run);
 
   // 3. Derive final status + error message. Pure computation — no DB writes
   //    before the CAS so concurrent synthesis + container-posted finalize
@@ -446,6 +451,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     await writeRunnerLedgerRow({ orgId: run.orgId, applicationId: run.applicationId }, run.id, {
       cost: result.cost,
       usage: validatedUsage,
+      modelSource: run.modelSource,
     });
   }
 
@@ -920,6 +926,10 @@ async function persistEventAndAdvance(
   // event's CAS would tolerate without retrying the dropped one.
   const scope = { orgId: run.orgId, applicationId: run.applicationId };
   const firstEvent = run.lastEventSequence === 0;
+  // Ledger `onUsageRecorded` events written inside the transaction below are
+  // collected here and broadcast only AFTER the commit — emitting inline would
+  // announce a row a rollback erases (a phantom event).
+  const pendingUsage: UsageRecordedParams[] = [];
   const claimed = await db.transaction(async (tx) => {
     const rows = await tx
       .update(runs)
@@ -934,7 +944,11 @@ async function persistEventAndAdvance(
       .returning({ id: runs.id });
     if (rows.length === 0) return false;
 
-    await persistRunEvent(tx, scope, run.id, event, { writeLedger: true });
+    await persistRunEvent(tx, scope, run.id, event, {
+      writeLedger: true,
+      modelSource: run.modelSource,
+      deferEmit: (usageEvent) => pendingUsage.push(usageEvent),
+    });
 
     // No runner emits `run.started`, so flip status → running on the
     // first ingested sequence regardless of type. Terminal status is
@@ -967,6 +981,12 @@ async function persistEventAndAdvance(
   }
 
   run.lastEventSequence = sequence;
+
+  // Post-commit broadcast of any `onUsageRecorded` event the ledger write
+  // collected inside the transaction above. Deferred to here so a rolled-back
+  // ledger row can never fire a phantom event; the CAS committed, so the row is
+  // now durable.
+  for (const usageEvent of pendingUsage) emitUsageRecorded(usageEvent);
 
   // Emit `run.started` for remote-origin runs at the moment the DB
   // actually transitions pending → running (the first ingested event).

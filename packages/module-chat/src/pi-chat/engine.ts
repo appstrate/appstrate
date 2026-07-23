@@ -54,6 +54,8 @@ export interface PiSubscriptionChatInput {
   presetId: string;
   orgId: string;
   userId: string;
+  /** Chat session the turn belongs to (null for an ephemeral, unpersisted turn). */
+  chatSessionId: string | null;
   /** Pre-assembled transcript prompt for this turn. */
   prompt: string;
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
@@ -242,11 +244,14 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           }),
         });
 
-        // Meter the turn (fire-and-forget by the caller). pi-ai pre-computes
-        // per-message cost, accumulated by the mapper.
+        // Meter the turn (fire-and-forget by the caller). We hand the platform
+        // seam the token counts + the model's catalog rates and let it compute
+        // the equivalent cost with the shared formula (consistent with the
+        // proxy/runner paths) rather than forwarding pi-ai's own `meta.costUsd`.
         input.recordUsage({
           orgId: input.orgId,
           userId: input.userId,
+          chatSessionId: input.chatSessionId,
           presetId: input.presetId,
           modelId: model.modelId,
           apiShape: model.apiShape,
@@ -254,7 +259,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           outputTokens: meta.usage.output,
           cacheReadTokens: meta.usage.cacheRead,
           cacheWriteTokens: meta.usage.cacheWrite,
-          costUsd: meta.costUsd,
+          cost: model.cost,
           durationMs: Date.now() - startedAt,
         });
       } finally {

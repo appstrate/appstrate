@@ -297,7 +297,7 @@ export async function freezeRunSpawnDependencies(params: {
  * Build run context, run module pre-checks, create run record, and fire-and-forget execution.
  *
  * Throws `ApiError` on validation / preflight failures (model not configured,
- * rate limit, concurrency, beforeRun hook rejection) so the HTTP error handler
+ * rate limit, concurrency, beforeUsage hook rejection) so the HTTP error handler
  * can surface RFC 9457 problem details directly. Background callers (scheduler)
  * catch `ApiError` to translate into their own failure semantics.
  */
@@ -326,7 +326,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   const pipelineStart = Date.now();
   const spanAttributes = { "appstrate.run.id": runId, "appstrate.org.id": orgId };
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
-  //     beforeRun hook). Shared with the remote origin in run-creation.ts so
+  //     beforeUsage hook). Shared with the remote origin in run-creation.ts so
   //     drift across the two paths is impossible — one change surface.
   const gatesStart = Date.now();
   const gates = await runWithSpan("appstrate.run.gates", { attributes: spanAttributes }, () =>
@@ -595,7 +595,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     gatesMs,
     rateLimitMs: gates.timings.rateLimitMs,
     concurrencyMs: gates.timings.concurrencyMs,
-    beforeRunHookMs: gates.timings.beforeRunHookMs,
+    beforeUsageHookMs: gates.timings.beforeUsageHookMs,
     freezeMs,
     connectionsMs,
     contextMs,

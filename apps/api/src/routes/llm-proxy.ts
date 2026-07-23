@@ -178,6 +178,14 @@ async function handleProxy(
   const userId = c.get("user").id;
   const principal = buildLlmProxyPrincipal({ apiKeyId, orgId, userId });
 
+  // Chat attribution rides the VALIDATED loopback bearer's claims, surfaced by
+  // the auth pipeline as opaque `authExtra` (never a caller-supplied header —
+  // that would let any proxy caller stamp spend onto an arbitrary session). The
+  // chat-loopback strategy is the only minter of this shape.
+  const authExtra = c.get("authExtra");
+  const chatSessionId =
+    authExtra && typeof authExtra.chatSessionId === "string" ? authExtra.chatSessionId : null;
+
   const runIdHeader = c.req.header("X-Run-Id");
   const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
   // CRIT-07 guard — `X-Run-Id` is caller-supplied and feeds
@@ -200,6 +208,7 @@ async function handleProxy(
       adapter,
       principal,
       runId,
+      chatSessionId,
       upstreamPath,
       incomingHeaders: c.req.raw.headers,
       rawBody,

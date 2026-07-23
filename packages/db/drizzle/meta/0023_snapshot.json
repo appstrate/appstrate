@@ -1,5 +1,5 @@
 {
-  "id": "dd27bd48-f84f-40c3-ad41-0ecbd69c367e",
+  "id": "21d6816e-436f-47fe-8deb-c05400df147e",
   "prevId": "a013735b-f814-4666-906c-0a99b9825454",
   "version": "7",
   "dialect": "postgresql",
@@ -1437,13 +1437,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "documents_bytes_used": {
-          "name": "documents_bytes_used",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -2753,6 +2746,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "chat_session_id": {
+          "name": "chat_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "model": {
           "name": "model",
           "type": "text",
@@ -2768,6 +2767,13 @@
         "api": {
           "name": "api",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credential_source": {
+          "name": "credential_source",
+          "type": "credential_source",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": false
         },
@@ -2885,6 +2891,21 @@
           "method": "btree",
           "with": {}
         },
+        "idx_llm_usage_chat_session_id": {
+          "name": "idx_llm_usage_chat_session_id",
+          "columns": [
+            {
+              "expression": "chat_session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "idx_llm_usage_org_created": {
           "name": "idx_llm_usage_org_created",
           "columns": [
@@ -2976,11 +2997,29 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "llm_usage_chat_session_id_chat_sessions_id_fk": {
+          "name": "llm_usage_chat_session_id_chat_sessions_id_fk",
+          "tableFrom": "llm_usage",
+          "tableTo": "chat_sessions",
+          "columnsFrom": ["chat_session_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "llm_usage_run_id_org_id_fk": {
           "name": "llm_usage_run_id_org_id_fk",
           "tableFrom": "llm_usage",
           "tableTo": "runs",
           "columnsFrom": ["run_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "llm_usage_chat_session_id_org_id_fk": {
+          "name": "llm_usage_chat_session_id_org_id_fk",
+          "tableFrom": "llm_usage",
+          "tableTo": "chat_sessions",
+          "columnsFrom": ["chat_session_id", "org_id"],
           "columnsTo": ["id", "org_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -3001,6 +3040,10 @@
         "llm_usage_runner_has_run_id": {
           "name": "llm_usage_runner_has_run_id",
           "value": "source <> 'runner' OR run_id IS NOT NULL"
+        },
+        "llm_usage_context_single": {
+          "name": "llm_usage_context_single",
+          "value": "run_id IS NULL OR chat_session_id IS NULL"
         }
       },
       "isRLSEnabled": false
@@ -5509,246 +5552,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.documents": {
-      "name": "documents",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "org_id": {
-          "name": "org_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "application_id": {
-          "name": "application_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "purpose": {
-          "name": "purpose",
-          "type": "document_purpose",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "chat_session_id": {
-          "name": "chat_session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "package_id": {
-          "name": "package_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "end_user_id": {
-          "name": "end_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "storage_key": {
-          "name": "storage_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mime": {
-          "name": "mime",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size": {
-          "name": "size",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_documents_org_app_created": {
-          "name": "idx_documents_org_app_created",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_documents_run": {
-          "name": "idx_documents_run",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_documents_chat_session": {
-          "name": "idx_documents_chat_session",
-          "columns": [
-            {
-              "expression": "chat_session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_documents_expires": {
-          "name": "idx_documents_expires",
-          "columns": [
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"documents\".\"expires_at\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "documents_org_id_organizations_id_fk": {
-          "name": "documents_org_id_organizations_id_fk",
-          "tableFrom": "documents",
-          "tableTo": "organizations",
-          "columnsFrom": ["org_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "documents_application_id_applications_id_fk": {
-          "name": "documents_application_id_applications_id_fk",
-          "tableFrom": "documents",
-          "tableTo": "applications",
-          "columnsFrom": ["application_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "documents_run_id_runs_id_fk": {
-          "name": "documents_run_id_runs_id_fk",
-          "tableFrom": "documents",
-          "tableTo": "runs",
-          "columnsFrom": ["run_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "documents_chat_session_id_chat_sessions_id_fk": {
-          "name": "documents_chat_session_id_chat_sessions_id_fk",
-          "tableFrom": "documents",
-          "tableTo": "chat_sessions",
-          "columnsFrom": ["chat_session_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "documents_user_id_user_id_fk": {
-          "name": "documents_user_id_user_id_fk",
-          "tableFrom": "documents",
-          "tableTo": "user",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "documents_end_user_id_end_users_id_fk": {
-          "name": "documents_end_user_id_end_users_id_fk",
-          "tableFrom": "documents",
-          "tableTo": "end_users",
-          "columnsFrom": ["end_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.audit_events": {
       "name": "audit_events",
       "schema": "",
@@ -7625,6 +7428,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "uq_chat_sessions_id_org_id": {
+          "name": "uq_chat_sessions_id_org_id",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -7655,10 +7479,10 @@
     }
   },
   "enums": {
-    "public.document_purpose": {
-      "name": "document_purpose",
+    "public.credential_source": {
+      "name": "credential_source",
       "schema": "public",
-      "values": ["user_upload", "agent_output"]
+      "values": ["system", "org"]
     },
     "public.invitation_status": {
       "name": "invitation_status",

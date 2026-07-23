@@ -45,6 +45,7 @@ import { ensureSession, persistUserMessage, persistAssistantMessage } from "./pe
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
+import type { UsageRejection } from "@appstrate/core/module";
 import {
   appendFinalStepSystemPrompt,
   CHAT_MAX_STEPS,
@@ -70,6 +71,25 @@ function subscriptionReconnectResponse(): Response {
       needsReconnection: true,
     }),
     { status: 401, headers: { "content-type": "application/problem+json" } },
+  );
+}
+
+/**
+ * RFC 9457 response for a turn blocked by the platform admission gate
+ * (`beforeUsage`, chat context). The hook's status flows through — a metering
+ * module returns 402 (payment required) when the org is over its soft cap.
+ */
+function usageRejectionResponse(rejection: UsageRejection): Response {
+  const status = rejection.status ?? 403;
+  return new Response(
+    JSON.stringify({
+      type: "https://docs.appstrate.dev/errors/usage-not-allowed",
+      title: "Usage not allowed",
+      status,
+      detail: rejection.message,
+      code: rejection.code,
+    }),
+    { status, headers: { "content-type": "application/problem+json" } },
   );
 }
 
@@ -205,6 +225,12 @@ export async function handleChatStream(
   const sessionId = body.id;
   let lastMessage = messages[messages.length - 1] as UIMessage | undefined;
 
+  // Session id to stamp on this turn's `llm_usage` row. Only set when the row
+  // for that session is (or will be) persisted this turn — the same condition
+  // that runs `ensureSession` below — so the ledger's `chat_session_id` FK is
+  // always satisfiable. Ephemeral turns record un-attributed usage (null).
+  const meteringSessionId = sessionId && lastMessage?.id ? sessionId : null;
+
   // Persist the session ROW up front, BEFORE the (potentially multi-second)
   // inference preamble (model resolve + MCP boot). The client mints the id and
   // creates conversations lazily, so the sidebar shows a new conversation
@@ -250,7 +276,13 @@ export async function handleChatStream(
   // bearer on every proxy call. The static header below is for the one-shot
   // calls (listModels) that fire immediately on this same line.
   const mintInferenceAuth = () =>
-    mintLoopbackToken({ userId: user.id, email: user.email, name: user.name, orgId, orgRole });
+    mintLoopbackToken(
+      { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
+      // The session id rides the SIGNED loopback claims (not a header) so the
+      // llm-proxy can attribute the ai-sdk path's usage to the chat session
+      // without trusting anything spoofable.
+      { chatSessionId: meteringSessionId },
+    );
   const inferenceHeaders: Record<string, string> = {
     Authorization: `Bearer ${mintInferenceAuth()}`,
     "X-Org-Id": orgId,
@@ -314,6 +346,22 @@ export async function handleChatStream(
   // possible refresh) happens here in the preamble, alongside the other reads.
   const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
   const isSubscription = subscription.subscription;
+
+  // Admission gate — non-subscription (built-in / API-key) turns only. A
+  // subscription turn spends the user's OWN credential (`credentialSource`
+  // `org`) and is never gated. The platform decides system-provided vs.
+  // org-owned server-side and dispatches `beforeUsage` (chat context) only for a
+  // system-provided model — an org's own API-key model is never blocked. Gated
+  // BEFORE the phase-B preamble so a rejected turn opens no MCP session and
+  // persists no user message.
+  if (!isSubscription) {
+    const rejection = await deps.checkUsageAllowed({
+      orgId,
+      presetId: chosen.id,
+      sessionId: meteringSessionId,
+    });
+    if (rejection) return usageRejectionResponse(rejection);
+  }
 
   // ── Preamble phase B (parallel) ──────────────────────────────────────────
   // The caller-context block (both paths) and the platform MCP probe (ai-sdk
@@ -495,6 +543,7 @@ export async function handleChatStream(
           presetId: chosen.id,
           orgId,
           userId: user.id,
+          chatSessionId: meteringSessionId,
           prompt: buildTranscriptPrompt(messages),
           system,
           platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },

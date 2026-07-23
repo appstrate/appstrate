@@ -51,12 +51,12 @@ describe("Module loader — ctx.services injection end-to-end", () => {
   // net). This file deliberately covers only the loader → init → service-call
   // path, so it doesn't duplicate that namespace-existence sweep.
 
-  it("exposes the minimal service surface (logger + runs.listLlmUsage)", () => {
+  it("exposes the minimal service surface (logger + usage.list)", () => {
     // The injected surface is intentionally tiny — a module gets the logger
-    // and the per-run ledger read, nothing else. `logger.info` is a
+    // and the ledger cursor read, nothing else. `logger.info` is a
     // synchronous, side-effect-free call any module can make at init.
     const s = capturedServices!;
     expect(typeof s.logger.info).toBe("function");
-    expect(typeof s.runs.listLlmUsage).toBe("function");
+    expect(typeof s.usage.list).toBe("function");
   });
 });

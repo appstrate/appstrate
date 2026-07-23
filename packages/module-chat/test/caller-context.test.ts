@@ -33,6 +33,7 @@ function fakeDeps(respond: (req: Request) => Response): {
       rateLimit: () => async (_c, next) => next(),
       resolveSubscriptionChatModel: async () => ({ subscription: false }),
       recordChatUsage: async () => {},
+      checkUsageAllowed: async () => null,
     },
     lastRequest: () => last,
   };

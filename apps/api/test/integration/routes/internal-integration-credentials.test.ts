@@ -24,7 +24,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedPackage } from "../../helpers/seed.ts";
+import { seedAgent, seedRun, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import {
@@ -353,5 +353,132 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
     const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
     expect(meta?.degraded_integrations).toContain(INTEGRATION);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Version-pinned runs — the dep guard reads the EFFECTIVE manifest.
+//
+// `assertAgentDeclaresIntegration` must authorize against the definition the
+// run EXECUTES (`runs.version_ref` → `package_versions` snapshot), never the
+// mutable draft. Regression for the @tractr/fathom-glenn incident: a dep
+// removed from the draft after publish 404'd the boot credential fetch of a
+// scheduled run pinned to a version that still declares it. The reverse
+// direction is the security half: a dep newly added to the draft must stay
+// out of reach of a run pinned to a version that doesn't declare it.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("GET /internal/integration-credentials — version-pinned runs", () => {
+  let ctx: TestContext;
+
+  async function seedIntegration(id: string) {
+    await seedPackage({
+      id,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: buildIntegrationManifest(id),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+    const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
+    await db.insert(integrationConnections).values({
+      integrationId: id,
+      authKey: "primary",
+      accountId: "acct-test",
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      endUserId: null,
+      credentialsEncrypted: ciphertext,
+      scopesGranted: [],
+    });
+  }
+
+  async function seedPinnedRun(versionRef: string): Promise<string> {
+    const run = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      status: "running",
+      versionRef,
+    });
+    return signRunToken(run.id);
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "pinnedcreds" });
+  });
+
+  it("ALLOW: a dep removed from the draft stays fetchable for a run pinned to a version declaring it", async () => {
+    // Draft no longer declares INTEGRATION; published 1.0.0 does.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedPackageVersion({
+      packageId: AGENT,
+      version: "1.0.0",
+      manifest: buildAgentManifest([INTEGRATION]),
+    });
+    await seedIntegration(INTEGRATION);
+    const token = await seedPinnedRun("1.0.0");
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { auths: Array<{ fields: Record<string, string> }> };
+    expect(body.auths[0]!.fields.api_key).toBe("live-secret-value");
+  });
+
+  it("DENY: a dep newly added to the draft is NOT reachable by a run pinned to a version without it", async () => {
+    // Draft declares INTEGRATION; published 1.0.0 declares nothing. A leaked
+    // run token of the pinned run must not widen to the draft's dep set.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedPackageVersion({
+      packageId: AGENT,
+      version: "1.0.0",
+      manifest: buildAgentManifest([]),
+    });
+    await seedIntegration(INTEGRATION);
+    const token = await seedPinnedRun("1.0.0");
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(404);
+    expect(JSON.stringify(await res.json())).toMatch(/not a dependency/i);
+  });
+
+  it("FALLBACK: a version_ref whose snapshot is gone degrades to the draft dep set", async () => {
+    // The pinned version row was deleted after kickoff — the guard falls back
+    // to the draft (which declares INTEGRATION), preserving pre-fix behavior.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    const token = await seedPinnedRun("9.9.9");
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
   });
 });

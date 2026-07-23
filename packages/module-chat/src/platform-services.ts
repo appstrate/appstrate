@@ -24,7 +24,7 @@
  */
 
 import type { MiddlewareHandler } from "hono";
-import type { ModuleInitContext } from "@appstrate/core/module";
+import type { ModuleInitContext, UsageRejection } from "@appstrate/core/module";
 import type {
   ChatAttachmentRequest,
   ChatUsageRecord,
@@ -68,6 +68,19 @@ export interface ChatPlatformDeps {
    * session row is removed so the FK cascade cannot destroy the evidence first.
    */
   cleanupSessionDocuments(chatSessionId: string): Promise<void>;
+  /**
+   * Admission gate for a non-subscription (built-in / API-key) turn. The
+   * platform decides whether the chosen preset is system-provided and, if so,
+   * dispatches the `beforeUsage` hook; an org's own model is never gated.
+   * Returns a {@link UsageRejection} to block the turn (surfaced as an RFC 9457
+   * problem response with the hook's status — 402 flows through), or null to
+   * allow.
+   */
+  checkUsageAllowed(args: {
+    orgId: string;
+    presetId: string;
+    sessionId: string | null;
+  }): Promise<UsageRejection | null>;
 }
 
 /**
@@ -111,5 +124,9 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
           // surface; session delete proceeds without document teardown (the FK
           // cascade still removes any rows). Safe no-op baseline.
           Promise.resolve(),
+    // No init context (test harness / OSS standalone) → no admission gate wired;
+    // allow the turn (null), the same safe baseline as before this seam existed.
+    checkUsageAllowed: (args) =>
+      ctx ? ctx.services.checkUsageAllowed(args) : Promise.resolve(null),
   };
 }

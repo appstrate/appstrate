@@ -30,14 +30,14 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs, llmUsage } from "@appstrate/db/schema";
+import { runs, runLogs, llmUsage, packages } from "@appstrate/db/schema";
 import { and } from "drizzle-orm";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import {
   finalizeRun,
@@ -77,6 +77,8 @@ async function seedRunWithSink(
     tokenUsage?: Record<string, number> | null;
     /** Persisted on `runs.modelSource` — forwarded to the `afterRun` hook. */
     modelSource?: string | null;
+    /** Persisted on `runs.versionRef` — pins the manifest finalize validates against. */
+    versionRef?: string;
   } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -86,6 +88,7 @@ async function seedRunWithSink(
     orgId: ctx.orgId,
     applicationId: ctx.defaultAppId,
     status: overrides.status ?? "running",
+    ...(overrides.versionRef !== undefined ? { versionRef: overrides.versionRef } : {}),
     runOrigin: "platform",
     sinkSecretEncrypted: encrypt(RUN_SECRET),
     sinkExpiresAt: new Date(Date.now() + 3600_000),
@@ -1741,6 +1744,107 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
       status: "success",
       durationMs: 100,
     });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/without calling the required `output` tool/);
+  });
+
+  // ── Version-pinned runs: finalize validates against the manifest the run
+  //    EXECUTED (`runs.version_ref` → `package_versions` snapshot), never the
+  //    mutable draft. A post-kickoff draft edit must not flip a pinned run's
+  //    outcome in either direction.
+
+  it("pinned run: a draft schema tightened AFTER publish does not fail a run valid per its pinned manifest", async () => {
+    // Published 1.0.0 has NO output schema; the draft (seeded in beforeEach)
+    // requires `answer`. A run pinned to 1.0.0 finishing without output must
+    // stay success — validating against the draft would flip it to failed.
+    await seedPackageVersion({
+      packageId: "@test/schema-agent",
+      version: "1.0.0",
+      manifest: {
+        name: "@test/schema-agent",
+        version: "1.0.0",
+        type: "agent",
+        runtime_tools: ["report"],
+      },
+    });
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent", { versionRef: "1.0.0" });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      report: "No structured output — the pinned version declares no schema.",
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+  });
+
+  it("pinned run: the pinned manifest's schema IS enforced even when the draft dropped it", async () => {
+    // Published 2.0.0 requires `answer`; replace the draft with one declaring
+    // NO output schema. A run pinned to 2.0.0 finishing without output must
+    // fail — validating against the draft would let it pass.
+    await seedPackageVersion({
+      packageId: "@test/schema-agent",
+      version: "2.0.0",
+      manifest: {
+        name: "@test/schema-agent",
+        version: "2.0.0",
+        type: "agent",
+        runtime_tools: ["output", "report"],
+        output: {
+          schema: {
+            type: "object",
+            required: ["answer"],
+            additionalProperties: false,
+            properties: { answer: { type: "string" } },
+          },
+        },
+      },
+    });
+    await db
+      .update(packages)
+      .set({
+        draftManifest: {
+          name: "@test/schema-agent",
+          version: "2.0.1",
+          type: "agent",
+          runtime_tools: ["report"],
+        },
+      })
+      .where(eq(packages.id, "@test/schema-agent"));
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent", { versionRef: "2.0.0" });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      report: "Forgot to call output.",
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/without calling the required `output` tool/);
+  });
+
+  it("pinned run whose version row is gone falls back to the draft schema", async () => {
+    // `version_ref` names a version that was deleted after kickoff — the
+    // helper degrades to the draft (which requires `answer`), preserving the
+    // pre-fix behavior instead of skipping validation entirely.
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent", { versionRef: "9.9.9" });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      report: "No output.",
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    expect(res.status).toBe(200);
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");

@@ -159,9 +159,9 @@ export interface AppstrateModule {
    * Priority order: topological order from `manifest.dependencies`. Modules
    * without dependencies keep the order they appear in `MODULES`.
    *
-   * Example: `MODULES=cloud,quota` — if both provide `beforeRun`,
-   * cloud runs first. To force ordering, add `dependencies: ["cloud"]` on
-   * quota so the topo sort always places cloud earlier.
+   * Example: `MODULES=admission,metering` — if both provide `beforeUsage`,
+   * `admission` runs first. To force ordering, add `dependencies: ["admission"]`
+   * on `metering` so the topo sort always places `admission` earlier.
    */
   hooks?: Partial<ModuleHooks>;
 
@@ -386,8 +386,14 @@ export interface AfterSignupContext {
 
 /** Known hooks and their signatures. */
 export interface ModuleHooks {
-  /** Pre-run gate — return a rejection to block the run, or null/undefined to allow. */
-  beforeRun: (params: BeforeRunParams) => Promise<RunRejection | null>;
+  /**
+   * Pre-usage admission gate — called before an org spends metered LLM usage on
+   * a given surface (an agent run or a chat turn). First-match-wins: the first
+   * module that provides it decides. Return a rejection to block the usage, or
+   * null/undefined to allow. The {@link BeforeUsageParams} context discriminates
+   * run vs. chat so a module can apply per-surface policy.
+   */
+  beforeUsage: (params: BeforeUsageParams) => Promise<UsageRejection | null>;
   /**
    * Pre-signup gate — throw to reject signup (e.g. domain allowlist,
    * free-tier usage limits, per-client org-signup policy).
@@ -410,7 +416,7 @@ export interface ModuleHooks {
   afterSignup: (user: { id: string; email: string }, ctx?: AfterSignupContext) => Promise<void>;
   /**
    * Post-run hook — called on terminal status before the final run record is
-   * persisted. Symmetric with `beforeRun`. Modules return a metadata patch
+   * persisted. Symmetric with `beforeUsage`. Modules return a metadata patch
    * stored as `runs.metadata` (e.g. `{ usage }` from the cloud metering
    * module), or null to leave it untouched.
    */
@@ -434,6 +440,26 @@ export interface ModuleEvents {
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
   onOrgDelete: (orgId: string) => void | Promise<void>;
+  /**
+   * One `llm_usage` row was written to the platform's usage ledger — broadcast
+   * after the row is committed by the single ledger writer (post-commit for
+   * writes made inside a transaction, so a rolled-back row never fires). Carries
+   * the full per-row attribution (source, principal, context, credential source,
+   * token counts, equivalent cost).
+   *
+   * CUMULATIVE runner rows: a `source:"runner"` row is a running total, not a
+   * per-call delta. The SAME {@link UsageRecordedParams.llmUsageId} re-fires as
+   * the run progresses, each time carrying a higher cumulative token/cost
+   * snapshot (the writer keeps one row per run and monotonically raises it).
+   * Consumers MUST upsert/replace by `llmUsageId` — NEVER sum successive event
+   * payloads, or a run's usage is over-counted. (`source:"proxy"` rows are
+   * per-call and fire once each.)
+   *
+   * Advisory only: the row is authoritative and consumers that must never miss a
+   * row (or must reconcile the final total) should read the ledger by its serial
+   * `id` cursor rather than relying on this side-effect broadcast.
+   */
+  onUsageRecorded: (params: UsageRecordedParams) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -865,15 +891,18 @@ export interface AuthStrategy {
 // Lifecycle types — shared between platform and modules
 // ---------------------------------------------------------------------------
 
-/** Parameters passed to the `beforeRun` hook. */
-export interface BeforeRunParams {
-  orgId: string;
-  packageId: string;
-  runningCount: number;
-}
+/**
+ * Parameters passed to the `beforeUsage` hook — a discriminated union over the
+ * usage surface. `run` carries the agent package id and the org's current
+ * running-run count (so a module can apply concurrency-aware admission); `chat`
+ * carries the session id (null for an ephemeral turn with no persisted session).
+ */
+export type BeforeUsageParams =
+  | { orgId: string; context: "run"; packageId: string; runningCount: number }
+  | { orgId: string; context: "chat"; sessionId: string | null };
 
-/** Structured rejection returned by `beforeRun` when a module blocks a run. */
-export interface RunRejection {
+/** Structured rejection returned by `beforeUsage` when a module blocks usage. */
+export interface UsageRejection {
   code: string;
   message: string;
   /** HTTP status hint (e.g. 402 for payment required, 429 for rate limit). Defaults to 403. */
@@ -910,6 +939,45 @@ export interface RunStatusChangeParams {
   packageEphemeral?: boolean;
   /** Additional data for webhook payloads (result, error, etc.). */
   extra?: Record<string, unknown>;
+}
+
+/**
+ * Parameters passed to the `onUsageRecorded` event — the per-row projection of
+ * one `llm_usage` ledger entry a module may observe.
+ *
+ * Deliberately OSS-neutral: it reports who paid the provider
+ * ({@link credentialSource}), never how that maps to any downstream accounting.
+ * The backing upstream model id and protocol family (`real_model` / `api`,
+ * server-side-only columns) are NEVER exposed here.
+ */
+export interface UsageRecordedParams {
+  /**
+   * Serial primary key of the `llm_usage` row — the ledger cursor value. For a
+   * `source:"runner"` row this id is STABLE across the run: the same id re-fires
+   * with an updated (higher) cumulative total as the run progresses, so key any
+   * state on it and replace-by-id, never accumulate. See `onUsageRecorded`.
+   */
+  llmUsageId: number;
+  orgId: string;
+  /** Authenticated user the usage is attributed to, when the principal was a user. */
+  userId?: string | null;
+  /** Which producer wrote the row: the inference proxy or the agent runner. */
+  source: "proxy" | "runner";
+  /** What the row is attributed to — an agent run, a chat session, or nothing. */
+  contextType: "run" | "chat" | null;
+  /** The run id / chat session id matching {@link contextType} (null when unattributed). */
+  contextId: string | null;
+  /** Which credential set reached the provider: platform-provided or the org's own. */
+  credentialSource: "system" | "org" | null;
+  /** Preset id (the catalog model the caller selected); never the backing upstream id. */
+  model?: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  /** Equivalent cost (USD) at the model's catalog rates. */
+  costUsd: number;
+  durationMs?: number | null;
 }
 
 /**
@@ -978,13 +1046,47 @@ export interface ModuleInitContext {
 // Deliberately minimal: a capability lands here ONLY when a real cross-tenant
 // consumer needs it (the same razor `scripts/verify-module-contract.ts`
 // applies to the `AppstrateModule` members). Today the sole consumer is the
-// `cloud` metering module, which reads the per-run `llm_usage` ledger via
-// `runs.listLlmUsage`. The previous broad surface (orchestrator / pubsub /
+// `cloud` metering module, which sweeps the append-only `llm_usage` ledger by
+// serial-`id` cursor via `usage.list` / `usage.settledFrontier` and gates admission via
+// `checkUsageAllowed`. The previous broad surface (orchestrator / pubsub /
 // realtime / inline / packages / models / applications / run CRUD) mirrored
 // the in-process `chat` module that has since been removed — it carried zero
 // live consumers, so it was dropped rather than left as speculative API.
 // Re-add a member here the moment a second consumer genuinely needs it.
 // ---------------------------------------------------------------------------
+
+/**
+ * One projected `llm_usage` ledger row from {@link PlatformServices.usage.list}
+ * — the cursor read a metering consumer reconciles by serial `id`. OSS-neutral:
+ * reports who paid the provider ({@link LlmUsageLedgerRow.credentialSource}),
+ * never any downstream accounting, and NEVER the backing upstream model id or
+ * protocol family (`real_model` / `api`, server-side-only columns).
+ */
+export interface LlmUsageLedgerRow {
+  /** Serial primary key — the cursor value the consumer advances by. */
+  id: number;
+  orgId: string;
+  /** Equivalent cost (USD) at the model's catalog rates. */
+  costUsd: number;
+  /** Which producer wrote the row: the inference proxy or the agent runner. */
+  source: string;
+  /** What the row is attributed to — an agent run, a chat session, or nothing. */
+  contextType: "run" | "chat" | null;
+  /** The run id / chat session id matching {@link contextType} (null when unattributed). */
+  contextId: string | null;
+  /** Which credential set reached the provider: platform-provided or the org's own. */
+  credentialSource: "system" | "org" | null;
+  /**
+   * Whether the row's `costUsd` is final. Proxy/chat rows are immutable at
+   * insert (always settled); a runner row's total GROWS during its run (one
+   * cumulative row per run) and only settles once the run reaches a terminal
+   * status (or its run row is gone). A cursor consumer processes settled rows
+   * only and NEVER advances its watermark past the first unsettled row — see
+   * {@link PlatformServices.usage.list} for the head-of-line trade-off that
+   * implies and when it is safe to skip an unsettled row.
+   */
+  settled: boolean;
+}
 
 export interface PlatformServices {
   /** Structured JSON logger (pino). */
@@ -1010,21 +1112,51 @@ export interface PlatformServices {
      */
     clientIp(c: Context): string;
   };
-  /** Run-ledger read surface. */
-  runs: {
+  /**
+   * Cursor read into the append-only `llm_usage` ledger — the canonical platform
+   * usage source of truth, read WITHOUT a cross-module SQL join. A metering
+   * consumer sweeps it by serial `id` watermark: `list({ afterId })` returns the
+   * next batch ordered by `id` ASC; `settledFrontier()` returns the only safe
+   * point at which to initialize that watermark at cutover (see its doc). See
+   * {@link LlmUsageLedgerRow.settled} for the ordering contract the consumer must
+   * honor.
+   */
+  usage: {
     /**
-     * Per-call `llm_usage` ledger rows for a run, org-scoped and filtered by
-     * `source` (e.g. `["runner", "proxy"]`). A read into the canonical platform
-     * usage ledger WITHOUT a cross-module SQL join — a consumer that aggregates
-     * per-call usage (analytics, an external usage store) reads here rather than
-     * joining `llm_usage` directly. Returns `{ id, costUsd, source }[]`; the
-     * caller reconciles on `id` against its own store.
+     * Next ledger rows after `afterId` (exclusive, default 0), ordered by `id`
+     * ASC, capped by `limit` (service default 500, max 1000). Optional
+     * `credentialSource` filters to rows stamped `system` / `org`.
+     *
+     * Head-of-line trade-off: the consumer must never advance its watermark past
+     * the first UNSETTLED row (see {@link LlmUsageLedgerRow.settled}), so a single
+     * unsettled row — e.g. a long-running run whose cumulative runner row is still
+     * growing — pins the frontier and holds back every LATER row (settled or not)
+     * from being processed until it settles. A consumer that will never process a
+     * given `credentialSource` may nonetheless safely skip that row's unsettled
+     * entries: `credentialSource` is fixed at a row's first insert and is NEVER
+     * mutated by the monotonic runner upsert, so skipping it can never cause a
+     * later cost to be mis-attributed.
      */
-    listLlmUsage(args: {
-      runId: string;
-      orgId: string;
-      sources: readonly string[];
-    }): Promise<Array<{ id: number; costUsd: number; source: string }>>;
+    list(args: {
+      afterId?: number;
+      limit?: number;
+      credentialSource?: "system" | "org";
+    }): Promise<LlmUsageLedgerRow[]>;
+    /**
+     * Highest ledger id `N` such that EVERY row with id ≤ `N` is settled — the
+     * only safe point at which a consumer may initialize its cursor watermark at
+     * cutover. Returns `MIN(unsettled id) − 1` when any unsettled row exists, else
+     * `MAX(id)`, else `0` for an empty ledger.
+     *
+     * Why not a plain `MAX(id)`: a runner row for an in-flight run is assigned its
+     * serial `id` at the first metric event (a LOW id) yet stays unsettled while
+     * its cumulative cost grows. A watermark seeded at the global `MAX(id)` would
+     * sit ABOVE that low id, so when the run finally settles its row is already
+     * behind the watermark and its usage is dropped forever. `settledFrontier()`
+     * stops at the first unsettled row, so no in-flight runner row is ever
+     * stranded below the initial watermark.
+     */
+    settledFrontier(): Promise<number>;
   };
   /**
    * In-process dispatch into the fully-wired platform Hono app — the same
@@ -1081,4 +1213,21 @@ export interface PlatformServices {
    * FK cascade cannot destroy the evidence first.
    */
   cleanupSessionDocuments(chatSessionId: string): Promise<void>;
+  /**
+   * Chat admission gate — the chat-surface entry point into the `beforeUsage`
+   * hook. The chat module calls this for its non-subscription (built-in /
+   * API-key) branch before starting a turn; the platform decides whether the
+   * chosen model is system-provided and only then dispatches the hook (an org's
+   * own API-key model is never gated). Returns a {@link UsageRejection} to block
+   * the turn (the module surfaces it as an RFC 9457 problem response with the
+   * hook's status — 402 flows through), or null to allow. Subscription turns
+   * never call this (they spend the user's own credential, `credentialSource`
+   * `org`). Keeping the system-provided decision server-side keeps the chat
+   * module dumb — it has no model-registry access.
+   */
+  checkUsageAllowed(args: {
+    orgId: string;
+    presetId: string;
+    sessionId: string | null;
+  }): Promise<UsageRejection | null>;
 }

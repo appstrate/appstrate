@@ -3,22 +3,22 @@
 /**
  * Phase 5 (model alias) — private usage ledger. `llm_usage.real_model` / `api`
  * retain the REAL backing id for billing + audit, but they are admin/cloud-only
- * and must never reach a user-facing surface. `listLlmUsageForRun` (the sole
- * service accessor, consumed by the cloud billing module) projects only
- * `id`/`costUsd`/`source` — this locks that projection so a future column add
- * can't silently leak the backing of a model alias.
+ * and must never reach a user-facing surface. `listLlmUsage` (the module-facing
+ * cursor read, consumed by the cloud metering module) never projects the binding
+ * columns — this locks that projection so a future column add can't silently
+ * leak the backing of a model alias.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage } from "@appstrate/db/schema";
-import { listLlmUsageForRun } from "../../../src/services/state/runs.ts";
+import { listLlmUsage } from "../../../src/services/state/runs.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedRun, seedAgent } from "../../helpers/seed.ts";
 
-describe("listLlmUsageForRun — private ledger never leaks the alias backing", () => {
+describe("listLlmUsage — private ledger never leaks the alias backing", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -26,7 +26,7 @@ describe("listLlmUsageForRun — private ledger never leaks the alias backing", 
     ctx = await createTestContext({ orgSlug: "ledgerorg" });
   });
 
-  it("returns only id/costUsd/source — never real_model / api / model", async () => {
+  it("projects the neutral row shape — never real_model / api / model", async () => {
     await seedAgent({ id: "@ledgerorg/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
     const run = await seedRun({
       packageId: "@ledgerorg/agent",
@@ -49,16 +49,23 @@ describe("listLlmUsageForRun — private ledger never leaks the alias backing", 
       requestId: "req_alias_ledger_1",
     });
 
-    const rows = await listLlmUsageForRun({
-      runId: run.id,
-      orgId: ctx.orgId,
-      sources: ["proxy"],
-    });
+    const rows = await listLlmUsage({});
 
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
-    // Exactly the public projection — no binding columns.
-    expect(Object.keys(row).sort()).toEqual(["costUsd", "id", "source"]);
+    // The neutral projection — no binding columns (real_model / api / model).
+    expect(Object.keys(row).sort()).toEqual(
+      [
+        "contextId",
+        "contextType",
+        "costUsd",
+        "credentialSource",
+        "id",
+        "orgId",
+        "settled",
+        "source",
+      ].sort(),
+    );
     expect(row.costUsd).toBeCloseTo(0.0123, 6);
 
     // Hard guarantee: neither the real backing nor the protocol family appears.

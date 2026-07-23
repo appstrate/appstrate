@@ -131,6 +131,7 @@ function makeCtx(overrides: Partial<MeteredForwardContext> = {}): MeteredForward
   return {
     principal: { kind: "jwt_user", userId: "u", orgId: "o" },
     runId: null,
+    chatSessionId: null,
     presetId: "preset",
     resolved: {
       modelId: "real-model",

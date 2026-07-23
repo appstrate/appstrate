@@ -8834,6 +8834,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model (RFC 9457 problem+json). */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Rate limited (20/min per caller) */

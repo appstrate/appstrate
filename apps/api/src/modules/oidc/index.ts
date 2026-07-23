@@ -158,6 +158,7 @@ const oidcModule: AppstrateModule = {
     "/api/oauth/forgot-password",
     "/api/oauth/reset-password",
     "/api/oauth/assets/social-sign-in.js",
+    "/api/oauth/assets/login-expiry.js",
     // Device-flow verification pages. `GET /activate` must be publicly
     // reachable so an unauthenticated user lands on the entry form and
     // gets redirected to `/auth/login?returnTo=...` with the user_code

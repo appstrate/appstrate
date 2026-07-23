@@ -227,6 +227,25 @@ export async function getLatestVersionInfo(
   };
 }
 
+/**
+ * Exact-version manifest lookup — the light read for run-scoped consumers
+ * that need a published manifest WITHOUT the artifact bytes. The run's
+ * `version_ref` is a concrete semver stamped at kickoff, so no spec
+ * resolution (dist-tag / range) applies here. Returns null when the version
+ * row is absent (never published, or deleted after kickoff).
+ */
+export async function getExactVersionManifest(
+  packageId: string,
+  version: string,
+): Promise<Record<string, unknown> | null> {
+  const [row] = await db
+    .select({ manifest: packageVersions.manifest })
+    .from(packageVersions)
+    .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+    .limit(1);
+  return asRecordOrNull(row?.manifest);
+}
+
 /** 3-step version resolution: exact → dist-tag → semver range. */
 export async function resolveVersion(packageId: string, query: string): Promise<number | null> {
   const allVersions: CatalogVersion[] = await db
