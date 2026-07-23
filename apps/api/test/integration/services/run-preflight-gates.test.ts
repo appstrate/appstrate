@@ -157,7 +157,14 @@ describe("runPreflightGates — beforeUsage model-source gating", () => {
     }
     // Dispatched with the run discriminant (not the chat shape).
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ orgId: ctx.orgId, context: "run", packageId: "@gates/agent" });
+    expect(calls[0]).toMatchObject({
+      orgId: ctx.orgId,
+      context: "run",
+      packageId: "@gates/agent",
+      // No run existed in the DB, but the hook receives the projected count
+      // including the run currently being admitted.
+      runningCount: 1,
+    });
   });
 
   it("does NOT dispatch the hook for an org-owned (BYOK) model", async () => {

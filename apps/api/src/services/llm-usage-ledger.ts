@@ -19,9 +19,10 @@
  *      row whose transaction later rolls back from firing a phantom event.
  *
  * It is intentionally a thin insert+emit seam, not a framework: cost is already
- * computed by each caller (they own the token→USD arithmetic and their own
- * best-effort try/catch), and the runner's monotonic upsert is expressed as one
- * opt-in flag rather than a second code path.
+ * computed by each caller (they own the token→USD arithmetic and persistence
+ * policy), and the runner's monotonic upsert is expressed as one opt-in flag
+ * rather than a second code path. Billable producers wrap this with
+ * `llm-usage-retry.ts` for durable recovery.
  */
 
 import { db, type Db } from "@appstrate/db/client";
@@ -75,7 +76,7 @@ export interface RecordLlmUsageOptions {
    * unique index `uq_llm_usage_runner_run_id` (at most one runner row per run;
    * the highest cumulative cost wins). The plain insert (proxy / chat) omits it.
    */
-  onConflict?: "runner-monotonic";
+  onConflict?: "runner-monotonic" | "proxy-idempotent";
   /**
    * Deferred-emit collector for a caller that records INSIDE its own
    * transaction. When provided, {@link recordLlmUsage} does NOT broadcast
@@ -107,7 +108,7 @@ function resolveContext(
  * columns (`real_model` / `api`). When {@link RecordLlmUsageOptions.deferEmit}
  * is supplied the event is collected instead of broadcast — see that option's
  * doc for the post-commit contract. DB errors are NOT swallowed here — each
- * caller owns its best-effort try/catch and its own log line.
+ * caller decides whether to fail, retry, or durably enqueue.
  */
 export async function recordLlmUsage(
   entry: LlmUsageEntry,
@@ -177,7 +178,20 @@ export async function recordLlmUsage(
             `,
           })
           .returning({ id: llmUsage.id })
-      : await executor.insert(llmUsage).values(values).returning({ id: llmUsage.id });
+      : opts.onConflict === "proxy-idempotent"
+        ? await executor
+            .insert(llmUsage)
+            .values(values)
+            // A DB client can lose the INSERT acknowledgement after Postgres
+            // committed it. Durable retry replays the exact same request_id;
+            // the partial unique index turns that uncertain outcome into a
+            // clean no-op instead of a duplicate ledger row.
+            .onConflictDoNothing({
+              target: llmUsage.requestId,
+              where: sql`source = 'proxy' AND request_id IS NOT NULL`,
+            })
+            .returning({ id: llmUsage.id })
+        : await executor.insert(llmUsage).values(values).returning({ id: llmUsage.id });
 
   const llmUsageId = inserted[0]?.id ?? null;
   if (llmUsageId === null) return null;

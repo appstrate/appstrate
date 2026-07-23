@@ -121,6 +121,30 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
     expect(row!.runId).toBeNull();
   });
 
+  it("replays a proxy retry idempotently when request_id already committed", async () => {
+    const entry = {
+      source: "proxy" as const,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      credentialSource: "system" as const,
+      inputTokens: 12,
+      outputTokens: 4,
+      costUsd: 0.002,
+      requestId: "req_durable_retry",
+    };
+
+    const first = await recordLlmUsage(entry, { onConflict: "proxy-idempotent" });
+    const replay = await recordLlmUsage(entry, { onConflict: "proxy-idempotent" });
+
+    expect(typeof first).toBe("number");
+    expect(replay).toBeNull();
+    const rows = await db
+      .select()
+      .from(llmUsage)
+      .where(eq(llmUsage.requestId, "req_durable_retry"));
+    expect(rows).toHaveLength(1);
+  });
+
   it("rejects a row attributed to BOTH a run and a chat session (llm_usage_context_single)", async () => {
     await seedAgent({ id: "@ledgerwriter/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
     const run = await seedRun({

@@ -160,7 +160,10 @@ function openAiSse(): Response {
 }
 
 interface DispatchCapture {
-  inferenceBody: { messages?: Array<{ role: string; content: unknown }> } | null;
+  inferenceBody: {
+    messages?: Array<{ role: string; content: unknown }>;
+    stream_options?: { include_usage?: boolean };
+  } | null;
   inferenceUrl: string | null;
 }
 
@@ -280,6 +283,10 @@ describe("handleChatStream (ai-sdk path)", () => {
     expect(res.capture.inferenceUrl).toContain(
       "/api/llm-proxy/openai-completions/v1/chat/completions",
     );
+    // Streaming usage is opt-in on OpenAI-compatible APIs. This field is
+    // load-bearing for the built-in-model billing path: the proxy can only
+    // write the chat's llm_usage row when the terminal SSE frame has usage.
+    expect(body?.stream_options).toEqual({ include_usage: true });
     expect(body?.messages?.[0]?.role).toBe("system");
     const systemContent = String(body?.messages?.[0]?.content ?? "");
     expect(systemContent).toContain(SYSTEM_PROMPT.slice(0, 64));

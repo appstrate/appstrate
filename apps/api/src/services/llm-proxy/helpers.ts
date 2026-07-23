@@ -39,9 +39,11 @@ export interface ParsedProxyRequest {
   stream: boolean;
   /**
    * Produce a fresh body byte sequence with `model` swapped for
-   * `upstreamModelId`. The rest of the payload is preserved verbatim.
+   * `upstreamModelId`. When `includeStreamUsage` is set, a streaming
+   * OpenAI-compatible request is also forced to ask for the terminal usage
+   * frame. The rest of the payload is preserved.
    */
-  rewriteModel(upstreamModelId: string): Uint8Array;
+  rewriteModel(upstreamModelId: string, opts?: { includeStreamUsage?: boolean }): Uint8Array;
 }
 
 /**
@@ -68,8 +70,15 @@ export function parseProxyRequest(rawBody: Uint8Array): ParsedProxyRequest {
   return {
     presetId: model,
     stream: obj["stream"] === true,
-    rewriteModel(upstreamModelId: string): Uint8Array {
+    rewriteModel(upstreamModelId: string, opts?: { includeStreamUsage?: boolean }): Uint8Array {
       obj["model"] = upstreamModelId;
+      if (opts?.includeStreamUsage && obj["stream"] === true) {
+        const current = obj["stream_options"];
+        obj["stream_options"] =
+          current && typeof current === "object" && !Array.isArray(current)
+            ? { ...(current as Record<string, unknown>), include_usage: true }
+            : { include_usage: true };
+      }
       return new TextEncoder().encode(JSON.stringify(obj));
     },
   };

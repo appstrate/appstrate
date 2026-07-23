@@ -60,6 +60,13 @@ export interface ProxyCallInputs {
   fetchImpl?: typeof fetch;
   /** Override the request-body cap. Defaults to 10 MiB. */
   maxRequestBytes?: number;
+  /**
+   * Admission seam invoked after a system preset is resolved and after a
+   * response-cache miss, but before any upstream request. The route wires this
+   * to the module `beforeUsage` hook with its validated chat/run context.
+   * Org-owned presets never invoke it.
+   */
+  beforeSystemUpstream?: (resolved: ResolvedModel, presetId: string) => Promise<void>;
 }
 
 export class LlmProxyUnsupportedModelError extends Error {
@@ -133,7 +140,15 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     throw new LlmProxyUnsupportedSubscriptionError(resolved.providerId);
   }
 
-  const rewrittenBody = request.rewriteModel(resolved.modelId);
+  // OpenAI-compatible streaming usage is opt-in. Force it server-side for
+  // system presets even when a remote/third-party client forgot the flag:
+  // billing must not depend on the caller SDK doing the right thing. Org-owned
+  // custom endpoints are left untouched for compatibility.
+  const includeStreamUsage =
+    resolved.isSystemModel &&
+    (inputs.adapter.apiShape === "openai-completions" ||
+      inputs.adapter.apiShape === "mistral-conversations");
+  const rewrittenBody = request.rewriteModel(resolved.modelId, { includeStreamUsage });
 
   // Model-alias swap (issue #727). When the resolved preset is an alias, the
   // upstream echoes the REAL id in its response `model` field (and may name it
@@ -171,6 +186,14 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       return probe.response;
     }
     cacheKeyForWrite = probe.cacheKey;
+  }
+
+  // Cached responses spend no provider tokens. On a cache miss, gate every
+  // platform-paid proxy call immediately before the upstream request. This
+  // closes the remote-run path where run creation cannot know whether the
+  // remote runner will later select a system preset.
+  if (resolved.isSystemModel) {
+    await inputs.beforeSystemUpstream?.(resolved, presetId);
   }
 
   const upstreamUrl = joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);

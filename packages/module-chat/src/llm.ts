@@ -149,6 +149,11 @@ export function modelFromFamily(
         apiKey: "proxy",
         headers,
         fetch: fetchImpl,
+        // OpenAI-compatible providers only include token counters in the
+        // terminal SSE frame when explicitly requested. Without this flag a
+        // successful built-in chat turn can stream normally while the proxy
+        // has no usage object to persist or bill.
+        includeUsage: true,
       })(model.id);
   }
 }

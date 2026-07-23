@@ -56,7 +56,8 @@ import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { db, type Db } from "@appstrate/db/client";
 import type { UsageRecordedParams } from "@appstrate/core/module";
-import { recordLlmUsage, type CredentialSource } from "../llm-usage-ledger.ts";
+import { type CredentialSource } from "../llm-usage-ledger.ts";
+import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import type { AppScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
@@ -257,8 +258,9 @@ export async function persistRunEvent(
       // cumulative running totals on each metric event, so concurrent
       // writers (a later metric event, the finalize-time fallback)
       // UPSERT the row with monotonic-max semantics. The ledger write
-      // is best-effort by its own contract (see writeRunnerLedgerRow's
-      // try/catch) so it never aborts the surrounding transaction.
+      // falls back to the durable usage-retry queue. The surrounding
+      // transaction aborts only if both Postgres and that queue are
+      // unavailable, so billable usage is never silently discarded.
       if (opts.writeLedger) {
         await writeRunnerLedgerRow(
           scope,
@@ -375,8 +377,8 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
  *   - reorder is safe — the highest-seen total wins regardless of arrival
  *     order
  *
- * Best-effort: metric persistence MUST NOT fail the ingestion path.
- * Errors are logged.
+ * A failed direct metric write is handed to the durable usage-retry queue. The
+ * ingestion path only fails when both persistence channels are unavailable.
  *
  * `opts.executor` writes inside the ingestion transaction; `opts.deferEmit`
  * (paired with it) collects the `onUsageRecorded` event so the ingestion layer
@@ -401,6 +403,13 @@ export async function writeRunnerLedgerRow(
      * by the transactional metric path so the broadcast happens post-commit.
      */
     deferEmit?: (event: UsageRecordedParams) => void;
+    /**
+     * Finalization barrier: require the terminal cumulative snapshot to be in
+     * Postgres before the run becomes settled. Cloud claims a runner row by its
+     * existing serial id, so asynchronously updating it after settlement could
+     * otherwise strand the final delta.
+     */
+    required?: boolean;
   } = {},
 ): Promise<void> {
   // Skip degenerate events with neither usage nor cost — nothing to bill
@@ -411,9 +420,7 @@ export async function writeRunnerLedgerRow(
     // The single ledger writer performs the monotonic upsert against the
     // partial unique index (highest cumulative total wins) and broadcasts
     // `onUsageRecorded` (deferred to post-commit when `deferEmit` is set).
-    // Best-effort by contract: metric persistence MUST NOT fail the ingestion
-    // path, so errors are logged, never rethrown.
-    await recordLlmUsage(
+    await recordLlmUsageReliably(
       {
         source: "runner",
         orgId: scope.orgId,
@@ -425,13 +432,19 @@ export async function writeRunnerLedgerRow(
         cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
         costUsd: row.cost ?? 0,
       },
-      { executor: opts.executor, onConflict: "runner-monotonic", deferEmit: opts.deferEmit },
+      {
+        executor: opts.executor,
+        onConflict: "runner-monotonic",
+        deferEmit: opts.deferEmit,
+        required: opts.required,
+      },
     );
   } catch (err) {
     logger.error("Failed to write runner ledger row", {
       runId,
       error: getErrorMessage(err),
     });
+    throw err;
   }
 }
 

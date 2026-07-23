@@ -749,6 +749,8 @@ export async function getRunAttribution(
   runId: string,
 ): Promise<{
   id: string;
+  packageId: string | null;
+  status: RunStatus;
   applicationId: string;
   userId: string | null;
   endUserId: string | null;
@@ -757,6 +759,8 @@ export async function getRunAttribution(
   const [row] = await db
     .select({
       id: runs.id,
+      packageId: runs.packageId,
+      status: runs.status,
       applicationId: runs.applicationId,
       userId: runs.userId,
       endUserId: runs.endUserId,
