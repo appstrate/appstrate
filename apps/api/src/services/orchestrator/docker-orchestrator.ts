@@ -75,7 +75,7 @@ export class DockerOrchestrator implements RunOrchestrator {
    * torn down). The {@link watchSidecarExit} watcher consults this set
    * to suppress the "sidecar exited unexpectedly" log on the cleanup
    * path. Added in {@link stopWorkload}, consumed by the watcher, and
-   * defensively cleared in {@link removeWorkload} / {@link shutdown}.
+   * defensively cleared in {@link shutdown}.
    */
   private expectedSidecarExits = new Set<string>();
   /**
@@ -468,17 +468,26 @@ export class DockerOrchestrator implements RunOrchestrator {
   }
 
   async stopWorkload(handle: WorkloadHandle, timeoutSeconds?: number): Promise<void> {
-    if (handle.role === "sidecar") this.expectedSidecarExits.add(handle.id);
-    await docker.stopContainer(handle.id, timeoutSeconds);
+    const isSidecar = handle.role === "sidecar";
+    if (isSidecar) this.expectedSidecarExits.add(handle.id);
+    try {
+      await docker.stopContainer(handle.id, timeoutSeconds);
+    } catch (err) {
+      // A failed stop did not establish an expected exit. Keep a later
+      // watcher event visible instead of accidentally suppressing it.
+      if (isSidecar) this.expectedSidecarExits.delete(handle.id);
+      throw err;
+    }
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
-    // No `expectedSidecarExits.add` here: by the time we're removing the
-    // container its `waitForExit` watcher has already resolved (either
-    // through the happy path or via `stopWorkload`'s suppression). Adding
-    // again would leak one string per run for the process lifetime.
+    // Do not clear `expectedSidecarExits` here. `stopContainer()` and the
+    // watcher's `waitForExit()` can resolve in either microtask order; clearing
+    // the marker during removal races the watcher and turns an intentional
+    // SIGKILL teardown (137) into a false crash report. The watcher consumes
+    // the marker, and shutdown defensively clears any marker left behind when
+    // Docker itself fails before the watcher can observe an exit.
     await docker.removeContainer(handle.id);
-    if (handle.role === "sidecar") this.expectedSidecarExits.delete(handle.id);
   }
 
   async waitForExit(handle: WorkloadHandle): Promise<number> {

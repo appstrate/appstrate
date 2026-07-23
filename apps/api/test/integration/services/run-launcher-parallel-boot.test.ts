@@ -51,6 +51,7 @@ interface TimingObservations {
   sidecarCreateResolvedAt: number | null;
   agentCreateResolvedAt: number | null;
   agentStartedAt: number | null;
+  cleanupCalls: string[];
 }
 
 function createTimingFake(config: TimingFakeConfig): {
@@ -62,6 +63,7 @@ function createTimingFake(config: TimingFakeConfig): {
     sidecarCreateResolvedAt: null,
     agentCreateResolvedAt: null,
     agentStartedAt: null,
+    cleanupCalls: [],
   };
 
   const orchestrator: RunOrchestrator = {
@@ -106,8 +108,12 @@ function createTimingFake(config: TimingFakeConfig): {
     async startWorkload(w: WorkloadHandle) {
       if (w.role === "agent") obs.agentStartedAt = Date.now();
     },
-    async stopWorkload() {},
-    async removeWorkload() {},
+    async stopWorkload(w: WorkloadHandle) {
+      obs.cleanupCalls.push(`stop:${w.role}`);
+    },
+    async removeWorkload(w: WorkloadHandle) {
+      obs.cleanupCalls.push(`remove:${w.role}`);
+    },
     async waitForExit(): Promise<number> {
       await new Promise((resolve) => setTimeout(resolve, config.agentLifetimeMs));
       return 0;
@@ -283,5 +289,26 @@ describe("#406 parallel-boot — pi.ts vs slow sidecar", () => {
     // /health round-trips. Generous upper bound to keep the test
     // resilient on slow CI.
     expect(elapsed).toBeLessThan(2_000);
+  });
+
+  it("stops the sidecar before removing it during successful cleanup", async () => {
+    const { orchestrator, obs } = createTimingFake({
+      sidecarCreateDelayMs: 0,
+      agentLifetimeMs: 0,
+    });
+
+    await runPlatformContainer({
+      runId: "run_cleanup",
+      context: buildContext("run_cleanup"),
+      plan: buildRunPlan(),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_cleanup",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+
+    expect(obs.cleanupCalls).toEqual(["stop:sidecar", "remove:sidecar", "remove:agent"]);
   });
 });

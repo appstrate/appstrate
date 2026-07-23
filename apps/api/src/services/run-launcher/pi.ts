@@ -445,6 +445,17 @@ async function runPlatformContainerImpl(
     // Removing the network boundary before its members are gone is an
     // error on Docker's side, so the finally chain must be strict.
     if (sidecarHandle) {
+      // The sidecar normally outlives the agent. Stop it explicitly before
+      // removal so orchestrators can distinguish this intentional teardown
+      // from a real sidecar crash. Docker removal otherwise force-kills the
+      // still-running process with 137 and the exit watcher reports a false
+      // failure.
+      await orch.stopWorkload(sidecarHandle).catch((err) => {
+        logger.warn("Failed to stop sidecar before removal", {
+          runId,
+          error: getErrorMessage(err),
+        });
+      });
       await orch.removeWorkload(sidecarHandle).catch((err) => {
         logger.error("Failed to remove sidecar", {
           runId,
