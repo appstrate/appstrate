@@ -752,6 +752,7 @@ export async function getRunAttribution(
   packageId: string | null;
   status: RunStatus;
   runOrigin: "platform" | "remote";
+  modelSource: string | null;
   applicationId: string;
   userId: string | null;
   endUserId: string | null;
@@ -763,6 +764,7 @@ export async function getRunAttribution(
       packageId: runs.packageId,
       status: runs.status,
       runOrigin: runs.runOrigin,
+      modelSource: runs.modelSource,
       applicationId: runs.applicationId,
       userId: runs.userId,
       endUserId: runs.endUserId,

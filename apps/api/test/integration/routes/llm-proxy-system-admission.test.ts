@@ -186,6 +186,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
       applicationId: h.ctx.defaultAppId,
       status: "running",
       runOrigin: "platform",
+      modelSource: "system",
     });
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances(
@@ -225,6 +226,70 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     expect(res.status).toBe(200);
     expect(upstreamHit).toBe(true);
     expect(calls).toHaveLength(0);
+  });
+
+  it("dispatches beforeUsage for platform runs that were not system-admitted at preflight", async () => {
+    const h = await buildHarness();
+    const byokRun = await seedRun({
+      packageId: "@system/proxy-agent",
+      orgId: h.ctx.orgId,
+      applicationId: h.ctx.defaultAppId,
+      status: "running",
+      runOrigin: "platform",
+      modelSource: "org",
+    });
+    const unresolvedRun = await seedRun({
+      packageId: "@system/proxy-agent",
+      orgId: h.ctx.orgId,
+      applicationId: h.ctx.defaultAppId,
+      status: "running",
+      runOrigin: "platform",
+      modelSource: null,
+    });
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances(
+      [
+        gateModule(
+          { code: "quota_exceeded", message: "Credit quota exceeded", status: 402 },
+          calls,
+        ),
+      ],
+      fakeInitCtx(),
+    );
+
+    let upstreamHits = 0;
+    globalThis.fetch = (async () => {
+      upstreamHits += 1;
+      return new Response("must not be called", { status: 599 });
+    }) as unknown as typeof fetch;
+
+    for (const runId of [byokRun.id, unresolvedRun.id]) {
+      const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+        method: "POST",
+        headers: { ...headers(h, false), "x-run-id": runId },
+        body: JSON.stringify({
+          model: SYSTEM_PRESET,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      expect(res.status).toBe(402);
+    }
+
+    expect(upstreamHits).toBe(0);
+    expect(calls).toEqual([
+      {
+        orgId: h.ctx.orgId,
+        context: "run",
+        packageId: "@system/proxy-agent",
+        runningCount: 3,
+      },
+      {
+        orgId: h.ctx.orgId,
+        context: "run",
+        packageId: "@system/proxy-agent",
+        runningCount: 3,
+      },
+    ]);
   });
 
   it("refuses an unattributed raw system call while leaving BYOK semantics untouched", async () => {

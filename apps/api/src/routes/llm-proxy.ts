@@ -209,6 +209,7 @@ async function handleProxy(
         context: "run",
         packageId: runAttribution.packageId!,
         runOrigin: runAttribution.runOrigin,
+        modelSource: runAttribution.modelSource,
       } as const)
     : c.get("firstPartyLoopback")
       ? ({ context: "chat", sessionId: chatSessionId } as const)
