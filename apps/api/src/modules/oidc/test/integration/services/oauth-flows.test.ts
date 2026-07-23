@@ -89,13 +89,18 @@ function randomVerifier(): string {
   return base64url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
+interface ConsentResponse {
+  headers: { get(name: string): string | null };
+  json(): Promise<unknown>;
+}
+
 /**
  * Extract the authorization code from a consent-endpoint response. The
  * plugin's response shape depends on its version — 302 with a `Location`
  * header, or 200 with a JSON body containing the redirect URL under one
  * of `redirect_uri` / `redirectURI` / `url`.
  */
-async function extractCodeFromConsentResponse(res: Response): Promise<string | null> {
+async function extractCodeFromConsentResponse(res: ConsentResponse): Promise<string | null> {
   const loc = res.headers.get("location");
   if (loc) {
     return new URL(loc, "http://localhost").searchParams.get("code");
@@ -108,6 +113,18 @@ async function extractCodeFromConsentResponse(res: Response): Promise<string | n
   const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
   if (!redirectUri) return null;
   return new URL(redirectUri).searchParams.get("code");
+}
+
+async function extractAuthorizationRedirect(res: ConsentResponse): Promise<URL | null> {
+  const location = res.headers.get("location");
+  if (location) return new URL(location, "http://localhost");
+  const json = (await res.json()) as {
+    redirect_uri?: string;
+    redirectURI?: string;
+    url?: string;
+  };
+  const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
+  return redirectUri ? new URL(redirectUri) : null;
 }
 
 async function registerClient(
@@ -300,15 +317,16 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       headers: {
         cookie: `${cookie}; ${csrfCookieValue}`,
         "Content-Type": "application/x-www-form-urlencoded",
-        // Request JSON back from Better Auth so we can parse the
-        // redirect_uri deterministically.
-        accept: "application/json",
+        accept: "text/html",
         origin: "http://localhost:3000",
       },
       body: consentFormBody.toString(),
       redirect: "manual",
     });
     expect([200, 302]).toContain(consentRes.status);
+
+    const authorizationRedirect = await extractAuthorizationRedirect(consentRes.clone());
+    expect(authorizationRedirect?.searchParams.get("iss")).toBe("http://localhost:3000/api/auth");
 
     const code = await extractCodeFromConsentResponse(consentRes);
     expect(code).toBeTruthy();

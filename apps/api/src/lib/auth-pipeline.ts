@@ -18,6 +18,7 @@
 
 import type { Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
+import { getEnv } from "@appstrate/env";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
@@ -107,7 +108,9 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // https://github.com/appstrate/appstrate/issues/166.
   app.on(["POST", "GET"], "/api/auth/*", async (c) => {
     const req = await maybeTransformDeviceFlowFormBody(c.req.raw);
-    return getAuth().handler(req);
+    const response = await getAuth().handler(req);
+    const issuer = `${getEnv().APP_URL.replace(/\/+$/, "")}/api/auth`;
+    return withAuthorizationResponseIssuer(req, response, issuer);
   });
 
   // Auth middleware: module strategies → Bearer API key → session cookie.
@@ -452,6 +455,51 @@ export async function maybeTransformDeviceFlowFormBody(req: Request): Promise<Re
   // `"unknown"` for every form-encoded device-flow request.
   propagateRequestClientIp(req, replacement);
   return replacement;
+}
+
+/**
+ * RFC 9207: stamp the authorization-server issuer on redirects back to an
+ * OAuth client. Internal redirects to login or consent are left untouched.
+ */
+export function withAuthorizationResponseIssuer(
+  request: Request,
+  response: Response,
+  issuer: string,
+): Response {
+  const requestUrl = new URL(request.url);
+  if (requestUrl.pathname !== "/api/auth/oauth2/authorize") return response;
+  if (response.status < 300 || response.status >= 400) return response;
+
+  const registeredTarget = requestUrl.searchParams.get("redirect_uri");
+  const location = response.headers.get("location");
+  if (!registeredTarget || !location) return response;
+
+  let registeredUrl: URL;
+  let locationUrl: URL;
+  try {
+    registeredUrl = new URL(registeredTarget);
+    locationUrl = new URL(location, request.url);
+  } catch {
+    return response;
+  }
+  if (
+    registeredUrl.origin !== locationUrl.origin ||
+    registeredUrl.pathname !== locationUrl.pathname
+  ) {
+    return response;
+  }
+  for (const [name, value] of registeredUrl.searchParams) {
+    if (!locationUrl.searchParams.getAll(name).includes(value)) return response;
+  }
+
+  locationUrl.searchParams.set("iss", issuer);
+  const headers = new Headers(response.headers);
+  headers.set("location", locationUrl.toString());
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 /** Paths that need auth but not org-context (user-scoped or self-resolving). */

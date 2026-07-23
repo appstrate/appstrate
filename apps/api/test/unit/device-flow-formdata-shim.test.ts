@@ -11,7 +11,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { maybeTransformDeviceFlowFormBody } from "../../src/lib/auth-pipeline.ts";
+import {
+  maybeTransformDeviceFlowFormBody,
+  withAuthorizationResponseIssuer,
+} from "../../src/lib/auth-pipeline.ts";
 
 function formRequest(url: string, body: Record<string, string>): Request {
   return new Request(url, {
@@ -110,5 +113,42 @@ describe("maybeTransformDeviceFlowFormBody", () => {
     });
     const transformed = await maybeTransformDeviceFlowFormBody(original);
     expect(transformed.headers.get("content-type")).toBe("application/json");
+  });
+});
+
+describe("withAuthorizationResponseIssuer", () => {
+  const issuer = "https://app.example.com/api/auth";
+
+  it("adds iss to a redirect back to the registered OAuth client", () => {
+    const request = new Request(
+      "https://app.example.com/api/auth/oauth2/authorize?" +
+        new URLSearchParams({
+          redirect_uri: "http://127.0.0.1:63178/callback",
+          state: "state-1",
+        }),
+    );
+    const response = Response.redirect(
+      "http://127.0.0.1:63178/callback?code=code-1&state=state-1",
+      302,
+    );
+
+    const stamped = withAuthorizationResponseIssuer(request, response, issuer);
+
+    const location = new URL(stamped.headers.get("location")!);
+    expect(location.searchParams.get("iss")).toBe(issuer);
+    expect(location.searchParams.get("code")).toBe("code-1");
+    expect(location.searchParams.get("state")).toBe("state-1");
+  });
+
+  it("does not stamp internal login or consent redirects", () => {
+    const request = new Request(
+      "https://app.example.com/api/auth/oauth2/authorize?" +
+        new URLSearchParams({
+          redirect_uri: "http://127.0.0.1:63178/callback",
+        }),
+    );
+    const response = Response.redirect("https://app.example.com/api/oauth/consent?sig=abc", 302);
+
+    expect(withAuthorizationResponseIssuer(request, response, issuer)).toBe(response);
   });
 });

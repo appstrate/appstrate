@@ -2353,12 +2353,12 @@ export function createOidcRouter() {
   const serveOpenIdConfig = async (c: Context<AppEnv>) => {
     const payload = await getOidcAuthApi().getOpenIdConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
-    return c.json(payload as never);
+    return c.json(withCodexCompatibleIssuerMetadata(payload) as never);
   };
   const serveOAuthServerConfig = async (c: Context<AppEnv>) => {
     const payload = await getOidcAuthApi().getOAuthServerConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
-    return c.json(payload as never);
+    return c.json(withCodexCompatibleIssuerMetadata(payload) as never);
   };
 
   // Origin-root form (RFC 5785 / RFC 8414) — OIDC client libraries that apply no
@@ -2471,12 +2471,38 @@ function prefersHtml(acceptHeader: string | undefined | null): boolean {
   return lower.includes("text/html") || lower.includes("*/*");
 }
 
+function authorizationServerIssuer(): string {
+  return `${getEnv().APP_URL.replace(/\/+$/, "")}/api/auth`;
+}
+
+function withCodexCompatibleIssuerMetadata(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const copy = { ...payload } as Record<string, unknown>;
+  delete copy.authorization_response_iss_parameter_supported;
+  return copy;
+}
+
+function withAuthorizationResponseIssuer(target: string): string {
+  const redirect = new URL(target, getEnv().APP_URL);
+  redirect.searchParams.set("iss", authorizationServerIssuer());
+  return redirect.toString();
+}
+
 async function maybeJsonRedirectToLocation(
   response: Response,
   acceptsHtml: boolean,
 ): Promise<Response> {
   if (!acceptsHtml) return response;
-  if (response.status === 302 || response.status === 303) return response;
+  if (response.status === 302 || response.status === 303) {
+    const target = response.headers.get("location");
+    if (!target) return response;
+    const redirect = new Response(null, { status: response.status });
+    for (const [name, value] of response.headers) {
+      if (name.toLowerCase() !== "location") redirect.headers.append(name, value);
+    }
+    redirect.headers.set("location", withAuthorizationResponseIssuer(target));
+    return redirect;
+  }
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("application/json")) return response;
 
@@ -2491,7 +2517,8 @@ async function maybeJsonRedirectToLocation(
   if (typeof target !== "string") return response;
 
   const redirect = new Response(null, { status: 302 });
-  redirect.headers.set("location", target);
+  const targetWithIssuer = withAuthorizationResponseIssuer(target);
+  redirect.headers.set("location", targetWithIssuer);
   for (const [name, value] of response.headers) {
     if (name.toLowerCase() === "set-cookie") {
       redirect.headers.append("set-cookie", value);
