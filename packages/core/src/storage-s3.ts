@@ -351,6 +351,13 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // private (proxy mode) and a presigned URL against the internal endpoint
       // is not browser-reachable, so return null and let the caller
       // proxy-stream the bytes through the API.
+      //
+      // A presigned URL is only valid until the EARLIER of `expiresIn` and the
+      // expiration of the credentials that signed it. Deployments that
+      // authenticate via temporary credentials (IAM role / STS session) can see
+      // URLs die before their nominal expiry — a 403 on a link we consider
+      // valid. Documented in the self-hosting guide; keep `expiresIn` short so
+      // the window where this matters stays small.
       if (!config.publicEndpoint) return null;
       const expiresIn = opts?.expiresIn ?? 900;
       const cmd = new GetObjectCommand({
