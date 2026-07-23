@@ -11,6 +11,7 @@
 
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -61,8 +62,34 @@ export function DocumentListPanel({
   const { isMember } = usePermissions();
   const download = useDocumentDownload();
   const deleteDoc = useDeleteDocument();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [pendingDelete, setPendingDelete] = useState<DocumentDto | null>(null);
-  const [previewDoc, setPreviewDoc] = useState<DocumentDto | null>(null);
+
+  // Preview is URL-addressable via a `?preview=<doc_id>` param so it can be
+  // deep-linked and shared, and the browser back button closes it. A deep-linked
+  // doc may be outside the currently loaded page, so an empty name is fine — the
+  // preview modal falls back to the fetched DTO's name.
+  const previewId = new URLSearchParams(location.search).get("preview");
+  const previewDoc = previewId
+    ? { id: previewId, name: documents.find((d) => d.id === previewId)?.name ?? "" }
+    : null;
+
+  // Navigate while preserving the URL hash (the run page keeps its active tab in
+  // the hash — react-router's setSearchParams would drop it) and any other
+  // existing search params. Both open and close PUSH a history entry, so the
+  // back button from an open modal lands on the param-less URL and closes it.
+  const setPreviewParam = (id: string | null) => {
+    const params = new URLSearchParams(location.search);
+    if (id) params.set("preview", id);
+    else params.delete("preview");
+    const search = params.toString();
+    navigate({
+      pathname: location.pathname,
+      search: search ? `?${search}` : "",
+      hash: location.hash,
+    });
+  };
 
   const onDelete = isMember ? (doc: DocumentDto) => setPendingDelete(doc) : undefined;
 
@@ -117,7 +144,7 @@ export function DocumentListPanel({
                 doc={doc}
                 onDownload={download}
                 onDelete={onDelete}
-                onPreview={setPreviewDoc}
+                onPreview={(d) => setPreviewParam(d.id)}
                 showRunLink={showRunLink}
                 direction={runId ? (doc.run_id === runId ? "output" : "input") : undefined}
               />
@@ -138,7 +165,11 @@ export function DocumentListPanel({
       />
 
       {previewDoc && (
-        <DocumentPreview doc={previewDoc} open={!!previewDoc} onClose={() => setPreviewDoc(null)} />
+        <DocumentPreview
+          doc={previewDoc}
+          open={!!previewDoc}
+          onClose={() => setPreviewParam(null)}
+        />
       )}
     </>
   );

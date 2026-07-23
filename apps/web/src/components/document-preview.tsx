@@ -250,7 +250,9 @@ export function DocumentPreview({
     <Modal
       open={open}
       onClose={onClose}
-      title={doc.name}
+      // Deep links (e.g. `?preview=<id>`) may target a doc outside the caller's
+      // loaded page, so `doc.name` can be empty — fall back to the fetched DTO's name.
+      title={doc.name || data?.name || ""}
       // DialogContent is a grid with auto rows — pin the body row to the
       // remaining height (minmax(0,1fr)) so the iframe previews stretch to the
       // full modal height instead of their intrinsic size.
