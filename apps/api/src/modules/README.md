@@ -206,10 +206,22 @@ Full design: `docs/architecture/OBSERVABILITY.md`.
 
 ## Hooks and events
 
-- **Hooks** (`callHook`, first-match-wins): `beforeUsage`, `afterRun`, `beforeSignup`. The first module that provides a hook is called, subsequent modules are skipped. `beforeUsage` gates metered LLM usage on a surface — a discriminated union over `run` (agent run) and `chat` (chat turn); `afterRun` returns a metadata patch persisted on the final run record, `beforeSignup` gates signup.
+- **Hooks** (`callHook`, first-match-wins): `beforeUsage`, `afterRun`, `beforeSignup`. The first module that provides a hook is called, subsequent modules are skipped. `beforeUsage` is the admission gate over LLM usage — a discriminated union over `run` (agent run) and `chat` (chat turn), detailed below; `afterRun` returns a metadata patch persisted on the final run record, `beforeSignup` gates signup.
 - **Events** (`emitEvent`, broadcast-to-all): `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`. Handlers run for side effects only; errors in one handler are isolated and do not block others.
 
 Names are defined in `packages/core/src/module.ts` (`ModuleHooks`, `ModuleEvents`). To add a new hook or event, update that file first so both platform and modules see the same contract.
+
+### `beforeUsage` — admission (core 4.1.0+)
+
+The hook is dispatched for **every** run and **every** chat turn, not for a subset the platform pre-selected. Each dispatch carries neutral execution facts, and the module turns them into a decision:
+
+- **`credentialSource`** — whose credential is spent on inference: `"system"` (platform-supplied credential or system model preset), `"org"` (the organization's own BYOK key or OAuth subscription), or — `run` only — `null` when a remote-origin run resolves its model later on its own host (any inference it then routes through the system model proxy is admitted at that seam instead).
+- **`executionPlane`** — whose compute runs the work: `"platform"` (a sandbox the platform operates, or its own chat process — always the case for `chat`) or `"remote"` (caller-supplied host).
+- **`timeoutSeconds`** (`run` only) — the effective post-ceiling upper bound on platform compute occupancy, or `null` at a seam that does not own the run's compute and must therefore contribute nothing for it (NOT "unknown, assume the worst" — that double-counts).
+
+**Deciding that an operation consumes nothing is the module's job**, not the platform's. The platform used to skip the hook whenever the organization brought its own credential; that assumption breaks as soon as platform compute is accounted for, since a BYOK run still occupies a platform-operated sandbox. A module that only cares about platform-supplied inference reproduces the old outcome by returning `null` when `credentialSource !== "system"`.
+
+An operation the organization supplies entirely by itself — `credentialSource !== "system"` **and** `executionPlane !== "platform"`, i.e. a remote BYOK run — should be short-circuited with `null` before the handler reads any of its own state (no DB round-trip, no account lookup): there is nothing for the platform to account for.
 
 ## Auth strategies
 
