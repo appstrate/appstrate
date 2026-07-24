@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, asc, desc, sql } from "drizzle-orm";
+import { eq, asc, desc } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import { applications, documents, uploads, runs, organizations } from "@appstrate/db/schema";
@@ -9,6 +9,7 @@ import { prefixedId } from "../lib/ids.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
+import { decrementOrgDocumentBytes, storageKeyToDeletionJob } from "./documents.ts";
 import {
   RUN_WORKSPACE_BUCKET,
   runWorkspaceBundleKey,
@@ -157,9 +158,8 @@ export async function deleteApplication(orgId: string, applicationId: string) {
 
     const storageJobs: StorageDeletionJobInput[] = [];
     for (const r of [...docRows, ...uploadRows]) {
-      const [bucket, ...rest] = r.storageKey.split("/");
-      if (bucket && rest.length > 0)
-        storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "application_deleted" });
+      const job = storageKeyToDeletionJob(r.storageKey, "application_deleted");
+      if (job) storageJobs.push(job);
     }
     for (const r of runRows) {
       storageJobs.push({
@@ -176,14 +176,7 @@ export async function deleteApplication(orgId: string, applicationId: string) {
     await enqueueStorageDeletion(tx, storageJobs);
 
     const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
-    if (bytes > 0) {
-      await tx
-        .update(organizations)
-        .set({
-          documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${bytes}, 0)`,
-        })
-        .where(eq(organizations.id, orgId));
-    }
+    if (bytes > 0) await decrementOrgDocumentBytes(tx, orgId, bytes);
 
     const deleted = await tx
       .delete(applications)

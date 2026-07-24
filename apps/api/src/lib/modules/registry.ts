@@ -135,7 +135,14 @@ function buildPlatformServices(): PlatformServices {
     resolveChatAttachment,
     // Chat session teardown — detach-or-delete the session's contained documents
     // before the session row is removed (the module has no DB/storage access).
-    cleanupSessionDocuments: (chatSessionId) => detachOrDeleteContainedDocuments({ chatSessionId }),
+    cleanupSessionDocuments: (chatSessionId, tx) =>
+      detachOrDeleteContainedDocuments(
+        { chatSessionId },
+        // `tx` is opaque in the core contract (no Drizzle dep there); it is the
+        // chat module's own open transaction handle, so the teardown runs in the
+        // same tx as the `chat_sessions` delete.
+        tx as Parameters<typeof detachOrDeleteContainedDocuments>[1],
+      ),
     // Per-org document storage limit — a metering/plan module (cloud) writes the
     // org's technical byte ceiling here; the platform enforces it on every write.
     // Billing-neutral: the core stores a byte limit, never a plan/price.
