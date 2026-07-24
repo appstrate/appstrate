@@ -154,9 +154,18 @@ export async function provisionDocuments(deps: ProvisionDeps): Promise<void> {
     return await deps.die(`Failed to fetch documents manifest: HTTP ${manifestRes.status}`);
   }
 
-  const manifest = (await manifestRes.json()) as { documents?: { name?: unknown }[] };
+  // The manifest carries a `name` (human display name) and a `workspace_name`
+  // (the unique single-segment filename to write on disk); the platform
+  // guarantees `workspace_name` is unique per run so two documents never
+  // overwrite each other here (see the platform's run-document-naming.ts).
+  // A pre-upgrade platform serves manifests without `workspace_name` — fall
+  // back to `name` (the old on-disk key) rather than silently provisioning
+  // zero documents.
+  const manifest = (await manifestRes.json()) as {
+    documents?: { workspace_name?: unknown; name?: unknown }[];
+  };
   const names = (manifest.documents ?? [])
-    .map((d) => d.name)
+    .map((d) => d.workspace_name ?? d.name)
     .filter((n): n is string => typeof n === "string" && n.length > 0);
   if (names.length === 0) return;
 

@@ -29,12 +29,22 @@
 import * as storage from "@appstrate/db/storage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
+import { assertUniqueWorkspaceNames } from "./run-document-naming.ts";
 
 const BUCKET = "run-workspace";
 
-/** Manifest entry the agent uses to enumerate + fetch its documents. */
+/**
+ * Manifest entry the agent uses to enumerate + fetch its documents.
+ *
+ * `name` is the human display name; `workspace_name` (snake_case on the wire)
+ * is the unique single-segment filename the agent writes into
+ * `workspace/documents/` and fetches the bytes by. The two are separated so two
+ * documents sharing a display name never overwrite each other on disk — see
+ * run-document-naming.ts.
+ */
 export interface RunDocumentMeta {
   name: string;
+  workspace_name: string;
   size: number;
 }
 
@@ -66,12 +76,16 @@ export function streamRunDocument(
 
 /**
  * Write the documents manifest the agent uses to enumerate + fetch its inputs.
- * Called once, after every document for the run has been streamed in.
+ * Called once, after every document for the run has been streamed in. Asserts
+ * the workspace names are unique before persisting — the manifest doubles as
+ * the container provisioning index, and a duplicate would silently overwrite a
+ * document on disk (400 `duplicate_document_name`).
  */
 export function writeRunDocumentsManifest(
   runId: string,
   documents: RunDocumentMeta[],
 ): Promise<string> {
+  assertUniqueWorkspaceNames(documents.map((d) => d.workspace_name));
   const manifest: RunDocumentsManifest = { documents };
   return storage.uploadFile(
     BUCKET,
@@ -149,7 +163,9 @@ export async function deleteRunWorkspace(runId: string): Promise<void> {
     const keys = [bundleKey(runId)];
     if (manifest) {
       keys.push(manifestKey(runId));
-      for (const d of manifest.documents) keys.push(documentKey(runId, d.name));
+      // Manifests written before `workspace_name` existed key documents on
+      // `name` — fall back so pre-upgrade runs still clean up fully.
+      for (const d of manifest.documents) keys.push(documentKey(runId, d.workspace_name ?? d.name));
     }
     await Promise.all(keys.map((k) => storage.deleteFile(BUCKET, k)));
   } catch (error) {

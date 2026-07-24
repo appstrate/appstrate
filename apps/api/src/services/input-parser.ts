@@ -45,7 +45,6 @@ import {
   isUnsniffableMime,
   sniffedMimeMatchesDeclared,
   normalizeMime,
-  sanitizeFilename,
   type UploadMeta,
 } from "./uploads.ts";
 import { getRun } from "./state/runs.ts";
@@ -66,12 +65,12 @@ import { prefixedId } from "../lib/ids.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
-import { sanitizeStorageKey } from "./file-storage.ts";
 import {
   streamRunDocument,
   writeRunDocumentsManifest,
   deleteRunDocuments,
 } from "./run-workspace-storage.ts";
+import { assignWorkspaceNames } from "./run-document-naming.ts";
 import { getEnv } from "@appstrate/env";
 
 export interface ParsedInput {
@@ -725,20 +724,37 @@ export async function parseRequestInput(
           }
         });
 
-        // The run-workspace document object name. Must match the path the
-        // prompt-builder hands the agent (`./documents/<sanitizeStorageKey(name)>`)
-        // and the manifest entry the agent fetches by. Unnamed inline files
-        // are named after their field (array entries get an index suffix so
-        // sibling documents never collide).
-        const uploadDocNames = resolved.map(({ id }) => sanitizeStorageKey(metas.get(id)!.name));
-        const inlineDocNames = inline.map(({ ref, file }, i) => {
-          if (file.name) return sanitizeStorageKey(sanitizeFilename(file.name));
+        // Separate each document's DISPLAY name (its human name) from its
+        // WORKSPACE name (the unique single-segment filename written into the
+        // run container). Unnamed inline files derive a display name from their
+        // field (array entries get an index suffix). `assignWorkspaceNames`
+        // then deterministically resolves any display-name collision so two
+        // documents never overwrite each other on disk — `report.pdf`,
+        // `report-2.pdf`, … The ordered list [uploads, inline, documents] is
+        // the single source of truth for provisioning, the manifest, and the
+        // prompt path (see run-document-naming.ts).
+        const uploadDisplayNames = resolved.map(({ id }) => metas.get(id)!.name);
+        const inlineDisplayNames = inline.map(({ ref, file }, i) => {
+          if (file.name) return file.name;
           const ext = inlineSniffed[i]?.ext ?? extFromMime(file.mime);
           const suffix = ref.index !== undefined ? `-${ref.index}` : "";
-          return sanitizeStorageKey(`${ref.fieldName}${suffix}.${ext}`);
+          return `${ref.fieldName}${suffix}.${ext}`;
         });
-        const documentDocNames = resolvedDocs.map(({ doc }) => sanitizeStorageKey(doc.name));
-        docNames = [...uploadDocNames, ...inlineDocNames, ...documentDocNames];
+        const documentDisplayNames = resolvedDocs.map(({ doc }) => doc.name);
+        const workspaceNames = assignWorkspaceNames([
+          ...uploadDisplayNames,
+          ...inlineDisplayNames,
+          ...documentDisplayNames,
+        ]);
+        const uploadWorkspaceNames = workspaceNames.slice(0, resolved.length);
+        const inlineWorkspaceNames = workspaceNames.slice(
+          resolved.length,
+          resolved.length + inline.length,
+        );
+        const documentWorkspaceNames = workspaceNames.slice(resolved.length + inline.length);
+        // Storage keys for rollback — the workspace names are the on-disk /
+        // object-store segments (`{runId}/documents/<workspaceName>`).
+        docNames = workspaceNames;
 
         // Stream each upload straight from the uploads bucket into the run
         // workspace — validating size + MIME on the fly — so the platform never
@@ -748,7 +764,7 @@ export async function parseRequestInput(
           resolved,
           DOC_STREAM_CONCURRENCY,
           async ({ ref, id }, i) => {
-            const docName = docNames[i]!;
+            const docName = uploadWorkspaceNames[i]!;
             const declaredSize = metas.get(id)!.size;
             // Sink: sniff the head, count bytes, and pipe everything to the run
             // workspace. `fileTypeStream` re-emits the full stream and exposes
@@ -784,7 +800,13 @@ export async function parseRequestInput(
               await streamRunDocument(runId, docName, detection.pipeThrough(counter));
               return { bytes, sniffedMime: detection.fileType?.mime };
             });
-            return { fieldName: ref.fieldName, name: meta.name, type: meta.mime, size: meta.size };
+            return {
+              fieldName: ref.fieldName,
+              name: meta.name,
+              workspaceName: docName,
+              type: meta.mime,
+              size: meta.size,
+            };
           },
         );
 
@@ -793,11 +815,12 @@ export async function parseRequestInput(
         const inlined: FileReference[] = [];
         for (let i = 0; i < inline.length; i++) {
           const { ref, file } = inline[i]!;
-          const docName = inlineDocNames[i]!;
+          const docName = inlineWorkspaceNames[i]!;
           await streamRunDocument(runId, docName, new Blob([file.bytes]).stream());
           inlined.push({
             fieldName: ref.fieldName,
-            name: docName,
+            name: inlineDisplayNames[i]!,
+            workspaceName: docName,
             type: file.mime,
             size: file.bytes.byteLength,
           });
@@ -810,13 +833,14 @@ export async function parseRequestInput(
         const documentFiles: FileReference[] = [];
         for (let j = 0; j < resolvedDocs.length; j++) {
           const { ref, doc } = resolvedDocs[j]!;
-          const docName = documentDocNames[j]!;
+          const docName = documentWorkspaceNames[j]!;
           const src = await streamDocumentContent(doc.storageKey);
           if (!src) throw notFound(`Document '${doc.id}' content is missing`);
           await streamRunDocument(runId, docName, src);
           documentFiles.push({
             fieldName: ref.fieldName,
-            name: docName,
+            name: doc.name,
+            workspaceName: docName,
             type: doc.mime,
             size: doc.size,
           });
@@ -828,7 +852,7 @@ export async function parseRequestInput(
         // instead of megabytes of base64.
         for (let i = 0; i < inline.length; i++) {
           const { ref, file } = inline[i]!;
-          const marker = strippedDataUri(file.mime, inlineDocNames[i]!);
+          const marker = strippedDataUri(file.mime, inlineWorkspaceNames[i]!);
           if (ref.index === undefined) {
             input[ref.fieldName] = marker;
           } else {
@@ -859,7 +883,7 @@ export async function parseRequestInput(
         const allFiles = [...consumed, ...inlined, ...documentFiles];
         await writeRunDocumentsManifest(
           runId,
-          allFiles.map((d, i) => ({ name: docNames[i]!, size: d.size })),
+          allFiles.map((d) => ({ name: d.name, workspace_name: d.workspaceName, size: d.size })),
         );
 
         uploadedFiles = allFiles;

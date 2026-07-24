@@ -1421,7 +1421,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "List the run's input documents (HMAC)",
       description:
-        "Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{name}`. Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault.",
+        "Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{workspace_name}` and writes it to `workspace/documents/<workspace_name>`. Each entry carries `name` (the document's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two documents never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault. A 400 `duplicate_document_name` means the stored manifest is malformed (two identical workspace names).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
@@ -1442,9 +1442,18 @@ export const runsPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["name", "size"],
+                      required: ["name", "workspace_name", "size"],
                       properties: {
-                        name: { type: "string" },
+                        name: {
+                          type: "string",
+                          description:
+                            "The document's human display name (may repeat across entries).",
+                        },
+                        workspace_name: {
+                          type: "string",
+                          description:
+                            "Unique single path segment the agent writes the document to under `workspace/documents/` and fetches its bytes by.",
+                        },
                         size: { type: "integer" },
                       },
                     },
@@ -1453,6 +1462,10 @@ export const runsPaths = {
               },
             },
           },
+        },
+        "400": {
+          description:
+            "duplicate_document_name — the stored manifest has colliding workspace names",
         },
         "401": { description: "Signature verification failed" },
         "404": { description: "run_not_found | no input documents" },

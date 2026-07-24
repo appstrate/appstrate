@@ -38,6 +38,7 @@ import {
   downloadRunDocumentsManifest,
   downloadRunDocumentStream,
 } from "../services/run-workspace-storage.ts";
+import { assertUniqueWorkspaceNames } from "../services/run-document-naming.ts";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
@@ -294,6 +295,14 @@ export function createRunsEventsRouter() {
     const run = c.get("run")!;
     const manifest = await downloadRunDocumentsManifest(run.id);
     if (!manifest) throw notFound(`no input documents for run ${run.id}`);
+    // Never serve a manifest whose workspace names collide — the container keys
+    // its `workspace/documents/` writes on `workspace_name`, so a duplicate
+    // would silently overwrite one document with another. The platform build
+    // path can't produce one (assignWorkspaceNames dedupes); this guards a
+    // corrupted / hand-built manifest with a typed 400 instead.
+    // (Pre-upgrade manifests key on `name` only — fall back rather than 400
+    // a run that was launched before workspace names existed.)
+    assertUniqueWorkspaceNames(manifest.documents.map((d) => d.workspace_name ?? d.name));
     return c.json(manifest);
   });
 
