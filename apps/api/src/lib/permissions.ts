@@ -100,7 +100,8 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "runs:read",
   "runs:cancel",
   "runs:delete",
-  // Documents (reads are ungated; delete is owner/admin or the doc's creator)
+  // Documents (read mirrors `runs:read`; delete is owner/admin or the doc's creator)
+  "documents:read",
   "documents:delete",
   // MCP servers (AFPS §3.4 — browse/import/delete, no editor)
   "mcp-servers:read",
@@ -167,6 +168,9 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Runs (read + cancel own)
   "runs:read",
   "runs:cancel",
+  // Documents (read only — deleting is owner/admin, or the creator via the
+  // per-document capability check, which needs no grant)
+  "documents:read",
   // Schedules (read only — creating/editing schedules, incl. choosing the
   // execution identity, is an admin/owner operation; #738).
   "schedules:read",
@@ -198,6 +202,9 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "skills:read",
   "mcp-servers:read",
   "runs:read",
+  // Aligned with `runs:read` — a viewer that can read a run can read the
+  // documents that run produced (the container ACL still applies per row).
+  "documents:read",
   "schedules:read",
   "persistence:read",
   "models:read",
@@ -246,7 +253,9 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "runs:read",
   "runs:cancel",
   "runs:delete",
-  // Documents (delete via API key for headless cleanup flows)
+  // Documents (read the gallery / download deliverables; delete via API key
+  // for headless cleanup flows)
+  "documents:read",
   "documents:delete",
   // Schedules
   "schedules:read",

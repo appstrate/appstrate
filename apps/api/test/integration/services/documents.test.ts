@@ -908,6 +908,72 @@ describe("documents service + routes", () => {
     expect(ownDto.preview_url).toContain(`/preview/documents/${upload.id}?t=`);
   });
 
+  it("gates all three read routes on documents:read — a narrowly scoped API key gets 403", async () => {
+    const runId = await seedRunRow(scope);
+    const { row: doc } = await publishStream(scope, runId, "gated.txt", "deliverable bytes");
+    const paths = [
+      "/api/documents",
+      `/api/documents/${doc.id}`,
+      `/api/documents/${doc.id}/content`,
+    ];
+
+    // The narrowest key the platform can mint: `validateScopes` accepts an
+    // empty scope list, so this key is a legitimate, fully authenticated
+    // principal of the org — it just holds no grant. Before `documents:read`
+    // existed it could list and download every agent_output of the app.
+    const unscoped = await seedApiKey({
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      createdBy: ctx.user.id,
+      scopes: [],
+    });
+    const unscopedHeaders = {
+      Authorization: `Bearer ${unscoped.rawKey}`,
+      "X-Application-Id": ctx.defaultAppId,
+    };
+    for (const path of paths) {
+      const res = await app.request(path, { headers: unscopedHeaders });
+      expect(res.status).toBe(403);
+      expect((await res.json()) as { code: string }).toMatchObject({ code: "forbidden" });
+    }
+
+    // A key carrying only `documents:delete` is still refused on reads — the
+    // grant is per action, not per family.
+    const deleteOnly = await seedApiKey({
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      createdBy: ctx.user.id,
+      scopes: ["documents:delete"],
+    });
+    const deleteOnlyRes = await app.request(paths[1]!, {
+      headers: {
+        Authorization: `Bearer ${deleteOnly.rawKey}`,
+        "X-Application-Id": ctx.defaultAppId,
+      },
+    });
+    expect(deleteOnlyRes.status).toBe(403);
+
+    // With the scope, the same principal reads normally.
+    const scoped = await seedApiKey({
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      createdBy: ctx.user.id,
+      scopes: ["documents:read"],
+    });
+    const scopedHeaders = {
+      Authorization: `Bearer ${scoped.rawKey}`,
+      "X-Application-Id": ctx.defaultAppId,
+    };
+    for (const path of paths) {
+      const res = await app.request(path, { headers: scopedHeaders });
+      expect(res.status).toBe(200);
+    }
+    const list = (await (await app.request(paths[0]!, { headers: scopedHeaders })).json()) as {
+      data: { id: string }[];
+    };
+    expect(list.data.map((d) => d.id)).toEqual([doc.id]);
+  });
+
   it("end-user (impersonated via API key) reads own docs, is blocked from others', and deletes own", async () => {
     const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     const euOther = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
@@ -916,6 +982,9 @@ describe("documents service + routes", () => {
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       createdBy: ctx.user.id,
+      // Reads now require the family grant; the DELETE below deliberately does
+      // NOT (it is authorized by the document's creator capability).
+      scopes: ["documents:read"],
     });
     const euHeaders = {
       Authorization: `Bearer ${key.rawKey}`,

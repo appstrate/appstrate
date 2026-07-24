@@ -230,6 +230,55 @@ export function buildPreviewCsp(appOrigin: string): string {
 }
 
 /**
+ * How the preview route must serve an `html` document for THIS request.
+ *
+ *  - `active` — parse and execute as `text/html` (the hardened CSP path).
+ *  - `inert-source` — serve the same bytes relabelled `text/plain`, so the
+ *    browser shows the source instead of running it.
+ */
+export type HtmlPreviewMode = "active" | "inert-source";
+
+/**
+ * Decide whether agent HTML may be served as ACTIVE content for this request.
+ *
+ * The CSP built by {@link buildPreviewCsp} blocks exfiltration (`connect-src`,
+ * `form-action`, `img-src`, `base-uri`) but NOT script execution itself — that
+ * is by design, the page has to render. Whether execution is harmless depends
+ * entirely on WHICH origin the script ends up running in:
+ *
+ *  - **Separate `USERCONTENT_URL` origin** — always safe. The script runs on a
+ *    throwaway registrable domain with its own cookie jar and storage
+ *    partition; it cannot reach the app's session no matter how the response
+ *    is loaded. `active` unconditionally.
+ *  - **Same-origin mode (`USERCONTENT_URL` unset — the OSS default)** — safe
+ *    ONLY inside the SPA's `sandbox="allow-scripts"` iframe, which gives the
+ *    document an opaque origin. `preview_url` is an absolute URL with a 300 s
+ *    token, so it can also be opened TOP-LEVEL (new tab, shared link). There
+ *    the sandbox attribute does not exist: the script runs on `APP_URL` with
+ *    full access to the SPA's `localStorage`/`sessionStorage`, non-HttpOnly
+ *    cookies, and same-origin navigation. That is the hole this closes.
+ *
+ * `Sec-Fetch-Dest` is a browser-set, script-unforgeable header, so it is the
+ * authoritative statement of the loading context. In same-origin mode the
+ * decision is fail-CLOSED: active HTML requires a proven nested-document load
+ * (`iframe`); a top-level navigation (`document`), a bare `fetch` (`empty`),
+ * an `object`/`embed` load, and a MISSING header (non-browser client, or a
+ * browser too old to send it — Safari < 16.4) all degrade to `inert-source`.
+ * Degrading rather than erroring keeps the link useful: the holder of a valid
+ * token may read the source, which it could download anyway — it just cannot
+ * make it execute in the app origin.
+ */
+export function resolveHtmlPreviewMode(input: {
+  /** True when the preview is served from a dedicated `USERCONTENT_URL` origin. */
+  separateOrigin: boolean;
+  /** Raw `Sec-Fetch-Dest` request header, or null when absent. */
+  secFetchDest: string | null;
+}): HtmlPreviewMode {
+  if (input.separateOrigin) return "active";
+  return input.secFetchDest === "iframe" ? "active" : "inert-source";
+}
+
+/**
  * Inject a `<meta http-equiv="Content-Security-Policy">` duplicating the CSP as
  * the FIRST child of `<head>`. A header alone can be bypassed on some
  * relative-URL / `srcdoc` paths; a parse-time meta CSP binds the policy to the

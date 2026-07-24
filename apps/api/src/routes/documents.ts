@@ -3,14 +3,26 @@
 /**
  * Documents API — gallery listing, metadata, content download, delete.
  *
- *   GET    /api/documents             → list (org+app scoped, actor-filtered)
+ *   GET    /api/documents             → list (documents:read, actor-filtered)
  *   GET    /api/documents/:id         → metadata DTO (+ derived `downloadable`)
  *   GET    /api/documents/:id/content → 307 → presigned GET, or proxy-stream
  *   DELETE /api/documents/:id         → delete (documents:delete perm OR creator)
  *
- * Reads carry no `requirePermission` — access is inherited from the document's
- * container (run read-ACL, or chat-session owner) at check time, mirroring the
- * runs read model. The end-user guard is applied inside `getDocumentForActor`.
+ * Authorization is TWO layers, and both are load-bearing:
+ *
+ *   1. `documents:read` (this file) — "may this principal touch the documents
+ *      family at all". Exactly what `runs:read` does for runs. Without it a
+ *      key minted with the narrowest possible scope set (even `scopes: []`,
+ *      which `validateScopes` accepts) could list and download every
+ *      `agent_output` of the application.
+ *   2. The per-document container ACL (`getDocumentForActor` /
+ *      `getDocumentCapabilities`) — "may this ACTOR touch THIS document",
+ *      inherited from the run read-ACL or the chat-session owner. The
+ *      end-user guard lives there.
+ *
+ * DELETE/keep deliberately stay ungated at layer 1: they are authorized by
+ * `capabilities.delete` / `capabilities.keep`, which grant the document's own
+ * creator (an end-user cleaning up its own upload holds no org permission).
  */
 
 import { Hono } from "hono";
@@ -18,6 +30,7 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
@@ -43,6 +56,7 @@ import {
   buildPreviewCsp,
   buildInertPreviewCsp,
   injectMetaCsp,
+  resolveHtmlPreviewMode,
   PREVIEW_MAX_BYTES,
 } from "../services/document-preview.ts";
 
@@ -66,7 +80,7 @@ export function createDocumentsRouter() {
   // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `packageId`
   // and the `startingAfter` pagination param are camelCase; `run_id` /
   // `chat_session_id` are snake_case domain fields.
-  router.get("/documents", rateLimit(120), async (c) => {
+  router.get("/documents", rateLimit(120), requirePermission("documents", "read"), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
 
@@ -90,70 +104,84 @@ export function createDocumentsRouter() {
 
   // GET /api/documents/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.
-  router.get("/documents/:id", rateLimit(120), async (c) => {
-    const scope = getAppScope(c);
-    const actor = getActor(c);
-    const resolved = await getDocumentForActor(
-      scope,
-      actor,
-      c.req.param("id")!,
-      c.get("permissions"),
-    );
-    if (!resolved) throw notFound("Document not found");
-    return c.json(toDocumentDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
-  });
+  router.get(
+    "/documents/:id",
+    rateLimit(120),
+    requirePermission("documents", "read"),
+    async (c) => {
+      const scope = getAppScope(c);
+      const actor = getActor(c);
+      const resolved = await getDocumentForActor(
+        scope,
+        actor,
+        c.req.param("id")!,
+        c.get("permissions"),
+      );
+      if (!resolved) throw notFound("Document not found");
+      return c.json(
+        toDocumentDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }),
+      );
+    },
+  );
 
   // GET /api/documents/:id/content — download the bytes. Gated by the derived
   // `downloadable` flag (a user upload is served only to its creator). 307 to a
   // presigned GET when storage supports it (S3 with a public endpoint), else
   // proxy-stream. Content-Disposition: attachment.
-  router.get("/documents/:id/content", rateLimit(120), async (c) => {
-    const scope = getAppScope(c);
-    const actor = getActor(c);
-    const resolved = await getDocumentForActor(scope, actor, c.req.param("id")!);
-    if (!resolved) throw notFound("Document not found");
-    if (!resolved.capabilities.download) {
-      throw forbidden("This document is not downloadable by the current actor");
-    }
-    const { row } = resolved;
+  router.get(
+    "/documents/:id/content",
+    rateLimit(120),
+    requirePermission("documents", "read"),
+    async (c) => {
+      const scope = getAppScope(c);
+      const actor = getActor(c);
+      const resolved = await getDocumentForActor(scope, actor, c.req.param("id")!);
+      if (!resolved) throw notFound("Document not found");
+      if (!resolved.capabilities.download) {
+        throw forbidden("This document is not downloadable by the current actor");
+      }
+      const { row } = resolved;
 
-    // RFC 9530 representation digest of the stored bytes — exposed only when the
-    // caller has the `metadata` capability (so a private upload's hash is never
-    // disclosed to a non-creator; download already implies metadata for these).
-    const reprDigest = resolved.capabilities.metadata ? reprDigestSha256(row.sha256) : undefined;
+      // RFC 9530 representation digest of the stored bytes — exposed only when
+      // the caller has the `metadata` capability (so a private upload's hash is
+      // never disclosed to a non-creator; download already implies metadata
+      // for these).
+      const reprDigest = resolved.capabilities.metadata ? reprDigestSha256(row.sha256) : undefined;
 
-    const parsed = parseStorageKey(row.storageKey);
-    const presigned = parsed
-      ? await createDownloadUrl(parsed.bucket, parsed.path, {
-          filename: row.name,
-          contentType: row.mime,
-        })
-      : null;
-    if (presigned) {
-      // The presigned GET serves the bytes from the blob store (we can't set
-      // headers on that response), but carry the digest on the 307 so a client
-      // that inspects the redirect still learns the authoritative hash.
-      if (reprDigest) c.header("Repr-Digest", reprDigest);
-      return c.redirect(presigned, 307);
-    }
+      const parsed = parseStorageKey(row.storageKey);
+      const presigned = parsed
+        ? await createDownloadUrl(parsed.bucket, parsed.path, {
+            filename: row.name,
+            contentType: row.mime,
+          })
+        : null;
+      if (presigned) {
+        // The presigned GET serves the bytes from the blob store (we can't set
+        // headers on that response), but carry the digest on the 307 so a
+        // client that inspects the redirect still learns the authoritative hash.
+        if (reprDigest) c.header("Repr-Digest", reprDigest);
+        return c.redirect(presigned, 307);
+      }
 
-    const stream = await streamDocumentContent(row.storageKey);
-    if (!stream) throw notFound("Document content not found");
-    return new Response(stream, {
-      status: 200,
-      headers: {
-        "Content-Type": row.mime,
-        // The MIME is agent/uploader-controlled — forbid content-type sniffing
-        // so a mislabelled body can never be reinterpreted as active content
-        // (S3). Attachment disposition already prevents inline rendering.
-        "X-Content-Type-Options": "nosniff",
-        "Content-Length": String(row.size),
-        "Content-Disposition": attachmentDisposition(row.name),
-        "Cache-Control": "private, no-store",
-        ...(reprDigest ? { "Repr-Digest": reprDigest } : {}),
-      },
-    });
-  });
+      const stream = await streamDocumentContent(row.storageKey);
+      if (!stream) throw notFound("Document content not found");
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "Content-Type": row.mime,
+          // The MIME is agent/uploader-controlled — forbid content-type
+          // sniffing so a mislabelled body can never be reinterpreted as
+          // active content (S3). Attachment disposition already prevents
+          // inline rendering.
+          "X-Content-Type-Options": "nosniff",
+          "Content-Length": String(row.size),
+          "Content-Disposition": attachmentDisposition(row.name),
+          "Cache-Control": "private, no-store",
+          ...(reprDigest ? { "Repr-Digest": reprDigest } : {}),
+        },
+      });
+    },
+  );
 
   // DELETE /api/documents/:id — allowed for a caller with the `documents:delete`
   // permission (owner/admin) OR the document's own creator.
@@ -232,6 +260,11 @@ export function createDocumentsRouter() {
  *  - `html` — untrusted agent-generated ACTIVE content: a strict CSP header + an
  *    injected parse-time `<meta>` CSP (covers the relative-URL / `srcdoc` bypass
  *    a header alone can miss), COOP `same-origin`, the full `Permissions-Policy`.
+ *    Served as ACTIVE html only where execution cannot reach the app session —
+ *    on a dedicated `USERCONTENT_URL` origin, or (same-origin mode) inside the
+ *    SPA's opaque `sandbox="allow-scripts"` iframe. Any other loading context,
+ *    a top-level navigation above all, degrades to inert `text/plain` source.
+ *    See {@link resolveHtmlPreviewMode}.
  *  - `image` / `pdf` / `text` — INERT content streamed byte-for-byte with a
  *    minimal `default-src 'none'` CSP, `inline` disposition and `nosniff`; text
  *    is always relabelled `text/plain` so no markdown→HTML sniff is possible.
@@ -298,23 +331,56 @@ export function createDocumentPreviewRouter() {
     const corp = env.USERCONTENT_URL ? "cross-origin" : "same-origin";
 
     if (kind === "html") {
-      // Active content — the full hardened treatment, UNCHANGED. Buffer-and-
-      // transform: read the whole (capped) body, inject the meta CSP as the
-      // first child of <head>, serve. Simple + correct over regex streaming.
+      // Active content — the full hardened treatment. Buffer-and-transform:
+      // read the whole (capped) body, inject the meta CSP as the first child
+      // of <head>, serve. Simple + correct over regex streaming.
+      //
+      // …but ONLY when this request is a context where executing the script
+      // cannot reach the app's session. In same-origin mode (no
+      // USERCONTENT_URL — the OSS default) that means the SPA's
+      // `sandbox="allow-scripts"` iframe and nothing else; a top-level
+      // navigation to the same absolute `preview_url` would run agent script
+      // on APP_URL itself. See `resolveHtmlPreviewMode`.
       const html = await new Response(stream).text();
+      const mode = resolveHtmlPreviewMode({
+        separateOrigin: Boolean(env.USERCONTENT_URL),
+        secFetchDest: c.req.header("Sec-Fetch-Dest") ?? null,
+      });
+      const commonHeaders = {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "Cache-Control": "private, no-store",
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Resource-Policy": corp,
+        // The representation depends on the request header — say so, even
+        // though `no-store` already forbids caching.
+        Vary: "Sec-Fetch-Dest",
+      };
+
+      if (mode === "inert-source") {
+        // Same bytes, relabelled: `text/plain` + `nosniff` means the browser
+        // renders the markup as source and never parses it as a document, so
+        // nothing executes in the app origin. `default-src 'none'` on top.
+        return new Response(html, {
+          status: 200,
+          headers: {
+            ...commonHeaders,
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Security-Policy": buildInertPreviewCsp(appOrigin),
+            "Content-Disposition": "inline",
+          },
+        });
+      }
+
       const csp = buildPreviewCsp(appOrigin);
       const body = injectMetaCsp(html, csp);
       return new Response(body, {
         status: 200,
         headers: {
+          ...commonHeaders,
           "Content-Type": "text/html; charset=utf-8",
           "Content-Security-Policy": csp,
-          "X-Content-Type-Options": "nosniff",
-          "Referrer-Policy": "no-referrer",
-          "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
-          "Cache-Control": "private, no-store",
-          "Cross-Origin-Opener-Policy": "same-origin",
-          "Cross-Origin-Resource-Policy": corp,
         },
       });
     }

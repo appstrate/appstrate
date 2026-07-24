@@ -3,13 +3,16 @@
 /**
  * Admission gate for platform-paid calls that enter through `/api/llm-proxy`.
  *
- * Platform-origin runs using a system model and chat turns are gated before
- * launch, but a remote run chooses its model later on its own host. The proxy
- * is therefore the first place that can know the remote call resolved to a
- * system preset. This seam applies the module `beforeUsage` hook immediately
- * before the upstream request, using only server-validated context. First-party
- * chat already owns that hook at turn admission; its signed loopback context
- * is validated here without dispatching the hook a second time.
+ * A run only discovers its model at inference time when it executes off-platform,
+ * so the proxy is the first place that can know a call resolved to a system
+ * preset. This seam applies the module `beforeUsage` hook immediately before
+ * the upstream request, using only server-validated context.
+ *
+ * Exactly one billable unit per hook dispatch:
+ *   - run context  → one dispatch per proxy call (the call IS the unit).
+ *   - chat context → zero dispatches; first-party chat already gated the turn
+ *     at admission, and the signed loopback identity validated here proves
+ *     this call is that same turn.
  */
 
 import type { ResolvedModel } from "./org-models.ts";
@@ -18,14 +21,7 @@ import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError } from "../lib/errors.ts";
 
 export type SystemProxyUsageContext =
-  | {
-      context: "run";
-      packageId: string;
-      runOrigin: "platform" | "remote";
-      modelSource: string | null;
-    }
-  | { context: "chat"; sessionId: string | null }
-  | null;
+  { context: "run"; packageId: string } | { context: "chat"; sessionId: string | null } | null;
 
 export async function enforceSystemProxyAdmission(args: {
   orgId: string;
@@ -57,21 +53,30 @@ export async function enforceSystemProxyAdmission(args: {
   // raw proxy call.
   if (args.usageContext.context === "chat") return;
 
-  // A platform-origin run on a SYSTEM model was already admitted once at
-  // preflight (run-preflight-gates.ts). Its per-call proxy usage stays
-  // attributed, but re-dispatching the hook here would gate the same run twice
-  // and duplicate quota reads on every LLM call.
+  // Every run-context call reaching THIS seam is gated, whatever the run's
+  // origin. There is no "already admitted" short-circuit, because the unit the
+  // preflight gate admitted is not the unit being admitted here:
   //
-  // `runOrigin === "platform"` alone is NOT proof of prior admission: BYOK
-  // platform runs (`modelSource === "org"`) and legacy/unresolved rows
-  // (`modelSource === null`) deliberately skipped the system-usage hook. If one
-  // of those run ids is later attached to a raw system-preset proxy request, it
-  // must be admitted here just like a remote run. Otherwise an llm-proxy caller
-  // could use an active BYOK run as a billing context to bypass a quota rejection.
-  const admittedAtPreflight =
-    args.usageContext.runOrigin === "platform" && args.usageContext.modelSource === "system";
-  if (admittedAtPreflight) return;
-
+  //   - `run-preflight-gates.ts` admits a run LAUNCH once, for a
+  //     platform-origin run resolving a system model. That run's inference
+  //     then flows through the sidecar (`MODEL_BASE_URL`), which never touches
+  //     `/api/llm-proxy`.
+  //   - This seam admits ONE raw proxy call, a distinct billable unit that
+  //     mints its own `llm_usage` row (`source='proxy'`). It is never the
+  //     continuation of the launch the preflight gate admitted.
+  //
+  // Skipping the hook for `runOrigin === "platform" && modelSource === "system"`
+  // — as this used to — was therefore not "avoiding a double gate", it was an
+  // open bypass: an org past its quota (so every new run/turn is rejected)
+  // could keep spending indefinitely by stamping `X-Run-Id` of ANY still-alive
+  // platform system run onto its proxy calls. `assertRunAttributable` only
+  // binds an API-key principal to org + application, so any key in the app can
+  // borrow any live run as a billing context.
+  //
+  // The one-gate-per-unit invariant is preserved on the legitimate paths:
+  // chat returns above (its turn was gated by `checkUsageAllowed` before the
+  // loopback token was minted, and that turn IS this one call), and a run
+  // launch is gated exactly once by the preflight gate.
   const params = {
     orgId: args.orgId,
     context: "run" as const,

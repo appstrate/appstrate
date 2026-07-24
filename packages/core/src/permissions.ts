@@ -71,11 +71,14 @@ export interface CoreResources {
   // imported as a `.afps`).
   "mcp-servers": "read" | "write" | "delete";
   runs: "read" | "cancel" | "delete";
-  // Durable document store. Reads are ungated (ACL inherited from the run/chat
-  // container at check time, like runs); only `delete` needs a grant —
-  // owner/admin, plus the document's own creator (enforced in the route
-  // handler, not RBAC).
-  documents: "delete";
+  // Durable document store. `read` gates the family the same way `runs:read`
+  // gates runs — it answers "may this principal touch documents at all",
+  // NOT "may it touch THIS document" (the per-document container ACL, derived
+  // from the run/chat session at check time, stays the fine-grained layer).
+  // Without it a minimally-scoped API key could download every `agent_output`
+  // in the application. `delete` is owner/admin, plus the document's own
+  // creator (enforced in the route handler, not RBAC).
+  documents: "read" | "delete";
   schedules: "read" | "write" | "delete";
   // Unified `package_persistence` (checkpoints + memories) with first-class
   // actor scoping. Supersedes the dropped `memories` resource.

@@ -133,8 +133,57 @@ export const uploadsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { $ref: "#/components/responses/RateLimited" },
+        // Both back-pressure codes below are the ones a client actually
+        // branches on to decide "retry later" vs "give up", so they are named
+        // here rather than folded into the generic Forbidden/RateLimited.
+        "403": {
+          description:
+            'Authorization denied, OR — with `code: "storage_limit_exceeded"` — the ' +
+            "organization's staging budget (`UPLOAD_STAGING_MAX_BYTES_PER_ORG`, summed over " +
+            "unconsumed, unexpired uploads plus the declared `size`) would be exceeded. " +
+            "Retrying is pointless until uploads are consumed or expire, or the quota is raised.",
+          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Storage Limit Exceeded",
+                status: 403,
+                detail: "Organization staging limit (5368709120 bytes) would be exceeded",
+                code: "storage_limit_exceeded",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
+        "429": {
+          description:
+            'Rate limited (`code: "rate_limited"`, 20/min), OR — with ' +
+            '`code: "upload_staging_limit_exceeded"` — the acting principal already holds ' +
+            "`UPLOAD_MAX_ACTIVE_PER_ACTOR` active staged uploads. Back-pressure, not an authz " +
+            "denial: retry after consuming an upload or letting one expire.",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            RateLimit: { $ref: "#/components/headers/RateLimit" },
+            "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Upload Staging Limit Exceeded",
+                status: 429,
+                detail:
+                  "Too many active staged uploads (max 20); consume or let existing uploads " +
+                  "expire before staging more",
+                code: "upload_staging_limit_exceeded",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
       },
     },
   },

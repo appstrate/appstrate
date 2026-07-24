@@ -149,6 +149,12 @@ export function createLlmProxyRouter() {
  *      org + application boundary is their enforcement line.
  *   4. The run is still active. A terminal run id must not become a reusable
  *      billing context for arbitrary post-run system-model calls.
+ *
+ * Because check 3 leaves an API key free to reference any live run of its own
+ * application, this validation alone does NOT bound platform-paid spend — it
+ * bounds cost *attribution*. Admission is enforced separately, per call, by
+ * `enforceSystemProxyAdmission`, which gates every run-context system call
+ * regardless of the referenced run's origin.
  */
 async function assertRunAttributable(
   c: Context<AppEnv>,
@@ -205,12 +211,7 @@ async function handleProxy(
     throw invalidRequest(`run ${runAttribution.id} has no agent package attribution`);
   }
   const usageContext = runAttribution
-    ? ({
-        context: "run",
-        packageId: runAttribution.packageId!,
-        runOrigin: runAttribution.runOrigin,
-        modelSource: runAttribution.modelSource,
-      } as const)
+    ? ({ context: "run", packageId: runAttribution.packageId! } as const)
     : c.get("firstPartyLoopback")
       ? ({ context: "chat", sessionId: chatSessionId } as const)
       : null;

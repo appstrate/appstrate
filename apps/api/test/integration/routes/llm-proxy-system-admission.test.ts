@@ -29,6 +29,8 @@ import {
 } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { enforceSystemProxyAdmission } from "../../../src/services/system-proxy-admission.ts";
+import type { ResolvedModel } from "../../../src/services/org-models.ts";
 
 const app = getTestApp();
 const SYSTEM_PRESET = "system-proxy-test";
@@ -175,10 +177,17 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     ]);
   });
 
-  it("does not re-dispatch beforeUsage for a platform-origin run (already gated at preflight)", async () => {
-    // Same rejecting module as the remote-run 402 test — but the run is
-    // platform-origin, so the proxy admission must NOT gate it a second time:
-    // the call reaches upstream and the hook records zero dispatches.
+  it("refuses the quota bypass that borrows a live platform run's X-Run-Id", async () => {
+    // The bypass: an org past its quota (every new run/turn rejected) stamps
+    // `X-Run-Id` of a still-alive platform-origin, system-model run onto raw
+    // proxy calls. `assertRunAttributable` only binds an API-key principal to
+    // org + application, so ANY key of the app can borrow ANY live run — and
+    // the proxy used to skip admission entirely for that run shape, buying
+    // unbounded platform-paid spend until the borrowed run expired.
+    //
+    // The run LAUNCH the preflight gate admitted and a raw proxy call are two
+    // different billable units (the launch's inference goes through the
+    // sidecar and never reaches this route), so the call gets gated here.
     const h = await buildHarness();
     const platformRun = await seedRun({
       packageId: "@system/proxy-agent",
@@ -202,16 +211,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     let upstreamHit = false;
     globalThis.fetch = (async () => {
       upstreamHit = true;
-      return new Response(
-        JSON.stringify({
-          id: "c1",
-          object: "chat.completion",
-          model: "upstream-system-model",
-          choices: [{ index: 0, message: { role: "assistant", content: "ok" } }],
-          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
+      return new Response("must not be called", { status: 599 });
     }) as unknown as typeof fetch;
 
     const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
@@ -223,12 +223,48 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
       }),
     });
 
-    expect(res.status).toBe(200);
-    expect(upstreamHit).toBe(true);
+    expect(res.status).toBe(402);
+    expect(upstreamHit).toBe(false);
+    // …and gated EXACTLY once for the one call — no double dispatch on the
+    // legitimate path either.
+    expect(calls).toEqual([
+      {
+        orgId: h.ctx.orgId,
+        context: "run",
+        packageId: "@system/proxy-agent",
+        runningCount: 2,
+      },
+    ]);
+  });
+
+  it("leaves the first-party chat turn ungated at the proxy (it was gated at admission)", async () => {
+    // The chat counterpart of the invariant above: one billable unit, one
+    // dispatch. `checkUsageAllowed` already called `beforeUsage` for this turn
+    // before minting the loopback bearer, and the signed loopback identity
+    // validated by the route proves this call IS that turn — so re-dispatching
+    // here would gate the same unit twice.
+    const h = await buildHarness();
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances(
+      [
+        gateModule(
+          { code: "quota_exceeded", message: "Credit quota exceeded", status: 402 },
+          calls,
+        ),
+      ],
+      fakeInitCtx(),
+    );
+
+    await enforceSystemProxyAdmission({
+      orgId: h.ctx.orgId,
+      resolved: { isSystemModel: true } as ResolvedModel,
+      usageContext: { context: "chat", sessionId: "chs_test" },
+    });
+
     expect(calls).toHaveLength(0);
   });
 
-  it("dispatches beforeUsage for platform runs that were not system-admitted at preflight", async () => {
+  it("dispatches beforeUsage for BYOK and model-source-less platform runs too", async () => {
     const h = await buildHarness();
     const byokRun = await seedRun({
       packageId: "@system/proxy-agent",

@@ -23,6 +23,28 @@ export function resetRateLimiters(): void {
   limiters = new Map();
 }
 
+/**
+ * The path component of a limiter key: the matched ROUTE PATTERN, never the
+ * concrete path.
+ *
+ * `c.req.path` is the literal URL, so `/api/documents/{id}/content` used to get
+ * one bucket PER DOCUMENT: 120 requests/min each, every one able to proxy up to
+ * 100 MiB — i.e. 120 × N downloads/min for N ids, which is no limit at all. The
+ * same geometry applied to every `:param` route (previews, per-run reads, …).
+ * Keying on the pattern gives the route ONE bucket per identity, which is what
+ * a "120/min on this endpoint" limit is supposed to mean.
+ *
+ * Fixed paths are unaffected — their pattern IS their path, so existing buckets
+ * keep the exact same key. The `*` fallback covers a limiter mounted as
+ * catch-all middleware (`app.use("*", …)`), where the pattern carries no
+ * information and collapsing every endpoint into one bucket would be wrong: we
+ * fall back to the concrete path there.
+ */
+function limiterPath(c: Context<AppEnv>): string {
+  const pattern = c.req.routePath;
+  return pattern && !pattern.includes("*") ? pattern : c.req.path;
+}
+
 /** Extract retryAfter (seconds) from rate-limiter-flexible rejection. */
 function extractRetryAfter(rej: unknown): number | undefined {
   return rej && typeof rej === "object" && "msBeforeNext" in rej
@@ -122,7 +144,7 @@ export const rateLimit = createRateLimitMiddleware({
     const user = c.get("user");
     const apiKeyId = c.get("apiKeyId");
     const identity = apiKeyId ? `apikey:${apiKeyId}` : user.id;
-    return `${c.req.method}:${c.req.path}:${identity}`;
+    return `${c.req.method}:${limiterPath(c)}:${identity}`;
   },
   emitHeaders: true,
 });
@@ -168,7 +190,7 @@ export const rateLimitByBearer = createRateLimitMiddleware({
     const token = auth.startsWith("Bearer ")
       ? (auth.slice(7).split(".")[0] ?? "unknown")
       : "unknown";
-    return `internal:${c.req.path}:${token}`;
+    return `internal:${limiterPath(c)}:${token}`;
   },
   emitHeaders: false,
 });
@@ -176,7 +198,7 @@ export const rateLimitByBearer = createRateLimitMiddleware({
 /** IP-based rate limiter for public (unauthenticated) routes. */
 export const rateLimitByIp = createRateLimitMiddleware({
   category: "ip",
-  extractKey: (c) => `ip:${c.req.method}:${c.req.path}:${getClientIp(c)}`,
+  extractKey: (c) => `ip:${c.req.method}:${limiterPath(c)}:${getClientIp(c)}`,
   emitHeaders: true,
 });
 
@@ -191,6 +213,86 @@ export const rateLimitByRunId = createRateLimitMiddleware({
   extractKey: (c) => `run-event:${c.req.param("runId") ?? "unknown"}`,
   emitHeaders: false,
 });
+
+/**
+ * Coarse, per-IP budget for REJECTED run-sink authentications, consumed by
+ * `middleware/verify-run-signature.ts` before it trusts anything.
+ *
+ * The run-HMAC routes take their identity from the `:runId` path param, so the
+ * fine-grained `rateLimitByRunId` / `rateLimitRunDocuments` limiters can only
+ * be applied AFTER the signature proves the caller is that run — applying them
+ * first lets anyone who knows a runId burn a legitimate run's ingestion budget
+ * with unsigned garbage. But with nothing in front, every attempt (including a
+ * flood of random runIds) costs one DB round-trip.
+ *
+ * A plain per-request IP limiter cannot fill that slot: run containers and CI
+ * runners sit behind one NAT egress address, so a whole instance's signed,
+ * legitimate event traffic shares a single IP bucket, and any cap tight enough
+ * to matter would throttle production. So this limiter counts only FAILURES:
+ *
+ *   - `assertRunSinkAuthBudget(c)` — 429 once the client has burned its budget,
+ *     evaluated before any DB read.
+ *   - `recordRunSinkAuthFailure(c)` — one point per rejected attempt (unknown
+ *     run, closed sink, bad/replayed signature).
+ *
+ * A caller holding the run secret never consumes a point, so there is no false
+ * positive; a caller without it is capped at 20 failed attempts per second per
+ * IP, which bounds the pre-auth DB work to something the database does not
+ * notice while making runId guessing hopeless. The window is deliberately
+ * SHORT (10 s, not a minute): the cap is a rate, and a short window recovers
+ * fast, so a legitimate burst of terminal-race rejections (a fleet of runners
+ * behind one NAT egress all hitting `run_sink_closed` at once) clears in
+ * seconds instead of locking the address out for a minute.
+ */
+const RUN_SINK_AUTH_FAILURES = 200;
+const RUN_SINK_AUTH_WINDOW_SEC = 10;
+
+async function runSinkAuthLimiter(): Promise<RateLimiterAbstract> {
+  const cacheKey = `run-sink-auth:${RUN_SINK_AUTH_FAILURES}:${RUN_SINK_AUTH_WINDOW_SEC}`;
+  let limiter = limiters.get(cacheKey);
+  if (!limiter) {
+    limiter = await createLimiter(
+      RUN_SINK_AUTH_FAILURES,
+      RUN_SINK_AUTH_WINDOW_SEC,
+      `rl:run-sink-auth:w${RUN_SINK_AUTH_WINDOW_SEC}:`,
+    );
+    limiters.set(cacheKey, limiter);
+  }
+  return limiter;
+}
+
+/** Key: the client IP alone — the route pattern is irrelevant, the budget is the client's. */
+function runSinkAuthKey(c: Context<AppEnv>): string {
+  return `run-sink-auth:${getClientIp(c)}`;
+}
+
+/** Throw 429 when this client has exhausted its failed-authentication budget. */
+export async function assertRunSinkAuthBudget(c: Context<AppEnv>): Promise<void> {
+  const limiter = await runSinkAuthLimiter();
+  const res = await limiter.get(runSinkAuthKey(c));
+  if (res && res.remainingPoints <= 0) {
+    throwRateLimited(
+      RUN_SINK_AUTH_FAILURES,
+      RUN_SINK_AUTH_WINDOW_SEC,
+      Math.ceil(res.msBeforeNext / 1000),
+    );
+  }
+}
+
+/**
+ * Charge one failed run-sink authentication to this client. Never throws —
+ * the caller is already on its way to rejecting the request with the real
+ * error, which must not be masked by a limiter fault.
+ */
+export async function recordRunSinkAuthFailure(c: Context<AppEnv>): Promise<void> {
+  try {
+    const limiter = await runSinkAuthLimiter();
+    await limiter.penalty(runSinkAuthKey(c), 1);
+  } catch {
+    // Best-effort accounting: a limiter/Redis fault must not convert an
+    // authentication rejection into a 500.
+  }
+}
 
 /**
  * Per-run rate limiter for document uploads (`POST /api/runs/:runId/documents`),

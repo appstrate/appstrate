@@ -679,24 +679,64 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.artifacts).toBeNull();
   });
 
-  it("rejects a malformed artifacts summary with a 400 (Zod)", async () => {
+  it("never fails finalize on a MALFORMED artifacts summary — 200, field degrades to null", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
+    // `artifacts` is a SOFT partial-deliverables signal: finalize reports the
+    // outcome of an already-finished run, so a cosmetic field must never turn
+    // a successful run's finalize into a hard 400 the container cannot recover
+    // from — the run would then sit `running` until the watchdog synthesised a
+    // timeout, i.e. a successful run reported as failed. Anything invalid
+    // degrades to `undefined` (column null) instead.
     const res = await postFinalize(runId, {
       memories: [],
       output: { ok: true },
       logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
-      // `status` outside the enum + `published` a string → strict schema rejects.
+      // `status` outside the enum + `published` a string.
       artifacts: { status: "mostly", published: "two", failed: [] },
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
 
-    // The run was NOT closed by the rejected POST.
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.sinkClosedAt).toBeNull();
+    // The run finalized normally: terminal status, sink closed, output kept.
+    expect(row?.status).toBe("success");
+    expect(row?.sinkClosedAt).not.toBeNull();
+    expect((row?.result as { output?: unknown } | null)?.output).toEqual({ ok: true });
+    // Only the cosmetic field was dropped.
     expect(row?.artifacts).toBeNull();
+  });
+
+  it("STRIPS unknown artifacts keys instead of rejecting them (deployments are not atomic)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // A runtime image newer than the platform can legitimately add a field to
+    // the summary — or to a `failed` entry. An extra cosmetic key must not
+    // cost the run its finalize, so unknown keys are stripped and everything
+    // the platform DOES understand is persisted.
+    const res = await postFinalize(runId, {
+      memories: [],
+      output: { ok: true },
+      logs: [],
+      status: "success",
+      usage: { input_tokens: 10, output_tokens: 5 },
+      artifacts: {
+        status: "partial",
+        published: 1,
+        failed: [{ name: "outputs/big.csv", code: "file_too_large", detail: "from a newer image" }],
+        skipped: 7,
+      },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.artifacts).toEqual({
+      status: "partial",
+      published: 1,
+      failed: [{ name: "outputs/big.csv", code: "file_too_large" }],
+    });
   });
 
   it("tolerates an OVERSIZED artifacts summary — finalize 200, persisted truncated", async () => {

@@ -106,16 +106,6 @@ const documentSchema = {
         "active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` " +
         "(plaintext). Present on every row.",
     },
-    preview_url: {
-      type: ["string", "null"],
-      format: "uri",
-      description:
-        "Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the " +
-        "query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list " +
-        "rows (which carry `previewable` instead). Non-null only for a previewable document. " +
-        'Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the ' +
-        "instance configures a separate preview domain, else same-origin.",
-    },
     expiresAt: {
       type: ["string", "null"],
       format: "date-time",
@@ -125,6 +115,52 @@ const documentSchema = {
   },
 } as const;
 
+/**
+ * The document as served by the SINGLE-document GET — the only handler that
+ * passes `mintPreview`, and therefore the only response that can carry a
+ * `preview_url`. List rows and the `keep` response use `documentSchema` above
+ * (no `preview_url` property at all), matching `toDocumentDto` exactly.
+ */
+const documentWithPreviewSchema = {
+  type: "object",
+  required: documentSchema.required,
+  properties: {
+    ...documentSchema.properties,
+    preview_url: {
+      type: ["string", "null"],
+      format: "uri",
+      description:
+        "Absolute URL of a hardened, cookie-less preview (short-lived signed token in the " +
+        "query). Minted ONLY on this single-document GET — the list rows and the `keep` " +
+        "response carry `previewable` instead. Non-null only for a previewable document. " +
+        'Load in a `sandbox="allow-scripts"` iframe: for an `html` document served ' +
+        "same-origin (no `USERCONTENT_URL`) that iframe is the ONLY context in which the " +
+        "markup is served as active HTML — a top-level navigation to the same URL is served " +
+        "as inert `text/plain` source so agent script can never run on the app origin. " +
+        "On the `USERCONTENT_URL` origin when the instance configures a separate preview " +
+        "domain, else same-origin.",
+    },
+  },
+} as const;
+
+/**
+ * Errors every `/api/documents` operation can answer with before its handler
+ * ever runs — all three come from the shared pipeline, not from the handler,
+ * and were previously undocumented:
+ *
+ *  - `400` — `requireAppContext()` with no resolvable `X-Application-Id`.
+ *  - `403` — the RBAC guard without `documents:read`, or `requireAppContext()`
+ *    when the header contradicts the application the credential is pinned to.
+ *  - `404` — `requireAppContext()` when the application id is not in the
+ *    caller's organization (same status the handlers use for an unreadable
+ *    document, deliberately indistinguishable).
+ */
+const pipelineResponses = {
+  "400": { $ref: "#/components/responses/ValidationError" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+  "404": { $ref: "#/components/responses/NotFound" },
+} as const;
+
 export const documentsPaths = {
   "/api/documents": {
     get: {
@@ -132,10 +168,11 @@ export const documentsPaths = {
       tags: ["Documents"],
       summary: "List documents",
       description:
-        "List the documents visible to the caller in the current application. Members see their " +
-        "own documents (and system-owned ones); end-users see only their own. Filter by " +
-        "`purpose`, `run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` " +
-        "+ `limit`. Access is inherited from each document's container (no per-file grants).",
+        "List the documents visible to the caller in the current application. Requires the " +
+        "`documents:read` permission (the family gate — mirrors `runs:read`); on top of it, " +
+        "each row is filtered by its own container ACL, so members see their own documents " +
+        "(and system-owned ones) and end-users see only their own. Filter by `purpose`, " +
+        "`run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -205,7 +242,7 @@ export const documentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        ...pipelineResponses,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -216,8 +253,10 @@ export const documentsPaths = {
       tags: ["Documents"],
       summary: "Get document metadata",
       description:
-        "Fetch a document's metadata, including the derived `downloadable` flag. Access is " +
-        "inherited from the document's container; an id the caller cannot read returns 404.",
+        "Fetch a document's metadata, including the derived `downloadable` flag and — for a " +
+        "previewable document — a freshly minted `preview_url`. Requires the `documents:read` " +
+        "permission; on top of it access is inherited from the document's container, so an id " +
+        "the caller cannot read returns 404.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -230,10 +269,10 @@ export const documentsPaths = {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
-          content: { "application/json": { schema: documentSchema } },
+          content: { "application/json": { schema: documentWithPreviewSchema } },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        ...pipelineResponses,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -256,8 +295,7 @@ export const documentsPaths = {
           headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        ...pipelineResponses,
         "409": {
           description: "Document is still referenced by one or more consumer runs.",
           content: {
@@ -296,7 +334,9 @@ export const documentsPaths = {
       ],
       responses: {
         "200": {
-          description: "The document, with `expiresAt` now null.",
+          description:
+            "The document, with `expiresAt` now null. No `preview_url` is minted on this " +
+            "response — re-read `GET /api/documents/{id}` for a fresh one.",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -304,8 +344,7 @@ export const documentsPaths = {
           content: { "application/json": { schema: documentSchema } },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        ...pipelineResponses,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -316,10 +355,11 @@ export const documentsPaths = {
       tags: ["Documents"],
       summary: "Download document content",
       description:
-        "Download the document bytes with `Content-Disposition: attachment`. When object storage " +
-        "supports it (S3 with a public endpoint), responds `307` with a short-lived presigned " +
-        "`Location`; otherwise proxy-streams the bytes (`200`). Gated by the `downloadable` " +
-        "flag — a user upload is served only to its creator (403 otherwise).",
+        "Download the document bytes with `Content-Disposition: attachment`. Requires the " +
+        "`documents:read` permission. When object storage supports it (S3 with a public " +
+        "endpoint), responds `307` with a short-lived presigned `Location`; otherwise " +
+        "proxy-streams the bytes (`200`). Also gated by the per-document `downloadable` flag " +
+        "— a user upload is served only to its creator (403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -327,11 +367,21 @@ export const documentsPaths = {
       ],
       responses: {
         "200": {
-          description: "The document bytes (proxy-stream mode).",
+          description:
+            "The document bytes (proxy-stream mode). `Content-Type` is the document's own " +
+            "stored MIME (never rewritten), served with `X-Content-Type-Options: nosniff` and " +
+            "an `attachment` disposition — hence the `*/*` media type here rather than a fixed " +
+            "`application/octet-stream`.",
           headers: {
             "Content-Disposition": {
               schema: { type: "string" },
               description: "attachment; filename=…",
+            },
+            "X-Content-Type-Options": {
+              schema: { type: "string", enum: ["nosniff"] },
+              description:
+                "Always `nosniff` — the stored MIME is uploader-controlled, so the browser " +
+                "must never re-interpret the body as active content.",
             },
             "Repr-Digest": {
               schema: { type: "string" },
@@ -341,7 +391,7 @@ export const documentsPaths = {
             },
           },
           content: {
-            "application/octet-stream": { schema: { type: "string", format: "binary" } },
+            "*/*": { schema: { type: "string", format: "binary" } },
           },
         },
         "307": {
@@ -357,8 +407,7 @@ export const documentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        ...pipelineResponses,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

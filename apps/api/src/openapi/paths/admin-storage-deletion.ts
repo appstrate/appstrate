@@ -43,10 +43,14 @@ export const adminStorageDeletionPaths = {
       tags: ["Admin"],
       summary: "List storage-deletion outbox jobs",
       description:
-        "Platform-admin only (`AUTH_PLATFORM_ADMIN_EMAILS`). Lists jobs from the transactional " +
-        "storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = " +
-        "pending jobs past the dead-letter attempt threshold (still retrying — the threshold is " +
-        "a visibility line, not an abandon point).",
+        "Platform-operator surface. Requires an authentic first-party dashboard SESSION whose " +
+        "realm is `platform` AND whose email is in `AUTH_PLATFORM_ADMIN_EMAILS`; API keys and " +
+        "OIDC-issued bearer tokens are refused outright, whatever their scopes. Lists jobs from " +
+        "the transactional storage-deletion outbox, newest-first, keyset-paginated on " +
+        "`(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold " +
+        "(still retrying — the threshold is a visibility line, not an abandon point). The " +
+        "listing is instance-global: rows carry the bucket + in-bucket key of objects belonging " +
+        "to ANY organization. Rate-limited to 60/min.",
       parameters: [
         {
           name: "status",
@@ -88,6 +92,7 @@ export const adminStorageDeletionPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
@@ -97,8 +102,10 @@ export const adminStorageDeletionPaths = {
       tags: ["Admin"],
       summary: "Retry a storage-deletion job now",
       description:
-        "Platform-admin only. Resets a pending job's `next_attempt_at` to now so the next worker " +
-        "pass retries it immediately. No-op (404) on a completed or unknown job.",
+        "Same platform-operator session gate as the listing above (session + `platform` realm + " +
+        "allowlisted email). Resets a pending job's `next_attempt_at` to now so the next worker " +
+        "pass retries it immediately. No-op (404) on a completed or unknown job. " +
+        "Rate-limited to 30/min.",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       responses: {
         "200": {
@@ -120,6 +127,7 @@ export const adminStorageDeletionPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },

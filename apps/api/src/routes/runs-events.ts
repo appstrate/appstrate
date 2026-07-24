@@ -248,7 +248,26 @@ export function createRunsEventsRouter() {
   // — or get starved by — the high-rate event-ingestion budget above.
   const documentLimiter = rateLimitRunDocuments(30, 6);
 
-  router.post("/runs/:runId/events", eventLimiter, verifyRunSignature, async (c) => {
+  // MIDDLEWARE ORDER — the signature guard runs FIRST on every route below,
+  // the per-run limiter second. Both limiters key on the `:runId` from the
+  // URL, so a limiter placed first would let anyone who merely knows a runId
+  // burn a legitimate run's ingestion budget with unsigned garbage — a remote
+  // DoS on that run's event stream and finalize sweep. Verifying first means
+  // only the authentic run can spend its own budget.
+  //
+  // What bounds the work done BEFORE authentication (one `getRunSinkContext`
+  // DB read per attempt, including a flood of random runIds) is not these
+  // limiters but the coarse per-IP FAILURE budget inside the guard itself
+  // (`assertRunSinkAuthBudget` / `recordRunSinkAuthFailure`,
+  // `middleware/rate-limit.ts`): it charges only REJECTED attempts, so signed
+  // traffic from a fleet of runners behind one NAT egress address is never
+  // throttled while an unauthenticated flood is capped.
+  //
+  // No handler depends on the limiter having run: both limiters are
+  // `emitHeaders: false` (no response header the handler reads) and their only
+  // effect is consuming a point or throwing 429.
+
+  router.post("/runs/:runId/events", verifyRunSignature, eventLimiter, async (c) => {
     // verifyRunSignature populated these. The runtime assertion is a
     // belt-and-suspenders against refactoring mistakes (types say
     // optional because AppEnv.Variables is a union with auth-less HMAC
@@ -274,7 +293,7 @@ export function createRunsEventsRouter() {
     });
   });
 
-  router.post("/runs/:runId/events/finalize", eventLimiter, verifyRunSignature, async (c) => {
+  router.post("/runs/:runId/events/finalize", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
 
     const parsed = RunResultSchema.safeParse(await c.req.json());
@@ -318,7 +337,7 @@ export function createRunsEventsRouter() {
   // open-sink row. No sequence advance, no log row, no ordering
   // semantics. The watchdog reads `last_heartbeat_at` exclusively,
   // so this endpoint is the minimum-viable liveness beacon.
-  router.post("/runs/:runId/events/heartbeat", eventLimiter, verifyRunSignature, async (c) => {
+  router.post("/runs/:runId/events/heartbeat", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     // Short-circuit if the sink is already closing — the runner's next
     // event will observe 410 anyway, no need to race.
@@ -344,7 +363,7 @@ export function createRunsEventsRouter() {
   // no bundle was provisioned, which the runtime treats as a fatal
   // provisioning fault (never a legitimately-empty workspace — the platform
   // always uploads the agent package).
-  router.get("/runs/:runId/workspace", eventLimiter, verifyRunSignature, async (c) => {
+  router.get("/runs/:runId/workspace", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const archive = await downloadRunWorkspace(run.id);
     if (!archive) throw notFound(`no workspace provisioned for run ${run.id}`);
@@ -363,7 +382,7 @@ export function createRunsEventsRouter() {
   // enumerates this, then fetches each document by name. A 404 means the run
   // carries no input documents (the common case), which the runtime treats as
   // an empty document set — not a fault.
-  router.get("/runs/:runId/documents", eventLimiter, verifyRunSignature, async (c) => {
+  router.get("/runs/:runId/documents", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const manifest = await downloadRunDocumentsManifest(run.id);
     if (!manifest) throw notFound(`no input documents for run ${run.id}`);
@@ -392,11 +411,9 @@ export function createRunsEventsRouter() {
   // enforced transactionally (403). Idempotent for the sweep's retries: an
   // identical (run, sha256, name) upload returns the existing document (200).
   //
-  // Middleware order — HMAC verification runs BEFORE the rate limiter. The
-  // limiter keys on the runId from the URL, so if it ran first an UNauthenticated
-  // attacker who merely knows a runId could spend a legitimate run's document
-  // budget with garbage requests (a DoS on the run's finalize sweep). Verifying
-  // the run signature first means only the authentic run can consume its budget.
+  // Signature before limiter — see the MIDDLEWARE ORDER note at the top of
+  // this router. Here the budget being protected is the run's finalize
+  // `outputs/` sweep.
   router.post("/runs/:runId/documents", verifyRunUploadSignature, documentLimiter, async (c) => {
     const run = c.get("run")!;
 
@@ -481,7 +498,7 @@ export function createRunsEventsRouter() {
   // straight from storage so neither the platform nor the agent buffers the
   // whole payload. The agent streams the response body to `documents/<name>`.
   // A 404 on a document the manifest listed is a fatal provisioning fault.
-  router.get("/runs/:runId/documents/:name", eventLimiter, verifyRunSignature, async (c) => {
+  router.get("/runs/:runId/documents/:name", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const name = c.req.param("name");
     const stream = await downloadRunDocumentStream(run.id, name);
