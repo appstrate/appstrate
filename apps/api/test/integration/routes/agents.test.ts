@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedApplication } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedRun,
+  seedApplication,
+  seedOrgModel,
+  seedOrgModelProviderKey,
+} from "../../helpers/seed.ts";
+import {
+  getSystemModels,
+  initSystemModelProviderKeys,
+} from "../../../src/services/model-registry.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
@@ -760,33 +770,101 @@ describe("Agents API", () => {
   });
 
   describe("PUT /api/agents/:scope/:name/model", () => {
-    it("returns the bare model-setting resource (same shape as GET)", async () => {
+    const SYSTEM_PRESET = "system-agent-model-test";
+
+    beforeAll(() => {
+      initSystemModelProviderKeys([
+        {
+          id: "system-agent-model-key",
+          providerId: "test-apikey",
+          baseUrlOverride: "https://api.openai.test/v1",
+          apiKey: "sk-system-test",
+          models: [{ id: SYSTEM_PRESET, modelId: "upstream-system-model" }],
+        },
+      ]);
+      expect(getSystemModels().has(SYSTEM_PRESET)).toBe(true);
+    });
+
+    afterAll(() => {
+      // Restore the env-derived (empty) baseline for the rest of the run.
+      initSystemModelProviderKeys();
+    });
+
+    async function seedModelAgent() {
       await seedInstalledAgent({
         id: "@myorg/model-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         applicationId: ctx.defaultAppId,
       });
+    }
 
-      const res = await app.request("/api/agents/@myorg/model-agent/model", {
+    function putModel(modelId: string | null, headers = authHeaders(ctx)) {
+      return app.request("/api/agents/@myorg/model-agent/model", {
         method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: "model-123" }),
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId }),
       });
+    }
+
+    it("returns the bare model-setting resource (same shape as GET)", async () => {
+      await seedModelAgent();
+      const key = await seedOrgModelProviderKey({ orgId: ctx.orgId });
+      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: key.id });
+
+      const res = await putModel(model.id);
       expect(res.status).toBe(200);
       const body = (await res.json()) as { modelId: string | null } & Record<string, unknown>;
       // Bare model-setting resource — no `success` scrap (#657).
-      expect(body.modelId).toBe("model-123");
+      expect(body.modelId).toBe(model.id);
       expect("success" in body).toBe(false);
 
       // Reverting to org default returns the null resource, not a stub.
-      const revert = await app.request("/api/agents/@myorg/model-agent/model", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: null }),
-      });
+      const revert = await putModel(null);
+      expect(revert.status).toBe(200);
       const revertBody = (await revert.json()) as { modelId: string | null };
       expect(revertBody.modelId).toBeNull();
+    });
+
+    it("accepts a system model preset id", async () => {
+      await seedModelAgent();
+
+      const res = await putModel(SYSTEM_PRESET);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { modelId: string | null };
+      expect(body.modelId).toBe(SYSTEM_PRESET);
+    });
+
+    it("rejects an unknown model id with 404 and does not persist it (#960)", async () => {
+      await seedModelAgent();
+
+      const res = await putModel("raw-upstream-model-name");
+      expect(res.status).toBe(404);
+
+      const get = await app.request("/api/agents/@myorg/model-agent/model", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await get.json()) as { modelId: string | null };
+      expect(body.modelId).toBeNull();
+    });
+
+    it("rejects a model UUID owned by another org (#960)", async () => {
+      await seedModelAgent();
+      const otherCtx = await createTestContext({ orgSlug: "otherorg" });
+      const otherKey = await seedOrgModelProviderKey({ orgId: otherCtx.orgId });
+      const otherModel = await seedOrgModel({
+        orgId: otherCtx.orgId,
+        credentialId: otherKey.id,
+      });
+
+      const res = await putModel(otherModel.id);
+      expect(res.status).toBe(404);
+
+      const get = await app.request("/api/agents/@myorg/model-agent/model", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await get.json()) as { modelId: string | null };
+      expect(body.modelId).toBeNull();
     });
   });
 });

@@ -35,6 +35,7 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
+import { assertExplicitModelExists } from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
@@ -223,6 +224,12 @@ export function createAgentsRouter() {
       const agent = c.get("package");
       const scope = getAppScope(c);
       const data = await readJsonBody(c, modelIdSchema);
+
+      // Reject unknown or cross-org model ids up front (#960) — same contract
+      // as explicit run/schedule overrides. `null` stays valid to clear the
+      // override; the resolveModel() fallback remains only for references
+      // that go stale after being written.
+      await assertExplicitModelExists(scope.orgId, data.modelId);
 
       await updateInstalledPackage(scope, agent.id, { modelId: data.modelId });
 

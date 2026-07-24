@@ -524,7 +524,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Set agent model override",
       description:
-        "Set a model override for this agent. Pass a model ID or null to revert to org default.",
+        "Set a model override for this agent. Pass a model ID or null to revert to org default. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
