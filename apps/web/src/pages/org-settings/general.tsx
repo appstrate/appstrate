@@ -15,7 +15,7 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useOrgStorage } from "../../hooks/use-org-storage";
-import { getUsageBarColor, USAGE_CRITICAL } from "../../lib/usage-severity";
+import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
@@ -38,7 +38,9 @@ export function OrgSettingsGeneralPage() {
   // Single source of truth for the storage gauge (shared with billing +
   // documents). `limitBytes` null = unlimited (per-org override ?? global quota).
   const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
-  const storageNearLimit = storagePercent !== null && storagePercent >= USAGE_CRITICAL;
+  // The heads-up banner fires at the shared WARN threshold — the same point the
+  // bar turns yellow — so the user is warned well before uploads get rejected.
+  const storageNearLimit = storagePercent !== null && storagePercent >= USAGE_WARN;
 
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
