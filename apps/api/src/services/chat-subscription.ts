@@ -167,11 +167,20 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  * Chat admission gate — the chat-surface entry into the `beforeUsage` hook.
  *
  * The chat module calls this for its non-subscription (built-in / API-key)
- * branch before starting a turn. The gate decides system-provided vs. org-owned
- * SERVER-SIDE (`isSystemModel` on the chosen preset) so the module stays dumb:
- *   - org's own API-key model → never gated (returns null immediately);
- *   - system-provided model → dispatch `beforeUsage` (chat context). A rejection
- *     flows back for the module to surface as an RFC 9457 problem response.
+ * branch before starting a turn. The gate resolves system-provided vs. org-owned
+ * SERVER-SIDE (`isSystemModel` on the chosen preset) so the chat module stays
+ * dumb — it has no model-registry access — but that resolution is REPORTED as
+ * the `credentialSource` fact, not used to pre-filter:
+ *
+ *   - every turn dispatches `beforeUsage` (chat context) with
+ *     `credentialSource` + `executionPlane`; a rejection flows back for the
+ *     module to surface as an RFC 9457 problem response.
+ *   - a turn on the org's own credential reports `credentialSource: "org"`. The
+ *     platform no longer declares it free and skips the hook: a chat turn always
+ *     runs inside the platform's own process, so the platform funds its compute
+ *     even when it funds no inference. A module that meters only
+ *     platform-supplied inference quotes that turn at zero and admits it — same
+ *     outcome as the old early return, but decided by the module.
  *
  * Returns null when no module provides the hook (OSS mode allows everything).
  */
@@ -180,13 +189,18 @@ export async function checkUsageAllowed(args: {
   presetId: string;
   sessionId: string | null;
 }): Promise<UsageRejection | null> {
-  // An org's own model spends the org's own credential — never platform-metered.
-  if (!isSystemModel(args.presetId)) return null;
   if (!hasHook("beforeUsage")) return null;
   const rejection = await callHook("beforeUsage", {
     orgId: args.orgId,
     context: "chat",
     sessionId: args.sessionId,
+    // A chat turn resolves its model on the platform before admission, so the
+    // credential source is always determinable here (never `null`, unlike a
+    // remote-origin run).
+    credentialSource: isSystemModel(args.presetId) ? "system" : "org",
+    // A turn executes in the platform's own process — never on a
+    // caller-supplied host.
+    executionPlane: "platform",
   });
   return rejection ?? null;
 }

@@ -349,11 +349,12 @@ export async function handleChatStream(
 
   // Admission gate — non-subscription (built-in / API-key) turns only. A
   // subscription turn spends the user's OWN credential (`credentialSource`
-  // `org`) and is never gated. The platform decides system-provided vs.
-  // org-owned server-side and dispatches `beforeUsage` (chat context) only for a
-  // system-provided model — an org's own API-key model is never blocked. Gated
-  // BEFORE the phase-B preamble so a rejected turn opens no MCP session and
-  // persists no user message.
+  // `org`) and is never gated. For the turns that do reach it, the platform
+  // resolves system-provided vs. org-owned server-side and dispatches
+  // `beforeUsage` (chat context) with that fact — every turn, not only the
+  // system-provided ones; a metering module quotes it and decides. Gated BEFORE
+  // the phase-B preamble so a rejected turn opens no MCP session and persists no
+  // user message.
   if (!isSubscription) {
     const rejection = await deps.checkUsageAllowed({
       orgId,

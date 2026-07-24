@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedRun } from "../../helpers/seed.ts";
 import { runPreflightGates } from "../../../src/services/run-preflight-gates.ts";
 import { getPlatformRunLimits } from "../../../src/services/run-limits.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
@@ -44,8 +44,16 @@ describe("runPreflightGates", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // No module → no `beforeUsage` hook. These cases assert the non-hook gates,
+    // and the hook now fires for every run, so a module leaked in by an earlier
+    // file would otherwise perturb `beforeUsageHookMs`.
+    resetModules();
     ctx = await createTestContext({ email: "gates@test.dev", orgSlug: "gates" });
     await seedPackage({ orgId: ctx.orgId, id: "@gates/agent", type: "agent" });
+  });
+
+  afterAll(() => {
+    resetModules();
   });
 
   it("returns ok with an untouched agent when the manifest timeout is below the ceiling", async () => {
@@ -53,6 +61,8 @@ describe("runPreflightGates", () => {
     const res = await runPreflightGates({
       orgId: ctx.orgId,
       agent,
+      credentialSource: "system",
+      executionPlane: "platform",
     });
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.agent.manifest.timeout).toBe(60);
@@ -63,6 +73,8 @@ describe("runPreflightGates", () => {
     const res = await runPreflightGates({
       orgId: ctx.orgId,
       agent,
+      credentialSource: "system",
+      executionPlane: "platform",
     });
     expect(res.ok).toBe(true);
     if (res.ok) {
@@ -81,6 +93,8 @@ describe("runPreflightGates", () => {
     const res = await runPreflightGates({
       orgId: ctx.orgId,
       agent,
+      credentialSource: "system",
+      executionPlane: "platform",
     });
     expect(res.ok).toBe(true);
     if (res.ok) {
@@ -93,12 +107,16 @@ describe("runPreflightGates", () => {
 });
 
 /**
- * `beforeUsage` model-source gating (fix: BYOK/OAuth/remote runs must NOT hit
- * the credit-cap gate). The hook fires ONLY for a platform-provided (`"system"`)
- * model — the same rule the chat surface applies. A metering module (cloud)
- * relies on these branches, so a regression that gated an org's own model — or
- * failed to gate a system one — surfaces here rather than as a billing/402
- * incident.
+ * `beforeUsage` execution-fact reporting. The hook fires for EVERY run — the
+ * platform stopped deciding that a non-system model is free and skipping it
+ * (that hard-coded "BYOK ⇒ free", which stops being true the moment platform
+ * compute is billed). It now reports neutral facts — `credentialSource`,
+ * `executionPlane`, and the EFFECTIVE post-ceiling `timeoutSeconds` — and a
+ * metering module (cloud) quotes them.
+ *
+ * These assertions pin the facts a module quotes against: dropping one, or
+ * reporting a pre-ceiling timeout, would silently over- or under-charge rather
+ * than fail loudly.
  */
 function fakeInitCtx(): ModuleInitContext {
   return {
@@ -124,7 +142,7 @@ function gateModule(result: UsageRejection | null, calls: BeforeUsageParams[]): 
   };
 }
 
-describe("runPreflightGates — beforeUsage model-source gating", () => {
+describe("runPreflightGates — beforeUsage execution facts", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -148,7 +166,8 @@ describe("runPreflightGates — beforeUsage model-source gating", () => {
     const res = await runPreflightGates({
       orgId: ctx.orgId,
       agent: loadedPackage("@gates/agent", 60),
-      modelSource: "system",
+      credentialSource: "system",
+      executionPlane: "platform",
     });
 
     expect(res.ok).toBe(false);
@@ -157,58 +176,144 @@ describe("runPreflightGates — beforeUsage model-source gating", () => {
     }
     // Dispatched with the run discriminant (not the chat shape).
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({
+    expect(calls[0]).toEqual({
       orgId: ctx.orgId,
       context: "run",
       packageId: "@gates/agent",
       // No run existed in the DB, but the hook receives the projected count
       // including the run currently being admitted.
       runningCount: 1,
+      credentialSource: "system",
+      executionPlane: "platform",
+      timeoutSeconds: 60,
     });
   });
 
-  it("does NOT dispatch the hook for an org-owned (BYOK) model", async () => {
+  it("dispatches the hook for an org-owned (BYOK) platform run with credentialSource 'org'", async () => {
+    // Reversal of the old topology: a BYOK run is no longer declared free by
+    // the platform. It occupies platform compute, so the module is told the
+    // facts and quotes it (a model-only meter quotes zero and admits).
     const calls: BeforeUsageParams[] = [];
-    await loadModulesFromInstances(
-      // Even a rejecting metering module must not block an org's own credential.
-      [gateModule({ code: "over_cap", message: "blocked", status: 402 }, calls)],
-      fakeInitCtx(),
-    );
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
 
     const res = await runPreflightGates({
       orgId: ctx.orgId,
       agent: loadedPackage("@gates/agent", 60),
-      modelSource: "org",
+      credentialSource: "org",
+      executionPlane: "platform",
     });
 
     expect(res.ok).toBe(true);
-    if (res.ok) expect(res.timings.beforeUsageHookMs).toBe(0);
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      orgId: ctx.orgId,
+      context: "run",
+      packageId: "@gates/agent",
+      runningCount: 1,
+      credentialSource: "org",
+      executionPlane: "platform",
+      timeoutSeconds: 60,
+    });
   });
 
-  it("does NOT dispatch the hook for a remote-origin run (modelSource null)", async () => {
+  it("dispatches the hook for a remote-origin run (credentialSource null, remote plane)", async () => {
     const calls: BeforeUsageParams[] = [];
-    await loadModulesFromInstances(
-      [gateModule({ code: "over_cap", message: "blocked", status: 402 }, calls)],
-      fakeInitCtx(),
-    );
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
 
     const res = await runPreflightGates({
       orgId: ctx.orgId,
       agent: loadedPackage("@gates/agent", 60),
-      modelSource: null,
+      credentialSource: null,
+      executionPlane: "remote",
     });
 
     expect(res.ok).toBe(true);
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(1);
+    // Neither platform credential nor platform compute — the two facts that let
+    // a module short-circuit a fully self-funded run before any billing read.
+    expect(calls[0]).toEqual({
+      orgId: ctx.orgId,
+      context: "run",
+      packageId: "@gates/agent",
+      runningCount: 1,
+      credentialSource: null,
+      executionPlane: "remote",
+      timeoutSeconds: 60,
+    });
+  });
+
+  it("reports the POST-ceiling timeout when the manifest declares more than the platform allows", async () => {
+    // The cap is applied before the hook: quoting compute on the declared value
+    // would charge for time the run can never occupy.
+    const limits = getPlatformRunLimits();
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+
+    const res = await runPreflightGates({
+      orgId: ctx.orgId,
+      agent: loadedPackage("@gates/agent", limits.timeout_ceiling_seconds + 600),
+      credentialSource: "system",
+      executionPlane: "platform",
+    });
+
+    expect(res.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect((calls[0] as { timeoutSeconds: number | null }).timeoutSeconds).toBe(
+      limits.timeout_ceiling_seconds,
+    );
+  });
+
+  it("reports the default timeout when the manifest declares none", async () => {
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+
+    const res = await runPreflightGates({
+      orgId: ctx.orgId,
+      agent: loadedPackage("@gates/agent"),
+      credentialSource: "system",
+      executionPlane: "platform",
+    });
+
+    expect(res.ok).toBe(true);
+    expect((calls[0] as { timeoutSeconds: number | null }).timeoutSeconds).toBe(300);
+  });
+
+  it("reports runningCount as the projected count INCLUDING the run being admitted", async () => {
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+    // Two runs already in flight → the hook must see 3, not the observed 2.
+    await seedRun({
+      packageId: "@gates/agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+    });
+    await seedRun({
+      packageId: "@gates/agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+    });
+
+    const res = await runPreflightGates({
+      orgId: ctx.orgId,
+      agent: loadedPackage("@gates/agent", 60),
+      credentialSource: "system",
+      executionPlane: "platform",
+    });
+
+    expect(res.ok).toBe(true);
+    expect((calls[0] as { runningCount: number }).runningCount).toBe(3);
   });
 
   it("returns ok for a system model when no metering module provides the hook (OSS mode)", async () => {
     const res = await runPreflightGates({
       orgId: ctx.orgId,
       agent: loadedPackage("@gates/agent", 60),
-      modelSource: "system",
+      credentialSource: "system",
+      executionPlane: "platform",
     });
     expect(res.ok).toBe(true);
+    if (res.ok) expect(res.timings.beforeUsageHookMs).toBe(0);
   });
 });

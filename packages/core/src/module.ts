@@ -898,10 +898,112 @@ export interface AuthStrategy {
  * concurrency-aware admission without treating the first run as zero cost);
  * `chat` carries the session id (null for an ephemeral turn with no persisted
  * session).
+ *
+ * Both surfaces additionally report two neutral execution facts —
+ * `credentialSource` (whose credential is spent on inference) and
+ * `executionPlane` (whose compute runs the work) — and a run also reports the
+ * upper bound on how long it may occupy that compute (`timeoutSeconds`).
+ *
+ * These are FACTS, not verdicts. The platform never classifies an operation as
+ * exempt and skips the hook on its behalf: it dispatches on every metered usage
+ * attempt and lets the module apply its own policy to the reported facts. That
+ * separation is what keeps the contract stable — a module that only cares about
+ * platform-supplied inference simply ignores operations where
+ * `credentialSource !== "system"`, while a module that also accounts for
+ * platform compute reads `executionPlane` and `timeoutSeconds`, with no change
+ * to this type and no change to where the hook fires.
  */
 export type BeforeUsageParams =
-  | { orgId: string; context: "run"; packageId: string; runningCount: number }
-  | { orgId: string; context: "chat"; sessionId: string | null };
+  | {
+      orgId: string;
+      context: "run";
+      packageId: string;
+      runningCount: number;
+      /**
+       * Whose credential is spent on the inference this run performs.
+       *
+       * - `"system"` — a platform-supplied credential is used (a
+       *   `SYSTEM_PROVIDER_KEYS` entry, or a system model preset). The
+       *   organization consumes a resource it does not own.
+       * - `"org"` — the organization spends its OWN credential: a BYOK API key
+       *   it configured, or a provider subscription it authorized over OAuth.
+       *   No platform-supplied credential is consumed for inference.
+       * - `null` — not determinable at admission time. A remote-origin run
+       *   resolves its model later, on its own host, so the platform cannot
+       *   know here which credential it will end up using. This is not a
+       *   coverage gap: if such a run later routes inference through the
+       *   platform's system model proxy, that seam dispatches its own
+       *   `beforeUsage` with a `credentialSource` that IS known there.
+       *
+       * Naming note: this matches the `llm_usage.credential_source` ledger
+       * column, which is what a metering module reconciles a run against after
+       * the fact. The `runs.model_source` database column is the same concept
+       * under an older, persisted name — deliberately not renamed.
+       */
+      credentialSource: "system" | "org" | null;
+      /**
+       * Whose compute runs the work.
+       *
+       * - `"platform"` — the run executes on infrastructure the platform
+       *   operates and is responsible for (a sandboxed container or microVM).
+       * - `"remote"` — the caller supplies the host. The platform orchestrates
+       *   and records the run but contributes no compute of its own.
+       *
+       * Reported separately from `credentialSource` because the two are
+       * genuinely independent: an organization can bring its own credential and
+       * still occupy platform compute, or supply its own host while using a
+       * platform-supplied credential. A module that collapses them into a
+       * single signal will mis-admit one of those combinations.
+       */
+      executionPlane: "platform" | "remote";
+      /**
+       * The upper bound on how long this run may occupy platform compute.
+       *
+       * - a number — the run's EFFECTIVE timeout in seconds: the agent's
+       *   declared timeout after the platform ceiling has been applied. It is a
+       *   ceiling, NOT a prediction of the actual duration; most runs finish
+       *   well before it.
+       * - `null` — not determinable at this admission point, and deliberately
+       *   so: the seam admitting the operation is not the seam that owns its
+       *   compute. Concretely, the system-proxy seam admits the inference of an
+       *   ALREADY-RUNNING run; that run's compute was already accounted for
+       *   when the run itself was admitted (platform plane), or is not
+       *   platform-supplied at all (remote plane). A consumer must therefore
+       *   read `null` as "contribute no compute component here", NOT as
+       *   "unknown, assume the worst" — assuming the worst would account for
+       *   the same run's compute twice.
+       *
+       * Present so a module that accounts for compute duration can derive its
+       * estimate from a fact already known at admission time, instead of
+       * needing a later widening of this contract. A module that does not
+       * account for duration can ignore the field entirely.
+       */
+      timeoutSeconds: number | null;
+    }
+  | {
+      orgId: string;
+      context: "chat";
+      sessionId: string | null;
+      /**
+       * Whose credential is spent on the inference for this chat turn.
+       *
+       * - `"system"` — the turn resolves to a platform-supplied model preset.
+       * - `"org"` — the turn resolves to a model the organization configured
+       *   with its own credential.
+       *
+       * Never `null` here: a chat turn resolves its model on the platform,
+       * before admission, so the fact is always determinable — unlike a
+       * remote-origin run, which resolves its model elsewhere.
+       */
+      credentialSource: "system" | "org";
+      /**
+       * Always `"platform"` for chat: a turn runs inside the platform's own
+       * process, never on a caller-supplied host. Present rather than omitted
+       * so a module can read `executionPlane` off either union member without
+       * first narrowing on `context`.
+       */
+      executionPlane: "platform";
+    };
 
 /** Structured rejection returned by `beforeUsage` when a module blocks usage. */
 export interface UsageRejection {
@@ -1225,14 +1327,28 @@ export interface PlatformServices {
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this for its non-subscription (built-in /
-   * API-key) branch before starting a turn; the platform decides whether the
-   * chosen model is system-provided and only then dispatches the hook (an org's
-   * own API-key model is never gated). Returns a {@link UsageRejection} to block
-   * the turn (the module surfaces it as an RFC 9457 problem response with the
-   * hook's status — 402 flows through), or null to allow. Subscription turns
-   * never call this (they spend the user's own credential, `credentialSource`
-   * `org`). Keeping the system-provided decision server-side keeps the chat
-   * module dumb — it has no model-registry access.
+   * API-key) branch before starting a turn, and the platform dispatches the
+   * hook for EVERY such turn. Returns a {@link UsageRejection} to block the
+   * turn (the module surfaces it as an RFC 9457 problem response with the
+   * hook's status — 402 flows through), or null to allow.
+   *
+   * The platform still resolves whether the chosen model is system-provided or
+   * organization-owned — keeping that resolution server-side is what keeps the
+   * chat module dumb, since it has no model-registry access — but it now
+   * REPORTS that resolution as the `credentialSource` fact instead of using it
+   * to pre-filter. A turn on the organization's own credential reports
+   * `credentialSource: "org"` and is dispatched all the same, because a chat
+   * turn always executes in the platform's own process: the platform supplies
+   * the compute even when it supplies no credential. `executionPlane` is
+   * consequently always `"platform"` on this surface.
+   *
+   * A module that only accounts for platform-supplied inference treats such a
+   * turn as contributing nothing and admits it — the same outcome the platform
+   * used to assume on the module's behalf, now decided by the module that owns
+   * the policy.
+   *
+   * Subscription turns never call this (they spend the user's own credential,
+   * `credentialSource` `org`).
    */
   checkUsageAllowed(args: {
     orgId: string;

@@ -206,6 +206,9 @@ describe("module-loader", () => {
         context: "run",
         packageId: "a",
         runningCount: 0,
+        credentialSource: "system",
+        executionPlane: "platform",
+        timeoutSeconds: 300,
       });
       expect(result).toBeUndefined();
     });
@@ -222,6 +225,9 @@ describe("module-loader", () => {
         context: "run",
         packageId: "a",
         runningCount: 0,
+        credentialSource: "system",
+        executionPlane: "platform",
+        timeoutSeconds: 300,
       });
       expect(result).toEqual({ code: "blocked", message: "no" });
       expect(hookA).toHaveBeenCalledTimes(1);

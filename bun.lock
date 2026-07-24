@@ -251,7 +251,7 @@
     },
     "packages/core": {
       "name": "@appstrate/core",
-      "version": "4.0.0",
+      "version": "4.1.0",
       "dependencies": {
         "@afps-spec/schema": "^0.6.1",
         "@appstrate/afps-shared": "^0.3.0",
