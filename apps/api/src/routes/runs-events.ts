@@ -81,6 +81,36 @@ const CloudEventEnvelopeSchema = z
  * Only the load-bearing outcome fields (`status`, `output`, `error`) stay
  * strict — a genuinely broken outcome should still surface loudly.
  */
+/** Ingest bounds for the artifacts summary — mirror runtime-pi/publish.ts. */
+const MAX_ARTIFACTS_FAILED = 1000;
+const MAX_ARTIFACT_NAME_LEN = 512;
+const MAX_ARTIFACT_CODE_LEN = 64;
+
+/**
+ * Clamp an oversized artifacts summary to the ingest bounds BEFORE Zod
+ * validation, so a version-skewed container that emits an over-long `failed`
+ * list (or over-long name/code strings) still finalizes with a TRUNCATED
+ * summary rather than tripping a hard 400. Only SIZE is clamped — a non-array
+ * `failed`, non-string name/code, or unknown keys pass through untouched and the
+ * strict schema still rejects them (a genuine shape violation stays a 400). Pure
+ * + defensive: any non-object / missing-`failed` input is returned unchanged.
+ */
+function clampArtifacts(input: unknown): unknown {
+  if (typeof input !== "object" || input === null) return input;
+  const obj = input as Record<string, unknown>;
+  if (!Array.isArray(obj.failed)) return input;
+  const failed = obj.failed.slice(0, MAX_ARTIFACTS_FAILED).map((entry) => {
+    if (typeof entry !== "object" || entry === null) return entry;
+    const e = entry as Record<string, unknown>;
+    return {
+      ...e,
+      ...(typeof e.name === "string" ? { name: e.name.slice(0, MAX_ARTIFACT_NAME_LEN) } : {}),
+      ...(typeof e.code === "string" ? { code: e.code.slice(0, MAX_ARTIFACT_CODE_LEN) } : {}),
+    };
+  });
+  return { ...obj, failed };
+}
+
 const RunResultSchema = z
   .object({
     memories: z
@@ -143,28 +173,37 @@ const RunResultSchema = z
     // finalize successfully while new agents publish markdown documents.
     report: z.string().optional().catch(undefined),
     // Terminal outputs-sweep summary (documents hardening). Snake_case inner
-    // keys, matching the persisted `runs.artifacts` column. Unlike the cosmetic
-    // fields above, this is validated STRICTLY (no `.catch`): a present-but-
-    // malformed summary is a runner-contract violation the platform should
-    // reject with a 400, not silently drop. Absence is fine — older containers
-    // do not send it, and the column stays null. Bounded (name length + failed
-    // count) so a runaway summary cannot bloat the row.
+    // keys, matching the persisted `runs.artifacts` column. The summary is a
+    // SOFT partial-deliverables SIGNAL — an oversized one must never turn a
+    // (possibly successful) run's finalize into a hard 400. So size overruns are
+    // CLAMPED, not rejected: `clampArtifacts` truncates an over-long `failed`
+    // list (≤1000) and over-long name/code strings (≤512 / ≤64) BEFORE
+    // validation — mirroring the producer bounds in runtime-pi/publish.ts, so a
+    // version-skewed container that emits a runaway loss list still finalizes
+    // with a truncated summary rather than failing. The object shape itself
+    // stays `.strict()` (unknown keys still rejected) and status/published stay
+    // strictly typed — genuine type/shape violations (not mere size) are still a
+    // 400. Absence is fine — older containers do not send it, column stays null.
     artifacts: z
-      .object({
-        status: z.enum(["complete", "partial"]),
-        published: z.number().int().nonnegative(),
-        failed: z
-          .array(
-            z
-              .object({
-                name: z.string().max(512),
-                code: z.string().max(64),
-              })
-              .strict(),
-          )
-          .max(1000),
-      })
-      .strict()
+      .preprocess(
+        clampArtifacts,
+        z
+          .object({
+            status: z.enum(["complete", "partial"]),
+            published: z.number().int().nonnegative(),
+            failed: z
+              .array(
+                z
+                  .object({
+                    name: z.string().max(512),
+                    code: z.string().max(64),
+                  })
+                  .strict(),
+              )
+              .max(1000),
+          })
+          .strict(),
+      )
       .optional(),
   })
   .passthrough();

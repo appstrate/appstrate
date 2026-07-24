@@ -699,6 +699,37 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.artifacts).toBeNull();
   });
 
+  it("tolerates an OVERSIZED artifacts summary — finalize 200, persisted truncated", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // A version-skewed container emits 1500 failures with over-long strings.
+    // Size overruns must be CLAMPED (not a 400): finalize succeeds and the row
+    // persists a truncated summary (≤1000 entries, name ≤512, code ≤64).
+    const failed = Array.from({ length: 1500 }, (_, i) => ({
+      name: "x".repeat(600) + `-${i}`,
+      code: "y".repeat(100),
+    }));
+    const res = await postFinalize(runId, {
+      memories: [],
+      output: { ok: true },
+      logs: [],
+      status: "success",
+      usage: { input_tokens: 10, output_tokens: 5 },
+      artifacts: { status: "partial", published: 3, failed },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    const persisted = row?.artifacts as RunArtifactsSummary | null;
+    expect(persisted?.status).toBe("partial");
+    expect(persisted?.published).toBe(3);
+    expect(persisted?.failed).toHaveLength(1000);
+    expect(persisted?.failed[0]!.name.length).toBe(512);
+    expect(persisted?.failed[0]!.code.length).toBe(64);
+    expect(persisted?.failed.every((f) => f.name.length <= 512 && f.code.length <= 64)).toBe(true);
+  });
+
   it("persists the deprecated report aggregate for compatibility", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
     const res = await postFinalize(runId, {

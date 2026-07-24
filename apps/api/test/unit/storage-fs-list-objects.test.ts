@@ -2,8 +2,8 @@
 
 /**
  * Unit tests for the filesystem `listObjects` implementation: recursive walk,
- * in-bucket key normalization, size reporting, prefix filter, and the
- * missing-bucket (empty) case.
+ * in-bucket key normalization, size + last-modified reporting, prefix filter,
+ * and the missing-bucket (empty) case.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -48,6 +48,19 @@ describe("filesystem listObjects", () => {
     expect(byKey.get("app1/doc1/a.txt")).toBe(5);
     expect(byKey.get("app1/doc2/b.txt")).toBe(7);
     expect(byKey.get("app2/doc3/c.bin")).toBe(3);
+  });
+
+  it("reports each object's last-modified time (stat mtime)", async () => {
+    const before = Date.now();
+    await storage.uploadFile("documents", "app1/doc1/a.txt", new TextEncoder().encode("hello"));
+    const after = Date.now();
+
+    const [obj] = await collect(storage.listObjects("documents"));
+    expect(obj!.lastModified).toBeInstanceOf(Date);
+    const mtime = obj!.lastModified!.getTime();
+    // Allow filesystem timestamp granularity slack on both ends.
+    expect(mtime).toBeGreaterThanOrEqual(before - 2000);
+    expect(mtime).toBeLessThanOrEqual(after + 2000);
   });
 
   it("filters to the given in-bucket prefix", async () => {

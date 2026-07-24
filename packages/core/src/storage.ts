@@ -81,6 +81,13 @@ export interface StorageObject {
   key: string;
   /** Object size in bytes when the backend reports it (S3 always; filesystem via stat). */
   size?: number;
+  /**
+   * Last-modified time when the backend reports it (S3 `LastModified`; filesystem
+   * `stat().mtime`). Lets a scanner apply a grace window so it never acts on an
+   * object created mid-scan (see scripts/storage-orphans.ts). Undefined when the
+   * backend does not report it.
+   */
+  lastModified?: Date;
 }
 
 /** Abstract file storage interface for bucket-based object storage. */

@@ -8,7 +8,7 @@
 
 import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, notifications, documents, runs } from "@appstrate/db/schema";
+import { endUsers, notifications, documents, runs, uploads } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
@@ -305,21 +305,28 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
     // Enumerate the end-user's storage objects BEFORE the FK cascade drops the
     // rows, and enqueue their physical deletion into the transactional outbox
     // (same tx) so the cascade can't orphan them. The end-user owns `documents`
-    // (endUserId) and run-workspace objects for its runs (endUserId); uploads
-    // are not end-user-scoped. Run-workspace per-document keys aren't enumerated
-    // (needs each run's manifest) — bundle + manifest keys are enqueued per run,
-    // worker treats a missing object as success.
+    // (endUserId), staged `uploads` (endUserId — migration 0030 added the FK +
+    // ON DELETE cascade, and consume/materialization records the uploader's
+    // endUserId), and run-workspace objects for its runs (endUserId). Run-
+    // workspace per-document keys aren't enumerated (needs each run's manifest) —
+    // bundle + manifest keys are enqueued per run, worker treats a missing object
+    // as success. (Queries are sequential — a Drizzle tx multiplexes one
+    // connection, so concurrent queries on `tx` are unsafe.)
     const docRows = await tx
       .select({ storageKey: documents.storageKey })
       .from(documents)
       .where(eq(documents.endUserId, endUserId));
+    const uploadRows = await tx
+      .select({ storageKey: uploads.storageKey })
+      .from(uploads)
+      .where(eq(uploads.endUserId, endUserId));
     const runRows = await tx
       .select({ id: runs.id })
       .from(runs)
       .where(eq(runs.endUserId, endUserId));
 
     const storageJobs: StorageDeletionJobInput[] = [];
-    for (const r of docRows) {
+    for (const r of [...docRows, ...uploadRows]) {
       const [bucket, ...rest] = r.storageKey.split("/");
       if (bucket && rest.length > 0)
         storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "end_user_deleted" });

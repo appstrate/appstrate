@@ -45,7 +45,12 @@ export interface StorageDeletionJobInput {
  */
 export const STORAGE_DELETION_DEAD_LETTER_THRESHOLD = 8;
 
-/** Backoff base (first retry ≈ 30s) and cap (retries never wait longer than 6h). */
+/**
+ * Backoff base and cap (retries never wait longer than 6h). The first FAILURE
+ * settles a job with `attempts = 1`, so its first retry waits
+ * `computeBackoffMs(1)` = `2^1 * 30s` ≈ 60s (the 30s base is the `attempts = 0`
+ * value, which the worker never settles with).
+ */
 const BACKOFF_BASE_MS = 30_000;
 const BACKOFF_CAP_MS = 6 * 60 * 60 * 1000;
 

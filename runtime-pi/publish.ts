@@ -449,22 +449,45 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
 }
 
 /**
+ * Bounds on the terminal artifacts summary, matching the server's tolerant
+ * ingest contract in `apps/api/src/routes/runs-events.ts` (RunResultSchema
+ * `artifacts`): the server clamps `failed` to {@link MAX_ARTIFACTS_FAILED}
+ * entries and each `name`/`code` string to these lengths. The producer applies
+ * the SAME bounds here so a container with thousands of dropped deliverables
+ * never emits a summary the server has to truncate — the wire payload stays
+ * small and the two sides agree byte-for-byte.
+ */
+const MAX_ARTIFACTS_FAILED = 1000;
+const MAX_ARTIFACT_NAME_LEN = 512;
+const MAX_ARTIFACT_CODE_LEN = 64;
+
+/**
  * Reduce a {@link SweepResult} to the terminal artifacts summary persisted on
  * the run row. `failed` combines the abandoned uploads with the `oversized`
  * skips (a deliverable dropped for exceeding the per-file cap is a LOSS, mapped
  * to `file_too_large`); the other skip reasons (`already_published`, `hidden`,
  * `symlink`, `empty_dir_or_other`) are NORMAL and excluded. `status` is
  * `"partial"` exactly when at least one deliverable was lost.
+ *
+ * Bounded to the server's ingest contract (see the constants above): `failed`
+ * is sliced to {@link MAX_ARTIFACTS_FAILED} and each `name`/`code` truncated, so
+ * an unbounded loss list can never bloat the finalize payload. The `status` /
+ * `published` counts reflect the FULL result — only the enumerated `failed`
+ * list is capped.
  */
 export function summarizeArtifacts(result: SweepResult): RunArtifactsSummary {
-  const failed: Array<{ name: string; code: string }> = [
+  const failedAll: Array<{ name: string; code: string }> = [
     ...result.failed.map((f) => ({ name: f.name, code: f.code })),
     ...result.skipped
       .filter((s) => s.reason === "oversized")
       .map((s) => ({ name: s.name, code: "file_too_large" })),
   ];
+  const failed = failedAll.slice(0, MAX_ARTIFACTS_FAILED).map((f) => ({
+    name: f.name.slice(0, MAX_ARTIFACT_NAME_LEN),
+    code: f.code.slice(0, MAX_ARTIFACT_CODE_LEN),
+  }));
   return {
-    status: failed.length > 0 ? "partial" : "complete",
+    status: failedAll.length > 0 ? "partial" : "complete",
     published: result.published.length,
     failed,
   };

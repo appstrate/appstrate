@@ -306,7 +306,11 @@ export function createS3Storage(config: S3StorageConfig): Storage {
         for (const obj of res.Contents ?? []) {
           const fullKey = obj.Key;
           if (!fullKey || !fullKey.startsWith(bucketPrefix)) continue;
-          yield { key: fullKey.slice(bucketPrefix.length), size: obj.Size };
+          yield {
+            key: fullKey.slice(bucketPrefix.length),
+            size: obj.Size,
+            lastModified: obj.LastModified,
+          };
         }
         continuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
       } while (continuationToken);

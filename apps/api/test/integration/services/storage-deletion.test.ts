@@ -10,6 +10,7 @@
  *  - worker pass: success → completedAt; failure → attempts+1, backoff, lastError.
  *  - dead letter: a job past the threshold appears in the dead list; retry resets it.
  *  - `deleteOrganization` enqueues documents + uploads keys before the FK cascade.
+ *  - `deleteEndUser` enqueues the end-user's staged upload key before the cascade.
  *  - `cleanupExpiredDocuments` enqueues instead of best-effort deleting.
  *  - concurrent worker passes don't double-claim (SKIP LOCKED).
  */
@@ -27,6 +28,7 @@ import {
   cleanupExpiredDocuments,
 } from "../../../src/services/documents.ts";
 import { deleteOrganization } from "../../../src/services/organizations.ts";
+import { createEndUser, deleteEndUser } from "../../../src/services/end-users.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import {
   enqueueStorageDeletion,
@@ -277,6 +279,39 @@ describe("storage-deletion outbox", () => {
     const runKeys = new Set(runJobs.map((r) => r.storageKey));
     expect(runKeys.has(`${runId}.afps`)).toBe(true);
     expect(runKeys.has(`${runId}/manifest.json`)).toBe(true);
+  });
+
+  it("deleteEndUser enqueues the end-user's staged upload key before the FK cascade", async () => {
+    const endUser = await createEndUser(scope, { name: "eu-with-upload" });
+
+    // A staged upload attributed to the end-user (endUserId, no dashboard user).
+    const up = await createUpload({
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
+      createdBy: null,
+      endUserId: endUser.id,
+      name: "eu.txt",
+      size: 4,
+      mime: "text/plain",
+    });
+    const [upRow] = await db
+      .select({ storageKey: uploads.storageKey })
+      .from(uploads)
+      .where(eq(uploads.id, up.id));
+    const { bucket: upBucket, inKey: upKey } = split(upRow!.storageKey);
+
+    await deleteEndUser(scope, endUser.id);
+
+    // A deletion job exists for the upload object, enqueued before the cascade
+    // dropped the row (which would otherwise orphan the bytes).
+    const upJob = await db
+      .select()
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, upKey));
+    expect(upJob).toHaveLength(1);
+    expect(upJob[0]!.bucket).toBe(upBucket);
+    expect(upJob[0]!.reason).toBe("end_user_deleted");
+    expect(upJob[0]!.completedAt).toBeNull();
   });
 
   it("cleanupExpiredDocuments enqueues the purge instead of best-effort deleting", async () => {

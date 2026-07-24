@@ -122,7 +122,7 @@ async function dropDocumentObject(storagePath: string, reason: string): Promise<
       enqueueStorageDeletion(tx, {
         bucket: DOCUMENTS_BUCKET,
         storageKey: storagePath,
-        reason: "materialization_failed",
+        reason,
       }),
     );
   } catch (err) {
@@ -213,9 +213,11 @@ export interface DocumentRow {
  *
  *  - `visible`  — the caller can resolve this document at all (container ACL). A
  *    non-visible document is a 404 everywhere; the other flags are then all false.
- *  - `metadata` — the caller may see the REAL name, mime, size and sha256. When
- *    false the DTO/MCP read serve an OPAQUE reference (generic name + mime, no
- *    sha256) — a non-creator run reader of a `user_upload` (privacy decision).
+ *  - `metadata` — the caller may see the REAL name, mime and sha256. When false
+ *    the DTO/MCP read serve an OPAQUE reference (generic name + mime, no sha256)
+ *    — a non-creator run reader of a `user_upload` (privacy decision). `size` is
+ *    intentionally NOT gated by this flag: it is exposed to opaque readers too (a
+ *    byte count is not sensitive, and the gallery needs it to render every row).
  *  - `download` — the caller may fetch the bytes (`/content`).
  *  - `preview`  — the caller may render an in-browser preview (download + a
  *    previewable mime).
@@ -285,8 +287,10 @@ export function getDocumentCapabilities(
   const isCreator = actor.type === "user" ? doc.userId === actor.id : doc.endUserId === actor.id;
   // agent_output → any container reader; user_upload → creator/uploader only.
   const download = isAgentOutput || isCreator;
-  // Sensitive metadata follows the same boundary as the content (never widen a
-  // private upload's real name / hash to a non-creator reader).
+  // Sensitive metadata (real name / mime / sha256) follows the same boundary as
+  // the content (never widen a private upload's real name / hash to a non-creator
+  // reader). `size` is deliberately NOT covered by this flag — a byte count is
+  // not sensitive and stays visible to opaque readers.
   const metadata = isAgentOutput || isCreator;
   const preview = download && previewKind(doc.mime) !== null;
   // Lifecycle control: creator OR the org's manage permission.
@@ -661,7 +665,7 @@ export async function createDocumentFromUpload(
     // The doc object may have been (partially) written before the throw
     // (size/MIME mismatch is validated post-drain). Drop it so the counter and
     // storage never disagree; consume already rolled back the upload side.
-    await dropDocumentObject(storagePath, "materialize error");
+    await dropDocumentObject(storagePath, "materialize_error");
     throw err;
   }
 
@@ -820,7 +824,7 @@ async function commitDocumentRow(params: {
   } catch (err) {
     // DB failed after the bytes landed — drop the object so its bytes are not
     // stranded uncounted in the bucket.
-    await dropDocumentObject(storagePath, "row-insert failure");
+    await dropDocumentObject(storagePath, "row_insert_failure");
     throw err;
   }
 }
@@ -981,7 +985,7 @@ export async function createDocumentFromStream(
     // have been partially written before the abort. Drop it so a cut-short
     // upload never leaves a partial object behind (the 413 delete-on-short
     // contract) nor strands bytes uncounted.
-    await dropDocumentObject(storagePath, "stream error");
+    await dropDocumentObject(storagePath, "stream_error");
     throw err;
   }
 
@@ -993,7 +997,7 @@ export async function createDocumentFromStream(
   // POST. Drop the freshly-written object and return the existing row.
   const existing = await findDedupDocument(scope, runId, sha256, input.name);
   if (existing) {
-    await dropDocumentObject(storagePath, "duplicate");
+    await dropDocumentObject(storagePath, "dedup_duplicate");
     return { row: existing, deduped: true };
   }
 

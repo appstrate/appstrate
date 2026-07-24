@@ -375,12 +375,16 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
         const key = relative(bucketRoot, full).split(sep).join("/");
         if (wantPrefix && !key.startsWith(wantPrefix)) continue;
         let size: number | undefined;
+        let lastModified: Date | undefined;
         try {
-          size = (await stat(full)).size;
+          const st = await stat(full);
+          size = st.size;
+          lastModified = st.mtime;
         } catch {
           size = undefined;
+          lastModified = undefined;
         }
-        yield { key, size };
+        yield { key, size, lastModified };
       }
     },
 

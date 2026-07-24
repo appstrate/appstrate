@@ -536,6 +536,40 @@ describe("sweepOutputs", () => {
   });
 });
 
+describe("summarizeArtifacts bounds (server ingest contract)", () => {
+  it("clamps a runaway failed list to 1000 entries and truncates long name/code", () => {
+    const failed = Array.from({ length: 1500 }, (_, i) => ({
+      name: "x".repeat(600) + `-${i}`,
+      code: "y".repeat(100) as UploadFailureCode,
+      message: "boom",
+    }));
+    const summary = summarizeArtifacts({ published: [], skipped: [], failed });
+
+    // failed sliced to the 1000-entry cap.
+    expect(summary.failed).toHaveLength(1000);
+    // status/published reflect the FULL result (partial because >0 lost).
+    expect(summary.status).toBe("partial");
+    expect(summary.published).toBe(0);
+    // Each entry's name ≤512 and code ≤64.
+    expect(summary.failed[0]!.name.length).toBe(512);
+    expect(summary.failed[0]!.code.length).toBe(64);
+    expect(summary.failed.every((f) => f.name.length <= 512 && f.code.length <= 64)).toBe(true);
+  });
+
+  it("leaves a small summary untouched", () => {
+    const summary = summarizeArtifacts({
+      published: [{ name: "a.txt", sha256: "s", size: 1 }],
+      skipped: [],
+      failed: [{ name: "b.txt", code: "upload_failed", message: "m" }],
+    });
+    expect(summary).toEqual({
+      status: "partial",
+      published: 1,
+      failed: [{ name: "b.txt", code: "upload_failed" }],
+    });
+  });
+});
+
 describe("buildPublishDocumentDef (publish_document tool)", () => {
   it("uploads and emits a document.published event on success", async () => {
     await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
