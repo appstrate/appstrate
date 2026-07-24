@@ -3,7 +3,7 @@
 import { hostname } from "node:os";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
-import { classifyDockerNetworkError } from "./docker-errors.ts";
+import { classifyDockerNetworkError, createContainerWithImagePull } from "./docker-errors.ts";
 
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 const DOCKER_API_TIMEOUT_MS = 30_000;
@@ -84,11 +84,29 @@ async function imageExists(image: string): Promise<boolean> {
   return res.ok;
 }
 
+/** Pulls currently in flight, keyed by image reference. See {@link pullImage}. */
+const inFlightPulls = new Map<string, Promise<void>>();
+
 /**
  * Pull an image from registry. Waits for the pull to complete.
  * Docker pull API streams JSON progress — we consume it fully before resolving.
+ *
+ * Concurrent pulls of the same reference are coalesced: after a host image
+ * prune, every queued run misses at once and would otherwise open its own
+ * progress stream for the same layer set (the daemon deduplicates the actual
+ * layer downloads, but not the streams or the waits).
  */
-export async function pullImage(image: string): Promise<void> {
+export function pullImage(image: string): Promise<void> {
+  const joined = inFlightPulls.get(image);
+  if (joined) return joined;
+  // Registered before the first await point so a synchronous burst of
+  // callers all join this flight instead of starting their own.
+  const flight = pullImageUncoalesced(image).finally(() => inFlightPulls.delete(image));
+  inFlightPulls.set(image, flight);
+  return flight;
+}
+
+async function pullImageUncoalesced(image: string): Promise<void> {
   logger.info("Pulling Docker image", { image });
 
   const res = await dockerFetch(
@@ -214,11 +232,18 @@ export async function createContainer(
     },
   };
 
-  const res = await dockerFetch(`/containers/create?name=${containerName}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  // The Engine API never pulls on create, so a host image prune between runs
+  // would otherwise fail every run until this process restarts.
+  const res = await createContainerWithImagePull(
+    () =>
+      dockerFetch(`/containers/create?name=${containerName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    () => pullImage(options.image),
+    { warn: (msg, data) => logger.warn(msg, { ...data, image: options.image, runId }) },
+  );
 
   await assertDockerOk(res, `create ${options.adapterName} container`);
 
