@@ -70,6 +70,15 @@ let runTerminal: Counter | undefined;
 let containerSpawn: Histogram | undefined;
 let llmLatency: Histogram | undefined;
 let processAnomaly: Counter | undefined;
+let storageDeletionResult: Counter | undefined;
+
+// Last-value snapshot of the storage-deletion outbox backlog, pushed by the
+// worker once per pass (via the telemetry façade) and read lazily by the three
+// observable gauges below on each metric collection. Same push-snapshot →
+// observe-on-collect shape as the scheduler queue-depth gauge.
+let storageDeletionBacklog = 0;
+let storageDeletionOldestPendingAgeSeconds = 0;
+let storageDeletionDeadLetters = 0;
 
 /**
  * Pull provider for the scheduler queue-depth observable gauge. The scheduler
@@ -259,6 +268,23 @@ function createInstruments(m: Meter): void {
       // A flaky queue read must not break metric collection.
     }
   });
+
+  // Storage-deletion outbox: one counter (attempt outcomes) + three last-value
+  // gauges reading the worker's pushed snapshot. Backlog + oldest-age surface a
+  // stuck purge; dead_letters surfaces objects that keep failing to delete.
+  storageDeletionResult = m.createCounter("appstrate.storage_deletion.result", {
+    description: "Count of storage-deletion job attempts by outcome (completed|failed).",
+  });
+  m.createObservableGauge("appstrate.storage_deletion.backlog", {
+    description: "Pending storage-deletion jobs (rows whose object is not yet purged).",
+  }).addCallback((result) => result.observe(storageDeletionBacklog));
+  m.createObservableGauge("appstrate.storage_deletion.oldest_pending_age_seconds", {
+    unit: "s",
+    description: "Age of the oldest pending storage-deletion job.",
+  }).addCallback((result) => result.observe(storageDeletionOldestPendingAgeSeconds));
+  m.createObservableGauge("appstrate.storage_deletion.dead_letters", {
+    description: "Pending storage-deletion jobs past the dead-letter attempt threshold.",
+  }).addCallback((result) => result.observe(storageDeletionDeadLetters));
 }
 
 // ─── Public state accessors ──────────────────────────────────────
@@ -455,6 +481,22 @@ export function recordRunTerminal(attrs: { status: string; errorCode?: string })
 export function recordProcessAnomaly(attrs: { kind: string }): void {
   if (!enabled) return;
   processAnomaly?.add(1, { kind: attrs.kind });
+}
+
+export function recordStorageDeletionSweep(stats: {
+  backlog: number;
+  oldestPendingAgeSeconds: number;
+  deadLetters: number;
+}): void {
+  if (!enabled) return;
+  storageDeletionBacklog = stats.backlog;
+  storageDeletionOldestPendingAgeSeconds = stats.oldestPendingAgeSeconds;
+  storageDeletionDeadLetters = stats.deadLetters;
+}
+
+export function recordStorageDeletionResult(attrs: { result: string }): void {
+  if (!enabled) return;
+  storageDeletionResult?.add(1, { result: attrs.result });
 }
 
 export function recordContainerSpawn(

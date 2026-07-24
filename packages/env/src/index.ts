@@ -482,6 +482,13 @@ const envSchema = z
     // default; livrable expiry is the #1 complaint, so this stays opt-in.
     DOCUMENT_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
 
+    // Poll cadence for the transactional storage-deletion worker (the outbox
+    // that physically purges S3/FS objects after their DB row is gone). Each
+    // pass claims a bounded batch of due `storage_deletion_jobs` and attempts
+    // the delete; failures back off exponentially and retry forever (deletion
+    // must never be abandoned). 60s balances purge latency against DB churn.
+    STORAGE_DELETION_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+
     // Separate origin for serving untrusted agent-generated HTML previews
     // (Phase 4 / D5). When set, `GET /api/documents/:id` mints its
     // `preview_url` on THIS origin instead of `APP_URL` — the operator points a

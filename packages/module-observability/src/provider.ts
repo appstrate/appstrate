@@ -21,6 +21,8 @@ import {
   recordContainerSpawn,
   recordLlmLatency,
   recordProcessAnomaly,
+  recordStorageDeletionSweep,
+  recordStorageDeletionResult,
   setQueueDepthProvider,
   shutdownObservability,
 } from "./otel.ts";
@@ -54,6 +56,8 @@ export function createTelemetryProvider(deps: TelemetryProviderDeps): TelemetryP
     recordContainerSpawn,
     recordLlmLatency,
     recordProcessAnomaly,
+    recordStorageDeletionSweep,
+    recordStorageDeletionResult,
     setQueueDepthSource: setQueueDepthProvider,
     httpMiddleware: observability({ clientIp: deps.clientIp }),
     shutdown: shutdownObservability,

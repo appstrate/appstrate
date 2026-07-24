@@ -43,6 +43,7 @@ import { applicationsPaths } from "./paths/applications.ts";
 import { endUsersPaths } from "./paths/end-users.ts";
 import { uploadsPaths } from "./paths/uploads.ts";
 import { documentsPaths } from "./paths/documents.ts";
+import { adminStorageDeletionPaths } from "./paths/admin-storage-deletion.ts";
 import { credentialProxyPaths } from "./paths/credential-proxy.ts";
 import { llmProxyPaths } from "./paths/llm-proxy.ts";
 import { libraryPaths } from "./paths/library.ts";
@@ -73,6 +74,7 @@ const corePaths = {
   ...endUsersPaths,
   ...uploadsPaths,
   ...documentsPaths,
+  ...adminStorageDeletionPaths,
   ...credentialProxyPaths,
   ...llmProxyPaths,
   ...libraryPaths,

@@ -5,6 +5,7 @@ import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
 import { cleanupExpiredDocuments, startDocumentGc } from "../services/documents.ts";
+import { startStorageDeletionWorker } from "../services/storage-deletion.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import {
@@ -355,6 +356,10 @@ export async function boot(): Promise<void> {
   // Kick off the recurring upload + document sweeps once initial cleanup is scheduled.
   startUploadGc();
   startDocumentGc();
+  // Transactional storage-deletion outbox worker: drains any boot-time backlog
+  // immediately, then polls for due jobs. Purges S3/FS objects whose DB rows
+  // were deleted (documents, uploads, run workspaces, org/app/end-user cascades).
+  startStorageDeletionWorker();
 }
 
 /**

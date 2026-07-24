@@ -38,6 +38,7 @@ import {
   downloadRunDocumentStream,
   deleteRunWorkspace,
 } from "../../../src/services/run-workspace-storage.ts";
+import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import { uploadFile as storagePut } from "@appstrate/db/storage";
 
 const app = getTestApp();
@@ -149,7 +150,11 @@ describe("run-workspace storage round-trip", () => {
     expect(reportStream).not.toBeNull();
     expect(await new Response(reportStream!).text()).toBe("hello world");
 
+    // deleteRunWorkspace now enqueues the purge into the transactional deletion
+    // outbox (all keys in one tx — no silent orphan); the worker performs the
+    // physical deletes. Drain it, then the objects are gone.
     await deleteRunWorkspace(runId);
+    await processStorageDeletionJobs();
     expect(await downloadRunWorkspace(runId)).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
     expect(await downloadRunDocumentStream(runId, "report.txt")).toBeNull();

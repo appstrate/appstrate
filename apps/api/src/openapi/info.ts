@@ -63,5 +63,9 @@ export const openApiInfo = {
       name: "LLM Proxy",
       description: "Server-side LLM model injection — OpenAI + Anthropic protocol families",
     },
+    {
+      name: "Admin",
+      description: "Platform-admin operator surfaces (storage-deletion outbox, dead letters)",
+    },
   ],
 } as const;

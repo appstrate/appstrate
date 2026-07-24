@@ -45,6 +45,16 @@ export interface TelemetrySpanOptions {
 /** Pull source for the scheduler queue-depth gauge. */
 export type QueueDepthSource = () => number | Promise<number> | null | undefined;
 
+/** Snapshot of the storage-deletion outbox backlog, emitted once per worker pass. */
+export interface StorageDeletionStats {
+  /** Pending (not-yet-completed, due or backing-off) jobs. */
+  backlog: number;
+  /** Age of the oldest pending job, in seconds (0 when none). */
+  oldestPendingAgeSeconds: number;
+  /** Pending jobs past the dead-letter attempt threshold (still retrying). */
+  deadLetters: number;
+}
+
 /**
  * Contract a telemetry module implements. Method semantics (attribute names,
  * units, cardinality clamps) are documented on the façade functions below —
@@ -63,6 +73,8 @@ export interface TelemetryProvider {
   recordContainerSpawn(durationMs: number, attrs?: { sidecar?: boolean; errorType?: string }): void;
   recordLlmLatency(durationMs: number, attrs: { api_shape?: string; status?: number }): void;
   recordProcessAnomaly(attrs: { kind: string }): void;
+  recordStorageDeletionSweep(stats: StorageDeletionStats): void;
+  recordStorageDeletionResult(attrs: { result: string }): void;
   setQueueDepthSource(source: QueueDepthSource): void;
   /**
    * Optional HTTP server-span middleware, mounted by the platform's global
@@ -177,6 +189,24 @@ export function recordLlmLatency(
  */
 export function recordProcessAnomaly(attrs: { kind: string }): void {
   provider?.recordProcessAnomaly(attrs);
+}
+
+/**
+ * Snapshot the storage-deletion outbox backlog for the last-value gauges
+ * (`appstrate.storage_deletion.backlog` / `.oldest_pending_age_seconds` /
+ * `.dead_letters`). Called once per worker pass with cheap COUNT/MIN queries.
+ */
+export function recordStorageDeletionSweep(stats: StorageDeletionStats): void {
+  provider?.recordStorageDeletionSweep(stats);
+}
+
+/**
+ * One storage-deletion job attempt reaching an outcome — `completed` (object
+ * gone) or `failed` (delete threw, will retry). Feeds the
+ * `appstrate.storage_deletion.result` counter.
+ */
+export function recordStorageDeletionResult(attrs: { result: "completed" | "failed" }): void {
+  provider?.recordStorageDeletionResult(attrs);
 }
 
 /**

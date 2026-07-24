@@ -159,6 +159,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/storage-deletion-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List storage-deletion outbox jobs
+         * @description Platform-admin only (`AUTH_PLATFORM_ADMIN_EMAILS`). Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `created_at`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point).
+         */
+        get: operations["listStorageDeletionJobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/storage-deletion-jobs/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a storage-deletion job now
+         * @description Platform-admin only. Resets a pending job's `next_attempt_at` to now so the next worker pass retries it immediately. No-op (404) on a completed or unknown job.
+         */
+        post: operations["retryStorageDeletionJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents": {
         parameters: {
             query?: never;
@@ -6118,6 +6158,90 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    listStorageDeletionJobs: {
+        parameters: {
+            query?: {
+                status?: "pending" | "dead" | "completed";
+                limit?: number;
+                /** @description Opaque cursor — the `nextCursor` returned by a prior page. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of storage-deletion jobs. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            /** @example sdj_0c9f… */
+                            id: string;
+                            /** @example documents */
+                            bucket: string;
+                            /**
+                             * @description In-bucket object key (no bucket prefix).
+                             * @example app_abc/doc_def/report.pdf
+                             */
+                            storageKey: string;
+                            /** @description Why the object is being purged (document_deleted | document_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | materialization_failed). */
+                            reason: string;
+                            /** @description Delete attempts made so far. */
+                            attempts: number;
+                            /** Format: date-time */
+                            nextAttemptAt: string;
+                            /** Format: date-time */
+                            completedAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        }[];
+                        /** Format: date-time */
+                        nextCursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    retryStorageDeletionJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Job scheduled for immediate retry. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @enum {boolean} */
+                        retried: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listAgents: {

@@ -8,7 +8,7 @@
 
 import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, notifications } from "@appstrate/db/schema";
+import { endUsers, notifications, documents, runs } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
@@ -18,6 +18,12 @@ import { buildUpdateSet } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { assertApplicationInScope } from "./applications.ts";
+import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
+import {
+  RUN_WORKSPACE_BUCKET,
+  runWorkspaceBundleKey,
+  runWorkspaceManifestKey,
+} from "./run-workspace-storage.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -296,6 +302,42 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
   // mid-way can't leave the end-user gone but their notifications stranded
   // (or vice-versa).
   await db.transaction(async (tx) => {
+    // Enumerate the end-user's storage objects BEFORE the FK cascade drops the
+    // rows, and enqueue their physical deletion into the transactional outbox
+    // (same tx) so the cascade can't orphan them. The end-user owns `documents`
+    // (endUserId) and run-workspace objects for its runs (endUserId); uploads
+    // are not end-user-scoped. Run-workspace per-document keys aren't enumerated
+    // (needs each run's manifest) — bundle + manifest keys are enqueued per run,
+    // worker treats a missing object as success.
+    const docRows = await tx
+      .select({ storageKey: documents.storageKey })
+      .from(documents)
+      .where(eq(documents.endUserId, endUserId));
+    const runRows = await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.endUserId, endUserId));
+
+    const storageJobs: StorageDeletionJobInput[] = [];
+    for (const r of docRows) {
+      const [bucket, ...rest] = r.storageKey.split("/");
+      if (bucket && rest.length > 0)
+        storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "end_user_deleted" });
+    }
+    for (const r of runRows) {
+      storageJobs.push({
+        bucket: RUN_WORKSPACE_BUCKET,
+        storageKey: runWorkspaceBundleKey(r.id),
+        reason: "end_user_deleted",
+      });
+      storageJobs.push({
+        bucket: RUN_WORKSPACE_BUCKET,
+        storageKey: runWorkspaceManifestKey(r.id),
+        reason: "end_user_deleted",
+      });
+    }
+    await enqueueStorageDeletion(tx, storageJobs);
+
     await tx
       .delete(notifications)
       .where(

@@ -9,6 +9,7 @@ import type {
   CreateDownloadUrlOptions,
   UploadFileOptions,
   UploadUrlDescriptor,
+  StorageObject,
 } from "@appstrate/core/storage";
 
 let store: Storage | null = null;
@@ -75,6 +76,10 @@ export function deleteFile(bucket: string, path: string): Promise<void> {
 
 export function fileExists(bucket: string, path: string): Promise<boolean> {
   return getStore().fileExists(bucket, path);
+}
+
+export function listObjects(bucket: string, prefix?: string): AsyncIterable<StorageObject> {
+  return getStore().listObjects(bucket, prefix);
 }
 
 export function ensureBucket(): Promise<void> {

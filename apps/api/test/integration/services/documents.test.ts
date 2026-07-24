@@ -23,6 +23,7 @@ import {
   uploads,
   auditEvents,
   chatSessions,
+  storageDeletionJobs,
 } from "@appstrate/db/schema";
 import { uploadStream, downloadStream } from "@appstrate/db/storage";
 import { _resetCacheForTesting } from "@appstrate/env";
@@ -52,6 +53,7 @@ import {
   detachOrDeleteContainedDocuments,
   reconcileOrgDocumentBytes,
 } from "../../../src/services/documents.ts";
+import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 
 /** Run `fn` with an env var temporarily overridden (cache reset around it). */
 async function withEnv(key: string, value: string, fn: () => Promise<void>): Promise<void> {
@@ -966,7 +968,19 @@ describe("documents service + routes", () => {
     const [row] = await db.select().from(documents).where(eq(documents.id, docX.id));
     expect(row).toBeUndefined();
     expect(await orgBytesUsed(ctx.orgId)).toBe(0);
-    // Storage object purged post-commit (awaited by the helper before it returns).
+    // The storage object is purged asynchronously via the transactional deletion
+    // outbox: the row delete enqueued a deletion job in the same tx (so the
+    // object can't be silently orphaned), and the background worker performs the
+    // physical delete. The object is still present until the worker runs.
+    const jobs = await db
+      .select()
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, rest.join("/")));
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.reason).toBe("document_deleted");
+    expect(await downloadStream(bucket!, rest.join("/"))).not.toBeNull();
+    // Draining the worker removes the object.
+    await processStorageDeletionJobs();
     expect(await downloadStream(bucket!, rest.join("/"))).toBeNull();
   });
 

@@ -3,11 +3,17 @@
 import { eq, asc, desc } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
-import { applications } from "@appstrate/db/schema";
+import { applications, documents, uploads, runs } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
+import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
+import {
+  RUN_WORKSPACE_BUCKET,
+  runWorkspaceBundleKey,
+  runWorkspaceManifestKey,
+} from "./run-workspace-storage.ts";
 
 export const appSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),
@@ -124,7 +130,49 @@ export async function deleteApplication(orgId: string, applicationId: string) {
   if (!app) throw notFound("Application not found");
   if (app.isDefault) throw invalidRequest("Cannot delete default application");
 
-  await db
-    .delete(applications)
-    .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }));
+  // Enumerate the app's storage objects BEFORE the FK cascade drops the rows and
+  // enqueue their physical deletion into the transactional outbox (same tx), so
+  // the cascade can't silently orphan the app's documents / uploads /
+  // run-workspace objects. Run-workspace per-document keys are not enumerated
+  // (that needs each run's manifest); bundle + manifest keys are enqueued per
+  // run and the worker treats a missing object as success. Sequential queries —
+  // a Drizzle tx multiplexes one connection.
+  await db.transaction(async (tx) => {
+    const docRows = await tx
+      .select({ storageKey: documents.storageKey })
+      .from(documents)
+      .where(eq(documents.applicationId, applicationId));
+    const uploadRows = await tx
+      .select({ storageKey: uploads.storageKey })
+      .from(uploads)
+      .where(eq(uploads.applicationId, applicationId));
+    const runRows = await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.applicationId, applicationId));
+
+    const storageJobs: StorageDeletionJobInput[] = [];
+    for (const r of [...docRows, ...uploadRows]) {
+      const [bucket, ...rest] = r.storageKey.split("/");
+      if (bucket && rest.length > 0)
+        storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "application_deleted" });
+    }
+    for (const r of runRows) {
+      storageJobs.push({
+        bucket: RUN_WORKSPACE_BUCKET,
+        storageKey: runWorkspaceBundleKey(r.id),
+        reason: "application_deleted",
+      });
+      storageJobs.push({
+        bucket: RUN_WORKSPACE_BUCKET,
+        storageKey: runWorkspaceManifestKey(r.id),
+        reason: "application_deleted",
+      });
+    }
+    await enqueueStorageDeletion(tx, storageJobs);
+
+    await tx
+      .delete(applications)
+      .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }));
+  });
 }

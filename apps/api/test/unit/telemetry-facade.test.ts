@@ -64,6 +64,10 @@ function fakeProvider(opts: { trust?: boolean; withMiddleware?: boolean } = {}) 
     recordContainerSpawn: (...args) => void calls.push({ method: "recordContainerSpawn", args }),
     recordLlmLatency: (...args) => void calls.push({ method: "recordLlmLatency", args }),
     recordProcessAnomaly: (...args) => void calls.push({ method: "recordProcessAnomaly", args }),
+    recordStorageDeletionSweep: (...args) =>
+      void calls.push({ method: "recordStorageDeletionSweep", args }),
+    recordStorageDeletionResult: (...args) =>
+      void calls.push({ method: "recordStorageDeletionResult", args }),
     setQueueDepthSource: (source) => {
       queueSource = source;
     },

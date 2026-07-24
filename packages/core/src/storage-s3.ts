@@ -9,6 +9,7 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   AbortMultipartUploadCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
@@ -284,6 +285,31 @@ export function createS3Storage(config: S3StorageConfig): Storage {
           Key: makeKey(bucket, path),
         }),
       );
+    },
+
+    async *listObjects(bucket, prefix) {
+      // Every object we store is keyed `${bucket}/${path}` (see makeKey), so a
+      // bucket listing is a ListObjectsV2 over the `${bucket}/` key-prefix. The
+      // in-bucket keys we yield strip that prefix back off, so callers get the
+      // exact `path` form deleteFile/downloadFile accept.
+      const bucketPrefix = `${bucket}/`;
+      const listPrefix = prefix ? makeKey(bucket, prefix) : bucketPrefix;
+      let continuationToken: string | undefined;
+      do {
+        const res = await client.send(
+          new ListObjectsV2Command({
+            Bucket: config.bucket,
+            Prefix: listPrefix,
+            ContinuationToken: continuationToken,
+          }),
+        );
+        for (const obj of res.Contents ?? []) {
+          const fullKey = obj.Key;
+          if (!fullKey || !fullKey.startsWith(bucketPrefix)) continue;
+          yield { key: fullKey.slice(bucketPrefix.length), size: obj.Size };
+        }
+        continuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+      } while (continuationToken);
     },
 
     async createUploadUrl(

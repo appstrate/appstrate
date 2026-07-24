@@ -1,8 +1,8 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdir, unlink, realpath, writeFile, open } from "node:fs/promises";
-import { join, dirname, normalize, resolve as resolvePath } from "node:path";
+import { mkdir, unlink, realpath, writeFile, open, readdir, stat } from "node:fs/promises";
+import { join, dirname, normalize, relative, sep, resolve as resolvePath } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type {
   Storage,
@@ -340,6 +340,40 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
       } catch (err: unknown) {
         // Ignore file-not-found, rethrow everything else
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
+    },
+
+    async *listObjects(bucket, prefix) {
+      // The bucket maps to a directory tree under `${base}/${bucket}`; walk it
+      // depth-first and yield each file's in-bucket key (relative to the bucket
+      // root, POSIX-separated so it matches the S3 backend and the `path` form
+      // deleteFile accepts). A missing bucket directory yields nothing.
+      const bucketRoot = resolve(bucket, "");
+      async function* walk(dir: string): AsyncGenerator<string> {
+        let entries;
+        try {
+          entries = await readdir(dir, { withFileTypes: true });
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+          throw err;
+        }
+        for (const entry of entries) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) yield* walk(full);
+          else if (entry.isFile()) yield full;
+        }
+      }
+      const wantPrefix = prefix ?? "";
+      for await (const full of walk(bucketRoot)) {
+        const key = relative(bucketRoot, full).split(sep).join("/");
+        if (wantPrefix && !key.startsWith(wantPrefix)) continue;
+        let size: number | undefined;
+        try {
+          size = (await stat(full)).size;
+        } catch {
+          size = undefined;
+        }
+        yield { key, size };
       }
     },
 

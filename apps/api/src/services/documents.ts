@@ -43,7 +43,6 @@ import type { DocumentPurpose } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
   downloadStream as storageDownloadStream,
-  deleteFile as storageDelete,
 } from "@appstrate/db/storage";
 import { fileTypeStream } from "file-type";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -64,6 +63,7 @@ import {
 } from "../lib/errors.ts";
 import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { consumeUploadStream, peekUploads, sanitizeFilename, parseUploadUri } from "./uploads.ts";
+import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import { getRun } from "./state/runs.ts";
 import { synthesiseFinalize } from "./run-event-ingestion.ts";
@@ -98,19 +98,47 @@ export function parseStorageKey(storageKey: string): { bucket: string; path: str
 }
 
 /**
- * Best-effort delete of a document's storage object by its `bucket/path` inside
- * {@link DOCUMENTS_BUCKET}. Swallows + logs any failure (a leftover object is
- * harmless — the org byte counter is the source of truth, reconciled by the GC).
- * One helper for every drop-on-error / drop-on-dedup site.
+ * Durably enqueue the deletion of a document's storage object (by its in-bucket
+ * path inside {@link DOCUMENTS_BUCKET}) on a drop-on-error / drop-on-dedup path.
+ *
+ * These sites run when the bytes may have landed but the `documents` row was
+ * NEVER committed (materialize error, row-insert failure, discarded duplicate),
+ * so there is no business transaction to piggyback the enqueue onto. The job is
+ * the durable record: it goes into its OWN short transaction and the outbox
+ * worker performs the idempotent physical delete. Never throws — a failed
+ * enqueue is logged, not propagated, so it can't mask the original error the
+ * caller is already unwinding.
  */
 async function dropDocumentObject(storagePath: string, reason: string): Promise<void> {
-  await storageDelete(DOCUMENTS_BUCKET, storagePath).catch((err) => {
-    logger.warn("failed to delete documents object", {
+  try {
+    await db.transaction((tx) =>
+      enqueueStorageDeletion(tx, {
+        bucket: DOCUMENTS_BUCKET,
+        storageKey: storagePath,
+        reason: "materialization_failed",
+      }),
+    );
+  } catch (err) {
+    logger.warn("failed to enqueue documents object deletion", {
       reason,
       storagePath,
       error: getErrorMessage(err),
     });
-  });
+  }
+}
+
+/**
+ * Turn a stored `bucket/path` storage key into a deletion-job input (splitting
+ * the bucket back off `storageKey`, which the outbox stores IN-BUCKET). Returns
+ * null for a malformed key so a bad row can't stall the enqueue.
+ */
+function storageKeyToDeletionJob(
+  storageKey: string,
+  reason: string,
+): StorageDeletionJobInput | null {
+  const parsed = parseStorageKey(storageKey);
+  if (!parsed) return null;
+  return { bucket: parsed.bucket, storageKey: parsed.path, reason };
 }
 
 /**
@@ -1151,13 +1179,13 @@ export async function detachOrDeleteContainedDocuments(
     ? inArray(documents.runId, runIds)
     : eq(documents.chatSessionId, chatSessionId!);
 
-  const deletedKeys = await db.transaction(async (tx) => {
+  await db.transaction(async (tx) => {
     const contained = await tx
       .select({ id: documents.id })
       .from(documents)
       .where(containedWhere)
       .for("update");
-    if (contained.length === 0) return [] as string[];
+    if (contained.length === 0) return;
     const containedIds = contained.map((d) => d.id);
 
     // Protected = still referenced by a live consumer outside the deleted set.
@@ -1186,7 +1214,7 @@ export async function detachOrDeleteContainedDocuments(
         .where(inArray(documents.id, detachIds));
     }
 
-    if (deleteIds.length === 0) return [] as string[];
+    if (deleteIds.length === 0) return;
 
     // Unprotected → delete rows + fold freed bytes back per org (a run set is one
     // org in practice, but group defensively — mirrors cleanupExpiredDocuments).
@@ -1205,25 +1233,27 @@ export async function detachOrDeleteContainedDocuments(
         })
         .where(eq(organizations.id, orgId));
     }
-    return removed.map((r) => r.storageKey);
-  });
 
-  // Best-effort storage purge AFTER commit — a leftover object is harmless (the
-  // counter is the quota's source of truth); same fire-and-forget-with-warn
-  // contract as deleteDocument.
-  for (const storageKey of deletedKeys) await deleteStorageObject(storageKey);
+    // Transactional outbox: enqueue the storage purge in the SAME transaction as
+    // the row delete, so a committed delete never orphans the object (replaces
+    // the old best-effort post-commit delete).
+    const jobs = removed
+      .map((r) => storageKeyToDeletionJob(r.storageKey, "document_deleted"))
+      .filter((j): j is StorageDeletionJobInput => j !== null);
+    await enqueueStorageDeletion(tx, jobs);
+  });
 }
 
 /**
- * Delete a document: drop the storage object, delete the row, and decrement the
- * org counter — the counter decrement + row delete are one transaction, the
- * storage delete is best-effort (a leftover object is harmless: the org byte
- * counter is the source of truth for the quota, kept honest by the periodic
- * counter reconciliation, and a stray object is never re-counted). Authorization
- * (owner/admin permission OR creator) is enforced by the caller.
+ * Delete a document: delete the row, decrement the org counter, and enqueue the
+ * storage-object purge — ALL in one transaction. The enqueue (transactional
+ * outbox) is atomic with the row delete, so the object can never be silently
+ * orphaned: a committed delete always leaves a durable, replayable deletion job
+ * that the background worker executes. Authorization (owner/admin permission OR
+ * creator) is enforced by the caller.
  */
 export async function deleteDocument(scope: AppScope, docId: string): Promise<void> {
-  const storageKey = await db.transaction(async (tx) => {
+  await db.transaction(async (tx) => {
     const [row] = await tx
       .select({ storageKey: documents.storageKey })
       .from(documents)
@@ -1267,10 +1297,10 @@ export async function deleteDocument(scope: AppScope, docId: string): Promise<vo
         documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${deleted[0]!.size}, 0)`,
       })
       .where(eq(organizations.id, scope.orgId));
-    return row.storageKey;
-  });
 
-  await deleteStorageObject(storageKey);
+    const job = storageKeyToDeletionJob(row.storageKey, "document_deleted");
+    if (job) await enqueueStorageDeletion(tx, job);
+  });
 }
 
 /**
@@ -1295,18 +1325,6 @@ export async function clearDocumentExpiry(scope: AppScope, docId: string): Promi
     .returning(documentSelect);
   if (!row) throw notFound(`Document '${docId}' not found`);
   return row as DocumentRow;
-}
-
-/** Delete a storage object addressed by its `bucket/path` storage key. Best-effort. */
-async function deleteStorageObject(storageKey: string): Promise<void> {
-  const parsed = parseStorageKey(storageKey);
-  if (!parsed) return;
-  await storageDelete(parsed.bucket, parsed.path).catch((err) => {
-    logger.warn("failed to delete document storage object", {
-      storageKey,
-      error: getErrorMessage(err),
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1371,10 +1389,16 @@ export async function cleanupExpiredDocuments(): Promise<number> {
           })
           .where(eq(organizations.id, orgId));
       }
+
+      // Transactional outbox: enqueue the storage purge atomically with the row
+      // delete (replaces the old best-effort post-commit delete).
+      const jobs = removed
+        .map((r) => storageKeyToDeletionJob(r.storageKey, "document_expired"))
+        .filter((j): j is StorageDeletionJobInput => j !== null);
+      await enqueueStorageDeletion(tx, jobs);
       return removed;
     });
     if (removed.length === 0) break;
-    await Promise.all(removed.map((row) => deleteStorageObject(row.storageKey)));
     totalRemoved += removed.length;
     if (removed.length < 500) break;
   }
@@ -1393,11 +1417,13 @@ export async function cleanupExpiredDocuments(): Promise<number> {
  * accounting, so reconciliation cannot clobber a concurrent increment or
  * decrement. Returns the number of orgs fixed.
  *
- * Note: the cascade ALSO orphans the corresponding S3 objects. The storage
- * abstraction (`@appstrate/core/storage`) exposes no list/enumerate operation,
- * so an object-level orphan sweep is not implemented — those bytes are dead
- * storage, but the QUOTA a user is charged against stays exact via this counter
- * recompute. See docs/architecture/DOCUMENTS.md.
+ * Note: this pass only corrects the byte COUNTER. The corresponding storage
+ * objects are NOT orphaned by cascade deletes — the org / application / end-user
+ * delete paths enumerate their documents' storage keys and enqueue them into the
+ * transactional deletion outbox (`storage_deletion_jobs`) before the cascade
+ * drops the rows, so the objects are purged by the background worker. This
+ * counter recompute remains as the drift safety net for the byte total, which
+ * the cascade still bypasses. See docs/architecture/DOCUMENTS.md.
  */
 export async function reconcileOrgDocumentBytes(): Promise<number> {
   let fixed = 0;

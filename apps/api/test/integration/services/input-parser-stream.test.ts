@@ -28,6 +28,7 @@ import {
   downloadRunDocumentStream,
   downloadRunDocumentsManifest,
 } from "../../../src/services/run-workspace-storage.ts";
+import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import { uploadFile as storagePut, fileExists as storageExists } from "@appstrate/db/storage";
 import { ApiError } from "../../../src/lib/errors.ts";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -156,7 +157,9 @@ describe("parseRequestInput — streamed document consume", () => {
       parseRequestInput(fakeCtx({ input: { doc: `upload://${id}` } }, scope), runId, fileSchema),
     ).rejects.toMatchObject({ status: 400 });
 
-    // Workspace rolled back — no orphaned document or manifest.
+    // Workspace rolled back via the deletion outbox — draining the worker
+    // purges any streamed document + manifest (no orphaned object).
+    await processStorageDeletionJobs();
     expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
     // Claim released so the client can re-upload + retry.
@@ -179,7 +182,9 @@ describe("parseRequestInput — streamed document consume", () => {
       parseRequestInput(fakeCtx({ input: { doc: `upload://${id}` } }, scope), runId, fileSchema),
     ).rejects.toMatchObject({ status: 400 });
 
-    // Workspace rolled back, claim released — same guarantees as any rejection.
+    // Workspace rolled back, claim released — same guarantees as any rejection
+    // (the rollback purge runs through the deletion outbox).
+    await processStorageDeletionJobs();
     expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
@@ -210,6 +215,8 @@ describe("parseRequestInput — streamed document consume", () => {
     }
     expect(thrown).toBeInstanceOf(ApiError);
     expect((thrown as ApiError).status).toBe(400);
+    // Rollback purge runs through the deletion outbox — drain it, then gone.
+    await processStorageDeletionJobs();
     expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
   });

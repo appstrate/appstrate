@@ -42,6 +42,7 @@ import { getEnv } from "@appstrate/env";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import { invalidRequest, notFound, conflict, gone, unauthorized } from "../lib/errors.ts";
+import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 
 /** Strip charset / boundary / other parameters from a MIME string and lowercase it. */
 export function normalizeMime(mime: string): string {
@@ -676,8 +677,10 @@ export async function writeProxyUploadContent(
  *     re-consumable (re-trigger after cancel, `rerun_from`); this sweep is
  *     the deleter of record for those retained bytes.
  *
- * Storage objects are removed on a best-effort basis. Returns the number of
- * rows removed.
+ * Storage objects are purged via the transactional deletion outbox: the upload
+ * rows and their deletion jobs are removed/inserted in ONE transaction, so a
+ * committed row delete can never silently orphan the object. Returns the number
+ * of rows removed.
  */
 export async function cleanupExpiredUploads(): Promise<number> {
   let totalRemoved = 0;
@@ -699,23 +702,18 @@ export async function cleanupExpiredUploads(): Promise<number> {
 
     if (expired.length === 0) break;
 
-    await Promise.all(
-      expired.map(async (row) => {
-        const [bucket, ...rest] = row.storageKey.split("/");
-        if (!bucket || rest.length === 0) return;
-        try {
-          await storageDelete(bucket, rest.join("/"));
-        } catch (err) {
-          logger.warn("failed to delete expired upload storage", {
-            uploadId: row.id,
-            error: getErrorMessage(err),
-          });
-        }
-      }),
-    );
-
     const ids = expired.map((r) => r.id);
-    await db.delete(uploads).where(inArray(uploads.id, ids));
+    await db.transaction(async (tx) => {
+      const jobs = expired
+        .map((row) => {
+          const [bucket, ...rest] = row.storageKey.split("/");
+          if (!bucket || rest.length === 0) return null;
+          return { bucket, storageKey: rest.join("/"), reason: "upload_expired" };
+        })
+        .filter((j): j is StorageDeletionJobInput => j !== null);
+      await enqueueStorageDeletion(tx, jobs);
+      await tx.delete(uploads).where(inArray(uploads.id, ids));
+    });
     totalRemoved += expired.length;
     if (expired.length < 500) break;
   }
