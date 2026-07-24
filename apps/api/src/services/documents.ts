@@ -66,6 +66,11 @@ import { resolveAgentOutputMime } from "./mime-policy.ts";
 import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { consumeUploadStream, peekUploads, sanitizeFilename, parseUploadUri } from "./uploads.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
+import {
+  recordDocumentCreated,
+  recordDocumentDeleted,
+  recordDocumentQuotaRejection,
+} from "@appstrate/core/telemetry";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import { getRun } from "./state/runs.ts";
 import { synthesiseFinalize } from "./run-event-ingestion.ts";
@@ -345,6 +350,10 @@ export function effectiveOrgStorageLimit(
  */
 function assertWithinOrgQuota(used: number, addBytes: number, limit: number | undefined): void {
   if (wouldExceedOrgQuota(used, addBytes, limit)) {
+    // One quota rejection per logical over-limit write. This is the single
+    // assert seam — the pre-flight fast reject and the FOR UPDATE re-check both
+    // route through it, and only one of them ever fires for a given write.
+    recordDocumentQuotaRejection();
     throw storageLimitExceeded(`Organization storage limit (${limit} bytes) would be exceeded`);
   }
 }
@@ -804,6 +813,9 @@ async function commitDocumentRow(params: {
       resourceId: documentId,
       after: { name: params.name, size: byteCount, mime: params.mime, purpose: params.purpose },
     });
+    // One durable document committed (the sole commit seam — an agent-output
+    // dedup replay never reaches here, so it is correctly not counted).
+    recordDocumentCreated({ purpose: params.purpose });
     return row as DocumentRow;
   } catch (err) {
     // DB failed after the bytes landed — drop the object so its bytes are not
@@ -1431,13 +1443,13 @@ export async function detachOrDeleteContainedDocuments(
     ? inArray(documents.runId, runIds)
     : eq(documents.chatSessionId, chatSessionId!);
 
-  await db.transaction(async (tx) => {
+  const deletedCount = await db.transaction(async (tx) => {
     const contained = await tx
       .select({ id: documents.id })
       .from(documents)
       .where(containedWhere)
       .for("update");
-    if (contained.length === 0) return;
+    if (contained.length === 0) return 0;
     const containedIds = contained.map((d) => d.id);
 
     // Protected = still referenced by a live consumer outside the deleted set.
@@ -1466,7 +1478,7 @@ export async function detachOrDeleteContainedDocuments(
         .where(inArray(documents.id, detachIds));
     }
 
-    if (deleteIds.length === 0) return;
+    if (deleteIds.length === 0) return 0;
 
     // Unprotected → delete rows + fold freed bytes back per org (a run set is one
     // org in practice, but group defensively — mirrors cleanupExpiredDocuments).
@@ -1493,7 +1505,9 @@ export async function detachOrDeleteContainedDocuments(
       .map((r) => storageKeyToDeletionJob(r.storageKey, "document_deleted"))
       .filter((j): j is StorageDeletionJobInput => j !== null);
     await enqueueStorageDeletion(tx, jobs);
+    return removed.length;
   });
+  recordDocumentDeleted(deletedCount);
 }
 
 /**
@@ -1553,6 +1567,9 @@ export async function deleteDocument(scope: AppScope, docId: string): Promise<vo
     const job = storageKeyToDeletionJob(row.storageKey, "document_deleted");
     if (job) await enqueueStorageDeletion(tx, job);
   });
+  // Reaching here means the transaction committed exactly one row delete (it
+  // throws otherwise) — count it.
+  recordDocumentDeleted(1);
 }
 
 /**
@@ -1651,6 +1668,7 @@ export async function cleanupExpiredDocuments(): Promise<number> {
       return removed;
     });
     if (removed.length === 0) break;
+    recordDocumentDeleted(removed.length);
     totalRemoved += removed.length;
     if (removed.length < 500) break;
   }

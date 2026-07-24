@@ -32,7 +32,12 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
-import { runWithSpan, recordRunDuration, recordRunTerminal } from "@appstrate/core/telemetry";
+import {
+  runWithSpan,
+  recordRunDuration,
+  recordRunTerminal,
+  recordDocumentPartialPublication,
+} from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { emitUsageRecorded } from "./llm-usage-ledger.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
@@ -598,6 +603,10 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // terminal-status counter (the failure-rate source). No-op when disabled.
   recordRunDuration(resolvedDurationMs, { status });
   recordRunTerminal({ status, errorCode: result.error?.code });
+  // A partial artifacts summary means the run lost at least one deliverable
+  // (over-cap/quota/conflict/upload-failed) — a health signal independent of the
+  // run's own terminal status. Emitted on the CAS winner only (exactly-once).
+  if (result.artifacts?.status === "partial") recordDocumentPartialPublication();
 
   // Drop the run's workspace provisioning archive (the AFPS bundle + input
   // docs the agent fetched at startup via GET /api/runs/:runId/workspace).

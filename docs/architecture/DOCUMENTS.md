@@ -150,14 +150,76 @@ The platform MCP server (`apps/api/src/modules/mcp/`) surfaces documents to exte
 - **`resources/read`** on a `document://` URI: a textual document (`text/*`, JSON, XML, `+json`/`+xml`) ≤ 1 MiB that the caller may download is inlined as `text`; everything else (non-textual, oversized, not downloadable) returns metadata only. A foreign/unknown id is an MCP error. Documents are **not** listed under `resources/list` (per spec — links need not be enumerated).
 - **`list_documents`** tool: the caller-visible documents (reuses `listDocumentsForActor`), filterable by `run_id` / `chat_session_id` / `purpose`, returning compact `{documents:[{id, uri, name, mime, size, run_id, package_id, created_at}], has_more}`. Exposed to chat too (both engines discover it dynamically), so the assistant can retrieve and re-inject a `document://` URI.
 
+## Hardening
+
+A cross-cutting summary of the guarantees the sections above rely on, and where they are enforced. The details are in the referenced sections; this is the map.
+
+### Identity model — display name vs workspace name (D-naming)
+
+Two distinct names per document:
+
+- **display name** (`documents.name`) — the human name shown to the agent and the gallery. It may legitimately COLLIDE (two inputs both `report.pdf`); the platform never rejects a duplicate display name.
+- **workspace name** — the single filename actually written into the run container at `workspace/documents/<name>`, which MUST be unique within the run or one input silently overwrites another. `assignWorkspaceNames` (`run-document-naming.ts`) derives a unique, deterministic name per input by inserting a numeric suffix before the extension (`report.pdf`, `report-2.pdf`), so repeated manifest fetches are stable. `assertUniqueWorkspaceNames` is the invariant guard (400 `duplicate_document_name`) for a hand-built/corrupted manifest — the platform never produces a colliding one.
+
+Agent OUTPUTS dedup on `(run_id, sha256, name)`: two outputs with the same name but different content are two distinct rows; the same name AND content dedups to one (idempotent republish).
+
+### Artifacts summary contract
+
+At finalize the runtime posts a terminal `artifacts` summary (`runs.artifacts`, validated STRICTLY — a malformed summary is a 400): `{ status: "complete" | "partial", published: number, failed: [{ name, code }] }`. `status: "partial"` means at least one `outputs/` deliverable was LOST; each `failed.code` is one of `file_too_large`, `quota_exceeded`, `conflict`, `upload_failed`. It is INDEPENDENT of the run's own terminal status — a successful run can still be `partial` (e.g. it exceeded the org quota on the 2nd of 3 outputs). Absent on older containers (column stays null).
+
+### Deletion outbox (transactional purge)
+
+Every document-row delete whose bytes live in storage enqueues a `storage_deletion_jobs` row **in the same transaction** (`enqueueStorageDeletion`) — atomic with the delete, so a committed delete always leaves a durable, replayable record of the object to purge (supersedes the older best-effort post-commit delete described under D4/D8). A background worker (`processStorageDeletionJobs`, every `STORAGE_DELETION_WORKER_INTERVAL_MS`) claims due jobs with a **lease** (it pushes `next_attempt_at` forward by `CLAIM_LEASE_MS` under `FOR UPDATE SKIP LOCKED` — the timestamp advance IS the lease, no extra column), calls `storage.deleteFile` OUTSIDE any transaction (a slow backend must never pin an idle-in-transaction connection), then settles each job: success → `completed_at`; failure → `attempts + 1` + jittered exponential backoff (`computeBackoffMs`, cap 6h). `deleteFile` is idempotent on a missing object, so a crash between execute and settle re-runs cleanly once the lease expires.
+
+Deletion is **replayable forever** — there is NO max-attempts abandon. Past `STORAGE_DELETION_DEAD_LETTER_THRESHOLD` (8) attempts a still-pending job surfaces as a **dead letter** (operator surface + metric) while it keeps retrying at the capped interval: a persistently-failing purge is a visibility problem, never a reason to drop the job. The admin surface (`routes/admin-storage-deletion.ts`) lists jobs by `pending | dead | completed` (keyset-paginated) and offers a "retry now" (`retryStorageDeletionJob`, resets `next_attempt_at`). The counter (`documents_bytes_used`) is decremented at ROW-delete time, not purge time, so the quota is exact regardless of purge lag.
+
+The **tenant-teardown FK cascade** (org / application / end-user delete) still bypasses this (it drops rows directly) — those object orphans are reclaimed by the `scripts/` orphan-sweep + the daily counter reconciliation (see D3/D4). See also `_resetStoreForTesting` (`packages/db/storage.ts`) — the test seam that lets a suite flip the store's presigned posture.
+
+### Capability matrix (D2 + upload privacy)
+
+`getDocumentCapabilities(doc, actor, { visible, canManage })` is the ONE access computation every consumer (REST route, DTO serializer, preview mint, MCP `resources/read`) derives its gates from — no ad-hoc re-derivation:
+
+| purpose        | `visible` (container ACL) | `metadata` (real name/mime/sha256) | `download` (bytes) | `preview`              | `keep` / `delete`             |
+| -------------- | ------------------------- | ---------------------------------- | ------------------ | ---------------------- | ----------------------------- |
+| `agent_output` | any container reader      | ✅ any reader                      | ✅ any reader      | ✅ if previewable mime | creator OR `documents:delete` |
+| `user_upload`  | any container reader      | ✅ creator only                    | ✅ creator only    | ✅ creator + mime      | creator OR `documents:delete` |
+
+A non-creator run reader of a `user_upload` stays `visible` but gets an **opaque reference**: `projectDocumentMetadata` degrades the DTO/MCP read to a generic name (`document`) + mime (`application/octet-stream`) with **no sha256**, and `/content` is a 403 with **no `Repr-Digest`**. This kills the cross-member disclosure + CDN-abuse vectors. The `documents:delete` management permission grants lifecycle control ONLY — never metadata or bytes of another member's upload.
+
+### Quota resolution order
+
+`effectiveOrgStorageLimit(orgLimit, envQuota)` resolves the per-org ceiling as `organizations.documents_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited`. The per-org override wins (a hard `0` is honored, not treated as unset); `setOrgDocumentStorageLimit` (the `PlatformServices.setDocumentStorageLimit` capability the cloud module pilots) sets/clears it — billing-neutral (a byte ceiling, never a plan or price). Enforced through one seam (`assertWithinOrgQuota`): a pre-flight fast reject on the declared size AND a re-check under the org `FOR UPDATE` lock at commit, so concurrent writes serialize and each observes the other's committed bytes.
+
+### Upload integrity + staging budgets (inbound)
+
+Staged uploads (the `uploads` bucket) are bounded on three axes before they ever materialize: `UPLOAD_MAX_ACTIVE_PER_ACTOR` (count of live staged uploads per actor, 429 on the N+1th), `UPLOAD_STAGING_MAX_BYTES_PER_ORG` (summed declared sizes of an org's active staging, 403 — distinct from the DURABLE quota), and `RUN_MAX_DOCUMENTS` (per-run input + output document COUNT, 413 `document_count_exceeded`). Integrity: a client may declare a `sha256`, which on the presigned path is signed into the PUT as `x-amz-checksum-sha256` so S3/MinIO verify the bytes server-side (mismatch → 4xx); on the proxy path the platform hashes on the fly. The authoritative digest is exposed as an RFC 9530 `Repr-Digest` on `/content` (only to a caller with the `metadata` capability). Uploads are also validated by magic-byte MIME sniff, and staging is swept after `UPLOAD_RETENTION_HOURS`.
+
+### Metrics
+
+The telemetry façade (`@appstrate/core/telemetry`, backed by `@appstrate/module-observability` when installed; a true no-op otherwise) emits documents counters at the service seams:
+
+| Metric                                     | Attributes | Emitted at                                                                           |
+| ------------------------------------------ | ---------- | ------------------------------------------------------------------------------------ |
+| `appstrate.documents.created`              | `purpose`  | `commitDocumentRow` (the sole commit seam — a dedup replay never counts).            |
+| `appstrate.documents.deleted`              | —          | Every row removed: explicit delete, container detach-or-delete, retention GC.        |
+| `appstrate.documents.quota_rejections`     | —          | `assertWithinOrgQuota` — once per logical over-limit write (pre-flight OR re-check). |
+| `appstrate.documents.partial_publications` | —          | `finalizeRun` CAS winner, when the artifacts summary `status` is `partial`.          |
+
+These complement the phase-3 storage-deletion gauges (`appstrate.storage_deletion.backlog` / `.oldest_pending_age_seconds` / `.dead_letters` / `.result`). No per-org used/limit gauge — that is a per-org API concern (`GET /organizations/:id`), not a global metric.
+
 ## Environment variables
 
-| Variable                  | Default                     | Purpose                                                                      |
-| ------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
-| `DOCUMENT_MAX_FILE_BYTES` | `104857600` (100 MiB)       | Per-file write cap (413 over-cap).                                           |
-| `ORG_STORAGE_QUOTA_BYTES` | unset (unlimited)           | Per-org durable-storage byte quota (403 `storage_limit_exceeded`).           |
-| `RUN_MAX_OUTPUT_BYTES`    | `268435456` (256 MiB)       | Total bytes a single run may publish as output.                              |
-| `DOCUMENT_RETENTION_DAYS` | unset (permanent)           | Default `expires_at` at creation; drives the GC sweep.                       |
-| `USERCONTENT_URL`         | unset (same-origin preview) | Separate registrable domain for serving HTML previews (strongest isolation). |
+| Variable                              | Default                     | Purpose                                                                                                                    |
+| ------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `DOCUMENT_MAX_FILE_BYTES`             | `104857600` (100 MiB)       | Per-file write cap (413 over-cap).                                                                                         |
+| `ORG_STORAGE_QUOTA_BYTES`             | unset (unlimited)           | Global per-org durable-storage byte quota (403 `storage_limit_exceeded`); overridable per org via `documents_bytes_limit`. |
+| `RUN_MAX_OUTPUT_BYTES`                | `268435456` (256 MiB)       | Total bytes a single run may publish as output.                                                                            |
+| `RUN_MAX_DOCUMENTS`                   | `200`                       | Per-run input + output document COUNT cap (413 `document_count_exceeded`).                                                 |
+| `DOCUMENT_RETENTION_DAYS`             | unset (permanent)           | Default `expires_at` at creation; drives the GC sweep.                                                                     |
+| `UPLOAD_MAX_ACTIVE_PER_ACTOR`         | `50`                        | Max live (unconsumed, unexpired) staged uploads per actor (429 on the N+1th).                                              |
+| `UPLOAD_STAGING_MAX_BYTES_PER_ORG`    | `2147483648` (2 GiB)        | Ceiling on an org's active staging (ephemeral `uploads` bucket); 403 over-budget.                                          |
+| `UPLOAD_RETENTION_HOURS`              | `24`                        | Staged-upload TTL before the sweep reclaims it.                                                                            |
+| `STORAGE_DELETION_WORKER_INTERVAL_MS` | `60000` (60 s)              | Cadence of the storage-deletion outbox worker.                                                                             |
+| `USERCONTENT_URL`                     | unset (same-origin preview) | Separate registrable domain for serving HTML previews (strongest isolation).                                               |
 
-Preview tokens are signed with `UPLOAD_SIGNING_SECRET` (shared with the uploads subsystem). See `docs/ENV.md` for the authoritative env reference.
+Preview tokens are signed with `UPLOAD_SIGNING_SECRET` (shared with the uploads subsystem). `STORAGE_DELETION_DEAD_LETTER_THRESHOLD` (8) is a code constant, not an env var. See `docs/ENV.md` for the authoritative env reference.
