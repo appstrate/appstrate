@@ -197,28 +197,107 @@ export interface DocumentRow {
   createdAt: Date;
 }
 
-/** A document resolved for a caller, with the derived `downloadable` flag. */
+/**
+ * The full access-capability set for one document + caller — the single source
+ * of truth consumed by REST, the DTO serializer, the preview mint, the MCP read
+ * path, and (via the DTO) the UI. Every gate that used to be re-derived ad hoc
+ * (route permission checks, `deriveDownloadable`, preview minting) now flows
+ * from {@link getDocumentCapabilities}.
+ *
+ *  - `visible`  — the caller can resolve this document at all (container ACL). A
+ *    non-visible document is a 404 everywhere; the other flags are then all false.
+ *  - `metadata` — the caller may see the REAL name, mime, size and sha256. When
+ *    false the DTO/MCP read serve an OPAQUE reference (generic name + mime, no
+ *    sha256) — a non-creator run reader of a `user_upload` (privacy decision).
+ *  - `download` — the caller may fetch the bytes (`/content`).
+ *  - `preview`  — the caller may render an in-browser preview (download + a
+ *    previewable mime).
+ *  - `keep`     — the caller may pin/clear the retention deadline.
+ *  - `delete`   — the caller may delete the document.
+ */
+export interface DocumentCapabilities {
+  visible: boolean;
+  metadata: boolean;
+  download: boolean;
+  preview: boolean;
+  keep: boolean;
+  delete: boolean;
+}
+
+/** A document resolved for a caller, with its derived access capabilities. */
 export interface ResolvedDocument {
   row: DocumentRow;
-  downloadable: boolean;
+  capabilities: DocumentCapabilities;
 }
 
 // ---------------------------------------------------------------------------
 // Pure helpers (unit-tested)
 // ---------------------------------------------------------------------------
 
+/** Generic name/mime a document degrades to when `metadata` is not granted. */
+export const GENERIC_DOCUMENT_NAME = "document";
+export const GENERIC_DOCUMENT_MIME = "application/octet-stream";
+
 /**
- * Derive whether `/content` serves the bytes to `actor` (D2 / Anthropic rule):
- * an `agent_output` is downloadable by anyone who can read the container; a
- * `user_upload` only by its own creator — so an upload is never re-served to
- * other actors via the API (kills the CDN-abuse vector). Pure.
+ * The one access-capability computation (D2 / Anthropic rule + the locked
+ * `user_upload` privacy decision). Pure — every consumer (REST route, DTO,
+ * preview mint, MCP read) derives its gates from here rather than re-deriving.
+ *
+ *  - `agent_output` — any caller who can read the container gets full metadata +
+ *    download (a deliverable is freely readable within its container, D6).
+ *  - `user_upload` — content AND sensitive metadata (real name, sha256) are
+ *    reserved to the CREATOR (the uploading user, or the end-user who uploaded it
+ *    for end-user-scoped flows). Other legitimate run readers still SEE the row
+ *    (`visible`) but get an opaque reference (`metadata: false`, `download:
+ *    false`) — never the bytes, the real name, or the hash (kills the
+ *    cross-member disclosure + CDN-abuse vectors).
+ *  - `keep` / `delete` — the document's creator OR a caller holding
+ *    `documents:delete` (owner/admin). The management permission does NOT grant
+ *    metadata or download of another member's upload — only lifecycle control.
+ *
+ * `opts.visible` is the container-ACL outcome (resolved by
+ * {@link getDocumentForActor} / the list SQL / a valid preview token); when
+ * false every capability collapses to false.
  */
-export function deriveDownloadable(
-  doc: { purpose: DocumentPurpose; userId: string | null; endUserId: string | null },
+export function getDocumentCapabilities(
+  doc: { purpose: DocumentPurpose; userId: string | null; endUserId: string | null; mime: string },
   actor: Actor,
-): boolean {
-  if (doc.purpose === "agent_output") return true;
-  return actor.type === "user" ? doc.userId === actor.id : doc.endUserId === actor.id;
+  opts: { visible: boolean; canManage?: boolean },
+): DocumentCapabilities {
+  if (!opts.visible) {
+    return {
+      visible: false,
+      metadata: false,
+      download: false,
+      preview: false,
+      keep: false,
+      delete: false,
+    };
+  }
+  const isAgentOutput = doc.purpose === "agent_output";
+  const isCreator = actor.type === "user" ? doc.userId === actor.id : doc.endUserId === actor.id;
+  // agent_output → any container reader; user_upload → creator/uploader only.
+  const download = isAgentOutput || isCreator;
+  // Sensitive metadata follows the same boundary as the content (never widen a
+  // private upload's real name / hash to a non-creator reader).
+  const metadata = isAgentOutput || isCreator;
+  const preview = download && previewKind(doc.mime) !== null;
+  // Lifecycle control: creator OR the org's manage permission.
+  const manage = isCreator || (opts.canManage ?? false);
+  return { visible: true, metadata, download, preview, keep: manage, delete: manage };
+}
+
+/**
+ * The name/mime/sha256 a caller is allowed to see, degrading to a generic,
+ * hash-less reference when `metadata` is not granted. One place so the DTO and
+ * the MCP read path degrade identically.
+ */
+export function projectDocumentMetadata(
+  row: Pick<DocumentRow, "name" | "mime" | "sha256">,
+  capabilities: Pick<DocumentCapabilities, "metadata">,
+): { name: string; mime: string; sha256?: string } {
+  if (capabilities.metadata) return { name: row.name, mime: row.mime, sha256: row.sha256 };
+  return { name: GENERIC_DOCUMENT_NAME, mime: GENERIC_DOCUMENT_MIME };
 }
 
 /**
@@ -328,11 +407,32 @@ export interface DocumentDto {
   run_id: string | null;
   chat_session_id: string | null;
   packageId: string | null;
+  /**
+   * Display name. Degrades to the generic {@link GENERIC_DOCUMENT_NAME} when the
+   * caller lacks the `metadata` capability (a non-creator run reader of a
+   * `user_upload`) — the real filename is never disclosed to them.
+   */
   name: string;
+  /**
+   * MIME type. Degrades to {@link GENERIC_DOCUMENT_MIME} when the caller lacks
+   * the `metadata` capability.
+   */
   mime: string;
   size: number;
-  sha256: string;
+  /**
+   * SHA-256 of the bytes (hex) — OMITTED (absent) when the caller lacks the
+   * `metadata` capability, so a private upload's content hash is never disclosed
+   * to a non-creator reader.
+   */
+  sha256?: string;
   downloadable: boolean;
+  /**
+   * The full access-capability set for this caller ({@link DocumentCapabilities}).
+   * The single source the UI drives download/preview/keep/delete affordances
+   * from; `downloadable` / `previewable` are kept as flat mirrors of
+   * `capabilities.download` / `capabilities.preview` for existing consumers.
+   */
+  capabilities: DocumentCapabilities;
   /**
    * Whether this document has an in-browser preview the caller may open — a
    * previewable mime ({@link PreviewKind}) on a document the caller can read. A
@@ -390,26 +490,27 @@ function mintPreviewUrl(row: DocumentRow, actor: Actor): string | null {
 }
 
 /**
- * Serialize a resolved document row to its wire DTO. `downloadable` is passed in
- * (the caller already derived it via {@link getDocumentForActor} /
- * {@link deriveDownloadable}) rather than re-derived here. `mintPreview` mints
- * the signed `preview_url` — set ONLY on the single-document GET, never in list
- * rows (a list of N rows must not sign N short-lived tokens). `previewable` (a
- * plain boolean) rides every row so the gallery still shows the preview
- * affordance. `downloadable` gates BOTH the bytes and the preview: a
- * `user_upload` is creator-only content (D2/S1), so a member who can merely
- * resolve the container is neither told it is previewable nor handed a token.
+ * Serialize a resolved document row to its wire DTO from its precomputed
+ * {@link DocumentCapabilities} (the single source — {@link getDocumentCapabilities}).
+ * The DTO applies the metadata degradation ({@link projectDocumentMetadata}):
+ * when `capabilities.metadata` is false the row serves a generic name, a generic
+ * mime, and OMITS `sha256` — so a non-creator run reader of a `user_upload` never
+ * learns its real name or content hash.
+ *
+ * `mintPreview` mints the signed `preview_url` — set ONLY on the single-document
+ * GET, never in list rows (a list of N rows must not sign N short-lived tokens).
+ * `previewable` / `downloadable` are flat mirrors of the capability booleans so
+ * existing consumers keep working while the UI drives affordances off
+ * `capabilities`.
  */
 export function toDocumentDto(
   row: DocumentRow,
   actor: Actor,
-  downloadable: boolean,
+  capabilities: DocumentCapabilities,
   opts: { mintPreview?: boolean } = {},
 ): DocumentDto {
-  const kind = previewKind(row.mime);
-  // `downloadable` gates the preview: a `user_upload` the caller cannot download
-  // is neither advertised as previewable nor assigned a kind (D2/S1).
-  const previewable = downloadable && kind !== null;
+  const view = projectDocumentMetadata(row, capabilities);
+  const previewable = capabilities.preview;
   return {
     object: "document",
     id: row.id,
@@ -419,13 +520,17 @@ export function toDocumentDto(
     run_id: row.runId,
     chat_session_id: row.chatSessionId,
     packageId: row.packageId,
-    name: row.name,
-    mime: row.mime,
+    name: view.name,
+    mime: view.mime,
     size: row.size,
-    sha256: row.sha256,
-    downloadable,
+    ...(view.sha256 !== undefined ? { sha256: view.sha256 } : {}),
+    downloadable: capabilities.download,
+    capabilities,
     previewable,
-    preview_kind: previewable ? kind : null,
+    // `previewKind` is computed from the REAL mime — when metadata is degraded
+    // preview is already false (a non-creator upload is never downloadable), so
+    // this stays consistent with the generic mime on the wire.
+    preview_kind: previewable ? previewKind(row.mime) : null,
     ...(opts.mintPreview ? { preview_url: previewable ? mintPreviewUrl(row, actor) : null } : {}),
     expiresAt: row.expiresAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -904,12 +1009,15 @@ const documentSelect = {
  * Returns `null` (→ 404 at the route) when the document does not exist in the
  * caller's org+app, or when the container's ACL rejects the actor — a
  * cross-org, cross-app, or cross-actor id is indistinguishable from a missing
- * one. `downloadable` is derived for the `/content` gate.
+ * one. The full {@link DocumentCapabilities} are derived once here (the single
+ * source) — `permissions` supplies the `documents:delete` grant that decides the
+ * `keep` / `delete` capabilities (default: none).
  */
 export async function getDocumentForActor(
   scope: AppScope,
   actor: Actor,
   docId: string,
+  permissions: ReadonlySet<string> = new Set(),
 ): Promise<ResolvedDocument | null> {
   if (!DOCUMENT_ID_RE.test(docId)) return null;
   const [row] = await db
@@ -947,15 +1055,24 @@ export async function getDocumentForActor(
     // container would (an end_user reads only its own rows).
     if (actor.type === "end_user" && row.endUserId !== actor.id) return null;
     // Conservative invariant: a detached `user_upload` is creator-only, fully
-    // (metadata included) — never widened by deletion. `deriveDownloadable` IS
-    // the creator check for a `user_upload` (true only for its creator), so a
+    // (metadata included) — never widened by deletion. The `download` capability
+    // IS the creator check for a `user_upload` (true only for its creator), so a
     // non-creator resolves it to null. A detached `agent_output` stays
-    // org-readable (deriveDownloadable is always true for it). This intentionally
-    // also narrows a run-origin detached upload to creator-only — least surprise.
-    if (row.purpose === "user_upload" && !deriveDownloadable(row, actor)) return null;
+    // org-readable (its `download` is always true). This intentionally also
+    // narrows a run-origin detached upload to creator-only — least surprise.
+    if (
+      row.purpose === "user_upload" &&
+      !getDocumentCapabilities(row, actor, { visible: true }).download
+    ) {
+      return null;
+    }
   }
 
-  return { row: row as DocumentRow, downloadable: deriveDownloadable(row, actor) };
+  const capabilities = getDocumentCapabilities(row, actor, {
+    visible: true,
+    canManage: permissions.has("documents:delete"),
+  });
+  return { row: row as DocumentRow, capabilities };
 }
 
 /**
@@ -1068,6 +1185,7 @@ export async function listDocumentsForActor(
   scope: AppScope,
   actor: Actor,
   filters: ListDocumentsFilters = {},
+  permissions: ReadonlySet<string> = new Set(),
 ): Promise<ListEnvelope<DocumentDto>> {
   const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
   const fetchLimit = limit + 1;
@@ -1132,12 +1250,15 @@ export async function listDocumentsForActor(
     .orderBy(desc(documents.createdAt), desc(documents.id))
     .limit(fetchLimit);
 
+  const canManage = permissions.has("documents:delete");
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => {
     const row = r as DocumentRow;
-    // No `mintPreview` — list rows carry only the `previewable` boolean; the
-    // signed preview token is minted on the single-document GET.
-    return toDocumentDto(row, actor, deriveDownloadable(row, actor));
+    // Every row passed the visibility SQL, so `visible: true`. No `mintPreview` —
+    // list rows carry only the `previewable` boolean; the signed preview token is
+    // minted on the single-document GET.
+    const capabilities = getDocumentCapabilities(row, actor, { visible: true, canManage });
+    return toDocumentDto(row, actor, capabilities);
   });
   return { ...listResponse(data, { hasMore }), limit };
 }

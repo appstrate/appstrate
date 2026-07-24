@@ -9795,14 +9795,31 @@ export interface operations {
                             chat_session_id: string | null;
                             /** @description Producing agent package id, or null. */
                             packageId: string | null;
+                            /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
                             name: string;
+                            /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
                             mime: string;
                             /** @description Size in bytes. */
                             size: number;
-                            /** @description SHA-256 of the bytes (hex). */
-                            sha256: string;
-                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                            /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                            sha256?: string;
+                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
                             downloadable: boolean;
+                            /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
+                            capabilities: {
+                                /** @description The caller can resolve this document at all (container ACL). */
+                                visible: boolean;
+                                /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                                metadata: boolean;
+                                /** @description The caller may fetch the bytes (`/content`). */
+                                download: boolean;
+                                /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                                preview: boolean;
+                                /** @description The caller may pin/clear the retention deadline. */
+                                keep: boolean;
+                                /** @description The caller may delete the document. */
+                                delete: boolean;
+                            };
                             /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
                             previewable: boolean;
                             /**
@@ -9873,14 +9890,31 @@ export interface operations {
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
                         packageId: string | null;
+                        /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
                         name: string;
+                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
                         mime: string;
                         /** @description Size in bytes. */
                         size: number;
-                        /** @description SHA-256 of the bytes (hex). */
-                        sha256: string;
-                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                        sha256?: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
                         downloadable: boolean;
+                        /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        capabilities: {
+                            /** @description The caller can resolve this document at all (container ACL). */
+                            visible: boolean;
+                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                            metadata: boolean;
+                            /** @description The caller may fetch the bytes (`/content`). */
+                            download: boolean;
+                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                            preview: boolean;
+                            /** @description The caller may pin/clear the retention deadline. */
+                            keep: boolean;
+                            /** @description The caller may delete the document. */
+                            delete: boolean;
+                        };
                         /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
                         previewable: boolean;
                         /**
@@ -10039,14 +10073,31 @@ export interface operations {
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
                         packageId: string | null;
+                        /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
                         name: string;
+                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
                         mime: string;
                         /** @description Size in bytes. */
                         size: number;
-                        /** @description SHA-256 of the bytes (hex). */
-                        sha256: string;
-                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                        sha256?: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
                         downloadable: boolean;
+                        /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        capabilities: {
+                            /** @description The caller can resolve this document at all (container ACL). */
+                            visible: boolean;
+                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                            metadata: boolean;
+                            /** @description The caller may fetch the bytes (`/content`). */
+                            download: boolean;
+                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                            preview: boolean;
+                            /** @description The caller may pin/clear the retention deadline. */
+                            keep: boolean;
+                            /** @description The caller may delete the document. */
+                            delete: boolean;
+                        };
                         /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
                         previewable: boolean;
                         /**

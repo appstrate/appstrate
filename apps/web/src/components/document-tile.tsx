@@ -120,20 +120,24 @@ export function DocumentTile({
 }) {
   const { t } = useTranslation("documents");
   const runHref = showRunLink ? documentRunHref(doc) : undefined;
+  // Every affordance is driven by the server-computed capabilities (the single
+  // source), not client-side guessing: `download`/`preview` gate the media
+  // actions, `keep`/`delete` gate the lifecycle buttons.
+  const caps = doc.capabilities;
 
-  const canPreview = !!onPreview && doc.previewable;
+  const canPreview = !!onPreview && caps.preview;
   // Media click mirrors the primary action: preview when available, else the
   // authenticated download when the content is reachable.
   const activate = canPreview
     ? () => onPreview(doc)
-    : doc.downloadable
+    : caps.download
       ? () => onDownload(doc.id, doc.name)
       : undefined;
   const activateLabel = canPreview ? t("row.preview") : t("row.download");
 
-  // Gate the image fetch on downloadable — an un-downloadable doc (another
-  // member's upload) would 403, so fall straight to the mime placeholder.
-  const showImage = doc.downloadable && isImageMime(doc.mime);
+  // Gate the image fetch on download — an un-downloadable doc (another member's
+  // upload) would 403, so fall straight to the mime placeholder.
+  const showImage = caps.download && isImageMime(doc.mime);
 
   const media = (
     <>
@@ -214,7 +218,7 @@ export function DocumentTile({
               <EyeIcon className="size-4" />
             </Button>
           ) : null}
-          {doc.downloadable ? (
+          {caps.download ? (
             <Button
               variant="ghost"
               size="icon"
@@ -226,7 +230,7 @@ export function DocumentTile({
               <DownloadIcon className="size-4" />
             </Button>
           ) : null}
-          {onKeep && doc.expiresAt ? (
+          {onKeep && caps.keep && doc.expiresAt ? (
             <Button
               variant="ghost"
               size="icon"
@@ -238,7 +242,7 @@ export function DocumentTile({
               <PinIcon className="size-4" />
             </Button>
           ) : null}
-          {onDelete ? (
+          {onDelete && caps.delete ? (
             <Button
               variant="ghost"
               size="icon"

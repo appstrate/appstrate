@@ -655,11 +655,12 @@ export async function parseRequestInput(
                     // Cross-actor ACL (S2): resolving a run is org-wide-visible to
                     // members, but a `user_upload` is creator-only content — a
                     // member must not deliver another member's private upload into
-                    // their own run. `downloadable` (deriveDownloadable) is always
-                    // true for an `agent_output` (freely chainable, D6) but only for
-                    // the creator of an upload. A rejected ref is indistinguishable
-                    // from missing (404), matching the not-found shape above.
-                    if (!doc || !doc.downloadable) throw notFound(`Document '${id}' not found`);
+                    // their own run. The `download` capability is always true for
+                    // an `agent_output` (freely chainable, D6) but only for the
+                    // creator of an upload. A rejected ref is indistinguishable from
+                    // missing (404), matching the not-found shape above.
+                    if (!doc || !doc.capabilities.download)
+                      throw notFound(`Document '${id}' not found`);
                     return { ref, doc: doc.row };
                   }),
                 );

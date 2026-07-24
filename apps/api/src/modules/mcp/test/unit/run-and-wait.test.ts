@@ -65,6 +65,8 @@ function makeRunAndWait(opts: {
     authHeaders: new Headers({ "X-Org-Id": "org_1", "X-Application-Id": "app_1" }),
     permissions: new Set(opts.permissions ?? ["mcp:invoke"]),
     dispatch,
+    actor: { type: "user", id: "user_1" },
+    scope: { orgId: "org_1", applicationId: "app_1" },
   });
   const tool = tools.find((t) => t.descriptor.name === "run_and_wait");
   if (!tool) throw new Error("run_and_wait tool not built");

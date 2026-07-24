@@ -19,8 +19,8 @@ const documentSchema = {
     "name",
     "mime",
     "size",
-    "sha256",
     "downloadable",
+    "capabilities",
     "previewable",
     "preview_kind",
     "expiresAt",
@@ -38,15 +38,58 @@ const documentSchema = {
     run_id: { type: ["string", "null"], description: "Run container, or null." },
     chat_session_id: { type: ["string", "null"], description: "Chat-session container, or null." },
     packageId: { type: ["string", "null"], description: "Producing agent package id, or null." },
-    name: { type: "string" },
-    mime: { type: "string" },
+    name: {
+      type: "string",
+      description:
+        'Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` ' +
+        "capability (a non-creator run reader of a `user_upload`) — the real filename is withheld.",
+    },
+    mime: {
+      type: "string",
+      description:
+        "MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` " +
+        "capability.",
+    },
     size: { type: "integer", description: "Size in bytes." },
-    sha256: { type: "string", description: "SHA-256 of the bytes (hex)." },
+    sha256: {
+      type: "string",
+      description:
+        "SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` " +
+        "capability, so a private upload's content hash is never disclosed to a non-creator.",
+    },
     downloadable: {
       type: "boolean",
       description:
         "Whether `/content` will serve the bytes to the current caller: an agent output is " +
-        "downloadable by anyone who can read the container; a user upload only by its creator.",
+        "downloadable by anyone who can read the container; a user upload only by its creator. " +
+        "Flat mirror of `capabilities.download`.",
+    },
+    capabilities: {
+      type: "object",
+      description:
+        "The caller's full access-capability set for this document — the single source the UI " +
+        "drives its download/preview/keep/delete affordances from.",
+      required: ["visible", "metadata", "download", "preview", "keep", "delete"],
+      properties: {
+        visible: {
+          type: "boolean",
+          description: "The caller can resolve this document at all (container ACL).",
+        },
+        metadata: {
+          type: "boolean",
+          description:
+            "The caller may see the real name, mime and sha256. When false the row serves an " +
+            "opaque reference (generic name + mime, no sha256).",
+        },
+        download: { type: "boolean", description: "The caller may fetch the bytes (`/content`)." },
+        preview: {
+          type: "boolean",
+          description:
+            "The caller may render an in-browser preview (download + a previewable mime).",
+        },
+        keep: { type: "boolean", description: "The caller may pin/clear the retention deadline." },
+        delete: { type: "boolean", description: "The caller may delete the document." },
+      },
     },
     previewable: {
       type: "boolean",

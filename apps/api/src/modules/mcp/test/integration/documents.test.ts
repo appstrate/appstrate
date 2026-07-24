@@ -167,6 +167,14 @@ describe("mcp list_documents", () => {
       name: "a.txt",
       mime: "text/plain",
       run_id: runA,
+      // Each entry carries the same capabilities the REST DTO computes, plus the
+      // flat `downloadable` mirror — an agent_output is downloadable by any reader.
+      downloadable: true,
+    });
+    expect(docs[0]!.capabilities as Record<string, unknown>).toMatchObject({
+      visible: true,
+      metadata: true,
+      download: true,
     });
     expect(data.has_more).toBe(false);
 
@@ -289,15 +297,32 @@ describe("mcp resources/read (document://)", () => {
     });
   });
 
-  it("returns metadata only for a non-textual (binary) document", async () => {
+  it("inlines a small non-textual (binary) document as a base64 blob", async () => {
     const runId = await seedRun(scope);
-    const docId = await publishDoc(
-      scope,
-      runId,
-      "blob.bin",
-      "application/octet-stream",
-      "\x00\x01\x02rawbytes",
-    );
+    const raw = "\x00\x01\x02rawbytes";
+    const docId = await publishDoc(scope, runId, "blob.bin", "application/octet-stream", raw);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "resources/read",
+      params: { uri: `document://${docId}` },
+    });
+    const contents = (envelope.result?.contents as Array<Record<string, unknown>>) ?? [];
+    expect(contents).toHaveLength(1);
+    // A small binary downloadable doc now returns a base64 `blob` (not metadata):
+    // the read pulls the bytes from storage directly, so S3-presigned deployments
+    // no longer degrade to metadata-only.
+    expect(contents[0]!.mimeType).toBe("application/octet-stream");
+    expect(contents[0]!.text).toBeUndefined();
+    const decoded = Buffer.from(contents[0]!.blob as string, "base64");
+    expect(decoded).toEqual(Buffer.from(new TextEncoder().encode(raw)));
+  });
+
+  it("returns metadata only for a binary document over the 700 KiB blob limit", async () => {
+    const runId = await seedRun(scope);
+    const big = "B".repeat(700 * 1024 + 16); // non-textual mime, over the blob ceiling
+    const docId = await publishDoc(scope, runId, "big.bin", "application/octet-stream", big);
 
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
@@ -309,8 +334,11 @@ describe("mcp resources/read (document://)", () => {
     expect(contents).toHaveLength(1);
     expect(contents[0]!.mimeType).toBe("application/json");
     const meta = JSON.parse(contents[0]!.text as string) as Record<string, unknown>;
-    expect(meta).toMatchObject({ id: docId, mime: "application/octet-stream", downloadable: true });
-    expect(String(meta.note)).toContain("binary");
+    expect(meta).toMatchObject({ id: docId, downloadable: true });
+    // Metadata-only carries the capabilities and a content URL hint.
+    expect((meta.capabilities as Record<string, unknown>).download).toBe(true);
+    expect(String(meta.content_url)).toContain(`/api/documents/${docId}/content`);
+    expect(contents[0]!.blob).toBeUndefined();
   });
 
   it("errors on a foreign (cross-org) document", async () => {
@@ -373,6 +401,11 @@ describe("mcp resources/read (document://)", () => {
     const meta = JSON.parse(contents[0]!.text as string) as Record<string, unknown>;
     expect(meta).toMatchObject({ id: upload.id, downloadable: false });
     expect(String(meta.note)).toContain("not downloadable");
+    // Degraded per the privacy decision: generic name, no real hash, and the
+    // capabilities say metadata is withheld.
+    expect(meta.name).toBe("document");
+    expect(meta.sha256).toBeUndefined();
+    expect((meta.capabilities as Record<string, unknown>).metadata).toBe(false);
     // The private text is never inlined into the read.
     expect(contents[0]!.text).not.toContain("member B private text");
   });

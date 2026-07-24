@@ -213,7 +213,7 @@ describe("documents service + routes", () => {
     // Same app: resolvable, downloadable by its creator.
     const ok = await getDocumentForActor(scope, userActor, doc.id);
     expect(ok?.row.id).toBe(doc.id);
-    expect(ok?.downloadable).toBe(true);
+    expect(ok?.capabilities.download).toBe(true);
 
     // Cross-org (different org scope): 404.
     const other = await createTestContext({ orgSlug: "otherorg" });
@@ -246,7 +246,7 @@ describe("documents service + routes", () => {
     // Owner end-user resolves + downloads (creator).
     const asOwner = await getDocumentForActor(scope, ownerActor, doc.id);
     expect(asOwner?.row.id).toBe(doc.id);
-    expect(asOwner?.downloadable).toBe(true);
+    expect(asOwner?.capabilities.download).toBe(true);
 
     // A different end-user cannot see it at all.
     const asOther = await getDocumentForActor(scope, { type: "end_user", id: euOther.id }, doc.id);
@@ -255,7 +255,7 @@ describe("documents service + routes", () => {
     // A dashboard user (member) can read it but cannot download an upload it did not create.
     const asUser = await getDocumentForActor(scope, userActor, doc.id);
     expect(asUser?.row.id).toBe(doc.id);
-    expect(asUser?.downloadable).toBe(false);
+    expect(asUser?.capabilities.download).toBe(false);
   });
 
   it("GET /:id returns metadata and /content proxy-streams the bytes", async () => {
@@ -802,6 +802,102 @@ describe("documents service + routes", () => {
     expect(outContent.status).toBe(200);
   });
 
+  it("capability matrix: creator / other member / manage-permission / agent_output", async () => {
+    const creator = await createTestUser({ email: "creator@caps.test" });
+    await addOrgMember(ctx.orgId, creator.id, "member");
+    const creatorActor: Actor = { type: "user", id: creator.id };
+    const other = await createTestUser({ email: "other@caps.test" });
+    await addOrgMember(ctx.orgId, other.id, "member");
+    const otherActor: Actor = { type: "user", id: other.id };
+
+    const runId = await seedRunRow(scope);
+    const up = await stageUpload(scope, creator.id, "u.txt", new TextEncoder().encode("upload"));
+    const upload = await createDocumentFromUpload(scope, creatorActor, up, { runId });
+    const { row: output } = await publishStream(scope, runId, "o.txt", "output");
+
+    // Creator of the user_upload → full metadata + download + lifecycle.
+    expect((await getDocumentForActor(scope, creatorActor, upload.id))?.capabilities).toMatchObject(
+      {
+        visible: true,
+        metadata: true,
+        download: true,
+        keep: true,
+        delete: true,
+      },
+    );
+    // Other member (run reader, not creator, no grant) → visible but OPAQUE.
+    expect((await getDocumentForActor(scope, otherActor, upload.id))?.capabilities).toMatchObject({
+      visible: true,
+      metadata: false,
+      download: false,
+      preview: false,
+      keep: false,
+      delete: false,
+    });
+    // Other member WITH documents:delete → may keep/delete; metadata stays opaque.
+    expect(
+      (await getDocumentForActor(scope, otherActor, upload.id, new Set(["documents:delete"])))
+        ?.capabilities,
+    ).toMatchObject({ metadata: false, download: false, keep: true, delete: true });
+    // agent_output → any member gets full metadata + download.
+    expect((await getDocumentForActor(scope, otherActor, output.id))?.capabilities).toMatchObject({
+      visible: true,
+      metadata: true,
+      download: true,
+    });
+  });
+
+  it("a non-creator run reader gets a degraded DTO, a 403 on /content, and no preview token", async () => {
+    const creator = await createTestUser({ email: "c3@docs.test" });
+    await addOrgMember(ctx.orgId, creator.id, "member");
+    const creatorActor: Actor = { type: "user", id: creator.id };
+    const reader = await createTestUser({ email: "r3@docs.test" });
+    await addOrgMember(ctx.orgId, reader.id, "member");
+    const readerHeaders = authHeaders({ ...ctx, cookie: reader.cookie });
+
+    const runId = await seedRunRow(scope);
+    const up = await stageUpload(
+      scope,
+      creator.id,
+      "secret-notes.txt",
+      new TextEncoder().encode("x"),
+    );
+    const upload = await createDocumentFromUpload(scope, creatorActor, up, { runId });
+
+    // GET /:id → visible but opaque: generic name/mime, no sha256, no preview token.
+    const meta = await app.request(`/api/documents/${upload.id}`, { headers: readerHeaders });
+    expect(meta.status).toBe(200);
+    const dto = (await meta.json()) as {
+      name: string;
+      mime: string;
+      sha256?: string;
+      downloadable: boolean;
+      previewable: boolean;
+      preview_url: string | null;
+      capabilities: { metadata: boolean; download: boolean; preview: boolean };
+    };
+    expect(dto.name).toBe("document");
+    expect(dto.mime).toBe("application/octet-stream");
+    expect(dto.sha256).toBeUndefined();
+    expect(dto.downloadable).toBe(false);
+    expect(dto.previewable).toBe(false);
+    expect(dto.preview_url).toBeNull();
+    expect(dto.capabilities).toMatchObject({ metadata: false, download: false, preview: false });
+
+    // /content is refused outright.
+    const content = await app.request(`/api/documents/${upload.id}/content`, {
+      headers: readerHeaders,
+    });
+    expect(content.status).toBe(403);
+
+    // The creator, by contrast, sees the real name + a minted preview token.
+    const creatorHeaders = authHeaders({ ...ctx, cookie: creator.cookie });
+    const own = await app.request(`/api/documents/${upload.id}`, { headers: creatorHeaders });
+    const ownDto = (await own.json()) as { name: string; preview_url: string | null };
+    expect(ownDto.name).toBe("secret-notes.txt");
+    expect(ownDto.preview_url).toContain(`/preview/documents/${upload.id}?t=`);
+  });
+
   it("end-user (impersonated via API key) reads own docs, is blocked from others', and deletes own", async () => {
     const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     const euOther = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
@@ -1009,7 +1105,7 @@ describe("documents service + routes", () => {
     const creatorActor: Actor = { type: "user", id: ctx.user.id };
     const asCreator = await getDocumentForActor(scope, creatorActor, doc.id);
     expect(asCreator?.row.id).toBe(doc.id);
-    expect(asCreator?.downloadable).toBe(true);
+    expect(asCreator?.capabilities.download).toBe(true);
     expect((await listDocumentsForActor(scope, creatorActor, {})).data.map((d) => d.id)).toContain(
       doc.id,
     );

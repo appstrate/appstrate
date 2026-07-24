@@ -22,7 +22,6 @@ import {
   useKeepDocument,
   type DocumentDto,
 } from "../hooks/use-documents";
-import { usePermissions } from "../hooks/use-permissions";
 import { LoadingState, ErrorState, EmptyState } from "./page-states";
 import { DocumentTile } from "./document-tile";
 import { DocumentPreview } from "./document-preview";
@@ -71,7 +70,6 @@ export function DocumentListPanel({
   onKept?: (id: string) => void;
 }) {
   const { t } = useTranslation("documents");
-  const { isMember } = usePermissions();
   const download = useDocumentDownload();
   const deleteDoc = useDeleteDocument();
   const keepDoc = useKeepDocument();
@@ -104,23 +102,23 @@ export function DocumentListPanel({
     });
   };
 
-  const onDelete = isMember ? (doc: DocumentDto) => setPendingDelete(doc) : undefined;
+  // Wire the delete/keep handlers unconditionally — per-document visibility is
+  // driven by the server-computed `capabilities` (delete/keep) inside the tile,
+  // not a client-side role guess. The server still enforces the real rule.
+  const onDelete = (doc: DocumentDto) => setPendingDelete(doc);
 
-  // Keep ("pin") — clears the document's expiry. Same member gate as delete; the
-  // server enforces the real creator-OR-permission rule.
-  const onKeep = isMember
-    ? (doc: DocumentDto) =>
-        keepDoc.mutate(
-          { params: { path: { id: doc.id } } },
-          {
-            onSuccess: () => {
-              toast.success(t("keep.success"));
-              onKept?.(doc.id);
-            },
-            onError: (err) => toast.error(getErrorMessage(err)),
-          },
-        )
-    : undefined;
+  // Keep ("pin") — clears the document's expiry.
+  const onKeep = (doc: DocumentDto) =>
+    keepDoc.mutate(
+      { params: { path: { id: doc.id } } },
+      {
+        onSuccess: () => {
+          toast.success(t("keep.success"));
+          onKept?.(doc.id);
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      },
+    );
 
   const confirmDelete = () => {
     if (!pendingDelete) return;

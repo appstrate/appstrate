@@ -42,6 +42,8 @@ function makeTools(permissions: string[]) {
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
     dispatch,
+    actor: { type: "user", id: "user_1" },
+    scope: { orgId: "org_1", applicationId: "app_1" },
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, calls };
@@ -450,6 +452,8 @@ describe("buildMcpTools contextInjected", () => {
       permissions: new Set(["mcp:read"]),
       dispatch,
       contextInjected: true,
+      actor: { type: "user", id: "user_1" },
+      scope: { orgId: "org_1", applicationId: "app_1" },
     });
     const names = tools.map((t) => t.descriptor.name).sort();
     // get_me is redundant for a context-injected caller; search_operations stays
