@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Coins } from "lucide-react";
 import { useAppConfig } from "../hooks/use-app-config";
-import { useBilling, getUsageBarColor } from "../hooks/use-billing";
+import { useBilling } from "../hooks/use-billing";
+import { getUsageBarColor } from "../lib/usage-severity";
 import {
   SidebarGroup,
   SidebarMenu,
