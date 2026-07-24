@@ -21,9 +21,9 @@
  * (disk or tmpfs) is a free performance choice — a tmpfs-backed `local` volume
  * is NOT shared between the seed helper and the agent (see issue #549).
  *
- * Everything for a run is keyed under its runId and deleted (best-effort) on
- * teardown. The manifest doubles as the deletion index, so cleanup needs no
- * storage `list` primitive.
+ * Everything for a run is keyed under its runId and deleted through the
+ * transactional outbox on teardown. The manifest doubles as the deletion
+ * index, so cleanup needs no storage `list` primitive.
  */
 
 import * as storage from "@appstrate/db/storage";
@@ -63,7 +63,8 @@ const documentKey = (runId: string, name: string): string => `${runId}/documents
  * Run-workspace bucket + key builders, exported so cascade-delete paths (org /
  * application delete) can enqueue a run's bundle + manifest keys into the
  * transactional deletion outbox without downloading the manifest inside their
- * transaction. The worker treats a missing object as a successful delete.
+ * transaction. The worker expands a manifest job into its document objects,
+ * deleting the manifest last so retries retain the deletion index.
  */
 export const RUN_WORKSPACE_BUCKET = BUCKET;
 export const runWorkspaceBundleKey = bundleKey;

@@ -44,7 +44,7 @@ export const adminStorageDeletionPaths = {
       summary: "List storage-deletion outbox jobs",
       description:
         "Platform-admin only (`AUTH_PLATFORM_ADMIN_EMAILS`). Lists jobs from the transactional " +
-        "storage-deletion outbox, newest-first, keyset-paginated on `created_at`. `dead` = " +
+        "storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = " +
         "pending jobs past the dead-letter attempt threshold (still retrying — the threshold is " +
         "a visibility line, not an abandon point).",
       parameters: [
@@ -64,7 +64,7 @@ export const adminStorageDeletionPaths = {
           name: "cursor",
           in: "query",
           required: false,
-          schema: { type: "string", format: "date-time" },
+          schema: { type: "string" },
           description: "Opaque cursor — the `nextCursor` returned by a prior page.",
         },
       ],
@@ -79,7 +79,7 @@ export const adminStorageDeletionPaths = {
                 required: ["items", "nextCursor"],
                 properties: {
                   items: { type: "array", items: storageDeletionJobSchema },
-                  nextCursor: { type: ["string", "null"], format: "date-time" },
+                  nextCursor: { type: ["string", "null"] },
                 },
               },
             },

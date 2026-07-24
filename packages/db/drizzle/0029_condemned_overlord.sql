@@ -1,1 +1,0 @@
-ALTER TABLE "organizations" ADD COLUMN "documents_bytes_limit" bigint;

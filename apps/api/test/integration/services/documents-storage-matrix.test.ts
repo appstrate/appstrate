@@ -29,6 +29,7 @@ import { db } from "@appstrate/db/client";
 import { uploads, storageDeletionJobs } from "@appstrate/db/schema";
 import {
   uploadStream,
+  downloadFile,
   fileExists,
   createUploadUrl,
   _resetStoreForTesting,
@@ -257,5 +258,35 @@ describeRequiresS3("documents storage parity — S3 presigned posture", () => {
     });
     expect(bad.status).toBeGreaterThanOrEqual(400);
     expect(bad.status).toBeLessThan(500);
+  });
+
+  it("presigned PUT is create-only: replay cannot replace the first payload", async () => {
+    const first = new TextEncoder().encode("immutable first payload");
+    const replay = new TextEncoder().encode("replayed replacement!!!");
+    expect(replay.byteLength).toBe(first.byteLength);
+    const key = `replay-test/${crypto.randomUUID()}/file.bin`;
+    const descriptor = await createUploadUrl("uploads", key, {
+      maxSize: first.byteLength,
+    });
+
+    expect(descriptor.headers["If-None-Match"]).toBe("*");
+    const initialPut = await fetch(descriptor.url, {
+      method: "PUT",
+      headers: descriptor.headers,
+      body: first,
+    });
+    expect(initialPut.status).toBe(200);
+
+    const replayPut = await fetch(descriptor.url, {
+      method: "PUT",
+      headers: descriptor.headers,
+      body: replay,
+    });
+    expect(replayPut.status).toBeGreaterThanOrEqual(400);
+    expect(replayPut.status).toBeLessThan(500);
+
+    const stored = await downloadFile("uploads", key);
+    expect(stored).not.toBeNull();
+    expect(new Uint8Array(stored!)).toEqual(first);
   });
 });

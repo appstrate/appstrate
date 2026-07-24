@@ -18,10 +18,13 @@
  * problem, never a reason to drop the job.
  */
 
-import { and, eq, lt, lte, isNull, isNotNull, inArray, sql, desc, gte } from "drizzle-orm";
+import { and, eq, lt, lte, isNull, isNotNull, inArray, sql, desc, gte, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { storageDeletionJobs } from "@appstrate/db/schema";
-import { deleteFile as storageDelete } from "@appstrate/db/storage";
+import {
+  deleteFile as storageDelete,
+  downloadFile as storageDownload,
+} from "@appstrate/db/storage";
 import { recordStorageDeletionSweep, recordStorageDeletionResult } from "@appstrate/core/telemetry";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getEnv } from "@appstrate/env";
@@ -66,6 +69,8 @@ const DEFAULT_BATCH_LIMIT = 100;
  * delete's latency without parking a genuinely-stuck object for long.
  */
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
+const RUN_WORKSPACE_BUCKET = "run-workspace";
+const RUN_WORKSPACE_MANIFEST_KEY = /^([^/]+)\/manifest\.json$/;
 
 /**
  * Exponential backoff for the Nth attempt, capped and jittered. `min(2^attempts
@@ -109,6 +114,8 @@ export async function enqueueStorageDeletion(
 export interface ProcessStorageDeletionDeps {
   /** Physical delete (defaults to the real storage adapter). Idempotent on missing objects. */
   deleteFile?: (bucket: string, path: string) => Promise<void>;
+  /** Small-object download used to expand run-workspace manifests. */
+  downloadFile?: (bucket: string, path: string) => Promise<Uint8Array | null>;
   /** Max jobs to claim in this pass. */
   batchLimit?: number;
   /** Random source for backoff jitter (test seam). */
@@ -120,6 +127,61 @@ export interface ProcessStorageDeletionResult {
   claimed: number;
   completed: number;
   failed: number;
+}
+
+/**
+ * Delete one outbox target. A run-workspace manifest is a durable deletion
+ * index: delete every document it names first, then the manifest itself. If a
+ * document delete fails, the manifest remains available and the whole job can
+ * be retried idempotently. This lets parent-row cascades enqueue two bounded
+ * jobs per run (bundle + manifest) without storage I/O inside their DB
+ * transaction or silently orphaning `documents/*`.
+ */
+async function deleteStorageTarget(
+  bucket: string,
+  storageKey: string,
+  del: (bucket: string, path: string) => Promise<void>,
+  download: (bucket: string, path: string) => Promise<Uint8Array | null>,
+): Promise<void> {
+  const match =
+    bucket === RUN_WORKSPACE_BUCKET ? RUN_WORKSPACE_MANIFEST_KEY.exec(storageKey) : null;
+  if (!match) {
+    await del(bucket, storageKey);
+    return;
+  }
+
+  const manifestBytes = await download(bucket, storageKey);
+  if (manifestBytes) {
+    const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as {
+      documents?: Array<{ name?: unknown; workspace_name?: unknown }>;
+    };
+    if (!Array.isArray(manifest.documents)) {
+      throw new Error(`Invalid run workspace manifest: ${storageKey}`);
+    }
+
+    const names = new Set<string>();
+    for (const entry of manifest.documents) {
+      const name =
+        typeof entry.workspace_name === "string"
+          ? entry.workspace_name
+          : typeof entry.name === "string"
+            ? entry.name
+            : null;
+      if (!name || name === "." || name === ".." || name.includes("/")) {
+        throw new Error(`Invalid document name in run workspace manifest: ${storageKey}`);
+      }
+      names.add(name);
+    }
+
+    const runId = match[1]!;
+    for (const name of names) {
+      await del(bucket, `${runId}/documents/${name}`);
+    }
+  }
+
+  // Delete the index last. A retry can then always rediscover any document
+  // whose previous physical deletion did not complete.
+  await del(bucket, storageKey);
 }
 
 /**
@@ -148,6 +210,7 @@ export async function processStorageDeletionJobs(
   deps: ProcessStorageDeletionDeps = {},
 ): Promise<ProcessStorageDeletionResult> {
   const del = deps.deleteFile ?? storageDelete;
+  const download = deps.downloadFile ?? storageDownload;
   const batchLimit = deps.batchLimit ?? DEFAULT_BATCH_LIMIT;
   const rand = deps.rand ?? Math.random;
 
@@ -185,7 +248,7 @@ export async function processStorageDeletionJobs(
   //        single autocommit UPDATE.
   for (const job of claimedJobs) {
     try {
-      await del(job.bucket, job.storageKey);
+      await deleteStorageTarget(job.bucket, job.storageKey, del, download);
       await db
         .update(storageDeletionJobs)
         .set({ completedAt: new Date(), lastError: null })
@@ -276,8 +339,8 @@ function statusFilter(status: StorageDeletionJobStatus) {
 
 /**
  * List storage-deletion jobs for the operator surface, newest-first, keyset-
- * paginated on `created_at` (cursor = the last row's `created_at` ISO string).
- * `dead` = pending past the attempt threshold (still retrying).
+ * paginated on the exact `(created_at, id)` sort tuple. `dead` = pending past
+ * the attempt threshold (still retrying).
  */
 export async function listStorageDeletionJobs(params: {
   status: StorageDeletionJobStatus;
@@ -285,13 +348,22 @@ export async function listStorageDeletionJobs(params: {
   cursor?: string;
 }): Promise<{ items: StorageDeletionJobView[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(params.limit, 1), 200);
-  const cursorDate = params.cursor ? new Date(params.cursor) : null;
+  const cursor = params.cursor ? decodeStorageDeletionCursor(params.cursor) : null;
   const rows = await db
     .select()
     .from(storageDeletionJobs)
     .where(
-      cursorDate && !Number.isNaN(cursorDate.getTime())
-        ? and(statusFilter(params.status), lt(storageDeletionJobs.createdAt, cursorDate))
+      cursor
+        ? and(
+            statusFilter(params.status),
+            or(
+              lt(storageDeletionJobs.createdAt, cursor.createdAt),
+              and(
+                eq(storageDeletionJobs.createdAt, cursor.createdAt),
+                lt(storageDeletionJobs.id, cursor.id),
+              ),
+            ),
+          )
         : statusFilter(params.status),
     )
     .orderBy(desc(storageDeletionJobs.createdAt), desc(storageDeletionJobs.id))
@@ -310,8 +382,33 @@ export async function listStorageDeletionJobs(params: {
     lastError: r.lastError,
     createdAt: r.createdAt.toISOString(),
   }));
-  const nextCursor = hasMore ? page.at(-1)!.createdAt.toISOString() : null;
+  const nextCursor = hasMore
+    ? encodeStorageDeletionCursor(page.at(-1)!.createdAt, page.at(-1)!.id)
+    : null;
   return { items, nextCursor };
+}
+
+function encodeStorageDeletionCursor(createdAt: Date, id: string): string {
+  return Buffer.from(JSON.stringify([createdAt.toISOString(), id])).toString("base64url");
+}
+
+function decodeStorageDeletionCursor(cursor: string): { createdAt: Date; id: string } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length !== 2 ||
+      typeof parsed[0] !== "string" ||
+      typeof parsed[1] !== "string" ||
+      parsed[1].length === 0
+    ) {
+      return null;
+    }
+    const createdAt = new Date(parsed[0]);
+    return Number.isNaN(createdAt.getTime()) ? null : { createdAt, id: parsed[1] };
+  } catch {
+    return null;
+  }
 }
 
 /**

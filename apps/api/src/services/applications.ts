@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, asc, desc } from "drizzle-orm";
+import { eq, asc, desc, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
-import { applications, documents, uploads, runs } from "@appstrate/db/schema";
+import { applications, documents, uploads, runs, organizations } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
@@ -120,26 +120,30 @@ export async function updateApplication(
 
 /** Delete an application. Throws 400 if default, 404 if not found. */
 export async function deleteApplication(orgId: string, applicationId: string) {
-  // Check existence and default status first
-  const [app] = await db
-    .select({ id: applications.id, isDefault: applications.isDefault })
-    .from(applications)
-    .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }))
-    .limit(1);
-
-  if (!app) throw notFound("Application not found");
-  if (app.isDefault) throw invalidRequest("Cannot delete default application");
-
-  // Enumerate the app's storage objects BEFORE the FK cascade drops the rows and
-  // enqueue their physical deletion into the transactional outbox (same tx), so
-  // the cascade can't silently orphan the app's documents / uploads /
-  // run-workspace objects. Run-workspace per-document keys are not enumerated
-  // (that needs each run's manifest); bundle + manifest keys are enqueued per
-  // run and the worker treats a missing object as success. Sequential queries —
-  // a Drizzle tx multiplexes one connection.
   await db.transaction(async (tx) => {
+    // Use the same org-first lock order as document/upload writes, then lock the
+    // parent application before enumerating its children. The parent lock
+    // prevents a concurrent FK insert from being cascade-deleted without a
+    // matching outbox job.
+    const [org] = await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1)
+      .for("update");
+    if (!org) throw notFound("Application not found");
+
+    const [app] = await tx
+      .select({ id: applications.id, isDefault: applications.isDefault })
+      .from(applications)
+      .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }))
+      .limit(1)
+      .for("update");
+    if (!app) throw notFound("Application not found");
+    if (app.isDefault) throw invalidRequest("Cannot delete default application");
+
     const docRows = await tx
-      .select({ storageKey: documents.storageKey })
+      .select({ storageKey: documents.storageKey, size: documents.size })
       .from(documents)
       .where(eq(documents.applicationId, applicationId));
     const uploadRows = await tx
@@ -171,8 +175,20 @@ export async function deleteApplication(orgId: string, applicationId: string) {
     }
     await enqueueStorageDeletion(tx, storageJobs);
 
-    await tx
+    const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
+    if (bytes > 0) {
+      await tx
+        .update(organizations)
+        .set({
+          documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${bytes}, 0)`,
+        })
+        .where(eq(organizations.id, orgId));
+    }
+
+    const deleted = await tx
       .delete(applications)
-      .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }));
+      .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }))
+      .returning({ id: applications.id });
+    if (deleted.length === 0) throw notFound("Application not found");
   });
 }

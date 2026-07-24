@@ -18,7 +18,14 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { documents, uploads, runs, organizations, storageDeletionJobs } from "@appstrate/db/schema";
+import {
+  applications,
+  documents,
+  uploads,
+  runs,
+  organizations,
+  storageDeletionJobs,
+} from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -29,6 +36,7 @@ import {
 } from "../../../src/services/documents.ts";
 import { deleteOrganization } from "../../../src/services/organizations.ts";
 import { createEndUser, deleteEndUser } from "../../../src/services/end-users.ts";
+import { createApplication, deleteApplication } from "../../../src/services/applications.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import {
   enqueueStorageDeletion,
@@ -46,12 +54,14 @@ type Scope = { orgId: string; applicationId: string };
 async function seedRunRow(
   scope: Scope,
   status: "running" | "success" = "success",
+  endUserId: string | null = null,
 ): Promise<string> {
   const id = `run_${crypto.randomUUID()}`;
   await db.insert(runs).values({
     id,
     orgId: scope.orgId,
     applicationId: scope.applicationId,
+    endUserId,
     status,
     startedAt: new Date(),
   });
@@ -59,18 +69,21 @@ async function seedRunRow(
 }
 
 /** Publish an `agent_output` document from a run's streaming channel; returns the row. */
-async function publishDoc(scope: Scope, runId: string, name: string, content: string) {
-  const { row } = await createDocumentFromStream(
-    scope,
-    runId,
-    { userId: null, endUserId: null },
-    null,
-    {
-      name,
-      mime: "text/plain",
-      body: new Blob([new TextEncoder().encode(content)]).stream(),
-    },
-  );
+async function publishDoc(
+  scope: Scope,
+  runId: string,
+  name: string,
+  content: string,
+  actor: { userId: string | null; endUserId: string | null } = {
+    userId: null,
+    endUserId: null,
+  },
+) {
+  const { row } = await createDocumentFromStream(scope, runId, actor, null, {
+    name,
+    mime: "text/plain",
+    body: new Blob([new TextEncoder().encode(content)]).stream(),
+  });
   return row;
 }
 
@@ -228,6 +241,81 @@ describe("storage-deletion outbox", () => {
     expect(await retryStorageDeletionJob("sdj_does-not-exist")).toBe(false);
   });
 
+  it("paginates every job when several rows share the same createdAt", async () => {
+    const createdAt = new Date("2026-07-24T10:00:00.000Z");
+    await db.insert(storageDeletionJobs).values(
+      ["a", "b", "c"].map((suffix) => ({
+        id: `sdj_cursor_${suffix}`,
+        bucket: "documents",
+        storageKey: `cursor/${suffix}`,
+        reason: "document_deleted",
+        createdAt,
+      })),
+    );
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await listStorageDeletionJobs({
+        status: "pending",
+        limit: 1,
+        ...(cursor ? { cursor } : {}),
+      });
+      seen.push(...page.items.map((item) => item.id));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+
+    expect(seen).toEqual(["sdj_cursor_c", "sdj_cursor_b", "sdj_cursor_a"]);
+    expect(new Set(seen).size).toBe(3);
+  });
+
+  it("expands a run manifest and deletes it last so a failed pass stays retryable", async () => {
+    const runId = `run_${crypto.randomUUID()}`;
+    const manifestKey = `${runId}/manifest.json`;
+    const manifest = new TextEncoder().encode(
+      JSON.stringify({
+        documents: [
+          { name: "A", workspace_name: "a.txt", size: 1 },
+          { name: "B", workspace_name: "b.txt", size: 1 },
+        ],
+      }),
+    );
+    await db.transaction((tx) =>
+      enqueueStorageDeletion(tx, {
+        bucket: "run-workspace",
+        storageKey: manifestKey,
+        reason: "org_deleted",
+      }),
+    );
+
+    const deleted: string[] = [];
+    let failB = true;
+    const deleteFile = async (_bucket: string, key: string): Promise<void> => {
+      deleted.push(key);
+      if (failB && key.endsWith("/b.txt")) throw new Error("temporary storage failure");
+    };
+    const downloadFile = async (): Promise<Uint8Array> => manifest;
+
+    const failed = await processStorageDeletionJobs({ deleteFile, downloadFile, rand: () => 0 });
+    expect(failed.failed).toBe(1);
+    expect(deleted).toEqual([`${runId}/documents/a.txt`, `${runId}/documents/b.txt`]);
+    expect(deleted).not.toContain(manifestKey);
+
+    failB = false;
+    const [job] = await db
+      .select({ id: storageDeletionJobs.id })
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, manifestKey));
+    await retryStorageDeletionJob(job!.id);
+    const retried = await processStorageDeletionJobs({ deleteFile, downloadFile });
+    expect(retried.completed).toBe(1);
+    expect(deleted.slice(-3)).toEqual([
+      `${runId}/documents/a.txt`,
+      `${runId}/documents/b.txt`,
+      manifestKey,
+    ]);
+  });
+
   it("deleteOrganization enqueues documents + uploads keys before the FK cascade", async () => {
     const runId = await seedRunRow(scope, "success");
     const doc = await publishDoc(scope, runId, "org-doc.txt", "org bytes");
@@ -281,8 +369,48 @@ describe("storage-deletion outbox", () => {
     expect(runKeys.has(`${runId}/manifest.json`)).toBe(true);
   });
 
-  it("deleteEndUser enqueues the end-user's staged upload key before the FK cascade", async () => {
+  it("deleteApplication keeps the org quota exact and queues all cascade-owned storage", async () => {
+    const appRow = await createApplication(scope.orgId, { name: "Disposable" }, ctx.user.id);
+    const appScope = { orgId: scope.orgId, applicationId: appRow.id };
+    const runId = await seedRunRow(appScope);
+    const doc = await publishDoc(appScope, runId, "app-doc.txt", "application bytes");
+    const { inKey: docKey } = split(doc.storageKey);
+    const [before] = await db
+      .select({ used: organizations.documentsBytesUsed })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId));
+    expect(before!.used).toBe(doc.size);
+
+    await deleteApplication(scope.orgId, appRow.id);
+
+    expect(await db.select().from(applications).where(eq(applications.id, appRow.id))).toHaveLength(
+      0,
+    );
+    const [after] = await db
+      .select({ used: organizations.documentsBytesUsed })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId));
+    expect(after!.used).toBe(0);
+    expect(
+      await db.select().from(storageDeletionJobs).where(eq(storageDeletionJobs.storageKey, docKey)),
+    ).toHaveLength(1);
+
+    const workspaceJobs = await db
+      .select({ storageKey: storageDeletionJobs.storageKey })
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.bucket, "run-workspace"));
+    expect(new Set(workspaceJobs.map((job) => job.storageKey))).toEqual(
+      new Set([`${runId}.afps`, `${runId}/manifest.json`]),
+    );
+  });
+
+  it("deleteEndUser purges owned bytes but preserves its surviving run workspace", async () => {
     const endUser = await createEndUser(scope, { name: "eu-with-upload" });
+    const runId = await seedRunRow(scope, "success", endUser.id);
+    const doc = await publishDoc(scope, runId, "eu-doc.txt", "end-user bytes", {
+      userId: null,
+      endUserId: endUser.id,
+    });
 
     // A staged upload attributed to the end-user (endUserId, no dashboard user).
     const up = await createUpload({
@@ -302,8 +430,17 @@ describe("storage-deletion outbox", () => {
 
     await deleteEndUser(scope, endUser.id);
 
-    // A deletion job exists for the upload object, enqueued before the cascade
-    // dropped the row (which would otherwise orphan the bytes).
+    const [survivingRun] = await db
+      .select({ endUserId: runs.endUserId })
+      .from(runs)
+      .where(eq(runs.id, runId));
+    expect(survivingRun).toEqual({ endUserId: null });
+    const [org] = await db
+      .select({ used: organizations.documentsBytesUsed })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId));
+    expect(org!.used).toBe(0);
+
     const upJob = await db
       .select()
       .from(storageDeletionJobs)
@@ -312,6 +449,16 @@ describe("storage-deletion outbox", () => {
     expect(upJob[0]!.bucket).toBe(upBucket);
     expect(upJob[0]!.reason).toBe("end_user_deleted");
     expect(upJob[0]!.completedAt).toBeNull();
+    const { inKey: docKey } = split(doc.storageKey);
+    expect(
+      await db.select().from(storageDeletionJobs).where(eq(storageDeletionJobs.storageKey, docKey)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(storageDeletionJobs)
+        .where(eq(storageDeletionJobs.bucket, "run-workspace")),
+    ).toHaveLength(0);
   });
 
   it("cleanupExpiredDocuments enqueues the purge instead of best-effort deleting", async () => {

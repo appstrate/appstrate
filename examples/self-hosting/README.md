@@ -469,7 +469,10 @@ Appstrate:
   middleware, set `maxRequestBodyBytes` ≥ `104857600`.
 
 Only direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) bypasses the proxy —
-browsers then PUT straight at the public S3 endpoint.
+browsers then PUT straight at the public S3 endpoint. Its bucket CORS policy
+must allow the request headers returned in the upload descriptor, including
+`If-None-Match`, `Content-Type`, `Content-Length`, and
+`x-amz-checksum-sha256` (or allow all request headers).
 
 ### Bring-your-own S3 (AWS, R2): abort incomplete multipart uploads
 

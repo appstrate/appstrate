@@ -356,6 +356,17 @@ export async function deleteOrganization(orgId: string): Promise<void> {
       sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(orgId)})::bigint)`,
     );
 
+    // Lock the parent before enumerating cascade-owned children. Concurrent
+    // FK inserts then either commit before this snapshot or wait until the
+    // organization is gone; no child can disappear without an outbox job.
+    const [lockedOrg] = await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1)
+      .for("update");
+    if (!lockedOrg) throw new Error("Failed to delete organization: not found");
+
     const runningResult = await tx
       .select({ runningCount: count() })
       .from(runs)
@@ -368,13 +379,11 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // Enumerate every storage object this org owns BEFORE the FK cascade drops
     // the rows, and enqueue its physical deletion into the transactional outbox
     // (same transaction). Without this the cascade would silently orphan the
-    // org's documents / uploads / run-workspace objects in S3/FS. Run-workspace
-    // per-document keys are NOT enumerated here (they'd require downloading each
-    // run's manifest inside the transaction); the bundle + manifest keys are
-    // enqueued per run and the worker treats a missing object as a successful
-    // delete. Most run workspaces are already purged at run finalize, so the
-    // residual is bounded. (Queries are sequential — a Drizzle tx multiplexes
-    // one connection, so concurrent queries on `tx` are unsafe.)
+    // org's documents / uploads / run-workspace objects in S3/FS. The worker
+    // expands each run manifest into its document keys and deletes the manifest
+    // last, so this transaction does no storage I/O and cleanup remains
+    // replayable. (Queries are sequential — a Drizzle tx multiplexes one
+    // connection, so concurrent queries on `tx` are unsafe.)
     const docRows = await tx
       .select({ storageKey: documents.storageKey })
       .from(documents)

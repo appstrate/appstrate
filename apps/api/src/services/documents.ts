@@ -1682,22 +1682,20 @@ export async function cleanupExpiredDocuments(): Promise<number> {
 /**
  * Reconcile every org's `documents_bytes_used` counter against the authoritative
  * `SUM(documents.size)` and correct any drift. The counter is maintained
- * transactionally on each document insert/delete, but an FK **cascade** delete
- * (run / chat-session / end-user / application / org removed) drops `documents`
- * rows WITHOUT running the app-level decrement — so the counter can drift high
- * over time. This pass recomputes it from the rows and writes the corrected
- * value only for orgs where it differs. Each organization row is locked before
- * its SUM is read. Document writes use the same organization lock for quota
- * accounting, so reconciliation cannot clobber a concurrent increment or
- * decrement. Returns the number of orgs fixed.
+ * transactionally by document writes and the service-mediated parent deletion
+ * paths. Legacy data, manual SQL, or an unmediated FK cascade can still bypass
+ * that application-level accounting, so this pass remains a safety net. It
+ * writes only orgs whose value differs. Each organization row is locked before
+ * its SUM is read; document writes use the same lock, so reconciliation cannot
+ * clobber a concurrent increment or decrement. Returns the number of orgs fixed.
  *
  * Note: this pass only corrects the byte COUNTER. The corresponding storage
  * objects are NOT orphaned by cascade deletes — the org / application / end-user
  * delete paths enumerate their documents' storage keys and enqueue them into the
  * transactional deletion outbox (`storage_deletion_jobs`) before the cascade
  * drops the rows, so the objects are purged by the background worker. This
- * counter recompute remains as the drift safety net for the byte total, which
- * the cascade still bypasses. See docs/architecture/DOCUMENTS.md.
+ * counter recompute remains as a defense-in-depth drift safety net. See
+ * docs/architecture/DOCUMENTS.md.
  */
 export async function reconcileOrgDocumentBytes(): Promise<number> {
   let fixed = 0;

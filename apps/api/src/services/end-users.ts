@@ -6,9 +6,9 @@
  * End-users belong to an application and represent external users of the platform.
  */
 
-import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
+import { eq, and, or, ilike, desc, lt, gt, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, notifications, documents, runs, uploads } from "@appstrate/db/schema";
+import { endUsers, notifications, documents, uploads, organizations } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
@@ -19,11 +19,6 @@ import { toISORequired } from "../lib/date-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { assertApplicationInScope } from "./applications.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
-import {
-  RUN_WORKSPACE_BUCKET,
-  runWorkspaceBundleKey,
-  runWorkspaceManifestKey,
-} from "./run-workspace-storage.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -290,40 +285,45 @@ export async function updateEndUser(
 }
 
 export async function deleteEndUser(scope: AppScope, endUserId: string): Promise<void> {
-  // Verify end-user exists and belongs to app
-  await getEndUser(scope, endUserId);
-
   // Notifications carry the recipient as a polymorphic (recipientType,
   // recipientId) tuple with NO foreign key, so deleting the end-user does not
-  // cascade them. Run-linked notifications are dropped transitively when the
-  // end-user's runs cascade, but a future run-less end-user notification would
-  // orphan — so delete the recipient's notifications explicitly. Scoped to the
-  // app for tenant safety. Both deletes run in one transaction so a failure
-  // mid-way can't leave the end-user gone but their notifications stranded
-  // (or vice-versa).
+  // cascade them. Delete every notification for that recipient explicitly,
+  // scoped to the app for tenant safety.
   await db.transaction(async (tx) => {
-    // Enumerate the end-user's storage objects BEFORE the FK cascade drops the
-    // rows, and enqueue their physical deletion into the transactional outbox
-    // (same tx) so the cascade can't orphan them. The end-user owns `documents`
-    // (endUserId), staged `uploads` (endUserId — migration 0030 added the FK +
-    // ON DELETE cascade, and consume/materialization records the uploader's
-    // endUserId), and run-workspace objects for its runs (endUserId). Run-
-    // workspace per-document keys aren't enumerated (needs each run's manifest) —
-    // bundle + manifest keys are enqueued per run, worker treats a missing object
-    // as success. (Queries are sequential — a Drizzle tx multiplexes one
-    // connection, so concurrent queries on `tx` are unsafe.)
+    // Follow the org-first lock order used by document/upload writes, then lock
+    // the parent end-user before enumerating cascade-owned children. Runs are
+    // deliberately excluded: their FK is ON DELETE SET NULL, so their
+    // workspaces remain live and must not be purged.
+    const [org] = await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId))
+      .limit(1)
+      .for("update");
+    if (!org) throw notFound("End-user not found");
+
+    const [lockedEndUser] = await tx
+      .select({ id: endUsers.id })
+      .from(endUsers)
+      .where(
+        and(
+          eq(endUsers.id, endUserId),
+          eq(endUsers.orgId, scope.orgId),
+          eq(endUsers.applicationId, scope.applicationId),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (!lockedEndUser) throw notFound("End-user not found");
+
     const docRows = await tx
-      .select({ storageKey: documents.storageKey })
+      .select({ storageKey: documents.storageKey, size: documents.size })
       .from(documents)
       .where(eq(documents.endUserId, endUserId));
     const uploadRows = await tx
       .select({ storageKey: uploads.storageKey })
       .from(uploads)
       .where(eq(uploads.endUserId, endUserId));
-    const runRows = await tx
-      .select({ id: runs.id })
-      .from(runs)
-      .where(eq(runs.endUserId, endUserId));
 
     const storageJobs: StorageDeletionJobInput[] = [];
     for (const r of [...docRows, ...uploadRows]) {
@@ -331,19 +331,17 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
       if (bucket && rest.length > 0)
         storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "end_user_deleted" });
     }
-    for (const r of runRows) {
-      storageJobs.push({
-        bucket: RUN_WORKSPACE_BUCKET,
-        storageKey: runWorkspaceBundleKey(r.id),
-        reason: "end_user_deleted",
-      });
-      storageJobs.push({
-        bucket: RUN_WORKSPACE_BUCKET,
-        storageKey: runWorkspaceManifestKey(r.id),
-        reason: "end_user_deleted",
-      });
-    }
     await enqueueStorageDeletion(tx, storageJobs);
+
+    const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
+    if (bytes > 0) {
+      await tx
+        .update(organizations)
+        .set({
+          documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${bytes}, 0)`,
+        })
+        .where(eq(organizations.id, scope.orgId));
+    }
 
     await tx
       .delete(notifications)
@@ -356,8 +354,8 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
         ),
       );
 
-    // Delete end-user — cascades handle connections, runs
-    await tx
+    // Cascade-owned rows are removed; runs survive with end_user_id set null.
+    const deleted = await tx
       .delete(endUsers)
       .where(
         and(
@@ -365,7 +363,9 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
           eq(endUsers.orgId, scope.orgId),
           eq(endUsers.applicationId, scope.applicationId),
         ),
-      );
+      )
+      .returning({ id: endUsers.id });
+    if (deleted.length === 0) throw notFound("End-user not found");
   });
 
   logger.info("End-user deleted via API", {

@@ -12,9 +12,11 @@ export const uploadsPaths = {
         "(1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — " +
         "the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. " +
         "(2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned " +
-        "`headers` (`Content-Type`, plus `Content-Length` when the storage signs the declared " +
-        "size — the body must then be exactly `size` bytes). No other headers are required — " +
-        "in particular no checksum headers; the signed URL does not bind one. " +
+        "`headers` (`Content-Type`; in direct-presign S3 mode also `If-None-Match: *`, plus " +
+        "`Content-Length` when the storage signs the declared size). The body must then be " +
+        "exactly `size` bytes. A successful direct PUT is create-only: replaying the URL cannot " +
+        "replace the stored bytes. When `sha256` was supplied, the returned signed checksum " +
+        "header is required as well. " +
         "(3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual " +
         "byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte " +
         "sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` " +
@@ -109,9 +111,10 @@ export const uploadsPaths = {
                     additionalProperties: { type: "string" },
                     description:
                       "The complete set of headers the client MUST send verbatim on the PUT " +
-                      "request (`Content-Type`, plus `Content-Length` bound to the declared " +
-                      "`size` in direct-presign S3 mode). Nothing else is required — no " +
-                      "checksum headers.",
+                      "request. Direct-presign S3 mode includes `If-None-Match: *` so the first " +
+                      "successful write is immutable, plus `Content-Length` bound to the " +
+                      "declared `size`; when `sha256` was supplied it also includes the signed " +
+                      "`x-amz-checksum-sha256` value.",
                   },
                   expiresAt: { type: "string", format: "date-time" },
                 },

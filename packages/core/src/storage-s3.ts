@@ -357,6 +357,11 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       const cmd = new PutObjectCommand({
         Bucket: config.bucket,
         Key: key,
+        // Presigned URLs are bearer credentials and may be replayed until
+        // expiry. Bind an atomic create-only precondition so a replay cannot
+        // replace bytes at the reserved key after they have been validated or
+        // consumed.
+        IfNoneMatch: "*",
         ...(opts?.mime ? { ContentType: opts.mime } : {}),
         ...(opts?.maxSize && opts.maxSize > 0 ? { ContentLength: opts.maxSize } : {}),
         ...(checksumBase64 ? { ChecksumSHA256: checksumBase64 } : {}),
@@ -377,7 +382,7 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // is a forbidden header in browsers — fetch()/XHR set it automatically
       // from the body, so echoing the descriptor verbatim stays safe there;
       // listing it documents the exact byte count the signature requires.
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = { "If-None-Match": "*" };
       if (opts?.mime) headers["Content-Type"] = opts.mime;
       if (opts?.maxSize && opts.maxSize > 0) headers["Content-Length"] = String(opts.maxSize);
       // The checksum header is part of the signature — the client MUST send it

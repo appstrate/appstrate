@@ -168,7 +168,7 @@ export interface paths {
         };
         /**
          * List storage-deletion outbox jobs
-         * @description Platform-admin only (`AUTH_PLATFORM_ADMIN_EMAILS`). Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `created_at`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point).
+         * @description Platform-admin only (`AUTH_PLATFORM_ADMIN_EMAILS`). Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point).
          */
         get: operations["listStorageDeletionJobs"];
         put?: never;
@@ -4218,7 +4218,7 @@ export interface paths {
         put?: never;
         /**
          * Create a direct-upload descriptor
-         * @description Reserve an upload slot and return a signed URL the client PUTs the binary to. Full upload→run recipe: (1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. (2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned `headers` (`Content-Type`, plus `Content-Length` when the storage signs the declared size — the body must then be exactly `size` bytes). No other headers are required — in particular no checksum headers; the signed URL does not bind one. (3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` re-consumable — for `UPLOAD_RETENTION_HOURS` (default 24 h) after the first consume, so the same input can be re-run (e.g. via `rerun_from` after cancelling) without re-uploading. Unconsumed uploads expire with the signed URL. Small files (≤4 MiB decoded) can skip this flow entirely: inline the content directly in the `runAgent` input as `data:<mime>;name=<filename>;base64,<payload>`. Rate-limited to 20/min.
+         * @description Reserve an upload slot and return a signed URL the client PUTs the binary to. Full upload→run recipe: (1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. (2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned `headers` (`Content-Type`; in direct-presign S3 mode also `If-None-Match: *`, plus `Content-Length` when the storage signs the declared size). The body must then be exactly `size` bytes. A successful direct PUT is create-only: replaying the URL cannot replace the stored bytes. When `sha256` was supplied, the returned signed checksum header is required as well. (3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` re-consumable — for `UPLOAD_RETENTION_HOURS` (default 24 h) after the first consume, so the same input can be re-run (e.g. via `rerun_from` after cancelling) without re-uploading. Unconsumed uploads expire with the signed URL. Small files (≤4 MiB decoded) can skip this flow entirely: inline the content directly in the `runAgent` input as `data:<mime>;name=<filename>;base64,<payload>`. Rate-limited to 20/min.
          */
         post: operations["createUpload"];
         delete?: never;
@@ -6206,7 +6206,6 @@ export interface operations {
                             /** Format: date-time */
                             createdAt: string;
                         }[];
-                        /** Format: date-time */
                         nextCursor: string | null;
                     };
                 };
@@ -6903,6 +6902,7 @@ export interface operations {
                      *         "message": "Summarize my latest emails"
                      *       },
                      *       "result": null,
+                     *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": null,
                      *       "metadata": null,
@@ -18225,6 +18225,7 @@ export interface operations {
                      *         "docId": "doc_123"
                      *       },
                      *       "result": null,
+                     *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": null,
                      *       "metadata": null,
@@ -18569,6 +18570,11 @@ export interface operations {
                      *         },
                      *         "text": "## Inbox triage\nProcessed 42 emails, labeled 38."
                      *       },
+                     *       "artifacts": {
+                     *         "status": "complete",
+                     *         "published": 2,
+                     *         "failed": []
+                     *       },
                      *       "checkpoint": {
                      *         "lastProcessedId": "msg_99f2a"
                      *       },
@@ -18682,6 +18688,7 @@ export interface operations {
                      *         "maxEmails": 50
                      *       },
                      *       "result": null,
+                     *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": "Cancelled by user",
                      *       "metadata": null,
@@ -19626,7 +19633,7 @@ export interface operations {
                         url: string;
                         /** @enum {string} */
                         method: "PUT";
-                        /** @description The complete set of headers the client MUST send verbatim on the PUT request (`Content-Type`, plus `Content-Length` bound to the declared `size` in direct-presign S3 mode). Nothing else is required — no checksum headers. */
+                        /** @description The complete set of headers the client MUST send verbatim on the PUT request. Direct-presign S3 mode includes `If-None-Match: *` so the first successful write is immutable, plus `Content-Length` bound to the declared `size`; when `sha256` was supplied it also includes the signed `x-amz-checksum-sha256` value. */
                         headers: {
                             [key: string]: string;
                         };
