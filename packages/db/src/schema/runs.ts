@@ -42,6 +42,23 @@ export type RunResultPayload = {
   text_truncated?: true;
 };
 
+/**
+ * Terminal summary of the run's end-of-run `outputs/` sweep, persisted on
+ * `runs.artifacts` (nullable jsonb). Reported by the container in its finalize
+ * payload and validated at the write boundary (`RunResultSchema` in
+ * `apps/api/src/routes/runs-events.ts`). `status` is `"partial"` exactly when
+ * `failed` is non-empty; a `"partial"` artifacts summary is INDEPENDENT of the
+ * run's terminal success/failure — a successful run can still have lost a
+ * deliverable (upload abandoned after retries, or a file over the per-file cap).
+ * NULL on older containers that predate the summary and on runs that never
+ * swept (bootstrap failures). Snake_case on the wire, matching the DB column.
+ */
+export type RunArtifactsSummary = {
+  status: "complete" | "partial";
+  published: number;
+  failed: Array<{ name: string; code: string }>;
+};
+
 export const runs = pgTable(
   "runs",
   {
@@ -73,6 +90,13 @@ export const runs = pgTable(
     status: runStatusEnum("status").notNull().default("pending"),
     input: jsonb("input"),
     result: jsonb("result").$type<RunResultPayload>(),
+    // Terminal summary of the end-of-run `outputs/` sweep (#documents-hardening):
+    // how many deliverables the container published and which were LOST. NULL
+    // until finalize writes it, and NULL forever for older containers that do
+    // not report the summary. A `status: "partial"` value coexists with a
+    // successful run — it does NOT change `runs.status`. Written online-safe as
+    // a plain nullable ADD COLUMN (no default backfill).
+    artifacts: jsonb("artifacts").$type<RunArtifactsSummary>(),
     checkpoint: jsonb("checkpoint"),
     // `error` stores the human-readable `RunError.message` only. The
     // runtime `RunError` shape (`code`, `message`, `stack`, `context`,

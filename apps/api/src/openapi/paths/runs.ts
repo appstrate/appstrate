@@ -1313,6 +1313,27 @@ export const runsPaths = {
                   minimum: 0,
                   description: "Authoritative terminal run cost written to the `runs` row.",
                 },
+                artifacts: {
+                  type: "object",
+                  description:
+                    'Terminal summary of the container\'s `outputs/` sweep, written verbatim to `runs.artifacts`. `status: "partial"` iff a deliverable was lost. Validated strictly — a malformed summary yields 400. Absent from older containers (column stays null).',
+                  required: ["status", "published", "failed"],
+                  properties: {
+                    status: { type: "string", enum: ["complete", "partial"] },
+                    published: { type: "integer", minimum: 0 },
+                    failed: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        required: ["name", "code"],
+                        properties: {
+                          name: { type: "string", maxLength: 512 },
+                          code: { type: "string", maxLength: 64 },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             },
           },

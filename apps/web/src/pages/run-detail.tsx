@@ -24,6 +24,7 @@ import { RunDocumentsTab } from "../components/run-documents-tab";
 import { useDocuments } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
+import { RunArtifactsBanner } from "../components/run-artifacts-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
@@ -248,6 +249,8 @@ export function RunDetailPage() {
       )}
 
       <RunDegradedBanner metadata={run.metadata} />
+
+      <RunArtifactsBanner artifacts={run.artifacts} />
 
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs

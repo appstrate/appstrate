@@ -72,6 +72,29 @@ export interface RunResult {
    * Retained for compatibility; new agents should publish durable documents.
    */
   report?: string;
+  /**
+   * Terminal summary of the end-of-run `outputs/` sweep — how many deliverables
+   * the container published and which were LOST (upload abandoned after retries,
+   * or dropped for exceeding the per-file cap). Stamped by the runtime onto the
+   * finalize payload so the platform can persist it on the run row and surface a
+   * "partial deliverables" warning. Absent for older containers that predate the
+   * summary; `status === "partial"` iff `failed` is non-empty. Independent of the
+   * run's terminal success/failure — a successful run can still lose an artifact.
+   */
+  artifacts?: RunArtifactsSummary;
+}
+
+/**
+ * Snake-case terminal artifacts summary carried on {@link RunResult.artifacts}
+ * and the finalize wire. `status` is `"partial"` exactly when `failed` is
+ * non-empty. `published` counts the deliverables the sweep stored; `failed`
+ * lists the ones it could NOT (each with the file name and a stable failure
+ * `code` — e.g. `"file_too_large"`, `"upload_failed"`).
+ */
+export interface RunArtifactsSummary {
+  status: "complete" | "partial";
+  published: number;
+  failed: Array<{ name: string; code: string }>;
 }
 
 /**

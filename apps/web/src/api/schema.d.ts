@@ -3964,7 +3964,7 @@ export interface paths {
         };
         /**
          * List the run's input documents (HMAC)
-         * @description Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{name}`. Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault.
+         * @description Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{workspace_name}` and writes it to `workspace/documents/<workspace_name>`. Each entry carries `name` (the document's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two documents never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault. A 400 `duplicate_document_name` means the stored manifest is malformed (two identical workspace names).
          */
         get: operations["fetchRunDocumentsManifest"];
         put?: never;
@@ -5409,6 +5409,20 @@ export interface components {
                  * @description Present and true when deprecated report text exceeded the 256 KiB storage cap.
                  */
                 text_truncated?: boolean;
+            } | null;
+            /** @description Terminal summary of the run's end-of-run `outputs/` sweep. `status: "partial"` means at least one deliverable was LOST (upload abandoned after retries, or a file over the per-file cap); `failed` lists each lost file's name + a stable code (`file_too_large`, `quota_exceeded`, `conflict`, `upload_failed`). Independent of the run `status` — a successful run can still be `partial`. Null on older runs / containers that never reported it. */
+            artifacts: {
+                /** @enum {string} */
+                status: "complete" | "partial";
+                /** @description Count of deliverables the sweep published to durable storage. */
+                published: number;
+                /** @description Deliverables the sweep could not publish (lost). */
+                failed: {
+                    /** @description Workspace-relative path of the lost file under `outputs/`. */
+                    name: string;
+                    /** @description Stable failure category: `file_too_large`, `quota_exceeded`, `conflict`, or `upload_failed`. */
+                    code: string;
+                }[];
             } | null;
             checkpoint: {
                 [key: string]: unknown;
@@ -18623,11 +18637,21 @@ export interface operations {
                 content: {
                     "application/json": {
                         documents: {
+                            /** @description The document's human display name (may repeat across entries). */
                             name: string;
+                            /** @description Unique single path segment the agent writes the document to under `workspace/documents/` and fetches its bytes by. */
+                            workspace_name: string;
                             size: number;
                         }[];
                     };
                 };
+            };
+            /** @description duplicate_document_name — the stored manifest has colliding workspace names */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Signature verification failed */
             401: {
@@ -18925,6 +18949,16 @@ export interface operations {
                     };
                     /** @description Authoritative terminal run cost written to the `runs` row. */
                     cost?: number;
+                    /** @description Terminal summary of the container's `outputs/` sweep, written verbatim to `runs.artifacts`. `status: "partial"` iff a deliverable was lost. Validated strictly — a malformed summary yields 400. Absent from older containers (column stays null). */
+                    artifacts?: {
+                        /** @enum {string} */
+                        status: "complete" | "partial";
+                        published: number;
+                        failed: {
+                            name: string;
+                            code: string;
+                        }[];
+                    };
                 };
             };
         };

@@ -142,6 +142,30 @@ const RunResultSchema = z
     // Deprecated report-channel aggregate. Kept tolerant so older runners can
     // finalize successfully while new agents publish markdown documents.
     report: z.string().optional().catch(undefined),
+    // Terminal outputs-sweep summary (documents hardening). Snake_case inner
+    // keys, matching the persisted `runs.artifacts` column. Unlike the cosmetic
+    // fields above, this is validated STRICTLY (no `.catch`): a present-but-
+    // malformed summary is a runner-contract violation the platform should
+    // reject with a 400, not silently drop. Absence is fine — older containers
+    // do not send it, and the column stays null. Bounded (name length + failed
+    // count) so a runaway summary cannot bloat the row.
+    artifacts: z
+      .object({
+        status: z.enum(["complete", "partial"]),
+        published: z.number().int().nonnegative(),
+        failed: z
+          .array(
+            z
+              .object({
+                name: z.string().max(512),
+                code: z.string().max(64),
+              })
+              .strict(),
+          )
+          .max(1000),
+      })
+      .strict()
+      .optional(),
   })
   .passthrough();
 
@@ -226,6 +250,7 @@ export function createRunsEventsRouter() {
       ...(d.usage !== undefined ? { usage: d.usage } : {}),
       ...(d.cost !== undefined ? { cost: d.cost } : {}),
       ...(d.report !== undefined ? { report: d.report } : {}),
+      ...(d.artifacts !== undefined ? { artifacts: d.artifacts } : {}),
     };
 
     await finalizeRun({ run, result });

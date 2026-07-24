@@ -31,6 +31,8 @@ import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
 export type { Run } from "@appstrate/db/schema";
+export type { RunArtifactsSummary } from "@appstrate/db/schema";
+import type { RunArtifactsSummary } from "@appstrate/db/schema";
 
 /**
  * Stripe-canonical list envelope for HTTP list responses.
@@ -69,6 +71,15 @@ export interface RunWireDto {
   status: _RunStatus;
   input: unknown;
   result: unknown;
+  /**
+   * Terminal summary of the run's `outputs/` sweep — `{ status, published,
+   * failed }`. `status: "partial"` means at least one deliverable was LOST
+   * (upload abandoned after retries, or over the per-file cap); the failed
+   * names + codes let the UI surface a warning. Null on older runs / containers
+   * that never reported it. Independent of `status` above (a successful run can
+   * still be `artifacts.status: "partial"`).
+   */
+  artifacts: RunArtifactsSummary | null;
   checkpoint: unknown;
   error: string | null;
   metadata: unknown;

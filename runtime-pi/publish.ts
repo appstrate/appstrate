@@ -27,6 +27,7 @@ import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { documentPublishedEvent } from "@appstrate/core/runtime-tool-defs";
 import type { PublishedDocument } from "@appstrate/core/runtime-tool-defs";
+import type { RunArtifactsSummary } from "@appstrate/afps-runtime/runner";
 
 /** Minimal Content-Type inference from a file extension. */
 const MIME_BY_EXT: Record<string, string> = {
@@ -78,6 +79,45 @@ function backoffMs(attempt: number): number {
 /** Ceiling on an honoured `Retry-After` — a huge (or hostile) value must not stall finalize. */
 const RETRY_AFTER_CAP_MS = 30_000;
 
+/**
+ * Stable, machine-readable classification of an abandoned document upload,
+ * carried on {@link UploadError.code} so the sweep records WHY a deliverable was
+ * lost without parsing a human message:
+ *   - `file_too_large`  — server 413 (over the per-file / per-run cap).
+ *   - `quota_exceeded`  — server 403 (org storage quota; `storage_limit_exceeded`).
+ *   - `conflict`        — server 409 (run not running — published after finalize).
+ *   - `upload_failed`   — network error / timeout / 5xx / 429 exhausted after retries.
+ */
+export type UploadFailureCode = "file_too_large" | "quota_exceeded" | "conflict" | "upload_failed";
+
+/**
+ * A document upload the uploader definitively abandoned. Carries a typed
+ * {@link UploadFailureCode} so the sweep (and the artifacts summary) can report
+ * the failure category, not just a string. Extends `Error` so the
+ * `publish_document` tool keeps surfacing `.message` unchanged.
+ */
+export class UploadError extends Error {
+  readonly code: UploadFailureCode;
+  constructor(code: UploadFailureCode, message: string) {
+    super(message);
+    this.name = "UploadError";
+    this.code = code;
+  }
+}
+
+/**
+ * Map a definitive (non-retryable) HTTP status to a typed failure code. The
+ * document endpoint's 4xx vocabulary is narrow: 413 cap, 403 org quota, 409
+ * run-not-running; anything else (401 signature, unexpected 4xx) is a generic
+ * `upload_failed`.
+ */
+function classifyHttpFailure(status: number): UploadFailureCode {
+  if (status === 413) return "file_too_large";
+  if (status === 403) return "quota_exceeded";
+  if (status === 409) return "conflict";
+  return "upload_failed";
+}
+
 /** Parse a `Retry-After` header (delta-seconds or HTTP-date) to milliseconds, capped. */
 function parseRetryAfterMs(header: string | null): number | undefined {
   if (!header) return undefined;
@@ -96,11 +136,15 @@ export interface RunDocumentUploaderDeps {
   /** Absolute workspace root; upload paths are resolved relative to it. */
   workspace: string;
   /**
-   * sha256s already published by this run — every successful upload records its
-   * sha here so the outputs sweep can skip a file the `publish_document` tool
-   * (or a prior sweep entry) already stored. Shared between the tool + sweep.
+   * Dedup identities already published by this run, keyed `${sha256}:${name}` to
+   * MATCH the server dedup identity `(runId, sha256, name)` (the partial unique
+   * index `uq_documents_run_output_dedup`). Every successful upload records its
+   * key here so the outputs sweep can skip a file the `publish_document` tool
+   * (or a prior sweep entry) already stored — while two files with identical
+   * bytes but DIFFERENT names still BOTH publish (distinct keys). Shared between
+   * the tool + sweep.
    */
-  publishedShas: Set<string>;
+  publishedKeys: Set<string>;
   /** Injected for tests; defaults to the global `fetch`. */
   fetchFn?: typeof fetch;
   /** Injected for tests to skip real backoff waits; defaults to `setTimeout`. */
@@ -111,13 +155,14 @@ export interface RunDocumentUploaderDeps {
  * Build the `uploadRunDocument(path, name?)` function the `publish_document`
  * tool and the outputs sweep both call. It streams the file straight to
  * `POST /api/runs/:id/documents` (never buffering it), records the returned
- * sha256 in {@link RunDocumentUploaderDeps.publishedShas}, and returns the
- * durable document metadata. Retryable failures (network error, per-attempt
- * timeout, 5xx, 429 — honouring `Retry-After`) are retried up to
+ * `${sha256}:${name}` identity in {@link RunDocumentUploaderDeps.publishedKeys},
+ * and returns the durable document metadata. Retryable failures (network error,
+ * per-attempt timeout, 5xx, 429 — honouring `Retry-After`) are retried up to
  * {@link MAX_UPLOAD_ATTEMPTS} times with jittered backoff; a definitive 4xx
- * (413/409/401/403) fails fast. Throws a clear `Error` on a missing file, a
- * path resolving outside the workspace (through symlinks or not), or an
- * abandoned upload so the tool surfaces it as a tool error.
+ * (413/409/401/403) fails fast. Throws a typed {@link UploadError} (with a
+ * {@link UploadFailureCode}) on an abandoned upload — and a plain `Error` on a
+ * missing file or a path resolving outside the workspace — so the tool surfaces
+ * it as a tool error and the sweep records the failure category.
  */
 export function createRunDocumentUploader(
   deps: RunDocumentUploaderDeps,
@@ -177,7 +222,9 @@ export function createRunDocumentUploader(
 
       if (res.ok) {
         const doc = (await res.json()) as PublishedDocument;
-        deps.publishedShas.add(doc.sha256);
+        // Record the server-authoritative identity (its sanitized name +
+        // sha256), matching the server dedup index exactly.
+        deps.publishedKeys.add(`${doc.sha256}:${doc.name}`);
         return doc;
       }
 
@@ -192,7 +239,10 @@ export function createRunDocumentUploader(
 
       const retryable = res.status === 429 || res.status >= 500;
       if (!retryable) {
-        throw new Error(`upload of '${relPath}' failed — ${detail}`);
+        throw new UploadError(
+          classifyHttpFailure(res.status),
+          `upload of '${relPath}' failed — ${detail}`,
+        );
       }
       if (attempt >= MAX_UPLOAD_ATTEMPTS) break;
       // Honour `Retry-After` on 429 when present, else jittered backoff.
@@ -201,7 +251,11 @@ export function createRunDocumentUploader(
       await sleep(retryAfterMs ?? backoffMs(attempt));
     }
 
-    throw new Error(
+    // Retries exhausted (network error / timeout / 5xx / 429) — the deliverable
+    // is abandoned. `upload_failed` is the catch-all category for a transient
+    // fault that never resolved.
+    throw new UploadError(
+      "upload_failed",
       `upload of '${relPath}' failed after ${MAX_UPLOAD_ATTEMPTS} attempts — ${lastError}`,
     );
   };
@@ -221,13 +275,40 @@ export interface SweepOutputsDeps {
   /** Absolute workspace root — the sweep scans `<workspace>/outputs/`. */
   workspace: string;
   /** Shared dedup set (same instance handed to the uploader). */
-  publishedShas: Set<string>;
+  publishedKeys: Set<string>;
   /** Per-file ceiling; files above it are skipped with a warning (server also caps). */
   maxFileBytes: number;
   /** Emits the canonical `document.published` event for each swept file. */
   emit: (event: { type: "document.published"; [k: string]: unknown }) => void | Promise<void>;
   /** Structured warning logger (non-fatal — the sweep never blocks finalize). */
   logWarn?: (message: string, data?: Record<string, unknown>) => void;
+}
+
+/**
+ * Why the sweep did NOT publish a scanned entry. All are NON-fatal:
+ *   - `already_published` — its `${sha}:${name}` key was already stored.
+ *   - `hidden`            — a dotfile / file under a hidden dir (never swept).
+ *   - `symlink`           — a symlink (never followed).
+ *   - `oversized`         — over the per-file cap. A LOST deliverable — the
+ *     artifacts summary promotes it to a `file_too_large` failure.
+ *   - `empty_dir_or_other`— a directory or other non-regular entry (readdir
+ *     yields intermediate dirs); nothing to publish.
+ */
+export type SweepSkipReason =
+  "already_published" | "hidden" | "symlink" | "oversized" | "empty_dir_or_other";
+
+/**
+ * Structured outcome of a {@link sweepOutputs} pass. `published` is what reached
+ * durable storage; `skipped` is the (mostly benign) non-publishes with a reason;
+ * `failed` is the deliverables the uploader definitively ABANDONED after retries,
+ * each with a typed {@link UploadFailureCode}. `name` is the workspace-relative
+ * path under `outputs/` (the deterministic per-file identity — see
+ * {@link sweepOutputs} for the basename-vs-path naming note).
+ */
+export interface SweepResult {
+  published: Array<{ name: string; sha256: string; size: number }>;
+  skipped: Array<{ name: string; reason: SweepSkipReason }>;
+  failed: Array<{ name: string; code: UploadFailureCode; message: string }>;
 }
 
 /** Max files uploaded concurrently by a single sweep — bounds container egress. */
@@ -238,71 +319,114 @@ const SWEEP_CONCURRENCY = 3;
  * not already published by this run. Runs after the agent session ends but
  * BEFORE the finalize event, so the published documents surface as run events.
  *
- * Bounded: a file larger than `maxFileBytes` is skipped with a warning; a file
- * whose sha256 is already in `publishedShas` (the `publish_document` tool
- * already stored it) is skipped. Every failure — a missing `outputs/` dir, a
- * per-file upload error — is logged and swallowed: the sweep must never block
- * or fail the run's finalize.
+ * Bounded: a file larger than `maxFileBytes` is recorded as `oversized`
+ * (a LOST deliverable — see {@link summarizeArtifacts}); a file whose
+ * `${sha}:${name}` key is already in `publishedKeys` (the `publish_document`
+ * tool already stored it) is `already_published`. Per-file upload errors are
+ * COLLECTED into {@link SweepResult.failed} — never swallowed — so the caller
+ * can report which deliverables were dropped, yet a single failure still never
+ * blocks or fails the run's finalize.
+ *
+ * Naming: the published document `name` is `path.basename(rel)` — the sweep
+ * deliberately FLATTENS the relative path and does NOT recreate the folder
+ * structure server-side. Two files with the same basename but DIFFERENT content
+ * both publish (different sha256 → different `(sha, name)` identity). Two files
+ * with the same basename AND identical content (e.g. `a/report.md` and
+ * `b/report.md` byte-for-byte) collapse to ONE document — identical bytes under
+ * the same name are the same deliverable by the server's dedup identity. This
+ * is intentional and deterministic; the `SweepResult` still lists each source
+ * path under its own `name` (the workspace-relative `rel`) so reporting stays
+ * per-file.
  */
-export async function sweepOutputs(deps: SweepOutputsDeps): Promise<void> {
+export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult> {
+  const result: SweepResult = { published: [], skipped: [], failed: [] };
   const outputsDir = path.join(deps.workspace, "outputs");
   let entries: string[];
   try {
     entries = await fs.readdir(outputsDir, { recursive: true });
   } catch {
     // No `outputs/` directory — the common case, not an error.
-    return;
+    return result;
   }
 
   const publishEntry = async (rel: string): Promise<void> => {
     const abs = path.join(outputsDir, rel);
+    // Skip hidden files by default: any path segment starting with `.`
+    // (a dotfile like `.env`/`.netrc`, or anything under a hidden dir like
+    // `.git/`). The implicit sweep must not exfiltrate these as org-visible
+    // documents — only the explicit `publish_document` tool may publish them.
+    if (rel.split(path.sep).some((seg) => seg.startsWith("."))) {
+      deps.logWarn?.("outputs sweep skipped hidden file", { file: rel });
+      result.skipped.push({ name: rel, reason: "hidden" });
+      return;
+    }
+    // `lstat` (not `stat`) so a symlink is not followed: its target could sit
+    // outside the workspace, and the uploader would refuse it anyway. Skip it
+    // here with a warning rather than let it reach the uploader as a per-file
+    // error.
+    let stat: Awaited<ReturnType<typeof fs.lstat>>;
     try {
-      // Skip hidden files by default: any path segment starting with `.`
-      // (a dotfile like `.env`/`.netrc`, or anything under a hidden dir like
-      // `.git/`). The implicit sweep must not exfiltrate these as org-visible
-      // documents — only the explicit `publish_document` tool may publish them.
-      if (rel.split(path.sep).some((seg) => seg.startsWith("."))) {
-        deps.logWarn?.("outputs sweep skipped hidden file", { file: rel });
-        return;
-      }
-      // `lstat` (not `stat`) so a symlink is not followed: its target could sit
-      // outside the workspace, and the uploader would refuse it anyway. Skip it
-      // here with a warning rather than let it reach the uploader as a per-file
-      // error.
-      const stat = await fs.lstat(abs);
-      if (stat.isSymbolicLink()) {
-        deps.logWarn?.("outputs sweep skipped symlink", { file: rel });
-        return;
-      }
-      if (!stat.isFile()) return;
-      if (stat.size > deps.maxFileBytes) {
-        deps.logWarn?.("outputs sweep skipped oversized file", {
-          file: rel,
-          size: stat.size,
-          maxFileBytes: deps.maxFileBytes,
-        });
-        return;
-      }
-      const sha = await fileSha256(abs);
-      if (deps.publishedShas.has(sha)) return; // already published by this run
-      // Reserve the sha before the async upload: with SWEEP_CONCURRENCY > 1,
-      // two same-content files would otherwise both pass the check above and
-      // publish twice. Rolled back on failure so a dropped file is not
-      // remembered as published.
-      deps.publishedShas.add(sha);
-      try {
-        const doc = await deps.uploader(path.join("outputs", rel), path.basename(rel));
-        await deps.emit(documentPublishedEvent(doc));
-      } catch (err) {
-        deps.publishedShas.delete(sha);
-        throw err;
-      }
+      stat = await fs.lstat(abs);
     } catch (err) {
+      // Vanished between readdir and lstat, or unreadable — treat as a dropped
+      // deliverable so it is visible, not silently gone.
+      result.failed.push({ name: rel, code: "upload_failed", message: getErrorMessage(err) });
+      deps.logWarn?.("outputs sweep could not stat a deliverable", {
+        file: rel,
+        error: getErrorMessage(err),
+      });
+      return;
+    }
+    if (stat.isSymbolicLink()) {
+      deps.logWarn?.("outputs sweep skipped symlink", { file: rel });
+      result.skipped.push({ name: rel, reason: "symlink" });
+      return;
+    }
+    if (!stat.isFile()) {
+      // Intermediate directory (recursive readdir lists them) or other
+      // non-regular entry — nothing to publish, not a failure.
+      result.skipped.push({ name: rel, reason: "empty_dir_or_other" });
+      return;
+    }
+    if (stat.size > deps.maxFileBytes) {
+      deps.logWarn?.("outputs sweep skipped oversized file", {
+        file: rel,
+        size: stat.size,
+        maxFileBytes: deps.maxFileBytes,
+      });
+      result.skipped.push({ name: rel, reason: "oversized" });
+      return;
+    }
+
+    const sha = await fileSha256(abs);
+    const documentName = path.basename(rel);
+    const key = `${sha}:${documentName}`;
+    if (deps.publishedKeys.has(key)) {
+      // Already published by this run (the `publish_document` tool or a prior
+      // sweep entry with the same content + name).
+      result.skipped.push({ name: rel, reason: "already_published" });
+      return;
+    }
+    // Reserve the key before the async upload: with SWEEP_CONCURRENCY > 1, two
+    // identical-content+same-name files would otherwise both pass the check
+    // above and publish twice. Rolled back on failure so a dropped file is not
+    // remembered as published.
+    deps.publishedKeys.add(key);
+    try {
+      const doc = await deps.uploader(path.join("outputs", rel), documentName);
+      await deps.emit(documentPublishedEvent(doc));
+      result.published.push({ name: rel, sha256: doc.sha256, size: doc.size });
+    } catch (err) {
+      deps.publishedKeys.delete(key);
       // Best-effort: a single file's failure must not abort the sweep or the
-      // run. The uploader has already exhausted its retries, so this deliverable
-      // is DROPPED — surface it clearly (name + last error/attempt count).
+      // run. The uploader has exhausted its retries, so this deliverable is
+      // DROPPED — COLLECT it (name + typed code + last error) instead of
+      // swallowing, so finalize can report the loss.
+      const code: UploadFailureCode = err instanceof UploadError ? err.code : "upload_failed";
+      result.failed.push({ name: rel, code, message: getErrorMessage(err) });
       deps.logWarn?.("outputs sweep dropped a deliverable (upload failed)", {
         file: rel,
+        code,
         error: getErrorMessage(err),
       });
     }
@@ -321,4 +445,27 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<void> {
   await Promise.all(
     Array.from({ length: Math.min(SWEEP_CONCURRENCY, entries.length) }, () => worker()),
   );
+  return result;
+}
+
+/**
+ * Reduce a {@link SweepResult} to the terminal artifacts summary persisted on
+ * the run row. `failed` combines the abandoned uploads with the `oversized`
+ * skips (a deliverable dropped for exceeding the per-file cap is a LOSS, mapped
+ * to `file_too_large`); the other skip reasons (`already_published`, `hidden`,
+ * `symlink`, `empty_dir_or_other`) are NORMAL and excluded. `status` is
+ * `"partial"` exactly when at least one deliverable was lost.
+ */
+export function summarizeArtifacts(result: SweepResult): RunArtifactsSummary {
+  const failed: Array<{ name: string; code: string }> = [
+    ...result.failed.map((f) => ({ name: f.name, code: f.code })),
+    ...result.skipped
+      .filter((s) => s.reason === "oversized")
+      .map((s) => ({ name: s.name, code: "file_too_large" })),
+  ];
+  return {
+    status: failed.length > 0 ? "partial" : "complete",
+    published: result.published.length,
+    failed,
+  };
 }

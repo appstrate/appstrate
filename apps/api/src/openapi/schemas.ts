@@ -549,6 +549,7 @@ export const schemas = {
       "status",
       "input",
       "result",
+      "artifacts",
       "checkpoint",
       "error",
       "metadata",
@@ -622,6 +623,39 @@ export const schemas = {
             deprecated: true,
             description:
               "Present and true when deprecated report text exceeded the 256 KiB storage cap.",
+          },
+        },
+      },
+      artifacts: {
+        type: ["object", "null"],
+        description:
+          "Terminal summary of the run's end-of-run `outputs/` sweep. `status: \"partial\"` means at least one deliverable was LOST (upload abandoned after retries, or a file over the per-file cap); `failed` lists each lost file's name + a stable code (`file_too_large`, `quota_exceeded`, `conflict`, `upload_failed`). Independent of the run `status` — a successful run can still be `partial`. Null on older runs / containers that never reported it.",
+        required: ["status", "published", "failed"],
+        properties: {
+          status: { type: "string", enum: ["complete", "partial"] },
+          published: {
+            type: "integer",
+            minimum: 0,
+            description: "Count of deliverables the sweep published to durable storage.",
+          },
+          failed: {
+            type: "array",
+            description: "Deliverables the sweep could not publish (lost).",
+            items: {
+              type: "object",
+              required: ["name", "code"],
+              properties: {
+                name: {
+                  type: "string",
+                  description: "Workspace-relative path of the lost file under `outputs/`.",
+                },
+                code: {
+                  type: "string",
+                  description:
+                    "Stable failure category: `file_too_large`, `quota_exceeded`, `conflict`, or `upload_failed`.",
+                },
+              },
+            },
           },
         },
       },
