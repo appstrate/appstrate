@@ -3,7 +3,8 @@
 import { hostname } from "node:os";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
-import { classifyDockerNetworkError } from "./docker-errors.ts";
+import { classifyDockerNetworkError, createContainerWithImagePull } from "./docker-errors.ts";
+import { singleflight } from "../lib/singleflight.ts";
 
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 const DOCKER_API_TIMEOUT_MS = 30_000;
@@ -85,10 +86,27 @@ async function imageExists(image: string): Promise<boolean> {
 }
 
 /**
+ * Pulls currently in flight, keyed by image reference. A cold host starting
+ * several runs at once would otherwise issue one `POST /images/create` per
+ * run for the same reference: the daemon deduplicates the layer downloads
+ * internally, but each caller still opens its own progress stream and waits
+ * out the full pull. Coalescing bounds the second caller's wait by the first
+ * pull instead of a serialised repeat.
+ */
+const inFlightPulls = new Map<string, Promise<unknown>>();
+
+/**
  * Pull an image from registry. Waits for the pull to complete.
  * Docker pull API streams JSON progress — we consume it fully before resolving.
+ *
+ * Concurrent calls for the same reference share one pull (see
+ * {@link inFlightPulls}); callers for different references run independently.
  */
-export async function pullImage(image: string): Promise<void> {
+export function pullImage(image: string): Promise<void> {
+  return singleflight(inFlightPulls, image, () => pullImageUncoalesced(image));
+}
+
+async function pullImageUncoalesced(image: string): Promise<void> {
   logger.info("Pulling Docker image", { image });
 
   const res = await dockerFetch(
@@ -214,11 +232,18 @@ export async function createContainer(
     },
   };
 
-  const res = await dockerFetch(`/containers/create?name=${containerName}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  // Pull-on-missing-image: the Engine API never pulls on create, so a host
+  // image prune between runs would otherwise fail every run until restart.
+  const res = await createContainerWithImagePull(
+    () =>
+      dockerFetch(`/containers/create?name=${containerName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    () => pullImage(options.image),
+    { warn: (msg, data) => logger.warn(msg, { ...data, image: options.image, runId }) },
+  );
 
   await assertDockerOk(res, `create ${options.adapterName} container`);
 
@@ -618,39 +643,51 @@ export async function runEphemeralCommand(options: {
   // silently consume the create+start+wait budget.
   const deadline = Date.now() + timeoutMs;
 
-  const createRes = await dockerFetch("/containers/create", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      Image: options.image,
-      Cmd: options.cmd,
-      Tty: false,
-      HostConfig: {
-        // AutoRemove deliberately OFF — Docker removes the container
-        // the moment its main process exits, racing the `waitForExit`
-        // poll (which inspects /containers/<id>/json every 2s). Without
-        // the container row, the poll sees 404 and reports the
-        // sentinel exit code 137 even on a clean `true` invocation.
-        // We remove explicitly after `waitForExit` resolves so the
-        // exit code is always observable.
-        AutoRemove: false,
-        SecurityOpt: ["no-new-privileges"],
-        CapDrop: ["ALL"],
-        // chown needs CHOWN cap restored — narrow grant for the init
-        // step; runEphemeralCommand has only one caller today (the
-        // workspace-volume init), so this stays trivially auditable.
-        // If more callers appear with different cap needs, surface
-        // `capAdd` through the options.
-        CapAdd: ["CHOWN", "FOWNER"],
-        ...(options.binds && options.binds.length > 0 ? { Binds: options.binds } : {}),
-      },
-      Labels: {
-        "appstrate.managed": "true",
-        "appstrate.adapter": "ephemeral",
-        ...(options.runId ? { "appstrate.run": options.runId } : {}),
-      },
-    }),
+  const createBody = JSON.stringify({
+    Image: options.image,
+    Cmd: options.cmd,
+    Tty: false,
+    HostConfig: {
+      // AutoRemove deliberately OFF — Docker removes the container
+      // the moment its main process exits, racing the `waitForExit`
+      // poll (which inspects /containers/<id>/json every 2s). Without
+      // the container row, the poll sees 404 and reports the
+      // sentinel exit code 137 even on a clean `true` invocation.
+      // We remove explicitly after `waitForExit` resolves so the
+      // exit code is always observable.
+      AutoRemove: false,
+      SecurityOpt: ["no-new-privileges"],
+      CapDrop: ["ALL"],
+      // chown needs CHOWN cap restored — narrow grant for the init
+      // step; runEphemeralCommand has only one caller today (the
+      // workspace-volume init), so this stays trivially auditable.
+      // If more callers appear with different cap needs, surface
+      // `capAdd` through the options.
+      CapAdd: ["CHOWN", "FOWNER"],
+      ...(options.binds && options.binds.length > 0 ? { Binds: options.binds } : {}),
+    },
+    Labels: {
+      "appstrate.managed": "true",
+      "appstrate.adapter": "ephemeral",
+      ...(options.runId ? { "appstrate.run": options.runId } : {}),
+    },
   });
+
+  // `ensureImage` above closes the common case, but a host prune can still
+  // land between that check and this create — heal the same way.
+  const createRes = await createContainerWithImagePull(
+    () =>
+      dockerFetch("/containers/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: createBody,
+      }),
+    () => pullImage(options.image),
+    {
+      warn: (msg, data) =>
+        logger.warn(msg, { ...data, image: options.image, runId: options.runId }),
+    },
+  );
   await assertDockerOk(createRes, "create ephemeral container");
   const { Id: containerId } = (await createRes.json()) as { Id: string };
 
