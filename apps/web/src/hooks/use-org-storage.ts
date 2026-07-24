@@ -31,9 +31,14 @@ export function useOrgStorage(options?: { enabled?: boolean }) {
   const storage = orgDetail?.storage;
   const usedBytes = storage?.used_bytes ?? null;
   const limitBytes = storage?.effective_limit_bytes ?? null;
+  // A hard ZERO limit is a valid quota (every write refused) — saturated, not
+  // unlimited: percent is 100 so the gauge and near-limit warnings fire. Only
+  // a null limit means unlimited (no meaningful ratio → null percent).
   const percent =
-    storage && limitBytes !== null && limitBytes > 0
-      ? Math.min(100, Math.round((storage.used_bytes / limitBytes) * 100))
+    storage && limitBytes !== null
+      ? limitBytes > 0
+        ? Math.min(100, Math.round((storage.used_bytes / limitBytes) * 100))
+        : 100
       : null;
 
   return { storage, usedBytes, limitBytes, percent, isLoading };

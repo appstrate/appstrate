@@ -120,6 +120,15 @@ export async function recordLlmUsage(
   entry: LlmUsageEntry,
   opts: RecordLlmUsageOptions = {},
 ): Promise<number | null> {
+  // Birth invariant, enforced HERE since migration 0028 dropped the
+  // `llm_usage_runner_has_run_id` CHECK (a detached row legitimately has
+  // run_id NULL, so the DB can no longer distinguish birth from detach): a
+  // runner row without a run would dodge the monotonic partial unique index
+  // (`WHERE source = 'runner' AND run_id IS NOT NULL`), turning every
+  // cumulative snapshot into a fresh, immediately-settled row — overbilling.
+  if (entry.source === "runner" && !entry.runId) {
+    throw new Error("recordLlmUsage: a runner row must be born with a runId");
+  }
   const executor = opts.executor ?? db;
   const values = {
     source: entry.source,

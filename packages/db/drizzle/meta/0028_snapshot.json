@@ -2759,6 +2759,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "chat_session_id": {
+          "name": "chat_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "model": {
           "name": "model",
           "type": "text",
@@ -2774,6 +2780,13 @@
         "api": {
           "name": "api",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credential_source": {
+          "name": "credential_source",
+          "type": "credential_source",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": false
         },
@@ -2891,6 +2904,21 @@
           "method": "btree",
           "with": {}
         },
+        "idx_llm_usage_chat_session_id": {
+          "name": "idx_llm_usage_chat_session_id",
+          "columns": [
+            {
+              "expression": "chat_session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "idx_llm_usage_org_created": {
           "name": "idx_llm_usage_org_created",
           "columns": [
@@ -2982,13 +3010,31 @@
           "onDelete": "set null",
           "onUpdate": "no action"
         },
+        "llm_usage_chat_session_id_chat_sessions_id_fk": {
+          "name": "llm_usage_chat_session_id_chat_sessions_id_fk",
+          "tableFrom": "llm_usage",
+          "tableTo": "chat_sessions",
+          "columnsFrom": ["chat_session_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
         "llm_usage_run_id_org_id_fk": {
           "name": "llm_usage_run_id_org_id_fk",
           "tableFrom": "llm_usage",
           "tableTo": "runs",
           "columnsFrom": ["run_id", "org_id"],
           "columnsTo": ["id", "org_id"],
-          "onDelete": "cascade",
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "llm_usage_chat_session_id_org_id_fk": {
+          "name": "llm_usage_chat_session_id_org_id_fk",
+          "tableFrom": "llm_usage",
+          "tableTo": "chat_sessions",
+          "columnsFrom": ["chat_session_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -3003,6 +3049,10 @@
         "llm_usage_proxy_has_request_id": {
           "name": "llm_usage_proxy_has_request_id",
           "value": "source <> 'proxy' OR request_id IS NOT NULL"
+        },
+        "llm_usage_context_single": {
+          "name": "llm_usage_context_single",
+          "value": "run_id IS NULL OR chat_session_id IS NULL"
         }
       },
       "isRLSEnabled": false
@@ -5883,6 +5933,115 @@
       },
       "isRLSEnabled": false
     },
+    "public.storage_deletion_jobs": {
+      "name": "storage_deletion_jobs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "bucket": {
+          "name": "bucket",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_storage_deletion_jobs_due": {
+          "name": "idx_storage_deletion_jobs_due",
+          "columns": [
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"storage_deletion_jobs\".\"completed_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_storage_deletion_jobs_pending": {
+          "name": "uq_storage_deletion_jobs_pending",
+          "columns": [
+            {
+              "expression": "bucket",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "storage_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"storage_deletion_jobs\".\"completed_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.audit_events": {
       "name": "audit_events",
       "schema": "",
@@ -7759,6 +7918,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "uq_chat_sessions_id_org_id": {
+          "name": "uq_chat_sessions_id_org_id",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -7786,118 +7966,14 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
-    },
-    "public.storage_deletion_jobs": {
-      "name": "storage_deletion_jobs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "bucket": {
-          "name": "bucket",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "storage_key": {
-          "name": "storage_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_attempt_at": {
-          "name": "next_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_storage_deletion_jobs_due": {
-          "name": "idx_storage_deletion_jobs_due",
-          "columns": [
-            {
-              "expression": "next_attempt_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"storage_deletion_jobs\".\"completed_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "uq_storage_deletion_jobs_pending": {
-          "name": "uq_storage_deletion_jobs_pending",
-          "columns": [
-            {
-              "expression": "bucket",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "storage_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"storage_deletion_jobs\".\"completed_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
     }
   },
   "enums": {
+    "public.credential_source": {
+      "name": "credential_source",
+      "schema": "public",
+      "values": ["system", "org"]
+    },
     "public.document_purpose": {
       "name": "document_purpose",
       "schema": "public",
