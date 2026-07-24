@@ -1,6 +1,6 @@
 {
   "appId": "dev.appstrate.desktop",
-  "productName": "Appstrate Desktop",
+  "productName": "Appstrate",
   "directories": {
     "output": "release",
     "buildResources": "assets"

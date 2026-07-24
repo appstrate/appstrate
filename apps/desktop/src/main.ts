@@ -98,6 +98,12 @@ if (!app.isPackaged && process.env.APPSTRATE_DESKTOP_REMOTE_DEBUG === "1") {
 // I/O on the Electron main thread.
 import { appendFile } from "node:fs";
 const debugLogPath = join(app.getPath("logs"), "appstrate-desktop.log");
+// Use the product name in development too, where Electron would otherwise
+// appear as "Electron". Preserve the already-resolved user-data directory so
+// the rename never disconnects existing profiles or browser sessions.
+const userDataPath = app.getPath("userData");
+app.setName("Appstrate");
+app.setPath("userData", userDataPath);
 const _debugLog = (msg: string): void => {
   if (process.env.APPSTRATE_DESKTOP_DEBUG_LOG !== "1") return;
   appendFile(debugLogPath, `[${new Date().toISOString()}] ${msg}`, () => {});
@@ -154,7 +160,7 @@ function createMainWindow(): BaseWindow {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: "Appstrate Desktop",
+    title: "Appstrate",
     titleBarStyle: "hiddenInset",
     icon: resolveAssetPath("icon.png"),
   });
@@ -472,7 +478,7 @@ function buildTrayMenu(): Menu {
 
 function refreshTray(): void {
   if (!tray) return;
-  tray.setToolTip(`Appstrate Desktop — ${bridgeState}`);
+  tray.setToolTip(`Appstrate: ${bridgeState}`);
   tray.setContextMenu(buildTrayMenu());
 }
 
@@ -543,7 +549,7 @@ function showSetupWindow(): Promise<Config> {
     setupWindow = new BrowserWindow({
       width: 480,
       height: 480,
-      title: "Appstrate Desktop — Setup",
+      title: "Appstrate: Setup",
       icon: resolveAssetPath("icon.png"),
       resizable: false,
       minimizable: false,
@@ -740,7 +746,7 @@ app.whenReady().then(async () => {
     .resize({ width: 22, height: 22 });
   trayIcon.setTemplateImage(true);
   tray = new Tray(trayIcon);
-  tray.setToolTip("Appstrate Desktop");
+  tray.setToolTip("Appstrate");
   // Dock icon (full-color square logo). dock is undefined on Linux/Windows.
   app.dock?.setIcon(nativeImage.createFromPath(resolveAssetPath("icon.png")));
   registerNavIpc();
@@ -782,5 +788,5 @@ app.on("activate", () => {
 // the POC, surface them as notifications so iteration is faster.
 process.on("unhandledRejection", (reason) => {
   const msg = reason instanceof Error ? reason.message : String(reason);
-  notify("Appstrate Desktop — error", msg).catch(() => {});
+  notify("Appstrate: error", msg).catch(() => {});
 });

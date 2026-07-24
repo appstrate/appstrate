@@ -1,4 +1,4 @@
-# Appstrate Desktop agent guide
+# Appstrate desktop app agent guide
 
 This directory contains the experimental macOS Electron companion. It lets an
 authorized run drive a dedicated local Chromium view.

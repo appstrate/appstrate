@@ -1,7 +1,7 @@
 {
   "name": "@appstrate/desktop",
   "version": "0.0.0",
-  "description": "Appstrate Desktop — Electron companion exposing a local Chromium browser surface to remote Appstrate agents via authenticated WebSocket bridge",
+  "description": "Appstrate, an Electron companion exposing a local Chromium browser surface to remote Appstrate agents via authenticated WebSocket bridge",
   "license": "Apache-2.0",
   "type": "module",
   "private": true,

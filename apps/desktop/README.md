@@ -1,4 +1,4 @@
-# Appstrate Desktop
+# Appstrate
 
 Experimental Electron companion that exposes a local Chromium surface to an
 authorized Appstrate agent run.
