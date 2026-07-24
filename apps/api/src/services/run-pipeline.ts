@@ -322,21 +322,21 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // the ~1.75 s pre-createRun pipeline is decomposable in prod without a tracer.
   const pipelineStart = Date.now();
   const spanAttributes = { "appstrate.run.id": runId, "appstrate.org.id": orgId };
-  // --- Step 0: Resolve the model source for the admission gate ---
+  // --- Step 0: Resolve the credential source reported to the admission gate ---
   //
-  // The `beforeUsage` gate must fire ONLY for platform-provided models — an org
-  // running its own credential (BYOK / OAuth subscription) spends no platform
-  // credit and must not be blocked by a cloud credit cap (the spurious-402
-  // bug). Resolve the same model `buildRunContext` will (Step 3) — cheap: system
-  // models are in-memory and DB rows are short-TTL cached, so the later
-  // resolution is a cache hit. `modelId` is the effective preset (per-run
+  // The `beforeUsage` gate fires for EVERY run; this resolution does not decide
+  // whether it fires, it supplies the fact the module quotes the MODEL
+  // component against (platform-supplied credential vs. the org's own BYOK /
+  // OAuth credential). Resolve the same model `buildRunContext` will (Step 3) —
+  // cheap: system models are in-memory and DB rows are short-TTL cached, so the
+  // later resolution is a cache hit. `modelId` is the effective preset (per-run
   // override folded in by the route/scheduler/inline callers), matching the
   // `params.modelId ?? config.modelId` cascade buildRunContext applies. A run
-  // with no resolvable model (`null`) fails downstream with
-  // `ModelNotConfiguredError`; treating it as non-system here just skips a gate
-  // that would never matter.
+  // with no resolvable model reports `null` and then fails downstream with
+  // `ModelNotConfiguredError` — it never reaches inference, so an unquotable
+  // model component costs nothing.
   const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null);
-  const modelSourceForGate: "system" | "org" | null = gateModel
+  const credentialSourceForGate: "system" | "org" | null = gateModel
     ? gateModel.isSystemModel
       ? "system"
       : "org"
@@ -350,7 +350,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     runPreflightGates({
       orgId,
       agent: params.agent,
-      modelSource: modelSourceForGate,
+      credentialSource: credentialSourceForGate,
+      // This pipeline launches the run inside platform-operated isolation (a
+      // sandbox container / microVM), so the platform funds its compute
+      // whatever credential the model uses.
+      executionPlane: "platform",
     }),
   );
   const gatesMs = Date.now() - gatesStart;

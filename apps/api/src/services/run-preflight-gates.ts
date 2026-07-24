@@ -6,11 +6,12 @@
  *
  *   1. Per-org rate limit (Redis token bucket).
  *   2. Per-org concurrency cap.
- *   3. `beforeUsage` module hook (admission policies — usage caps, feature
- *      gates) — run surface.
- *   4. Timeout ceiling — agent manifest's `timeout` capped to the platform
+ *   3. Timeout ceiling — agent manifest's `timeout` capped to the platform
  *      limit. Returns a cloned agent when a cap is applied so callers pass
  *      the capped value into the container env without mutating the DB.
+ *   4. `beforeUsage` module hook (admission policies — usage caps, feature
+ *      gates) — run surface. Runs last of the four so it is told the EFFECTIVE
+ *      (post-ceiling) timeout and the observed in-flight count.
  *
  * Why a dedicated module: platform (`run-pipeline.prepareAndExecuteRun`)
  * and remote (`run-creation.createRun`) used to duplicate all the
@@ -30,27 +31,45 @@ export interface PreflightGatesInput {
   orgId: string;
   agent: LoadedPackage;
   /**
-   * Where the run's resolved model comes from, decided SERVER-SIDE by the
-   * caller (platform pipeline: `resolveModel(...).isSystemModel`; remote: never
-   * resolves a platform model → `null`). Governs the `beforeUsage` admission
-   * hook: it fires ONLY for a platform-provided (`"system"`) model — the same
-   * rule the chat surface applies (`checkUsageAllowed` → `isSystemModel`).
+   * Whose credential pays for the inference this run performs, decided
+   * SERVER-SIDE by the caller (platform pipeline: `resolveModel(...)
+   * .isSystemModel`; remote: never resolves a platform model → `null`).
    *
-   *   - `"system"` → platform credential is spent → dispatch `beforeUsage` so a
-   *     metering module (cloud) can enforce credit caps.
-   *   - `"org"` → the org spends its OWN credential (BYOK / OAuth subscription)
-   *     → never platform-metered → skip the hook (spending a run gate here is
-   *     the spurious-402 bug this guards against).
+   * This is a FACT reported to `beforeUsage`, NOT a decision about whether the
+   * hook fires — the hook fires on every run. A module reads it to quote the
+   * MODEL component of the operation:
+   *
+   *   - `"system"` → a platform-supplied credential is spent (a
+   *     `SYSTEM_PROVIDER_KEYS` entry / system preset). The platform funds the
+   *     model component.
+   *   - `"org"` → the org spends its OWN credential (BYOK API key or OAuth
+   *     subscription). The platform funds no model component — a module that
+   *     only meters platform-supplied inference quotes zero here, which is what
+   *     keeps a BYOK run from taking a spurious 402.
    *   - `null` → a remote-origin run resolves no platform model at creation
    *     (the runner executes on its own host with its own model + credentials),
-   *     so it is not cheaply determinable whether it will route inference
-   *     through the system proxy. We skip the run-surface hook; any system-proxy
-   *     inference a remote run does make is metered per-call on the proxy rows
-   *     (`credential_source:"system"`), which carry the attribution.
-   *   - `undefined` → unresolved (no caller currently omits it) → treated as
-   *     non-system → skip.
+   *     so the fact is genuinely not determinable here. Not a coverage gap: any
+   *     inference such a run later routes through the platform's system proxy
+   *     is admitted at the proxy seam (`system-proxy-admission.ts`), where the
+   *     credential source IS known, and metered per-call on the proxy ledger
+   *     rows (`credential_source:"system"`).
+   *
+   * Naming: matches the `llm_usage.credential_source` ledger column a metering
+   * module reconciles against. The `runs.model_source` DB column is the same
+   * concept under an older, persisted name — deliberately not renamed.
    */
-  modelSource?: "system" | "org" | null;
+  credentialSource: "system" | "org" | null;
+  /**
+   * Whose compute runs the work — the other neutral fact `beforeUsage` quotes
+   * against. `"platform"` for a run executing in platform-operated isolation (a
+   * sandbox container / microVM), `"remote"` when the caller supplies the host
+   * and the platform contributes no compute.
+   *
+   * Reported separately from {@link credentialSource} because the two are
+   * independent: a BYOK run can still occupy platform compute, and a
+   * platform-credential run can execute on a caller-supplied host.
+   */
+  executionPlane: "platform" | "remote";
 }
 
 /** Per-sub-gate wall-clock timings (ms), surfaced for the pipeline timing log. */
@@ -147,9 +166,13 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
     };
   }
 
-  // 3. Timeout ceiling — applied before `beforeUsage` so module code sees
-  //    the effective timeout (e.g. for pre-charging cost estimation).
+  // 3. Timeout ceiling — applied BEFORE `beforeUsage` (and computed here, not
+  //    after) so the hook is told the run's EFFECTIVE compute bound, not the
+  //    manifest's wish. An agent declaring a timeout above the platform ceiling
+  //    can never occupy compute for longer than the ceiling, so quoting it on
+  //    the declared value would over-charge.
   const declaredTimeout = typeof agent.manifest.timeout === "number" ? agent.manifest.timeout : 300;
+  const effectiveTimeoutSeconds = Math.min(declaredTimeout, platformLimits.timeout_ceiling_seconds);
   if (declaredTimeout > platformLimits.timeout_ceiling_seconds) {
     agent = {
       ...agent,
@@ -157,14 +180,26 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
     };
   }
 
-  // 4. `beforeUsage` module hook (run surface) — ONLY for platform-provided
-  //    ("system") models. A run on the org's OWN model (BYOK / OAuth
-  //    subscription) or a remote-origin run (own host + credentials) spends no
-  //    platform credit, so gating it here is the spurious-402 the model-source
-  //    check prevents. Mirrors the chat surface (`checkUsageAllowed`). See
-  //    `PreflightGatesInput.modelSource` for the full per-value rationale.
+  // 4. `beforeUsage` module hook (run surface) — dispatched for EVERY run,
+  //    whatever its credential source or execution plane.
+  //
+  //    The platform used to decide here that a non-`"system"` model was free
+  //    and skip the hook entirely. That hard-coded "BYOK ⇒ free", which is only
+  //    true while platform compute is unbilled: a BYOK run on the platform
+  //    plane still occupies a sandbox the platform pays for. So the platform
+  //    now reports neutral FACTS — who funds the credential
+  //    (`credentialSource`), who funds the compute (`executionPlane`), and the
+  //    upper bound on that compute (`timeoutSeconds`) — and the module quotes
+  //    the operation and decides. A module that only meters platform-supplied
+  //    inference simply quotes zero for a BYOK run, which is what keeps the
+  //    spurious-402 fixed without the platform pre-classifying anything.
+  //
+  //    Cost of dispatching unconditionally: a module now sees runs it may quote
+  //    at zero. That is deliberate — it is the module's job to short-circuit a
+  //    fully self-funded operation (neither platform credential nor platform
+  //    compute) before it reads any billing state.
   let beforeUsageHookMs = 0;
-  if (input.modelSource === "system" && hasHook("beforeUsage")) {
+  if (hasHook("beforeUsage")) {
     const hookStart = Date.now();
     const rejection = await callHook("beforeUsage", {
       orgId,
@@ -174,6 +209,12 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
       // the projected in-flight count INCLUDING the run being considered;
       // otherwise the first run of an org is checked with a zero-cost estimate.
       runningCount: runningCount + 1,
+      credentialSource: input.credentialSource,
+      executionPlane: input.executionPlane,
+      // Post-ceiling: the real upper bound on platform compute time. A run
+      // admitted here always owns its compute quote — the proxy seam passes
+      // `null` precisely so it does not quote this same run's compute twice.
+      timeoutSeconds: effectiveTimeoutSeconds,
     });
     beforeUsageHookMs = Date.now() - hookStart;
     if (rejection) {

@@ -209,7 +209,11 @@ async function handleProxy(
         context: "run",
         packageId: runAttribution.packageId!,
         runOrigin: runAttribution.runOrigin,
-        modelSource: runAttribution.modelSource,
+        // Persisted `runs.model_source` — the run's credential source under its
+        // older column name. The admission seam reads it to tell a run whose
+        // model component was already quoted at preflight from one that was
+        // quoted at zero (and could otherwise launder system inference).
+        credentialSource: runAttribution.modelSource,
       } as const)
     : c.get("firstPartyLoopback")
       ? ({ context: "chat", sessionId: chatSessionId } as const)

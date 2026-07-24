@@ -29,6 +29,7 @@ import {
 } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
 const SYSTEM_PRESET = "system-proxy-test";
@@ -171,14 +172,24 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
         context: "run",
         packageId: "@system/proxy-agent",
         runningCount: 1,
+        // The seam only runs for a resolved system preset, so the call being
+        // admitted is platform-funded inference whatever the run declared.
+        credentialSource: "system",
+        // Remote origin — the platform funds no compute for this run.
+        executionPlane: "remote",
+        // The proxy holds no manifest: "contribute no compute component here",
+        // never a guessed duration (which would double-count).
+        timeoutSeconds: null,
       },
     ]);
   });
 
-  it("does not re-dispatch beforeUsage for a platform-origin run (already gated at preflight)", async () => {
+  it("does not re-dispatch beforeUsage for a platform-origin SYSTEM run (model component already quoted at preflight)", async () => {
     // Same rejecting module as the remote-run 402 test — but the run is
-    // platform-origin, so the proxy admission must NOT gate it a second time:
-    // the call reaches upstream and the hook records zero dispatches.
+    // platform-origin AND system-credential, so its MODEL component was already
+    // quoted when the run was admitted. Re-dispatching would gate the same
+    // platform-supplied inference twice: the call reaches upstream and the hook
+    // records zero dispatches.
     const h = await buildHarness();
     const platformRun = await seedRun({
       packageId: "@system/proxy-agent",
@@ -228,7 +239,15 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("dispatches beforeUsage for platform runs that were not system-admitted at preflight", async () => {
+  it("dispatches beforeUsage for platform runs whose model component was quoted at zero (BYOK-run-as-billing-context bypass)", async () => {
+    // THE bypass this seam defends against: a platform BYOK run (or a
+    // legacy/unresolved row) was admitted at preflight with a ZERO model
+    // component — correct, since its own inference spends the org's credential.
+    // Attaching that active run id to a raw SYSTEM-preset proxy request would
+    // otherwise launder platform-funded inference through a run quoted at zero
+    // and defeat a quota rejection. Both must be admitted here, like a remote
+    // run. (The `admittedAtPreflight` expression is unchanged by the
+    // fact-reporting refactor, but its justification is now this one.)
     const h = await buildHarness();
     const byokRun = await seedRun({
       packageId: "@system/proxy-agent",
@@ -276,20 +295,82 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     }
 
     expect(upstreamHits).toBe(0);
-    expect(calls).toEqual([
+    // Platform origin → `executionPlane: "platform"`, but `timeoutSeconds: null`
+    // so the module quotes NO compute component here: that run's compute was
+    // already quoted at its own preflight.
+    const expectedCall: BeforeUsageParams = {
+      orgId: h.ctx.orgId,
+      context: "run",
+      packageId: "@system/proxy-agent",
+      runningCount: 3,
+      credentialSource: "system",
+      executionPlane: "platform",
+      timeoutSeconds: null,
+    };
+    expect(calls).toEqual([expectedCall, expectedCall]);
+  });
+
+  it("does not re-dispatch beforeUsage for a first-party chat loopback call (already admitted at turn start)", async () => {
+    // The chat surface owns the hook at turn admission (`checkUsageAllowed`),
+    // which now fires for every turn — system or org credential. The signed
+    // loopback identity is still load-bearing here (it is what distinguishes
+    // chat from an unattributed raw proxy call), but dispatching again would
+    // gate the same turn twice.
+    const h = await buildHarness();
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances(
+      [
+        gateModule(
+          { code: "quota_exceeded", message: "Credit quota exceeded", status: 402 },
+          calls,
+        ),
+      ],
+      fakeInitCtx(),
+    );
+
+    let upstreamHit = false;
+    globalThis.fetch = (async () => {
+      upstreamHit = true;
+      return new Response(
+        JSON.stringify({
+          id: "c1",
+          object: "chat.completion",
+          model: "upstream-system-model",
+          choices: [{ index: 0, message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const loopback = mintLoopbackToken(
       {
+        userId: h.ctx.user.id,
+        email: h.ctx.user.email ?? "u@test",
+        name: h.ctx.user.name ?? "U",
         orgId: h.ctx.orgId,
-        context: "run",
-        packageId: "@system/proxy-agent",
-        runningCount: 3,
+        orgRole: "owner",
       },
-      {
-        orgId: h.ctx.orgId,
-        context: "run",
-        packageId: "@system/proxy-agent",
-        runningCount: 3,
+      { chatSessionId: "chs_loopback" },
+    );
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${loopback}`,
+        "x-org-id": h.ctx.orgId,
+        "x-application-id": h.ctx.defaultAppId,
+        "content-type": "application/json",
       },
-    ]);
+      body: JSON.stringify({
+        model: SYSTEM_PRESET,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(upstreamHit).toBe(true);
+    expect(calls).toHaveLength(0);
   });
 
   it("refuses an unattributed raw system call while leaving BYOK semantics untouched", async () => {
