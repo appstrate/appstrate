@@ -201,8 +201,16 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     // a document a run still consumes is detached (kept); the rest are deleted
     // (row + counter + storage). Must precede the delete — the chat_session_id FK
     // cascade would otherwise wipe the documents (and their links) first.
-    await deps.cleanupSessionDocuments(session.id);
-    await db.delete(chatSessions).where(eq(chatSessions.id, session.id));
+    //
+    // Both run in ONE transaction: the teardown and the `chat_sessions` delete
+    // commit atomically, so an attachment materializing between them can no
+    // longer be cascade-deleted with no storage-deletion outbox job (orphaned
+    // S3 object). The teardown locks the org row FOR UPDATE — the same
+    // serialization point the materialize path takes — so the two serialize.
+    await db.transaction(async (tx) => {
+      await deps.cleanupSessionDocuments(session.id, tx);
+      await tx.delete(chatSessions).where(eq(chatSessions.id, session.id));
+    });
     await notifySessionUpdate(session.id, session.orgId, session.userId);
     return c.body(null, 204);
   });

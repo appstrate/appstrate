@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Agent deletion preserves observability — the test that locks down the
- * intent of migration 0017 (`runs.package_id` switched from CASCADE to SET
- * NULL) and migration 0016 (`llm_usage.run_id` switched from SET NULL to
- * CASCADE).
+ * Agent (package) deletion preserves observability — locks down the intent of
+ * migration 0017 (`runs.package_id` is `ON DELETE SET NULL`). Deleting a package
+ * orphans its runs (package_id = NULL, denormalized agent_scope/agent_name kept)
+ * rather than deleting them, so their run_logs and llm_usage rows — still
+ * attached to the surviving run — are untouched. Deletion succeeds with 204.
  *
- * Before 0016/0017, deleting an agent that had any terminated run raised a
- * generic 500 (CHECK violation on `llm_usage_runner_has_run_id` triggered
- * by the SET NULL cascade). After: deletion succeeds with 204, runs survive
- * as orphans (package_id = NULL, denormalized agent_scope/agent_name kept),
- * llm_usage rows survive (still attached to the run), run_logs survive.
+ * (Distinct from run DELETION, which detaches llm_usage to run_id = NULL — see
+ * `llm-usage-detach.test.ts`. Deleting the package does not delete the runs.)
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -93,8 +91,8 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     expect(logs.length).toBe(1);
     expect(logs[0]!.message).toBe("log line for posterity");
 
-    // llm_usage rows survive — the run is alive, the runner-source
-    // CHECK invariant (run_id NOT NULL) holds.
+    // llm_usage rows survive, still attached — the run is alive (package
+    // delete only nulled runs.package_id), so nothing detaches them.
     const usage = await db.select().from(llmUsage).where(eq(llmUsage.runId, run.id));
     expect(usage.length).toBe(1);
     expect(usage[0]!.source).toBe("runner");

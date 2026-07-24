@@ -14,6 +14,8 @@ import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
+import { useOrgStorage } from "../../hooks/use-org-storage";
+import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
@@ -33,21 +35,12 @@ export function OrgSettingsGeneralPage() {
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
-  const { data: orgDetail } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
-  const storage = orgDetail?.storage;
-  // The limit that actually applies (per-org override ?? global quota); null =
-  // unlimited. `limit_bytes` is now the raw override only.
-  const storageLimit = storage?.effective_limit_bytes ?? null;
-  const storagePercent =
-    storage && storageLimit !== null && storageLimit > 0
-      ? Math.min(100, Math.round((storage.used_bytes / storageLimit) * 100))
-      : 0;
-  const storageNearLimit = storageLimit !== null && storagePercent >= 80;
+  // Single source of truth for the storage gauge (shared with billing +
+  // documents). `limitBytes` null = unlimited (per-org override ?? global quota).
+  const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
+  // The heads-up banner fires at the shared WARN threshold — the same point the
+  // bar turns yellow — so the user is warned well before uploads get rejected.
+  const storageNearLimit = storagePercent !== null && storagePercent >= USAGE_WARN;
 
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
@@ -154,14 +147,21 @@ export function OrgSettingsGeneralPage() {
 
             {storageLimit !== null && (
               <div className="mt-4">
-                <div className="bg-muted h-2 w-full overflow-hidden rounded-full">
+                <div
+                  className="bg-muted h-2 w-full overflow-hidden rounded-full"
+                  role="progressbar"
+                  aria-valuenow={storagePercent ?? 0}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={t("orgStorage.title")}
+                >
                   <div
-                    className={`h-full rounded-full ${storageNearLimit ? "bg-warning" : "bg-primary"}`}
-                    style={{ width: `${storagePercent}%` }}
+                    className={`h-full rounded-full transition-all ${getUsageBarColor(storagePercent ?? 0)}`}
+                    style={{ width: `${storagePercent ?? 0}%` }}
                   />
                 </div>
                 <div className="text-muted-foreground mt-1 text-right text-xs tabular-nums">
-                  {t("orgStorage.percentUsed", { percent: storagePercent })}
+                  {t("orgStorage.percentUsed", { percent: storagePercent ?? 0 })}
                 </div>
                 {storageNearLimit && (
                   <Alert variant="warning" className="mt-3">

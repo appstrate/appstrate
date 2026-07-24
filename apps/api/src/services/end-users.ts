@@ -6,7 +6,7 @@
  * End-users belong to an application and represent external users of the platform.
  */
 
-import { eq, and, or, ilike, desc, lt, gt, sql } from "drizzle-orm";
+import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, notifications, documents, uploads, organizations } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
@@ -19,6 +19,7 @@ import { toISORequired } from "../lib/date-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { assertApplicationInScope } from "./applications.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
+import { decrementOrgDocumentBytes, storageKeyToDeletionJob } from "./documents.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -327,21 +328,13 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
 
     const storageJobs: StorageDeletionJobInput[] = [];
     for (const r of [...docRows, ...uploadRows]) {
-      const [bucket, ...rest] = r.storageKey.split("/");
-      if (bucket && rest.length > 0)
-        storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "end_user_deleted" });
+      const job = storageKeyToDeletionJob(r.storageKey, "end_user_deleted");
+      if (job) storageJobs.push(job);
     }
     await enqueueStorageDeletion(tx, storageJobs);
 
     const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
-    if (bytes > 0) {
-      await tx
-        .update(organizations)
-        .set({
-          documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${bytes}, 0)`,
-        })
-        .where(eq(organizations.id, scope.orgId));
-    }
+    if (bytes > 0) await decrementOrgDocumentBytes(tx, scope.orgId, bytes);
 
     await tx
       .delete(notifications)

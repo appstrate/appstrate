@@ -24,7 +24,11 @@
  */
 
 import type { MiddlewareHandler } from "hono";
+import type { db } from "@appstrate/db/client";
 import type { ModuleInitContext, UsageRejection } from "@appstrate/core/module";
+
+/** The chat module's open DB transaction handle (Drizzle tx). */
+export type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 import type {
   ChatAttachmentRequest,
   ChatUsageRecord,
@@ -66,8 +70,11 @@ export interface ChatPlatformDeps {
    * an unconsumed one is deleted (row + counter + storage). The module has no DB
    * or storage access, so this crosses through `ctx.services`. Called before the
    * session row is removed so the FK cascade cannot destroy the evidence first.
+   *
+   * Pass the SAME transaction that deletes the `chat_sessions` row so the two
+   * commit atomically (closes the materialize-in-the-gap orphan window).
    */
-  cleanupSessionDocuments(chatSessionId: string): Promise<void>;
+  cleanupSessionDocuments(chatSessionId: string, tx?: ChatDbTx): Promise<void>;
   /**
    * Admission gate for a non-subscription (built-in / API-key) turn. The
    * platform decides whether the chosen preset is system-provided and, if so,
@@ -117,9 +124,9 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
           // surface. Text-only turns never reach here; an attachment turn without
           // the platform wired is a genuine misconfiguration.
           Promise.reject(new Error("chat attachments require the platform document service")),
-    cleanupSessionDocuments: (chatSessionId) =>
+    cleanupSessionDocuments: (chatSessionId, tx) =>
       ctx
-        ? ctx.services.cleanupSessionDocuments(chatSessionId)
+        ? ctx.services.cleanupSessionDocuments(chatSessionId, tx)
         : // No init context (test harness / OSS standalone) → no document store
           // surface; session delete proceeds without document teardown (the FK
           // cascade still removes any rows). Safe no-op baseline.

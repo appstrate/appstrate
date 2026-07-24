@@ -212,6 +212,24 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
   });
 });
 
+describe("recordLlmUsage — runner birth invariant", () => {
+  it("rejects a runner entry without a runId (guard replaces the dropped DB CHECK)", async () => {
+    // Since migration 0028 the DB can no longer forbid NULL run_id on runner
+    // rows (detach legitimately NULLs it); the writer is the sole guarantor. A
+    // runner row born without a run would dodge the monotonic partial unique
+    // index and turn every cumulative snapshot into a fresh settled row.
+    await expect(
+      recordLlmUsage({
+        source: "runner",
+        orgId: "00000000-0000-4000-a000-000000000001",
+        inputTokens: 1,
+        outputTokens: 1,
+        costUsd: 0.01,
+      }),
+    ).rejects.toThrow("a runner row must be born with a runId");
+  });
+});
+
 describe("recordLlmUsage — runner monotonic upsert", () => {
   let ctx: TestContext;
   let runId: string;

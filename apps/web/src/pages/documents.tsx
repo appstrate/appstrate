@@ -13,8 +13,7 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { formatBytes } from "@appstrate/core/format";
-import { $api } from "../api/client";
-import { useOrg } from "../hooks/use-org";
+import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { useDocuments, type DocumentDto } from "../hooks/use-documents";
 import { PageHeader } from "../components/page-header";
@@ -28,18 +27,9 @@ import { DocumentListPanel, type PurposeFilter } from "../components/document-li
  */
 function StorageUsageLine() {
   const { t } = useTranslation(["documents"]);
-  const { currentOrg } = useOrg();
-  const orgId = currentOrg?.id;
-  const { data: orgDetail } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
-  const storage = orgDetail?.storage;
+  const { storage, limitBytes: limit } = useOrgStorage();
   if (!storage) return null;
 
-  const limit = storage.effective_limit_bytes;
   const over = limit !== null && storage.used_bytes >= limit;
 
   return (

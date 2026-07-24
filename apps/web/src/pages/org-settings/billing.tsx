@@ -5,10 +5,10 @@ import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
-import { $api } from "../../api/client";
-import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
-import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../../hooks/use-billing";
+import { useBilling, useCheckout, usePortal } from "../../hooks/use-billing";
+import { useOrgStorage } from "../../hooks/use-org-storage";
+import { getUsageBarColor } from "../../lib/usage-severity";
 import { PlanGrid } from "../../components/plan-card";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { formatDateField } from "../../lib/markdown";
@@ -28,7 +28,6 @@ const STATUS_I18N: Record<string, string> = {
 export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { features } = useAppConfig();
-  const { currentOrg } = useOrg();
   // Gate the cloud fetch on the feature flag (mirrors sidebar-billing) so OSS
   // mode never fires the cloud-only `/billing` request (404). The line-below
   // <Navigate> still handles the visible redirect.
@@ -38,20 +37,13 @@ export function OrgSettingsBillingPage() {
 
   // Storage entitlement — core data (organizations.documents_bytes_*), shown
   // next to the credit gauge because the plan drives the storage limit in
-  // cloud mode. Same source as the org-settings/general storage section.
-  const orgId = currentOrg?.id;
-  const { data: orgDetail } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: features.billing && !!orgId },
-  );
-  const storage = orgDetail?.storage;
-  const storageLimit = storage?.effective_limit_bytes ?? null;
-  const storagePercent =
-    storage && storageLimit !== null && storageLimit > 0
-      ? Math.min(100, Math.round((storage.used_bytes / storageLimit) * 100))
-      : 0;
+  // cloud mode. Same source (useOrgStorage) as the org-settings/general storage
+  // section. Gated on the billing flag to mirror the credit fetch above.
+  const {
+    storage,
+    limitBytes: storageLimit,
+    percent: storagePercent,
+  } = useOrgStorage({ enabled: features.billing });
 
   if (!features.billing) return <Navigate to="/org-settings/general" replace />;
   if (isLoading) return <LoadingState />;
@@ -135,7 +127,14 @@ export function OrgSettingsBillingPage() {
               </span>
             </span>
           </div>
-          <div className="bg-muted h-2 overflow-hidden rounded-full">
+          <div
+            className="bg-muted h-2 overflow-hidden rounded-full"
+            role="progressbar"
+            aria-valuenow={Math.min(billing.usage_percent, 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={t("billing.usage")}
+          >
             <div
               className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usage_percent)}`}
               style={{ width: `${Math.min(billing.usage_percent, 100)}%` }}
@@ -164,10 +163,17 @@ export function OrgSettingsBillingPage() {
               </span>
             </div>
             {storageLimit !== null && (
-              <div className="bg-muted h-2 overflow-hidden rounded-full">
+              <div
+                className="bg-muted h-2 overflow-hidden rounded-full"
+                role="progressbar"
+                aria-valuenow={storagePercent ?? 0}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={t("billing.storageUsage")}
+              >
                 <div
-                  className={`h-full rounded-full transition-all ${getUsageBarColor(storagePercent)}`}
-                  style={{ width: `${storagePercent}%` }}
+                  className={`h-full rounded-full transition-all ${getUsageBarColor(storagePercent ?? 0)}`}
+                  style={{ width: `${storagePercent ?? 0}%` }}
                 />
               </div>
             )}

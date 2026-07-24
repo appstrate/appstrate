@@ -82,12 +82,6 @@ export interface BillingInfo {
   upgrades: BillingPlanDetail[];
 }
 
-export function getUsageBarColor(usagePercent: number): string {
-  if (usagePercent >= 90) return "bg-destructive";
-  if (usagePercent >= 70) return "bg-yellow-500";
-  return "bg-primary";
-}
-
 export function useBilling(options?: { enabled?: boolean }) {
   const orgId = useCurrentOrgId();
   const enabled = (options?.enabled ?? true) && !!orgId;

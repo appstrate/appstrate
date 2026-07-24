@@ -1443,11 +1443,13 @@ const terminalRunStatusSqlList = sql.join(
 /**
  * SQL boolean — is this ledger row's `cost_usd` final? Proxy/chat rows are
  * immutable at insert (always settled); a runner row settles only once its run
- * reaches a terminal status, or its run row is gone (LEFT JOIN `runs` → NULL, a
- * legacy/detached row treated settled). Shared by the cursor read
- * ({@link listLlmUsage}) and the settled-frontier query
- * ({@link getSettledFrontierId}) so the two definitions can never drift. Both
- * callers must LEFT JOIN `runs` on `llm_usage.run_id` for `runs.status` /
+ * reaches a terminal status, or its run row is gone (LEFT JOIN `runs` → NULL).
+ * The `runs.id IS NULL` branch is live, not defensive: a runner row is DETACHED
+ * to `run_id = NULL` when its run is deleted (FK ON DELETE SET NULL), and a
+ * detached row's cost can no longer grow, so it is immediately final → billable.
+ * Shared by the cursor read ({@link listLlmUsage}) and the settled-frontier
+ * query ({@link getSettledFrontierId}) so the two definitions can never drift.
+ * Both callers must LEFT JOIN `runs` on `llm_usage.run_id` for `runs.status` /
  * `runs.id` to resolve.
  */
 const settledSql = sql<boolean>`(${llmUsage.source} <> 'runner' OR ${runs.status} IN (${terminalRunStatusSqlList}) OR ${runs.id} IS NULL)`;
@@ -1461,10 +1463,11 @@ const settledSql = sql<boolean>`(${llmUsage.source} <> 'runner' OR ${runs.status
  * `settled` (LEFT JOIN `runs`): proxy/chat rows are immutable at insert (always
  * settled); a runner row's `cost_usd` GROWS during its run (one cumulative row
  * per run) and only settles once the run reaches a terminal status — or its run
- * row is gone (deleted → cascade already removed the ledger row, so a surviving
- * runner row with no run is a legacy/detached case, treated settled). A cursor
- * consumer processes settled rows only and never advances past the first
- * unsettled row. `real_model` / `api` are NEVER selected (server-side only).
+ * is deleted, which DETACHES the row to `run_id = NULL` (FK ON DELETE SET NULL);
+ * a detached row can no longer grow, so it is final and swept normally, its
+ * unswept spend preserved. A cursor consumer processes settled rows only and
+ * never advances past the first unsettled row. `real_model` / `api` are NEVER
+ * selected (server-side only).
  */
 export async function listLlmUsage(args: {
   afterId?: number;

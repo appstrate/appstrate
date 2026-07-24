@@ -1213,8 +1213,15 @@ export interface PlatformServices {
    * access and no documents-service surface, so this crosses through here. Called
    * by the DELETE session route BEFORE removing the `chat_sessions` row, so the
    * FK cascade cannot destroy the evidence first.
+   *
+   * `tx` is the caller's open DB transaction handle (opaque here — core carries
+   * no Drizzle dependency). The chat module passes the SAME transaction it uses
+   * to delete the `chat_sessions` row, so the document teardown and the row
+   * delete commit atomically: a document materializing in the gap can no longer
+   * be cascade-deleted without a storage-deletion outbox job. Omitted → the
+   * platform opens its own transaction (the legacy, non-atomic single call).
    */
-  cleanupSessionDocuments(chatSessionId: string): Promise<void>;
+  cleanupSessionDocuments(chatSessionId: string, tx?: unknown): Promise<void>;
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this for its non-subscription (built-in /
