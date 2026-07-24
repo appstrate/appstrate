@@ -315,15 +315,65 @@ export function wouldExceedOrgQuota(
 }
 
 /**
- * Throw the 403 `storage_limit_exceeded` when writing `addBytes` on top of
- * `used` would overrun the org's `ORG_STORAGE_QUOTA_BYTES`. The org-quota
- * rejection in one place (pre-flight fast reject + FOR UPDATE re-check).
+ * Resolve the effective per-org storage limit (in bytes) from the org's own
+ * override and the global env quota:
+ *
+ *   organization.documents_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
+ *
+ * `undefined` return = no limit (unlimited) — the exact shape
+ * {@link wouldExceedOrgQuota} treats as "no ceiling". A per-org override of `0`
+ * is honored (a hard zero limit, not "unset"); NULL/undefined `orgLimit` falls
+ * back to the env quota. Pure — the single resolution point every enforcement
+ * site (pre-flight fast reject + FOR UPDATE re-check) reads through.
  */
-function assertWithinOrgQuota(used: number, addBytes: number): void {
-  const quota = getEnv().ORG_STORAGE_QUOTA_BYTES;
-  if (wouldExceedOrgQuota(used, addBytes, quota)) {
-    throw storageLimitExceeded(`Organization storage quota (${quota} bytes) would be exceeded`);
+export function effectiveOrgStorageLimit(
+  orgLimit: number | null | undefined,
+  envQuota: number | undefined,
+): number | undefined {
+  if (orgLimit !== null && orgLimit !== undefined) return orgLimit;
+  return envQuota;
+}
+
+/**
+ * Throw the 403 `storage_limit_exceeded` when writing `addBytes` on top of
+ * `used` would overrun the org's effective storage limit (resolved override or
+ * env quota — see {@link effectiveOrgStorageLimit}). The org-limit rejection in
+ * one place (pre-flight fast reject + FOR UPDATE re-check). `limit` undefined =
+ * unlimited (no-op).
+ */
+function assertWithinOrgQuota(used: number, addBytes: number, limit: number | undefined): void {
+  if (wouldExceedOrgQuota(used, addBytes, limit)) {
+    throw storageLimitExceeded(`Organization storage limit (${limit} bytes) would be exceeded`);
   }
+}
+
+/**
+ * Set (or clear) an organization's per-org document storage limit — the narrow
+ * capability the out-of-repo cloud module pilots per org via
+ * `PlatformServices.setDocumentStorageLimit`. Billing-neutral: a technical byte
+ * ceiling, never a plan or price.
+ *
+ *  - `bytes` a non-negative safe integer → the org's override (takes precedence
+ *    over `ORG_STORAGE_QUOTA_BYTES`).
+ *  - `bytes` null → clears the override (the org falls back to the env quota).
+ *
+ * Throws {@link invalidRequest} for a non-integer / negative / unsafe `bytes`,
+ * and {@link notFound} when `orgId` does not exist — the RFC 9457 shapes the
+ * rest of the service throws, consistent with the module contract.
+ */
+export async function setOrgDocumentStorageLimit(
+  orgId: string,
+  bytes: number | null,
+): Promise<void> {
+  if (bytes !== null && (!Number.isSafeInteger(bytes) || bytes < 0)) {
+    throw invalidRequest("Document storage limit must be a non-negative integer or null");
+  }
+  const updated = await db
+    .update(organizations)
+    .set({ documentsBytesLimit: bytes })
+    .where(eq(organizations.id, orgId))
+    .returning({ id: organizations.id });
+  if (updated.length === 0) throw notFound(`Organization '${orgId}' not found`);
 }
 
 /**
@@ -654,14 +704,22 @@ async function commitDocumentRow(params: {
   try {
     const [row] = await db.transaction(async (tx) => {
       // Lock the org row so a concurrent write cannot both pass the quota
-      // re-check on a stale `used`. Exact byte count re-checked here.
+      // re-check on a stale `used`. Exact byte count re-checked here against the
+      // org's effective limit (per-org override ?? env quota).
       const [orgLocked] = await tx
-        .select({ used: organizations.documentsBytesUsed })
+        .select({
+          used: organizations.documentsBytesUsed,
+          limit: organizations.documentsBytesLimit,
+        })
         .from(organizations)
         .where(eq(organizations.id, scope.orgId))
         .for("update")
         .limit(1);
-      assertWithinOrgQuota(orgLocked?.used ?? 0, byteCount);
+      assertWithinOrgQuota(
+        orgLocked?.used ?? 0,
+        byteCount,
+        effectiveOrgStorageLimit(orgLocked?.limit, getEnv().ORG_STORAGE_QUOTA_BYTES),
+      );
       // Per-run cap re-check under the same lock (agent-output ingestion). The
       // org `FOR UPDATE` above serialises every commit for this org — so two
       // concurrent publishes to the same run each observe the other's already-
@@ -913,14 +971,18 @@ function assertWithinFileCap(size: number, cap: number): void {
 export async function assertWithinDocumentLimits(orgId: string, sizes: number[]): Promise<void> {
   const env = getEnv();
   for (const size of sizes) assertWithinFileCap(size, env.DOCUMENT_MAX_FILE_BYTES);
-  if (env.ORG_STORAGE_QUOTA_BYTES === undefined || sizes.length === 0) return;
+  if (sizes.length === 0) return;
   const total = sizes.reduce((sum, s) => sum + s, 0);
   const [org] = await db
-    .select({ used: organizations.documentsBytesUsed })
+    .select({ used: organizations.documentsBytesUsed, limit: organizations.documentsBytesLimit })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
-  assertWithinOrgQuota(org?.used ?? 0, total);
+  // Resolve the effective limit (per-org override ?? env quota). Undefined =
+  // unlimited, so the org-limit assert is a no-op — the fast reject stays free
+  // for orgs with no override and no env quota.
+  const limit = effectiveOrgStorageLimit(org?.limit, env.ORG_STORAGE_QUOTA_BYTES);
+  assertWithinOrgQuota(org?.used ?? 0, total, limit);
 }
 
 /**

@@ -46,6 +46,13 @@ interface OrgResult {
    * settings screen can show consumption against the quota.
    */
   documentsBytesUsed: number;
+  /**
+   * Per-org durable-document storage limit override in bytes
+   * (`organizations.documents_bytes_limit`), or null when no override is set (the
+   * org falls back to the global `ORG_STORAGE_QUOTA_BYTES`). Surfaced so the org
+   * detail endpoint can report the raw override alongside the effective limit.
+   */
+  documentsBytesLimit: number | null;
 }
 
 function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
@@ -57,6 +64,7 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
     documentsBytesUsed: row.documentsBytesUsed,
+    documentsBytesLimit: row.documentsBytesLimit,
   };
 }
 

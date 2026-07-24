@@ -40,7 +40,9 @@ export function OrgSettingsGeneralPage() {
     { enabled: !!orgId },
   );
   const storage = orgDetail?.storage;
-  const storageLimit = storage?.limit_bytes ?? null;
+  // The limit that actually applies (per-org override ?? global quota); null =
+  // unlimited. `limit_bytes` is now the raw override only.
+  const storageLimit = storage?.effective_limit_bytes ?? null;
   const storagePercent =
     storage && storageLimit !== null && storageLimit > 0
       ? Math.min(100, Math.round((storage.used_bytes / storageLimit) * 100))
@@ -140,11 +142,11 @@ export function OrgSettingsGeneralPage() {
               <div className="flex-1">
                 <h3 className="text-sm font-semibold">{t("orgStorage.title")}</h3>
                 <span className="text-muted-foreground text-sm">
-                  {storage.limit_bytes === null
+                  {storage.effective_limit_bytes === null
                     ? t("orgStorage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
                     : t("orgStorage.usedOfLimit", {
                         used: formatBytes(storage.used_bytes),
-                        limit: formatBytes(storage.limit_bytes),
+                        limit: formatBytes(storage.effective_limit_bytes),
                       })}
                 </span>
               </div>

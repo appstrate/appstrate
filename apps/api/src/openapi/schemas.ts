@@ -241,13 +241,19 @@ export const schemas = {
       storage: {
         type: "object",
         description:
-          "Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the org-wide quota (`ORG_STORAGE_QUOTA_BYTES`), or null when unset (unlimited).",
-        required: ["used_bytes", "limit_bytes"],
+          "Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the raw per-org limit override (`documents_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited).",
+        required: ["used_bytes", "limit_bytes", "effective_limit_bytes"],
         properties: {
           used_bytes: { type: "integer", description: "Bytes of durable documents stored." },
           limit_bytes: {
             type: ["integer", "null"],
-            description: "Quota in bytes, or null when no quota is configured (unlimited).",
+            description:
+              "Per-org limit override in bytes, or null when no override is set (falls back to the global quota).",
+          },
+          effective_limit_bytes: {
+            type: ["integer", "null"],
+            description:
+              "Effective limit in bytes the write path enforces (override ?? global quota), or null when unlimited.",
           },
         },
       },

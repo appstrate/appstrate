@@ -11,6 +11,7 @@ import { describe, it, expect } from "bun:test";
 import {
   getDocumentCapabilities,
   wouldExceedOrgQuota,
+  effectiveOrgStorageLimit,
   retentionExpiry,
   createHashingCounter,
   toDocumentDto,
@@ -228,6 +229,28 @@ describe("wouldExceedOrgQuota", () => {
     expect(wouldExceedOrgQuota(91, 10, 100)).toBe(true);
     expect(wouldExceedOrgQuota(0, 100, 100)).toBe(false);
     expect(wouldExceedOrgQuota(0, 101, 100)).toBe(true);
+  });
+});
+
+describe("effectiveOrgStorageLimit", () => {
+  it("no override + no env quota ⇒ undefined (unlimited)", () => {
+    expect(effectiveOrgStorageLimit(null, undefined)).toBeUndefined();
+    expect(effectiveOrgStorageLimit(undefined, undefined)).toBeUndefined();
+  });
+
+  it("no override + env quota ⇒ env quota", () => {
+    expect(effectiveOrgStorageLimit(null, 1000)).toBe(1000);
+    expect(effectiveOrgStorageLimit(undefined, 1000)).toBe(1000);
+  });
+
+  it("override present ⇒ override wins, regardless of env quota", () => {
+    expect(effectiveOrgStorageLimit(500, undefined)).toBe(500);
+    expect(effectiveOrgStorageLimit(500, 1000)).toBe(500); // below env quota
+    expect(effectiveOrgStorageLimit(2000, 1000)).toBe(2000); // above env quota
+  });
+
+  it("a hard-zero override is honored (not treated as unset)", () => {
+    expect(effectiveOrgStorageLimit(0, 1000)).toBe(0);
   });
 });
 

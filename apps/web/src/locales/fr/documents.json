@@ -23,5 +23,8 @@
   "delete.description": "Supprimer « {{name}} » ? Cette action est irréversible.",
   "delete.success": "Document supprimé.",
   "preview.frameTitle": "Aperçu de {{name}}",
-  "preview.unavailable": "Ce document ne peut pas être prévisualisé."
+  "preview.unavailable": "Ce document ne peut pas être prévisualisé.",
+  "storage.usedUnlimited": "{{used}} utilisés",
+  "storage.usedOfLimit": "{{used}} utilisés sur {{limit}}",
+  "storage.limitReached": "Limite de stockage atteinte. Les nouveaux envois et sorties d'agent sont bloqués jusqu'à ce que vous libériez de l'espace ; les documents existants ne sont pas affectés."
 }

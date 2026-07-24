@@ -52,6 +52,8 @@ import {
   cleanupExpiredDocuments,
   detachOrDeleteContainedDocuments,
   reconcileOrgDocumentBytes,
+  setOrgDocumentStorageLimit,
+  deleteDocument,
 } from "../../../src/services/documents.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 
@@ -1235,5 +1237,157 @@ describe("documents service + routes", () => {
     expect(asOwner?.row.id).toBe(doc.id);
     const asOther = await getDocumentForActor(scope, { type: "end_user", id: euOther.id }, doc.id);
     expect(asOther).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Per-org document storage limit (Phase 5)
+  // -------------------------------------------------------------------------
+
+  it("NULL org limit + env quota unset → unlimited (write succeeds past any small bound)", async () => {
+    // No per-org override, no env quota → effective limit is undefined
+    // (unlimited). A 40-byte write that would trip an 8-byte quota still lands.
+    const runId = await seedRunRow(scope);
+    const up = await stageUpload(
+      scope,
+      ctx.user.id,
+      "big.txt",
+      new TextEncoder().encode("forty bytes of durable content here-oo!!"),
+    );
+    const doc = await createDocumentFromUpload(scope, userActor, up, { runId });
+    expect(doc.size).toBe(40);
+    expect(await orgBytesUsed(ctx.orgId)).toBe(40);
+  });
+
+  it("org limit BELOW env quota → org limit wins (write rejected at the org limit)", async () => {
+    // env quota 1000 is generous; the org override (8) is the binding ceiling.
+    await withEnv("ORG_STORAGE_QUOTA_BYTES", "1000", async () => {
+      await setOrgDocumentStorageLimit(ctx.orgId, 8);
+      const runId = await seedRunRow(scope);
+      const up = await stageUpload(
+        scope,
+        ctx.user.id,
+        "over.txt",
+        new TextEncoder().encode("eighteen bytes!!!!"),
+      );
+      await expect(createDocumentFromUpload(scope, userActor, up, { runId })).rejects.toMatchObject(
+        { status: 403, code: "storage_limit_exceeded" },
+      );
+      expect(await orgBytesUsed(ctx.orgId)).toBe(0);
+    });
+  });
+
+  it("org limit ABOVE env quota → org limit wins (write allowed past the env quota)", async () => {
+    // env quota 8 would reject an 18-byte write, but the org override (1000)
+    // supersedes it — the write lands.
+    await withEnv("ORG_STORAGE_QUOTA_BYTES", "8", async () => {
+      await setOrgDocumentStorageLimit(ctx.orgId, 1000);
+      const runId = await seedRunRow(scope);
+      const up = await stageUpload(
+        scope,
+        ctx.user.id,
+        "ok.txt",
+        new TextEncoder().encode("eighteen bytes!!!!"),
+      );
+      const doc = await createDocumentFromUpload(scope, userActor, up, { runId });
+      expect(doc.size).toBe(18);
+      expect(await orgBytesUsed(ctx.orgId)).toBe(18);
+    });
+  });
+
+  it("setDocumentStorageLimit: set, clear (null), unknown org (404), negative (400)", async () => {
+    // Set an override, then read it back off the row.
+    await setOrgDocumentStorageLimit(ctx.orgId, 4096);
+    const [afterSet] = await db
+      .select({ limit: organizations.documentsBytesLimit })
+      .from(organizations)
+      .where(eq(organizations.id, ctx.orgId));
+    expect(afterSet!.limit).toBe(4096);
+
+    // Clear it (back to env default).
+    await setOrgDocumentStorageLimit(ctx.orgId, null);
+    const [afterClear] = await db
+      .select({ limit: organizations.documentsBytesLimit })
+      .from(organizations)
+      .where(eq(organizations.id, ctx.orgId));
+    expect(afterClear!.limit).toBeNull();
+
+    // Unknown org → typed not-found.
+    await expect(
+      setOrgDocumentStorageLimit("00000000-0000-0000-0000-000000000000", 10),
+    ).rejects.toMatchObject({ status: 404 });
+
+    // Negative / non-integer → rejected (400), the row untouched.
+    await expect(setOrgDocumentStorageLimit(ctx.orgId, -1)).rejects.toMatchObject({ status: 400 });
+    await expect(setOrgDocumentStorageLimit(ctx.orgId, 1.5)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("downgrade (used > limit): existing docs intact, new write 403, delete then re-write allowed", async () => {
+    // Fill the org to 30 bytes across two docs, then set a limit BELOW that.
+    const runId = await seedRunRow(scope);
+    const up1 = await stageUpload(
+      scope,
+      ctx.user.id,
+      "keep-a.txt",
+      new TextEncoder().encode("fifteen bytes!!"),
+    );
+    const docA = await createDocumentFromUpload(scope, userActor, up1, { runId });
+    const up2 = await stageUpload(
+      scope,
+      ctx.user.id,
+      "keep-b.txt",
+      new TextEncoder().encode("fifteen bytes!!"),
+    );
+    const docB = await createDocumentFromUpload(scope, userActor, up2, { runId });
+    expect(await orgBytesUsed(ctx.orgId)).toBe(30);
+
+    // Downgrade below current usage.
+    await setOrgDocumentStorageLimit(ctx.orgId, 20);
+
+    // Existing documents are NEVER auto-deleted — still resolvable + downloadable.
+    const resolvedA = await getDocumentForActor(scope, userActor, docA.id);
+    expect(resolvedA?.capabilities.download).toBe(true);
+    const listed = await listDocumentsForActor(scope, userActor, {});
+    expect(listed.data.map((d) => d.id)).toContain(docA.id);
+
+    // A NEW write is rejected while used (30) ≥ limit (20).
+    const up3 = await stageUpload(scope, ctx.user.id, "new.txt", new TextEncoder().encode("x"));
+    await expect(createDocumentFromUpload(scope, userActor, up3, { runId })).rejects.toMatchObject({
+      status: 403,
+      code: "storage_limit_exceeded",
+    });
+
+    // Deletes still work (they decrement) — free docB's 15 bytes.
+    await deleteDocument(scope, docB.id);
+    expect(await orgBytesUsed(ctx.orgId)).toBe(15);
+
+    // Now under the limit (15 < 20), a small new write is allowed again.
+    const up4 = await stageUpload(scope, ctx.user.id, "again.txt", new TextEncoder().encode("ok"));
+    const docC = await createDocumentFromUpload(scope, userActor, up4, { runId });
+    expect(docC.size).toBe(2);
+    expect(await orgBytesUsed(ctx.orgId)).toBe(17);
+  });
+
+  it("FOR UPDATE re-check against the org limit: two concurrent writes, only the one that fits commits", async () => {
+    // Org limit 15; two 10-byte publishes cannot both land. The org `FOR UPDATE`
+    // lock serialises the commit-time re-check (the run-output cap default is far
+    // larger, so the org limit is the binding constraint) → exactly one commits,
+    // the loser gets a 403 storage_limit_exceeded.
+    await setOrgDocumentStorageLimit(ctx.orgId, 15);
+    const runId = await seedRunRow(scope);
+    const results = await Promise.allSettled([
+      publishStream(scope, runId, "a.txt", "0123456789"),
+      publishStream(scope, runId, "b.txt", "abcdefghij"),
+    ]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+      status: 403,
+      code: "storage_limit_exceeded",
+    });
+    const rows = await db.select().from(documents).where(eq(documents.runId, runId));
+    expect(rows).toHaveLength(1);
+    expect(await orgBytesUsed(ctx.orgId)).toBe(10);
   });
 });

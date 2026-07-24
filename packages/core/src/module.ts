@@ -1232,4 +1232,20 @@ export interface PlatformServices {
     presetId: string;
     sessionId: string | null;
   }): Promise<UsageRejection | null>;
+  /**
+   * Set (or clear) an organization's per-org document storage limit — the
+   * technical byte ceiling the platform enforces on durable-document writes.
+   * A metering/plan module (e.g. cloud) pilots per-org storage by mapping its
+   * own plan/quota to a byte value and writing it here; the platform then
+   * enforces `documents_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited`
+   * on every document write.
+   *
+   *  - `bytes` a non-negative safe integer → the org's override.
+   *  - `bytes` null → clears the override (back to the env default).
+   *
+   * Billing-neutral by contract: the core knows only a byte limit, never a plan
+   * or price. Throws the platform's RFC 9457 errors — a 404 for an unknown
+   * `orgId`, a 400 for a negative / non-integer `bytes`.
+   */
+  setDocumentStorageLimit(orgId: string, bytes: number | null): Promise<void>;
 }

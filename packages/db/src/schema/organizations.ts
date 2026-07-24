@@ -50,6 +50,15 @@ export const organizations = pgTable("organizations", {
   // high; `reconcileOrgDocumentBytes()` (documents.ts GC loop, ~daily) recomputes
   // it from `SUM(documents.size)` and corrects the drift.
   documentsBytesUsed: bigint("documents_bytes_used", { mode: "number" }).notNull().default(0),
+  // Per-org durable-document storage limit, in bytes. NULL = no per-org override
+  // (the org falls back to the global env quota). Resolution order the write path
+  // enforces (see `effectiveOrgStorageLimit` in documents.ts):
+  //   organizations.documents_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
+  // Pilotable per-org by the out-of-repo cloud module via the narrow
+  // `PlatformServices.setDocumentStorageLimit` capability. The core stays
+  // billing-neutral: this is a technical byte ceiling, never a plan or price.
+  // bigint (mode: number) — mirrors `documents_bytes_used` above.
+  documentsBytesLimit: bigint("documents_bytes_limit", { mode: "number" }),
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

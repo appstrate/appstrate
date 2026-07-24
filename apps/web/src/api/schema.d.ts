@@ -5188,12 +5188,14 @@ export interface components {
             slug?: string;
             /** Format: date-time */
             createdAt?: string;
-            /** @description Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the org-wide quota (`ORG_STORAGE_QUOTA_BYTES`), or null when unset (unlimited). */
+            /** @description Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the raw per-org limit override (`documents_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited). */
             storage?: {
                 /** @description Bytes of durable documents stored. */
                 used_bytes: number;
-                /** @description Quota in bytes, or null when no quota is configured (unlimited). */
+                /** @description Per-org limit override in bytes, or null when no override is set (falls back to the global quota). */
                 limit_bytes: number | null;
+                /** @description Effective limit in bytes the write path enforces (override ?? global quota), or null when unlimited. */
+                effective_limit_bytes: number | null;
             };
             members?: components["schemas"]["OrgMember"][];
             invitations?: components["schemas"]["OrgInvitationInfo"][];

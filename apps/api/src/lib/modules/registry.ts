@@ -30,6 +30,7 @@ import {
 import {
   resolveChatAttachment,
   detachOrDeleteContainedDocuments,
+  setOrgDocumentStorageLimit,
 } from "../../services/documents.ts";
 
 // ---------------------------------------------------------------------------
@@ -135,6 +136,10 @@ function buildPlatformServices(): PlatformServices {
     // Chat session teardown — detach-or-delete the session's contained documents
     // before the session row is removed (the module has no DB/storage access).
     cleanupSessionDocuments: (chatSessionId) => detachOrDeleteContainedDocuments({ chatSessionId }),
+    // Per-org document storage limit — a metering/plan module (cloud) writes the
+    // org's technical byte ceiling here; the platform enforces it on every write.
+    // Billing-neutral: the core stores a byte limit, never a plan/price.
+    setDocumentStorageLimit: setOrgDocumentStorageLimit,
   };
 }
 
