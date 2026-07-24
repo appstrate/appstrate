@@ -468,26 +468,25 @@ export const llmUsage = pgTable(
     userId: text("user_id").references(() => user.id, {
       onDelete: "set null",
     }),
-    // Was: onDelete: "set null". Switched to cascade to resolve a schema-level
-    // contradiction with the `llm_usage_runner_has_run_id` check constraint
-    // below: that check forbids NULL run_id on rows where source='runner', but
-    // the SET NULL cascade tries to NULL exactly that column when a run is
-    // deleted. Net effect was that any DELETE /api/packages/agents/{scope}/{name}
-    // on a package whose runs had emitted runner-source llm_usage rows threw a
-    // CHECK violation, surfaced as a generic 500 with no detail (cf BUGS-EVO §1.2).
-    // CASCADE is the right semantics: an llm_usage row is solidary of its run
-    // (no analytical value if the run is gone), and cascading the delete
-    // satisfies both the FK and the runner-has-run-id invariant.
+    // Run attribution — DETACH-ON-DELETE. An llm_usage row is an org-level
+    // accounting fact billed AFTER the fact by a cursor consumer; it loses its
+    // CONTEXT (the run) when that run is deleted, never its existence. Deleting
+    // a run therefore NULLs this column, keeping the not-yet-billed row on the
+    // org's ledger so a run delete cannot erase unswept spend. The former
+    // `llm_usage_runner_has_run_id` CHECK forbade a NULL run_id on runner rows
+    // (which forced this FK to cascade to satisfy it); that check is dropped by
+    // migration 0028 precisely so a runner row can be detached. Org deletion
+    // still cascades the whole ledger (org_id FK) — total-teardown is accepted.
     runId: text("run_id").references(() => runs.id, {
-      onDelete: "cascade",
+      onDelete: "set null",
     }),
     // Chat attribution — set on rows metered for a chat turn (source='proxy',
-    // run_id NULL). Cascades with the session, mirroring the run_id FK above:
-    // a ledger row has no analytical value once its context is gone. A row is
-    // attributable to at most one context — see the run_id/chat_session_id
-    // single-context check below.
+    // run_id NULL). Same detach semantics as run_id above: a ledger row survives
+    // its chat session's deletion with chat_session_id NULLed, so a session
+    // delete cannot erase unswept spend. A row is attributable to at most one
+    // context — see the run_id/chat_session_id single-context check below.
     chatSessionId: text("chat_session_id").references(() => chatSessions.id, {
-      onDelete: "cascade",
+      onDelete: "set null",
     }),
     // Preset id the caller asked for (what the CLI / client picked from
     // the model catalog). Kept alongside `realModel` for audit. Required
@@ -547,32 +546,48 @@ export const llmUsage = pgTable(
     // express NOT VALID) so existing rows are never scanned at apply time;
     // enforcement applies to every INSERT/UPDATE from then on. Migration 0021
     // detaches mismatched legacy rows, then `VALIDATE CONSTRAINT`s it.
+    //
+    // DELETE ACTION is `SET NULL (run_id)` — the PostgreSQL 15+ column-list
+    // form, so deleting a run nulls ONLY run_id and leaves the NOT-NULL org_id
+    // intact (a plain composite SET NULL would null org_id too → error). Drizzle
+    // cannot express the column list; the live action is hand-written in raw SQL
+    // migration 0028. The `.onDelete("set null")` below is the closest Drizzle
+    // approximation (only the column list is inexpressible) — if drizzle-kit ever
+    // materialised it, a plain composite SET NULL fails loudly on the NOT-NULL
+    // org_id instead of silently re-cascading ledger rows away.
     foreignKey({
       name: "llm_usage_run_id_org_id_fk",
       columns: [table.runId, table.orgId],
       foreignColumns: [runs.id, runs.orgId],
-    }).onDelete("cascade"),
+    }).onDelete("set null"),
     // Tenant-integrity FK for chat attribution — mirror of the CRIT-07 run FK
     // above: a ledger row's `chat_session_id` is inseparable from its `org_id`,
     // so a caller-supplied session id can never attribute spend onto another
     // tenant's session. NULL `chat_session_id` rows pass (MATCH SIMPLE). Also
     // created NOT VALID in the migration (Drizzle cannot express NOT VALID) so
-    // existing rows are never scanned at apply time. ON DELETE CASCADE mirrors
-    // the single-column `chat_session_id` FK above.
+    // existing rows are never scanned at apply time. DELETE action is
+    // `SET NULL (chat_session_id)` — same column-list detach as the run FK above,
+    // hand-written in raw SQL migration 0028; the `.onDelete("set null")` here is
+    // the closest Drizzle approximation, fail-loud if ever materialised (see the
+    // run FK above).
     foreignKey({
       name: "llm_usage_chat_session_id_org_id_fk",
       columns: [table.chatSessionId, table.orgId],
       foreignColumns: [chatSessions.id, chatSessions.orgId],
-    }).onDelete("cascade"),
+    }).onDelete("set null"),
     // INSERT invariant: exactly one principal. After FK cleanup (api_key /
     // user deleted) both may become NULL — the row survives for audit /
     // billing retention, so we don't enforce "exactly one" forever.
     check("llm_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
-    // Source-consistency invariants.
+    // Source-consistency invariant: a proxy row always carries its dedup key.
+    // (There is deliberately NO runner-has-run-id CHECK: a runner row is BORN
+    // with a run_id — the single ledger writer `recordLlmUsage` inserts it from
+    // the run's own id, see llm-usage-ledger.ts — but a later run deletion
+    // detaches it to NULL, which the dropped CHECK would have forbidden.)
     check("llm_usage_proxy_has_request_id", sql`source <> 'proxy' OR request_id IS NOT NULL`),
-    check("llm_usage_runner_has_run_id", sql`source <> 'runner' OR run_id IS NOT NULL`),
     // Attribution is to at most one context: a ledger row belongs to a run OR
-    // a chat session, never both.
+    // a chat session, never both. NULL-friendly, so a detached row (both NULL)
+    // still passes.
     check("llm_usage_context_single", sql`run_id IS NULL OR chat_session_id IS NULL`),
   ],
 );

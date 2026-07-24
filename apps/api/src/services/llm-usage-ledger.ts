@@ -10,7 +10,13 @@
  * are unified here so they can't drift:
  *
  *   1. the column mapping + the ledger check-constraint invariants (a proxy row
- *      carries a `request_id`; a row is attributed to at most one context);
+ *      carries a `request_id`; a row is attributed to at most one context). This
+ *      writer is also the sole guarantor of the runner-row birth invariant: a
+ *      `source: "runner"` row is ALWAYS inserted with a non-null `runId` (from
+ *      the run's own id — see the runner-monotonic upsert below, keyed on
+ *      `run_id`). The DB no longer enforces it with a CHECK (dropped in
+ *      migration 0028) because a run deletion legitimately detaches the row to
+ *      `run_id = NULL` afterwards; the at-insert invariant lives here instead;
  *   2. the broadcast of the `onUsageRecorded` module event — fired inline the
  *      instant the row is durably written, EXCEPT when a caller records inside
  *      its own transaction: it passes {@link RecordLlmUsageOptions.deferEmit}
