@@ -1511,7 +1511,8 @@ export const runsPaths = {
           in: "header",
           required: true,
           schema: { type: "string" },
-          description: "Display name for the document (sanitised server-side).",
+          description:
+            "Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max).",
         },
         {
           name: "Content-Type",
@@ -1573,7 +1574,10 @@ export const runsPaths = {
             },
           },
         },
-        "400": { description: "X-Document-Name or Content-Type header missing / empty body" },
+        "400": {
+          description:
+            "X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
+        },
         "401": { description: "Signature verification failed" },
         "403": { description: "storage_limit_exceeded" },
         "404": { description: "run_not_found" },

@@ -38,6 +38,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { StorageAlreadyExistsError } from "@appstrate/core/storage";
 import { UPLOAD_URI_PREFIX, UPLOAD_ID_RE } from "@appstrate/core/document-uri";
+import { MAX_FILENAME_LEN, sanitizeFilename } from "@appstrate/core/naming";
 import { getEnv } from "@appstrate/env";
 import type { Actor } from "@appstrate/connect";
 import { prefixedId } from "../lib/ids.ts";
@@ -68,7 +69,6 @@ export { normalizeMime, isUnsniffableMime, sniffedMimeMatchesDeclared };
 
 const UPLOAD_BUCKET = "uploads";
 const DEFAULT_EXPIRY_SECONDS = 900; // 15 min
-const MAX_FILENAME_LEN = 255;
 const DEFAULT_MAX_SIZE = 100 * 1024 * 1024; // 100 MB absolute ceiling
 
 /**
@@ -132,29 +132,12 @@ export type UploadStreamSink = (
 // Utilities
 // ---------------------------------------------------------------------------
 
-/**
- * Strip path separators + control characters from a user-supplied filename.
- *
- * Defense in depth only — the actual path-traversal block lives in the
- * storage layer (`makeKey()` rejects any raw bucket/path containing `..`
- * or `\0` before touching the filesystem). This helper keeps the stored
- * filename human-readable and prevents a `..` segment from surviving into
- * the final on-disk path even if the storage check ever regressed.
- *
- * Control chars (`\x00-\x1f`, `\x7f`) are collapsed too — CR/LF in a name would
- * otherwise survive into a stored filename and, on the download path, into a
- * `Content-Disposition` header (a response-splitting / header-injection vector
- * the presign path's quote-stripping alone does not cover).
- */
-export function sanitizeFilename(name: string): string {
-  const cleaned = name
-    // eslint-disable-next-line no-control-regex
-    .replace(/[/\\\x00-\x1f\x7f]/g, "_")
-    .replace(/\.\.+/g, ".")
-    .trim();
-  if (!cleaned) return "file";
-  return cleaned.slice(0, MAX_FILENAME_LEN);
-}
+// Re-exported so existing importers (documents, run-document-naming, routes,
+// tests) keep a single import site. The rule itself now lives in
+// `@appstrate/core/naming`: the agent container must apply the IDENTICAL rule
+// to predict the `documents.name` the server will store, which is half of the
+// `(run_id, sha256, name)` dedup identity. Do not re-implement here.
+export { sanitizeFilename };
 
 /**
  * Extract the upload id from an `upload://upl_xxx` URI. Returns null if the

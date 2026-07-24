@@ -26,6 +26,7 @@ import { sign } from "@appstrate/afps-runtime/events";
 import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { documentPublishedEvent } from "@appstrate/core/runtime-tool-defs";
+import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
 import type { PublishedDocument } from "@appstrate/core/runtime-tool-defs";
 import type { RunArtifactsSummary } from "@appstrate/afps-runtime/runner";
 
@@ -143,6 +144,11 @@ export interface RunDocumentUploaderDeps {
    * (or a prior sweep entry) already stored — while two files with identical
    * bytes but DIFFERENT names still BOTH publish (distinct keys). Shared between
    * the tool + sweep.
+   *
+   * `name` is always the SANITIZED name (`sanitizeFilename`), because that is
+   * what the server stores in `documents.name` and indexes on. Uploads record
+   * the name straight off the server response; the sweep sanitizes the basename
+   * itself before reserving its key.
    */
   publishedKeys: Set<string>;
   /** Injected for tests; defaults to the global `fetch`. */
@@ -175,8 +181,26 @@ export function createRunDocumentUploader(
     // `publish_document` promises a workspace-relative path. Keep that
     // contract narrower than api_call/api_upload: absolute `/tmp` paths are
     // not publishable, and symlinks may not escape the workspace.
-    const { absPath } = await resolveWorkspaceFile(deps.workspace, relPath);
+    const { absPath, stat } = await resolveWorkspaceFile(deps.workspace, relPath);
+    // The resolver already lstat'd the path; use it. A directory (the plausible
+    // `publish_document({ path: "outputs" })` mistake) or any other non-regular
+    // entry has no bytes to stream: fail HERE with a message that names the
+    // problem, instead of letting the request die inside the fetch try where it
+    // would be classified as a retryable network fault and burn 3 attempts plus
+    // backoff before surfacing an opaque `upload_failed`.
+    if (!stat.isFile()) {
+      throw new Error(
+        `'${relPath}' is not a regular file (publish_document takes a workspace-relative FILE path)`,
+      );
+    }
     const documentName = name ?? path.basename(absPath);
+    // Percent-encoded for the wire (see `encodeFilenameHeader`): a raw
+    // non-ASCII name either makes `Headers` throw inside the fetch try (where
+    // it is misread as a retryable network fault, so the deliverable is lost
+    // after 3 attempts) or survives the ISO-8859-1 header round-trip as
+    // mojibake. Computed ONCE, outside the retry loop, so an unencodable name
+    // fails fast rather than three times.
+    const encodedName = encodeFilenameHeader(documentName);
     const contentType = guessMime(absPath);
     // Size the per-attempt timeout from the payload once — the file is not
     // re-read between attempts (the body stream is rebuilt each try).
@@ -196,7 +220,7 @@ export function createRunDocumentUploader(
           secret: deps.sinkSecret,
         }),
         "Content-Type": contentType,
-        "X-Document-Name": documentName,
+        "X-Document-Name": encodedName,
       };
 
       let res: Response;
@@ -400,7 +424,15 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
 
     const sha = await fileSha256(abs);
     const documentName = path.basename(rel);
-    const key = `${sha}:${documentName}`;
+    // Key on the SANITIZED name. The server stores `sanitizeFilename(name)` in
+    // `documents.name`, and that is both what its `(run_id, sha256, name)` dedup
+    // index matches on and what the uploader records back from the response.
+    // Keying on the RAW basename made the two diverge for every name the
+    // sanitizer rewrites (accented names are untouched, but a control char, a
+    // separator, `..`, or a name over 255 chars is not): no duplicate row (the
+    // partial unique index still caught it) but a full re-stream of an
+    // already-stored file, up to the per-file cap, plus rate-limit budget.
+    const key = `${sha}:${sanitizeFilename(documentName)}`;
     if (deps.publishedKeys.has(key)) {
       // Already published by this run (the `publish_document` tool or a prior
       // sweep entry with the same content + name).
@@ -412,21 +444,37 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
     // above and publish twice. Rolled back on failure so a dropped file is not
     // remembered as published.
     deps.publishedKeys.add(key);
+    let doc: PublishedDocument;
     try {
-      const doc = await deps.uploader(path.join("outputs", rel), documentName);
-      await deps.emit(documentPublishedEvent(doc));
-      result.published.push({ name: rel, sha256: doc.sha256, size: doc.size });
+      doc = await deps.uploader(path.join("outputs", rel), documentName);
     } catch (err) {
       deps.publishedKeys.delete(key);
       // Best-effort: a single file's failure must not abort the sweep or the
       // run. The uploader has exhausted its retries, so this deliverable is
-      // DROPPED — COLLECT it (name + typed code + last error) instead of
+      // DROPPED: COLLECT it (name + typed code + last error) instead of
       // swallowing, so finalize can report the loss.
       const code: UploadFailureCode = err instanceof UploadError ? err.code : "upload_failed";
       result.failed.push({ name: rel, code, message: getErrorMessage(err) });
       deps.logWarn?.("outputs sweep dropped a deliverable (upload failed)", {
         file: rel,
         code,
+        error: getErrorMessage(err),
+      });
+      return;
+    }
+    // Past this point the bytes are stored, hashed and counted server-side:
+    // the file IS published, whatever happens next.
+    result.published.push({ name: rel, sha256: doc.sha256, size: doc.size });
+    // Emitting the event is a separate, best-effort concern and is deliberately
+    // OUTSIDE the upload's failure path. Inside it, an emit failure rolled back
+    // the dedup key and recorded the file as `failed` even though the server had
+    // already stored and counted it: a false negative in the artifacts summary,
+    // plus a re-upload of a document that is already durable.
+    try {
+      await deps.emit(documentPublishedEvent(doc));
+    } catch (err) {
+      deps.logWarn?.("outputs sweep published a document but could not emit its event", {
+        file: rel,
         error: getErrorMessage(err),
       });
     }

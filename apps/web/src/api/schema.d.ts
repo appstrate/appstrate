@@ -168,7 +168,7 @@ export interface paths {
         };
         /**
          * List storage-deletion outbox jobs
-         * @description Platform-admin only (`AUTH_PLATFORM_ADMIN_EMAILS`). Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point).
+         * @description Platform-operator surface. Requires an authentic first-party dashboard SESSION whose realm is `platform` AND whose email is in `AUTH_PLATFORM_ADMIN_EMAILS`; API keys and OIDC-issued bearer tokens are refused outright, whatever their scopes. Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point). The listing is instance-global: rows carry the bucket + in-bucket key of objects belonging to ANY organization. Rate-limited to 60/min.
          */
         get: operations["listStorageDeletionJobs"];
         put?: never;
@@ -190,7 +190,7 @@ export interface paths {
         put?: never;
         /**
          * Retry a storage-deletion job now
-         * @description Platform-admin only. Resets a pending job's `next_attempt_at` to now so the next worker pass retries it immediately. No-op (404) on a completed or unknown job.
+         * @description Same platform-operator session gate as the listing above (session + `platform` realm + allowlisted email). Resets a pending job's `next_attempt_at` to now so the next worker pass retries it immediately. No-op (404) on a completed or unknown job. Rate-limited to 30/min.
          */
         post: operations["retryStorageDeletionJob"];
         delete?: never;
@@ -1286,7 +1286,7 @@ export interface paths {
         };
         /**
          * List documents
-         * @description List the documents visible to the caller in the current application. Members see their own documents (and system-owned ones); end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`. Access is inherited from each document's container (no per-file grants).
+         * @description List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`.
          */
         get: operations["listDocuments"];
         put?: never;
@@ -1306,7 +1306,7 @@ export interface paths {
         };
         /**
          * Get document metadata
-         * @description Fetch a document's metadata, including the derived `downloadable` flag. Access is inherited from the document's container; an id the caller cannot read returns 404.
+         * @description Fetch a document's metadata, including the derived `downloadable` flag and — for a previewable document — a freshly minted `preview_url`. Requires the `documents:read` permission; on top of it access is inherited from the document's container, so an id the caller cannot read returns 404.
          */
         get: operations["getDocument"];
         put?: never;
@@ -1330,7 +1330,7 @@ export interface paths {
         };
         /**
          * Download document content
-         * @description Download the document bytes with `Content-Disposition: attachment`. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Gated by the `downloadable` flag — a user upload is served only to its creator (403 otherwise).
+         * @description Download the document bytes with `Content-Disposition: attachment`. Requires the `documents:read` permission. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-document `downloadable` flag — a user upload is served only to its creator (403 otherwise).
          */
         get: operations["getDocumentContent"];
         put?: never;
@@ -6213,6 +6213,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     retryStorageDeletionJob: {
@@ -6243,6 +6244,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listAgents: {
@@ -9830,11 +9832,6 @@ export interface operations {
                              */
                             preview_kind: "html" | "image" | "pdf" | "text" | null;
                             /**
-                             * Format: uri
-                             * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
-                             */
-                            preview_url?: string | null;
-                            /**
                              * Format: date-time
                              * @description Retention deadline, or null when permanent.
                              */
@@ -9847,8 +9844,10 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -9925,21 +9924,23 @@ export interface operations {
                          */
                         preview_kind: "html" | "image" | "pdf" | "text" | null;
                         /**
-                         * Format: uri
-                         * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
-                         */
-                        preview_url?: string | null;
-                        /**
                          * Format: date-time
                          * @description Retention deadline, or null when permanent.
                          */
                         expiresAt: string | null;
                         /** Format: date-time */
                         createdAt: string;
+                        /**
+                         * Format: uri
+                         * @description Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-document GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe: for an `html` document served same-origin (no `USERCONTENT_URL`) that iframe is the ONLY context in which the markup is served as active HTML — a top-level navigation to the same URL is served as inert `text/plain` source so agent script can never run on the app origin. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         */
+                        preview_url?: string | null;
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
@@ -9968,6 +9969,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -10009,17 +10011,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The document bytes (proxy-stream mode). */
+            /** @description The document bytes (proxy-stream mode). `Content-Type` is the document's own stored MIME (never rewritten), served with `X-Content-Type-Options: nosniff` and an `attachment` disposition — hence the `*\/*` media type here rather than a fixed `application/octet-stream`. */
             200: {
                 headers: {
                     /** @description attachment; filename=… */
                     "Content-Disposition"?: string;
+                    /** @description Always `nosniff` — the stored MIME is uploader-controlled, so the browser must never re-interpret the body as active content. */
+                    "X-Content-Type-Options"?: "nosniff";
                     /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:`. Present only when the caller has the document's `metadata` capability. */
                     "Repr-Digest"?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/octet-stream": Blob;
+                    "*/*": Blob;
                 };
             };
             /** @description Redirect to a presigned GET URL (public-endpoint S3 mode). */
@@ -10033,6 +10037,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -10055,7 +10060,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The document, with `expiresAt` now null. */
+            /** @description The document, with `expiresAt` now null. No `preview_url` is minted on this response — re-read `GET /api/documents/{id}` for a fresh one. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -10112,11 +10117,6 @@ export interface operations {
                          */
                         preview_kind: "html" | "image" | "pdf" | "text" | null;
                         /**
-                         * Format: uri
-                         * @description Absolute URL of a hardened, cookie-less HTML preview (short-lived signed token in the query). Minted ONLY on the single-document `GET /api/documents/{id}` — ABSENT on list rows (which carry `previewable` instead). Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
-                         */
-                        preview_url?: string | null;
-                        /**
                          * Format: date-time
                          * @description Retention deadline, or null when permanent.
                          */
@@ -10126,6 +10126,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -18869,7 +18870,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Display name for the document (sanitised server-side). */
+                /** @description Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). */
                 "X-Document-Name": string;
                 /** @description MIME type of the document bytes. */
                 "Content-Type": string;
@@ -18921,7 +18922,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description X-Document-Name or Content-Type header missing / empty body */
+            /** @description X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19644,8 +19645,48 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            429: components["responses"]["RateLimited"];
+            /** @description Authorization denied, OR — with `code: "storage_limit_exceeded"` — the organization's staging budget (`UPLOAD_STAGING_MAX_BYTES_PER_ORG`, summed over unconsumed, unexpired uploads plus the declared `size`) would be exceeded. Retrying is pointless until uploads are consumed or expire, or the quota is raised. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "about:blank",
+                     *       "title": "Storage Limit Exceeded",
+                     *       "status": 403,
+                     *       "detail": "Organization staging limit (5368709120 bytes) would be exceeded",
+                     *       "code": "storage_limit_exceeded",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate limited (`code: "rate_limited"`, 20/min), OR — with `code: "upload_staging_limit_exceeded"` — the acting principal already holds `UPLOAD_MAX_ACTIVE_PER_ACTOR` active staged uploads. Back-pressure, not an authz denial: retry after consuming an upload or letting one expire. */
+            429: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    RateLimit: components["headers"]["RateLimit"];
+                    "RateLimit-Policy": components["headers"]["RateLimitPolicy"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "about:blank",
+                     *       "title": "Upload Staging Limit Exceeded",
+                     *       "status": 429,
+                     *       "detail": "Too many active staged uploads (max 20); consume or let existing uploads expire before staging more",
+                     *       "code": "upload_staging_limit_exceeded",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     writeUploadContent: {

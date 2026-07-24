@@ -117,6 +117,105 @@ export function toSlug(value: string, maxLen?: number): string {
   return maxLen && maxLen > 0 ? out.slice(0, maxLen) : out;
 }
 
+// ---------------------------------------------------------------------------
+// Filenames (documents / uploads)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ceiling on a stored filename. One constant so every producer and consumer of
+ * a document/upload `name` truncates at the same point.
+ */
+export const MAX_FILENAME_LEN = 255;
+
+/**
+ * Strip path separators + control characters from a caller-supplied filename.
+ *
+ * Defense in depth only: the actual path-traversal block lives in the storage
+ * layer (`makeKey()` rejects any raw bucket/path containing `..` or `\0` before
+ * touching the filesystem). This helper keeps the stored filename
+ * human-readable and prevents a `..` segment from surviving into the final
+ * on-disk path even if the storage check ever regressed.
+ *
+ * Control chars (`\x00-\x1f`, `\x7f`) are collapsed too: CR/LF in a name would
+ * otherwise survive into a stored filename and, on the download path, into a
+ * `Content-Disposition` header (a response-splitting / header-injection vector
+ * the presign path's quote-stripping alone does not cover).
+ *
+ * Lives in core (not in `apps/api`) because BOTH ends of the run-to-platform
+ * document channel must apply the exact same rule: the API sanitizes the
+ * incoming `X-Document-Name` before it becomes `documents.name`, and therefore
+ * part of the `(run_id, sha256, name)` dedup identity, while the agent
+ * container has to PREDICT that stored name to build a matching dedup key. When
+ * the rule was only reachable from the server, the two keys silently diverged
+ * on any name carrying a separator, a control char, `..`, or exceeding
+ * {@link MAX_FILENAME_LEN}, and an already-stored file was re-streamed in full.
+ */
+export function sanitizeFilename(name: string): string {
+  const cleaned = name
+    // eslint-disable-next-line no-control-regex
+    .replace(/[/\\\x00-\x1f\x7f]/g, "_")
+    .replace(/\.\.+/g, ".")
+    .trim();
+  if (!cleaned) return "file";
+  return cleaned.slice(0, MAX_FILENAME_LEN);
+}
+
+/**
+ * Ceiling on the ENCODED header value accepted by
+ * {@link decodeFilenameHeader}. A {@link MAX_FILENAME_LEN}-char name made of
+ * 3-byte code points percent-encodes to 255 * 3 * 3 = 2295 chars; 4096 leaves
+ * headroom for 4-byte code points while keeping the decode bounded.
+ */
+export const MAX_ENCODED_FILENAME_HEADER_LEN = 4096;
+
+/**
+ * The exact alphabet `encodeURIComponent` can emit: the unreserved characters
+ * plus the `%` that introduces an escape. Anything else (a raw non-ASCII byte,
+ * a space, a `/`) proves the sender did NOT encode, and is rejected rather than
+ * guessed at.
+ */
+const ENCODED_FILENAME_RE = /^[A-Za-z0-9\-_.!~*'()%]+$/;
+
+/**
+ * Encode a filename for transport in an HTTP header value.
+ *
+ * HTTP field values are ISO-8859-1 by spec, so a non-ASCII name sent raw is
+ * either REFUSED outright by the sender (Bun's `Headers` throws
+ * `has invalid value` on a CJK filename, and inside a `fetch` try/catch that
+ * throw is indistinguishable from a retryable network fault) or silently
+ * mojibaked (a French accented name written UTF-8 and read back Latin-1 becomes
+ * the value that is then stored, displayed, and served in
+ * `Content-Disposition`).
+ *
+ * Percent-encoding (`encodeURIComponent`) is the chosen wire form: its output
+ * always sits inside {@link ENCODED_FILENAME_RE}, so it is a valid field value
+ * for ANY Unicode name; the inverse is a single standard call; it round-trips
+ * byte-for-byte; and a plain ASCII name comes out unchanged, so logs and
+ * captured requests stay readable. RFC 5987's `filename*=UTF-8''<pct-encoded>`
+ * carries the same payload but adds an ext-value grammar that only pays off on
+ * `Content-Disposition`, where a browser is the peer; here both ends are ours.
+ */
+export function encodeFilenameHeader(name: string): string {
+  return encodeURIComponent(name);
+}
+
+/**
+ * Inverse of {@link encodeFilenameHeader}. Returns `null` (never a guess) for
+ * an over-long value, a value outside the encoder's alphabet (i.e. a raw,
+ * un-encoded name), or a malformed / invalid-UTF-8 escape sequence. Callers
+ * turn that `null` into a typed 400.
+ */
+export function decodeFilenameHeader(raw: string): string | null {
+  if (raw.length === 0 || raw.length > MAX_ENCODED_FILENAME_HEADER_LEN) return null;
+  if (!ENCODED_FILENAME_RE.test(raw)) return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    // Malformed escape (`%zz`, a truncated `%E4%`) or invalid UTF-8 (`%FF`).
+    return null;
+  }
+}
+
 /**
  * MCP tool name validation.
  *

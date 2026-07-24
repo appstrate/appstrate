@@ -11,6 +11,11 @@ import {
   isValidToolName,
   normalizeToolName,
   TOOL_NAME_MAX_LEN,
+  sanitizeFilename,
+  MAX_FILENAME_LEN,
+  encodeFilenameHeader,
+  decodeFilenameHeader,
+  MAX_ENCODED_FILENAME_HEADER_LEN,
 } from "../src/naming.ts";
 
 describe("normalizeScope", () => {
@@ -213,5 +218,106 @@ describe("normalizeToolName", () => {
   it("caps to TOOL_NAME_MAX_LEN", () => {
     const big = "a".repeat(80) + "__b";
     expect(normalizeToolName(big).length).toBe(TOOL_NAME_MAX_LEN);
+  });
+});
+
+describe("sanitizeFilename", () => {
+  it("leaves a plain name untouched, accents included", () => {
+    expect(sanitizeFilename("report.html")).toBe("report.html");
+    // "rapport-ete.md" with acute accents: the sanitizer is NOT an ASCII fold.
+    expect(sanitizeFilename("rapport-été.md")).toBe("rapport-été.md");
+  });
+
+  it("collapses path separators and control characters", () => {
+    expect(sanitizeFilename("a/b.txt")).toBe("a_b.txt");
+    expect(sanitizeFilename("a\\b.txt")).toBe("a_b.txt");
+    expect(sanitizeFilename("head\r\ninjected.txt")).toBe("head__injected.txt");
+  });
+
+  it("collapses `..` runs so no traversal segment survives", () => {
+    expect(sanitizeFilename("report..md")).toBe("report.md");
+    expect(sanitizeFilename("../../etc/passwd")).toBe("._._etc_passwd");
+  });
+
+  it("falls back to `file` when nothing is left", () => {
+    expect(sanitizeFilename("   ")).toBe("file");
+    expect(sanitizeFilename("")).toBe("file");
+  });
+
+  it("caps at MAX_FILENAME_LEN", () => {
+    expect(sanitizeFilename("x".repeat(400))).toHaveLength(MAX_FILENAME_LEN);
+  });
+});
+
+describe("encodeFilenameHeader / decodeFilenameHeader", () => {
+  // "baogao.md" in Chinese, "rapport-ete.md" with acute accents, and a
+  // bar-chart emoji: the three shapes an agent writing to `outputs/` produces
+  // on a French/international product.
+  const NON_ASCII = ["报告.md", "rapport-été.md", "\u{1f4ca}.png"];
+
+  it("round-trips a non-ASCII name byte-for-byte", () => {
+    for (const name of NON_ASCII) {
+      expect(decodeFilenameHeader(encodeFilenameHeader(name))).toBe(name);
+    }
+  });
+
+  it("emits a header-safe ASCII value for a non-ASCII name", () => {
+    for (const name of NON_ASCII) {
+      const encoded = encodeFilenameHeader(name);
+      expect(encoded).not.toBe(name);
+      expect([...encoded].every((ch) => ch.charCodeAt(0) < 128)).toBe(true);
+    }
+  });
+
+  it("is the only form an HTTP header can carry (the bug this encoding fixes)", () => {
+    // Two distinct failure modes for a raw name, both fixed by encoding:
+    //
+    // 1. Outside Latin-1 (CJK, emoji) `Headers` THROWS. In the uploader that
+    //    throw lands inside the fetch try, where it is classified as a
+    //    retryable network fault: 3 attempts, backoff, then the deliverable is
+    //    permanently lost as `upload_failed`.
+    for (const name of ["报告.md", "\u{1f4ca}.png"]) {
+      expect(() => new Headers({ "X-Document-Name": name })).toThrow();
+      expect(() => new Headers({ "X-Document-Name": encodeFilenameHeader(name) })).not.toThrow();
+    }
+    // 2. Inside Latin-1 (a French accent) it is ACCEPTED, which is worse: the
+    //    value survives the send and is silently mojibaked by the UTF-8 write /
+    //    Latin-1 read round-trip on the way in. Encoding removes the ambiguity.
+    const accented = "rapport-été.md";
+    expect(() => new Headers({ "X-Document-Name": accented })).not.toThrow();
+    expect(encodeFilenameHeader(accented)).not.toBe(accented);
+  });
+
+  it("leaves a plain ASCII name unchanged on the wire (logs stay readable)", () => {
+    expect(encodeFilenameHeader("report.html")).toBe("report.html");
+    expect(decodeFilenameHeader("report.html")).toBe("report.html");
+  });
+
+  it("rejects a raw, un-encoded value instead of guessing", () => {
+    // A space and a `/` are both outside the encoder's alphabet.
+    expect(decodeFilenameHeader("Nice Name.bin")).toBeNull();
+    expect(decodeFilenameHeader("nested/report.md")).toBeNull();
+    for (const name of NON_ASCII) expect(decodeFilenameHeader(name)).toBeNull();
+  });
+
+  it("rejects a malformed or invalid-UTF-8 escape", () => {
+    expect(decodeFilenameHeader("%zz.md")).toBeNull();
+    expect(decodeFilenameHeader("truncated%")).toBeNull();
+    expect(decodeFilenameHeader("%E4%")).toBeNull();
+    expect(decodeFilenameHeader("%FF.md")).toBeNull();
+  });
+
+  it("rejects an empty or over-long value", () => {
+    expect(decodeFilenameHeader("")).toBeNull();
+    expect(decodeFilenameHeader("a".repeat(MAX_ENCODED_FILENAME_HEADER_LEN + 1))).toBeNull();
+    // A full-length name of 3-byte code points still fits the ceiling.
+    const longName = "报".repeat(MAX_FILENAME_LEN);
+    const encoded = encodeFilenameHeader(longName);
+    expect(encoded.length).toBeLessThanOrEqual(MAX_ENCODED_FILENAME_HEADER_LEN);
+    expect(decodeFilenameHeader(encoded)).toBe(longName);
+  });
+
+  it("round-trips a name carrying `%` literally", () => {
+    expect(decodeFilenameHeader(encodeFilenameHeader("100%-done.md"))).toBe("100%-done.md");
   });
 });
