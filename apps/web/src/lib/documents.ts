@@ -27,6 +27,29 @@ export interface DocumentLike {
 }
 
 /**
+ * True for an `image/*` mime — the only content shown as a thumbnail (gallery
+ * tiles, run-tab tiles, chat attachments). Lives in the shell because the
+ * documents surfaces are core: an optional module consumes the shell's helpers,
+ * never the reverse.
+ */
+export function isImageMime(mime: string | null | undefined): boolean {
+  return !!mime?.startsWith("image/");
+}
+
+/**
+ * Markdown detection for the preview modal: an explicit `text/markdown` mime
+ * (tolerating a `; charset=…` parameter) or a `.md` filename served with a
+ * text-ish mime. The preview route relabels markdown as `text/plain` to defeat
+ * md→HTML sniffing, so rich rendering has to be decided client-side from the
+ * mime/name pair.
+ */
+export function isMarkdownDoc(mime: string, name: string): boolean {
+  const m = mime.toLowerCase();
+  if (m === "text/markdown" || m.startsWith("text/markdown;")) return true;
+  return name.toLowerCase().endsWith(".md") && m.startsWith("text/");
+}
+
+/**
  * Pick a Lucide file icon for a MIME type. A small, deterministic mapping
  * (top-level type first, then a few well-known subtypes) with a neutral
  * `File` fallback — no exhaustive registry to rot.

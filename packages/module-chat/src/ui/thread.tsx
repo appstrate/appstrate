@@ -53,7 +53,6 @@ import {
   ATTACHMENT_CHIP_CLASS,
   ATTACHMENT_IMAGE_CLASS,
 } from "./document-attachment.tsx";
-import { useChatHeaders, useOpenDocument } from "./runtime-context.ts";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
@@ -217,8 +216,6 @@ function InertAttachmentChip({ name }: { name: string }) {
  * only.
  */
 function SentAttachmentChip() {
-  const getHeaders = useChatHeaders();
-  const opener = useOpenDocument();
   const name = useAttachment((a) => a.name);
   const contentType = useAttachment((a) => a.contentType);
   // The content array reference is stable for a settled attachment, so this
@@ -239,13 +236,7 @@ function SentAttachmentChip() {
 
   // A resolved `document://` is interactive: the unified renderer shows an image
   // thumbnail or a download/preview chip, resolving the opener-vs-download action.
-  return (
-    <DocumentAttachment
-      doc={{ id: resolved.id, name, mime: contentType }}
-      opener={opener}
-      getHeaders={getHeaders}
-    />
-  );
+  return <DocumentAttachment doc={{ id: resolved.id, name, mime: contentType }} />;
 }
 
 function Composer({ slot }: { slot?: React.ReactNode }) {

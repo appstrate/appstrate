@@ -10,6 +10,15 @@
 import type { UploadFn } from "@appstrate/ui/schema-form";
 import { client } from "./client";
 
+/**
+ * Per-upload byte cap the platform enforces (`POST /api/uploads` rejects a
+ * larger declared size). Client-side it is a UX fast-path only — the server is
+ * the authoritative gate — but it belongs HERE, next to the uploader, so every
+ * surface that guards a file size (SchemaForm fields, the chat composer via
+ * `ChatPage`'s injection) reads one number instead of hardcoding its own.
+ */
+export const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
 export const uploadClient: UploadFn = async (file, signal) => {
   const { data: desc } = await client.POST("/api/uploads", {
     body: {

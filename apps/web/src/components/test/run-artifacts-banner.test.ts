@@ -33,21 +33,14 @@ describe("partialArtifactFailures", () => {
     expect(partialArtifactFailures({ status: "complete", published: 3, failed: [] })).toBeNull();
   });
 
-  it("returns null for a null / malformed summary", () => {
+  it("returns null when the run has no artifacts summary at all", () => {
     expect(partialArtifactFailures(null)).toBeNull();
     expect(partialArtifactFailures(undefined)).toBeNull();
-    expect(partialArtifactFailures("nope")).toBeNull();
-    // `partial` but no failures array → nothing to show.
-    expect(partialArtifactFailures({ status: "partial", published: 0 })).toBeNull();
   });
 
-  it("drops malformed failed entries but keeps the well-formed ones", () => {
-    const failures = partialArtifactFailures({
-      status: "partial",
-      published: 0,
-      failed: [{ name: "ok.txt", code: "upload_failed" }, { name: 5 }, null],
-    });
-    expect(failures).toEqual([{ name: "ok.txt", code: "upload_failed" }]);
+  it("returns null for a `partial` summary with an empty failed list", () => {
+    // Nothing was lost → nothing to warn about.
+    expect(partialArtifactFailures({ status: "partial", published: 0, failed: [] })).toBeNull();
   });
 });
 

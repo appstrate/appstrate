@@ -24,14 +24,12 @@ import {
   PinIcon,
   Trash2Icon,
 } from "lucide-react";
-import { isImageMime, useDocumentImageSrc } from "@appstrate/module-chat/ui";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { cn } from "@appstrate/ui/cn";
 import { formatDateField } from "../lib/markdown";
-import { buildScopingHeaders } from "../lib/scoping-headers";
-import { mimeIconFor, documentRunHref, documentExpiryInfo } from "../lib/documents";
-import type { DocumentDto } from "../hooks/use-documents";
+import { isImageMime, mimeIconFor, documentRunHref, documentExpiryInfo } from "../lib/documents";
+import { useDocumentImageSrc, type DocumentDto } from "../hooks/use-documents";
 
 /**
  * Relative-expiry badge — rendered only for a document carrying a retention
@@ -83,12 +81,10 @@ function MimePlaceholder({ mime }: { mime: string }) {
  * Image branch: the authenticated cover-cropped preview, falling back to the
  * mime placeholder while the fetch is in flight or on failure (src null). Kept
  * as its own component so the fetch hook only runs for eligible images (hooks
- * can't be called conditionally). Cookie auth alone is not enough — the content
- * route resolves the org/app context from the scoping headers, like every other
- * web API call.
+ * can't be called conditionally).
  */
 function DocumentTileImage({ doc }: { doc: DocumentDto }) {
-  const src = useDocumentImageSrc(doc.id, buildScopingHeaders);
+  const src = useDocumentImageSrc(doc.id);
   if (!src) return <MimePlaceholder mime={doc.mime} />;
   return <img src={src} alt={doc.name} className="size-full object-cover" />;
 }

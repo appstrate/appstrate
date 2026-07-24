@@ -25,12 +25,17 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PanelLeftIcon } from "lucide-react";
 import { Thread } from "./thread.tsx";
-import {
-  ChatHeadersProvider,
-  SelectConversationProvider,
-  OpenDocumentProvider,
+import { ChatRuntimeProvider } from "./runtime-provider.tsx";
+import { useChatTranslate, useMaxUploadBytes, useUploadFile } from "./runtime-context.ts";
+import type {
+  ChatTranslate,
+  DownloadDocument,
+  GetHeaders,
+  OpenDocument,
+  SelectConversation,
+  UploadFile,
+  UseDocumentImageSrc,
 } from "./runtime-context.ts";
-import type { GetHeaders, SelectConversation, OpenDocument } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
@@ -44,16 +49,6 @@ import {
 import { useSessions } from "./use-sessions.ts";
 import { subscribeModel, getSelectedModel, setSelectedModel } from "./model-store.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
-
-// The unified chat document renderer + its helpers, re-exported so the web shell
-// (Phase 2) can reuse the same square-thumbnail treatment for its own document
-// surfaces.
-export {
-  DocumentAttachment,
-  isImageMime,
-  useDocumentImageSrc,
-  ATTACHMENT_IMAGE_CLASS,
-} from "./document-attachment.tsx";
 
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
@@ -90,11 +85,22 @@ export interface ChatPageProps {
   onConversationChange?: SelectConversation;
   /**
    * Opens the host's in-app document preview for a clicked chat document
-   * (attachment thumbnail/chip or a run card's document chip). Provided by the
-   * web shell; when absent (embedded mounts) the chat falls back to the
-   * authenticated download. Delivered to deep tool UIs via context, not props.
+   * (attachment thumbnail/chip or a run card's document chip). Optional: when
+   * absent the chat falls back to `downloadDocument`. Delivered to deep tool UIs
+   * via context, not props.
    */
   onOpenDocument?: OpenDocument;
+  /**
+   * REQUIRED host services — the chat implements none of them itself (see
+   * `runtime-context.ts`): the authenticated download, the authenticated image
+   * preview hook, the staged uploader + the platform's per-upload cap, and the
+   * translator for every user-facing string this UI renders.
+   */
+  downloadDocument: DownloadDocument;
+  useDocumentImageSrc: UseDocumentImageSrc;
+  uploadFile: UploadFile;
+  maxUploadBytes: number;
+  t: ChatTranslate;
 }
 
 export function ChatPage({
@@ -103,6 +109,11 @@ export function ChatPage({
   newChatKey,
   onConversationChange,
   onOpenDocument,
+  downloadDocument,
+  useDocumentImageSrc,
+  uploadFile,
+  maxUploadBytes,
+  t,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -171,72 +182,77 @@ export function ChatPage({
   }, [sessions.data, activeId]);
 
   return (
-    <ChatHeadersProvider value={getHeaders ?? null}>
-      <SelectConversationProvider value={onConversationChange ?? null}>
-        <OpenDocumentProvider value={onOpenDocument ?? null}>
-          <div className="bg-background flex h-full w-full">
-            <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
+    <ChatRuntimeProvider
+      getHeaders={getHeaders ?? null}
+      selectConversation={onConversationChange ?? null}
+      openDocument={onOpenDocument ?? null}
+      downloadDocument={downloadDocument}
+      useDocumentImageSrc={useDocumentImageSrc}
+      uploadFile={uploadFile}
+      maxUploadBytes={maxUploadBytes}
+      t={t}
+    >
+      <div className="bg-background flex h-full w-full">
+        <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
+          <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
+        </aside>
+
+        {mobileOpen && (
+          <div className="fixed inset-0 z-40 md:hidden">
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setMobileOpen(false)}
+              aria-hidden
+            />
+            <aside
+              className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
+              // Bubble phase, NOT capture: a capture handler would flush
+              // `setMobileOpen(false)` synchronously (discrete event) and
+              // unmount this subtree BEFORE the bubble dispatch, swallowing
+              // the row button's own onClick (select/navigate). In bubble
+              // order the child's handler runs first, then this closes.
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest("button")) setMobileOpen(false);
+              }}
+            >
               <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
             </aside>
+          </div>
+        )}
 
-            {mobileOpen && (
-              <div className="fixed inset-0 z-40 md:hidden">
-                <div
-                  className="absolute inset-0 bg-black/40"
-                  onClick={() => setMobileOpen(false)}
-                  aria-hidden
-                />
-                <aside
-                  className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
-                  // Bubble phase, NOT capture: a capture handler would flush
-                  // `setMobileOpen(false)` synchronously (discrete event) and
-                  // unmount this subtree BEFORE the bubble dispatch, swallowing
-                  // the row button's own onClick (select/navigate). In bubble
-                  // order the child's handler runs first, then this closes.
-                  onClick={(e) => {
-                    if ((e.target as HTMLElement).closest("button")) setMobileOpen(false);
-                  }}
-                >
-                  <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
-                </aside>
-              </div>
-            )}
-
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-                <button
-                  type="button"
-                  onClick={() => setMobileOpen(true)}
-                  aria-label="Conversations"
-                  className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
-                >
-                  <PanelLeftIcon className="size-5" />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <ActiveConversationTitle activeId={conversationId ?? null} />
-                </div>
-              </div>
-              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                <Conversation
-                  key={activeId}
-                  id={activeId}
-                  getHeaders={getHeaders}
-                  isPersisted={isPersisted}
-                  onConversationChange={onConversationChange}
-                  composerSlot={
-                    <ModelSelect
-                      models={models}
-                      selectedId={selectedModel}
-                      onSelect={setSelectedModel}
-                    />
-                  }
-                />
-              </main>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Conversations"
+              className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
+            >
+              <PanelLeftIcon className="size-5" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <ActiveConversationTitle activeId={conversationId ?? null} />
             </div>
           </div>
-        </OpenDocumentProvider>
-      </SelectConversationProvider>
-    </ChatHeadersProvider>
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <Conversation
+              key={activeId}
+              id={activeId}
+              getHeaders={getHeaders}
+              isPersisted={isPersisted}
+              onConversationChange={onConversationChange}
+              composerSlot={
+                <ModelSelect
+                  models={models}
+                  selectedId={selectedModel}
+                  onSelect={setSelectedModel}
+                />
+              }
+            />
+          </main>
+        </div>
+      </div>
+    </ChatRuntimeProvider>
   );
 }
 
@@ -388,10 +404,17 @@ function ConversationInner({
     onConversationChange?.(id);
   }, [chat.messages.length, id, onConversationChange]);
 
-  // File attachments: the composer uploads picked files (2-step upload) and
-  // sends them as `upload://` file parts the server materializes into durable
-  // documents. Memoized on `getHeaders` (stable) so the runtime keeps one adapter.
-  const attachments = useMemo(() => createChatAttachmentAdapter(getHeaders), [getHeaders]);
+  // File attachments: the composer stages picked files through the HOST
+  // uploader and sends them as `upload://` file parts the server materializes
+  // into durable documents. Memoized on the injected services (stable host
+  // values) so the runtime keeps one adapter.
+  const upload = useUploadFile();
+  const maxUploadBytes = useMaxUploadBytes();
+  const t = useChatTranslate();
+  const attachments = useMemo(
+    () => createChatAttachmentAdapter({ upload, maxBytes: maxUploadBytes, t }),
+    [upload, maxUploadBytes, t],
+  );
   const runtime = useAISDKRuntime(chat, { adapters: { attachments } });
 
   return (

@@ -4,29 +4,30 @@
  * The single opener-vs-download decision for a chat-surfaced document, shared by
  * the sent-attachment chips (`thread.tsx`) and the run-progress document chips
  * (`chat-run-progress-card.tsx`). With a host opener (web shell) a document
- * opens the in-app preview modal; without one (embedded mounts) it falls back to
- * the authenticated download. The same choice drives the click action and its
- * label ("Aperçu de X" vs "Télécharger X").
+ * opens the in-app preview modal; without one it falls back to the host's
+ * authenticated download. The same choice drives the click action and its label.
  *
- * A pure function (not a hook): callers already hold `opener`/`getHeaders` from
- * their own top-level hook calls and pass them in, so this composes cleanly
+ * A pure function (not a hook): callers already hold `opener` / `download` / `t`
+ * from their own top-level hook calls and pass them in, so this composes cleanly
  * inside conditionals and `.map` bodies.
  */
 
-import type { OpenDocument, GetHeaders } from "./runtime-context.ts";
-import { downloadChatDocument } from "./document-download.ts";
+import type { OpenDocument, DownloadDocument, ChatTranslate } from "./runtime-context.ts";
 
 export function documentActivation(
   doc: { id: string; name: string },
   opener: OpenDocument | null,
-  getHeaders: GetHeaders | null,
+  download: DownloadDocument,
+  t: ChatTranslate,
 ): { onActivate: () => void; label: string } {
   const { id, name } = doc;
-  const actionName = name || "document";
-  const labelName = name || "le document";
-  const onActivate = opener
-    ? () => opener({ id, name: actionName })
-    : () => void downloadChatDocument(id, actionName, getHeaders?.() ?? {});
-  const label = opener ? `Aperçu de ${labelName}` : `Télécharger ${labelName}`;
+  // The bare fallback only feeds the download filename; the label uses its own
+  // translated placeholder so the sentence stays grammatical in every language.
+  const fileName = name || "document";
+  const labelName = name || t("doc.unnamed");
+  const onActivate = opener ? () => opener({ id, name: fileName }) : () => download(id, fileName);
+  const label = opener
+    ? t("doc.previewOf", { name: labelName })
+    : t("doc.downloadOf", { name: labelName });
   return { onActivate, label };
 }

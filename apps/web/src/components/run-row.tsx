@@ -46,10 +46,10 @@ export function RunRow({
   const time = isRunning ? elapsed : run.duration;
   const duration = time ? `${(time / 1000).toFixed(1)}s` : "";
 
-  // Optional-chained so a run frame from an older server (rollout window) can't
-  // take down the whole list — the icons just stay hidden.
-  const inputDocs = run.document_counts?.input ?? 0;
-  const outputDocs = run.document_counts?.output ?? 0;
+  // `document_counts` is a non-optional field of the run DTO — every list and
+  // detail endpoint computes it — so read it straight.
+  const inputDocs = run.document_counts.input;
+  const outputDocs = run.document_counts.output;
 
   const content = (
     <div className="flex min-w-0 flex-1 items-center gap-2">

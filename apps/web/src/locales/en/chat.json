@@ -1,0 +1,18 @@
+{
+  "doc.unnamed": "this document",
+  "doc.previewOf": "Preview {{name}}",
+  "doc.downloadOf": "Download {{name}}",
+  "upload.tooLarge": "File too large ({{max}} MB maximum).",
+  "upload.failed": "File upload failed.",
+  "run.fallbackLabel": "Run",
+  "run.starting": "Starting",
+  "run.running": "Running",
+  "run.launchFailed": "Launch failed",
+  "run.details": "Run details",
+  "run.openPage": "Open the run page",
+  "run.status.success": "Completed",
+  "run.status.failed": "Failed",
+  "run.status.timeout": "Timed out",
+  "run.status.cancelled": "Cancelled",
+  "run.status.done": "Finished"
+}

@@ -24,7 +24,7 @@ import {
 import { ChevronDown } from "lucide-react";
 import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { uploadClient } from "../api/uploads";
+import { useUploadClient } from "../hooks/use-upload";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
@@ -167,6 +167,7 @@ export function ScheduleForm({
   const hasInputSchema = Object.keys(schema.properties).length > 0;
   const wrapper: SchemaWrapper = { schema };
   const labels = useSchemaFormLabels();
+  const upload = useUploadClient();
 
   const [inputValues, setInputValues] = useState<Record<string, unknown>>(
     () => defaultValues?.input ?? {},
@@ -436,7 +437,7 @@ export function ScheduleForm({
               <SchemaForm
                 wrapper={wrapper}
                 formData={inputValues}
-                upload={uploadClient}
+                upload={upload}
                 labels={labels}
                 onChange={(e) => setInputValues(e.formData as Record<string, unknown>)}
               />

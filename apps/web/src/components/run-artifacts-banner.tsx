@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
+import type { RunArtifactsSummary } from "@appstrate/shared-types";
 import { artifactFailureCodeKey, partialArtifactFailures } from "./run-artifacts";
 
 /**
@@ -12,10 +13,10 @@ import { artifactFailureCodeKey, partialArtifactFailures } from "./run-artifacts
  * place a finished, green run surfaces the silent data loss. Lists each lost
  * file's name with a human explanation of its failure code.
  */
-export function RunArtifactsBanner({ artifacts }: { artifacts: unknown }) {
+export function RunArtifactsBanner({ artifacts }: { artifacts: RunArtifactsSummary | null }) {
   const { t } = useTranslation("agents");
   const failures = partialArtifactFailures(artifacts);
-  if (!failures || failures.length === 0) return null;
+  if (!failures) return null;
   return (
     <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
       <div className="flex items-center gap-2 font-medium text-amber-600 dark:text-amber-500">

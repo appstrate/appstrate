@@ -9,7 +9,7 @@ import { Spinner } from "./spinner";
 import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { uploadClient } from "../api/uploads";
+import { useUploadClient } from "../hooks/use-upload";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
 import { DependencyOverridesSection } from "./dependency-overrides-section";
@@ -107,6 +107,7 @@ function RunWithOptionsForm({
   // skills the modal renders match what the run will execute, not the draft.
   const deps = useScheduleFormDeps(agent.id, version);
   const labels = useSchemaFormLabels();
+  const upload = useUploadClient();
 
   // Version-pinned input wrapper / skills (fall back to the draft props the
   // parent passed while the version-aware detail is still loading).
@@ -136,7 +137,7 @@ function RunWithOptionsForm({
             ref={inputFormRef}
             wrapper={inputWrapper}
             formData={inputData}
-            upload={uploadClient}
+            upload={upload}
             labels={labels}
             onChange={(e) => setInputData(e.formData as Record<string, unknown>)}
             onSubmit={(e) => fire(e.formData as Record<string, unknown>)}

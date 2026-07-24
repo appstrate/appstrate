@@ -71,18 +71,22 @@ export function isTerminalStatus(status: string | null | undefined): status is R
   return typeof status === "string" && TERMINAL_RUN_STATUSES.has(status as RunStatus);
 }
 
-export function terminalRunLineText(status: RunStatus | undefined): string {
+/**
+ * i18n key for the settled line a terminal run's card shows instead of its last
+ * log. A KEY, not a sentence: this module ships no literal user-facing text —
+ * the card resolves it through the host translator (same pattern as the web
+ * shell's `artifactFailureCodeKey`). An unknown/absent status falls back to the
+ * generic "finished" key, so a new status can never render a raw key.
+ */
+export function runStatusLineKey(status: RunStatus | undefined): string {
   switch (status) {
     case "success":
-      return "Complété";
     case "failed":
-      return "Échec";
     case "timeout":
-      return "Expiré";
     case "cancelled":
-      return "Annulé";
+      return `run.status.${status}`;
     default:
-      return "Terminé";
+      return "run.status.done";
   }
 }
 
@@ -391,11 +395,6 @@ export function mergeRunDocuments(
   const byId = new Map<string, ChatRunDocument>();
   for (const doc of [...a, ...b]) if (!byId.has(doc.id)) byId.set(doc.id, doc);
   return [...byId.values()];
-}
-
-/** Content-download URL for a document (the `/content` route handles the 307). */
-export function documentContentHref(id: string): string {
-  return `/api/documents/${encodeURIComponent(id)}/content`;
 }
 
 /**

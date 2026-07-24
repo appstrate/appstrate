@@ -34,6 +34,10 @@ export const i18nReady = i18n
     supportedLngs: ["fr", "en"],
     defaultNS: "common",
     fallbackNS: "common",
+    // Core namespaces, preloaded for every user. A MODULE's namespace is
+    // deliberately absent (e.g. `chat`): `useTranslation("chat")` loads it on
+    // demand inside the module route's Suspense boundary, so a disabled module
+    // costs nothing — same rule as its code chunk.
     ns: ["common", "agents", "settings", "documents"],
     interpolation: { escapeValue: false },
   });

@@ -4,17 +4,24 @@
  * THE unified renderer for a chat-surfaced document attachment — shared by the
  * sent user-message attachments (`thread.tsx`, input) and the run-card output
  * documents (`chat-run-progress-card.tsx`, output). An image renders as a small
- * square thumbnail (authenticated fetch → object URL); anything else renders as
- * a clickable chip. The click action (in-app preview vs. authenticated download)
- * and its label come from `documentActivation`, so both surfaces behave
- * identically.
+ * square thumbnail; anything else renders as a clickable chip. The click action
+ * (in-app preview vs. authenticated download) and its label come from
+ * `documentActivation`, so both surfaces behave identically.
+ *
+ * Every service this needs — the preview opener, the authenticated download, the
+ * authenticated image hook, the translator — is read from the host injection
+ * seam, so callers pass a document and nothing else.
  */
 
-import * as React from "react";
 import { DownloadIcon, EyeIcon } from "lucide-react";
 import { documentActivation } from "./doc-activation.ts";
-import { documentContentHref } from "./run-events.ts";
-import type { GetHeaders, OpenDocument } from "./runtime-context.ts";
+import {
+  useChatTranslate,
+  useDocumentImageSrcHook,
+  useDownloadDocument,
+  useOpenDocument,
+} from "./runtime-context.ts";
+import type { OpenDocument } from "./runtime-context.ts";
 
 /** True for an `image/*` mime — the only content shown as a thumbnail. */
 export function isImageMime(mime: string | null | undefined): boolean {
@@ -30,40 +37,6 @@ export const ATTACHMENT_CHIP_CLASS =
  * attachments, staged uploads, run-card documents): a 64px cover-cropped square.
  */
 export const ATTACHMENT_IMAGE_CLASS = "size-16 shrink-0 rounded-lg border object-cover";
-
-/**
- * Authenticated fetch of a stored document's content route → object URL for an
- * <img> src, revoked on unmount / id change. Returns null while loading or on
- * failure (callers fall back to the chip). The content route only serves stored
- * documents, so this is only ever used for a resolved `document://`.
- */
-export function useDocumentImageSrc(id: string, getHeaders: GetHeaders | null): string | null {
-  const [src, setSrc] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    void (async () => {
-      try {
-        const res = await fetch(documentContentHref(id), {
-          headers: getHeaders?.() ?? {},
-          credentials: "include",
-        });
-        if (!res.ok || cancelled) return;
-        const blob = await res.blob();
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setSrc(objectUrl);
-      } catch {
-        // Fetch failure → stay on the chip fallback (src stays null).
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [id, getHeaders]);
-  return src;
-}
 
 /**
  * Clickable chip: the action glyph (eye when an in-app preview opener is
@@ -101,26 +74,26 @@ function AttachmentChip({
 }
 
 /**
- * Image branch: the authenticated thumbnail, falling back to the chip while the
- * fetch is in flight or on failure (src null). Kept as its own component so the
- * fetch hook only runs for images (hooks can't be called conditionally).
+ * Image branch: the host's authenticated thumbnail, falling back to the chip
+ * while the fetch is in flight or on failure (src null). Kept as its own
+ * component so the injected hook only runs for images (hooks can't be called
+ * conditionally).
  */
 function DocumentImageThumbnail({
   id,
   name,
   label,
   opener,
-  getHeaders,
   onActivate,
 }: {
   id: string;
   name: string;
   label: string;
   opener: OpenDocument | null;
-  getHeaders: GetHeaders | null;
   onActivate: () => void;
 }) {
-  const src = useDocumentImageSrc(id, getHeaders);
+  const useImageSrc = useDocumentImageSrcHook();
+  const src = useImageSrc(id);
   if (!src)
     return <AttachmentChip name={name} label={label} opener={opener} onActivate={onActivate} />;
   return (
@@ -141,19 +114,18 @@ function DocumentImageThumbnail({
 /**
  * The unified document attachment. An image renders as a clickable square
  * thumbnail; anything else renders as the clickable chip. Both open the same
- * activation (in-app preview when a host opener is present, else the
+ * activation (in-app preview when a host opener is present, else the host's
  * authenticated download).
  */
 export function DocumentAttachment({
   doc,
-  opener,
-  getHeaders,
 }: {
   doc: { id: string; name: string; mime?: string | null };
-  opener: OpenDocument | null;
-  getHeaders: GetHeaders | null;
 }) {
-  const { onActivate, label } = documentActivation(doc, opener, getHeaders);
+  const opener = useOpenDocument();
+  const download = useDownloadDocument();
+  const t = useChatTranslate();
+  const { onActivate, label } = documentActivation(doc, opener, download, t);
   if (isImageMime(doc.mime)) {
     return (
       <DocumentImageThumbnail
@@ -161,7 +133,6 @@ export function DocumentAttachment({
         name={doc.name}
         label={label}
         opener={opener}
-        getHeaders={getHeaders}
         onActivate={onActivate}
       />
     );

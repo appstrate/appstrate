@@ -15,7 +15,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Button } from "@appstrate/ui/components/button";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import {
   useDeleteDocument,
   useDocumentDownload,
@@ -88,18 +88,25 @@ export function DocumentListPanel({
 
   // Navigate while preserving the URL hash (the run page keeps its active tab in
   // the hash — react-router's setSearchParams would drop it) and any other
-  // existing search params. Both open and close PUSH a history entry, so the
-  // back button from an open modal lands on the param-less URL and closes it.
+  // existing search params.
+  //
+  // Opening PUSHES (so the back button closes the preview); closing REPLACES.
+  // Pushing on close too would stack `[page, page?preview=x, page]`, and then
+  // "back" from the closed state would REOPEN the preview instead of leaving
+  // the page — worse with every document consulted.
   const setPreviewParam = (id: string | null) => {
     const params = new URLSearchParams(location.search);
     if (id) params.set("preview", id);
     else params.delete("preview");
     const search = params.toString();
-    navigate({
-      pathname: location.pathname,
-      search: search ? `?${search}` : "",
-      hash: location.hash,
-    });
+    navigate(
+      {
+        pathname: location.pathname,
+        search: search ? `?${search}` : "",
+        hash: location.hash,
+      },
+      { replace: id === null },
+    );
   };
 
   // Wire the delete/keep handlers unconditionally — per-document visibility is
@@ -138,18 +145,22 @@ export function DocumentListPanel({
 
   return (
     <>
-      <div className="mb-4 flex items-center gap-1">
-        {PURPOSE_TABS.map((p) => (
-          <Button
-            key={p}
-            variant={purpose === p ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => onPurposeChange(p)}
-          >
-            {t(`filter.${p}`)}
-          </Button>
-        ))}
-      </div>
+      {/* A real tab strip (same primitive as the run page's tabs) — the roving
+          focus + `role="tab"` semantics come with it, which a row of buttons
+          never had. */}
+      <Tabs
+        className="mb-4"
+        value={purpose}
+        onValueChange={(v) => onPurposeChange(v as PurposeFilter)}
+      >
+        <TabsList>
+          {PURPOSE_TABS.map((p) => (
+            <TabsTrigger key={p} value={p}>
+              {t(`filter.${p}`)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {isLoading ? (
         <LoadingState />
@@ -192,13 +203,7 @@ export function DocumentListPanel({
         isPending={deleteDoc.isPending}
       />
 
-      {previewDoc && (
-        <DocumentPreview
-          doc={previewDoc}
-          open={!!previewDoc}
-          onClose={() => setPreviewParam(null)}
-        />
-      )}
+      {previewDoc && <DocumentPreview doc={previewDoc} onClose={() => setPreviewParam(null)} />}
     </>
   );
 }

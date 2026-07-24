@@ -12,7 +12,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { LazySchemaForm as SchemaForm } from "../lazy-schema-form";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
-import { uploadClient } from "../../api/uploads";
+import { useUploadClient } from "../../hooks/use-upload";
 import { getModelIcon } from "../icons";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
@@ -41,6 +41,7 @@ function ConfigSection({
 
   const [values, setValues] = useState<Record<string, unknown>>(() => current);
   const labels = useSchemaFormLabels();
+  const upload = useUploadClient();
 
   if (!schema?.properties || Object.keys(schema.properties).length === 0) return null;
 
@@ -54,7 +55,7 @@ function ConfigSection({
       <SchemaForm
         wrapper={wrapper}
         formData={values}
-        upload={uploadClient}
+        upload={upload}
         labels={labels}
         onChange={(e) => setValues(e.formData as Record<string, unknown>)}
       />
