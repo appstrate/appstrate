@@ -4,6 +4,9 @@ import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { formatBytes } from "@appstrate/core/format";
+import { $api } from "../../api/client";
+import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../../hooks/use-billing";
 import { PlanGrid } from "../../components/plan-card";
@@ -25,12 +28,30 @@ const STATUS_I18N: Record<string, string> = {
 export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { features } = useAppConfig();
+  const { currentOrg } = useOrg();
   // Gate the cloud fetch on the feature flag (mirrors sidebar-billing) so OSS
   // mode never fires the cloud-only `/billing` request (404). The line-below
   // <Navigate> still handles the visible redirect.
   const { data: billing, isLoading, error } = useBilling({ enabled: features.billing });
   const checkoutMutation = useCheckout();
   const portalMutation = usePortal();
+
+  // Storage entitlement — core data (organizations.documents_bytes_*), shown
+  // next to the credit gauge because the plan drives the storage limit in
+  // cloud mode. Same source as the org-settings/general storage section.
+  const orgId = currentOrg?.id;
+  const { data: orgDetail } = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}",
+    { params: { path: { orgId: orgId ?? "" } } },
+    { enabled: features.billing && !!orgId },
+  );
+  const storage = orgDetail?.storage;
+  const storageLimit = storage?.effective_limit_bytes ?? null;
+  const storagePercent =
+    storage && storageLimit !== null && storageLimit > 0
+      ? Math.min(100, Math.round((storage.used_bytes / storageLimit) * 100))
+      : 0;
 
   if (!features.billing) return <Navigate to="/org-settings/general" replace />;
   if (isLoading) return <LoadingState />;
@@ -121,6 +142,37 @@ export function OrgSettingsBillingPage() {
             />
           </div>
         </div>
+
+        {storage && (
+          <div className="mt-4">
+            <div className="mb-1 flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">{t("billing.storageUsage")}</span>
+              <span className="font-medium">
+                {storageLimit === null
+                  ? t("orgStorage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
+                  : `${storagePercent}%`}
+                {storageLimit !== null && (
+                  <span className="text-muted-foreground ml-2 text-xs font-normal">
+                    (
+                    {t("orgStorage.usedOfLimit", {
+                      used: formatBytes(storage.used_bytes),
+                      limit: formatBytes(storageLimit),
+                    })}
+                    )
+                  </span>
+                )}
+              </span>
+            </div>
+            {storageLimit !== null && (
+              <div className="bg-muted h-2 overflow-hidden rounded-full">
+                <div
+                  className={`h-full rounded-full transition-all ${getUsageBarColor(storagePercent)}`}
+                  style={{ width: `${storagePercent}%` }}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {billing.status === "past_due" && (
