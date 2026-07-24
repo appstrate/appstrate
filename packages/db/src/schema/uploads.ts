@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, timestamp, integer, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, bigint, uuid, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
@@ -46,8 +46,14 @@ export const uploads = pgTable(
     name: text("name").notNull(),
     /** Declared MIME type (re-verified server-side via magic-byte sniffing). */
     mime: text("mime").notNull(),
-    /** Size in bytes (declared, then verified on consumption). */
-    size: integer("size").notNull(),
+    /**
+     * Size in bytes (declared, then verified on consumption). bigint, NOT
+     * int4: an upload is materialized into `documents`, whose `size` is
+     * bigint, and the whole upload → materialize → document path would
+     * otherwise carry a silent ~2.1 GB ceiling on the staging half of a
+     * pipeline whose durable half has none.
+     */
+    size: bigint("size", { mode: "number" }).notNull(),
     /**
      * Optional client-declared SHA-256 of the payload (hex, lowercase). When
      * present it is enforced server-side: the S3 presign binds an
@@ -75,5 +81,18 @@ export const uploads = pgTable(
     index("idx_uploads_expires_unconsumed")
       .on(table.expiresAt)
       .where(sql`${table.consumedAt} IS NULL`),
+    // FK-side indexes. Postgres indexes the REFERENCED side of a foreign key,
+    // never the referencing one — so without these, deleting an organization,
+    // an end-user or a dashboard user seq-scans the whole of `uploads` (under
+    // the lock the cascade holds) just to find the rows to cascade or null.
+    index("idx_uploads_org").on(table.orgId),
+    // Partial (`IS NOT NULL`): dashboard-user uploads never enter this index.
+    index("idx_uploads_end_user")
+      .on(table.endUserId)
+      .where(sql`${table.endUserId} IS NOT NULL`),
+    // Partial (`IS NOT NULL`): end-user / unattributed uploads stay out.
+    index("idx_uploads_created_by")
+      .on(table.createdBy)
+      .where(sql`${table.createdBy} IS NOT NULL`),
   ],
 );

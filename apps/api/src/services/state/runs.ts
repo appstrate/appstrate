@@ -564,6 +564,11 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
           consumedDocumentIds.map((documentId) => ({
             documentId,
             consumerRunId: id,
+            // Tenant column, enforced by the two composite FKs on
+            // `document_links`: the document AND the consuming run must both
+            // belong to this org, so a cross-tenant link — which would block the
+            // victim org from ever deleting its own document — cannot be written.
+            orgId: scope.orgId,
           })),
         )
         .onConflictDoNothing();

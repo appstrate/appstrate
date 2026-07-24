@@ -66,5 +66,15 @@ export const storageDeletionJobs = pgTable(
     uniqueIndex("uq_storage_deletion_jobs_pending")
       .on(table.bucket, table.storageKey)
       .where(sql`${table.completedAt} IS NULL`),
+    // Retention sweep: this table takes one row per deleted storage object and
+    // keeps it forever once completed, so the completed tail grows without
+    // bound. The purge deletes by `completed_at < now() - retention`; both
+    // partial indexes above are scoped to `completed_at IS NULL` and are
+    // therefore useless to it, leaving a full seq scan of an ever-growing
+    // table. Partial on the complement so the (small, hot) pending set stays
+    // out of this index exactly as completed rows stay out of theirs.
+    index("idx_storage_deletion_jobs_completed")
+      .on(table.completedAt)
+      .where(sql`${table.completedAt} IS NOT NULL`),
   ],
 );

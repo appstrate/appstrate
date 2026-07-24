@@ -21,6 +21,12 @@ END $$;--> statement-breakpoint
 ALTER TABLE "llm_usage" ADD COLUMN IF NOT EXISTS "chat_session_id" text;--> statement-breakpoint
 ALTER TABLE "llm_usage" ADD COLUMN IF NOT EXISTS "credential_source" "credential_source";--> statement-breakpoint
 -- Single-column chat FK — cascade-deletes a ledger row with its session.
+-- (Migration 0028 later flips this to `SET NULL`: a ledger row must lose its
+-- context, never its existence.) Added NOT VALID so `llm_usage` — the largest
+-- table in this database — is NEVER scanned at apply time under the SHARE ROW
+-- EXCLUSIVE lock the ADD CONSTRAINT takes. Validation is trivially satisfiable
+-- (`chat_session_id` was just added and is NULL everywhere) but is deferred to
+-- the dedicated validation migration 0030, exactly like the composite FK below.
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -29,7 +35,7 @@ BEGIN
       AND conrelid = 'public.llm_usage'::regclass
       AND contype = 'f'
   ) THEN
-    ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_chat_session_id_chat_sessions_id_fk" FOREIGN KEY ("chat_session_id") REFERENCES "public"."chat_sessions"("id") ON DELETE cascade ON UPDATE no action;
+    ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_chat_session_id_chat_sessions_id_fk" FOREIGN KEY ("chat_session_id") REFERENCES "public"."chat_sessions"("id") ON DELETE cascade ON UPDATE no action NOT VALID;
   END IF;
 END $$;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_llm_usage_chat_session_id" ON "llm_usage" USING btree ("chat_session_id");--> statement-breakpoint
@@ -56,8 +62,14 @@ BEGIN
   END IF;
 END $$;--> statement-breakpoint
 -- Single-context invariant: a ledger row is attributed to a run OR a chat
--- session, never both. Trivially valid against existing rows — `chat_session_id`
--- was just added and is NULL everywhere — so this validates immediately.
+-- session, never both. Trivially SATISFIED by existing rows — `chat_session_id`
+-- was just added and is NULL everywhere — but "trivially satisfied" is not
+-- "free": `ADD CONSTRAINT ... CHECK` without NOT VALID always seq-scans the
+-- WHOLE table to prove it, under an ACCESS EXCLUSIVE lock. On `llm_usage` (the
+-- highest-volume table here) that is a boot-blocking, write-blocking scan for
+-- zero information. Added NOT VALID — enforced for every INSERT/UPDATE from
+-- now on — and VALIDATEd in migration 0030 (SHARE UPDATE EXCLUSIVE, concurrent
+-- with reads and writes) so the every-row guarantee is still reached.
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -66,7 +78,7 @@ BEGIN
       AND conrelid = 'public.llm_usage'::regclass
       AND contype = 'c'
   ) THEN
-    ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_context_single" CHECK (run_id IS NULL OR chat_session_id IS NULL);
+    ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_context_single" CHECK (run_id IS NULL OR chat_session_id IS NULL) NOT VALID;
   END IF;
 END $$;--> statement-breakpoint
 -- Backfill historical run rows from `runs.model_source` (free-text, only ever

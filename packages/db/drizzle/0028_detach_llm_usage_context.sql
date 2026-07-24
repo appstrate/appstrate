@@ -18,6 +18,15 @@
 -- constraints are dropped IF EXISTS under BOTH the Drizzle `_fk` name and the
 -- legacy Postgres `_fkey` name (they drift on old databases), then re-added only
 -- when absent. A replay reproduces the same end state.
+--
+-- LOCKING: all four FKs are re-added NOT VALID, so this migration never scans
+-- `llm_usage` — the highest-volume table in this database — while it holds its
+-- locks. `ADD CONSTRAINT ... FOREIGN KEY` without NOT VALID would seq-scan the
+-- whole table (and take SHARE ROW EXCLUSIVE on `runs` / `chat_sessions` too)
+-- purely to re-prove rows that the constraint being replaced already enforced.
+-- The `VALIDATE CONSTRAINT` calls that restore the every-row guarantee live in
+-- the dedicated validation migration 0030, where they run under SHARE UPDATE
+-- EXCLUSIVE and do not block writers.
 
 -- Step 1: drop the runner-has-run-id CHECK. A detached runner row legitimately
 -- carries run_id NULL; the birth invariant (a runner row is INSERTed with a
@@ -35,7 +44,7 @@ BEGIN
       AND conrelid = 'public.llm_usage'::regclass
       AND contype = 'f'
   ) THEN
-    ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_run_id_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."runs"("id") ON DELETE SET NULL ON UPDATE no action;
+    ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_run_id_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."runs"("id") ON DELETE SET NULL ON UPDATE no action NOT VALID;
   END IF;
 END $$;--> statement-breakpoint
 
@@ -50,14 +59,14 @@ BEGIN
       AND conrelid = 'public.llm_usage'::regclass
       AND contype = 'f'
   ) THEN
-    ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_chat_session_id_chat_sessions_id_fk" FOREIGN KEY ("chat_session_id") REFERENCES "public"."chat_sessions"("id") ON DELETE SET NULL ON UPDATE no action;
+    ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_chat_session_id_chat_sessions_id_fk" FOREIGN KEY ("chat_session_id") REFERENCES "public"."chat_sessions"("id") ON DELETE SET NULL ON UPDATE no action NOT VALID;
   END IF;
 END $$;--> statement-breakpoint
 
 -- Step 4: composite tenant-integrity run FK → SET NULL (run_id) column-list.
--- Re-added NOT VALID (never scans legacy rows at apply time), then VALIDATEd in
--- a guarded step so a replay is a no-op and the every-row invariant established
--- by migration 0021 is restored.
+-- Re-added NOT VALID (never scans legacy rows at apply time); the every-row
+-- invariant established by migration 0021 is restored by the VALIDATE in
+-- migration 0030.
 ALTER TABLE "llm_usage" DROP CONSTRAINT IF EXISTS "llm_usage_run_id_org_id_fk";--> statement-breakpoint
 ALTER TABLE "llm_usage" DROP CONSTRAINT IF EXISTS "llm_usage_run_id_org_id_fkey";--> statement-breakpoint
 DO $$
@@ -69,17 +78,6 @@ BEGIN
       AND contype = 'f'
   ) THEN
     ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_run_id_org_id_fk" FOREIGN KEY ("run_id","org_id") REFERENCES "public"."runs"("id","org_id") ON DELETE SET NULL ("run_id") ON UPDATE no action NOT VALID;
-  END IF;
-END $$;--> statement-breakpoint
-DO $$
-BEGIN
-  IF NOT (
-    SELECT convalidated FROM pg_constraint
-    WHERE conname = 'llm_usage_run_id_org_id_fk'
-      AND conrelid = 'public.llm_usage'::regclass
-      AND contype = 'f'
-  ) THEN
-    ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_run_id_org_id_fk";
   END IF;
 END $$;--> statement-breakpoint
 
@@ -95,16 +93,5 @@ BEGIN
       AND contype = 'f'
   ) THEN
     ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_chat_session_id_org_id_fk" FOREIGN KEY ("chat_session_id","org_id") REFERENCES "public"."chat_sessions"("id","org_id") ON DELETE SET NULL ("chat_session_id") ON UPDATE no action NOT VALID;
-  END IF;
-END $$;--> statement-breakpoint
-DO $$
-BEGIN
-  IF NOT (
-    SELECT convalidated FROM pg_constraint
-    WHERE conname = 'llm_usage_chat_session_id_org_id_fk'
-      AND conrelid = 'public.llm_usage'::regclass
-      AND contype = 'f'
-  ) THEN
-    ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_chat_session_id_org_id_fk";
   END IF;
 END $$;

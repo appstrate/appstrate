@@ -446,7 +446,9 @@ describe("documents service + routes", () => {
     const producerRun = await seedRunRow(scope);
     const { row: doc } = await publishStream(scope, producerRun, "shared.txt", "shared");
     const consumerRun = await seedRunRow(scope);
-    await db.insert(documentLinks).values({ documentId: doc.id, consumerRunId: consumerRun });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: doc.id, consumerRunId: consumerRun, orgId: ctx.orgId });
 
     const blocked = await app.request(`/api/documents/${doc.id}`, {
       method: "DELETE",
@@ -543,7 +545,9 @@ describe("documents service + routes", () => {
     const expired = await createDocumentFromUpload(scope, userActor, upExpired, { runId });
     const permanent = await createDocumentFromUpload(scope, userActor, upKeep, { runId });
     const consumerRun = await seedRunRow(scope);
-    await db.insert(documentLinks).values({ documentId: expired.id, consumerRunId: consumerRun });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: expired.id, consumerRunId: consumerRun, orgId: ctx.orgId });
 
     // Force the first document past its retention deadline.
     await db
@@ -1024,7 +1028,9 @@ describe("documents service + routes", () => {
     const runA = await seedRunRow(scope, { packageId: "@chain/producer" });
     const runB = await seedRunRow(scope, { packageId: "@chain/consumer" });
     const { row: docX } = await publishStream(scope, runA, "shared.txt", "shared bytes");
-    await db.insert(documentLinks).values({ documentId: docX.id, consumerRunId: runB });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: docX.id, consumerRunId: runB, orgId: ctx.orgId });
 
     const usedBefore = await orgBytesUsed(ctx.orgId);
 
@@ -1094,7 +1100,9 @@ describe("documents service + routes", () => {
     const up = await stageUpload(scope, ctx.user.id, "att.txt", new TextEncoder().encode("attach"));
     const doc = await createDocumentFromUpload(scope, userActor, up, { chatSessionId: sessionId });
     const runB = await seedRunRow(scope);
-    await db.insert(documentLinks).values({ documentId: doc.id, consumerRunId: runB });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: doc.id, consumerRunId: runB, orgId: ctx.orgId });
 
     const usedBefore = await orgBytesUsed(ctx.orgId);
     await detachOrDeleteContainedDocuments({ chatSessionId: sessionId });
@@ -1229,7 +1237,9 @@ describe("documents service + routes", () => {
       endUserId: euOwner.id,
     });
     const runB = await seedRunRow(scope, { endUserId: euOwner.id });
-    await db.insert(documentLinks).values({ documentId: doc.id, consumerRunId: runB });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: doc.id, consumerRunId: runB, orgId: ctx.orgId });
 
     await deletePackageRuns(scope, "@chain/eu");
 

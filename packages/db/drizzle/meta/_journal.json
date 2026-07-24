@@ -166,7 +166,7 @@
     {
       "idx": 23,
       "version": "7",
-      "when": 1784637183806,
+      "when": 1784632361761,
       "tag": "0023_attribution_llm_usage",
       "breakpoints": true
     },
@@ -203,6 +203,20 @@
       "version": "7",
       "when": 1784889502482,
       "tag": "0028_detach_llm_usage_context",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1784929744239,
+      "tag": "0029_documents_tenant_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1784929744240,
+      "tag": "0030_validate_deferred_constraints",
       "breakpoints": true
     }
   ]
