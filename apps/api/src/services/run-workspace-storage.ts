@@ -21,20 +21,32 @@
  * (disk or tmpfs) is a free performance choice — a tmpfs-backed `local` volume
  * is NOT shared between the seed helper and the agent (see issue #549).
  *
- * Everything for a run is keyed under its runId and deleted (best-effort) on
- * teardown. The manifest doubles as the deletion index, so cleanup needs no
- * storage `list` primitive.
+ * Everything for a run is keyed under its runId and deleted through the
+ * transactional outbox on teardown. The manifest doubles as the deletion
+ * index, so cleanup needs no storage `list` primitive.
  */
 
 import * as storage from "@appstrate/db/storage";
+import { db } from "@appstrate/db/client";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
+import { assertUniqueWorkspaceNames } from "./run-document-naming.ts";
+import { enqueueStorageDeletion } from "./storage-deletion.ts";
 
 const BUCKET = "run-workspace";
 
-/** Manifest entry the agent uses to enumerate + fetch its documents. */
+/**
+ * Manifest entry the agent uses to enumerate + fetch its documents.
+ *
+ * `name` is the human display name; `workspace_name` (snake_case on the wire)
+ * is the unique single-segment filename the agent writes into
+ * `workspace/documents/` and fetches the bytes by. The two are separated so two
+ * documents sharing a display name never overwrite each other on disk — see
+ * run-document-naming.ts.
+ */
 export interface RunDocumentMeta {
   name: string;
+  workspace_name: string;
   size: number;
 }
 
@@ -46,6 +58,17 @@ export interface RunDocumentsManifest {
 const bundleKey = (runId: string): string => `${runId}.afps`;
 const manifestKey = (runId: string): string => `${runId}/manifest.json`;
 const documentKey = (runId: string, name: string): string => `${runId}/documents/${name}`;
+
+/**
+ * Run-workspace bucket + key builders, exported so cascade-delete paths (org /
+ * application delete) can enqueue a run's bundle + manifest keys into the
+ * transactional deletion outbox without downloading the manifest inside their
+ * transaction. The worker expands a manifest job into its document objects,
+ * deleting the manifest last so retries retain the deletion index.
+ */
+export const RUN_WORKSPACE_BUCKET = BUCKET;
+export const runWorkspaceBundleKey = bundleKey;
+export const runWorkspaceManifestKey = manifestKey;
 
 /**
  * Stream a single input document into the run's workspace storage. The bytes
@@ -66,12 +89,16 @@ export function streamRunDocument(
 
 /**
  * Write the documents manifest the agent uses to enumerate + fetch its inputs.
- * Called once, after every document for the run has been streamed in.
+ * Called once, after every document for the run has been streamed in. Asserts
+ * the workspace names are unique before persisting — the manifest doubles as
+ * the container provisioning index, and a duplicate would silently overwrite a
+ * document on disk (400 `duplicate_document_name`).
  */
 export function writeRunDocumentsManifest(
   runId: string,
   documents: RunDocumentMeta[],
 ): Promise<string> {
+  assertUniqueWorkspaceNames(documents.map((d) => d.workspace_name));
   const manifest: RunDocumentsManifest = { documents };
   return storage.uploadFile(
     BUCKET,
@@ -122,26 +149,38 @@ export function downloadRunDocumentStream(
  * before its row + bundle exist (e.g. a size/MIME mismatch or input-validation
  * failure mid-trigger). The manifest is not yet the deletion index at this
  * stage — it may be absent or partial — so the caller passes the doc names it
- * attempted. Best-effort + idempotent on missing keys.
+ * attempted.
+ *
+ * The run row never committed, so there is no business transaction to join: the
+ * deletions go through the transactional outbox in their OWN short transaction
+ * (the durable record), and the worker performs the idempotent physical delete.
+ * Never throws (best-effort caller contract) — a failed enqueue is logged, not
+ * propagated, so it can't mask the failure the caller is already unwinding.
  */
 export async function deleteRunDocuments(runId: string, names: string[]): Promise<void> {
   const keys = [manifestKey(runId), ...names.map((n) => documentKey(runId, n))];
-  await Promise.all(
-    keys.map((k) =>
-      storage.deleteFile(BUCKET, k).catch((error) => {
-        logger.warn("Failed to delete run document (best-effort)", {
-          runId,
-          error: getErrorMessage(error),
-        });
-      }),
-    ),
-  );
+  try {
+    await db.transaction((tx) =>
+      enqueueStorageDeletion(
+        tx,
+        keys.map((k) => ({ bucket: BUCKET, storageKey: k, reason: "run_input_rollback" })),
+      ),
+    );
+  } catch (error) {
+    logger.warn("Failed to enqueue run document rollback deletion (best-effort)", {
+      runId,
+      error: getErrorMessage(error),
+    });
+  }
 }
 
 /**
  * Delete all of a run's workspace storage — bundle, documents, and manifest.
- * Best-effort: never throws. The manifest is the deletion index (no storage
- * `list` primitive needed); when it is already gone we still drop the bundle.
+ * Never throws (best-effort caller contract). The manifest is the deletion
+ * index (no storage `list` primitive needed); when it is already gone we still
+ * drop the bundle. The physical deletes go through the transactional deletion
+ * outbox: all keys are enqueued in one transaction so a crash mid-teardown
+ * can't silently orphan a subset — the worker performs the idempotent deletes.
  */
 export async function deleteRunWorkspace(runId: string): Promise<void> {
   try {
@@ -149,11 +188,18 @@ export async function deleteRunWorkspace(runId: string): Promise<void> {
     const keys = [bundleKey(runId)];
     if (manifest) {
       keys.push(manifestKey(runId));
-      for (const d of manifest.documents) keys.push(documentKey(runId, d.name));
+      // Manifests written before `workspace_name` existed key documents on
+      // `name` — fall back so pre-upgrade runs still clean up fully.
+      for (const d of manifest.documents) keys.push(documentKey(runId, d.workspace_name ?? d.name));
     }
-    await Promise.all(keys.map((k) => storage.deleteFile(BUCKET, k)));
+    await db.transaction((tx) =>
+      enqueueStorageDeletion(
+        tx,
+        keys.map((k) => ({ bucket: BUCKET, storageKey: k, reason: "run_workspace_deleted" })),
+      ),
+    );
   } catch (error) {
-    logger.warn("Failed to delete run workspace (best-effort)", {
+    logger.warn("Failed to enqueue run workspace deletion (best-effort)", {
       runId,
       error: getErrorMessage(error),
     });

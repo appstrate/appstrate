@@ -14,12 +14,20 @@ import {
   orgInvitations,
   notifications,
   schedules,
+  documents,
+  uploads,
 } from "@appstrate/db/schema";
 import { and, eq, inArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { orgRunConcurrencyLockKey } from "./state/runs.ts";
 import { removeScheduleJobs } from "./scheduler.ts";
+import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
+import {
+  RUN_WORKSPACE_BUCKET,
+  runWorkspaceBundleKey,
+  runWorkspaceManifestKey,
+} from "./run-workspace-storage.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -38,6 +46,13 @@ interface OrgResult {
    * settings screen can show consumption against the quota.
    */
   documentsBytesUsed: number;
+  /**
+   * Per-org durable-document storage limit override in bytes
+   * (`organizations.documents_bytes_limit`), or null when no override is set (the
+   * org falls back to the global `ORG_STORAGE_QUOTA_BYTES`). Surfaced so the org
+   * detail endpoint can report the raw override alongside the effective limit.
+   */
+  documentsBytesLimit: number | null;
 }
 
 function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
@@ -49,6 +64,7 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
     documentsBytesUsed: row.documentsBytesUsed,
+    documentsBytesLimit: row.documentsBytesLimit,
   };
 }
 
@@ -340,6 +356,17 @@ export async function deleteOrganization(orgId: string): Promise<void> {
       sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(orgId)})::bigint)`,
     );
 
+    // Lock the parent before enumerating cascade-owned children. Concurrent
+    // FK inserts then either commit before this snapshot or wait until the
+    // organization is gone; no child can disappear without an outbox job.
+    const [lockedOrg] = await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1)
+      .for("update");
+    if (!lockedOrg) throw new Error("Failed to delete organization: not found");
+
     const runningResult = await tx
       .select({ runningCount: count() })
       .from(runs)
@@ -348,6 +375,44 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     if ((runningResult[0]?.runningCount ?? 0) > 0) {
       throw new Error("Cannot delete organization: runs are in progress");
     }
+
+    // Enumerate every storage object this org owns BEFORE the FK cascade drops
+    // the rows, and enqueue its physical deletion into the transactional outbox
+    // (same transaction). Without this the cascade would silently orphan the
+    // org's documents / uploads / run-workspace objects in S3/FS. The worker
+    // expands each run manifest into its document keys and deletes the manifest
+    // last, so this transaction does no storage I/O and cleanup remains
+    // replayable. (Queries are sequential — a Drizzle tx multiplexes one
+    // connection, so concurrent queries on `tx` are unsafe.)
+    const docRows = await tx
+      .select({ storageKey: documents.storageKey })
+      .from(documents)
+      .where(eq(documents.orgId, orgId));
+    const uploadRows = await tx
+      .select({ storageKey: uploads.storageKey })
+      .from(uploads)
+      .where(eq(uploads.orgId, orgId));
+    const runRows = await tx.select({ id: runs.id }).from(runs).where(eq(runs.orgId, orgId));
+
+    const storageJobs: StorageDeletionJobInput[] = [];
+    for (const r of [...docRows, ...uploadRows]) {
+      const [bucket, ...rest] = r.storageKey.split("/");
+      if (bucket && rest.length > 0)
+        storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "org_deleted" });
+    }
+    for (const r of runRows) {
+      storageJobs.push({
+        bucket: RUN_WORKSPACE_BUCKET,
+        storageKey: runWorkspaceBundleKey(r.id),
+        reason: "org_deleted",
+      });
+      storageJobs.push({
+        bucket: RUN_WORKSPACE_BUCKET,
+        storageKey: runWorkspaceManifestKey(r.id),
+        reason: "org_deleted",
+      });
+    }
+    await enqueueStorageDeletion(tx, storageJobs);
 
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)
     await tx.delete(runLogs).where(eq(runLogs.orgId, orgId));

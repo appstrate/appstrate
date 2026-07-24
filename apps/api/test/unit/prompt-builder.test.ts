@@ -494,16 +494,31 @@ describe("buildEnrichedPrompt — documents", () => {
   it("includes documents section when files provided", async () => {
     const ctx = baseContext({
       files: [
-        { fieldName: "doc", name: "report.pdf", type: "application/pdf", size: 102400 },
-        { fieldName: "doc2", name: "data.csv", type: "text/csv", size: 5120 },
+        {
+          fieldName: "doc",
+          name: "report.pdf",
+          workspaceName: "report.pdf",
+          type: "application/pdf",
+          size: 102400,
+        },
+        // Display name collides with the first — its unique workspace name is
+        // what appears in the on-disk path.
+        {
+          fieldName: "doc2",
+          name: "report.pdf",
+          workspaceName: "report-2.pdf",
+          type: "text/csv",
+          size: 5120,
+        },
       ],
     });
 
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Documents");
     expect(prompt).toContain("report.pdf");
-    expect(prompt).toContain("./documents/");
-    expect(prompt).toContain("data.csv");
+    // The colliding display names resolve to distinct on-disk paths.
+    expect(prompt).toContain("./documents/report.pdf");
+    expect(prompt).toContain("./documents/report-2.pdf");
   });
 
   it("omits documents section when no files", async () => {

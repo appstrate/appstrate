@@ -42,9 +42,10 @@ export async function validateApplicationInOrg(
 
 /**
  * The org's default application (`is_default = true`). Used as the last-resort
- * fallback for header-less MCP callers — see `requireAppContext`.
+ * fallback for header-less MCP callers — see `requireAppContext` and the MCP
+ * router's per-session app-scope resolution.
  */
-async function defaultAppForOrg(orgId: string): Promise<AppContextRow | null> {
+export async function defaultAppForOrg(orgId: string): Promise<AppContextRow | null> {
   const [app] = await db
     .select({
       id: applications.id,

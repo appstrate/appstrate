@@ -15,6 +15,15 @@ export interface CreateUploadUrlOptions {
   maxSize?: number;
   /** Seconds until the URL expires. Default: 900 (15 min). */
   expiresIn?: number;
+  /**
+   * Optional client-declared SHA-256 of the payload, lowercase hex (64 chars).
+   * When set the backend binds it so the upload is verified server-side:
+   * S3/MinIO get an `x-amz-checksum-sha256` header signed into the presigned PUT
+   * (rejected on mismatch); the proxy sink encodes it into the signed token so
+   * `writeProxyUploadContent` re-hashes the streamed bytes and rejects a
+   * mismatch. Omitted ⇒ no integrity binding (byte-identical to before).
+   */
+  sha256?: string;
 }
 
 /** Returned descriptor for a client-side direct upload. */
@@ -61,6 +70,24 @@ export class StorageAlreadyExistsError extends Error {
     super(message);
     this.name = "StorageAlreadyExistsError";
   }
+}
+
+/** A single object enumerated by {@link Storage.listObjects}. */
+export interface StorageObject {
+  /**
+   * Object key WITHIN the bucket (no `bucket/` prefix) — the exact form
+   * `deleteFile` / `downloadFile` accept as their `path` argument.
+   */
+  key: string;
+  /** Object size in bytes when the backend reports it (S3 always; filesystem via stat). */
+  size?: number;
+  /**
+   * Last-modified time when the backend reports it (S3 `LastModified`; filesystem
+   * `stat().mtime`). Lets a scanner apply a grace window so it never acts on an
+   * object created mid-scan (see scripts/storage-orphans.ts). Undefined when the
+   * backend does not report it.
+   */
+  lastModified?: Date;
 }
 
 /** Abstract file storage interface for bucket-based object storage. */
@@ -115,6 +142,15 @@ export interface Storage {
    * sink to refuse overwrites on a single-use signed URL.
    */
   fileExists(bucket: string, path: string): Promise<boolean>;
+  /**
+   * Enumerate objects in a bucket, optionally filtered to those whose in-bucket
+   * key starts with `prefix`. Yields keys WITHOUT the `bucket/` prefix (the form
+   * deleteFile/downloadFile accept). Backends paginate internally (S3
+   * ListObjectsV2 continuation tokens; filesystem recursive walk) and yield
+   * lazily, so a caller can stream a large bucket without materialising the
+   * whole listing. Used by the orphan-reconciliation operator tool.
+   */
+  listObjects(bucket: string, prefix?: string): AsyncIterable<StorageObject>;
   /**
    * Create a URL the client can PUT a binary payload to directly, without proxying
    * through the API server. For S3, this is a pre-signed URL. For filesystem storage,

@@ -373,6 +373,10 @@ const expectedEndpoints = [
 
   // Library (consolidated package catalog across an org's applications)
   "GET /api/library",
+
+  // Storage-deletion outbox operator surface (platform-admin gated)
+  "GET /api/admin/storage-deletion-jobs",
+  "POST /api/admin/storage-deletion-jobs/{id}/retry",
 ];
 
 // Module-contributed endpoints are sourced directly from each module's

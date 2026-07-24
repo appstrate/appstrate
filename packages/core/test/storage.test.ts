@@ -60,6 +60,7 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     expect(params.get("x-amz-checksum-crc32")).toBeNull();
     expect(params.get("x-amz-sdk-checksum-algorithm")).toBeNull();
     expect(params.get("X-Amz-Signature")).not.toBeNull();
+    expect(params.get("X-Amz-SignedHeaders")).toContain("if-none-match");
     // No declared size → content-length stays out of the signature.
     expect(params.get("X-Amz-SignedHeaders")).not.toContain("content-length");
   });
@@ -79,9 +80,11 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     // Content-Length differs from the declared size — a client cannot reserve
     // a small slot and upload an unbounded object.
     expect(params.get("X-Amz-SignedHeaders")).toContain("content-length");
+    expect(params.get("X-Amz-SignedHeaders")).toContain("if-none-match");
     // The descriptor tells the client the exact byte count the signature binds.
     expect(descriptor.headers["Content-Length"]).toBe("24576");
     expect(descriptor.headers["Content-Type"]).toBe("application/pdf");
+    expect(descriptor.headers["If-None-Match"]).toBe("*");
   });
 
   it("returns a PUT descriptor whose headers are sufficient for the upload", async () => {
@@ -96,9 +99,12 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     });
     expect(descriptor.method).toBe("PUT");
     expect(descriptor.expiresIn).toBe(120);
-    // The full header contract: clients send exactly these — nothing else
-    // (no checksum headers) is required by the signature.
-    expect(descriptor.headers).toEqual({ "Content-Type": "text/csv" });
+    // The full header contract includes the create-only precondition that
+    // makes the signed PUT non-replayable after its first success.
+    expect(descriptor.headers).toEqual({
+      "If-None-Match": "*",
+      "Content-Type": "text/csv",
+    });
   });
 
   it("presigns against the public endpoint when one is configured", async () => {

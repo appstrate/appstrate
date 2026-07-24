@@ -38,8 +38,21 @@ import {
   downloadRunDocumentStream,
   deleteRunWorkspace,
 } from "../../../src/services/run-workspace-storage.ts";
+import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
+import { uploadFile as storagePut } from "@appstrate/db/storage";
 
 const app = getTestApp();
+
+/** Write a manifest JSON to run-workspace storage directly, bypassing the
+ *  uniqueness assertion in `writeRunDocumentsManifest` — used to simulate a
+ *  corrupted / hand-built manifest the serve-time guard must reject. */
+async function putRawManifest(runId: string, manifest: unknown): Promise<void> {
+  await storagePut(
+    "run-workspace",
+    `${runId}/manifest.json`,
+    new TextEncoder().encode(JSON.stringify(manifest)),
+  );
+}
 
 const RUN_SECRET = "a".repeat(43); // matches mintSinkCredentials base64url(32 bytes)
 
@@ -51,16 +64,27 @@ const RUN_SECRET = "a".repeat(43); // matches mintSinkCredentials base64url(32 b
  */
 async function seedWorkspace(
   runId: string,
-  upload: { bundle?: Buffer; documents: { name: string; content: Buffer }[] },
+  upload: {
+    bundle?: Buffer;
+    documents: { name: string; content: Buffer; workspaceName?: string }[];
+  },
 ): Promise<void> {
   if (upload.bundle) await uploadRunBundle(runId, upload.bundle);
   if (upload.documents.length > 0) {
     for (const doc of upload.documents) {
-      await streamRunDocument(runId, doc.name, new Response(doc.content).body!);
+      await streamRunDocument(
+        runId,
+        doc.workspaceName ?? doc.name,
+        new Response(doc.content).body!,
+      );
     }
     await writeRunDocumentsManifest(
       runId,
-      upload.documents.map((d) => ({ name: d.name, size: d.content.byteLength })),
+      upload.documents.map((d) => ({
+        name: d.name,
+        workspace_name: d.workspaceName ?? d.name,
+        size: d.content.byteLength,
+      })),
     );
   }
 }
@@ -117,8 +141,8 @@ describe("run-workspace storage round-trip", () => {
     // Manifest enumerates the documents with their sizes.
     const manifest = await downloadRunDocumentsManifest(runId);
     expect(manifest?.documents).toEqual([
-      { name: "report.txt", size: 11 },
-      { name: "data.csv", size: 5 },
+      { name: "report.txt", workspace_name: "report.txt", size: 11 },
+      { name: "data.csv", workspace_name: "data.csv", size: 5 },
     ]);
 
     // Each document is fetchable as its own streamed object.
@@ -126,7 +150,11 @@ describe("run-workspace storage round-trip", () => {
     expect(reportStream).not.toBeNull();
     expect(await new Response(reportStream!).text()).toBe("hello world");
 
+    // deleteRunWorkspace now enqueues the purge into the transactional deletion
+    // outbox (all keys in one tx — no silent orphan); the worker performs the
+    // physical deletes. Drain it, then the objects are gone.
     await deleteRunWorkspace(runId);
+    await processStorageDeletionJobs();
     expect(await downloadRunWorkspace(runId)).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
     expect(await downloadRunDocumentStream(runId, "report.txt")).toBeNull();
@@ -244,7 +272,9 @@ describe("GET /api/runs/:runId/documents[/:name]", () => {
       headers: signedGetHeaders(RUN_SECRET),
     });
     expect(manifestRes.status).toBe(200);
-    expect(await manifestRes.json()).toEqual({ documents: [{ name: "a.txt", size: 5 }] });
+    expect(await manifestRes.json()).toEqual({
+      documents: [{ name: "a.txt", workspace_name: "a.txt", size: 5 }],
+    });
 
     const docRes = await app.request(`/api/runs/${runId}/documents/a.txt`, {
       method: "GET",
@@ -253,6 +283,30 @@ describe("GET /api/runs/:runId/documents[/:name]", () => {
     expect(docRes.status).toBe(200);
     expect(docRes.headers.get("content-type")).toBe("application/octet-stream");
     expect(await docRes.text()).toBe("doc-a");
+
+    await deleteRunWorkspace(runId);
+  });
+
+  it("rejects a malformed manifest with duplicate workspace names (400 duplicate_document_name)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/docs-agent");
+    // A corrupted / hand-built manifest whose two entries resolve to the SAME
+    // workspace_name would silently overwrite one document with the other in the
+    // container. The platform never produces one, so this bypasses the write
+    // guard by putting the JSON in storage directly — the serve-time guard must
+    // reject it with a typed 400 (which the runtime then treats as fatal).
+    await putRawManifest(runId, {
+      documents: [
+        { name: "report.pdf", workspace_name: "report.pdf", size: 3 },
+        { name: "other.pdf", workspace_name: "report.pdf", size: 4 },
+      ],
+    });
+
+    const res = await app.request(`/api/runs/${runId}/documents`, {
+      method: "GET",
+      headers: signedGetHeaders(RUN_SECRET),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("duplicate_document_name");
 
     await deleteRunWorkspace(runId);
   });

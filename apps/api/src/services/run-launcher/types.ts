@@ -15,10 +15,16 @@ export { modelCostSchema, tokenUsageSchema };
  * Reference to an input document surfaced to a run — field, filename, MIME, and
  * size. Document bytes are streamed into the run workspace during upload-consume,
  * so this carries metadata only (no content).
+ *
+ * `name` is the document's human display name (may collide across documents);
+ * `workspaceName` is the unique single-segment filename actually written into
+ * the run container at `workspace/documents/<workspaceName>` — the prompt path
+ * and the documents manifest are both keyed on it (see run-document-naming.ts).
  */
 export interface FileReference {
   fieldName: string;
   name: string;
+  workspaceName: string;
   type: string;
   size: number;
 }

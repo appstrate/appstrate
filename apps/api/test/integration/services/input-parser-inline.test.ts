@@ -86,13 +86,21 @@ describe("parseRequestInput — inline data: URIs", () => {
 
     // Unnamed text/plain → named after the field with a .txt extension.
     expect(result.uploadedFiles).toEqual([
-      { fieldName: "doc", name: "doc.txt", type: "text/plain", size: TEXT_BYTES.length },
+      {
+        fieldName: "doc",
+        name: "doc.txt",
+        workspaceName: "doc.txt",
+        type: "text/plain",
+        size: TEXT_BYTES.length,
+      },
     ]);
 
     // Bytes landed in the run workspace + manifest enumerates the document.
     expect(await readDoc(runId, "doc.txt")).toEqual(new Uint8Array(TEXT_BYTES));
     const manifest = await downloadRunDocumentsManifest(runId);
-    expect(manifest?.documents).toEqual([{ name: "doc.txt", size: TEXT_BYTES.length }]);
+    expect(manifest?.documents).toEqual([
+      { name: "doc.txt", workspace_name: "doc.txt", size: TEXT_BYTES.length },
+    ]);
 
     // The persisted input keeps a payload-stripped marker, not the base64 blob.
     expect(result.input?.doc).toBe("data:text/plain;name=doc.txt;base64,");
@@ -111,7 +119,13 @@ describe("parseRequestInput — inline data: URIs", () => {
     );
 
     expect(result.uploadedFiles).toEqual([
-      { fieldName: "doc", name: "invoice.pdf", type: "application/pdf", size: PDF_BYTES.length },
+      {
+        fieldName: "doc",
+        name: "invoice.pdf",
+        workspaceName: "invoice.pdf",
+        type: "application/pdf",
+        size: PDF_BYTES.length,
+      },
     ]);
     expect(await readDoc(runId, "invoice.pdf")).toEqual(new Uint8Array(PDF_BYTES));
     expect(result.input?.doc).toBe("data:application/pdf;name=invoice.pdf;base64,");
@@ -168,9 +182,21 @@ describe("parseRequestInput — inline data: URIs", () => {
     );
 
     expect(result.uploadedFiles).toEqual([
-      { fieldName: "docs", name: "file.pdf", type: "application/pdf", size: PDF_BYTES.length },
+      {
+        fieldName: "docs",
+        name: "file.pdf",
+        workspaceName: "file.pdf",
+        type: "application/pdf",
+        size: PDF_BYTES.length,
+      },
       // Unnamed inline array entry → field name + index suffix + sniffed extension.
-      { fieldName: "docs", name: "docs-1.pdf", type: "application/pdf", size: PDF_BYTES.length },
+      {
+        fieldName: "docs",
+        name: "docs-1.pdf",
+        workspaceName: "docs-1.pdf",
+        type: "application/pdf",
+        size: PDF_BYTES.length,
+      },
     ]);
 
     // Both documents in the workspace + manifest.
@@ -178,8 +204,8 @@ describe("parseRequestInput — inline data: URIs", () => {
     expect(await readDoc(runId, "docs-1.pdf")).toEqual(new Uint8Array(PDF_BYTES));
     const manifest = await downloadRunDocumentsManifest(runId);
     expect(manifest?.documents).toEqual([
-      { name: "file.pdf", size: PDF_BYTES.length },
-      { name: "docs-1.pdf", size: PDF_BYTES.length },
+      { name: "file.pdf", workspace_name: "file.pdf", size: PDF_BYTES.length },
+      { name: "docs-1.pdf", workspace_name: "docs-1.pdf", size: PDF_BYTES.length },
     ]);
 
     // Both entries are rewritten in the persisted input: the upload:// reference

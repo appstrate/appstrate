@@ -16,7 +16,8 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { fileTypeStream } from "file-type";
 import { zipSync } from "fflate";
 import { db } from "@appstrate/db/client";
-import { uploads } from "@appstrate/db/schema";
+import { uploads, storageDeletionJobs } from "@appstrate/db/schema";
+import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import {
@@ -497,7 +498,19 @@ describe("cleanupExpiredUploads", () => {
 
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row).toBeUndefined();
-    // The sweep is the deleter of record for the retained reuse bytes.
+    // The sweep is the deleter of record for the retained reuse bytes — but now
+    // via the transactional deletion outbox: the row delete + deletion-job insert
+    // are one transaction (no silent orphan), and the worker purges the object.
+    const jobs = await db
+      .select()
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, storagePath));
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.bucket).toBe(UPLOAD_BUCKET);
+    expect(jobs[0]!.reason).toBe("upload_expired");
+    // Still present until the worker drains; then gone.
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
+    await processStorageDeletionJobs();
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
   });
 

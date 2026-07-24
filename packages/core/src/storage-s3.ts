@@ -9,6 +9,7 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   AbortMultipartUploadCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
@@ -286,6 +287,35 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       );
     },
 
+    async *listObjects(bucket, prefix) {
+      // Every object we store is keyed `${bucket}/${path}` (see makeKey), so a
+      // bucket listing is a ListObjectsV2 over the `${bucket}/` key-prefix. The
+      // in-bucket keys we yield strip that prefix back off, so callers get the
+      // exact `path` form deleteFile/downloadFile accept.
+      const bucketPrefix = `${bucket}/`;
+      const listPrefix = prefix ? makeKey(bucket, prefix) : bucketPrefix;
+      let continuationToken: string | undefined;
+      do {
+        const res = await client.send(
+          new ListObjectsV2Command({
+            Bucket: config.bucket,
+            Prefix: listPrefix,
+            ContinuationToken: continuationToken,
+          }),
+        );
+        for (const obj of res.Contents ?? []) {
+          const fullKey = obj.Key;
+          if (!fullKey || !fullKey.startsWith(bucketPrefix)) continue;
+          yield {
+            key: fullKey.slice(bucketPrefix.length),
+            size: obj.Size,
+            lastModified: obj.LastModified,
+          };
+        }
+        continuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+      } while (continuationToken);
+    },
+
     async createUploadUrl(
       bucket: string,
       path: string,
@@ -313,11 +343,28 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // the declared size an upload-time contract — a client cannot reserve a
       // 1 KB slot and PUT 100 MB — instead of relying solely on the
       // server-side size check at consume time.
+      // When the client declares a SHA-256, sign `x-amz-checksum-sha256` (base64
+      // of the raw digest) INTO the presigned PUT. The presignClient runs
+      // `requestChecksumCalculation: WHEN_REQUIRED`, so a command that carries an
+      // explicit checksum makes it a REQUIRED (signed) header — S3/MinIO then
+      // verify the uploaded bytes against it and reject a mismatch server-side.
+      // The client must echo the returned header. No sha256 ⇒ the command and
+      // the signature are byte-identical to before (plain PUT, no checksum).
+      const checksumBase64 =
+        opts?.sha256 && opts.sha256.length > 0
+          ? Buffer.from(opts.sha256, "hex").toString("base64")
+          : undefined;
       const cmd = new PutObjectCommand({
         Bucket: config.bucket,
         Key: key,
+        // Presigned URLs are bearer credentials and may be replayed until
+        // expiry. Bind an atomic create-only precondition so a replay cannot
+        // replace bytes at the reserved key after they have been validated or
+        // consumed.
+        IfNoneMatch: "*",
         ...(opts?.mime ? { ContentType: opts.mime } : {}),
         ...(opts?.maxSize && opts.maxSize > 0 ? { ContentLength: opts.maxSize } : {}),
+        ...(checksumBase64 ? { ChecksumSHA256: checksumBase64 } : {}),
       });
       // `@aws-sdk/s3-request-presigner` and `@aws-sdk/client-s3` resolve to
       // different physical `@smithy/core` copies in the lockfile (transitive
@@ -335,9 +382,12 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // is a forbidden header in browsers — fetch()/XHR set it automatically
       // from the body, so echoing the descriptor verbatim stays safe there;
       // listing it documents the exact byte count the signature requires.
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = { "If-None-Match": "*" };
       if (opts?.mime) headers["Content-Type"] = opts.mime;
       if (opts?.maxSize && opts.maxSize > 0) headers["Content-Length"] = String(opts.maxSize);
+      // The checksum header is part of the signature — the client MUST send it
+      // verbatim (base64 of the raw sha-256) or S3 rejects the PUT.
+      if (checksumBase64) headers["x-amz-checksum-sha256"] = checksumBase64;
       return { url, method: "PUT", headers, expiresIn };
     },
 

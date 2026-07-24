@@ -32,6 +32,10 @@ import {
   recordRunTerminal,
   recordContainerSpawn,
   recordLlmLatency,
+  recordDocumentCreated,
+  recordDocumentDeleted,
+  recordDocumentQuotaRejection,
+  recordDocumentPartialPublication,
   setQueueDepthProvider,
   _resetObservabilityForTesting,
   _forceFlushForTesting,
@@ -89,6 +93,10 @@ describe("observability — disabled (no-op)", () => {
     expect(() => recordRunTerminal({ status: "failed", errorCode: "timeout" })).not.toThrow();
     expect(() => recordContainerSpawn(10, { sidecar: true })).not.toThrow();
     expect(() => recordLlmLatency(5, { api_shape: "openai", status: 200 })).not.toThrow();
+    expect(() => recordDocumentCreated({ purpose: "agent_output" })).not.toThrow();
+    expect(() => recordDocumentDeleted(2)).not.toThrow();
+    expect(() => recordDocumentQuotaRejection()).not.toThrow();
+    expect(() => recordDocumentPartialPublication()).not.toThrow();
     expect(currentTraceparent()).toBeUndefined();
   });
 });
@@ -235,6 +243,44 @@ describe("observability — enabled (in-memory exporters)", () => {
       expect(p.attributes.outcome).toBeUndefined();
       expect(p.attributes.status_code).toBeUndefined();
     }
+  });
+
+  it("records the documents lifecycle counters (created tagged by purpose, others plain)", async () => {
+    recordDocumentCreated({ purpose: "agent_output" });
+    recordDocumentCreated({ purpose: "agent_output" });
+    recordDocumentCreated({ purpose: "user_upload" });
+    recordDocumentDeleted(3); // one batch delete of 3 rows
+    recordDocumentDeleted(1); // one explicit delete
+    recordDocumentQuotaRejection();
+    recordDocumentPartialPublication();
+    await _forceFlushForTesting();
+
+    const rms = metricExporter.getMetrics();
+    const created = findMetric(rms, "appstrate.documents.created");
+    const deleted = findMetric(rms, "appstrate.documents.deleted");
+    const quota = findMetric(rms, "appstrate.documents.quota_rejections");
+    const partial = findMetric(rms, "appstrate.documents.partial_publications");
+
+    expect(created).toBeDefined();
+    expect(deleted).toBeDefined();
+    expect(quota).toBeDefined();
+    expect(partial).toBeDefined();
+
+    // created splits into two data points by purpose (2 agent_output + 1 upload).
+    const byPurpose = new Map(
+      created!.dataPoints.map((p) => [p.attributes.purpose, p.value as number]),
+    );
+    expect(byPurpose.get("agent_output")).toBe(2);
+    expect(byPurpose.get("user_upload")).toBe(1);
+
+    // deleted counts ROWS: 3 + 1 = 4.
+    const deletedTotal = deleted!.dataPoints.reduce((n, p) => n + (p.value as number), 0);
+    expect(deletedTotal).toBe(4);
+
+    const quotaTotal = quota!.dataPoints.reduce((n, p) => n + (p.value as number), 0);
+    expect(quotaTotal).toBe(1);
+    const partialTotal = partial!.dataPoints.reduce((n, p) => n + (p.value as number), 0);
+    expect(partialTotal).toBe(1);
   });
 
   it("tags a span that ends in a throw with error.type = exception class name", async () => {

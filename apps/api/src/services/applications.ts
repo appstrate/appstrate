@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, asc, desc } from "drizzle-orm";
+import { eq, asc, desc, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
-import { applications } from "@appstrate/db/schema";
+import { applications, documents, uploads, runs, organizations } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
+import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
+import {
+  RUN_WORKSPACE_BUCKET,
+  runWorkspaceBundleKey,
+  runWorkspaceManifestKey,
+} from "./run-workspace-storage.ts";
 
 export const appSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),
@@ -114,17 +120,75 @@ export async function updateApplication(
 
 /** Delete an application. Throws 400 if default, 404 if not found. */
 export async function deleteApplication(orgId: string, applicationId: string) {
-  // Check existence and default status first
-  const [app] = await db
-    .select({ id: applications.id, isDefault: applications.isDefault })
-    .from(applications)
-    .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }))
-    .limit(1);
+  await db.transaction(async (tx) => {
+    // Use the same org-first lock order as document/upload writes, then lock the
+    // parent application before enumerating its children. The parent lock
+    // prevents a concurrent FK insert from being cascade-deleted without a
+    // matching outbox job.
+    const [org] = await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1)
+      .for("update");
+    if (!org) throw notFound("Application not found");
 
-  if (!app) throw notFound("Application not found");
-  if (app.isDefault) throw invalidRequest("Cannot delete default application");
+    const [app] = await tx
+      .select({ id: applications.id, isDefault: applications.isDefault })
+      .from(applications)
+      .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }))
+      .limit(1)
+      .for("update");
+    if (!app) throw notFound("Application not found");
+    if (app.isDefault) throw invalidRequest("Cannot delete default application");
 
-  await db
-    .delete(applications)
-    .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }));
+    const docRows = await tx
+      .select({ storageKey: documents.storageKey, size: documents.size })
+      .from(documents)
+      .where(eq(documents.applicationId, applicationId));
+    const uploadRows = await tx
+      .select({ storageKey: uploads.storageKey })
+      .from(uploads)
+      .where(eq(uploads.applicationId, applicationId));
+    const runRows = await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.applicationId, applicationId));
+
+    const storageJobs: StorageDeletionJobInput[] = [];
+    for (const r of [...docRows, ...uploadRows]) {
+      const [bucket, ...rest] = r.storageKey.split("/");
+      if (bucket && rest.length > 0)
+        storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "application_deleted" });
+    }
+    for (const r of runRows) {
+      storageJobs.push({
+        bucket: RUN_WORKSPACE_BUCKET,
+        storageKey: runWorkspaceBundleKey(r.id),
+        reason: "application_deleted",
+      });
+      storageJobs.push({
+        bucket: RUN_WORKSPACE_BUCKET,
+        storageKey: runWorkspaceManifestKey(r.id),
+        reason: "application_deleted",
+      });
+    }
+    await enqueueStorageDeletion(tx, storageJobs);
+
+    const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
+    if (bytes > 0) {
+      await tx
+        .update(organizations)
+        .set({
+          documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${bytes}, 0)`,
+        })
+        .where(eq(organizations.id, orgId));
+    }
+
+    const deleted = await tx
+      .delete(applications)
+      .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }))
+      .returning({ id: applications.id });
+    if (deleted.length === 0) throw notFound("Application not found");
+  });
 }

@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for `sniffedMimeMatchesDeclared` — the declared-vs-sniffed MIME
- * compatibility policy shared by the staged-upload consume path and the inline
- * `data:` URI input path. Pins the Marcel/Tika-style ZIP-container refinement
- * (a sniffed `application/zip` satisfies a declared OOXML/ODF type, because
- * `file-type`'s head sample cannot always reach the archive's identifying
- * entry) without weakening the exact-match rule outside that family.
+ * Unit tests for the shared MIME policy module (`services/mime-policy.ts`) — the
+ * ONE declared-vs-sniffed compatibility policy consumed by the staged-upload
+ * consume path, the inline `data:` URI input path, AND agent-output ingestion.
+ * Pins the Marcel/Tika-style ZIP-container refinement (a sniffed `application/zip`
+ * satisfies a declared OOXML/ODF type, because `file-type`'s head sample cannot
+ * always reach the archive's identifying entry) without weakening the exact-match
+ * rule outside that family; plus the agent-output relabel asymmetry.
  */
 
 import { describe, it, expect } from "bun:test";
-import { sniffedMimeMatchesDeclared } from "../../../src/services/uploads.ts";
+import {
+  sniffedMimeMatchesDeclared,
+  shouldEnforceSniffedMime,
+  resolveAgentOutputMime,
+} from "../../../src/services/mime-policy.ts";
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -85,5 +90,46 @@ describe("sniffedMimeMatchesDeclared", () => {
       sniffedMimeMatchesDeclared(DOCX, "application/vnd.ms-word.document.macroenabled.12"),
     ).toBe(false);
     expect(sniffedMimeMatchesDeclared("application/epub+zip", XLSX)).toBe(false);
+  });
+});
+
+describe("shouldEnforceSniffedMime", () => {
+  it("enforces concrete sniffable binary declarations", () => {
+    expect(shouldEnforceSniffedMime("application/pdf")).toBe(true);
+    expect(shouldEnforceSniffedMime("image/png")).toBe(true);
+    expect(shouldEnforceSniffedMime(XLSX)).toBe(true);
+  });
+
+  it("skips the escape hatches (octet-stream, empty, text-ish)", () => {
+    expect(shouldEnforceSniffedMime("application/octet-stream")).toBe(false);
+    expect(shouldEnforceSniffedMime("")).toBe(false);
+    expect(shouldEnforceSniffedMime("text/plain")).toBe(false);
+    expect(shouldEnforceSniffedMime("application/json")).toBe(false);
+    expect(shouldEnforceSniffedMime("image/svg+xml")).toBe(false);
+    expect(shouldEnforceSniffedMime("application/vnd.custom+xml")).toBe(false);
+  });
+});
+
+describe("resolveAgentOutputMime (relabel asymmetry — agent outputs are never rejected)", () => {
+  it("keeps the declared mime when the sniff matches or refines it", () => {
+    expect(resolveAgentOutputMime("application/pdf", "application/pdf")).toBe("application/pdf");
+    // Container refinement: a declared xlsx sniffing as generic zip stays xlsx.
+    expect(resolveAgentOutputMime(XLSX, "application/zip")).toBe(XLSX);
+  });
+
+  it("keeps the declared mime when the bytes are unsniffable", () => {
+    // No magic signature → trust the declaration (text, json, …).
+    expect(resolveAgentOutputMime("text/csv", undefined)).toBe("text/csv");
+    expect(resolveAgentOutputMime("application/json", undefined)).toBe("application/json");
+  });
+
+  it("RELABELS to the sniffed type on a genuine mismatch", () => {
+    // Declared text/plain but the bytes are a PNG → store image/png (honest).
+    expect(resolveAgentOutputMime("text/plain", "image/png")).toBe("image/png");
+    expect(resolveAgentOutputMime("application/pdf", "image/png")).toBe("image/png");
+  });
+
+  it("normalizes the declared mime (strips params, lowercases)", () => {
+    expect(resolveAgentOutputMime("TEXT/Plain; charset=utf-8", undefined)).toBe("text/plain");
   });
 });

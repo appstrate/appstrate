@@ -26,4 +26,11 @@ export {
 export { RunTimeoutError } from "../errors.ts";
 // Re-exported for ergonomics: runners produce RunResult, so consumers
 // typically import it alongside the runner surface.
-export type { RunResult, RunError, LogEntry, LogLevel, TokenUsage } from "../types/run-result.ts";
+export type {
+  RunResult,
+  RunArtifactsSummary,
+  RunError,
+  LogEntry,
+  LogLevel,
+  TokenUsage,
+} from "../types/run-result.ts";

@@ -28,6 +28,7 @@ import {
   downloadRunDocumentStream,
   downloadRunDocumentsManifest,
 } from "../../../src/services/run-workspace-storage.ts";
+import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import { uploadFile as storagePut, fileExists as storageExists } from "@appstrate/db/storage";
 import { ApiError } from "../../../src/lib/errors.ts";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -44,7 +45,7 @@ const fileSchema: JSONSchemaObject = {
 
 async function seedUpload(
   ctx: { orgId: string; applicationId: string },
-  opts: { id: string; bytes: Buffer; mime?: string; sizeOverride?: number },
+  opts: { id: string; bytes: Buffer; mime?: string; sizeOverride?: number; name?: string },
 ): Promise<void> {
   const storagePath = `${ctx.applicationId}/${opts.id}/file.pdf`;
   await storagePut(UPLOAD_BUCKET, storagePath, opts.bytes);
@@ -54,7 +55,7 @@ async function seedUpload(
     applicationId: ctx.applicationId,
     createdBy: null,
     storageKey: `${UPLOAD_BUCKET}/${storagePath}`,
-    name: "file.pdf",
+    name: opts.name ?? "file.pdf",
     mime: opts.mime ?? "application/pdf",
     size: opts.sizeOverride ?? opts.bytes.length,
     expiresAt: new Date(Date.now() + 900 * 1000),
@@ -133,7 +134,9 @@ describe("parseRequestInput — streamed document consume", () => {
       new Uint8Array(PDF_BYTES),
     );
     const manifest = await downloadRunDocumentsManifest(runId);
-    expect(manifest?.documents).toEqual([{ name: "file.pdf", size: PDF_BYTES.length }]);
+    expect(manifest?.documents).toEqual([
+      { name: "file.pdf", workspace_name: "file.pdf", size: PDF_BYTES.length },
+    ]);
 
     // Source upload stamped consumed; its storage object is RETAINED so the
     // same URI stays re-consumable for the post-consume reuse window (#634).
@@ -154,7 +157,9 @@ describe("parseRequestInput — streamed document consume", () => {
       parseRequestInput(fakeCtx({ input: { doc: `upload://${id}` } }, scope), runId, fileSchema),
     ).rejects.toMatchObject({ status: 400 });
 
-    // Workspace rolled back — no orphaned document or manifest.
+    // Workspace rolled back via the deletion outbox — draining the worker
+    // purges any streamed document + manifest (no orphaned object).
+    await processStorageDeletionJobs();
     expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
     // Claim released so the client can re-upload + retry.
@@ -177,7 +182,9 @@ describe("parseRequestInput — streamed document consume", () => {
       parseRequestInput(fakeCtx({ input: { doc: `upload://${id}` } }, scope), runId, fileSchema),
     ).rejects.toMatchObject({ status: 400 });
 
-    // Workspace rolled back, claim released — same guarantees as any rejection.
+    // Workspace rolled back, claim released — same guarantees as any rejection
+    // (the rollback purge runs through the deletion outbox).
+    await processStorageDeletionJobs();
     expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
@@ -208,6 +215,8 @@ describe("parseRequestInput — streamed document consume", () => {
     }
     expect(thrown).toBeInstanceOf(ApiError);
     expect((thrown as ApiError).status).toBe(400);
+    // Rollback purge runs through the deletion outbox — drain it, then gone.
+    await processStorageDeletionJobs();
     expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
     expect(await downloadRunDocumentsManifest(runId)).toBeNull();
   });
@@ -599,6 +608,88 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // persists as SQL NULL, matching a fresh input-less trigger.
     expect(result.input).toBeUndefined();
     expect(result.uploadedFiles).toBeUndefined();
+  });
+});
+
+describe("parseRequestInput — colliding document names (workspace-name hardening)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  const arrayFileSchema: JSONSchemaObject = {
+    type: "object",
+    properties: {
+      docs: {
+        type: "array",
+        items: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+        maxItems: 5,
+      },
+    },
+  };
+
+  it("gives colliding upload/document/inline inputs unique workspace names, preserving display names", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-collide" });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const actor = { type: "user" as const, id: ctx.user.id };
+
+    // An upload named report.pdf.
+    const uploadId = "upl_collide_1";
+    await seedUpload(scope, { id: uploadId, bytes: PDF_BYTES, name: "report.pdf" });
+
+    // A durable agent_output document ALSO named report.pdf.
+    const producerRunId = `run_${crypto.randomUUID()}`;
+    await db.insert(runs).values({
+      id: producerRunId,
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
+      status: "running",
+    });
+    const { row: doc } = await createDocumentFromStream(
+      scope,
+      producerRunId,
+      { userId: ctx.user.id, endUserId: null },
+      null,
+      { name: "report.pdf", mime: "application/pdf", body: new Blob([PDF_BYTES]).stream() },
+    );
+
+    // An inline file ALSO named report.pdf.
+    const inlineUri = `data:application/pdf;name=report.pdf;base64,${PDF_BYTES.toString("base64")}`;
+
+    const runId = `run_${crypto.randomUUID()}`;
+    const result = await parseRequestInput(
+      fakeCtx(
+        { input: { docs: [`upload://${uploadId}`, `document://${doc.id}`, inlineUri] } },
+        { ...scope, user: { id: actor.id } },
+      ),
+      runId,
+      arrayFileSchema,
+    );
+
+    // All three documents surfaced, all keeping their human display name.
+    expect(result.uploadedFiles).toHaveLength(3);
+    expect(result.uploadedFiles!.every((f) => f.name === "report.pdf")).toBe(true);
+
+    // The manifest served to the container carries three UNIQUE workspace names,
+    // display names preserved — no silent overwrite.
+    const manifest = await downloadRunDocumentsManifest(runId);
+    expect(manifest?.documents).toHaveLength(3);
+    expect(manifest!.documents.map((d) => d.name)).toEqual([
+      "report.pdf",
+      "report.pdf",
+      "report.pdf",
+    ]);
+    const workspaceNames = manifest!.documents.map((d) => d.workspace_name);
+    expect(new Set(workspaceNames).size).toBe(3);
+    expect(workspaceNames).toEqual(["report.pdf", "report-2.pdf", "report-3.pdf"]);
+
+    // Each document is independently fetchable at its own workspace name.
+    for (const name of workspaceNames) {
+      const stream = await downloadRunDocumentStream(runId, name);
+      expect(stream).not.toBeNull();
+      expect(new Uint8Array(await new Response(stream!).arrayBuffer())).toEqual(
+        new Uint8Array(PDF_BYTES),
+      );
+    }
   });
 });
 

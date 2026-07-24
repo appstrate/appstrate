@@ -159,6 +159,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/storage-deletion-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List storage-deletion outbox jobs
+         * @description Platform-admin only (`AUTH_PLATFORM_ADMIN_EMAILS`). Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point).
+         */
+        get: operations["listStorageDeletionJobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/storage-deletion-jobs/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a storage-deletion job now
+         * @description Platform-admin only. Resets a pending job's `next_attempt_at` to now so the next worker pass retries it immediately. No-op (404) on a completed or unknown job.
+         */
+        post: operations["retryStorageDeletionJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents": {
         parameters: {
             query?: never;
@@ -3964,7 +4004,7 @@ export interface paths {
         };
         /**
          * List the run's input documents (HMAC)
-         * @description Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{name}`. Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault.
+         * @description Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{workspace_name}` and writes it to `workspace/documents/<workspace_name>`. Each entry carries `name` (the document's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two documents never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault. A 400 `duplicate_document_name` means the stored manifest is malformed (two identical workspace names).
          */
         get: operations["fetchRunDocumentsManifest"];
         put?: never;
@@ -4178,7 +4218,7 @@ export interface paths {
         put?: never;
         /**
          * Create a direct-upload descriptor
-         * @description Reserve an upload slot and return a signed URL the client PUTs the binary to. Full upload→run recipe: (1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. (2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned `headers` (`Content-Type`, plus `Content-Length` when the storage signs the declared size — the body must then be exactly `size` bytes). No other headers are required — in particular no checksum headers; the signed URL does not bind one. (3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` re-consumable — for `UPLOAD_RETENTION_HOURS` (default 24 h) after the first consume, so the same input can be re-run (e.g. via `rerun_from` after cancelling) without re-uploading. Unconsumed uploads expire with the signed URL. Small files (≤4 MiB decoded) can skip this flow entirely: inline the content directly in the `runAgent` input as `data:<mime>;name=<filename>;base64,<payload>`. Rate-limited to 20/min.
+         * @description Reserve an upload slot and return a signed URL the client PUTs the binary to. Full upload→run recipe: (1) POST /api/uploads with the file's `name`, exact `size` in bytes, and `mime` — the response carries a `uri` (e.g. `upload://upl_xxx`), a signed `url`, and `headers`. (2) PUT the raw file bytes (not multipart) to `url`, sending exactly the returned `headers` (`Content-Type`; in direct-presign S3 mode also `If-None-Match: *`, plus `Content-Length` when the storage signs the declared size). The body must then be exactly `size` bytes. A successful direct PUT is create-only: replaying the URL cannot replace the stored bytes. When `sha256` was supplied, the returned signed checksum header is required as well. (3) Call `runAgent` with `uri` as the value of the file-typed input field. The actual byte count must equal the declared `size`, and binary MIMEs are verified by magic-byte sniffing. Consumed uploads are NOT single-use: the bytes stay retained — and the `uri` re-consumable — for `UPLOAD_RETENTION_HOURS` (default 24 h) after the first consume, so the same input can be re-run (e.g. via `rerun_from` after cancelling) without re-uploading. Unconsumed uploads expire with the signed URL. Small files (≤4 MiB decoded) can skip this flow entirely: inline the content directly in the `runAgent` input as `data:<mime>;name=<filename>;base64,<payload>`. Rate-limited to 20/min.
          */
         post: operations["createUpload"];
         delete?: never;
@@ -5148,12 +5188,14 @@ export interface components {
             slug?: string;
             /** Format: date-time */
             createdAt?: string;
-            /** @description Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the org-wide quota (`ORG_STORAGE_QUOTA_BYTES`), or null when unset (unlimited). */
+            /** @description Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the raw per-org limit override (`documents_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited). */
             storage?: {
                 /** @description Bytes of durable documents stored. */
                 used_bytes: number;
-                /** @description Quota in bytes, or null when no quota is configured (unlimited). */
+                /** @description Per-org limit override in bytes, or null when no override is set (falls back to the global quota). */
                 limit_bytes: number | null;
+                /** @description Effective limit in bytes the write path enforces (override ?? global quota), or null when unlimited. */
+                effective_limit_bytes: number | null;
             };
             members?: components["schemas"]["OrgMember"][];
             invitations?: components["schemas"]["OrgInvitationInfo"][];
@@ -5409,6 +5451,20 @@ export interface components {
                  * @description Present and true when deprecated report text exceeded the 256 KiB storage cap.
                  */
                 text_truncated?: boolean;
+            } | null;
+            /** @description Terminal summary of the run's end-of-run `outputs/` sweep. `status: "partial"` means at least one deliverable was LOST (upload abandoned after retries, or a file over the per-file cap); `failed` lists each lost file's name + a stable code (`file_too_large`, `quota_exceeded`, `conflict`, `upload_failed`). Independent of the run `status` — a successful run can still be `partial`. Null on older runs / containers that never reported it. */
+            artifacts: {
+                /** @enum {string} */
+                status: "complete" | "partial";
+                /** @description Count of deliverables the sweep published to durable storage. */
+                published: number;
+                /** @description Deliverables the sweep could not publish (lost). */
+                failed: {
+                    /** @description Workspace-relative path of the lost file under `outputs/`. */
+                    name: string;
+                    /** @description Stable failure category: `file_too_large`, `quota_exceeded`, `conflict`, or `upload_failed`. */
+                    code: string;
+                }[];
             } | null;
             checkpoint: {
                 [key: string]: unknown;
@@ -6106,6 +6162,89 @@ export interface operations {
             };
         };
     };
+    listStorageDeletionJobs: {
+        parameters: {
+            query?: {
+                status?: "pending" | "dead" | "completed";
+                limit?: number;
+                /** @description Opaque cursor — the `nextCursor` returned by a prior page. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of storage-deletion jobs. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            /** @example sdj_0c9f… */
+                            id: string;
+                            /** @example documents */
+                            bucket: string;
+                            /**
+                             * @description In-bucket object key (no bucket prefix).
+                             * @example app_abc/doc_def/report.pdf
+                             */
+                            storageKey: string;
+                            /** @description Why the object is being purged (document_deleted | document_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | materialization_failed). */
+                            reason: string;
+                            /** @description Delete attempts made so far. */
+                            attempts: number;
+                            /** Format: date-time */
+                            nextAttemptAt: string;
+                            /** Format: date-time */
+                            completedAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        }[];
+                        nextCursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    retryStorageDeletionJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Job scheduled for immediate retry. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @enum {boolean} */
+                        retried: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listAgents: {
         parameters: {
             query?: never;
@@ -6763,6 +6902,7 @@ export interface operations {
                      *         "message": "Summarize my latest emails"
                      *       },
                      *       "result": null,
+                     *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": null,
                      *       "metadata": null,
@@ -9657,14 +9797,31 @@ export interface operations {
                             chat_session_id: string | null;
                             /** @description Producing agent package id, or null. */
                             packageId: string | null;
+                            /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
                             name: string;
+                            /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
                             mime: string;
                             /** @description Size in bytes. */
                             size: number;
-                            /** @description SHA-256 of the bytes (hex). */
-                            sha256: string;
-                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                            /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                            sha256?: string;
+                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
                             downloadable: boolean;
+                            /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
+                            capabilities: {
+                                /** @description The caller can resolve this document at all (container ACL). */
+                                visible: boolean;
+                                /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                                metadata: boolean;
+                                /** @description The caller may fetch the bytes (`/content`). */
+                                download: boolean;
+                                /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                                preview: boolean;
+                                /** @description The caller may pin/clear the retention deadline. */
+                                keep: boolean;
+                                /** @description The caller may delete the document. */
+                                delete: boolean;
+                            };
                             /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
                             previewable: boolean;
                             /**
@@ -9735,14 +9892,31 @@ export interface operations {
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
                         packageId: string | null;
+                        /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
                         name: string;
+                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
                         mime: string;
                         /** @description Size in bytes. */
                         size: number;
-                        /** @description SHA-256 of the bytes (hex). */
-                        sha256: string;
-                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                        sha256?: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
                         downloadable: boolean;
+                        /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        capabilities: {
+                            /** @description The caller can resolve this document at all (container ACL). */
+                            visible: boolean;
+                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                            metadata: boolean;
+                            /** @description The caller may fetch the bytes (`/content`). */
+                            download: boolean;
+                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                            preview: boolean;
+                            /** @description The caller may pin/clear the retention deadline. */
+                            keep: boolean;
+                            /** @description The caller may delete the document. */
+                            delete: boolean;
+                        };
                         /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
                         previewable: boolean;
                         /**
@@ -9840,6 +10014,8 @@ export interface operations {
                 headers: {
                     /** @description attachment; filename=… */
                     "Content-Disposition"?: string;
+                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:`. Present only when the caller has the document's `metadata` capability. */
+                    "Repr-Digest"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -9851,6 +10027,8 @@ export interface operations {
                 headers: {
                     /** @description Presigned URL. */
                     Location?: string;
+                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:` (carried on the redirect; present only when the caller has the `metadata` capability). */
+                    "Repr-Digest"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -9901,14 +10079,31 @@ export interface operations {
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
                         packageId: string | null;
+                        /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
                         name: string;
+                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
                         mime: string;
                         /** @description Size in bytes. */
                         size: number;
-                        /** @description SHA-256 of the bytes (hex). */
-                        sha256: string;
-                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. */
+                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                        sha256?: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
                         downloadable: boolean;
+                        /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        capabilities: {
+                            /** @description The caller can resolve this document at all (container ACL). */
+                            visible: boolean;
+                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                            metadata: boolean;
+                            /** @description The caller may fetch the bytes (`/content`). */
+                            download: boolean;
+                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                            preview: boolean;
+                            /** @description The caller may pin/clear the retention deadline. */
+                            keep: boolean;
+                            /** @description The caller may delete the document. */
+                            delete: boolean;
+                        };
                         /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
                         previewable: boolean;
                         /**
@@ -18030,6 +18225,7 @@ export interface operations {
                      *         "docId": "doc_123"
                      *       },
                      *       "result": null,
+                     *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": null,
                      *       "metadata": null,
@@ -18374,6 +18570,11 @@ export interface operations {
                      *         },
                      *         "text": "## Inbox triage\nProcessed 42 emails, labeled 38."
                      *       },
+                     *       "artifacts": {
+                     *         "status": "complete",
+                     *         "published": 2,
+                     *         "failed": []
+                     *       },
                      *       "checkpoint": {
                      *         "lastProcessedId": "msg_99f2a"
                      *       },
@@ -18487,6 +18688,7 @@ export interface operations {
                      *         "maxEmails": 50
                      *       },
                      *       "result": null,
+                     *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": "Cancelled by user",
                      *       "metadata": null,
@@ -18623,11 +18825,21 @@ export interface operations {
                 content: {
                     "application/json": {
                         documents: {
+                            /** @description The document's human display name (may repeat across entries). */
                             name: string;
+                            /** @description Unique single path segment the agent writes the document to under `workspace/documents/` and fetches its bytes by. */
+                            workspace_name: string;
                             size: number;
                         }[];
                     };
                 };
+            };
+            /** @description duplicate_document_name — the stored manifest has colliding workspace names */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Signature verification failed */
             401: {
@@ -18925,6 +19137,16 @@ export interface operations {
                     };
                     /** @description Authoritative terminal run cost written to the `runs` row. */
                     cost?: number;
+                    /** @description Terminal summary of the container's `outputs/` sweep, written verbatim to `runs.artifacts`. `status: "partial"` iff a deliverable was lost. Validated strictly — a malformed summary yields 400. Absent from older containers (column stays null). */
+                    artifacts?: {
+                        /** @enum {string} */
+                        status: "complete" | "partial";
+                        published: number;
+                        failed: {
+                            name: string;
+                            code: string;
+                        }[];
+                    };
                 };
             };
         };
@@ -19371,6 +19593,8 @@ export interface operations {
                     size: number;
                     /** @description Declared MIME. Verified via magic-byte sniffing on consume for binary types. */
                     mime: string;
+                    /** @description Optional client integrity claim: lowercase-hex SHA-256 of the payload. When provided it is enforced server-side — direct-presign S3 mode binds a signed `x-amz-checksum-sha256` header the client MUST echo (returned in `headers`), the proxy sink re-hashes the streamed bytes, and consume re-checks it — a mismatch is rejected (400 `checksum_mismatch`). */
+                    sha256?: string;
                 };
             };
         };
@@ -19409,7 +19633,7 @@ export interface operations {
                         url: string;
                         /** @enum {string} */
                         method: "PUT";
-                        /** @description The complete set of headers the client MUST send verbatim on the PUT request (`Content-Type`, plus `Content-Length` bound to the declared `size` in direct-presign S3 mode). Nothing else is required — no checksum headers. */
+                        /** @description The complete set of headers the client MUST send verbatim on the PUT request. Direct-presign S3 mode includes `If-None-Match: *` so the first successful write is immutable, plus `Content-Length` bound to the declared `size`; when `sha256` was supplied it also includes the signed `x-amz-checksum-sha256` value. */
                         headers: {
                             [key: string]: string;
                         };

@@ -21,6 +21,7 @@ import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
+import { reprDigestSha256 } from "../lib/digest.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { createDownloadUrl } from "@appstrate/db/storage";
 import { zDocumentPurposeEnum } from "@appstrate/db/schema";
@@ -32,7 +33,7 @@ import {
   toDocumentDto,
   streamDocumentContent,
   loadDocumentForPreview,
-  deriveDownloadable,
+  getDocumentCapabilities,
   parseStorageKey,
   type ListDocumentsFilters,
 } from "../services/documents.ts";
@@ -83,7 +84,7 @@ export function createDocumentsRouter() {
     // Documented query-int idiom (routes/models.ts): coerce + clamp + default.
     filters.limit = z.coerce.number().int().min(1).max(100).catch(20).parse(c.req.query("limit"));
 
-    const page = await listDocumentsForActor(scope, actor, filters);
+    const page = await listDocumentsForActor(scope, actor, filters, c.get("permissions"));
     return c.json(page);
   });
 
@@ -92,9 +93,14 @@ export function createDocumentsRouter() {
   router.get("/documents/:id", rateLimit(120), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
-    const resolved = await getDocumentForActor(scope, actor, c.req.param("id")!);
+    const resolved = await getDocumentForActor(
+      scope,
+      actor,
+      c.req.param("id")!,
+      c.get("permissions"),
+    );
     if (!resolved) throw notFound("Document not found");
-    return c.json(toDocumentDto(resolved.row, actor, resolved.downloadable, { mintPreview: true }));
+    return c.json(toDocumentDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
   });
 
   // GET /api/documents/:id/content — download the bytes. Gated by the derived
@@ -106,10 +112,15 @@ export function createDocumentsRouter() {
     const actor = getActor(c);
     const resolved = await getDocumentForActor(scope, actor, c.req.param("id")!);
     if (!resolved) throw notFound("Document not found");
-    if (!resolved.downloadable) {
+    if (!resolved.capabilities.download) {
       throw forbidden("This document is not downloadable by the current actor");
     }
     const { row } = resolved;
+
+    // RFC 9530 representation digest of the stored bytes — exposed only when the
+    // caller has the `metadata` capability (so a private upload's hash is never
+    // disclosed to a non-creator; download already implies metadata for these).
+    const reprDigest = resolved.capabilities.metadata ? reprDigestSha256(row.sha256) : undefined;
 
     const parsed = parseStorageKey(row.storageKey);
     const presigned = parsed
@@ -118,7 +129,13 @@ export function createDocumentsRouter() {
           contentType: row.mime,
         })
       : null;
-    if (presigned) return c.redirect(presigned, 307);
+    if (presigned) {
+      // The presigned GET serves the bytes from the blob store (we can't set
+      // headers on that response), but carry the digest on the 307 so a client
+      // that inspects the redirect still learns the authoritative hash.
+      if (reprDigest) c.header("Repr-Digest", reprDigest);
+      return c.redirect(presigned, 307);
+    }
 
     const stream = await streamDocumentContent(row.storageKey);
     if (!stream) throw notFound("Document content not found");
@@ -133,6 +150,7 @@ export function createDocumentsRouter() {
         "Content-Length": String(row.size),
         "Content-Disposition": attachmentDisposition(row.name),
         "Cache-Control": "private, no-store",
+        ...(reprDigest ? { "Repr-Digest": reprDigest } : {}),
       },
     });
   });
@@ -142,13 +160,16 @@ export function createDocumentsRouter() {
   router.delete("/documents/:id", rateLimit(60), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
-    const resolved = await getDocumentForActor(scope, actor, c.req.param("id")!);
+    const resolved = await getDocumentForActor(
+      scope,
+      actor,
+      c.req.param("id")!,
+      c.get("permissions"),
+    );
     if (!resolved) throw notFound("Document not found");
     const { row } = resolved;
 
-    const hasPermission = c.get("permissions")?.has("documents:delete") ?? false;
-    const isCreator = actor.type === "user" ? row.userId === actor.id : row.endUserId === actor.id;
-    if (!hasPermission && !isCreator) {
+    if (!resolved.capabilities.delete) {
       throw forbidden("Only the document creator or an admin can delete this document");
     }
 
@@ -170,13 +191,16 @@ export function createDocumentsRouter() {
   router.post("/documents/:id/keep", rateLimit(60), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
-    const resolved = await getDocumentForActor(scope, actor, c.req.param("id")!);
+    const resolved = await getDocumentForActor(
+      scope,
+      actor,
+      c.req.param("id")!,
+      c.get("permissions"),
+    );
     if (!resolved) throw notFound("Document not found");
     const { row } = resolved;
 
-    const hasPermission = c.get("permissions")?.has("documents:delete") ?? false;
-    const isCreator = actor.type === "user" ? row.userId === actor.id : row.endUserId === actor.id;
-    if (!hasPermission && !isCreator) {
+    if (!resolved.capabilities.keep) {
       throw forbidden("Only the document creator or an admin can keep this document");
     }
 
@@ -193,7 +217,7 @@ export function createDocumentsRouter() {
         after: { expiresAt: null },
       });
     }
-    return c.json(toDocumentDto(updated, actor, resolved.downloadable));
+    return c.json(toDocumentDto(updated, actor, resolved.capabilities));
   });
 
   return router;
@@ -252,11 +276,11 @@ export function createDocumentPreviewRouter() {
     // creator-only content, so its preview is refused unless the token's bound
     // minting actor is the document's creator — even a hand-crafted token that
     // verifies. An `agent_output` is previewable by anyone who resolved the
-    // container (deriveDownloadable is always true for it), so this gate is a
+    // container (its `download` capability is always true), so this gate is a
     // no-op there.
     if (row.purpose === "user_upload") {
       const tokenActor = actorFromIds(payload.u ?? null, payload.eu ?? null);
-      if (!tokenActor || !deriveDownloadable(row, tokenActor)) {
+      if (!tokenActor || !getDocumentCapabilities(row, tokenActor, { visible: true }).download) {
         throw unauthorized("Preview token does not authorize this document");
       }
     }

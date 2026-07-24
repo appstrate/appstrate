@@ -17,8 +17,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { verify } from "@appstrate/afps-runtime/events";
 import { buildPublishDocumentDef } from "@appstrate/core/runtime-tool-defs";
-import { createRunDocumentUploader, sweepOutputs, uploadTimeoutMs } from "../publish.ts";
-import type { RunDocumentUploaderDeps } from "../publish.ts";
+import {
+  createRunDocumentUploader,
+  sweepOutputs,
+  summarizeArtifacts,
+  uploadTimeoutMs,
+  UploadError,
+} from "../publish.ts";
+import type { RunDocumentUploaderDeps, UploadFailureCode } from "../publish.ts";
 
 const SECRET = "test-run-secret-0123456789";
 
@@ -107,31 +113,36 @@ beforeEach(async () => {
   workspace = await realpath(await mkdtemp(path.join(tmpdir(), "publish-test-")));
 });
 
-function makeUploader(publishedShas: Set<string>, overrides?: Partial<RunDocumentUploaderDeps>) {
+function makeUploader(publishedKeys: Set<string>, overrides?: Partial<RunDocumentUploaderDeps>) {
   return createRunDocumentUploader({
     sinkUrl,
     sinkSecret: SECRET,
     workspace,
-    publishedShas,
+    publishedKeys,
     // No real backoff waits in tests; retry-specific cases inject a recorder.
     sleepFn: async () => {},
     ...overrides,
   });
 }
 
+/** The dedup key the uploader records: `${sha256}:${name}`. */
+function key(sha256: string, name: string): string {
+  return `${sha256}:${name}`;
+}
+
 describe("createRunDocumentUploader", () => {
   it("streams a workspace file to /documents and records its sha", async () => {
     const bytes = new TextEncoder().encode("<html>hello</html>");
     await writeFile(path.join(workspace, "report.html"), bytes);
-    const shas = new Set<string>();
+    const keys = new Set<string>();
 
-    const doc = await makeUploader(shas)("report.html");
+    const doc = await makeUploader(keys)("report.html");
 
     expect(doc.name).toBe("report.html");
     expect(doc.size).toBe(bytes.byteLength);
     expect(doc.sha256).toBe(sha256Hex(bytes));
     expect(doc.uri).toBe(`document://${doc.id}`);
-    expect(shas.has(doc.sha256)).toBe(true);
+    expect(keys.has(key(doc.sha256, doc.name))).toBe(true);
     expect(config.received).toHaveLength(1);
     expect(config.received[0]!.name).toBe("report.html");
     expect(config.received[0]!.contentType).toBe("text/html");
@@ -193,13 +204,13 @@ describe("createRunDocumentUploader", () => {
     config.statusQueue = [500, 201];
     const bytes = new TextEncoder().encode("retry-me");
     await writeFile(path.join(workspace, "r.txt"), bytes);
-    const shas = new Set<string>();
+    const keys = new Set<string>();
 
-    const doc = await makeUploader(shas)("r.txt");
+    const doc = await makeUploader(keys)("r.txt");
 
     expect(doc.sha256).toBe(sha256Hex(bytes));
     expect(config.received).toHaveLength(2); // one failed + one successful attempt
-    expect(shas.has(doc.sha256)).toBe(true);
+    expect(keys.has(key(doc.sha256, doc.name))).toBe(true);
   });
 
   it("does not retry a definitive 413", async () => {
@@ -235,6 +246,27 @@ describe("createRunDocumentUploader", () => {
     await expect(makeUploader(new Set())("doomed.txt")).rejects.toThrow(/after 3 attempts/);
     expect(config.received).toHaveLength(3);
   });
+
+  it("throws a typed UploadError classifying the HTTP status", async () => {
+    // 413 → file_too_large, 403 → quota_exceeded, 409 → conflict; a 500 that
+    // survives all retries → upload_failed.
+    await writeFile(path.join(workspace, "f.txt"), new TextEncoder().encode("x"));
+    const cases: Array<[number, UploadFailureCode]> = [
+      [413, "file_too_large"],
+      [403, "quota_exceeded"],
+      [409, "conflict"],
+    ];
+    for (const [status, code] of cases) {
+      config = { status, statusQueue: [], received: [] };
+      const err = await makeUploader(new Set())("f.txt").catch((e) => e);
+      expect(err).toBeInstanceOf(UploadError);
+      expect((err as UploadError).code).toBe(code);
+    }
+    config = { status: 500, statusQueue: [], received: [] };
+    const err = await makeUploader(new Set())("f.txt").catch((e) => e);
+    expect(err).toBeInstanceOf(UploadError);
+    expect((err as UploadError).code).toBe("upload_failed");
+  });
 });
 
 describe("uploadTimeoutMs", () => {
@@ -259,13 +291,13 @@ describe("sweepOutputs", () => {
   it("publishes every unpublished file under outputs/ and emits events", async () => {
     await seedOutput("a.txt", "alpha");
     await seedOutput("nested/b.csv", "b,c");
-    const shas = new Set<string>();
+    const keys = new Set<string>();
     const events: Array<Record<string, unknown>> = [];
 
-    await sweepOutputs({
-      uploader: makeUploader(shas),
+    const result = await sweepOutputs({
+      uploader: makeUploader(keys),
       workspace,
-      publishedShas: shas,
+      publishedKeys: keys,
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -275,19 +307,46 @@ describe("sweepOutputs", () => {
     expect(config.received).toHaveLength(2);
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.type === "document.published")).toBe(true);
-    // Every emitted doc's sha is now tracked.
-    for (const e of events) expect(shas.has(e.sha256 as string)).toBe(true);
+    expect(result.published).toHaveLength(2);
+    expect(result.failed).toHaveLength(0);
+    // Every emitted doc's `${sha}:${name}` key is now tracked.
+    for (const e of events) expect(keys.has(key(e.sha256 as string, e.name as string))).toBe(true);
   });
 
-  it("skips a file whose sha was already published (dedup)", async () => {
+  it("publishes two same-content files with DIFFERENT names (keyed on sha+name)", async () => {
+    // Identical bytes, distinct basenames → distinct `${sha}:${name}` keys, so
+    // BOTH must publish (the old sha-only dedup would have dropped the second).
+    await seedOutput("first.txt", "same-bytes");
+    await seedOutput("second.txt", "same-bytes");
+    const keys = new Set<string>();
+    const events: Array<Record<string, unknown>> = [];
+
+    const result = await sweepOutputs({
+      uploader: makeUploader(keys),
+      workspace,
+      publishedKeys: keys,
+      maxFileBytes: 1024,
+      emit: (e) => {
+        events.push(e);
+      },
+    });
+
+    expect(config.received).toHaveLength(2);
+    expect(result.published).toHaveLength(2);
+    const names = config.received.map((r) => r.name).sort();
+    expect(names).toEqual(["first.txt", "second.txt"]);
+  });
+
+  it("skips a file whose sha+name was already published (dedup)", async () => {
     await seedOutput("dup.txt", "already-published");
-    const shas = new Set<string>([sha256Hex(new TextEncoder().encode("already-published"))]);
+    const sha = sha256Hex(new TextEncoder().encode("already-published"));
+    const keys = new Set<string>([key(sha, "dup.txt")]);
     const events: unknown[] = [];
 
-    await sweepOutputs({
-      uploader: makeUploader(shas),
+    const result = await sweepOutputs({
+      uploader: makeUploader(keys),
       workspace,
-      publishedShas: shas,
+      publishedKeys: keys,
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -296,6 +355,7 @@ describe("sweepOutputs", () => {
 
     expect(config.received).toHaveLength(0);
     expect(events).toHaveLength(0);
+    expect(result.skipped).toEqual([{ name: "dup.txt", reason: "already_published" }]);
   });
 
   it("skips a symlink under outputs/ with a warning and publishes regular files", async () => {
@@ -307,14 +367,14 @@ describe("sweepOutputs", () => {
     await seedOutput("real.txt", "real-content");
     await symlink(path.join(outside, "secret.txt"), path.join(workspace, "outputs", "link.txt"));
 
-    const shas = new Set<string>();
+    const keys = new Set<string>();
     const warnings: string[] = [];
     const events: Array<Record<string, unknown>> = [];
 
-    await sweepOutputs({
-      uploader: makeUploader(shas),
+    const result = await sweepOutputs({
+      uploader: makeUploader(keys),
       workspace,
-      publishedShas: shas,
+      publishedKeys: keys,
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -327,16 +387,17 @@ describe("sweepOutputs", () => {
     expect(config.received[0]!.name).toBe("real.txt");
     expect(events).toHaveLength(1);
     expect(warnings.some((w) => /symlink/.test(w))).toBe(true);
+    expect(result.skipped.some((s) => s.reason === "symlink" && s.name === "link.txt")).toBe(true);
   });
 
-  it("skips an oversized file with a warning and never throws", async () => {
+  it("records an oversized file as a lost deliverable (never throws)", async () => {
     await seedOutput("huge.txt", "0123456789");
     const warnings: string[] = [];
 
-    await sweepOutputs({
+    const result = await sweepOutputs({
       uploader: makeUploader(new Set()),
       workspace,
-      publishedShas: new Set(),
+      publishedKeys: new Set(),
       maxFileBytes: 4,
       emit: () => {},
       logWarn: (m) => warnings.push(m),
@@ -344,34 +405,62 @@ describe("sweepOutputs", () => {
 
     expect(config.received).toHaveLength(0);
     expect(warnings.some((w) => /oversized/.test(w))).toBe(true);
+    expect(result.skipped).toEqual([{ name: "huge.txt", reason: "oversized" }]);
+    // The summary PROMOTES an oversized skip to a `file_too_large` failure.
+    const summary = summarizeArtifacts(result);
+    expect(summary.status).toBe("partial");
+    expect(summary.failed).toEqual([{ name: "huge.txt", code: "file_too_large" }]);
   });
 
-  it("no-ops when outputs/ does not exist", async () => {
+  it("returns an empty result when outputs/ does not exist", async () => {
     const events: unknown[] = [];
-    await expect(
-      sweepOutputs({
-        uploader: makeUploader(new Set()),
-        workspace,
-        publishedShas: new Set(),
-        maxFileBytes: 1024,
-        emit: (e) => {
-          events.push(e);
-        },
-      }),
-    ).resolves.toBeUndefined();
+    const result = await sweepOutputs({
+      uploader: makeUploader(new Set()),
+      workspace,
+      publishedKeys: new Set(),
+      maxFileBytes: 1024,
+      emit: (e) => {
+        events.push(e);
+      },
+    });
     expect(events).toHaveLength(0);
+    expect(result).toEqual({ published: [], skipped: [], failed: [] });
+    expect(summarizeArtifacts(result).status).toBe("complete");
   });
 
-  it("swallows a per-file upload failure and never blocks finalize", async () => {
-    config.status = 500;
-    await seedOutput("fails.txt", "boom");
+  it("collects a per-file upload failure with its typed code, never blocking finalize", async () => {
+    // Three files; the middle one's upload fails every attempt (500 → abandoned
+    // as upload_failed). The other two publish; the failure is COLLECTED, not
+    // swallowed, and the sweep still resolves.
+    await seedOutput("ok-1.txt", "one");
+    await seedOutput("boom.txt", "boom");
+    await seedOutput("ok-2.txt", "two");
+    const failSha = sha256Hex(new TextEncoder().encode("boom"));
     const warnings: string[] = [];
     const events: unknown[] = [];
 
-    await sweepOutputs({
-      uploader: makeUploader(new Set()),
+    const result = await sweepOutputs({
+      // Force ONLY boom.txt to fail: its sha maps to a 500, others succeed.
+      uploader: makeUploader(new Set(), {
+        fetchFn: (async (_input: string | URL | Request, init?: RequestInit) => {
+          const body = init?.body as ReadableStream;
+          const buf = new Uint8Array(await new Response(body).arrayBuffer());
+          const sha = sha256Hex(buf);
+          if (sha === failSha) return new Response("boom", { status: 500 });
+          const name = (init?.headers as Record<string, string>)["X-Document-Name"];
+          const id = `doc_${sha.slice(0, 12)}`;
+          return Response.json({
+            id,
+            uri: `document://${id}`,
+            name,
+            mime: "text/plain",
+            size: buf.byteLength,
+            sha256: sha,
+          });
+        }) as unknown as typeof fetch,
+      }),
       workspace,
-      publishedShas: new Set(),
+      publishedKeys: new Set(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -379,21 +468,32 @@ describe("sweepOutputs", () => {
       logWarn: (m) => warnings.push(m),
     });
 
-    expect(events).toHaveLength(0);
+    expect(result.published).toHaveLength(2);
+    expect(events).toHaveLength(2);
+    expect(result.failed).toEqual([
+      { name: "boom.txt", code: "upload_failed", message: expect.any(String) },
+    ]);
     expect(warnings.some((w) => /dropped a deliverable/.test(w))).toBe(true);
+
+    const summary = summarizeArtifacts(result);
+    expect(summary).toEqual({
+      status: "partial",
+      published: 2,
+      failed: [{ name: "boom.txt", code: "upload_failed" }],
+    });
   });
 
   it("skips a hidden dotfile at the root and publishes regular files", async () => {
     await seedOutput(".env", "SECRET=shh");
     await seedOutput("report.md", "# ok");
-    const shas = new Set<string>();
+    const keys = new Set<string>();
     const warnings: string[] = [];
     const events: Array<Record<string, unknown>> = [];
 
-    await sweepOutputs({
-      uploader: makeUploader(shas),
+    const result = await sweepOutputs({
+      uploader: makeUploader(keys),
       workspace,
-      publishedShas: shas,
+      publishedKeys: keys,
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -406,19 +506,22 @@ describe("sweepOutputs", () => {
     expect(config.received[0]!.name).toBe("report.md");
     expect(events).toHaveLength(1);
     expect(warnings.some((w) => /hidden file/.test(w))).toBe(true);
+    expect(result.skipped.some((s) => s.reason === "hidden" && s.name === ".env")).toBe(true);
+    // A hidden skip is NORMAL — it is NOT a lost deliverable.
+    expect(summarizeArtifacts(result).status).toBe("complete");
   });
 
   it("skips a file nested inside a hidden directory", async () => {
     await seedOutput(".git/config", "[core]");
     await seedOutput("data.csv", "a,b");
-    const shas = new Set<string>();
+    const keys = new Set<string>();
     const warnings: string[] = [];
     const events: Array<Record<string, unknown>> = [];
 
     await sweepOutputs({
-      uploader: makeUploader(shas),
+      uploader: makeUploader(keys),
       workspace,
-      publishedShas: shas,
+      publishedKeys: keys,
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -430,6 +533,40 @@ describe("sweepOutputs", () => {
     expect(config.received).toHaveLength(1);
     expect(config.received[0]!.name).toBe("data.csv");
     expect(warnings.some((w) => /hidden file/.test(w))).toBe(true);
+  });
+});
+
+describe("summarizeArtifacts bounds (server ingest contract)", () => {
+  it("clamps a runaway failed list to 1000 entries and truncates long name/code", () => {
+    const failed = Array.from({ length: 1500 }, (_, i) => ({
+      name: "x".repeat(600) + `-${i}`,
+      code: "y".repeat(100) as UploadFailureCode,
+      message: "boom",
+    }));
+    const summary = summarizeArtifacts({ published: [], skipped: [], failed });
+
+    // failed sliced to the 1000-entry cap.
+    expect(summary.failed).toHaveLength(1000);
+    // status/published reflect the FULL result (partial because >0 lost).
+    expect(summary.status).toBe("partial");
+    expect(summary.published).toBe(0);
+    // Each entry's name ≤512 and code ≤64.
+    expect(summary.failed[0]!.name.length).toBe(512);
+    expect(summary.failed[0]!.code.length).toBe(64);
+    expect(summary.failed.every((f) => f.name.length <= 512 && f.code.length <= 64)).toBe(true);
+  });
+
+  it("leaves a small summary untouched", () => {
+    const summary = summarizeArtifacts({
+      published: [{ name: "a.txt", sha256: "s", size: 1 }],
+      skipped: [],
+      failed: [{ name: "b.txt", code: "upload_failed", message: "m" }],
+    });
+    expect(summary).toEqual({
+      status: "partial",
+      published: 1,
+      failed: [{ name: "b.txt", code: "upload_failed" }],
+    });
   });
 });
 

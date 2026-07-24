@@ -37,7 +37,10 @@ import { createMcpServer } from "@appstrate/mcp-transport";
 import { getEnv } from "@appstrate/env";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
-import { forbidden, methodNotAllowed, notFound } from "../../lib/errors.ts";
+import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
+import { getActor } from "../../lib/actor.ts";
+import type { AppScope } from "../../lib/scope.ts";
+import { defaultAppForOrg, validateApplicationInOrg } from "../../middleware/app-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
 import { logger } from "../../lib/logger.ts";
 import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
@@ -170,6 +173,32 @@ function forwardAuthHeaders(src: Headers): Headers {
   return out;
 }
 
+/**
+ * Resolve the org+app scope for the MCP session so a tool can call an app-scoped
+ * service directly (the document resource provider). Mirrors `requireAppContext`
+ * for this org-pinned surface: a strategy-pinned application (API key) wins; an
+ * `X-Application-Id` header (validated to belong to the org) is honoured next;
+ * otherwise it falls back to the org's default application — the documented MCP
+ * default the in-process sub-dispatch also lands on. This keeps the direct
+ * service call in lockstep with what a dispatched REST route would resolve.
+ */
+async function resolveMcpAppScope(c: Context<AppEnv>, orgId: string): Promise<AppScope> {
+  const pinned = c.get("applicationId");
+  const headerApp = c.req.header("X-Application-Id");
+  if (pinned && headerApp && headerApp !== pinned) {
+    throw forbidden("X-Application-Id does not match authenticated application");
+  }
+  const explicit = pinned ?? headerApp;
+  if (explicit) {
+    const app = await validateApplicationInOrg(explicit, orgId);
+    if (!app) throw notFound(`Application '${explicit}' not found in this organization`);
+    return { orgId, applicationId: app.id };
+  }
+  const active = await defaultAppForOrg(orgId);
+  if (!active) throw invalidRequest("No application available for this organization.");
+  return { orgId, applicationId: active.id };
+}
+
 export function createMcpRouter(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -292,6 +321,11 @@ export function createMcpRouter(): Hono<AppEnv> {
     const permissions = c.get("permissions") ?? new Set<string>();
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
     const dispatch: Dispatch = dispatchInProcess;
+    // The caller identity + app scope for tools that call a service directly (the
+    // document resource provider). Resolved the same way the in-process
+    // sub-dispatch would, so direct and dispatched paths stay consistent.
+    const actor = getActor(c);
+    const scope = await resolveMcpAppScope(c, org);
 
     // Audit + telemetry sink. The tool layer emits plain data; here we decide
     // what to do with it: structured telemetry for every tool call, and a
@@ -349,6 +383,8 @@ export function createMcpRouter(): Hono<AppEnv> {
       dispatch,
       observe,
       contextInjected,
+      actor,
+      scope,
     };
     const tools = buildMcpTools(toolCtx);
     // `resources/read` for `document://doc_xxx` — resolves through the same

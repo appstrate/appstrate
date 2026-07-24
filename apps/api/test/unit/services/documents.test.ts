@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the pure helpers in the documents service: the `downloadable`
- * derivation (D2 / Anthropic rule), the org-quota math, retention-expiry
- * stamping, the `document://` URI parser, and the streaming SHA-256 counter.
+ * Unit tests for the pure helpers in the documents service: the single access-
+ * capability computation (D2 / Anthropic rule + the `user_upload` privacy
+ * decision), the org-quota math, retention-expiry stamping, the `document://`
+ * URI parser, and the streaming SHA-256 counter.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
-  deriveDownloadable,
+  getDocumentCapabilities,
   wouldExceedOrgQuota,
+  effectiveOrgStorageLimit,
   retentionExpiry,
   createHashingCounter,
   toDocumentDto,
@@ -23,26 +25,140 @@ const userB: Actor = { type: "user", id: "user-b" };
 const euA: Actor = { type: "end_user", id: "eu-a" };
 const euB: Actor = { type: "end_user", id: "eu-b" };
 
-describe("deriveDownloadable", () => {
-  it("an agent output is downloadable by anyone who can read the container", () => {
-    const doc = { purpose: "agent_output" as const, userId: "user-a", endUserId: null };
-    expect(deriveDownloadable(doc, userA)).toBe(true);
-    expect(deriveDownloadable(doc, userB)).toBe(true);
-    expect(deriveDownloadable(doc, euA)).toBe(true);
+describe("getDocumentCapabilities", () => {
+  const mime = "text/plain"; // not previewable → preview stays false throughout
+
+  it("a non-visible document collapses every capability to false", () => {
+    const doc = { purpose: "agent_output" as const, userId: null, endUserId: null, mime };
+    expect(getDocumentCapabilities(doc, userA, { visible: false })).toEqual({
+      visible: false,
+      metadata: false,
+      download: false,
+      preview: false,
+      keep: false,
+      delete: false,
+    });
   });
 
-  it("a user upload is downloadable only by its creator (user)", () => {
-    const doc = { purpose: "user_upload" as const, userId: "user-a", endUserId: null };
-    expect(deriveDownloadable(doc, userA)).toBe(true);
-    expect(deriveDownloadable(doc, userB)).toBe(false);
-    expect(deriveDownloadable(doc, euA)).toBe(false);
+  it("an agent output grants metadata + download to anyone who can read the container", () => {
+    const doc = { purpose: "agent_output" as const, userId: "user-a", endUserId: null, mime };
+    for (const actor of [userA, userB, euA]) {
+      const caps = getDocumentCapabilities(doc, actor, { visible: true });
+      expect(caps.metadata).toBe(true);
+      expect(caps.download).toBe(true);
+    }
   });
 
-  it("a user upload is downloadable only by its creator (end-user)", () => {
-    const doc = { purpose: "user_upload" as const, userId: null, endUserId: "eu-a" };
-    expect(deriveDownloadable(doc, euA)).toBe(true);
-    expect(deriveDownloadable(doc, euB)).toBe(false);
-    expect(deriveDownloadable(doc, userA)).toBe(false);
+  it("a user upload reserves metadata + download to its creator (user)", () => {
+    const doc = { purpose: "user_upload" as const, userId: "user-a", endUserId: null, mime };
+    const creator = getDocumentCapabilities(doc, userA, { visible: true });
+    expect(creator.metadata).toBe(true);
+    expect(creator.download).toBe(true);
+    for (const other of [userB, euA]) {
+      const caps = getDocumentCapabilities(doc, other, { visible: true });
+      // Visible (resolved the container) but opaque: no metadata, no bytes.
+      expect(caps.metadata).toBe(false);
+      expect(caps.download).toBe(false);
+    }
+  });
+
+  it("a user upload reserves metadata + download to its creator (end-user)", () => {
+    const doc = { purpose: "user_upload" as const, userId: null, endUserId: "eu-a", mime };
+    expect(getDocumentCapabilities(doc, euA, { visible: true }).download).toBe(true);
+    expect(getDocumentCapabilities(doc, euB, { visible: true }).download).toBe(false);
+    expect(getDocumentCapabilities(doc, userA, { visible: true }).download).toBe(false);
+  });
+
+  it("keep/delete follow creator OR the documents:delete grant (canManage)", () => {
+    const doc = { purpose: "user_upload" as const, userId: "user-a", endUserId: null, mime };
+    // Creator, no manage grant → keep/delete via creator.
+    const creator = getDocumentCapabilities(doc, userA, { visible: true });
+    expect(creator.keep).toBe(true);
+    expect(creator.delete).toBe(true);
+    // Non-creator without the grant → no lifecycle control.
+    const stranger = getDocumentCapabilities(doc, userB, { visible: true });
+    expect(stranger.keep).toBe(false);
+    expect(stranger.delete).toBe(false);
+    // Non-creator WITH the grant → may keep/delete, but the manage permission
+    // never widens metadata/download of another member's upload.
+    const admin = getDocumentCapabilities(doc, userB, { visible: true, canManage: true });
+    expect(admin.keep).toBe(true);
+    expect(admin.delete).toBe(true);
+    expect(admin.metadata).toBe(false);
+    expect(admin.download).toBe(false);
+  });
+
+  it("preview requires download AND a previewable mime", () => {
+    const html = {
+      purpose: "agent_output" as const,
+      userId: null,
+      endUserId: null,
+      mime: "text/html",
+    };
+    expect(getDocumentCapabilities(html, userA, { visible: true }).preview).toBe(true);
+    // A non-previewable mime (e.g. a zip) → no preview even when downloadable.
+    const zip = {
+      purpose: "agent_output" as const,
+      userId: null,
+      endUserId: null,
+      mime: "application/zip",
+    };
+    expect(getDocumentCapabilities(zip, userA, { visible: true }).preview).toBe(false);
+    const priv = {
+      purpose: "user_upload" as const,
+      userId: "user-a",
+      endUserId: null,
+      mime: "text/html",
+    };
+    // Non-creator can't download → can't preview even a previewable mime.
+    expect(getDocumentCapabilities(priv, userB, { visible: true }).preview).toBe(false);
+  });
+});
+
+describe("toDocumentDto — capabilities + metadata degradation", () => {
+  const uploadRow = (over: Partial<DocumentRow> = {}): DocumentRow => ({
+    id: "doc_degrade12345",
+    orgId: "org-1",
+    applicationId: "app-1",
+    purpose: "user_upload",
+    runId: "run-1",
+    chatSessionId: null,
+    packageId: null,
+    userId: "user-a",
+    endUserId: null,
+    storageKey: "documents/app-1/doc_degrade12345/secret.pdf",
+    name: "secret.pdf",
+    mime: "application/pdf",
+    size: 42,
+    sha256: "a".repeat(64),
+    expiresAt: null,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    ...over,
+  });
+
+  it("a non-creator reader gets an opaque DTO: generic name, generic mime, no sha256", () => {
+    const row = uploadRow();
+    const caps = getDocumentCapabilities(row, userB, { visible: true });
+    const dto = toDocumentDto(row, userB, caps);
+    expect(dto.name).toBe("document");
+    expect(dto.mime).toBe("application/octet-stream");
+    expect(dto.sha256).toBeUndefined();
+    expect(dto.downloadable).toBe(false);
+    expect(dto.capabilities).toMatchObject({ visible: true, metadata: false, download: false });
+    // Non-sensitive fields still ride through.
+    expect(dto.id).toBe(row.id);
+    expect(dto.size).toBe(42);
+    expect(dto.purpose).toBe("user_upload");
+  });
+
+  it("the creator gets the real name, mime and sha256", () => {
+    const row = uploadRow();
+    const caps = getDocumentCapabilities(row, userA, { visible: true });
+    const dto = toDocumentDto(row, userA, caps);
+    expect(dto.name).toBe("secret.pdf");
+    expect(dto.mime).toBe("application/pdf");
+    expect(dto.sha256).toBe("a".repeat(64));
+    expect(dto.capabilities.metadata).toBe(true);
   });
 });
 
@@ -70,7 +186,9 @@ describe("toDocumentDto — preview_url honours the downloadable gate (S1)", () 
   // Single-document GET semantics: pass `mintPreview` so `preview_url` is minted
   // (list rows carry only the `previewable` boolean).
   const singleDto = (row: DocumentRow, actor: Actor) =>
-    toDocumentDto(row, actor, deriveDownloadable(row, actor), { mintPreview: true });
+    toDocumentDto(row, actor, getDocumentCapabilities(row, actor, { visible: true }), {
+      mintPreview: true,
+    });
 
   it("a non-creator member gets NO preview_url for an html user_upload (cross-member disclosure blocked)", () => {
     const dto = singleDto(htmlRow(), userB);
@@ -95,7 +213,7 @@ describe("toDocumentDto — preview_url honours the downloadable gate (S1)", () 
 
   it("list rows carry `previewable` but never mint a `preview_url`", () => {
     const row = htmlRow({ purpose: "agent_output" });
-    const dto = toDocumentDto(row, userB, deriveDownloadable(row, userB));
+    const dto = toDocumentDto(row, userB, getDocumentCapabilities(row, userB, { visible: true }));
     expect(dto.previewable).toBe(true);
     expect(dto.preview_url).toBeUndefined();
   });
@@ -111,6 +229,28 @@ describe("wouldExceedOrgQuota", () => {
     expect(wouldExceedOrgQuota(91, 10, 100)).toBe(true);
     expect(wouldExceedOrgQuota(0, 100, 100)).toBe(false);
     expect(wouldExceedOrgQuota(0, 101, 100)).toBe(true);
+  });
+});
+
+describe("effectiveOrgStorageLimit", () => {
+  it("no override + no env quota ⇒ undefined (unlimited)", () => {
+    expect(effectiveOrgStorageLimit(null, undefined)).toBeUndefined();
+    expect(effectiveOrgStorageLimit(undefined, undefined)).toBeUndefined();
+  });
+
+  it("no override + env quota ⇒ env quota", () => {
+    expect(effectiveOrgStorageLimit(null, 1000)).toBe(1000);
+    expect(effectiveOrgStorageLimit(undefined, 1000)).toBe(1000);
+  });
+
+  it("override present ⇒ override wins, regardless of env quota", () => {
+    expect(effectiveOrgStorageLimit(500, undefined)).toBe(500);
+    expect(effectiveOrgStorageLimit(500, 1000)).toBe(500); // below env quota
+    expect(effectiveOrgStorageLimit(2000, 1000)).toBe(2000); // above env quota
+  });
+
+  it("a hard-zero override is honored (not treated as unset)", () => {
+    expect(effectiveOrgStorageLimit(0, 1000)).toBe(0);
   });
 });
 

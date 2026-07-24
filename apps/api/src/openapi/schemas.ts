@@ -241,13 +241,19 @@ export const schemas = {
       storage: {
         type: "object",
         description:
-          "Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the org-wide quota (`ORG_STORAGE_QUOTA_BYTES`), or null when unset (unlimited).",
-        required: ["used_bytes", "limit_bytes"],
+          "Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the raw per-org limit override (`documents_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited).",
+        required: ["used_bytes", "limit_bytes", "effective_limit_bytes"],
         properties: {
           used_bytes: { type: "integer", description: "Bytes of durable documents stored." },
           limit_bytes: {
             type: ["integer", "null"],
-            description: "Quota in bytes, or null when no quota is configured (unlimited).",
+            description:
+              "Per-org limit override in bytes, or null when no override is set (falls back to the global quota).",
+          },
+          effective_limit_bytes: {
+            type: ["integer", "null"],
+            description:
+              "Effective limit in bytes the write path enforces (override ?? global quota), or null when unlimited.",
           },
         },
       },
@@ -549,6 +555,7 @@ export const schemas = {
       "status",
       "input",
       "result",
+      "artifacts",
       "checkpoint",
       "error",
       "metadata",
@@ -622,6 +629,39 @@ export const schemas = {
             deprecated: true,
             description:
               "Present and true when deprecated report text exceeded the 256 KiB storage cap.",
+          },
+        },
+      },
+      artifacts: {
+        type: ["object", "null"],
+        description:
+          "Terminal summary of the run's end-of-run `outputs/` sweep. `status: \"partial\"` means at least one deliverable was LOST (upload abandoned after retries, or a file over the per-file cap); `failed` lists each lost file's name + a stable code (`file_too_large`, `quota_exceeded`, `conflict`, `upload_failed`). Independent of the run `status` — a successful run can still be `partial`. Null on older runs / containers that never reported it.",
+        required: ["status", "published", "failed"],
+        properties: {
+          status: { type: "string", enum: ["complete", "partial"] },
+          published: {
+            type: "integer",
+            minimum: 0,
+            description: "Count of deliverables the sweep published to durable storage.",
+          },
+          failed: {
+            type: "array",
+            description: "Deliverables the sweep could not publish (lost).",
+            items: {
+              type: "object",
+              required: ["name", "code"],
+              properties: {
+                name: {
+                  type: "string",
+                  description: "Workspace-relative path of the lost file under `outputs/`.",
+                },
+                code: {
+                  type: "string",
+                  description:
+                    "Stable failure category: `file_too_large`, `quota_exceeded`, `conflict`, or `upload_failed`.",
+                },
+              },
+            },
           },
         },
       },

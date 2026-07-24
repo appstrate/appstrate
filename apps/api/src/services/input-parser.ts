@@ -37,6 +37,7 @@ import {
   conflict,
   payloadTooLarge,
   validationFailed,
+  documentCountExceeded,
 } from "../lib/errors.ts";
 import {
   consumeUploadStream,
@@ -45,7 +46,6 @@ import {
   isUnsniffableMime,
   sniffedMimeMatchesDeclared,
   normalizeMime,
-  sanitizeFilename,
   type UploadMeta,
 } from "./uploads.ts";
 import { getRun } from "./state/runs.ts";
@@ -61,17 +61,17 @@ import {
   parseDocumentUri,
   documentUri,
 } from "@appstrate/core/document-uri";
-import { getActor } from "../lib/actor.ts";
+import { getActor, tryGetActor } from "../lib/actor.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
-import { sanitizeStorageKey } from "./file-storage.ts";
 import {
   streamRunDocument,
   writeRunDocumentsManifest,
   deleteRunDocuments,
 } from "./run-workspace-storage.ts";
+import { assignWorkspaceNames } from "./run-document-naming.ts";
 import { getEnv } from "@appstrate/env";
 
 export interface ParsedInput {
@@ -641,30 +641,45 @@ export async function parseRequestInput(
     let docNames: string[] = [];
     try {
       if (resolved.length > 0 || inline.length > 0 || docRefs.length > 0) {
+        // Bound the NUMBER of input documents a single run may carry (uploads +
+        // inline + document:// refs) — the byte caps below do not bound the
+        // COUNT (thousands of tiny files). Rejected before any streaming.
+        const totalInputDocs = resolved.length + inline.length + docRefs.length;
+        if (totalInputDocs > getEnv().RUN_MAX_DOCUMENTS) {
+          throw documentCountExceeded(
+            `A run may carry at most ${getEnv().RUN_MAX_DOCUMENTS} input documents (got ${totalInputDocs})`,
+          );
+        }
+
+        // The run-triggering actor — resolved once and threaded into both the
+        // document ACL check AND the upload ownership gate (peek/consume), so a
+        // member can only deliver documents/uploads they may read. The document
+        // ACL REQUIRES a principal (strict `getActor`); the upload ownership gate
+        // scopes leniently (`tryGetActor` → tenant-only when absent), so
+        // upload/inline-only inputs never hard-require a principal in context.
+        const actor =
+          docRefs.length > 0 ? getActor(c) : resolved.length > 0 ? tryGetActor(c) : undefined;
+
         // Resolve every `document://` reference through the container ACL (D2):
         // the run-triggering actor must be able to read the document, else it is
         // indistinguishable from missing (404 — covers cross-org and cross-app).
-        // The actor is resolved only on this path so upload/inline-only inputs
-        // never require a principal in context.
         const resolvedDocs =
           docRefs.length > 0
-            ? await (async () => {
-                const actor = getActor(c);
-                return Promise.all(
-                  docRefs.map(async ({ ref, id }) => {
-                    const doc = await getDocumentForActor({ orgId, applicationId }, actor, id);
-                    // Cross-actor ACL (S2): resolving a run is org-wide-visible to
-                    // members, but a `user_upload` is creator-only content — a
-                    // member must not deliver another member's private upload into
-                    // their own run. `downloadable` (deriveDownloadable) is always
-                    // true for an `agent_output` (freely chainable, D6) but only for
-                    // the creator of an upload. A rejected ref is indistinguishable
-                    // from missing (404), matching the not-found shape above.
-                    if (!doc || !doc.downloadable) throw notFound(`Document '${id}' not found`);
-                    return { ref, doc: doc.row };
-                  }),
-                );
-              })()
+            ? await Promise.all(
+                docRefs.map(async ({ ref, id }) => {
+                  const doc = await getDocumentForActor({ orgId, applicationId }, actor!, id);
+                  // Cross-actor ACL (S2): resolving a run is org-wide-visible to
+                  // members, but a `user_upload` is creator-only content — a
+                  // member must not deliver another member's private upload into
+                  // their own run. The `download` capability is always true for
+                  // an `agent_output` (freely chainable, D6) but only for the
+                  // creator of an upload. A rejected ref is indistinguishable from
+                  // missing (404), matching the not-found shape above.
+                  if (!doc || !doc.capabilities.download)
+                    throw notFound(`Document '${id}' not found`);
+                  return { ref, doc: doc.row };
+                }),
+              )
             : [];
 
         // Bound the total input-document payload on DECLARED sizes BEFORE
@@ -680,7 +695,7 @@ export async function parseRequestInput(
           resolved.length > 0
             ? await peekUploads(
                 resolved.map((r) => r.id),
-                { orgId, applicationId },
+                { orgId, applicationId, actor },
               )
             : new Map();
         assertDocsWithinCap(
@@ -725,20 +740,37 @@ export async function parseRequestInput(
           }
         });
 
-        // The run-workspace document object name. Must match the path the
-        // prompt-builder hands the agent (`./documents/<sanitizeStorageKey(name)>`)
-        // and the manifest entry the agent fetches by. Unnamed inline files
-        // are named after their field (array entries get an index suffix so
-        // sibling documents never collide).
-        const uploadDocNames = resolved.map(({ id }) => sanitizeStorageKey(metas.get(id)!.name));
-        const inlineDocNames = inline.map(({ ref, file }, i) => {
-          if (file.name) return sanitizeStorageKey(sanitizeFilename(file.name));
+        // Separate each document's DISPLAY name (its human name) from its
+        // WORKSPACE name (the unique single-segment filename written into the
+        // run container). Unnamed inline files derive a display name from their
+        // field (array entries get an index suffix). `assignWorkspaceNames`
+        // then deterministically resolves any display-name collision so two
+        // documents never overwrite each other on disk — `report.pdf`,
+        // `report-2.pdf`, … The ordered list [uploads, inline, documents] is
+        // the single source of truth for provisioning, the manifest, and the
+        // prompt path (see run-document-naming.ts).
+        const uploadDisplayNames = resolved.map(({ id }) => metas.get(id)!.name);
+        const inlineDisplayNames = inline.map(({ ref, file }, i) => {
+          if (file.name) return file.name;
           const ext = inlineSniffed[i]?.ext ?? extFromMime(file.mime);
           const suffix = ref.index !== undefined ? `-${ref.index}` : "";
-          return sanitizeStorageKey(`${ref.fieldName}${suffix}.${ext}`);
+          return `${ref.fieldName}${suffix}.${ext}`;
         });
-        const documentDocNames = resolvedDocs.map(({ doc }) => sanitizeStorageKey(doc.name));
-        docNames = [...uploadDocNames, ...inlineDocNames, ...documentDocNames];
+        const documentDisplayNames = resolvedDocs.map(({ doc }) => doc.name);
+        const workspaceNames = assignWorkspaceNames([
+          ...uploadDisplayNames,
+          ...inlineDisplayNames,
+          ...documentDisplayNames,
+        ]);
+        const uploadWorkspaceNames = workspaceNames.slice(0, resolved.length);
+        const inlineWorkspaceNames = workspaceNames.slice(
+          resolved.length,
+          resolved.length + inline.length,
+        );
+        const documentWorkspaceNames = workspaceNames.slice(resolved.length + inline.length);
+        // Storage keys for rollback — the workspace names are the on-disk /
+        // object-store segments (`{runId}/documents/<workspaceName>`).
+        docNames = workspaceNames;
 
         // Stream each upload straight from the uploads bucket into the run
         // workspace — validating size + MIME on the fly — so the platform never
@@ -748,43 +780,62 @@ export async function parseRequestInput(
           resolved,
           DOC_STREAM_CONCURRENCY,
           async ({ ref, id }, i) => {
-            const docName = docNames[i]!;
+            const docName = uploadWorkspaceNames[i]!;
             const declaredSize = metas.get(id)!.size;
             // Sink: sniff the head, count bytes, and pipe everything to the run
             // workspace. `fileTypeStream` re-emits the full stream and exposes
             // `.fileType` once the head has been read — available after the pipe
             // drains. The counting passthrough yields the size the size-check
             // (and manifest) needs.
-            const meta = await consumeUploadStream(id, { orgId, applicationId }, async (src) => {
-              const detection = await fileTypeStream(src);
-              let bytes = 0;
-              const counter = new TransformStream<Uint8Array, Uint8Array>({
-                transform(chunk, controller) {
-                  bytes += chunk.byteLength;
-                  // Abort the moment the stream overshoots the declared size,
-                  // rather than copying a declared-small / uploaded-huge object
-                  // into the run workspace in full just to delete it after the
-                  // post-drain size check. Errors the stream → the S3 multipart
-                  // upload aborts (or the FS write stops) → consume releases the
-                  // claim and the run workspace is rolled back. The post-drain
-                  // `bytes === size` check in consume still catches the
-                  // under-size case (and is the correctness backstop for any
-                  // sink that does not abort early).
-                  if (bytes > declaredSize) {
-                    controller.error(
-                      invalidRequest(
-                        `Upload '${id}' size mismatch: declared ${declaredSize} bytes, exceeded mid-stream`,
-                      ),
-                    );
-                    return;
-                  }
-                  controller.enqueue(chunk);
-                },
-              });
-              await streamRunDocument(runId, docName, detection.pipeThrough(counter));
-              return { bytes, sniffedMime: detection.fileType?.mime };
-            });
-            return { fieldName: ref.fieldName, name: meta.name, type: meta.mime, size: meta.size };
+            const meta = await consumeUploadStream(
+              id,
+              { orgId, applicationId, actor },
+              async (src) => {
+                const detection = await fileTypeStream(src);
+                let bytes = 0;
+                // Hash the streamed bytes too, so consume can compare against a
+                // client-declared upload sha256 and reject a mismatch at this
+                // FIRST consume (fails fast, before the run is created).
+                const hasher = new Bun.CryptoHasher("sha256");
+                const counter = new TransformStream<Uint8Array, Uint8Array>({
+                  transform(chunk, controller) {
+                    bytes += chunk.byteLength;
+                    // Abort the moment the stream overshoots the declared size,
+                    // rather than copying a declared-small / uploaded-huge object
+                    // into the run workspace in full just to delete it after the
+                    // post-drain size check. Errors the stream → the S3 multipart
+                    // upload aborts (or the FS write stops) → consume releases the
+                    // claim and the run workspace is rolled back. The post-drain
+                    // `bytes === size` check in consume still catches the
+                    // under-size case (and is the correctness backstop for any
+                    // sink that does not abort early).
+                    if (bytes > declaredSize) {
+                      controller.error(
+                        invalidRequest(
+                          `Upload '${id}' size mismatch: declared ${declaredSize} bytes, exceeded mid-stream`,
+                        ),
+                      );
+                      return;
+                    }
+                    hasher.update(chunk);
+                    controller.enqueue(chunk);
+                  },
+                });
+                await streamRunDocument(runId, docName, detection.pipeThrough(counter));
+                return {
+                  bytes,
+                  sniffedMime: detection.fileType?.mime,
+                  sha256: hasher.digest("hex"),
+                };
+              },
+            );
+            return {
+              fieldName: ref.fieldName,
+              name: meta.name,
+              workspaceName: docName,
+              type: meta.mime,
+              size: meta.size,
+            };
           },
         );
 
@@ -793,11 +844,12 @@ export async function parseRequestInput(
         const inlined: FileReference[] = [];
         for (let i = 0; i < inline.length; i++) {
           const { ref, file } = inline[i]!;
-          const docName = inlineDocNames[i]!;
+          const docName = inlineWorkspaceNames[i]!;
           await streamRunDocument(runId, docName, new Blob([file.bytes]).stream());
           inlined.push({
             fieldName: ref.fieldName,
-            name: docName,
+            name: inlineDisplayNames[i]!,
+            workspaceName: docName,
             type: file.mime,
             size: file.bytes.byteLength,
           });
@@ -810,13 +862,14 @@ export async function parseRequestInput(
         const documentFiles: FileReference[] = [];
         for (let j = 0; j < resolvedDocs.length; j++) {
           const { ref, doc } = resolvedDocs[j]!;
-          const docName = documentDocNames[j]!;
+          const docName = documentWorkspaceNames[j]!;
           const src = await streamDocumentContent(doc.storageKey);
           if (!src) throw notFound(`Document '${doc.id}' content is missing`);
           await streamRunDocument(runId, docName, src);
           documentFiles.push({
             fieldName: ref.fieldName,
-            name: docName,
+            name: doc.name,
+            workspaceName: docName,
             type: doc.mime,
             size: doc.size,
           });
@@ -828,7 +881,7 @@ export async function parseRequestInput(
         // instead of megabytes of base64.
         for (let i = 0; i < inline.length; i++) {
           const { ref, file } = inline[i]!;
-          const marker = strippedDataUri(file.mime, inlineDocNames[i]!);
+          const marker = strippedDataUri(file.mime, inlineWorkspaceNames[i]!);
           if (ref.index === undefined) {
             input[ref.fieldName] = marker;
           } else {
@@ -859,7 +912,7 @@ export async function parseRequestInput(
         const allFiles = [...consumed, ...inlined, ...documentFiles];
         await writeRunDocumentsManifest(
           runId,
-          allFiles.map((d, i) => ({ name: docNames[i]!, size: d.size })),
+          allFiles.map((d) => ({ name: d.name, workspace_name: d.workspaceName, size: d.size })),
         );
 
         uploadedFiles = allFiles;

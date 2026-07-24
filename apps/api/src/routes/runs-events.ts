@@ -38,6 +38,7 @@ import {
   downloadRunDocumentsManifest,
   downloadRunDocumentStream,
 } from "../services/run-workspace-storage.ts";
+import { assertUniqueWorkspaceNames } from "../services/run-document-naming.ts";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
@@ -80,6 +81,36 @@ const CloudEventEnvelopeSchema = z
  * Only the load-bearing outcome fields (`status`, `output`, `error`) stay
  * strict — a genuinely broken outcome should still surface loudly.
  */
+/** Ingest bounds for the artifacts summary — mirror runtime-pi/publish.ts. */
+const MAX_ARTIFACTS_FAILED = 1000;
+const MAX_ARTIFACT_NAME_LEN = 512;
+const MAX_ARTIFACT_CODE_LEN = 64;
+
+/**
+ * Clamp an oversized artifacts summary to the ingest bounds BEFORE Zod
+ * validation, so a version-skewed container that emits an over-long `failed`
+ * list (or over-long name/code strings) still finalizes with a TRUNCATED
+ * summary rather than tripping a hard 400. Only SIZE is clamped — a non-array
+ * `failed`, non-string name/code, or unknown keys pass through untouched and the
+ * strict schema still rejects them (a genuine shape violation stays a 400). Pure
+ * + defensive: any non-object / missing-`failed` input is returned unchanged.
+ */
+function clampArtifacts(input: unknown): unknown {
+  if (typeof input !== "object" || input === null) return input;
+  const obj = input as Record<string, unknown>;
+  if (!Array.isArray(obj.failed)) return input;
+  const failed = obj.failed.slice(0, MAX_ARTIFACTS_FAILED).map((entry) => {
+    if (typeof entry !== "object" || entry === null) return entry;
+    const e = entry as Record<string, unknown>;
+    return {
+      ...e,
+      ...(typeof e.name === "string" ? { name: e.name.slice(0, MAX_ARTIFACT_NAME_LEN) } : {}),
+      ...(typeof e.code === "string" ? { code: e.code.slice(0, MAX_ARTIFACT_CODE_LEN) } : {}),
+    };
+  });
+  return { ...obj, failed };
+}
+
 const RunResultSchema = z
   .object({
     memories: z
@@ -141,6 +172,39 @@ const RunResultSchema = z
     // Deprecated report-channel aggregate. Kept tolerant so older runners can
     // finalize successfully while new agents publish markdown documents.
     report: z.string().optional().catch(undefined),
+    // Terminal outputs-sweep summary (documents hardening). Snake_case inner
+    // keys, matching the persisted `runs.artifacts` column. The summary is a
+    // SOFT partial-deliverables SIGNAL — an oversized one must never turn a
+    // (possibly successful) run's finalize into a hard 400. So size overruns are
+    // CLAMPED, not rejected: `clampArtifacts` truncates an over-long `failed`
+    // list (≤1000) and over-long name/code strings (≤512 / ≤64) BEFORE
+    // validation — mirroring the producer bounds in runtime-pi/publish.ts, so a
+    // version-skewed container that emits a runaway loss list still finalizes
+    // with a truncated summary rather than failing. The object shape itself
+    // stays `.strict()` (unknown keys still rejected) and status/published stay
+    // strictly typed — genuine type/shape violations (not mere size) are still a
+    // 400. Absence is fine — older containers do not send it, column stays null.
+    artifacts: z
+      .preprocess(
+        clampArtifacts,
+        z
+          .object({
+            status: z.enum(["complete", "partial"]),
+            published: z.number().int().nonnegative(),
+            failed: z
+              .array(
+                z
+                  .object({
+                    name: z.string().max(512),
+                    code: z.string().max(64),
+                  })
+                  .strict(),
+              )
+              .max(1000),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .passthrough();
 
@@ -225,6 +289,7 @@ export function createRunsEventsRouter() {
       ...(d.usage !== undefined ? { usage: d.usage } : {}),
       ...(d.cost !== undefined ? { cost: d.cost } : {}),
       ...(d.report !== undefined ? { report: d.report } : {}),
+      ...(d.artifacts !== undefined ? { artifacts: d.artifacts } : {}),
     };
 
     await finalizeRun({ run, result });
@@ -294,6 +359,14 @@ export function createRunsEventsRouter() {
     const run = c.get("run")!;
     const manifest = await downloadRunDocumentsManifest(run.id);
     if (!manifest) throw notFound(`no input documents for run ${run.id}`);
+    // Never serve a manifest whose workspace names collide — the container keys
+    // its `workspace/documents/` writes on `workspace_name`, so a duplicate
+    // would silently overwrite one document with another. The platform build
+    // path can't produce one (assignWorkspaceNames dedupes); this guards a
+    // corrupted / hand-built manifest with a typed 400 instead.
+    // (Pre-upgrade manifests key on `name` only — fall back rather than 400
+    // a run that was launched before workspace names existed.)
+    assertUniqueWorkspaceNames(manifest.documents.map((d) => d.workspace_name ?? d.name));
     return c.json(manifest);
   });
 
@@ -310,7 +383,13 @@ export function createRunsEventsRouter() {
   // stream mid-flight (413, deleting any partial object), the org quota is
   // enforced transactionally (403). Idempotent for the sweep's retries: an
   // identical (run, sha256, name) upload returns the existing document (200).
-  router.post("/runs/:runId/documents", documentLimiter, verifyRunUploadSignature, async (c) => {
+  //
+  // Middleware order — HMAC verification runs BEFORE the rate limiter. The
+  // limiter keys on the runId from the URL, so if it ran first an UNauthenticated
+  // attacker who merely knows a runId could spend a legitimate run's document
+  // budget with garbage requests (a DoS on the run's finalize sweep). Verifying
+  // the run signature first means only the authentic run can consume its budget.
+  router.post("/runs/:runId/documents", verifyRunUploadSignature, documentLimiter, async (c) => {
     const run = c.get("run")!;
 
     // Only a live run may publish — a document arriving after finalize (or

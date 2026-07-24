@@ -23,6 +23,7 @@ import {
   uploads,
   auditEvents,
   chatSessions,
+  storageDeletionJobs,
 } from "@appstrate/db/schema";
 import { uploadStream, downloadStream } from "@appstrate/db/storage";
 import { _resetCacheForTesting } from "@appstrate/env";
@@ -51,7 +52,10 @@ import {
   cleanupExpiredDocuments,
   detachOrDeleteContainedDocuments,
   reconcileOrgDocumentBytes,
+  setOrgDocumentStorageLimit,
+  deleteDocument,
 } from "../../../src/services/documents.ts";
+import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 
 /** Run `fn` with an env var temporarily overridden (cache reset around it). */
 async function withEnv(key: string, value: string, fn: () => Promise<void>): Promise<void> {
@@ -211,7 +215,7 @@ describe("documents service + routes", () => {
     // Same app: resolvable, downloadable by its creator.
     const ok = await getDocumentForActor(scope, userActor, doc.id);
     expect(ok?.row.id).toBe(doc.id);
-    expect(ok?.downloadable).toBe(true);
+    expect(ok?.capabilities.download).toBe(true);
 
     // Cross-org (different org scope): 404.
     const other = await createTestContext({ orgSlug: "otherorg" });
@@ -244,7 +248,7 @@ describe("documents service + routes", () => {
     // Owner end-user resolves + downloads (creator).
     const asOwner = await getDocumentForActor(scope, ownerActor, doc.id);
     expect(asOwner?.row.id).toBe(doc.id);
-    expect(asOwner?.downloadable).toBe(true);
+    expect(asOwner?.capabilities.download).toBe(true);
 
     // A different end-user cannot see it at all.
     const asOther = await getDocumentForActor(scope, { type: "end_user", id: euOther.id }, doc.id);
@@ -253,7 +257,7 @@ describe("documents service + routes", () => {
     // A dashboard user (member) can read it but cannot download an upload it did not create.
     const asUser = await getDocumentForActor(scope, userActor, doc.id);
     expect(asUser?.row.id).toBe(doc.id);
-    expect(asUser?.downloadable).toBe(false);
+    expect(asUser?.capabilities.download).toBe(false);
   });
 
   it("GET /:id returns metadata and /content proxy-streams the bytes", async () => {
@@ -276,6 +280,10 @@ describe("documents service + routes", () => {
     expect(content.headers.get("content-disposition")).toContain("attachment");
     // S3: the proxy stream must forbid content-type sniffing.
     expect(content.headers.get("x-content-type-options")).toBe("nosniff");
+    // RFC 9530 representation digest — present because the creator has the
+    // `metadata` capability. `sha-256=:<base64>:` of the stored bytes.
+    const expectedB64 = Buffer.from(doc.sha256, "hex").toString("base64");
+    expect(content.headers.get("repr-digest")).toBe(`sha-256=:${expectedB64}:`);
     const body = new Uint8Array(await content.arrayBuffer());
     expect(body).toEqual(bytes);
 
@@ -800,6 +808,102 @@ describe("documents service + routes", () => {
     expect(outContent.status).toBe(200);
   });
 
+  it("capability matrix: creator / other member / manage-permission / agent_output", async () => {
+    const creator = await createTestUser({ email: "creator@caps.test" });
+    await addOrgMember(ctx.orgId, creator.id, "member");
+    const creatorActor: Actor = { type: "user", id: creator.id };
+    const other = await createTestUser({ email: "other@caps.test" });
+    await addOrgMember(ctx.orgId, other.id, "member");
+    const otherActor: Actor = { type: "user", id: other.id };
+
+    const runId = await seedRunRow(scope);
+    const up = await stageUpload(scope, creator.id, "u.txt", new TextEncoder().encode("upload"));
+    const upload = await createDocumentFromUpload(scope, creatorActor, up, { runId });
+    const { row: output } = await publishStream(scope, runId, "o.txt", "output");
+
+    // Creator of the user_upload → full metadata + download + lifecycle.
+    expect((await getDocumentForActor(scope, creatorActor, upload.id))?.capabilities).toMatchObject(
+      {
+        visible: true,
+        metadata: true,
+        download: true,
+        keep: true,
+        delete: true,
+      },
+    );
+    // Other member (run reader, not creator, no grant) → visible but OPAQUE.
+    expect((await getDocumentForActor(scope, otherActor, upload.id))?.capabilities).toMatchObject({
+      visible: true,
+      metadata: false,
+      download: false,
+      preview: false,
+      keep: false,
+      delete: false,
+    });
+    // Other member WITH documents:delete → may keep/delete; metadata stays opaque.
+    expect(
+      (await getDocumentForActor(scope, otherActor, upload.id, new Set(["documents:delete"])))
+        ?.capabilities,
+    ).toMatchObject({ metadata: false, download: false, keep: true, delete: true });
+    // agent_output → any member gets full metadata + download.
+    expect((await getDocumentForActor(scope, otherActor, output.id))?.capabilities).toMatchObject({
+      visible: true,
+      metadata: true,
+      download: true,
+    });
+  });
+
+  it("a non-creator run reader gets a degraded DTO, a 403 on /content, and no preview token", async () => {
+    const creator = await createTestUser({ email: "c3@docs.test" });
+    await addOrgMember(ctx.orgId, creator.id, "member");
+    const creatorActor: Actor = { type: "user", id: creator.id };
+    const reader = await createTestUser({ email: "r3@docs.test" });
+    await addOrgMember(ctx.orgId, reader.id, "member");
+    const readerHeaders = authHeaders({ ...ctx, cookie: reader.cookie });
+
+    const runId = await seedRunRow(scope);
+    const up = await stageUpload(
+      scope,
+      creator.id,
+      "secret-notes.txt",
+      new TextEncoder().encode("x"),
+    );
+    const upload = await createDocumentFromUpload(scope, creatorActor, up, { runId });
+
+    // GET /:id → visible but opaque: generic name/mime, no sha256, no preview token.
+    const meta = await app.request(`/api/documents/${upload.id}`, { headers: readerHeaders });
+    expect(meta.status).toBe(200);
+    const dto = (await meta.json()) as {
+      name: string;
+      mime: string;
+      sha256?: string;
+      downloadable: boolean;
+      previewable: boolean;
+      preview_url: string | null;
+      capabilities: { metadata: boolean; download: boolean; preview: boolean };
+    };
+    expect(dto.name).toBe("document");
+    expect(dto.mime).toBe("application/octet-stream");
+    expect(dto.sha256).toBeUndefined();
+    expect(dto.downloadable).toBe(false);
+    expect(dto.previewable).toBe(false);
+    expect(dto.preview_url).toBeNull();
+    expect(dto.capabilities).toMatchObject({ metadata: false, download: false, preview: false });
+
+    // /content is refused outright.
+    const content = await app.request(`/api/documents/${upload.id}/content`, {
+      headers: readerHeaders,
+    });
+    expect(content.status).toBe(403);
+
+    // The creator, by contrast, sees the real name + a minted preview token.
+    const creatorHeaders = authHeaders({ ...ctx, cookie: creator.cookie });
+    const own = await app.request(`/api/documents/${upload.id}`, { headers: creatorHeaders });
+    const ownDto = (await own.json()) as { name: string; preview_url: string | null };
+    expect(ownDto.name).toBe("secret-notes.txt");
+    expect(ownDto.preview_url).toContain(`/preview/documents/${upload.id}?t=`);
+  });
+
   it("end-user (impersonated via API key) reads own docs, is blocked from others', and deletes own", async () => {
     const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     const euOther = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
@@ -966,7 +1070,19 @@ describe("documents service + routes", () => {
     const [row] = await db.select().from(documents).where(eq(documents.id, docX.id));
     expect(row).toBeUndefined();
     expect(await orgBytesUsed(ctx.orgId)).toBe(0);
-    // Storage object purged post-commit (awaited by the helper before it returns).
+    // The storage object is purged asynchronously via the transactional deletion
+    // outbox: the row delete enqueued a deletion job in the same tx (so the
+    // object can't be silently orphaned), and the background worker performs the
+    // physical delete. The object is still present until the worker runs.
+    const jobs = await db
+      .select()
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, rest.join("/")));
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.reason).toBe("document_deleted");
+    expect(await downloadStream(bucket!, rest.join("/"))).not.toBeNull();
+    // Draining the worker removes the object.
+    await processStorageDeletionJobs();
     expect(await downloadStream(bucket!, rest.join("/"))).toBeNull();
   });
 
@@ -995,7 +1111,7 @@ describe("documents service + routes", () => {
     const creatorActor: Actor = { type: "user", id: ctx.user.id };
     const asCreator = await getDocumentForActor(scope, creatorActor, doc.id);
     expect(asCreator?.row.id).toBe(doc.id);
-    expect(asCreator?.downloadable).toBe(true);
+    expect(asCreator?.capabilities.download).toBe(true);
     expect((await listDocumentsForActor(scope, creatorActor, {})).data.map((d) => d.id)).toContain(
       doc.id,
     );
@@ -1125,5 +1241,157 @@ describe("documents service + routes", () => {
     expect(asOwner?.row.id).toBe(doc.id);
     const asOther = await getDocumentForActor(scope, { type: "end_user", id: euOther.id }, doc.id);
     expect(asOther).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Per-org document storage limit (Phase 5)
+  // -------------------------------------------------------------------------
+
+  it("NULL org limit + env quota unset → unlimited (write succeeds past any small bound)", async () => {
+    // No per-org override, no env quota → effective limit is undefined
+    // (unlimited). A 40-byte write that would trip an 8-byte quota still lands.
+    const runId = await seedRunRow(scope);
+    const up = await stageUpload(
+      scope,
+      ctx.user.id,
+      "big.txt",
+      new TextEncoder().encode("forty bytes of durable content here-oo!!"),
+    );
+    const doc = await createDocumentFromUpload(scope, userActor, up, { runId });
+    expect(doc.size).toBe(40);
+    expect(await orgBytesUsed(ctx.orgId)).toBe(40);
+  });
+
+  it("org limit BELOW env quota → org limit wins (write rejected at the org limit)", async () => {
+    // env quota 1000 is generous; the org override (8) is the binding ceiling.
+    await withEnv("ORG_STORAGE_QUOTA_BYTES", "1000", async () => {
+      await setOrgDocumentStorageLimit(ctx.orgId, 8);
+      const runId = await seedRunRow(scope);
+      const up = await stageUpload(
+        scope,
+        ctx.user.id,
+        "over.txt",
+        new TextEncoder().encode("eighteen bytes!!!!"),
+      );
+      await expect(createDocumentFromUpload(scope, userActor, up, { runId })).rejects.toMatchObject(
+        { status: 403, code: "storage_limit_exceeded" },
+      );
+      expect(await orgBytesUsed(ctx.orgId)).toBe(0);
+    });
+  });
+
+  it("org limit ABOVE env quota → org limit wins (write allowed past the env quota)", async () => {
+    // env quota 8 would reject an 18-byte write, but the org override (1000)
+    // supersedes it — the write lands.
+    await withEnv("ORG_STORAGE_QUOTA_BYTES", "8", async () => {
+      await setOrgDocumentStorageLimit(ctx.orgId, 1000);
+      const runId = await seedRunRow(scope);
+      const up = await stageUpload(
+        scope,
+        ctx.user.id,
+        "ok.txt",
+        new TextEncoder().encode("eighteen bytes!!!!"),
+      );
+      const doc = await createDocumentFromUpload(scope, userActor, up, { runId });
+      expect(doc.size).toBe(18);
+      expect(await orgBytesUsed(ctx.orgId)).toBe(18);
+    });
+  });
+
+  it("setDocumentStorageLimit: set, clear (null), unknown org (404), negative (400)", async () => {
+    // Set an override, then read it back off the row.
+    await setOrgDocumentStorageLimit(ctx.orgId, 4096);
+    const [afterSet] = await db
+      .select({ limit: organizations.documentsBytesLimit })
+      .from(organizations)
+      .where(eq(organizations.id, ctx.orgId));
+    expect(afterSet!.limit).toBe(4096);
+
+    // Clear it (back to env default).
+    await setOrgDocumentStorageLimit(ctx.orgId, null);
+    const [afterClear] = await db
+      .select({ limit: organizations.documentsBytesLimit })
+      .from(organizations)
+      .where(eq(organizations.id, ctx.orgId));
+    expect(afterClear!.limit).toBeNull();
+
+    // Unknown org → typed not-found.
+    await expect(
+      setOrgDocumentStorageLimit("00000000-0000-0000-0000-000000000000", 10),
+    ).rejects.toMatchObject({ status: 404 });
+
+    // Negative / non-integer → rejected (400), the row untouched.
+    await expect(setOrgDocumentStorageLimit(ctx.orgId, -1)).rejects.toMatchObject({ status: 400 });
+    await expect(setOrgDocumentStorageLimit(ctx.orgId, 1.5)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("downgrade (used > limit): existing docs intact, new write 403, delete then re-write allowed", async () => {
+    // Fill the org to 30 bytes across two docs, then set a limit BELOW that.
+    const runId = await seedRunRow(scope);
+    const up1 = await stageUpload(
+      scope,
+      ctx.user.id,
+      "keep-a.txt",
+      new TextEncoder().encode("fifteen bytes!!"),
+    );
+    const docA = await createDocumentFromUpload(scope, userActor, up1, { runId });
+    const up2 = await stageUpload(
+      scope,
+      ctx.user.id,
+      "keep-b.txt",
+      new TextEncoder().encode("fifteen bytes!!"),
+    );
+    const docB = await createDocumentFromUpload(scope, userActor, up2, { runId });
+    expect(await orgBytesUsed(ctx.orgId)).toBe(30);
+
+    // Downgrade below current usage.
+    await setOrgDocumentStorageLimit(ctx.orgId, 20);
+
+    // Existing documents are NEVER auto-deleted — still resolvable + downloadable.
+    const resolvedA = await getDocumentForActor(scope, userActor, docA.id);
+    expect(resolvedA?.capabilities.download).toBe(true);
+    const listed = await listDocumentsForActor(scope, userActor, {});
+    expect(listed.data.map((d) => d.id)).toContain(docA.id);
+
+    // A NEW write is rejected while used (30) ≥ limit (20).
+    const up3 = await stageUpload(scope, ctx.user.id, "new.txt", new TextEncoder().encode("x"));
+    await expect(createDocumentFromUpload(scope, userActor, up3, { runId })).rejects.toMatchObject({
+      status: 403,
+      code: "storage_limit_exceeded",
+    });
+
+    // Deletes still work (they decrement) — free docB's 15 bytes.
+    await deleteDocument(scope, docB.id);
+    expect(await orgBytesUsed(ctx.orgId)).toBe(15);
+
+    // Now under the limit (15 < 20), a small new write is allowed again.
+    const up4 = await stageUpload(scope, ctx.user.id, "again.txt", new TextEncoder().encode("ok"));
+    const docC = await createDocumentFromUpload(scope, userActor, up4, { runId });
+    expect(docC.size).toBe(2);
+    expect(await orgBytesUsed(ctx.orgId)).toBe(17);
+  });
+
+  it("FOR UPDATE re-check against the org limit: two concurrent writes, only the one that fits commits", async () => {
+    // Org limit 15; two 10-byte publishes cannot both land. The org `FOR UPDATE`
+    // lock serialises the commit-time re-check (the run-output cap default is far
+    // larger, so the org limit is the binding constraint) → exactly one commits,
+    // the loser gets a 403 storage_limit_exceeded.
+    await setOrgDocumentStorageLimit(ctx.orgId, 15);
+    const runId = await seedRunRow(scope);
+    const results = await Promise.allSettled([
+      publishStream(scope, runId, "a.txt", "0123456789"),
+      publishStream(scope, runId, "b.txt", "abcdefghij"),
+    ]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+      status: 403,
+      code: "storage_limit_exceeded",
+    });
+    const rows = await db.select().from(documents).where(eq(documents.runId, runId));
+    expect(rows).toHaveLength(1);
+    expect(await orgBytesUsed(ctx.orgId)).toBe(10);
   });
 });

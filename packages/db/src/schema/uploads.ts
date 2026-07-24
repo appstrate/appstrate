@@ -4,7 +4,7 @@ import { pgTable, text, timestamp, integer, uuid, index } from "drizzle-orm/pg-c
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
-import { applications } from "./applications.ts";
+import { applications, endUsers } from "./applications.ts";
 
 /**
  * Tracks direct-upload requests before the binary has been consumed by a run.
@@ -31,8 +31,15 @@ export const uploads = pgTable(
     applicationId: text("application_id")
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
-    /** Better Auth user who requested the upload (null = API key / end-user context). */
+    /** Better Auth user who requested the upload (null = end-user / unattributed). */
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    /**
+     * End-user who requested the upload (null = dashboard-user context). Records
+     * the creator identity for end-user-scoped flows so peek/consume can enforce
+     * that only the uploading principal reads its own staged bytes — the
+     * `createdBy` column only captures dashboard/API-key users.
+     */
+    endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
     /** Storage key returned by the storage adapter (bucket/path). */
     storageKey: text("storage_key").notNull(),
     /** Original filename declared by the client. */
@@ -41,6 +48,16 @@ export const uploads = pgTable(
     mime: text("mime").notNull(),
     /** Size in bytes (declared, then verified on consumption). */
     size: integer("size").notNull(),
+    /**
+     * Optional client-declared SHA-256 of the payload (hex, lowercase). When
+     * present it is enforced server-side: the S3 presign binds an
+     * `x-amz-checksum-sha256` header (S3/MinIO verify on PUT), the proxy sink
+     * re-hashes the streamed bytes, and consume/materialization compares the
+     * hashed stream against it — a mismatch is rejected (400 `checksum_mismatch`)
+     * before the object becomes visible or a document is committed. NULL = no
+     * client integrity claim (behaviour identical to before this column existed).
+     */
+    sha256: text("sha256"),
     /** When the pre-signed URL expires and the row becomes eligible for GC. */
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /**

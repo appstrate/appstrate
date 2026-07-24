@@ -32,7 +32,12 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
-import { runWithSpan, recordRunDuration, recordRunTerminal } from "@appstrate/core/telemetry";
+import {
+  runWithSpan,
+  recordRunDuration,
+  recordRunTerminal,
+  recordDocumentPartialPublication,
+} from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import { emitUsageRecorded } from "./llm-usage-ledger.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
@@ -561,6 +566,11 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       // on the unique index); `runs.checkpoint` preserves the per-run
       // history so agents can inspect what each prior run emitted.
       ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
+      // Terminal artifacts summary from the container's outputs sweep. Only
+      // written when the runner reported it (older containers omit it) — an
+      // absent value leaves the column null rather than clobbering it. Does NOT
+      // affect `status` above: a `partial` summary coexists with a run success.
+      ...(result.artifacts !== undefined ? { artifacts: result.artifacts } : {}),
       // The finalize body is the authoritative terminal usage. Metric events
       // may still update this column before finalize for live charts, but the
       // close path writes the terminal value exactly once. When a non-success
@@ -593,6 +603,10 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // terminal-status counter (the failure-rate source). No-op when disabled.
   recordRunDuration(resolvedDurationMs, { status });
   recordRunTerminal({ status, errorCode: result.error?.code });
+  // A partial artifacts summary means the run lost at least one deliverable
+  // (over-cap/quota/conflict/upload-failed) — a health signal independent of the
+  // run's own terminal status. Emitted on the CAS winner only (exactly-once).
+  if (result.artifacts?.status === "partial") recordDocumentPartialPublication();
 
   // Drop the run's workspace provisioning archive (the AFPS bundle + input
   // docs the agent fetched at startup via GET /api/runs/:runId/workspace).

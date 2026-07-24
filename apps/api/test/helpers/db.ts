@@ -61,6 +61,8 @@ const CORE_TABLES = [
   // applications / chat_sessions (all ON DELETE CASCADE), so it must be deleted
   // BEFORE any of them — placed first to guarantee that ordering.
   "documents",
+  // Standalone outbox table (no FKs) — deletion jobs must not leak between tests.
+  "storage_deletion_jobs",
   // Leaf tables (no dependents)
   "notifications",
   "audit_events",

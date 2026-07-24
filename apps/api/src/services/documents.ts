@@ -43,7 +43,6 @@ import type { DocumentPurpose } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
   downloadStream as storageDownloadStream,
-  deleteFile as storageDelete,
 } from "@appstrate/db/storage";
 import { fileTypeStream } from "file-type";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -61,9 +60,17 @@ import {
   notFound,
   payloadTooLarge,
   storageLimitExceeded,
+  documentCountExceeded,
 } from "../lib/errors.ts";
+import { resolveAgentOutputMime } from "./mime-policy.ts";
 import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { consumeUploadStream, peekUploads, sanitizeFilename, parseUploadUri } from "./uploads.ts";
+import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
+import {
+  recordDocumentCreated,
+  recordDocumentDeleted,
+  recordDocumentQuotaRejection,
+} from "@appstrate/core/telemetry";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import { getRun } from "./state/runs.ts";
 import { synthesiseFinalize } from "./run-event-ingestion.ts";
@@ -98,19 +105,47 @@ export function parseStorageKey(storageKey: string): { bucket: string; path: str
 }
 
 /**
- * Best-effort delete of a document's storage object by its `bucket/path` inside
- * {@link DOCUMENTS_BUCKET}. Swallows + logs any failure (a leftover object is
- * harmless — the org byte counter is the source of truth, reconciled by the GC).
- * One helper for every drop-on-error / drop-on-dedup site.
+ * Durably enqueue the deletion of a document's storage object (by its in-bucket
+ * path inside {@link DOCUMENTS_BUCKET}) on a drop-on-error / drop-on-dedup path.
+ *
+ * These sites run when the bytes may have landed but the `documents` row was
+ * NEVER committed (materialize error, row-insert failure, discarded duplicate),
+ * so there is no business transaction to piggyback the enqueue onto. The job is
+ * the durable record: it goes into its OWN short transaction and the outbox
+ * worker performs the idempotent physical delete. Never throws — a failed
+ * enqueue is logged, not propagated, so it can't mask the original error the
+ * caller is already unwinding.
  */
 async function dropDocumentObject(storagePath: string, reason: string): Promise<void> {
-  await storageDelete(DOCUMENTS_BUCKET, storagePath).catch((err) => {
-    logger.warn("failed to delete documents object", {
+  try {
+    await db.transaction((tx) =>
+      enqueueStorageDeletion(tx, {
+        bucket: DOCUMENTS_BUCKET,
+        storageKey: storagePath,
+        reason,
+      }),
+    );
+  } catch (err) {
+    logger.warn("failed to enqueue documents object deletion", {
       reason,
       storagePath,
       error: getErrorMessage(err),
     });
-  });
+  }
+}
+
+/**
+ * Turn a stored `bucket/path` storage key into a deletion-job input (splitting
+ * the bucket back off `storageKey`, which the outbox stores IN-BUCKET). Returns
+ * null for a malformed key so a bad row can't stall the enqueue.
+ */
+function storageKeyToDeletionJob(
+  storageKey: string,
+  reason: string,
+): StorageDeletionJobInput | null {
+  const parsed = parseStorageKey(storageKey);
+  if (!parsed) return null;
+  return { bucket: parsed.bucket, storageKey: parsed.path, reason };
 }
 
 /**
@@ -169,28 +204,111 @@ export interface DocumentRow {
   createdAt: Date;
 }
 
-/** A document resolved for a caller, with the derived `downloadable` flag. */
+/**
+ * The full access-capability set for one document + caller — the single source
+ * of truth consumed by REST, the DTO serializer, the preview mint, the MCP read
+ * path, and (via the DTO) the UI. Every gate that used to be re-derived ad hoc
+ * (route permission checks, `deriveDownloadable`, preview minting) now flows
+ * from {@link getDocumentCapabilities}.
+ *
+ *  - `visible`  — the caller can resolve this document at all (container ACL). A
+ *    non-visible document is a 404 everywhere; the other flags are then all false.
+ *  - `metadata` — the caller may see the REAL name, mime and sha256. When false
+ *    the DTO/MCP read serve an OPAQUE reference (generic name + mime, no sha256)
+ *    — a non-creator run reader of a `user_upload` (privacy decision). `size` is
+ *    intentionally NOT gated by this flag: it is exposed to opaque readers too (a
+ *    byte count is not sensitive, and the gallery needs it to render every row).
+ *  - `download` — the caller may fetch the bytes (`/content`).
+ *  - `preview`  — the caller may render an in-browser preview (download + a
+ *    previewable mime).
+ *  - `keep`     — the caller may pin/clear the retention deadline.
+ *  - `delete`   — the caller may delete the document.
+ */
+export interface DocumentCapabilities {
+  visible: boolean;
+  metadata: boolean;
+  download: boolean;
+  preview: boolean;
+  keep: boolean;
+  delete: boolean;
+}
+
+/** A document resolved for a caller, with its derived access capabilities. */
 export interface ResolvedDocument {
   row: DocumentRow;
-  downloadable: boolean;
+  capabilities: DocumentCapabilities;
 }
 
 // ---------------------------------------------------------------------------
 // Pure helpers (unit-tested)
 // ---------------------------------------------------------------------------
 
+/** Generic name/mime a document degrades to when `metadata` is not granted. */
+export const GENERIC_DOCUMENT_NAME = "document";
+export const GENERIC_DOCUMENT_MIME = "application/octet-stream";
+
 /**
- * Derive whether `/content` serves the bytes to `actor` (D2 / Anthropic rule):
- * an `agent_output` is downloadable by anyone who can read the container; a
- * `user_upload` only by its own creator — so an upload is never re-served to
- * other actors via the API (kills the CDN-abuse vector). Pure.
+ * The one access-capability computation (D2 / Anthropic rule + the locked
+ * `user_upload` privacy decision). Pure — every consumer (REST route, DTO,
+ * preview mint, MCP read) derives its gates from here rather than re-deriving.
+ *
+ *  - `agent_output` — any caller who can read the container gets full metadata +
+ *    download (a deliverable is freely readable within its container, D6).
+ *  - `user_upload` — content AND sensitive metadata (real name, sha256) are
+ *    reserved to the CREATOR (the uploading user, or the end-user who uploaded it
+ *    for end-user-scoped flows). Other legitimate run readers still SEE the row
+ *    (`visible`) but get an opaque reference (`metadata: false`, `download:
+ *    false`) — never the bytes, the real name, or the hash (kills the
+ *    cross-member disclosure + CDN-abuse vectors).
+ *  - `keep` / `delete` — the document's creator OR a caller holding
+ *    `documents:delete` (owner/admin). The management permission does NOT grant
+ *    metadata or download of another member's upload — only lifecycle control.
+ *
+ * `opts.visible` is the container-ACL outcome (resolved by
+ * {@link getDocumentForActor} / the list SQL / a valid preview token); when
+ * false every capability collapses to false.
  */
-export function deriveDownloadable(
-  doc: { purpose: DocumentPurpose; userId: string | null; endUserId: string | null },
+export function getDocumentCapabilities(
+  doc: { purpose: DocumentPurpose; userId: string | null; endUserId: string | null; mime: string },
   actor: Actor,
-): boolean {
-  if (doc.purpose === "agent_output") return true;
-  return actor.type === "user" ? doc.userId === actor.id : doc.endUserId === actor.id;
+  opts: { visible: boolean; canManage?: boolean },
+): DocumentCapabilities {
+  if (!opts.visible) {
+    return {
+      visible: false,
+      metadata: false,
+      download: false,
+      preview: false,
+      keep: false,
+      delete: false,
+    };
+  }
+  const isAgentOutput = doc.purpose === "agent_output";
+  const isCreator = actor.type === "user" ? doc.userId === actor.id : doc.endUserId === actor.id;
+  // agent_output → any container reader; user_upload → creator/uploader only.
+  const download = isAgentOutput || isCreator;
+  // Sensitive metadata (real name / mime / sha256) follows the same boundary as
+  // the content (never widen a private upload's real name / hash to a non-creator
+  // reader). `size` is deliberately NOT covered by this flag — a byte count is
+  // not sensitive and stays visible to opaque readers.
+  const metadata = isAgentOutput || isCreator;
+  const preview = download && previewKind(doc.mime) !== null;
+  // Lifecycle control: creator OR the org's manage permission.
+  const manage = isCreator || (opts.canManage ?? false);
+  return { visible: true, metadata, download, preview, keep: manage, delete: manage };
+}
+
+/**
+ * The name/mime/sha256 a caller is allowed to see, degrading to a generic,
+ * hash-less reference when `metadata` is not granted. One place so the DTO and
+ * the MCP read path degrade identically.
+ */
+export function projectDocumentMetadata(
+  row: Pick<DocumentRow, "name" | "mime" | "sha256">,
+  capabilities: Pick<DocumentCapabilities, "metadata">,
+): { name: string; mime: string; sha256?: string } {
+  if (capabilities.metadata) return { name: row.name, mime: row.mime, sha256: row.sha256 };
+  return { name: GENERIC_DOCUMENT_NAME, mime: GENERIC_DOCUMENT_MIME };
 }
 
 /**
@@ -208,15 +326,69 @@ export function wouldExceedOrgQuota(
 }
 
 /**
- * Throw the 403 `storage_limit_exceeded` when writing `addBytes` on top of
- * `used` would overrun the org's `ORG_STORAGE_QUOTA_BYTES`. The org-quota
- * rejection in one place (pre-flight fast reject + FOR UPDATE re-check).
+ * Resolve the effective per-org storage limit (in bytes) from the org's own
+ * override and the global env quota:
+ *
+ *   organization.documents_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
+ *
+ * `undefined` return = no limit (unlimited) — the exact shape
+ * {@link wouldExceedOrgQuota} treats as "no ceiling". A per-org override of `0`
+ * is honored (a hard zero limit, not "unset"); NULL/undefined `orgLimit` falls
+ * back to the env quota. Pure — the single resolution point every enforcement
+ * site (pre-flight fast reject + FOR UPDATE re-check) reads through.
  */
-function assertWithinOrgQuota(used: number, addBytes: number): void {
-  const quota = getEnv().ORG_STORAGE_QUOTA_BYTES;
-  if (wouldExceedOrgQuota(used, addBytes, quota)) {
-    throw storageLimitExceeded(`Organization storage quota (${quota} bytes) would be exceeded`);
+export function effectiveOrgStorageLimit(
+  orgLimit: number | null | undefined,
+  envQuota: number | undefined,
+): number | undefined {
+  if (orgLimit !== null && orgLimit !== undefined) return orgLimit;
+  return envQuota;
+}
+
+/**
+ * Throw the 403 `storage_limit_exceeded` when writing `addBytes` on top of
+ * `used` would overrun the org's effective storage limit (resolved override or
+ * env quota — see {@link effectiveOrgStorageLimit}). The org-limit rejection in
+ * one place (pre-flight fast reject + FOR UPDATE re-check). `limit` undefined =
+ * unlimited (no-op).
+ */
+function assertWithinOrgQuota(used: number, addBytes: number, limit: number | undefined): void {
+  if (wouldExceedOrgQuota(used, addBytes, limit)) {
+    // One quota rejection per logical over-limit write. This is the single
+    // assert seam — the pre-flight fast reject and the FOR UPDATE re-check both
+    // route through it, and only one of them ever fires for a given write.
+    recordDocumentQuotaRejection();
+    throw storageLimitExceeded(`Organization storage limit (${limit} bytes) would be exceeded`);
   }
+}
+
+/**
+ * Set (or clear) an organization's per-org document storage limit — the narrow
+ * capability the out-of-repo cloud module pilots per org via
+ * `PlatformServices.setDocumentStorageLimit`. Billing-neutral: a technical byte
+ * ceiling, never a plan or price.
+ *
+ *  - `bytes` a non-negative safe integer → the org's override (takes precedence
+ *    over `ORG_STORAGE_QUOTA_BYTES`).
+ *  - `bytes` null → clears the override (the org falls back to the env quota).
+ *
+ * Throws {@link invalidRequest} for a non-integer / negative / unsafe `bytes`,
+ * and {@link notFound} when `orgId` does not exist — the RFC 9457 shapes the
+ * rest of the service throws, consistent with the module contract.
+ */
+export async function setOrgDocumentStorageLimit(
+  orgId: string,
+  bytes: number | null,
+): Promise<void> {
+  if (bytes !== null && (!Number.isSafeInteger(bytes) || bytes < 0)) {
+    throw invalidRequest("Document storage limit must be a non-negative integer or null");
+  }
+  const updated = await db
+    .update(organizations)
+    .set({ documentsBytesLimit: bytes })
+    .where(eq(organizations.id, orgId))
+    .returning({ id: organizations.id });
+  if (updated.length === 0) throw notFound(`Organization '${orgId}' not found`);
 }
 
 /**
@@ -300,11 +472,32 @@ export interface DocumentDto {
   run_id: string | null;
   chat_session_id: string | null;
   packageId: string | null;
+  /**
+   * Display name. Degrades to the generic {@link GENERIC_DOCUMENT_NAME} when the
+   * caller lacks the `metadata` capability (a non-creator run reader of a
+   * `user_upload`) — the real filename is never disclosed to them.
+   */
   name: string;
+  /**
+   * MIME type. Degrades to {@link GENERIC_DOCUMENT_MIME} when the caller lacks
+   * the `metadata` capability.
+   */
   mime: string;
   size: number;
-  sha256: string;
+  /**
+   * SHA-256 of the bytes (hex) — OMITTED (absent) when the caller lacks the
+   * `metadata` capability, so a private upload's content hash is never disclosed
+   * to a non-creator reader.
+   */
+  sha256?: string;
   downloadable: boolean;
+  /**
+   * The full access-capability set for this caller ({@link DocumentCapabilities}).
+   * The single source the UI drives download/preview/keep/delete affordances
+   * from; `downloadable` / `previewable` are kept as flat mirrors of
+   * `capabilities.download` / `capabilities.preview` for existing consumers.
+   */
+  capabilities: DocumentCapabilities;
   /**
    * Whether this document has an in-browser preview the caller may open — a
    * previewable mime ({@link PreviewKind}) on a document the caller can read. A
@@ -362,26 +555,27 @@ function mintPreviewUrl(row: DocumentRow, actor: Actor): string | null {
 }
 
 /**
- * Serialize a resolved document row to its wire DTO. `downloadable` is passed in
- * (the caller already derived it via {@link getDocumentForActor} /
- * {@link deriveDownloadable}) rather than re-derived here. `mintPreview` mints
- * the signed `preview_url` — set ONLY on the single-document GET, never in list
- * rows (a list of N rows must not sign N short-lived tokens). `previewable` (a
- * plain boolean) rides every row so the gallery still shows the preview
- * affordance. `downloadable` gates BOTH the bytes and the preview: a
- * `user_upload` is creator-only content (D2/S1), so a member who can merely
- * resolve the container is neither told it is previewable nor handed a token.
+ * Serialize a resolved document row to its wire DTO from its precomputed
+ * {@link DocumentCapabilities} (the single source — {@link getDocumentCapabilities}).
+ * The DTO applies the metadata degradation ({@link projectDocumentMetadata}):
+ * when `capabilities.metadata` is false the row serves a generic name, a generic
+ * mime, and OMITS `sha256` — so a non-creator run reader of a `user_upload` never
+ * learns its real name or content hash.
+ *
+ * `mintPreview` mints the signed `preview_url` — set ONLY on the single-document
+ * GET, never in list rows (a list of N rows must not sign N short-lived tokens).
+ * `previewable` / `downloadable` are flat mirrors of the capability booleans so
+ * existing consumers keep working while the UI drives affordances off
+ * `capabilities`.
  */
 export function toDocumentDto(
   row: DocumentRow,
   actor: Actor,
-  downloadable: boolean,
+  capabilities: DocumentCapabilities,
   opts: { mintPreview?: boolean } = {},
 ): DocumentDto {
-  const kind = previewKind(row.mime);
-  // `downloadable` gates the preview: a `user_upload` the caller cannot download
-  // is neither advertised as previewable nor assigned a kind (D2/S1).
-  const previewable = downloadable && kind !== null;
+  const view = projectDocumentMetadata(row, capabilities);
+  const previewable = capabilities.preview;
   return {
     object: "document",
     id: row.id,
@@ -391,13 +585,17 @@ export function toDocumentDto(
     run_id: row.runId,
     chat_session_id: row.chatSessionId,
     packageId: row.packageId,
-    name: row.name,
-    mime: row.mime,
+    name: view.name,
+    mime: view.mime,
     size: row.size,
-    sha256: row.sha256,
-    downloadable,
+    ...(view.sha256 !== undefined ? { sha256: view.sha256 } : {}),
+    downloadable: capabilities.download,
+    capabilities,
     previewable,
-    preview_kind: previewable ? kind : null,
+    // `previewKind` is computed from the REAL mime — when metadata is degraded
+    // preview is already false (a non-creator upload is never downloadable), so
+    // this stays consistent with the generic mime on the wire.
+    preview_kind: previewable ? previewKind(row.mime) : null,
     ...(opts.mintPreview ? { preview_url: previewable ? mintPreviewUrl(row, actor) : null } : {}),
     expiresAt: row.expiresAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -434,19 +632,25 @@ export async function createDocumentFromUpload(
   const env = getEnv();
   const documentId = opts.documentId ?? prefixedId("doc");
 
+  // Access context: the acting principal is threaded into peek/consume so a
+  // member can only materialize their OWN staged upload (ownership gate).
+  const access = { ...scope, actor };
+
   // Declared-size pre-check: reject an over-cap / over-quota upload before
-  // streaming a single byte. `peekUploads` also validates tenant + expiry
-  // (same not-found / gone shapes as consume).
-  const [meta] = (await peekUploads([uploadId], scope)).values();
+  // streaming a single byte. `peekUploads` also validates tenant + ownership +
+  // expiry (same not-found / gone shapes as consume).
+  const [meta] = (await peekUploads([uploadId], access)).values();
   await assertWithinDocumentLimits(scope.orgId, [meta!.size]);
 
   const storagePath = documentStoragePath(scope, documentId, meta!.name);
 
   // Stream upload → documents bucket, hashing + counting on the fly. The sink's
-  // returned `{bytes, sniffedMime}` feed consume's size + MIME validation.
+  // returned `{bytes, sniffedMime, sha256}` feed consume's size + MIME + client
+  // integrity validation (a client-declared upload sha256 is compared against
+  // the streamed hash and rejected on mismatch — covers the S3-proxy path).
   const digester = createHashingCounter();
   try {
-    await consumeUploadStream(uploadId, scope, async (src) => {
+    await consumeUploadStream(uploadId, access, async (src) => {
       const detection = await fileTypeStream(src);
       await storageUploadStream(
         DOCUMENTS_BUCKET,
@@ -454,13 +658,14 @@ export async function createDocumentFromUpload(
         detection.pipeThrough(digester.stream),
         { exclusive: true },
       );
-      return { bytes: digester.result().bytes, sniffedMime: detection.fileType?.mime };
+      const { bytes, sha256 } = digester.result();
+      return { bytes, sniffedMime: detection.fileType?.mime, sha256 };
     });
   } catch (err) {
     // The doc object may have been (partially) written before the throw
     // (size/MIME mismatch is validated post-drain). Drop it so the counter and
     // storage never disagree; consume already rolled back the upload side.
-    await dropDocumentObject(storagePath, "materialize error");
+    await dropDocumentObject(storagePath, "materialize_error");
     throw err;
   }
 
@@ -516,27 +721,59 @@ async function commitDocumentRow(params: {
    * each observes the other's committed bytes rather than a stale total.
    */
   runOutputCap?: number;
+  /**
+   * Per-run output COUNT ceiling ({@link createDocumentFromStream} only). When
+   * set, the number of `agent_output` documents already published by this run is
+   * re-counted under the SAME org `FOR UPDATE` lock and this publish is rejected
+   * (413 `document_count_exceeded`) if it would exceed the cap. Bounds the file
+   * COUNT the byte cap does not (thousands of tiny files). Placed here (not
+   * mid-stream) so a retried publish of an already-committed file reaches dedup
+   * first — same rationale as the byte cap.
+   */
+  runMaxDocuments?: number;
 }): Promise<DocumentRow> {
   const { scope, documentId, storagePath, byteCount, attribution } = params;
   try {
     const [row] = await db.transaction(async (tx) => {
       // Lock the org row so a concurrent write cannot both pass the quota
-      // re-check on a stale `used`. Exact byte count re-checked here.
+      // re-check on a stale `used`. Exact byte count re-checked here against the
+      // org's effective limit (per-org override ?? env quota).
       const [orgLocked] = await tx
-        .select({ used: organizations.documentsBytesUsed })
+        .select({
+          used: organizations.documentsBytesUsed,
+          limit: organizations.documentsBytesLimit,
+        })
         .from(organizations)
         .where(eq(organizations.id, scope.orgId))
         .for("update")
         .limit(1);
-      assertWithinOrgQuota(orgLocked?.used ?? 0, byteCount);
+      assertWithinOrgQuota(
+        orgLocked?.used ?? 0,
+        byteCount,
+        effectiveOrgStorageLimit(orgLocked?.limit, getEnv().ORG_STORAGE_QUOTA_BYTES),
+      );
       // Per-run cap re-check under the same lock (agent-output ingestion). The
       // org `FOR UPDATE` above serialises every commit for this org — so two
       // concurrent publishes to the same run each observe the other's already-
       // committed row here, and their combined total is bounded exactly.
-      if (params.runOutputCap !== undefined && params.runId && params.purpose === "agent_output") {
-        const runTotal = await runOutputBytesUsed(tx, scope, params.runId);
-        if (runTotal + byteCount > params.runOutputCap) {
-          throw payloadTooLarge(runOutputCapMessage(params.runOutputCap));
+      if (params.runId && params.purpose === "agent_output") {
+        if (params.runOutputCap !== undefined) {
+          const runTotal = await runOutputBytesUsed(tx, scope, params.runId);
+          if (runTotal + byteCount > params.runOutputCap) {
+            throw payloadTooLarge(runOutputCapMessage(params.runOutputCap));
+          }
+        }
+        // Per-run COUNT cap — re-counted under the same lock so concurrent
+        // publishes each observe the other's committed row and the combined
+        // count is bounded exactly. `count >= cap` means this (cap+1)-th publish
+        // must fail.
+        if (params.runMaxDocuments !== undefined) {
+          const runCount = await runOutputCountUsed(tx, scope, params.runId);
+          if (runCount >= params.runMaxDocuments) {
+            throw documentCountExceeded(
+              `Run output would exceed the per-run limit of ${params.runMaxDocuments} documents`,
+            );
+          }
         }
       }
       const inserted = await tx
@@ -580,11 +817,14 @@ async function commitDocumentRow(params: {
       resourceId: documentId,
       after: { name: params.name, size: byteCount, mime: params.mime, purpose: params.purpose },
     });
+    // One durable document committed (the sole commit seam — an agent-output
+    // dedup replay never reaches here, so it is correctly not counted).
+    recordDocumentCreated({ purpose: params.purpose });
     return row as DocumentRow;
   } catch (err) {
     // DB failed after the bytes landed — drop the object so its bytes are not
     // stranded uncounted in the bucket.
-    await dropDocumentObject(storagePath, "row-insert failure");
+    await dropDocumentObject(storagePath, "row_insert_failure");
     throw err;
   }
 }
@@ -610,6 +850,29 @@ async function runOutputBytesUsed(
       ),
     );
   return Number(row?.total ?? 0);
+}
+
+/**
+ * Count the `agent_output` documents a run has already published — the running
+ * count the per-run document-count cap ({@link createDocumentFromStream}) checks
+ * the incoming file against.
+ */
+async function runOutputCountUsed(
+  executor: DbOrTx,
+  scope: AppScope,
+  runId: string,
+): Promise<number> {
+  const [row] = await executor
+    .select({ count: sql<string>`COUNT(*)` })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.runId, runId),
+        eq(documents.orgId, scope.orgId),
+        eq(documents.purpose, "agent_output"),
+      ),
+    );
+  return Number(row?.count ?? 0);
 }
 
 /** The outcome of an agent-output ingestion: the row plus whether it deduped. */
@@ -699,32 +962,42 @@ export async function createDocumentFromStream(
     perFileCap: env.DOCUMENT_MAX_FILE_BYTES,
   });
 
+  // Sniff the magic bytes as the stream flows so the STORED mime can be made
+  // honest. Unlike user uploads (which REJECT a declared/sniffed mismatch), an
+  // agent output is never rejected — an agent legitimately emits an odd file
+  // under a mime it never considered — so a concrete sniffed type that does not
+  // match the declared one RELABELS the stored mime ({@link resolveAgentOutputMime}).
+  // This keeps the downstream preview/kind logic safe without failing publishes.
+  let sniffedMime: string | undefined;
   try {
+    const detection = await fileTypeStream(input.body);
     await storageUploadStream(
       DOCUMENTS_BUCKET,
       storagePath,
-      input.body.pipeThrough(digester.stream),
+      detection.pipeThrough(digester.stream),
       {
         exclusive: true,
       },
     );
+    sniffedMime = detection.fileType?.mime;
   } catch (err) {
     // Cap tripped mid-stream (or a transient storage error) — the object may
     // have been partially written before the abort. Drop it so a cut-short
     // upload never leaves a partial object behind (the 413 delete-on-short
     // contract) nor strands bytes uncounted.
-    await dropDocumentObject(storagePath, "stream error");
+    await dropDocumentObject(storagePath, "stream_error");
     throw err;
   }
 
   const { bytes: byteCount, sha256 } = digester.result();
+  const storedMime = resolveAgentOutputMime(input.mime, sniffedMime);
 
   // Dedup fast path: an identical (run, sha256, name) agent_output already
   // exists — the sweep re-published a file the tool already stored, or a retried
   // POST. Drop the freshly-written object and return the existing row.
   const existing = await findDedupDocument(scope, runId, sha256, input.name);
   if (existing) {
-    await dropDocumentObject(storagePath, "duplicate");
+    await dropDocumentObject(storagePath, "dedup_duplicate");
     return { row: existing, deduped: true };
   }
 
@@ -739,14 +1012,17 @@ export async function createDocumentFromStream(
       packageId,
       attribution,
       name: input.name,
-      mime: input.mime,
+      // Store the sniff-relabelled mime (honest labeling for agent outputs).
+      mime: storedMime,
       byteCount,
       sha256,
       expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
-      // Authoritative (and only) per-run cap check — re-summed under the org
-      // `FOR UPDATE` lock inside commitDocumentRow. Enforced here, not mid-stream,
-      // so a retried publish of an already-committed file reaches dedup first.
+      // Authoritative (and only) per-run cap checks — re-summed/re-counted under
+      // the org `FOR UPDATE` lock inside commitDocumentRow. Enforced here, not
+      // mid-stream, so a retried publish of an already-committed file reaches
+      // dedup first.
       runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
+      runMaxDocuments: env.RUN_MAX_DOCUMENTS,
     });
     return { row, deduped: false };
   } catch (err) {
@@ -780,14 +1056,18 @@ function assertWithinFileCap(size: number, cap: number): void {
 export async function assertWithinDocumentLimits(orgId: string, sizes: number[]): Promise<void> {
   const env = getEnv();
   for (const size of sizes) assertWithinFileCap(size, env.DOCUMENT_MAX_FILE_BYTES);
-  if (env.ORG_STORAGE_QUOTA_BYTES === undefined || sizes.length === 0) return;
+  if (sizes.length === 0) return;
   const total = sizes.reduce((sum, s) => sum + s, 0);
   const [org] = await db
-    .select({ used: organizations.documentsBytesUsed })
+    .select({ used: organizations.documentsBytesUsed, limit: organizations.documentsBytesLimit })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
-  assertWithinOrgQuota(org?.used ?? 0, total);
+  // Resolve the effective limit (per-org override ?? env quota). Undefined =
+  // unlimited, so the org-limit assert is a no-op — the fast reject stays free
+  // for orgs with no override and no env quota.
+  const limit = effectiveOrgStorageLimit(org?.limit, env.ORG_STORAGE_QUOTA_BYTES);
+  assertWithinOrgQuota(org?.used ?? 0, total, limit);
 }
 
 /**
@@ -876,12 +1156,15 @@ const documentSelect = {
  * Returns `null` (→ 404 at the route) when the document does not exist in the
  * caller's org+app, or when the container's ACL rejects the actor — a
  * cross-org, cross-app, or cross-actor id is indistinguishable from a missing
- * one. `downloadable` is derived for the `/content` gate.
+ * one. The full {@link DocumentCapabilities} are derived once here (the single
+ * source) — `permissions` supplies the `documents:delete` grant that decides the
+ * `keep` / `delete` capabilities (default: none).
  */
 export async function getDocumentForActor(
   scope: AppScope,
   actor: Actor,
   docId: string,
+  permissions: ReadonlySet<string> = new Set(),
 ): Promise<ResolvedDocument | null> {
   if (!DOCUMENT_ID_RE.test(docId)) return null;
   const [row] = await db
@@ -919,15 +1202,24 @@ export async function getDocumentForActor(
     // container would (an end_user reads only its own rows).
     if (actor.type === "end_user" && row.endUserId !== actor.id) return null;
     // Conservative invariant: a detached `user_upload` is creator-only, fully
-    // (metadata included) — never widened by deletion. `deriveDownloadable` IS
-    // the creator check for a `user_upload` (true only for its creator), so a
+    // (metadata included) — never widened by deletion. The `download` capability
+    // IS the creator check for a `user_upload` (true only for its creator), so a
     // non-creator resolves it to null. A detached `agent_output` stays
-    // org-readable (deriveDownloadable is always true for it). This intentionally
-    // also narrows a run-origin detached upload to creator-only — least surprise.
-    if (row.purpose === "user_upload" && !deriveDownloadable(row, actor)) return null;
+    // org-readable (its `download` is always true). This intentionally also
+    // narrows a run-origin detached upload to creator-only — least surprise.
+    if (
+      row.purpose === "user_upload" &&
+      !getDocumentCapabilities(row, actor, { visible: true }).download
+    ) {
+      return null;
+    }
   }
 
-  return { row: row as DocumentRow, downloadable: deriveDownloadable(row, actor) };
+  const capabilities = getDocumentCapabilities(row, actor, {
+    visible: true,
+    canManage: permissions.has("documents:delete"),
+  });
+  return { row: row as DocumentRow, capabilities };
 }
 
 /**
@@ -1040,6 +1332,7 @@ export async function listDocumentsForActor(
   scope: AppScope,
   actor: Actor,
   filters: ListDocumentsFilters = {},
+  permissions: ReadonlySet<string> = new Set(),
 ): Promise<ListEnvelope<DocumentDto>> {
   const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
   const fetchLimit = limit + 1;
@@ -1104,12 +1397,15 @@ export async function listDocumentsForActor(
     .orderBy(desc(documents.createdAt), desc(documents.id))
     .limit(fetchLimit);
 
+  const canManage = permissions.has("documents:delete");
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => {
     const row = r as DocumentRow;
-    // No `mintPreview` — list rows carry only the `previewable` boolean; the
-    // signed preview token is minted on the single-document GET.
-    return toDocumentDto(row, actor, deriveDownloadable(row, actor));
+    // Every row passed the visibility SQL, so `visible: true`. No `mintPreview` —
+    // list rows carry only the `previewable` boolean; the signed preview token is
+    // minted on the single-document GET.
+    const capabilities = getDocumentCapabilities(row, actor, { visible: true, canManage });
+    return toDocumentDto(row, actor, capabilities);
   });
   return { ...listResponse(data, { hasMore }), limit };
 }
@@ -1151,13 +1447,13 @@ export async function detachOrDeleteContainedDocuments(
     ? inArray(documents.runId, runIds)
     : eq(documents.chatSessionId, chatSessionId!);
 
-  const deletedKeys = await db.transaction(async (tx) => {
+  const deletedCount = await db.transaction(async (tx) => {
     const contained = await tx
       .select({ id: documents.id })
       .from(documents)
       .where(containedWhere)
       .for("update");
-    if (contained.length === 0) return [] as string[];
+    if (contained.length === 0) return 0;
     const containedIds = contained.map((d) => d.id);
 
     // Protected = still referenced by a live consumer outside the deleted set.
@@ -1186,7 +1482,7 @@ export async function detachOrDeleteContainedDocuments(
         .where(inArray(documents.id, detachIds));
     }
 
-    if (deleteIds.length === 0) return [] as string[];
+    if (deleteIds.length === 0) return 0;
 
     // Unprotected → delete rows + fold freed bytes back per org (a run set is one
     // org in practice, but group defensively — mirrors cleanupExpiredDocuments).
@@ -1205,25 +1501,29 @@ export async function detachOrDeleteContainedDocuments(
         })
         .where(eq(organizations.id, orgId));
     }
-    return removed.map((r) => r.storageKey);
-  });
 
-  // Best-effort storage purge AFTER commit — a leftover object is harmless (the
-  // counter is the quota's source of truth); same fire-and-forget-with-warn
-  // contract as deleteDocument.
-  for (const storageKey of deletedKeys) await deleteStorageObject(storageKey);
+    // Transactional outbox: enqueue the storage purge in the SAME transaction as
+    // the row delete, so a committed delete never orphans the object (replaces
+    // the old best-effort post-commit delete).
+    const jobs = removed
+      .map((r) => storageKeyToDeletionJob(r.storageKey, "document_deleted"))
+      .filter((j): j is StorageDeletionJobInput => j !== null);
+    await enqueueStorageDeletion(tx, jobs);
+    return removed.length;
+  });
+  recordDocumentDeleted(deletedCount);
 }
 
 /**
- * Delete a document: drop the storage object, delete the row, and decrement the
- * org counter — the counter decrement + row delete are one transaction, the
- * storage delete is best-effort (a leftover object is harmless: the org byte
- * counter is the source of truth for the quota, kept honest by the periodic
- * counter reconciliation, and a stray object is never re-counted). Authorization
- * (owner/admin permission OR creator) is enforced by the caller.
+ * Delete a document: delete the row, decrement the org counter, and enqueue the
+ * storage-object purge — ALL in one transaction. The enqueue (transactional
+ * outbox) is atomic with the row delete, so the object can never be silently
+ * orphaned: a committed delete always leaves a durable, replayable deletion job
+ * that the background worker executes. Authorization (owner/admin permission OR
+ * creator) is enforced by the caller.
  */
 export async function deleteDocument(scope: AppScope, docId: string): Promise<void> {
-  const storageKey = await db.transaction(async (tx) => {
+  await db.transaction(async (tx) => {
     const [row] = await tx
       .select({ storageKey: documents.storageKey })
       .from(documents)
@@ -1267,10 +1567,13 @@ export async function deleteDocument(scope: AppScope, docId: string): Promise<vo
         documentsBytesUsed: sql`GREATEST(${organizations.documentsBytesUsed} - ${deleted[0]!.size}, 0)`,
       })
       .where(eq(organizations.id, scope.orgId));
-    return row.storageKey;
-  });
 
-  await deleteStorageObject(storageKey);
+    const job = storageKeyToDeletionJob(row.storageKey, "document_deleted");
+    if (job) await enqueueStorageDeletion(tx, job);
+  });
+  // Reaching here means the transaction committed exactly one row delete (it
+  // throws otherwise) — count it.
+  recordDocumentDeleted(1);
 }
 
 /**
@@ -1295,18 +1598,6 @@ export async function clearDocumentExpiry(scope: AppScope, docId: string): Promi
     .returning(documentSelect);
   if (!row) throw notFound(`Document '${docId}' not found`);
   return row as DocumentRow;
-}
-
-/** Delete a storage object addressed by its `bucket/path` storage key. Best-effort. */
-async function deleteStorageObject(storageKey: string): Promise<void> {
-  const parsed = parseStorageKey(storageKey);
-  if (!parsed) return;
-  await storageDelete(parsed.bucket, parsed.path).catch((err) => {
-    logger.warn("failed to delete document storage object", {
-      storageKey,
-      error: getErrorMessage(err),
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1371,10 +1662,17 @@ export async function cleanupExpiredDocuments(): Promise<number> {
           })
           .where(eq(organizations.id, orgId));
       }
+
+      // Transactional outbox: enqueue the storage purge atomically with the row
+      // delete (replaces the old best-effort post-commit delete).
+      const jobs = removed
+        .map((r) => storageKeyToDeletionJob(r.storageKey, "document_expired"))
+        .filter((j): j is StorageDeletionJobInput => j !== null);
+      await enqueueStorageDeletion(tx, jobs);
       return removed;
     });
     if (removed.length === 0) break;
-    await Promise.all(removed.map((row) => deleteStorageObject(row.storageKey)));
+    recordDocumentDeleted(removed.length);
     totalRemoved += removed.length;
     if (removed.length < 500) break;
   }
@@ -1384,20 +1682,20 @@ export async function cleanupExpiredDocuments(): Promise<number> {
 /**
  * Reconcile every org's `documents_bytes_used` counter against the authoritative
  * `SUM(documents.size)` and correct any drift. The counter is maintained
- * transactionally on each document insert/delete, but an FK **cascade** delete
- * (run / chat-session / end-user / application / org removed) drops `documents`
- * rows WITHOUT running the app-level decrement — so the counter can drift high
- * over time. This pass recomputes it from the rows and writes the corrected
- * value only for orgs where it differs. Each organization row is locked before
- * its SUM is read. Document writes use the same organization lock for quota
- * accounting, so reconciliation cannot clobber a concurrent increment or
- * decrement. Returns the number of orgs fixed.
+ * transactionally by document writes and the service-mediated parent deletion
+ * paths. Legacy data, manual SQL, or an unmediated FK cascade can still bypass
+ * that application-level accounting, so this pass remains a safety net. It
+ * writes only orgs whose value differs. Each organization row is locked before
+ * its SUM is read; document writes use the same lock, so reconciliation cannot
+ * clobber a concurrent increment or decrement. Returns the number of orgs fixed.
  *
- * Note: the cascade ALSO orphans the corresponding S3 objects. The storage
- * abstraction (`@appstrate/core/storage`) exposes no list/enumerate operation,
- * so an object-level orphan sweep is not implemented — those bytes are dead
- * storage, but the QUOTA a user is charged against stays exact via this counter
- * recompute. See docs/architecture/DOCUMENTS.md.
+ * Note: this pass only corrects the byte COUNTER. The corresponding storage
+ * objects are NOT orphaned by cascade deletes — the org / application / end-user
+ * delete paths enumerate their documents' storage keys and enqueue them into the
+ * transactional deletion outbox (`storage_deletion_jobs`) before the cascade
+ * drops the rows, so the objects are purged by the background worker. This
+ * counter recompute remains as a defense-in-depth drift safety net. See
+ * docs/architecture/DOCUMENTS.md.
  */
 export async function reconcileOrgDocumentBytes(): Promise<number> {
   let fixed = 0;

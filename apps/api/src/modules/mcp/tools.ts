@@ -41,9 +41,17 @@ import {
   fetchRunDocuments,
   type RunAndWaitDocument,
 } from "@appstrate/core/run-and-wait-client";
-import { parseDocumentUri } from "@appstrate/core/document-uri";
+import { parseDocumentUri, documentUri } from "@appstrate/core/document-uri";
+import type { Actor } from "@appstrate/connect";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import type { AppScope } from "../../lib/scope.ts";
+import {
+  getDocumentForActor,
+  streamDocumentContent,
+  projectDocumentMetadata,
+  type DocumentCapabilities,
+} from "../../services/documents.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -95,6 +103,16 @@ export interface McpToolContext {
   authHeaders: Headers;
   /** Effective permissions of the caller (from the session/token). */
   permissions: ReadonlySet<string>;
+  /**
+   * The resolved caller identity (from the same forwarded auth the dispatched
+   * requests carry). Lets the document resource provider call the documents
+   * service DIRECTLY — no in-process HTTP round-trip, so it works identically
+   * across FS / S3-proxy / S3-presigned storage (the 307-redirect a fetch
+   * cannot follow no longer degrades the read).
+   */
+  actor: Actor;
+  /** The caller's org+app scope (org fixed by the endpoint/token; app resolved). */
+  scope: AppScope;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -192,6 +210,14 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  * no partial-content standard, so we keep it simple.
  */
 const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Ceiling on inlining a NON-textual document's RAW bytes as a base64 `blob` in a
+ * `resources/read` result. Base64 inflates 4/3, so a 700 KiB raw cap keeps the
+ * encoded payload (~933 KiB) under the ~1 MB practical MCP response limit. Above
+ * it (either kind) the read returns metadata only.
+ */
+const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
 
 /**
  * Whether a mime type is textual enough to inline as `text` in a
@@ -992,6 +1018,12 @@ function projectDocumentRow(raw: unknown): Record<string, unknown> | null {
     run_id: asString(r?.run_id) ?? null,
     packageId: asString(r?.packageId) ?? null,
     createdAt: asString(r?.createdAt) ?? null,
+    // Surface the same access capabilities the REST DTO carries (computed by the
+    // one `getDocumentCapabilities`), so the model can tell before a
+    // `resources/read` whether it will get bytes (`downloadable`) or an opaque
+    // reference (`capabilities.metadata` false).
+    downloadable: r?.downloadable === true,
+    capabilities: asRecord(r?.capabilities) ?? null,
   };
 }
 
@@ -1082,20 +1114,62 @@ function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
  * client read a document referenced by a `resource_link` (or a known
  * `document://` URI) WITHOUT going through the REST API.
  *
- * Authorization + scope resolution reuse the documents REST route by dispatching
- * in-process with the caller's forwarded auth (identical to every other tool):
- * `GET /api/documents/:id` enforces the container ACL (a foreign/unknown id is a
- * 404 → surfaced as an MCP error), and `GET /api/documents/:id/content` re-checks
- * the derived `downloadable` gate. A textual document ≤ 1 MiB that the caller may
- * download is inlined as `text`; everything else (non-textual, oversized, or
- * not downloadable by this caller) returns metadata only — MCP has no
- * partial-content standard, so the read stays simple.
+ * Authorization + scope resolution call the documents SERVICE directly with the
+ * MCP session's resolved actor (`getDocumentForActor`), which enforces the same
+ * container ACL the REST route does (a foreign/unknown id is a 404 → surfaced as
+ * an MCP error) and derives the caller's {@link DocumentCapabilities} from the
+ * one `getDocumentCapabilities`. The bytes are read via `streamDocumentContent`
+ * — NOT an in-process `GET /content` — so there is no 307-presigned-redirect the
+ * reader cannot follow: the read behaves identically on FS, S3-proxy, and
+ * S3-presigned deployments (the bug this replaces).
+ *
+ * Return shape (each < ~1 MB total):
+ *  - textual mime, ≤ {@link RESOURCE_TEXT_MAX_BYTES} → `text` contents.
+ *  - non-textual, ≤ {@link RESOURCE_BLOB_MAX_BYTES} → base64 `blob` contents.
+ *  - larger (either kind), OR not downloadable by this caller → metadata-only
+ *    JSON, including the capabilities and (when downloadable) the REST content
+ *    URL hint. When the caller lacks `metadata` (a non-creator upload) the JSON
+ *    itself is degraded (generic name + mime, no sha256), flowing from the same
+ *    {@link projectDocumentMetadata} the DTO uses.
  *
  * Deliberately provides NO `list()` (documents are not enumerated under
  * `resources/list` per the plan/spec — they surface only via `resource_link`);
  * omitting it makes `resources/list` return empty.
  */
 export function buildDocumentResourceProvider(ctx: McpToolContext): AppstrateResourceProvider {
+  /** Metadata-only JSON block — degraded per the caller's capabilities. */
+  const metadataOnly = (
+    docId: string,
+    uri: string,
+    row: { size: number; name: string; mime: string; sha256: string },
+    caps: DocumentCapabilities,
+    note: string,
+  ): ReadResourceResult => {
+    const view = projectDocumentMetadata(row, caps);
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: "application/json",
+          text: JSON.stringify({
+            id: docId,
+            uri,
+            name: view.name,
+            mime: view.mime,
+            ...(view.sha256 !== undefined ? { sha256: view.sha256 } : {}),
+            size: row.size,
+            downloadable: caps.download,
+            capabilities: caps,
+            ...(caps.download
+              ? { content_url: `${ctx.origin}/api/documents/${docId}/content` }
+              : {}),
+            note,
+          }),
+        },
+      ],
+    };
+  };
+
   return {
     read: async (uri: string): Promise<ReadResourceResult> => {
       const docId = parseDocumentUri(uri);
@@ -1103,57 +1177,51 @@ export function buildDocumentResourceProvider(ctx: McpToolContext): AppstrateRes
         throw new McpError(ErrorCode.InvalidParams, `Not a document resource URI: ${uri}`);
       }
 
-      const metaRes = await dispatchGet(ctx, new URL(`/api/documents/${docId}`, ctx.origin));
-      if (metaRes.status === 404) {
+      const resolved = await getDocumentForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
+      if (!resolved) {
         throw new McpError(ErrorCode.InvalidParams, `Document not found: ${uri}`);
       }
-      if (!metaRes.ok) {
-        throw new McpError(
-          ErrorCode.InternalError,
-          `Failed to read document ${uri} (status ${metaRes.status}).`,
+      const { row, capabilities } = resolved;
+      // Canonicalise the URI to the resolved id (the caller may have passed any
+      // valid form) so the returned `contents[].uri` is stable.
+      const canonicalUri = documentUri(row.id);
+
+      // Not downloadable (e.g. another member's upload): metadata only, degraded.
+      if (!capabilities.download) {
+        return metadataOnly(
+          row.id,
+          canonicalUri,
+          row,
+          capabilities,
+          "Content is not downloadable by you; only its metadata is available.",
         );
       }
-      const dto = asRecord(await metaRes.json().catch(() => undefined)) ?? {};
-      const mime = asString(dto.mime) ?? "application/octet-stream";
-      const name = asString(dto.name) ?? docId;
-      const size = typeof dto.size === "number" ? dto.size : 0;
-      const downloadable = dto.downloadable === true;
 
-      // Inline the bytes only for a textual, in-budget document the caller may
-      // download; a non-downloadable upload (e.g. someone else's) never has its
-      // content served here (mirrors the /content gate).
-      if (downloadable && isTextualMime(mime) && size <= RESOURCE_TEXT_MAX_BYTES) {
-        const contentRes = await dispatchGet(
-          ctx,
-          new URL(`/api/documents/${docId}/content`, ctx.origin),
-        );
-        if (contentRes.status === 200) {
-          const text = await contentRes.text();
-          return { contents: [{ uri, mimeType: mime, text }] };
+      // Downloadable → serve the bytes from storage directly (no 307 to follow).
+      if (isTextualMime(row.mime) && row.size <= RESOURCE_TEXT_MAX_BYTES) {
+        const stream = await streamDocumentContent(row.storageKey);
+        if (stream) {
+          const text = await new Response(stream).text();
+          return { contents: [{ uri: canonicalUri, mimeType: row.mime, text }] };
         }
-        // A 307 (presigned redirect) or any non-200 → fall through to metadata.
+      } else if (row.size <= RESOURCE_BLOB_MAX_BYTES) {
+        const stream = await streamDocumentContent(row.storageKey);
+        if (stream) {
+          const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+          const blob = Buffer.from(bytes).toString("base64");
+          return { contents: [{ uri: canonicalUri, mimeType: row.mime, blob }] };
+        }
       }
 
-      // Metadata-only: describe the document + how to obtain its bytes.
-      return {
-        contents: [
-          {
-            uri,
-            mimeType: "application/json",
-            text: JSON.stringify({
-              id: docId,
-              uri,
-              name,
-              mime,
-              size,
-              downloadable,
-              note: downloadable
-                ? "Content omitted (binary or exceeds the 1 MiB inline limit). Download it via GET /api/documents/:id/content."
-                : "Content is not downloadable by you; only its metadata is available.",
-            }),
-          },
-        ],
-      };
+      // Oversized (either kind), or the storage object went missing → metadata.
+      return metadataOnly(
+        row.id,
+        canonicalUri,
+        row,
+        capabilities,
+        "Content omitted — it exceeds the inline size limit (1 MiB text / 700 KiB binary). " +
+          "Fetch it from the content_url.",
+      );
     },
   };
 }

@@ -23,5 +23,8 @@
   "delete.description": "Delete “{{name}}”? This cannot be undone.",
   "delete.success": "Document deleted.",
   "preview.frameTitle": "Preview of {{name}}",
-  "preview.unavailable": "This document cannot be previewed."
+  "preview.unavailable": "This document cannot be previewed.",
+  "storage.usedUnlimited": "{{used}} used",
+  "storage.usedOfLimit": "{{used}} used of {{limit}}",
+  "storage.limitReached": "Storage limit reached. New uploads and agent outputs are blocked until you free up space; existing documents are unaffected."
 }

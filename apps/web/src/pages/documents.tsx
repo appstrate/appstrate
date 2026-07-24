@@ -9,11 +9,58 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { formatBytes } from "@appstrate/core/format";
+import { $api } from "../api/client";
+import { useOrg } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { useDocuments, type DocumentDto } from "../hooks/use-documents";
 import { PageHeader } from "../components/page-header";
 import { DocumentListPanel, type PurposeFilter } from "../components/document-list-panel";
+
+/**
+ * A single storage-usage line ("X used / Y limit") with a conditional warning
+ * when consumption has reached or passed the effective limit — at which point
+ * new document writes are rejected (403) while existing documents stay intact.
+ * `effective_limit_bytes` null = unlimited: the line collapses to "X used".
+ */
+function StorageUsageLine() {
+  const { t } = useTranslation(["documents"]);
+  const { currentOrg } = useOrg();
+  const orgId = currentOrg?.id;
+  const { data: orgDetail } = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}",
+    { params: { path: { orgId: orgId ?? "" } } },
+    { enabled: !!orgId },
+  );
+  const storage = orgDetail?.storage;
+  if (!storage) return null;
+
+  const limit = storage.effective_limit_bytes;
+  const over = limit !== null && storage.used_bytes >= limit;
+
+  return (
+    <div className="mb-4">
+      <p className="text-muted-foreground text-sm tabular-nums">
+        {limit === null
+          ? t("storage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
+          : t("storage.usedOfLimit", {
+              used: formatBytes(storage.used_bytes),
+              limit: formatBytes(limit),
+            })}
+      </p>
+      {over && (
+        <Alert variant="warning" className="mt-2">
+          <AlertTriangle size={16} />
+          <AlertDescription>{t("storage.limitReached")}</AlertDescription>
+        </Alert>
+      )}
+    </div>
+  );
+}
 
 export function DocumentsPage() {
   // Remount on application switch so the cursor + accumulated pages reset.
@@ -67,6 +114,8 @@ function DocumentsPageContent() {
           { label: t("page.title") },
         ]}
       />
+
+      <StorageUsageLine />
 
       <DocumentListPanel
         documents={documents}

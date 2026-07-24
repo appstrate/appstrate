@@ -236,7 +236,11 @@ describe("provisionDocuments", () => {
     };
     config.documents = () =>
       Response.json({
-        documents: Object.entries(files).map(([name, b]) => ({ name, size: b.byteLength })),
+        documents: Object.entries(files).map(([name, b]) => ({
+          name,
+          workspace_name: name,
+          size: b.byteLength,
+        })),
       });
     config.doc = (name) => chunkedResponse(files[name]!);
     const ws = await tempWorkspace();
@@ -251,12 +255,43 @@ describe("provisionDocuments", () => {
     }
   });
 
+  it("keys writes on workspace_name, not the (possibly colliding) display name", async () => {
+    // Two documents share the human display name `report.pdf` but the platform
+    // disambiguated their workspace names — the container must write BOTH,
+    // under the distinct workspace names, never overwriting one with the other.
+    const a = new TextEncoder().encode("first report");
+    const b = new TextEncoder().encode("second report, longer");
+    config.documents = () =>
+      Response.json({
+        documents: [
+          { name: "report.pdf", workspace_name: "report.pdf", size: a.byteLength },
+          { name: "report.pdf", workspace_name: "report-2.pdf", size: b.byteLength },
+        ],
+      });
+    config.doc = (name) => chunkedResponse(name === "report.pdf" ? a : b);
+    const ws = await tempWorkspace();
+    const { die, messages } = makeDie();
+
+    await provisionDocuments(deps(ws, die));
+
+    expect(messages).toHaveLength(0);
+    expect(
+      Buffer.compare(await readFile(path.join(ws, "documents", "report.pdf")), Buffer.from(a)),
+    ).toBe(0);
+    expect(
+      Buffer.compare(await readFile(path.join(ws, "documents", "report-2.pdf")), Buffer.from(b)),
+    ).toBe(0);
+  });
+
   it("streams a large multi-chunk document byte-exact (reader loop + backpressure)", async () => {
     // 1 MiB of deterministic bytes, served in 16-byte chunks → exercises the
     // chunk-by-chunk reader loop the fix relies on.
     const big = new Uint8Array(1024 * 1024);
     for (let i = 0; i < big.length; i++) big[i] = i % 251;
-    config.documents = () => Response.json({ documents: [{ name: "big.bin", size: big.length }] });
+    config.documents = () =>
+      Response.json({
+        documents: [{ name: "big.bin", workspace_name: "big.bin", size: big.length }],
+      });
     config.doc = () => chunkedResponse(big, 16);
     const ws = await tempWorkspace();
     const { die } = makeDie();
@@ -269,7 +304,8 @@ describe("provisionDocuments", () => {
   });
 
   it("dies when a listed document fetch returns non-ok", async () => {
-    config.documents = () => Response.json({ documents: [{ name: "x.txt", size: 1 }] });
+    config.documents = () =>
+      Response.json({ documents: [{ name: "x.txt", workspace_name: "x.txt", size: 1 }] });
     config.doc = () => new Response("gone", { status: 404 });
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
@@ -286,7 +322,9 @@ describe("provisionDocuments", () => {
     // read error — so it can't exercise the write-loop catch).
     const fetchFn = (async (url: string | URL): Promise<Response> => {
       if (String(url).endsWith("/documents")) {
-        return Response.json({ documents: [{ name: "partial.bin", size: 9 }] });
+        return Response.json({
+          documents: [{ name: "partial.bin", workspace_name: "partial.bin", size: 9 }],
+        });
       }
       const body = new ReadableStream<Uint8Array>({
         start(c) {
@@ -304,7 +342,8 @@ describe("provisionDocuments", () => {
   });
 
   it("refuses a path-traversal document name without fetching it", async () => {
-    config.documents = () => Response.json({ documents: [{ name: "../evil" }] });
+    config.documents = () =>
+      Response.json({ documents: [{ name: "../evil", workspace_name: "../evil" }] });
     let docFetched = false;
     config.doc = () => {
       docFetched = true;

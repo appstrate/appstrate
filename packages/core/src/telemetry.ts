@@ -45,6 +45,16 @@ export interface TelemetrySpanOptions {
 /** Pull source for the scheduler queue-depth gauge. */
 export type QueueDepthSource = () => number | Promise<number> | null | undefined;
 
+/** Snapshot of the storage-deletion outbox backlog, emitted once per worker pass. */
+export interface StorageDeletionStats {
+  /** Pending (not-yet-completed, due or backing-off) jobs. */
+  backlog: number;
+  /** Age of the oldest pending job, in seconds (0 when none). */
+  oldestPendingAgeSeconds: number;
+  /** Pending jobs past the dead-letter attempt threshold (still retrying). */
+  deadLetters: number;
+}
+
 /**
  * Contract a telemetry module implements. Method semantics (attribute names,
  * units, cardinality clamps) are documented on the façade functions below —
@@ -63,6 +73,12 @@ export interface TelemetryProvider {
   recordContainerSpawn(durationMs: number, attrs?: { sidecar?: boolean; errorType?: string }): void;
   recordLlmLatency(durationMs: number, attrs: { api_shape?: string; status?: number }): void;
   recordProcessAnomaly(attrs: { kind: string }): void;
+  recordStorageDeletionSweep(stats: StorageDeletionStats): void;
+  recordStorageDeletionResult(attrs: { result: string }): void;
+  recordDocumentCreated(attrs: { purpose: string }): void;
+  recordDocumentDeleted(count: number): void;
+  recordDocumentQuotaRejection(): void;
+  recordDocumentPartialPublication(): void;
   setQueueDepthSource(source: QueueDepthSource): void;
   /**
    * Optional HTTP server-span middleware, mounted by the platform's global
@@ -177,6 +193,66 @@ export function recordLlmLatency(
  */
 export function recordProcessAnomaly(attrs: { kind: string }): void {
   provider?.recordProcessAnomaly(attrs);
+}
+
+/**
+ * Snapshot the storage-deletion outbox backlog for the last-value gauges
+ * (`appstrate.storage_deletion.backlog` / `.oldest_pending_age_seconds` /
+ * `.dead_letters`). Called once per worker pass with cheap COUNT/MIN queries.
+ */
+export function recordStorageDeletionSweep(stats: StorageDeletionStats): void {
+  provider?.recordStorageDeletionSweep(stats);
+}
+
+/**
+ * One storage-deletion job attempt reaching an outcome — `completed` (object
+ * gone) or `failed` (delete threw, will retry). Feeds the
+ * `appstrate.storage_deletion.result` counter.
+ */
+export function recordStorageDeletionResult(attrs: { result: "completed" | "failed" }): void {
+  provider?.recordStorageDeletionResult(attrs);
+}
+
+/**
+ * One durable document committed into the `documents` table, tagged by
+ * `purpose` (`agent_output` | `user_upload`). Emitted from the single commit
+ * seam (`commitDocumentRow`) so a deduped agent-output republish — which never
+ * commits — is correctly NOT counted. Feeds `appstrate.documents.created`.
+ */
+export function recordDocumentCreated(attrs: { purpose: string }): void {
+  provider?.recordDocumentCreated(attrs);
+}
+
+/**
+ * `count` document rows physically removed from the `documents` table (explicit
+ * delete, container-teardown detach-or-delete, or the retention GC sweep).
+ * Counts ROWS, not storage objects — the object purge is the outbox's concern
+ * (`appstrate.storage_deletion.result`). A non-positive count is a no-op. Feeds
+ * `appstrate.documents.deleted`.
+ */
+export function recordDocumentDeleted(count = 1): void {
+  if (count > 0) provider?.recordDocumentDeleted(count);
+}
+
+/**
+ * One write rejected because it would overrun the org's effective storage limit
+ * (403 `storage_limit_exceeded`). Emitted from the single quota-assert seam
+ * (`assertWithinOrgQuota`), which fires exactly once per logical rejection (the
+ * pre-flight fast reject OR the `FOR UPDATE` re-check, never both). Feeds
+ * `appstrate.documents.quota_rejections`.
+ */
+export function recordDocumentQuotaRejection(): void {
+  provider?.recordDocumentQuotaRejection();
+}
+
+/**
+ * One run finalized with a `partial` artifacts summary — at least one
+ * end-of-run deliverable was LOST (over-cap, over-quota, conflict, or abandoned
+ * after upload retries). Emitted once on the finalize CAS winner, independent of
+ * the run's own terminal status. Feeds `appstrate.documents.partial_publications`.
+ */
+export function recordDocumentPartialPublication(): void {
+  provider?.recordDocumentPartialPublication();
 }
 
 /**

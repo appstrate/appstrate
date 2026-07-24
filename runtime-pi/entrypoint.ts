@@ -75,7 +75,8 @@ import {
   type RuntimeEventDrainer,
 } from "@appstrate/core/runtime-event-drain";
 import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
-import { createRunDocumentUploader, sweepOutputs } from "./publish.ts";
+import { createRunDocumentUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
+import type { SweepResult } from "./publish.ts";
 
 /**
  * Synthesise a Bundle the runner can consume when no `.afps` ships
@@ -199,16 +200,19 @@ const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
 const bridgedSink = bridge.sink;
 
 // --- 0b. Document publishing (run → platform) ---
-// sha256s this run has published, shared by the `publish_document` tool and
-// the end-of-run outputs sweep so a file published explicitly is not swept
-// again. The uploader streams a workspace file to POST /api/runs/:id/documents,
-// signed with the same run HMAC as the workspace provisioning fetches.
-const publishedDocumentShas = new Set<string>();
+// `${sha256}:${name}` identities this run has published, shared by the
+// `publish_document` tool and the end-of-run outputs sweep so a file published
+// explicitly is not swept again — while two files with identical bytes but
+// different names both still publish. Matches the server dedup identity
+// `(runId, sha256, name)`. The uploader streams a workspace file to
+// POST /api/runs/:id/documents, signed with the same run HMAC as the workspace
+// provisioning fetches.
+const publishedDocumentKeys = new Set<string>();
 const uploadRunDocument = createRunDocumentUploader({
   sinkUrl: env.sink.url,
   sinkSecret: env.sink.secret,
   workspace: env.workspaceDir,
-  publishedShas: publishedDocumentShas,
+  publishedKeys: publishedDocumentKeys,
 });
 
 /**
@@ -930,15 +934,18 @@ const OUTPUTS_SWEEP_MAX_FILE_BYTES = ((): number => {
 /**
  * Auto-publish everything under `workspace/outputs/` that was not already
  * published explicitly. Runs at finalize time, BEFORE the finalize event is
- * posted, so the swept documents surface as run events. Best-effort — a sweep
- * failure logs a warning and never blocks finalize (regardless of whether the
- * `publish_document` tool was enabled).
+ * posted, so the swept documents surface as run events. Best-effort — per-file
+ * failures never block finalize (regardless of whether the `publish_document`
+ * tool was enabled), but they are COLLECTED into the returned {@link SweepResult}
+ * so the caller can stamp a terminal artifacts summary onto the finalize
+ * payload. Returns `null` only when the scan itself faulted (never on a per-file
+ * upload failure), leaving the run's `artifacts` column null.
  */
-async function runOutputsSweep(): Promise<void> {
-  await sweepOutputs({
+async function runOutputsSweep(): Promise<SweepResult | null> {
+  return sweepOutputs({
     uploader: uploadRunDocument,
     workspace: WORKSPACE,
-    publishedShas: publishedDocumentShas,
+    publishedKeys: publishedDocumentKeys,
     maxFileBytes: OUTPUTS_SWEEP_MAX_FILE_BYTES,
     emit: (event) => {
       void bridgedSink.handle(event as RunEvent);
@@ -948,9 +955,10 @@ async function runOutputsSweep(): Promise<void> {
         `${JSON.stringify({ level: "warn", event: message, ...(data ?? {}) })}\n`,
       ),
   }).catch((err) => {
-    // sweepOutputs already swallows per-file failures; this guards the scan
+    // sweepOutputs collects per-file failures itself; this guards the scan
     // itself so a sweep fault can never abort finalize.
     process.stderr.write(`[outputs-sweep] ${getErrorMessage(err)}\n`);
+    return null;
   });
 }
 
@@ -976,7 +984,14 @@ const piEventSink: typeof bridgedSink = {
         final: true,
       });
     }
-    await runOutputsSweep();
+    const sweep = await runOutputsSweep();
+    // Stamp the terminal artifacts summary onto the finalize payload so the
+    // platform persists it on the run row and can surface a "partial
+    // deliverables" warning. Absent when the scan itself faulted — the column
+    // stays null. `artifacts.status === "partial"` is INDEPENDENT of the run's
+    // terminal success/failure (the runner owns that); a successful run can
+    // still have lost a deliverable.
+    if (sweep) result.artifacts = summarizeArtifacts(sweep);
     await bridgedSink.finalize(result);
   },
 };

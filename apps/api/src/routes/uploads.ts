@@ -21,6 +21,7 @@ import { createUpload, writeProxyUploadContent } from "../services/uploads.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { invalidRequest, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
+import { getActor, actorInsert } from "../lib/actor.ts";
 import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
 import { getEnv } from "@appstrate/env";
 
@@ -32,6 +33,12 @@ const createUploadSchema = z.object({
     .positive()
     .max(100 * 1024 * 1024),
   mime: z.string().min(1).max(255),
+  // Optional client integrity claim: lowercase-hex SHA-256, verified
+  // server-side (S3 checksum on PUT, proxy-sink re-hash, and again at consume).
+  sha256: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, "sha256 must be a 64-character hex SHA-256 digest")
+    .optional(),
 });
 
 export function createUploadsRouter() {
@@ -44,15 +51,21 @@ export function createUploadsRouter() {
   router.post("/", rateLimit(20), async (c) => {
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
-    const user = c.get("user");
+    // Record BOTH creator identities (dashboard/API-key user OR end-user) so the
+    // ownership gate on peek/consume can enforce that only the uploading
+    // principal reads its own staged bytes. `actorInsert` produces the exact
+    // {userId, endUserId} pair for whichever principal is in context.
+    const { userId, endUserId } = actorInsert(getActor(c));
     const data = await readJsonBody(c, createUploadSchema, { allowEmpty: true });
     const upload = await createUpload({
       orgId,
       applicationId,
-      createdBy: user?.id ?? null,
+      createdBy: userId,
+      endUserId,
       name: data.name,
       size: data.size,
       mime: data.mime,
+      ...(data.sha256 ? { sha256: data.sha256 } : {}),
     });
     await recordAuditFromContext(c, {
       action: "upload.created",
@@ -84,6 +97,12 @@ export function createUploadsRouter() {
 export function createUploadContentRouter() {
   const router = new Hono<AppEnv>();
 
+  // Middleware order — the IP-keyed limiter INTENTIONALLY runs BEFORE the token
+  // check. This endpoint is PUBLIC (the HMAC token is the only credential and it
+  // arrives in the body/query), so there is no authenticated identity to key on;
+  // rate-limiting by client IP first is exactly what caps brute-force token
+  // guessing before any verification work. (Contrast the run-document route,
+  // whose limiter keys on a URL runId and so must verify FIRST.)
   router.put("/", rateLimitByIp(60), async (c) => {
     const token = c.req.query("token");
     if (!token) throw unauthorized("missing upload token");
@@ -121,7 +140,9 @@ export function createUploadContentRouter() {
     // streams — verified only up front, a slow-trickled body could hold the
     // socket (and an open S3 multipart upload) long past the token window.
     const body = c.req.raw.body ?? new Blob([]).stream();
-    await writeProxyUploadContent(payload.k, body, payload.s, payload.e);
+    // `payload.h` is the token's signed sha256 (when the client declared one);
+    // the sink re-hashes the streamed bytes and rejects a mismatch (400).
+    await writeProxyUploadContent(payload.k, body, payload.s, payload.e, payload.h);
     return c.body(null, 204);
   });
 

@@ -255,10 +255,35 @@ describe("Organizations API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.storage).toEqual({ used_bytes: 2048, limit_bytes: null });
+      expect(body.storage).toEqual({
+        used_bytes: 2048,
+        limit_bytes: null,
+        effective_limit_bytes: null,
+      });
     });
 
-    it("reports the org quota as limit_bytes when ORG_STORAGE_QUOTA_BYTES is set (issue #945)", async () => {
+    it("surfaces a per-org limit override as both limit_bytes and effective_limit_bytes", async () => {
+      const ctx = await createTestContext();
+      await db
+        .update(organizations)
+        .set({ documentsBytesUsed: 100, documentsBytesLimit: 4096 })
+        .where(eq(organizations.id, ctx.orgId));
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}`, {
+        headers: { Cookie: ctx.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      // Override wins over any env quota; both fields report it (no env quota set here).
+      expect(body.storage).toEqual({
+        used_bytes: 100,
+        limit_bytes: 4096,
+        effective_limit_bytes: 4096,
+      });
+    });
+
+    it("reports the env quota as effective_limit_bytes (override unset) when ORG_STORAGE_QUOTA_BYTES is set (issue #945)", async () => {
       const ctx = await createTestContext();
       await db
         .update(organizations)
@@ -276,7 +301,12 @@ describe("Organizations API", () => {
 
         expect(res.status).toBe(200);
         const body = (await res.json()) as any;
-        expect(body.storage).toEqual({ used_bytes: 500, limit_bytes: 10000 });
+        // No per-org override → limit_bytes null; the env quota is the effective limit.
+        expect(body.storage).toEqual({
+          used_bytes: 500,
+          limit_bytes: null,
+          effective_limit_bytes: 10000,
+        });
       } finally {
         if (snapshot === undefined) delete process.env.ORG_STORAGE_QUOTA_BYTES;
         else process.env.ORG_STORAGE_QUOTA_BYTES = snapshot;

@@ -216,6 +216,7 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     status: row.status,
     input: row.input,
     result: row.result,
+    artifacts: row.artifacts ?? null,
     checkpoint: row.checkpoint,
     error: row.error,
     metadata: row.metadata,

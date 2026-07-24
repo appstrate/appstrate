@@ -30,6 +30,10 @@ import {
   recordContainerSpawn,
   recordLlmLatency,
   recordProcessAnomaly,
+  recordDocumentCreated,
+  recordDocumentDeleted,
+  recordDocumentQuotaRejection,
+  recordDocumentPartialPublication,
   setQueueDepthSource,
   shutdownTelemetry,
   type QueueDepthSource,
@@ -64,6 +68,16 @@ function fakeProvider(opts: { trust?: boolean; withMiddleware?: boolean } = {}) 
     recordContainerSpawn: (...args) => void calls.push({ method: "recordContainerSpawn", args }),
     recordLlmLatency: (...args) => void calls.push({ method: "recordLlmLatency", args }),
     recordProcessAnomaly: (...args) => void calls.push({ method: "recordProcessAnomaly", args }),
+    recordStorageDeletionSweep: (...args) =>
+      void calls.push({ method: "recordStorageDeletionSweep", args }),
+    recordStorageDeletionResult: (...args) =>
+      void calls.push({ method: "recordStorageDeletionResult", args }),
+    recordDocumentCreated: (...args) => void calls.push({ method: "recordDocumentCreated", args }),
+    recordDocumentDeleted: (...args) => void calls.push({ method: "recordDocumentDeleted", args }),
+    recordDocumentQuotaRejection: (...args) =>
+      void calls.push({ method: "recordDocumentQuotaRejection", args }),
+    recordDocumentPartialPublication: (...args) =>
+      void calls.push({ method: "recordDocumentPartialPublication", args }),
     setQueueDepthSource: (source) => {
       queueSource = source;
     },
@@ -101,6 +115,10 @@ describe("telemetry façade — no provider (module absent)", () => {
     expect(() => recordContainerSpawn(10, { sidecar: true })).not.toThrow();
     expect(() => recordLlmLatency(5, { api_shape: "openai", status: 200 })).not.toThrow();
     expect(() => recordProcessAnomaly({ kind: "uncaughtException" })).not.toThrow();
+    expect(() => recordDocumentCreated({ purpose: "agent_output" })).not.toThrow();
+    expect(() => recordDocumentDeleted(3)).not.toThrow();
+    expect(() => recordDocumentQuotaRejection()).not.toThrow();
+    expect(() => recordDocumentPartialPublication()).not.toThrow();
     await expect(shutdownTelemetry()).resolves.toBeUndefined();
   });
 
@@ -142,6 +160,32 @@ describe("telemetry façade — provider installed", () => {
       { method: "recordRunTerminal", args: [{ status: "failed", errorCode: "timeout" }] },
     ]);
     expect(currentTraceparent()).toBe("00-provider-traceparent-01");
+  });
+
+  it("delegates the documents lifecycle counters with the exact arguments", () => {
+    const { provider, calls } = fakeProvider();
+    installTelemetryProvider(provider);
+
+    recordDocumentCreated({ purpose: "user_upload" });
+    recordDocumentDeleted(4);
+    recordDocumentQuotaRejection();
+    recordDocumentPartialPublication();
+
+    expect(calls).toEqual([
+      { method: "recordDocumentCreated", args: [{ purpose: "user_upload" }] },
+      { method: "recordDocumentDeleted", args: [4] },
+      { method: "recordDocumentQuotaRejection", args: [] },
+      { method: "recordDocumentPartialPublication", args: [] },
+    ]);
+  });
+
+  it("recordDocumentDeleted is a no-op for a non-positive count (never reaches the provider)", () => {
+    const { provider, calls } = fakeProvider();
+    installTelemetryProvider(provider);
+    recordDocumentDeleted(0);
+    recordDocumentDeleted(-2);
+    recordDocumentDeleted(); // defaults to 1 → delegates
+    expect(calls).toEqual([{ method: "recordDocumentDeleted", args: [1] }]);
   });
 
   it("replays a queue-depth source registered BEFORE the provider install", () => {

@@ -46,6 +46,8 @@ import {
   capUtf8Text,
 } from "../../../src/services/run-event-ingestion.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { getRunFull } from "../../../src/services/state/runs.ts";
+import type { RunArtifactsSummary } from "@appstrate/db/schema";
 import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
 
 const app = getTestApp();
@@ -630,6 +632,102 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const persisted = row?.result as { output?: unknown } | null;
     expect(persisted).not.toBeNull();
     expect(persisted?.output).toEqual({ answer: 42 });
+  });
+
+  it("persists the artifacts summary from the finalize body onto runs.artifacts", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    const artifacts = {
+      status: "partial",
+      published: 2,
+      failed: [{ name: "outputs/big.csv", code: "file_too_large" }],
+    } satisfies RunArtifactsSummary;
+    const res = await postFinalize(runId, {
+      memories: [],
+      output: { ok: true },
+      logs: [],
+      status: "success",
+      usage: { input_tokens: 10, output_tokens: 5 },
+      artifacts,
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    // A `partial` artifacts summary coexists with a SUCCESSFUL run.
+    expect(row?.status).toBe("success");
+    expect(row?.artifacts).toEqual(artifacts);
+
+    // The run DTO exposes `artifacts` snake_case (field + inner keys).
+    const dto = await getRunFull({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, runId);
+    expect(dto?.artifacts).toEqual(artifacts);
+  });
+
+  it("leaves runs.artifacts null when an older container omits the summary", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    const res = await postFinalize(runId, {
+      memories: [],
+      output: { ok: true },
+      logs: [],
+      status: "success",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.artifacts).toBeNull();
+  });
+
+  it("rejects a malformed artifacts summary with a 400 (Zod)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    const res = await postFinalize(runId, {
+      memories: [],
+      output: { ok: true },
+      logs: [],
+      status: "success",
+      usage: { input_tokens: 10, output_tokens: 5 },
+      // `status` outside the enum + `published` a string → strict schema rejects.
+      artifacts: { status: "mostly", published: "two", failed: [] },
+    });
+    expect(res.status).toBe(400);
+
+    // The run was NOT closed by the rejected POST.
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.sinkClosedAt).toBeNull();
+    expect(row?.artifacts).toBeNull();
+  });
+
+  it("tolerates an OVERSIZED artifacts summary — finalize 200, persisted truncated", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // A version-skewed container emits 1500 failures with over-long strings.
+    // Size overruns must be CLAMPED (not a 400): finalize succeeds and the row
+    // persists a truncated summary (≤1000 entries, name ≤512, code ≤64).
+    const failed = Array.from({ length: 1500 }, (_, i) => ({
+      name: "x".repeat(600) + `-${i}`,
+      code: "y".repeat(100),
+    }));
+    const res = await postFinalize(runId, {
+      memories: [],
+      output: { ok: true },
+      logs: [],
+      status: "success",
+      usage: { input_tokens: 10, output_tokens: 5 },
+      artifacts: { status: "partial", published: 3, failed },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    const persisted = row?.artifacts as RunArtifactsSummary | null;
+    expect(persisted?.status).toBe("partial");
+    expect(persisted?.published).toBe(3);
+    expect(persisted?.failed).toHaveLength(1000);
+    expect(persisted?.failed[0]!.name.length).toBe(512);
+    expect(persisted?.failed[0]!.code.length).toBe(64);
+    expect(persisted?.failed.every((f) => f.name.length <= 512 && f.code.length <= 64)).toBe(true);
   });
 
   it("persists the deprecated report aggregate for compatibility", async () => {

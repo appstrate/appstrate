@@ -70,6 +70,19 @@ let runTerminal: Counter | undefined;
 let containerSpawn: Histogram | undefined;
 let llmLatency: Histogram | undefined;
 let processAnomaly: Counter | undefined;
+let storageDeletionResult: Counter | undefined;
+let documentsCreated: Counter | undefined;
+let documentsDeleted: Counter | undefined;
+let documentsQuotaRejections: Counter | undefined;
+let documentsPartialPublications: Counter | undefined;
+
+// Last-value snapshot of the storage-deletion outbox backlog, pushed by the
+// worker once per pass (via the telemetry façade) and read lazily by the three
+// observable gauges below on each metric collection. Same push-snapshot →
+// observe-on-collect shape as the scheduler queue-depth gauge.
+let storageDeletionBacklog = 0;
+let storageDeletionOldestPendingAgeSeconds = 0;
+let storageDeletionDeadLetters = 0;
 
 /**
  * Pull provider for the scheduler queue-depth observable gauge. The scheduler
@@ -258,6 +271,42 @@ function createInstruments(m: Meter): void {
     } catch {
       // A flaky queue read must not break metric collection.
     }
+  });
+
+  // Storage-deletion outbox: one counter (attempt outcomes) + three last-value
+  // gauges reading the worker's pushed snapshot. Backlog + oldest-age surface a
+  // stuck purge; dead_letters surfaces objects that keep failing to delete.
+  storageDeletionResult = m.createCounter("appstrate.storage_deletion.result", {
+    description: "Count of storage-deletion job attempts by outcome (completed|failed).",
+  });
+  m.createObservableGauge("appstrate.storage_deletion.backlog", {
+    description: "Pending storage-deletion jobs (rows whose object is not yet purged).",
+  }).addCallback((result) => result.observe(storageDeletionBacklog));
+  m.createObservableGauge("appstrate.storage_deletion.oldest_pending_age_seconds", {
+    unit: "s",
+    description: "Age of the oldest pending storage-deletion job.",
+  }).addCallback((result) => result.observe(storageDeletionOldestPendingAgeSeconds));
+  m.createObservableGauge("appstrate.storage_deletion.dead_letters", {
+    description: "Pending storage-deletion jobs past the dead-letter attempt threshold.",
+  }).addCallback((result) => result.observe(storageDeletionDeadLetters));
+
+  // Documents lifecycle counters (documents-hardening). Created/deleted track
+  // the durable-document population churn; quota_rejections + partial_publications
+  // are the health signals (a write refused for want of quota; a run that lost a
+  // deliverable at finalize). `purpose` on `created` is a 2-value dimension
+  // (agent_output|user_upload) — bounded, no clamp needed.
+  documentsCreated = m.createCounter("appstrate.documents.created", {
+    description: "Count of durable documents committed, tagged by purpose.",
+  });
+  documentsDeleted = m.createCounter("appstrate.documents.deleted", {
+    description: "Count of document rows removed (explicit delete, teardown, or retention GC).",
+  });
+  documentsQuotaRejections = m.createCounter("appstrate.documents.quota_rejections", {
+    description: "Count of writes rejected for overrunning the org storage limit (403).",
+  });
+  documentsPartialPublications = m.createCounter("appstrate.documents.partial_publications", {
+    description:
+      "Count of runs finalized with a partial artifacts summary (a deliverable was lost).",
   });
 }
 
@@ -457,6 +506,42 @@ export function recordProcessAnomaly(attrs: { kind: string }): void {
   processAnomaly?.add(1, { kind: attrs.kind });
 }
 
+export function recordStorageDeletionSweep(stats: {
+  backlog: number;
+  oldestPendingAgeSeconds: number;
+  deadLetters: number;
+}): void {
+  if (!enabled) return;
+  storageDeletionBacklog = stats.backlog;
+  storageDeletionOldestPendingAgeSeconds = stats.oldestPendingAgeSeconds;
+  storageDeletionDeadLetters = stats.deadLetters;
+}
+
+export function recordStorageDeletionResult(attrs: { result: string }): void {
+  if (!enabled) return;
+  storageDeletionResult?.add(1, { result: attrs.result });
+}
+
+export function recordDocumentCreated(attrs: { purpose: string }): void {
+  if (!enabled) return;
+  documentsCreated?.add(1, { purpose: attrs.purpose });
+}
+
+export function recordDocumentDeleted(count: number): void {
+  if (!enabled) return;
+  documentsDeleted?.add(count);
+}
+
+export function recordDocumentQuotaRejection(): void {
+  if (!enabled) return;
+  documentsQuotaRejections?.add(1);
+}
+
+export function recordDocumentPartialPublication(): void {
+  if (!enabled) return;
+  documentsPartialPublications?.add(1);
+}
+
 export function recordContainerSpawn(
   durationMs: number,
   attrs?: { sidecar?: boolean; errorType?: string },
@@ -523,5 +608,11 @@ export async function _resetObservabilityForTesting(): Promise<void> {
   runTerminal = undefined;
   containerSpawn = undefined;
   llmLatency = undefined;
+  processAnomaly = undefined;
+  storageDeletionResult = undefined;
+  documentsCreated = undefined;
+  documentsDeleted = undefined;
+  documentsQuotaRejections = undefined;
+  documentsPartialPublications = undefined;
   queueDepthProvider = null;
 }

@@ -9,9 +9,20 @@ import type {
   CreateDownloadUrlOptions,
   UploadFileOptions,
   UploadUrlDescriptor,
+  StorageObject,
 } from "@appstrate/core/storage";
 
 let store: Storage | null = null;
+
+/**
+ * Test-only: drop the memoized store so the next call re-derives it from the
+ * current env. Pair with `_resetCacheForTesting()` (from `@appstrate/env`) when a
+ * test toggles a storage env var (e.g. `S3_PUBLIC_ENDPOINT` to exercise the
+ * presigned-download branch). Production never re-inits the store.
+ */
+export function _resetStoreForTesting(): void {
+  store = null;
+}
 
 function getStore(): Storage {
   if (store) return store;
@@ -75,6 +86,10 @@ export function deleteFile(bucket: string, path: string): Promise<void> {
 
 export function fileExists(bucket: string, path: string): Promise<boolean> {
   return getStore().fileExists(bucket, path);
+}
+
+export function listObjects(bucket: string, prefix?: string): AsyncIterable<StorageObject> {
+  return getStore().listObjects(bucket, prefix);
 }
 
 export function ensureBucket(): Promise<void> {

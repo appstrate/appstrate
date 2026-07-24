@@ -30,7 +30,6 @@ import {
   renderPlatformPrompt,
   type PlatformPromptIntegration,
 } from "@appstrate/afps-runtime/bundle";
-import { sanitizeStorageKey } from "../file-storage.ts";
 import { fetchIntegrationPromptDocs } from "../integration-service.ts";
 
 export async function buildPlatformSystemPrompt(
@@ -39,7 +38,7 @@ export async function buildPlatformSystemPrompt(
 ): Promise<string> {
   const uploads = plan.files?.map((f) => ({
     name: f.name,
-    path: `./documents/${sanitizeStorageKey(f.name)}`,
+    path: `./documents/${f.workspaceName}`,
     size: f.size,
     ...(f.type ? { type: f.type } : {}),
   }));
