@@ -35,6 +35,7 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
+import { assertExplicitModelExists } from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
@@ -223,6 +224,9 @@ export function createAgentsRouter() {
       const agent = c.get("package");
       const scope = getAppScope(c);
       const data = await readJsonBody(c, modelIdSchema);
+
+      // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
+      await assertExplicitModelExists(scope.orgId, data.modelId);
 
       await updateInstalledPackage(scope, agent.id, { modelId: data.modelId });
 
