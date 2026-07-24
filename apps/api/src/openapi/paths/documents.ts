@@ -333,6 +333,12 @@ export const documentsPaths = {
               schema: { type: "string" },
               description: "attachment; filename=…",
             },
+            "Repr-Digest": {
+              schema: { type: "string" },
+              description:
+                "RFC 9530 representation digest of the bytes, `sha-256=:<base64>:`. Present only " +
+                "when the caller has the document's `metadata` capability.",
+            },
           },
           content: {
             "application/octet-stream": { schema: { type: "string", format: "binary" } },
@@ -342,6 +348,12 @@ export const documentsPaths = {
           description: "Redirect to a presigned GET URL (public-endpoint S3 mode).",
           headers: {
             Location: { schema: { type: "string", format: "uri" }, description: "Presigned URL." },
+            "Repr-Digest": {
+              schema: { type: "string" },
+              description:
+                "RFC 9530 representation digest of the bytes, `sha-256=:<base64>:` (carried on the " +
+                "redirect; present only when the caller has the `metadata` capability).",
+            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },

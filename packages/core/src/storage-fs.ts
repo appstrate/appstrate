@@ -59,6 +59,12 @@ export interface FsUploadTokenPayload {
   m: string;
   /** Expiration unix timestamp (seconds). */
   e: number;
+  /**
+   * Optional client-declared SHA-256 of the payload (lowercase hex). Signed into
+   * the token so the proxy sink can re-hash the streamed bytes and reject a
+   * mismatch before the object becomes visible. Absent ⇒ no integrity binding.
+   */
+  h?: string;
 }
 
 /**
@@ -138,6 +144,7 @@ export function createProxyUploadDescriptor(
       s: opts?.maxSize ?? 0,
       m: opts?.mime ?? "",
       e: Math.floor(Date.now() / 1000) + expiresIn,
+      ...(opts?.sha256 && opts.sha256.length > 0 ? { h: opts.sha256 } : {}),
     },
     config.uploadSecret,
   );

@@ -21,6 +21,7 @@ import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
+import { reprDigestSha256 } from "../lib/digest.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { createDownloadUrl } from "@appstrate/db/storage";
 import { zDocumentPurposeEnum } from "@appstrate/db/schema";
@@ -116,6 +117,11 @@ export function createDocumentsRouter() {
     }
     const { row } = resolved;
 
+    // RFC 9530 representation digest of the stored bytes — exposed only when the
+    // caller has the `metadata` capability (so a private upload's hash is never
+    // disclosed to a non-creator; download already implies metadata for these).
+    const reprDigest = resolved.capabilities.metadata ? reprDigestSha256(row.sha256) : undefined;
+
     const parsed = parseStorageKey(row.storageKey);
     const presigned = parsed
       ? await createDownloadUrl(parsed.bucket, parsed.path, {
@@ -123,7 +129,13 @@ export function createDocumentsRouter() {
           contentType: row.mime,
         })
       : null;
-    if (presigned) return c.redirect(presigned, 307);
+    if (presigned) {
+      // The presigned GET serves the bytes from the blob store (we can't set
+      // headers on that response), but carry the digest on the 307 so a client
+      // that inspects the redirect still learns the authoritative hash.
+      if (reprDigest) c.header("Repr-Digest", reprDigest);
+      return c.redirect(presigned, 307);
+    }
 
     const stream = await streamDocumentContent(row.storageKey);
     if (!stream) throw notFound("Document content not found");
@@ -138,6 +150,7 @@ export function createDocumentsRouter() {
         "Content-Length": String(row.size),
         "Content-Disposition": attachmentDisposition(row.name),
         "Cache-Control": "private, no-store",
+        ...(reprDigest ? { "Repr-Digest": reprDigest } : {}),
       },
     });
   });

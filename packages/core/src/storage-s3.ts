@@ -339,11 +339,23 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // the declared size an upload-time contract — a client cannot reserve a
       // 1 KB slot and PUT 100 MB — instead of relying solely on the
       // server-side size check at consume time.
+      // When the client declares a SHA-256, sign `x-amz-checksum-sha256` (base64
+      // of the raw digest) INTO the presigned PUT. The presignClient runs
+      // `requestChecksumCalculation: WHEN_REQUIRED`, so a command that carries an
+      // explicit checksum makes it a REQUIRED (signed) header — S3/MinIO then
+      // verify the uploaded bytes against it and reject a mismatch server-side.
+      // The client must echo the returned header. No sha256 ⇒ the command and
+      // the signature are byte-identical to before (plain PUT, no checksum).
+      const checksumBase64 =
+        opts?.sha256 && opts.sha256.length > 0
+          ? Buffer.from(opts.sha256, "hex").toString("base64")
+          : undefined;
       const cmd = new PutObjectCommand({
         Bucket: config.bucket,
         Key: key,
         ...(opts?.mime ? { ContentType: opts.mime } : {}),
         ...(opts?.maxSize && opts.maxSize > 0 ? { ContentLength: opts.maxSize } : {}),
+        ...(checksumBase64 ? { ChecksumSHA256: checksumBase64 } : {}),
       });
       // `@aws-sdk/s3-request-presigner` and `@aws-sdk/client-s3` resolve to
       // different physical `@smithy/core` copies in the lockfile (transitive
@@ -364,6 +376,9 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       const headers: Record<string, string> = {};
       if (opts?.mime) headers["Content-Type"] = opts.mime;
       if (opts?.maxSize && opts.maxSize > 0) headers["Content-Length"] = String(opts.maxSize);
+      // The checksum header is part of the signature — the client MUST send it
+      // verbatim (base64 of the raw sha-256) or S3 rejects the PUT.
+      if (checksumBase64) headers["x-amz-checksum-sha256"] = checksumBase64;
       return { url, method: "PUT", headers, expiresIn };
     },
 

@@ -55,6 +55,16 @@ export const uploadsPaths = {
                   description:
                     "Declared MIME. Verified via magic-byte sniffing on consume for binary types.",
                 },
+                sha256: {
+                  type: "string",
+                  pattern: "^[0-9a-fA-F]{64}$",
+                  description:
+                    "Optional client integrity claim: lowercase-hex SHA-256 of the payload. When " +
+                    "provided it is enforced server-side — direct-presign S3 mode binds a signed " +
+                    "`x-amz-checksum-sha256` header the client MUST echo (returned in `headers`), " +
+                    "the proxy sink re-hashes the streamed bytes, and consume re-checks it — a " +
+                    "mismatch is rejected (400 `checksum_mismatch`).",
+                },
               },
             },
             example: { name: "invoice.pdf", size: 24576, mime: "application/pdf" },

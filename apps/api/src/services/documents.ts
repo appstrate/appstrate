@@ -60,7 +60,9 @@ import {
   notFound,
   payloadTooLarge,
   storageLimitExceeded,
+  documentCountExceeded,
 } from "../lib/errors.ts";
+import { resolveAgentOutputMime } from "./mime-policy.ts";
 import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { consumeUploadStream, peekUploads, sanitizeFilename, parseUploadUri } from "./uploads.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
@@ -617,19 +619,25 @@ export async function createDocumentFromUpload(
   const env = getEnv();
   const documentId = opts.documentId ?? prefixedId("doc");
 
+  // Access context: the acting principal is threaded into peek/consume so a
+  // member can only materialize their OWN staged upload (ownership gate).
+  const access = { ...scope, actor };
+
   // Declared-size pre-check: reject an over-cap / over-quota upload before
-  // streaming a single byte. `peekUploads` also validates tenant + expiry
-  // (same not-found / gone shapes as consume).
-  const [meta] = (await peekUploads([uploadId], scope)).values();
+  // streaming a single byte. `peekUploads` also validates tenant + ownership +
+  // expiry (same not-found / gone shapes as consume).
+  const [meta] = (await peekUploads([uploadId], access)).values();
   await assertWithinDocumentLimits(scope.orgId, [meta!.size]);
 
   const storagePath = documentStoragePath(scope, documentId, meta!.name);
 
   // Stream upload → documents bucket, hashing + counting on the fly. The sink's
-  // returned `{bytes, sniffedMime}` feed consume's size + MIME validation.
+  // returned `{bytes, sniffedMime, sha256}` feed consume's size + MIME + client
+  // integrity validation (a client-declared upload sha256 is compared against
+  // the streamed hash and rejected on mismatch — covers the S3-proxy path).
   const digester = createHashingCounter();
   try {
-    await consumeUploadStream(uploadId, scope, async (src) => {
+    await consumeUploadStream(uploadId, access, async (src) => {
       const detection = await fileTypeStream(src);
       await storageUploadStream(
         DOCUMENTS_BUCKET,
@@ -637,7 +645,8 @@ export async function createDocumentFromUpload(
         detection.pipeThrough(digester.stream),
         { exclusive: true },
       );
-      return { bytes: digester.result().bytes, sniffedMime: detection.fileType?.mime };
+      const { bytes, sha256 } = digester.result();
+      return { bytes, sniffedMime: detection.fileType?.mime, sha256 };
     });
   } catch (err) {
     // The doc object may have been (partially) written before the throw
@@ -699,6 +708,16 @@ async function commitDocumentRow(params: {
    * each observes the other's committed bytes rather than a stale total.
    */
   runOutputCap?: number;
+  /**
+   * Per-run output COUNT ceiling ({@link createDocumentFromStream} only). When
+   * set, the number of `agent_output` documents already published by this run is
+   * re-counted under the SAME org `FOR UPDATE` lock and this publish is rejected
+   * (413 `document_count_exceeded`) if it would exceed the cap. Bounds the file
+   * COUNT the byte cap does not (thousands of tiny files). Placed here (not
+   * mid-stream) so a retried publish of an already-committed file reaches dedup
+   * first — same rationale as the byte cap.
+   */
+  runMaxDocuments?: number;
 }): Promise<DocumentRow> {
   const { scope, documentId, storagePath, byteCount, attribution } = params;
   try {
@@ -724,10 +743,24 @@ async function commitDocumentRow(params: {
       // org `FOR UPDATE` above serialises every commit for this org — so two
       // concurrent publishes to the same run each observe the other's already-
       // committed row here, and their combined total is bounded exactly.
-      if (params.runOutputCap !== undefined && params.runId && params.purpose === "agent_output") {
-        const runTotal = await runOutputBytesUsed(tx, scope, params.runId);
-        if (runTotal + byteCount > params.runOutputCap) {
-          throw payloadTooLarge(runOutputCapMessage(params.runOutputCap));
+      if (params.runId && params.purpose === "agent_output") {
+        if (params.runOutputCap !== undefined) {
+          const runTotal = await runOutputBytesUsed(tx, scope, params.runId);
+          if (runTotal + byteCount > params.runOutputCap) {
+            throw payloadTooLarge(runOutputCapMessage(params.runOutputCap));
+          }
+        }
+        // Per-run COUNT cap — re-counted under the same lock so concurrent
+        // publishes each observe the other's committed row and the combined
+        // count is bounded exactly. `count >= cap` means this (cap+1)-th publish
+        // must fail.
+        if (params.runMaxDocuments !== undefined) {
+          const runCount = await runOutputCountUsed(tx, scope, params.runId);
+          if (runCount >= params.runMaxDocuments) {
+            throw documentCountExceeded(
+              `Run output would exceed the per-run limit of ${params.runMaxDocuments} documents`,
+            );
+          }
         }
       }
       const inserted = await tx
@@ -801,6 +834,29 @@ async function runOutputBytesUsed(
       ),
     );
   return Number(row?.total ?? 0);
+}
+
+/**
+ * Count the `agent_output` documents a run has already published — the running
+ * count the per-run document-count cap ({@link createDocumentFromStream}) checks
+ * the incoming file against.
+ */
+async function runOutputCountUsed(
+  executor: DbOrTx,
+  scope: AppScope,
+  runId: string,
+): Promise<number> {
+  const [row] = await executor
+    .select({ count: sql<string>`COUNT(*)` })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.runId, runId),
+        eq(documents.orgId, scope.orgId),
+        eq(documents.purpose, "agent_output"),
+      ),
+    );
+  return Number(row?.count ?? 0);
 }
 
 /** The outcome of an agent-output ingestion: the row plus whether it deduped. */
@@ -890,15 +946,24 @@ export async function createDocumentFromStream(
     perFileCap: env.DOCUMENT_MAX_FILE_BYTES,
   });
 
+  // Sniff the magic bytes as the stream flows so the STORED mime can be made
+  // honest. Unlike user uploads (which REJECT a declared/sniffed mismatch), an
+  // agent output is never rejected — an agent legitimately emits an odd file
+  // under a mime it never considered — so a concrete sniffed type that does not
+  // match the declared one RELABELS the stored mime ({@link resolveAgentOutputMime}).
+  // This keeps the downstream preview/kind logic safe without failing publishes.
+  let sniffedMime: string | undefined;
   try {
+    const detection = await fileTypeStream(input.body);
     await storageUploadStream(
       DOCUMENTS_BUCKET,
       storagePath,
-      input.body.pipeThrough(digester.stream),
+      detection.pipeThrough(digester.stream),
       {
         exclusive: true,
       },
     );
+    sniffedMime = detection.fileType?.mime;
   } catch (err) {
     // Cap tripped mid-stream (or a transient storage error) — the object may
     // have been partially written before the abort. Drop it so a cut-short
@@ -909,6 +974,7 @@ export async function createDocumentFromStream(
   }
 
   const { bytes: byteCount, sha256 } = digester.result();
+  const storedMime = resolveAgentOutputMime(input.mime, sniffedMime);
 
   // Dedup fast path: an identical (run, sha256, name) agent_output already
   // exists — the sweep re-published a file the tool already stored, or a retried
@@ -930,14 +996,17 @@ export async function createDocumentFromStream(
       packageId,
       attribution,
       name: input.name,
-      mime: input.mime,
+      // Store the sniff-relabelled mime (honest labeling for agent outputs).
+      mime: storedMime,
       byteCount,
       sha256,
       expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
-      // Authoritative (and only) per-run cap check — re-summed under the org
-      // `FOR UPDATE` lock inside commitDocumentRow. Enforced here, not mid-stream,
-      // so a retried publish of an already-committed file reaches dedup first.
+      // Authoritative (and only) per-run cap checks — re-summed/re-counted under
+      // the org `FOR UPDATE` lock inside commitDocumentRow. Enforced here, not
+      // mid-stream, so a retried publish of an already-committed file reaches
+      // dedup first.
       runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
+      runMaxDocuments: env.RUN_MAX_DOCUMENTS,
     });
     return { row, deduped: false };
   } catch (err) {

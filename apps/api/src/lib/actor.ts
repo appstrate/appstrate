@@ -15,6 +15,20 @@ export function getActor(c: Context): Actor {
 }
 
 /**
+ * Like {@link getActor} but returns `undefined` when NEITHER an end-user nor a
+ * dashboard/API-key user is present in the context, instead of throwing. For
+ * call sites where a principal is expected in production (every authenticated
+ * route) but the identity is used only for a best-effort ownership scoping that
+ * degrades safely to tenant-only when absent.
+ */
+export function tryGetActor(c: Context): Actor | undefined {
+  const endUser = c.get("endUser");
+  if (endUser) return { type: "end_user", id: endUser.id };
+  const user = c.get("user");
+  return user ? { type: "user", id: user.id } : undefined;
+}
+
+/**
  * Produces the `{userId, endUserId}` column pair for an INSERT. Both `runs`
  * and `integration_connections` use those exact column names, so callers can
  * spread the result into the values object directly without further mapping.

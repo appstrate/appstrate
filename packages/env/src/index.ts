@@ -453,6 +453,33 @@ const envSchema = z
     // within the window.
     UPLOAD_RETENTION_HOURS: z.coerce.number().min(0).max(720).default(24),
 
+    // Max number of ACTIVE (unconsumed, unexpired) staged uploads a single
+    // actor may hold at once. Bounds the row + reserved-slot footprint one
+    // principal can book before consuming/expiring — a 429 on the (N+1)th
+    // create. Computed from the live upload rows (no separate counter), so a
+    // consumed or expired upload frees the budget immediately.
+    UPLOAD_MAX_ACTIVE_PER_ACTOR: z.coerce.number().int().positive().default(50),
+
+    // Ceiling on the summed DECLARED sizes of an org's ACTIVE (unconsumed,
+    // unexpired) staged uploads. A create whose declared size would push the
+    // org's active staging total over this is rejected (403
+    // `storage_limit_exceeded`). Bounds the ephemeral `uploads` bucket footprint
+    // per org before GC; distinct from the durable ORG_STORAGE_QUOTA_BYTES.
+    // Default 2 GiB.
+    UPLOAD_STAGING_MAX_BYTES_PER_ORG: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(2 * 1024 * 1024 * 1024),
+
+    // Max number of documents a single run may reference as input (uploads +
+    // inline + document:// refs) AND publish as output (agent_output rows).
+    // Bounds the per-run document COUNT the byte caps do not (thousands of
+    // tiny files). Enforced platform-side at input-parse (413) and at
+    // agent-output commit under the org FOR UPDATE lock (413
+    // `document_count_exceeded`). Default 200.
+    RUN_MAX_DOCUMENTS: z.coerce.number().int().positive().default(200),
+
     // Per-file ceiling on a durable document (materialized upload or agent
     // output). Enforced synchronously at write time — over-cap writes 413.
     // Default 100 MiB, aligned with the staged-upload absolute ceiling.

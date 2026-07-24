@@ -26,9 +26,9 @@
  *    for re-consume + GC worker removes both kinds of leftovers
  */
 
-import { and, eq, lt, isNull, isNotNull, inArray, or, sql } from "drizzle-orm";
+import { and, eq, lt, gt, isNull, isNotNull, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { uploads } from "@appstrate/db/schema";
+import { uploads, organizations } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
   downloadStream as storageDownloadStream,
@@ -39,15 +39,32 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { StorageAlreadyExistsError } from "@appstrate/core/storage";
 import { UPLOAD_URI_PREFIX, UPLOAD_ID_RE } from "@appstrate/core/document-uri";
 import { getEnv } from "@appstrate/env";
+import type { Actor } from "@appstrate/connect";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
-import { invalidRequest, notFound, conflict, gone, unauthorized } from "../lib/errors.ts";
+import {
+  invalidRequest,
+  notFound,
+  conflict,
+  gone,
+  unauthorized,
+  checksumMismatch,
+  storageLimitExceeded,
+  uploadStagingLimitExceeded,
+} from "../lib/errors.ts";
+import { SHA256_HEX_RE } from "../lib/digest.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
+import {
+  normalizeMime,
+  isUnsniffableMime,
+  sniffedMimeMatchesDeclared,
+  shouldEnforceSniffedMime,
+} from "./mime-policy.ts";
 
-/** Strip charset / boundary / other parameters from a MIME string and lowercase it. */
-export function normalizeMime(mime: string): string {
-  return mime.split(";")[0]?.trim().toLowerCase() ?? "";
-}
+// Re-exported so existing importers (input-parser, tests) keep a single import
+// site while the policy itself lives in `mime-policy.ts` (the one module shared
+// by uploads AND agent-output ingestion). Do not re-implement here.
+export { normalizeMime, isUnsniffableMime, sniffedMimeMatchesDeclared };
 
 const UPLOAD_BUCKET = "uploads";
 const DEFAULT_EXPIRY_SECONDS = 900; // 15 min
@@ -91,17 +108,25 @@ export interface UploadMeta {
   name: string;
   mime: string;
   size: number;
+  /**
+   * Client-declared SHA-256 (lowercase hex) or null when the client made no
+   * integrity claim. Carried so the materialization path can compare it against
+   * the hash of the streamed bytes and reject a mismatch.
+   */
+  sha256: string | null;
 }
 
 /**
  * Sink the upload bytes are streamed through. Receives the upload's content as
- * a stream and reports how many bytes it observed plus the magic-byte sniffed
- * MIME (undefined for formats `file-type` cannot identify). The caller (consume)
- * validates these against the declared upload row.
+ * a stream and reports how many bytes it observed, the magic-byte sniffed MIME
+ * (undefined for formats `file-type` cannot identify), and optionally the
+ * SHA-256 of the streamed bytes (lowercase hex — supplied by sinks that hash;
+ * consume compares it against the row's client-declared `sha256` when both are
+ * present). The caller (consume) validates these against the declared upload row.
  */
 export type UploadStreamSink = (
   stream: ReadableStream<Uint8Array>,
-) => Promise<{ bytes: number; sniffedMime: string | undefined }>;
+) => Promise<{ bytes: number; sniffedMime: string | undefined; sha256?: string }>;
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -149,10 +174,19 @@ export function parseUploadUri(uri: string): string | null {
 export interface CreateUploadParams {
   orgId: string;
   applicationId: string;
+  /** Dashboard/API-key user who created the upload (null for end-user flows). */
   createdBy: string | null;
+  /** End-user who created the upload (null for dashboard/API-key flows). */
+  endUserId?: string | null;
   name: string;
   size: number;
   mime: string;
+  /**
+   * Optional client-declared SHA-256 (lowercase hex, 64 chars) — bound into the
+   * signed upload URL/token so the bytes are verified server-side on upload and
+   * again at consume.
+   */
+  sha256?: string;
   /** Optional tighter expiry; clamped to [60, 3600]. */
   expiresIn?: number;
   /** Optional max-size ceiling applied to the pre-signed URL. */
@@ -176,6 +210,13 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
     throw invalidRequest("mime is required", "mime");
   }
 
+  // Normalize any client sha256 to lowercase hex and validate its shape — a
+  // malformed checksum must never be signed into an upload token / presign.
+  const sha256 = params.sha256 ? params.sha256.toLowerCase() : undefined;
+  if (sha256 !== undefined && !SHA256_HEX_RE.test(sha256)) {
+    throw invalidRequest("sha256 must be a 64-character hex SHA-256 digest", "sha256");
+  }
+
   // Strip parameters (charset, boundary, …) and lowercase so consume-time
   // comparison against sniffed MIME is an exact string match. An attacker
   // padding the declared MIME with junk params would otherwise bypass the
@@ -189,29 +230,92 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
   const uploadId = prefixedId("upl");
   const safeName = sanitizeFilename(params.name);
   const storagePath = `${params.applicationId}/${uploadId}/${safeName}`;
+  const createdBy = params.createdBy ?? null;
+  const endUserId = params.endUserId ?? null;
 
   // `maxSize` carries the DECLARED size (`params.size <= maxSize` is enforced
   // above, so the min is exactly `params.size`): direct-presign S3 signs it
   // as the presigned PUT's exact Content-Length; the proxy sink (FS storage,
   // or S3 in proxy mode) enforces it as the streaming upper bound. Either
-  // way the client cannot upload more than it declared.
+  // way the client cannot upload more than it declared. `sha256` (when given)
+  // is bound too so the bytes are checksum-verified server-side. The descriptor
+  // is signed BEFORE the budget transaction — it touches no storage, so a
+  // rejected budget check simply discards it (nothing to roll back).
   const descriptor = await createUploadUrl(UPLOAD_BUCKET, storagePath, {
     mime: normalizedMime,
     maxSize: Math.min(params.size, maxSize),
     expiresIn,
+    ...(sha256 ? { sha256 } : {}),
   });
 
   const expiresAt = new Date(Date.now() + expiresIn * 1000);
-  await db.insert(uploads).values({
-    id: uploadId,
-    orgId: params.orgId,
-    applicationId: params.applicationId,
-    createdBy: params.createdBy,
-    storageKey: `${UPLOAD_BUCKET}/${storagePath}`,
-    name: safeName,
-    mime: normalizedMime,
-    size: params.size,
-    expiresAt,
+
+  // Staging budget, computed from the live upload rows (no separate counter) and
+  // enforced under the org row's FOR UPDATE lock so two concurrent creates for
+  // the same org cannot both pass a stale sum. The lock scope is kept tight —
+  // the aggregates + insert only. Consumed / expired uploads are excluded, so
+  // they free budget the instant they leave the active set.
+  await db.transaction(async (tx) => {
+    // Lock the org row (same lock the durable documents quota takes) to
+    // serialise this org's concurrent creates.
+    await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, params.orgId))
+      .for("update")
+      .limit(1);
+
+    const env = getEnv();
+    const now = new Date();
+
+    // Per-actor active-upload count. Skipped when no principal is attributed
+    // (no actor to bound). `createdBy` / `endUserId` are mutually exclusive.
+    if (createdBy !== null || endUserId !== null) {
+      const actorFilter =
+        createdBy !== null ? eq(uploads.createdBy, createdBy) : eq(uploads.endUserId, endUserId!);
+      const [activeForActor] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(uploads)
+        .where(and(actorFilter, isNull(uploads.consumedAt), gt(uploads.expiresAt, now)));
+      if ((activeForActor?.count ?? 0) >= env.UPLOAD_MAX_ACTIVE_PER_ACTOR) {
+        throw uploadStagingLimitExceeded(
+          `Too many active staged uploads (max ${env.UPLOAD_MAX_ACTIVE_PER_ACTOR}); ` +
+            "consume or let existing uploads expire before staging more",
+        );
+      }
+    }
+
+    // Per-org active declared-bytes sum + this upload's declared size.
+    const [activeForOrg] = await tx
+      .select({ total: sql<string>`coalesce(sum(${uploads.size}), 0)` })
+      .from(uploads)
+      .where(
+        and(
+          eq(uploads.orgId, params.orgId),
+          isNull(uploads.consumedAt),
+          gt(uploads.expiresAt, now),
+        ),
+      );
+    const stagedTotal = Number(activeForOrg?.total ?? 0);
+    if (stagedTotal + params.size > env.UPLOAD_STAGING_MAX_BYTES_PER_ORG) {
+      throw storageLimitExceeded(
+        `Organization staging limit (${env.UPLOAD_STAGING_MAX_BYTES_PER_ORG} bytes) would be exceeded`,
+      );
+    }
+
+    await tx.insert(uploads).values({
+      id: uploadId,
+      orgId: params.orgId,
+      applicationId: params.applicationId,
+      createdBy,
+      endUserId,
+      storageKey: `${UPLOAD_BUCKET}/${storagePath}`,
+      name: safeName,
+      mime: normalizedMime,
+      size: params.size,
+      sha256: sha256 ?? null,
+      expiresAt,
+    });
   });
 
   return {
@@ -230,120 +334,50 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
 // ---------------------------------------------------------------------------
 
 /**
- * MIME prefixes/values where `file-type` cannot sniff a signature — these
- * formats have no magic bytes (plain text, JSON, CSV, XML source, JS, etc.).
- * For these we skip the sniff check and trust the declared mime. Callers
- * that need strict binary validation should declare a concrete binary MIME
- * (application/pdf, image/*, etc.) which `file-type` can identify.
- *
- * Exported so the inline `data:` URI input path (input-parser) applies the
- * exact same declared-vs-sniffed MIME policy as the staged-upload path.
+ * The identity + tenant a peek/consume acts on behalf of. `actor` is the acting
+ * principal (run-triggering user/end-user, or chat-session owner) — an upload is
+ * readable ONLY by the principal that created it, so peek/consume reject a
+ * non-creator with the same 404 a missing/cross-tenant row gets (no existence
+ * oracle). Optional for backward-compatible service callers that pre-date
+ * ownership; when omitted the ownership gate is skipped (tenant scoping still
+ * applies).
  */
-export function isUnsniffableMime(mime: string): boolean {
-  if (mime.startsWith("text/")) return true;
-  // Structured text payloads with no reliable magic signature.
-  const unsniffable = new Set([
-    "application/json",
-    "application/x-ndjson",
-    "application/ld+json",
-    "application/xml",
-    "application/x-yaml",
-    "application/yaml",
-    "application/csv",
-    "application/javascript",
-    "application/ecmascript",
-    "application/x-sh",
-    "application/x-httpd-php",
-    "application/x-www-form-urlencoded",
-    "image/svg+xml", // XML-based, file-type never matches it
-  ]);
-  if (unsniffable.has(mime)) return true;
-  // Structured-suffix convention (RFC 6839) — `+json`, `+xml`, `+yaml`.
-  // Anything in these families is text-shaped and cannot be magic-sniffed.
-  if (mime.endsWith("+json") || mime.endsWith("+xml") || mime.endsWith("+yaml")) return true;
-  return false;
+export interface UploadAccessContext {
+  orgId: string;
+  applicationId: string;
+  actor?: Actor;
 }
 
 /**
- * MIMEs whose on-disk format is a ZIP container. `file-type` samples only the
- * head of the stream (~4100 bytes); when the identifying entry of an OOXML/ODF
- * archive ([Content_Types].xml, mimetype) sits beyond the sample window — the
- * normal layout for openpyxl/LibreOffice/Google-exported files — it falls back
- * to plain `application/zip`. Treating that fallback as a mismatch would
- * reject legitimate office documents, so declared-vs-sniffed comparison uses
- * Marcel/Tika-style subtype refinement: a declared member of this family is
- * compatible with a sniffed `application/zip` (and vice versa). A declaration
- * outside the family (application/pdf, image/png, …) still requires an exact
- * sniff match.
+ * Ownership gate: does `actor` match the principal recorded on the upload row?
+ * A `user`/API-key upload records `createdBy`; an end-user upload records
+ * `endUserId`. A row with NEITHER recorded (legacy pre-migration rows, drained
+ * within the retention window) has no owner to enforce, so it is allowed. A
+ * recorded owner that does not match the actor is rejected by the caller as a
+ * 404 (indistinguishable from missing — same convention as the documents ACL).
  */
-const ZIP_CONTAINER_MIMES = new Set([
-  // OOXML
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.template", // xltx
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.template", // dotx
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // pptx
-  "application/vnd.openxmlformats-officedocument.presentationml.slideshow", // ppsx
-  "application/vnd.openxmlformats-officedocument.presentationml.template", // potx
-  // OOXML macro-enabled
-  "application/vnd.ms-excel.sheet.macroenabled.12", // xlsm
-  "application/vnd.ms-excel.template.macroenabled.12", // xltm
-  "application/vnd.ms-word.document.macroenabled.12", // docm
-  "application/vnd.ms-word.template.macroenabled.12", // dotm
-  "application/vnd.ms-powerpoint.presentation.macroenabled.12", // pptm
-  "application/vnd.ms-powerpoint.slideshow.macroenabled.12", // ppsm
-  // OpenDocument
-  "application/vnd.oasis.opendocument.text", // odt
-  "application/vnd.oasis.opendocument.spreadsheet", // ods
-  "application/vnd.oasis.opendocument.presentation", // odp
-  "application/vnd.oasis.opendocument.graphics", // odg
-  // Other ZIP-based formats
-  "application/epub+zip",
-  "application/java-archive", // jar
-]);
+function actorOwnsUpload(
+  row: { createdBy: string | null; endUserId: string | null },
+  actor: Actor | undefined,
+): boolean {
+  if (!actor) return true; // no principal supplied → tenant-only scoping
+  if (row.createdBy === null && row.endUserId === null) return true; // unattributed legacy row
+  return actor.type === "user" ? row.createdBy === actor.id : row.endUserId === actor.id;
+}
 
 /**
- * Legacy Office formats stored in an OLE2 / Compound File Binary container.
- * `file-type` identifies the container magic (`application/x-cfb`) but never
- * refines it to the concrete format, so every legitimate legacy Office upload
- * sniffs as the generic parent — same shape as the ZIP family above.
+ * SQL ownership predicate for the atomic consume claim: the acting principal
+ * matches the row's recorded creator, OR the row is unattributed (legacy).
+ * Mirrors {@link actorOwnsUpload} in SQL so a non-owner NEVER wins the claim
+ * (which would mark another member's upload consumed and let the rollback path
+ * delete its bytes). Undefined when no actor is supplied (tenant-only scoping).
  */
-const CFB_CONTAINER_MIMES = new Set([
-  "application/msword", // .doc
-  "application/vnd.ms-excel", // .xls
-  "application/vnd.ms-powerpoint", // .ppt
-  "application/vnd.ms-outlook", // .msg
-  "application/vnd.visio", // .vsd
-]);
-
-/**
- * Container families for declared-vs-sniffed refinement: `generic` is the
- * parent MIME the sniffer reports for the raw container, `members` are the
- * concrete formats stored in it.
- */
-const CONTAINER_FAMILIES: ReadonlyArray<{ generic: string; members: Set<string> }> = [
-  { generic: "application/zip", members: ZIP_CONTAINER_MIMES },
-  { generic: "application/x-cfb", members: CFB_CONTAINER_MIMES },
-];
-
-/**
- * Declared-vs-sniffed MIME compatibility for the magic-byte check. Exact match
- * always passes; otherwise refinement is strictly parent↔child against a
- * container family's generic type (declared xlsx / sniffed application/zip,
- * declared application/zip / sniffed xlsx). Two SPECIFIC container types never
- * satisfy each other — declared xlsx with sniffed docm/xlsm stays a mismatch,
- * so a macro-enabled document cannot ride in under a macro-free declaration
- * when the sniffer DID identify it. Exported so the inline `data:` URI input
- * path (input-parser) applies the exact same policy as the staged-upload path.
- */
-export function sniffedMimeMatchesDeclared(declared: string, sniffed: string | undefined): boolean {
-  if (!sniffed) return false;
-  if (sniffed === declared) return true;
-  for (const { generic, members } of CONTAINER_FAMILIES) {
-    if (sniffed === generic && members.has(declared)) return true;
-    if (declared === generic && members.has(sniffed)) return true;
-  }
-  return false;
+function ownershipClaimFilter(actor: Actor | undefined): SQL | undefined {
+  if (!actor) return undefined;
+  const unattributed = and(isNull(uploads.createdBy), isNull(uploads.endUserId));
+  const mine =
+    actor.type === "user" ? eq(uploads.createdBy, actor.id) : eq(uploads.endUserId, actor.id);
+  return or(mine, unattributed);
 }
 
 /**
@@ -356,7 +390,7 @@ export function sniffedMimeMatchesDeclared(declared: string, sniffed: string | u
  */
 export async function peekUploads(
   uploadIds: string[],
-  ctx: { orgId: string; applicationId: string },
+  ctx: UploadAccessContext,
 ): Promise<Map<string, UploadMeta>> {
   if (uploadIds.length === 0) return new Map();
   const rows = await db.select().from(uploads).where(inArray(uploads.id, uploadIds));
@@ -364,8 +398,16 @@ export async function peekUploads(
   const result = new Map<string, UploadMeta>();
   for (const id of uploadIds) {
     const row = byId.get(id);
-    // Hide cross-tenant existence behind the same not-found as a missing row.
-    if (!row || row.orgId !== ctx.orgId || row.applicationId !== ctx.applicationId) {
+    // Hide cross-tenant existence AND cross-actor ownership behind the same
+    // not-found as a missing row — an upload is readable only by its creator, so
+    // a non-owner must not be able to probe existence (same convention as the
+    // documents ACL).
+    if (
+      !row ||
+      row.orgId !== ctx.orgId ||
+      row.applicationId !== ctx.applicationId ||
+      !actorOwnsUpload(row, ctx.actor)
+    ) {
       throw notFound(`Upload '${id}' not found`);
     }
     // Two validity regimes: an unconsumed upload lives until its PUT-window
@@ -378,7 +420,7 @@ export async function peekUploads(
     } else if (row.expiresAt.getTime() < Date.now()) {
       throw gone("upload_expired", `Upload '${id}' has expired`);
     }
-    result.set(id, { id, name: row.name, mime: row.mime, size: row.size });
+    result.set(id, { id, name: row.name, mime: row.mime, size: row.size, sha256: row.sha256 });
   }
   return result;
 }
@@ -411,16 +453,19 @@ export async function peekUploads(
  */
 export async function consumeUploadStream(
   uploadId: string,
-  ctx: { orgId: string; applicationId: string },
+  ctx: UploadAccessContext,
   sink: UploadStreamSink,
 ): Promise<UploadMeta> {
   // Atomic first-consume claim that also reads the row: the caller whose
   // UPDATE flips NULL → claimedAt owns the destructive failure path below,
   // and the same statement hands back the row data (storageKey, size, mime,
   // name) — no separate pre-check SELECT on the happy path. The WHERE guards
-  // (tenant + not-consumed + not-expired) make a returned row owned, fresh,
-  // and freshly-claimed by construction.
+  // (tenant + OWNERSHIP + not-consumed + not-expired) make a returned row owned,
+  // fresh, and freshly-claimed by construction. Ownership is IN the claim so a
+  // non-owner can never win it — otherwise their claim would mark another
+  // member's upload consumed and the rollback path would delete its bytes.
   const claimedAt = new Date();
+  const ownership = ownershipClaimFilter(ctx.actor);
   const [claimed] = await db
     .update(uploads)
     .set({ consumedAt: claimedAt })
@@ -429,6 +474,7 @@ export async function consumeUploadStream(
         eq(uploads.id, uploadId),
         eq(uploads.orgId, ctx.orgId),
         eq(uploads.applicationId, ctx.applicationId),
+        ...(ownership ? [ownership] : []),
         isNull(uploads.consumedAt),
         sql`${uploads.expiresAt} >= now()`,
       ),
@@ -437,12 +483,18 @@ export async function consumeUploadStream(
   const firstConsume = claimed !== undefined;
   let row = claimed;
   // Nothing claimed → either the upload was already consumed (re-consumable
-  // within the reuse window) or it is missing / cross-tenant / expired. The
-  // cold path diagnoses which, so the caller still gets a precise error.
+  // within the reuse window), missing / cross-tenant / cross-actor, or expired.
+  // The cold path diagnoses which, so the caller still gets a precise error.
   if (!row) {
     const [existing] = await db.select().from(uploads).where(eq(uploads.id, uploadId)).limit(1);
-    // Hide cross-tenant existence behind the same not-found as a missing row.
-    if (!existing || existing.orgId !== ctx.orgId || existing.applicationId !== ctx.applicationId) {
+    // Hide cross-tenant + cross-actor existence behind the same not-found as a
+    // missing row (an upload is readable only by its creator).
+    if (
+      !existing ||
+      existing.orgId !== ctx.orgId ||
+      existing.applicationId !== ctx.applicationId ||
+      !actorOwnsUpload(existing, ctx.actor)
+    ) {
       throw notFound(`Upload '${uploadId}' not found`);
     }
     if (!existing.consumedAt) {
@@ -472,9 +524,27 @@ export async function consumeUploadStream(
     }
 
     // Stream the bytes through the caller's sink (which pipes them to their
-    // destination). The sink reports the observed byte count and the MIME
-    // sniffed from the head — both are only known once the stream drains.
-    const { bytes, sniffedMime } = await sink(source);
+    // destination). The sink reports the observed byte count, the MIME sniffed
+    // from the head, and (when it hashes) the SHA-256 of the streamed bytes —
+    // all only known once the stream drains.
+    const { bytes, sniffedMime, sha256: streamedSha } = await sink(source);
+
+    // Client-integrity check: when the row carries a client-declared sha256 AND
+    // the sink hashed the bytes, the streamed hash MUST match. Covers the
+    // S3-proxy path (S3/MinIO verify their own checksum on PUT, but a re-consume
+    // re-validates here) and the FS path. Throwing here triggers the same
+    // first-consume rollback as a size/MIME mismatch (bytes dropped, claim
+    // released) so a clean re-PUT is possible.
+    if (row.sha256 && streamedSha && row.sha256 !== streamedSha) {
+      logger.warn("upload sha256 mismatch on consume", {
+        uploadId,
+        declared: row.sha256,
+        actual: streamedSha,
+      });
+      throw checksumMismatch(
+        `Upload '${uploadId}' content hash does not match the declared sha256`,
+      );
+    }
 
     // Reject mismatched size outright. Both upload paths enforce the declared
     // size at upload time (direct-presign S3 signs ContentLength into the
@@ -506,7 +576,7 @@ export async function consumeUploadStream(
     //    Strict matching would reject every legitimate text upload. We trust
     //    the declared MIME for these — manifests that need binary-grade
     //    validation must declare a sniffable MIME.
-    if (row.mime && row.mime !== "application/octet-stream" && !isUnsniffableMime(row.mime)) {
+    if (shouldEnforceSniffedMime(row.mime)) {
       if (!sniffedMimeMatchesDeclared(row.mime, sniffedMime)) {
         logger.warn("upload mime mismatch on consume", {
           uploadId,
@@ -529,6 +599,7 @@ export async function consumeUploadStream(
       name: row.name,
       mime: row.mime,
       size: bytes,
+      sha256: row.sha256,
     };
   } catch (err) {
     // A failed RE-consume must not destroy state that other consumers (and
@@ -616,17 +687,25 @@ export interface FsContentWriteResult {
  * valid for 15 min and could otherwise be replayed within its window to swap
  * the bytes of an already-populated upload between client PUT and
  * server-side consume.
+ *
+ * Integrity: when the token signed a SHA-256 (`sha256`, lowercase hex), the
+ * streamed bytes are hashed as they flow and the digest is compared AFTER the
+ * write. A mismatch removes the just-written object (same drop-then-retry
+ * contract as the short-size case) and throws a typed 400 `checksum_mismatch`,
+ * so a wrong-bytes upload never lingers visible for a consume to pick up.
  */
 export async function writeProxyUploadContent(
   storageKey: string,
   body: ReadableStream<Uint8Array>,
   maxSize: number,
   expiresAt = 0,
+  sha256?: string,
 ): Promise<FsContentWriteResult> {
   const [bucket, ...rest] = storageKey.split("/");
   if (!bucket || rest.length === 0) throw invalidRequest("invalid storage key");
   const path = rest.join("/");
   let bytes = 0;
+  const hasher = sha256 ? new Bun.CryptoHasher("sha256") : null;
   const counter = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       if (expiresAt > 0 && Date.now() / 1000 > expiresAt) {
@@ -638,6 +717,7 @@ export async function writeProxyUploadContent(
         controller.error(invalidRequest(`body exceeds signed max ${maxSize} bytes`));
         return;
       }
+      hasher?.update(chunk);
       controller.enqueue(chunk);
     },
   });
@@ -660,6 +740,19 @@ export async function writeProxyUploadContent(
       // size re-check; GC sweeps it with the expired upload row.
     }
     throw invalidRequest(`body is ${bytes} bytes but the signed size is ${maxSize}`);
+  }
+  if (hasher && sha256) {
+    const actual = hasher.digest("hex");
+    if (actual !== sha256) {
+      // Wrong bytes for the declared checksum — drop the object before it can be
+      // consumed, so a retry with the correct bytes re-PUTs cleanly.
+      try {
+        await storageDelete(bucket, path);
+      } catch {
+        // Best-effort: a leftover object still fails the consume-time sha check.
+      }
+      throw checksumMismatch("uploaded bytes do not match the declared sha256");
+    }
   }
   return { storageKey, size: bytes };
 }

@@ -344,7 +344,13 @@ export function createRunsEventsRouter() {
   // stream mid-flight (413, deleting any partial object), the org quota is
   // enforced transactionally (403). Idempotent for the sweep's retries: an
   // identical (run, sha256, name) upload returns the existing document (200).
-  router.post("/runs/:runId/documents", documentLimiter, verifyRunUploadSignature, async (c) => {
+  //
+  // Middleware order — HMAC verification runs BEFORE the rate limiter. The
+  // limiter keys on the runId from the URL, so if it ran first an UNauthenticated
+  // attacker who merely knows a runId could spend a legitimate run's document
+  // budget with garbage requests (a DoS on the run's finalize sweep). Verifying
+  // the run signature first means only the authentic run can consume its budget.
+  router.post("/runs/:runId/documents", verifyRunUploadSignature, documentLimiter, async (c) => {
     const run = c.get("run")!;
 
     // Only a live run may publish — a document arriving after finalize (or

@@ -280,6 +280,10 @@ describe("documents service + routes", () => {
     expect(content.headers.get("content-disposition")).toContain("attachment");
     // S3: the proxy stream must forbid content-type sniffing.
     expect(content.headers.get("x-content-type-options")).toBe("nosniff");
+    // RFC 9530 representation digest — present because the creator has the
+    // `metadata` capability. `sha-256=:<base64>:` of the stored bytes.
+    const expectedB64 = Buffer.from(doc.sha256, "hex").toString("base64");
+    expect(content.headers.get("repr-digest")).toBe(`sha-256=:${expectedB64}:`);
     const body = new Uint8Array(await content.arrayBuffer());
     expect(body).toEqual(bytes);
 

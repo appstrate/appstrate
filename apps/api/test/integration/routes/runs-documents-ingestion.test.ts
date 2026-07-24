@@ -216,11 +216,64 @@ describe("POST /api/runs/:runId/documents — agent-output ingestion", () => {
     });
   });
 
+  it("rejects over the per-run document COUNT cap with a distinct 413", async () => {
+    const runId = await seedRun(ctx);
+    await withEnv("RUN_MAX_DOCUMENTS", "2", async () => {
+      // Two distinct publishes fill the run's document budget.
+      expect((await postDoc(runId, docHeaders(RUN_SECRET, "a.txt"), "aaa")).status).toBe(201);
+      expect((await postDoc(runId, docHeaders(RUN_SECRET, "b.txt"), "bbb")).status).toBe(201);
+      // The third genuinely-new document exceeds the count cap.
+      const res = await postDoc(runId, docHeaders(RUN_SECRET, "c.txt"), "ccc");
+      expect(res.status).toBe(413);
+      expect(((await res.json()) as { code: string }).code).toBe("document_count_exceeded");
+      const rows = await db.select().from(documents).where(eq(documents.runId, runId));
+      expect(rows.length).toBe(2);
+    });
+  });
+
+  it("relabels an agent output whose bytes mismatch the declared mime", async () => {
+    const runId = await seedRun(ctx);
+    // Declared text/plain, but the bytes are a real (1×1) PNG — enough header
+    // for `file-type` to sniff image/png.
+    const png = new Uint8Array(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
+    const res = await postDoc(runId, docHeaders(RUN_SECRET, "chart.png", "text/plain"), png);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; mime: string };
+    // Honest relabeling — the stored mime is the sniffed one, not the declaration.
+    expect(body.mime).toBe("image/png");
+    const [row] = await db.select().from(documents).where(eq(documents.id, body.id));
+    expect(row!.mime).toBe("image/png");
+  });
+
   describe("authentication", () => {
     it("accepts a valid run signature", async () => {
       const runId = await seedRun(ctx);
       const res = await postDoc(runId, docHeaders(RUN_SECRET, "ok.txt"), new Uint8Array([1, 2]));
       expect(res.status).toBe(201);
+    });
+
+    it("unsigned requests do not consume the run's rate-limit budget (HMAC before limiter)", async () => {
+      const runId = await seedRun(ctx);
+      // The document limiter is 30/6s keyed on runId. Fire far more than that
+      // many UNSIGNED requests — each must 401 at the signature guard BEFORE the
+      // limiter runs, so the run's budget is untouched…
+      for (let i = 0; i < 40; i++) {
+        const res = await postDoc(
+          runId,
+          { "X-Document-Name": `junk-${i}.txt`, "Content-Type": "text/plain" },
+          "x",
+        );
+        expect(res.status).toBe(401);
+      }
+      // …and a legitimately-signed publish still succeeds (would 429 if the
+      // limiter had run first and been exhausted by the garbage).
+      const ok = await postDoc(runId, docHeaders(RUN_SECRET, "real.txt"), "real");
+      expect(ok.status).toBe(201);
     });
 
     it("rejects a cookie/API-key request with no run signature: 401", async () => {

@@ -37,6 +37,7 @@ import {
   conflict,
   payloadTooLarge,
   validationFailed,
+  documentCountExceeded,
 } from "../lib/errors.ts";
 import {
   consumeUploadStream,
@@ -60,7 +61,7 @@ import {
   parseDocumentUri,
   documentUri,
 } from "@appstrate/core/document-uri";
-import { getActor } from "../lib/actor.ts";
+import { getActor, tryGetActor } from "../lib/actor.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
@@ -640,31 +641,45 @@ export async function parseRequestInput(
     let docNames: string[] = [];
     try {
       if (resolved.length > 0 || inline.length > 0 || docRefs.length > 0) {
+        // Bound the NUMBER of input documents a single run may carry (uploads +
+        // inline + document:// refs) — the byte caps below do not bound the
+        // COUNT (thousands of tiny files). Rejected before any streaming.
+        const totalInputDocs = resolved.length + inline.length + docRefs.length;
+        if (totalInputDocs > getEnv().RUN_MAX_DOCUMENTS) {
+          throw documentCountExceeded(
+            `A run may carry at most ${getEnv().RUN_MAX_DOCUMENTS} input documents (got ${totalInputDocs})`,
+          );
+        }
+
+        // The run-triggering actor — resolved once and threaded into both the
+        // document ACL check AND the upload ownership gate (peek/consume), so a
+        // member can only deliver documents/uploads they may read. The document
+        // ACL REQUIRES a principal (strict `getActor`); the upload ownership gate
+        // scopes leniently (`tryGetActor` → tenant-only when absent), so
+        // upload/inline-only inputs never hard-require a principal in context.
+        const actor =
+          docRefs.length > 0 ? getActor(c) : resolved.length > 0 ? tryGetActor(c) : undefined;
+
         // Resolve every `document://` reference through the container ACL (D2):
         // the run-triggering actor must be able to read the document, else it is
         // indistinguishable from missing (404 — covers cross-org and cross-app).
-        // The actor is resolved only on this path so upload/inline-only inputs
-        // never require a principal in context.
         const resolvedDocs =
           docRefs.length > 0
-            ? await (async () => {
-                const actor = getActor(c);
-                return Promise.all(
-                  docRefs.map(async ({ ref, id }) => {
-                    const doc = await getDocumentForActor({ orgId, applicationId }, actor, id);
-                    // Cross-actor ACL (S2): resolving a run is org-wide-visible to
-                    // members, but a `user_upload` is creator-only content — a
-                    // member must not deliver another member's private upload into
-                    // their own run. The `download` capability is always true for
-                    // an `agent_output` (freely chainable, D6) but only for the
-                    // creator of an upload. A rejected ref is indistinguishable from
-                    // missing (404), matching the not-found shape above.
-                    if (!doc || !doc.capabilities.download)
-                      throw notFound(`Document '${id}' not found`);
-                    return { ref, doc: doc.row };
-                  }),
-                );
-              })()
+            ? await Promise.all(
+                docRefs.map(async ({ ref, id }) => {
+                  const doc = await getDocumentForActor({ orgId, applicationId }, actor!, id);
+                  // Cross-actor ACL (S2): resolving a run is org-wide-visible to
+                  // members, but a `user_upload` is creator-only content — a
+                  // member must not deliver another member's private upload into
+                  // their own run. The `download` capability is always true for
+                  // an `agent_output` (freely chainable, D6) but only for the
+                  // creator of an upload. A rejected ref is indistinguishable from
+                  // missing (404), matching the not-found shape above.
+                  if (!doc || !doc.capabilities.download)
+                    throw notFound(`Document '${id}' not found`);
+                  return { ref, doc: doc.row };
+                }),
+              )
             : [];
 
         // Bound the total input-document payload on DECLARED sizes BEFORE
@@ -680,7 +695,7 @@ export async function parseRequestInput(
           resolved.length > 0
             ? await peekUploads(
                 resolved.map((r) => r.id),
-                { orgId, applicationId },
+                { orgId, applicationId, actor },
               )
             : new Map();
         assertDocsWithinCap(
@@ -772,35 +787,48 @@ export async function parseRequestInput(
             // `.fileType` once the head has been read — available after the pipe
             // drains. The counting passthrough yields the size the size-check
             // (and manifest) needs.
-            const meta = await consumeUploadStream(id, { orgId, applicationId }, async (src) => {
-              const detection = await fileTypeStream(src);
-              let bytes = 0;
-              const counter = new TransformStream<Uint8Array, Uint8Array>({
-                transform(chunk, controller) {
-                  bytes += chunk.byteLength;
-                  // Abort the moment the stream overshoots the declared size,
-                  // rather than copying a declared-small / uploaded-huge object
-                  // into the run workspace in full just to delete it after the
-                  // post-drain size check. Errors the stream → the S3 multipart
-                  // upload aborts (or the FS write stops) → consume releases the
-                  // claim and the run workspace is rolled back. The post-drain
-                  // `bytes === size` check in consume still catches the
-                  // under-size case (and is the correctness backstop for any
-                  // sink that does not abort early).
-                  if (bytes > declaredSize) {
-                    controller.error(
-                      invalidRequest(
-                        `Upload '${id}' size mismatch: declared ${declaredSize} bytes, exceeded mid-stream`,
-                      ),
-                    );
-                    return;
-                  }
-                  controller.enqueue(chunk);
-                },
-              });
-              await streamRunDocument(runId, docName, detection.pipeThrough(counter));
-              return { bytes, sniffedMime: detection.fileType?.mime };
-            });
+            const meta = await consumeUploadStream(
+              id,
+              { orgId, applicationId, actor },
+              async (src) => {
+                const detection = await fileTypeStream(src);
+                let bytes = 0;
+                // Hash the streamed bytes too, so consume can compare against a
+                // client-declared upload sha256 and reject a mismatch at this
+                // FIRST consume (fails fast, before the run is created).
+                const hasher = new Bun.CryptoHasher("sha256");
+                const counter = new TransformStream<Uint8Array, Uint8Array>({
+                  transform(chunk, controller) {
+                    bytes += chunk.byteLength;
+                    // Abort the moment the stream overshoots the declared size,
+                    // rather than copying a declared-small / uploaded-huge object
+                    // into the run workspace in full just to delete it after the
+                    // post-drain size check. Errors the stream → the S3 multipart
+                    // upload aborts (or the FS write stops) → consume releases the
+                    // claim and the run workspace is rolled back. The post-drain
+                    // `bytes === size` check in consume still catches the
+                    // under-size case (and is the correctness backstop for any
+                    // sink that does not abort early).
+                    if (bytes > declaredSize) {
+                      controller.error(
+                        invalidRequest(
+                          `Upload '${id}' size mismatch: declared ${declaredSize} bytes, exceeded mid-stream`,
+                        ),
+                      );
+                      return;
+                    }
+                    hasher.update(chunk);
+                    controller.enqueue(chunk);
+                  },
+                });
+                await streamRunDocument(runId, docName, detection.pipeThrough(counter));
+                return {
+                  bytes,
+                  sniffedMime: detection.fileType?.mime,
+                  sha256: hasher.digest("hex"),
+                };
+              },
+            );
             return {
               fieldName: ref.fieldName,
               name: meta.name,

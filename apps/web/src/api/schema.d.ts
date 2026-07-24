@@ -10014,6 +10014,8 @@ export interface operations {
                 headers: {
                     /** @description attachment; filename=… */
                     "Content-Disposition"?: string;
+                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:`. Present only when the caller has the document's `metadata` capability. */
+                    "Repr-Digest"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10025,6 +10027,8 @@ export interface operations {
                 headers: {
                     /** @description Presigned URL. */
                     Location?: string;
+                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:` (carried on the redirect; present only when the caller has the `metadata` capability). */
+                    "Repr-Digest"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -19582,6 +19586,8 @@ export interface operations {
                     size: number;
                     /** @description Declared MIME. Verified via magic-byte sniffing on consume for binary types. */
                     mime: string;
+                    /** @description Optional client integrity claim: lowercase-hex SHA-256 of the payload. When provided it is enforced server-side — direct-presign S3 mode binds a signed `x-amz-checksum-sha256` header the client MUST echo (returned in `headers`), the proxy sink re-hashes the streamed bytes, and consume re-checks it — a mismatch is rejected (400 `checksum_mismatch`). */
+                    sha256?: string;
                 };
             };
         };

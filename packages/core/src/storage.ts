@@ -15,6 +15,15 @@ export interface CreateUploadUrlOptions {
   maxSize?: number;
   /** Seconds until the URL expires. Default: 900 (15 min). */
   expiresIn?: number;
+  /**
+   * Optional client-declared SHA-256 of the payload, lowercase hex (64 chars).
+   * When set the backend binds it so the upload is verified server-side:
+   * S3/MinIO get an `x-amz-checksum-sha256` header signed into the presigned PUT
+   * (rejected on mismatch); the proxy sink encodes it into the signed token so
+   * `writeProxyUploadContent` re-hashes the streamed bytes and rejects a
+   * mismatch. Omitted ⇒ no integrity binding (byte-identical to before).
+   */
+  sha256?: string;
 }
 
 /** Returned descriptor for a client-side direct upload. */

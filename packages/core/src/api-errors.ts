@@ -246,6 +246,53 @@ export function payloadTooLarge(detail: string): ApiError {
   });
 }
 
+/**
+ * 413 with a distinct `document_count_exceeded` problem type — the number of
+ * documents a run may reference as input or publish as output
+ * (`RUN_MAX_DOCUMENTS`) would be exceeded. Mirrors the per-file 413
+ * ({@link payloadTooLarge}) but branches separately so a client can tell "too
+ * many files" from "one file too big".
+ */
+export function documentCountExceeded(detail: string): ApiError {
+  return new ApiError({
+    status: 413,
+    code: "document_count_exceeded",
+    title: "Document Count Exceeded",
+    detail,
+  });
+}
+
+/**
+ * 400 with a `checksum_mismatch` problem type — a client-declared SHA-256 did
+ * not match the bytes the server actually received/streamed. Distinct code so a
+ * client can retry with the correct bytes rather than treating it as a generic
+ * validation error.
+ */
+export function checksumMismatch(detail: string): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "checksum_mismatch",
+    title: "Checksum Mismatch",
+    detail,
+  });
+}
+
+/**
+ * 429 with an `upload_staging_limit_exceeded` problem type — the acting
+ * principal already holds the maximum number of ACTIVE (unconsumed, unexpired)
+ * staged uploads (`UPLOAD_MAX_ACTIVE_PER_ACTOR`). A budget/back-pressure signal,
+ * not an authz denial, so it is a 429 the client can retry after consuming or
+ * letting an upload expire.
+ */
+export function uploadStagingLimitExceeded(detail: string): ApiError {
+  return new ApiError({
+    status: 429,
+    code: "upload_staging_limit_exceeded",
+    title: "Upload Staging Limit Exceeded",
+    detail,
+  });
+}
+
 export function internalError(): ApiError {
   return new ApiError({
     status: 500,
