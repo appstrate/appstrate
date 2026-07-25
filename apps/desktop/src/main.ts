@@ -121,6 +121,7 @@ import {
 import { start as startBridge, matchesAuthorizedUri, type BridgeClient } from "./bridge/client.ts";
 import { installDownloadInterceptor } from "./bridge/downloads.ts";
 import { createTabManager, type TabManager } from "./tabs.ts";
+import { clearEphemeralProfile, purgeStaleAgentProfiles } from "./profiles.ts";
 import {
   calculateDesktopLayout,
   toggleBrowserFocus,
@@ -349,6 +350,12 @@ function createMainWindow(): BaseWindow {
             webContents.close();
           } catch {
             // already gone
+          }
+          // Last tab of a run-scoped profile: wipe it, so `isolated`
+          // leaves nothing behind. Persistent profiles are kept on
+          // purpose and aged out at startup instead.
+          if (!tabManager?.usesPartition(partition)) {
+            void clearEphemeralProfile(partition, _debugLog);
           }
         },
       };
@@ -933,6 +940,10 @@ app.whenReady().then(async () => {
   app.dock?.setIcon(nativeImage.createFromPath(resolveAssetPath("icon.png")));
   registerNavIpc();
   refreshTray();
+  // Age out profiles of agents nobody has run in a month. Runs BEFORE
+  // any tab opens: a profile a live view is bound to must never be
+  // deleted under it.
+  await purgeStaleAgentProfiles(userDataPath, _debugLog).catch(() => []);
   await bootstrap();
 });
 

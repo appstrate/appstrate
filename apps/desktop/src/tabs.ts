@@ -110,6 +110,8 @@ export interface TabManager {
   require(tabId: string, opts?: { runId?: string; allowPaused?: boolean }): TabRecord;
   get(tabId: string): TabRecord | undefined;
   byWebContents(wc: WebContents): TabRecord | undefined;
+  /** Is any open tab still bound to this profile? */
+  usesPartition(partition: string): boolean;
   list(): TabSummary[];
   activate(tabId: string): void;
   activeTabId(): string | null;
@@ -218,6 +220,12 @@ export function createTabManager(host: TabHost): TabManager {
         if (tab.webContents === wc) return tab;
       }
       return undefined;
+    },
+    usesPartition: (partition) => {
+      for (const tab of tabs.values()) {
+        if (tab.partition === partition) return true;
+      }
+      return false;
     },
     list: () =>
       order.flatMap((tabId): TabSummary[] => {

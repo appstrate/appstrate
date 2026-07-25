@@ -98,12 +98,18 @@ export async function navigate(
   // probe for automation signals, so no debugger may be attached here.
   // Electron's own load events give the same `loaded` semantics.
   const timeoutMs = Math.min(Math.max(p.timeoutMs ?? 10_000, 500), 60_000);
+  // A fresh tab sits on `about:blank`, and its load event can land while
+  // we are already waiting for the real one. Resolving on it would tell
+  // the agent the page is ready before the first byte of the target
+  // arrived — its next click or evaluate then hits an empty document.
+  const ignoreBlank = p.url !== "about:blank";
   const loaded = new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => {
       cleanup();
       resolve(false);
     }, timeoutMs);
     const onLoad = (): void => {
+      if (ignoreBlank && wc.getURL() === "about:blank") return;
       cleanup();
       resolve(true);
     };
