@@ -150,8 +150,8 @@ export interface AppstrateModule {
   betterAuthPlugins?(): unknown[];
 
   /**
-   * Named hooks. Each hook name has ONE dispatch mode, fixed by the contract
-   * and enumerated in {@link HOOK_DISPATCH_MODES}:
+   * Named hooks. Each hook name has ONE dispatch mode, fixed by which half of
+   * the contract declares it:
    *
    *   - {@link FirstMatchHooks} — only the first module providing the hook is
    *     called; its answer is authoritative.
@@ -432,7 +432,9 @@ export interface FirstMatchHooks {
    *
    * First-match-wins is deliberate: the admission answer is a single verdict
    * (`UsageRejection | null`) the caller turns into one HTTP status. Two modules
-   * answering would need a merge rule the contract does not define.
+   * answering would need a merge rule the contract does not define. Core cannot
+   * host the decision itself — the policy lives in the metering module's own
+   * database.
    */
   beforeUsage: (params: BeforeUsageParams) => Promise<UsageRejection | null>;
 }
@@ -453,7 +455,9 @@ export interface BroadcastHooks {
    *
    * Broadcast, not first-match-wins: unrelated modules — e.g. a metering
    * module's free-tier gate + OIDC's per-client signup policy — must both get
-   * to refuse. Any thrown error aborts the signup.
+   * to refuse. Any thrown error aborts the signup. It is a hook rather than an
+   * event because Better Auth creates the user BELOW the module layer, so
+   * `packages/db` cannot import a module to ask.
    */
   beforeSignup: (email: string, ctx?: BeforeSignupContext) => Promise<void>;
   /**
@@ -475,34 +479,13 @@ export interface BroadcastHooks {
  */
 export interface ModuleHooks extends FirstMatchHooks, BroadcastHooks {}
 
-/** How the platform dispatches a hook — see {@link HOOK_DISPATCH_MODES}. */
-export type HookDispatchMode = "first-match" | "broadcast";
-
-/**
- * Dispatch mode of every hook name — the runtime projection of the
- * {@link FirstMatchHooks} / {@link BroadcastHooks} split.
- *
- * Before this table the mode was a property of the CALL SITE alone, invisible
- * to the type system: `beforeSignup` is documented as a gate every module
- * participates in, yet nothing stopped a future `callHook("beforeSignup", …)`
- * from silently disabling every signup gate but the first — a security control
- * failing open with no test, no type error and no log. The symmetric mistake,
- * `callAllHooks("beforeUsage", …)`, would discard every rejection.
- *
- * `satisfies Record<keyof ModuleHooks, …>` makes the table exhaustive: adding
- * a hook to either interface without classifying it here fails `tsc`. The
- * platform's dispatchers additionally assert against it at runtime, so an
- * untyped caller (a `as never` cast, plain JS) cannot bypass the split either.
- */
-export const HOOK_DISPATCH_MODES = {
-  beforeUsage: "first-match",
-  beforeSignup: "broadcast",
-  afterSignup: "broadcast",
-} as const satisfies Record<keyof ModuleHooks, HookDispatchMode>;
-
 /** Known events and their signatures. Handlers may be sync or async. */
 export interface ModuleEvents {
-  /** Run status changed — broadcast on every run lifecycle transition. */
+  /**
+   * Run status changed — broadcast on every run lifecycle transition. The run
+   * pipeline cannot import a module, and core must not know who reacts
+   * (webhooks today, an analytics or notification module tomorrow).
+   */
   onRunStatusChange: (params: RunStatusChangeParams) => void | Promise<void>;
   /**
    * Run kickoff was blocked because one or more integration connections were
@@ -515,7 +498,10 @@ export interface ModuleEvents {
   onRunConnectionMissing: (params: RunConnectionMissingParams) => void | Promise<void>;
   /** Org created — broadcast after a new organization is created. */
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
-  /** Org deleted — broadcast before an organization is deleted. */
+  /**
+   * Org deleted — broadcast BEFORE an organization is deleted, and awaited
+   * ahead of the cascade so a listener can still read the org's rows.
+   */
   onOrgDelete: (orgId: string) => void | Promise<void>;
 }
 
@@ -1065,9 +1051,11 @@ export interface ModuleInitContext {
 //
 // Deliberately minimal: a capability lands here ONLY when a real consumer
 // needs it. `scripts/verify-module-contract.ts` enforces that mechanically —
-// every member below carries a ledger entry with a written justification, and
-// a member no module consumes fails the check as dead surface, exactly like an
-// `AppstrateModule` member would. The previous broad surface (orchestrator /
+// every member below must carry a ledger entry naming its consumers (adding one
+// without an entry fails `tsc`), and a member no module consumes fails the check
+// as dead surface, exactly like an `AppstrateModule` member would. Each member's
+// own JSDoc states why the consumer cannot obtain the capability any other way.
+// The previous broad surface (orchestrator /
 // pubsub / realtime / inline / packages / models / applications / run CRUD)
 // mirrored an in-process module that has since been removed — it carried zero
 // live consumers, so it was dropped rather than left as speculative API.
@@ -1118,7 +1106,11 @@ export interface LlmUsageLedgerRow {
 }
 
 export interface PlatformServices {
-  /** Structured JSON logger (pino). */
+  /**
+   * Structured JSON logger — the platform's OWN pino instance, so module output
+   * lands in one stream with one format. A module importing `apps/api`'s logger
+   * would couple itself to the app.
+   */
   logger: Logger;
   /**
    * HTTP middleware factories for module routes.

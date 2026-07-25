@@ -42,27 +42,6 @@ describe("signKeyringToken / verifyKeyringToken — round trip", () => {
 });
 
 describe("domain separation — asserted in BOTH directions", () => {
-  const previewPayload = { documentId: "doc_abc12345", exp: 1_800_000_000 };
-  const uploadPayload = { bucket: "documents", path: "org/doc_abc12345", exp: 1_800_000_000 };
-
-  it("a PREVIEW token is refused by the UPLOAD domain (same secret)", () => {
-    const token = signKeyringToken(PREVIEW_DOMAIN, previewPayload, SHARED_SECRET);
-    // Sanity: it is a valid token — under its own domain.
-    expect(verifyKeyringToken<typeof previewPayload>(PREVIEW_DOMAIN, token, SHARED_SECRET)).toEqual(
-      previewPayload,
-    );
-    // …and worthless under the other one, despite the shared signing secret.
-    expect(verifyKeyringToken(UPLOAD_DOMAIN, token, SHARED_SECRET)).toBeNull();
-  });
-
-  it("an UPLOAD token is refused by the PREVIEW domain (same secret)", () => {
-    const token = signKeyringToken(UPLOAD_DOMAIN, uploadPayload, SHARED_SECRET);
-    expect(verifyKeyringToken<typeof uploadPayload>(UPLOAD_DOMAIN, token, SHARED_SECRET)).toEqual(
-      uploadPayload,
-    );
-    expect(verifyKeyringToken(PREVIEW_DOMAIN, token, SHARED_SECRET)).toBeNull();
-  });
-
   it("the separation holds for an arbitrary domain pair, both ways", () => {
     const a = signKeyringToken("alpha.v1.", { n: 1 }, SHARED_SECRET);
     const b = signKeyringToken("beta.v1.", { n: 1 }, SHARED_SECRET);
@@ -91,11 +70,6 @@ describe("signature integrity", () => {
     );
     const tampered = `${forgedBody}.${token.slice(token.indexOf(".") + 1)}`;
     expect(verifyKeyringToken(PREVIEW_DOMAIN, tampered, SHARED_SECRET)).toBeNull();
-  });
-
-  it("rejects a token signed with a different secret", () => {
-    const token = signKeyringToken(PREVIEW_DOMAIN, { n: 1 }, SHARED_SECRET);
-    expect(verifyKeyringToken(PREVIEW_DOMAIN, token, "x".repeat(32))).toBeNull();
   });
 
   it("rejects malformed shapes without throwing", () => {

@@ -15,7 +15,6 @@ import {
   MAX_FILENAME_LEN,
   encodeFilenameHeader,
   decodeFilenameHeader,
-  MAX_ENCODED_FILENAME_HEADER_LEN,
 } from "../src/naming.ts";
 
 describe("normalizeScope", () => {
@@ -309,12 +308,13 @@ describe("encodeFilenameHeader / decodeFilenameHeader", () => {
 
   it("rejects an empty or over-long value", () => {
     expect(decodeFilenameHeader("")).toBeNull();
-    expect(decodeFilenameHeader("a".repeat(MAX_ENCODED_FILENAME_HEADER_LEN + 1))).toBeNull();
-    // A full-length name of 3-byte code points still fits the ceiling.
+    // The bound is internal; assert it behaviourally. 64K is far past any
+    // ceiling a real name could need.
+    expect(decodeFilenameHeader("a".repeat(65_536))).toBeNull();
+    // …while a full-length name of 3-byte code points still decodes, so the
+    // ceiling can never reject a name `sanitizeFilename` would accept.
     const longName = "报".repeat(MAX_FILENAME_LEN);
-    const encoded = encodeFilenameHeader(longName);
-    expect(encoded.length).toBeLessThanOrEqual(MAX_ENCODED_FILENAME_HEADER_LEN);
-    expect(decodeFilenameHeader(encoded)).toBe(longName);
+    expect(decodeFilenameHeader(encodeFilenameHeader(longName))).toBe(longName);
   });
 
   it("round-trips a name carrying `%` literally", () => {

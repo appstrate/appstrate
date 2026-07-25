@@ -166,7 +166,7 @@ export function sanitizeFilename(name: string): string {
  * 3-byte code points percent-encodes to 255 * 3 * 3 = 2295 chars; 4096 leaves
  * headroom for 4-byte code points while keeping the decode bounded.
  */
-export const MAX_ENCODED_FILENAME_HEADER_LEN = 4096;
+const MAX_ENCODED_FILENAME_HEADER_LEN = 4096;
 
 /**
  * The exact alphabet `encodeURIComponent` can emit: the unreserved characters
@@ -177,23 +177,12 @@ export const MAX_ENCODED_FILENAME_HEADER_LEN = 4096;
 const ENCODED_FILENAME_RE = /^[A-Za-z0-9\-_.!~*'()%]+$/;
 
 /**
- * Encode a filename for transport in an HTTP header value.
- *
- * HTTP field values are ISO-8859-1 by spec, so a non-ASCII name sent raw is
- * either REFUSED outright by the sender (Bun's `Headers` throws
- * `has invalid value` on a CJK filename, and inside a `fetch` try/catch that
- * throw is indistinguishable from a retryable network fault) or silently
- * mojibaked (a French accented name written UTF-8 and read back Latin-1 becomes
- * the value that is then stored, displayed, and served in
- * `Content-Disposition`).
- *
- * Percent-encoding (`encodeURIComponent`) is the chosen wire form: its output
- * always sits inside {@link ENCODED_FILENAME_RE}, so it is a valid field value
- * for ANY Unicode name; the inverse is a single standard call; it round-trips
- * byte-for-byte; and a plain ASCII name comes out unchanged, so logs and
- * captured requests stay readable. RFC 5987's `filename*=UTF-8''<pct-encoded>`
- * carries the same payload but adds an ext-value grammar that only pays off on
- * `Content-Disposition`, where a browser is the peer; here both ends are ours.
+ * Encode a filename for transport in an HTTP header value. HTTP field values
+ * are ISO-8859-1 by spec, so a non-ASCII name sent raw is either REFUSED by the
+ * sender (Bun's `Headers` throws on a CJK filename) or silently mojibaked (an
+ * accented name written UTF-8, read back Latin-1). Percent-encoding always
+ * lands inside {@link ENCODED_FILENAME_RE}, round-trips byte-for-byte, and
+ * leaves a plain ASCII name unchanged so logs stay readable.
  */
 export function encodeFilenameHeader(name: string): string {
   return encodeURIComponent(name);

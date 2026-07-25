@@ -208,9 +208,8 @@ Full design: `docs/architecture/OBSERVABILITY.md`.
 
 A hook's dispatch mode is **fixed by the contract, per hook name** — it is not a
 property of the call site. `packages/core/src/module.ts` splits the map in two
-and `HOOK_DISPATCH_MODES` records the mode of every name; the platform's two
-dispatchers accept only their own half (and assert the table at runtime, for
-callers that opted out of the types).
+(`FirstMatchHooks` / `BroadcastHooks`); the platform's two dispatchers are typed
+to accept only their own half, so the wrong-mode call does not compile.
 
 - **First-match-wins hooks** (`callHook`, `FirstMatchHooks`): `beforeUsage`.
   Only the first module providing it is called; its answer is authoritative.
@@ -230,8 +229,8 @@ callers that opted out of the types).
 
 Names are defined in `packages/core/src/module.ts` (`FirstMatchHooks` /
 `BroadcastHooks` / `ModuleHooks`, `ModuleEvents`). To add a new hook or event,
-update that file first — including its `HOOK_DISPATCH_MODES` entry and its
-`scripts/verify-module-contract.ts` ledger entry — so both platform and modules
+update that file first — including its `scripts/verify-module-contract.ts`
+ledger entry — so both platform and modules
 see the same contract. A hook or event no module implements fails that check as
 dead surface.
 

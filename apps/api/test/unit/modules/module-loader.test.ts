@@ -24,7 +24,6 @@ import type {
   ModuleInitContext,
   AuthStrategy,
 } from "@appstrate/core/module";
-import { HOOK_DISPATCH_MODES } from "@appstrate/core/module";
 import type { AppConfig } from "@appstrate/shared-types";
 
 // The fictitious resources these tests contribute. `ModulePermissionContribution`
@@ -267,67 +266,13 @@ describe("module-loader", () => {
   });
 
   // ---------------------------------------------------------------------
-  // Dispatch-mode integrity.
-  //
-  // A hook's dispatch mode used to be a property of the CALL SITE alone:
-  // `beforeSignup` is a gate EVERY module must get to veto, but nothing
-  // stopped a `callHook("beforeSignup", …)` from silently skipping every
-  // module after the first — a security control failing open with no error.
-  // The types now reject that; these tests pin the runtime half, which is
-  // what an untyped caller (a cast, plain JS) would hit.
+  // Broadcast dispatch. `beforeSignup` is a gate EVERY module must get to
+  // veto — first-match-wins here would silently skip every module after the
+  // first, a security control failing open with no error. The `callHook` /
+  // `callAllHooks` signatures make that call unrepresentable; this pins the
+  // behaviour of the broadcast dispatcher itself.
   // ---------------------------------------------------------------------
   describe("hook dispatch mode", () => {
-    // Erase the name/arg typing exactly the way a JS caller or a stale,
-    // un-recompiled call site would — the signatures already reject these
-    // calls, so this is the only way to reach the runtime guard.
-    type UntypedDispatch = (name: string, ...args: unknown[]) => Promise<unknown>;
-    const untypedCallHook = callHook as unknown as UntypedDispatch;
-    const untypedCallAllHooks = callAllHooks as unknown as UntypedDispatch;
-
-    it("classifies every hook exactly once, matching its contract half", () => {
-      expect(HOOK_DISPATCH_MODES).toEqual({
-        beforeUsage: "first-match",
-        beforeSignup: "broadcast",
-        afterSignup: "broadcast",
-      });
-    });
-
-    it("callHook REFUSES a broadcast hook instead of silently skipping modules", async () => {
-      const first = mock(async () => {});
-      const second = mock(async () => {});
-      await loadModulesFromInstances(
-        [
-          mockModule("gate-a", { hooks: { beforeSignup: first } }),
-          mockModule("gate-b", { hooks: { beforeSignup: second } }),
-        ],
-        mockCtx(),
-      );
-
-      await expect(untypedCallHook("beforeSignup", "user@example.com")).rejects.toThrow(
-        /declared "broadcast".*dispatched as "first-match"/s,
-      );
-      // The load-bearing assertion: the second gate was never bypassed,
-      // because nothing ran at all.
-      expect(first).toHaveBeenCalledTimes(0);
-      expect(second).toHaveBeenCalledTimes(0);
-    });
-
-    it("callAllHooks REFUSES a first-match hook instead of discarding rejections", async () => {
-      await loadModulesFromInstances(
-        [mockModule("gate", { hooks: { beforeUsage: async () => null } })],
-        mockCtx(),
-      );
-
-      await expect(
-        untypedCallAllHooks("beforeUsage", {
-          orgId: "o",
-          context: "run",
-          packageId: "a",
-          runningCount: 1,
-        }),
-      ).rejects.toThrow(/declared "first-match".*dispatched as "broadcast"/s);
-    });
-
     it("callAllHooks runs EVERY module's broadcast gate", async () => {
       const calls: string[] = [];
       await loadModulesFromInstances(

@@ -47,8 +47,7 @@ opts?)` returns a browser-usable GET URL (S3 presign with
   sanitizes `X-Document-Name` into `documents.name`, which is part of the
   `(run_id, sha256, name)` dedup identity, and the agent container has to
   PREDICT that stored name): `MAX_FILENAME_LEN`, `sanitizeFilename()`,
-  `MAX_ENCODED_FILENAME_HEADER_LEN`, `encodeFilenameHeader()`,
-  `decodeFilenameHeader()`.
+  `encodeFilenameHeader()`, `decodeFilenameHeader()`.
 
 - **`@appstrate/core/api-errors`** — `storageLimitExceeded()`,
   `documentCountExceeded()`, `checksumMismatch()`, `uploadStagingLimitExceeded()`.
@@ -91,20 +90,19 @@ opts?)` returns a browser-usable GET URL (S3 presign with
   org's document-storage byte ceiling, enforced by the platform inside its own
   document-write transaction.
 
-- **`@appstrate/core/module`** — `FirstMatchHooks` / `BroadcastHooks` /
-  `HOOK_DISPATCH_MODES` / `HookDispatchMode` (see Changed).
+- **`@appstrate/core/module`** — `FirstMatchHooks` / `BroadcastHooks` (see
+  Changed).
 
 ### Changed (BREAKING)
 
 - **`ModuleHooks` is split by dispatch mode.** `ModuleHooks` is now
-  `FirstMatchHooks & BroadcastHooks`, and the new `HOOK_DISPATCH_MODES` table
-  (`satisfies Record<keyof ModuleHooks, HookDispatchMode>`) records the mode of
-  every hook name. Modules are unaffected — `hooks?: Partial<ModuleHooks>` is
-  unchanged — but the platform's dispatchers now accept only their own half.
-  Previously the mode was a property of the CALL SITE alone: `beforeSignup` is
-  broadcast to every module, yet nothing in the types stopped a future
-  `callHook("beforeSignup", …)` from silently skipping every signup gate but the
-  first, nor a `callAllHooks("beforeUsage", …)` from discarding every rejection.
+  `FirstMatchHooks & BroadcastHooks`. Modules are unaffected (the declaration
+  site, `hooks`, is still `Partial<ModuleHooks>`) but the platform's dispatchers
+  now accept only their own half. Previously the mode was a property of the CALL
+  SITE alone: `beforeSignup` is broadcast to every module, yet nothing in the
+  types stopped a future `callHook("beforeSignup", …)` from silently skipping
+  every signup gate but the first, nor a `callAllHooks("beforeUsage", …)` from
+  discarding every rejection.
 
 - **`ModulePermissionContribution` is now typed against `ModuleResources`.**
   It distributes over the augmentation, so `resource` pins the legal `actions`
@@ -162,16 +160,12 @@ RunStatusChangeParams) => Promise<Record<string, unknown> | null>`, whose
   `PlatformServices.usage.list` / `usage.settledFrontier` sweep it by serial-`id`
   cursor, which is what a consumer that must not miss spend had to use anyway.
 
-### Fixed
+### Changed (documentation)
 
-- **`PlatformServices.usage.list` — documented row invisibility.** A remote run
-  metered through the inference proxy also carries the runner's cumulative
-  MIRROR row (`source` `"runner"`, `credentialSource` null); the service excludes
-  it on every read so the spend is not double-counted, and a consumer must NOT
-  re-apply the rule. The consequence is now stated: returned ids are not
-  contiguous, a batch is "the next `limit` VISIBLE rows after `afterId`", and an
-  empty batch therefore always means "caught up". `usage.settledFrontier()` is
-  computed over the same visible set.
+- **`PlatformServices.usage.list` — row invisibility is now documented.** The
+  service hides the runner's cumulative mirror row of a proxy-metered run, so
+  returned ids are not contiguous and a consumer must not re-apply the rule.
+  Behaviour unchanged; see the member's JSDoc for the full cursor contract.
 
 - **License neutrality in the published contract.** The Apache-2.0 module
   contract named the proprietary `cloud` module six times in JSDoc and used

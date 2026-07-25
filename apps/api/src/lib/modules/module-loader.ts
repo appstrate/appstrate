@@ -13,7 +13,6 @@ import type {
   AuthStrategy,
   ModulePermissionContribution,
 } from "@appstrate/core/module";
-import { HOOK_DISPATCH_MODES, type HookDispatchMode } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
   CORE_RESOURCE_NAMES,
@@ -507,30 +506,6 @@ type AnyHandler = (...args: any[]) => any;
 type HookResult<K extends keyof ModuleHooks> = Awaited<ReturnType<ModuleHooks[K]>>;
 
 /**
- * Refuse to dispatch a hook in a mode other than the one the contract pins for
- * it (`HOOK_DISPATCH_MODES` in `@appstrate/core/module`).
- *
- * The type parameters below already make the mistake unrepresentable in typed
- * code. This is the belt for the braces: a `as never` cast, a JS caller, or a
- * hook renamed on one side only would otherwise turn a broadcast GATE into
- * first-match-wins — every signup gate but the first silently skipped, failing
- * open with no error anywhere. Throwing is correct: both dispatchers back
- * security-relevant decisions, so an unclassifiable call must abort, never
- * proceed in the wrong mode.
- */
-function assertDispatchMode(name: keyof ModuleHooks, expected: HookDispatchMode): void {
-  const declared: HookDispatchMode | undefined = HOOK_DISPATCH_MODES[name];
-  if (declared !== expected) {
-    throw new Error(
-      `Hook "${name}" is declared "${declared ?? "unknown"}" in HOOK_DISPATCH_MODES but was ` +
-        `dispatched as "${expected}". Use ${
-          expected === "first-match" ? "callAllHooks()" : "callHook()"
-        } instead, or reclassify the hook in @appstrate/core/module.`,
-    );
-  }
-}
-
-/**
  * Call a FIRST-MATCH-WINS hook ({@link FirstMatchHooks}) — returns the result
  * from the FIRST module that provides it, or `undefined` if no module does.
  *
@@ -552,7 +527,6 @@ export async function callHook<K extends keyof FirstMatchHooks>(
   name: K,
   ...args: Parameters<ModuleHooks[K]>
 ): Promise<HookResult<K> | undefined> {
-  assertDispatchMode(name, "first-match");
   for (const mod of _modules.values()) {
     const hook = (mod.hooks as Record<string, AnyHandler> | undefined)?.[name];
     if (hook) {
@@ -578,7 +552,6 @@ export async function callAllHooks<K extends keyof BroadcastHooks>(
   name: K,
   ...args: Parameters<ModuleHooks[K]>
 ): Promise<void> {
-  assertDispatchMode(name, "broadcast");
   for (const mod of _modules.values()) {
     const hook = (mod.hooks as Record<string, AnyHandler> | undefined)?.[name];
     if (hook) await hook(...args);
