@@ -80,7 +80,14 @@ les téléchargements restent en mémoire dans le processus API.
   tant que le premier travaille sur ce site.
 - Une reprise en main humaine met l'onglet en pause: les commandes agent
   reçoivent 409 jusqu'à ce que la personne rende la main. Une fermeture
-  donne 410.
+  donne 410. La détection couvre la frappe clavier, le clic (via un
+  preload passif) et le pilotage depuis la barre locale.
+- `browser.request_human` inverse le modèle: l'agent s'arrête de
+  lui-même et sollicite la personne. L'onglet est garé, le message
+  s'affiche dans un bandeau natif, une notification système est émise, et
+  l'appel de l'agent reste suspendu côté plateforme jusqu'au « Rendre la
+  main » ou à l'expiration. Un dépassement n'est pas une erreur: l'onglet
+  reste garé et le run peut redemander.
 - Chaque onglet porte ses propres `authorized_uris`, figées à son
   ouverture. Le desktop vérifie la page ou la cible et bloque les
   navigations principales hors périmètre. Une popup hérite du
@@ -125,10 +132,11 @@ Les octets passent par le storage en HTTPS, jamais par le WebSocket.
 - **`session: "user"` reste un prêt de session.** L'agent hérite des
   connexions de la personne et lui en laisse. C'est désormais une ligne
   de manifeste visible et refusable, plus le comportement par défaut.
-- La reprise en main automatique se déclenche à la frappe clavier et au
-  pilotage depuis la barre locale, pas au simple clic souris (Electron
-  n'expose pas d'événement main-process équivalent). Le bouton de pause
-  de la barre d'onglets couvre le reste.
+- La reprise en main non sollicitée ne se déclenche pas pendant qu'une
+  commande est en vol: les frappes et clics de l'agent passent par les
+  mêmes événements que les tiens. La fenêtre de collision se réduit à la
+  durée d'une commande, et `browser.request_human` la supprime
+  entièrement quand c'est l'agent qui sollicite.
 - Multi-réplique toujours hors scope: registre et baux sont en mémoire.
 
 ## Nettoyage de fin de run

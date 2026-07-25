@@ -60,6 +60,11 @@ as credential capture, download status and batch execution.
   are serialized per origin — they would otherwise read each other's cookies,
   `localStorage`, `BroadcastChannel` and `SharedWorker` on that site.
 - A user takeover pauses the tab (409 until handed back); closing it gives 410.
+  Typing, clicking (passive preload) and the local chrome all count as a takeover.
+- `browser.request_human {message}` inverts the flow: the agent stops by itself,
+  the tab is parked with a native banner + system notification, and the agent's
+  call stays suspended until the person hands it back. A timeout leaves the tab
+  parked so the run can ask again.
 - Every tab carries its own URI boundary, frozen when it was opened. The
   desktop checks the current page or target and blocks top-level navigation
   outside it. A popup inherits its opener's owner and boundary.
