@@ -38,7 +38,14 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { documents, documentLinks, organizations, chatSessions } from "@appstrate/db/schema";
+import {
+  documents,
+  documentLinks,
+  organizations,
+  chatSessions,
+  endUsers,
+  runs,
+} from "@appstrate/db/schema";
 import type { DocumentPurpose } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
@@ -1437,63 +1444,98 @@ export async function listDocumentsForActor(
 // ---------------------------------------------------------------------------
 
 /**
- * Container-teardown for a deleted run set or chat session: decide, per contained
- * document, whether to DETACH it (a live consumer outside the deleted set still
- * references it — the "durable & chainable" promise) or DELETE it (nothing else
- * needs it). Replaces the blind FK cascade for these two user-driven delete paths
- * so a consumed doc survives its producer's deletion, and an unconsumed one frees
- * its bytes + storage object.
+ * Which set of documents a teardown owns. Every parent whose FK would otherwise
+ * cascade-destroy `documents` rows goes through this one primitive.
+ */
+export type DocumentContainerSelector =
+  { runIds: string[] } | { chatSessionId: string } | { endUserId: string };
+
+/**
+ * Container-teardown for a deleted run set, chat session, or end-user: decide,
+ * per contained document, whether to DETACH it (a live consumer outside the
+ * deleted set still references it — the "durable & chainable" promise) or DELETE
+ * it (nothing else needs it). Replaces the blind FK cascade for these
+ * user-driven delete paths so a consumed doc survives its producer's deletion,
+ * and an unconsumed one frees its bytes + storage object.
  *
  *  - PROTECTED (run variant): a `document_links` row whose `consumer_run_id` is
  *    NOT in the deleted set — a live run still consumes it → detach (`run_id =
  *    NULL`); bytes, counter, and id untouched.
  *  - PROTECTED (chat variant): ANY link at all — the consumer is always a run,
  *    never the chat session itself → detach (`chat_session_id = NULL`).
- *  - UNPROTECTED → delete the row + decrement the org counter (one transaction),
- *    then best-effort delete the storage object after commit (same contract as
+ *  - PROTECTED (end-user variant): ANY link at all — runs SURVIVE an end-user
+ *    deletion (`runs.end_user_id` is SET NULL), so every link is by definition
+ *    a live consumer → detach (`end_user_id = NULL`, dropping only the
+ *    attribution the deleted principal carried).
+ *  - UNPROTECTED → delete the row, decrement the org counter, and enqueue the
+ *    storage purge — all in the same transaction (same contract as
  *    {@link deleteDocument}).
  *
- * The select + detach + delete + counter all run in ONE transaction. The caller
- * MUST invoke this BEFORE deleting the runs/session, else the FK cascade destroys
- * the `documents` rows (and their links) before this can consult them.
+ * LOCK ORDER — org row FIRST, then the documents. Every document WRITE
+ * (`createDocumentFromStream`) locks the org row before inserting, and every
+ * parent cascade (organization / application / end-user delete) locks the org
+ * before enumerating. A teardown that locked documents first and only touched
+ * `organizations` later through the counter update would form the other half of
+ * an ABBA cycle with those cascades. Taking the org lock here also serializes
+ * this teardown against a concurrent publish: either we see the new document
+ * (and delete it + enqueue its job), or the publish's insert fails the FK
+ * against the by-then-deleted parent and drops its own object.
+ *
+ * The caller MUST invoke this BEFORE deleting the runs/session/end-user, else
+ * the FK cascade destroys the `documents` rows (and their links) first.
  */
 export async function detachOrDeleteContainedDocuments(
-  container: { runIds: string[] } | { chatSessionId: string },
+  container: DocumentContainerSelector,
   tx?: DbOrTx,
 ): Promise<void> {
   const runIds = "runIds" in container ? container.runIds : null;
   // An empty run set contains nothing — skip the transaction entirely.
   if (runIds && runIds.length === 0) return;
-  const chatSessionId = runIds ? null : (container as { chatSessionId: string }).chatSessionId;
+  const chatSessionId = "chatSessionId" in container ? container.chatSessionId : null;
+  const endUserId = "endUserId" in container ? container.endUserId : null;
 
   const containedWhere = runIds
     ? inArray(documents.runId, runIds)
-    : eq(documents.chatSessionId, chatSessionId!);
+    : chatSessionId
+      ? eq(documents.chatSessionId, chatSessionId)
+      : eq(documents.endUserId, endUserId!);
 
-  const teardown = async (exec: DbOrTx): Promise<number> => {
-    // Chat-session teardown: lock the org row FOR UPDATE first — the SAME
-    // serialization point the attachment-materialize path
-    // (`createDocumentFromStream`) takes. Without it a composer attachment
-    // materializing concurrently could insert a new session document AFTER this
-    // enumeration; the caller's `chat_sessions` delete would then cascade that
-    // row with no storage-deletion outbox job, orphaning its object forever.
-    // Holding the org lock forces the two to serialize: either we see the new
-    // document (and delete it + enqueue its job), or the materialize's insert
-    // fails the FK against the by-then-deleted session and drops its own object.
+  /** The org(s) owning this container — locked before anything else is read. */
+  const containerOrgIds = async (exec: DbOrTx): Promise<string[]> => {
+    if (runIds) {
+      const rows = await exec
+        .selectDistinct({ orgId: runs.orgId })
+        .from(runs)
+        .where(inArray(runs.id, runIds));
+      return rows.map((r) => r.orgId);
+    }
     if (chatSessionId) {
-      const [session] = await exec
+      const rows = await exec
         .select({ orgId: chatSessions.orgId })
         .from(chatSessions)
         .where(eq(chatSessions.id, chatSessionId))
         .limit(1);
-      if (session) {
-        await exec
-          .select({ id: organizations.id })
-          .from(organizations)
-          .where(eq(organizations.id, session.orgId))
-          .for("update")
-          .limit(1);
-      }
+      return rows.map((r) => r.orgId);
+    }
+    const rows = await exec
+      .select({ orgId: endUsers.orgId })
+      .from(endUsers)
+      .where(eq(endUsers.id, endUserId!))
+      .limit(1);
+    return rows.map((r) => r.orgId);
+  };
+
+  const teardown = async (exec: DbOrTx): Promise<number> => {
+    // Org-first (see the doc comment). Sorted so a multi-org batch always takes
+    // the locks in the same order and two such batches cannot deadlock either.
+    const orgIds = [...new Set(await containerOrgIds(exec))].sort();
+    for (const orgId of orgIds) {
+      await exec
+        .select({ id: organizations.id })
+        .from(organizations)
+        .where(eq(organizations.id, orgId))
+        .for("update")
+        .limit(1);
     }
 
     const contained = await exec
@@ -1526,7 +1568,9 @@ export async function detachOrDeleteContainedDocuments(
     if (detachIds.length > 0) {
       await exec
         .update(documents)
-        .set(runIds ? { runId: null } : { chatSessionId: null })
+        .set(
+          runIds ? { runId: null } : chatSessionId ? { chatSessionId: null } : { endUserId: null },
+        )
         .where(inArray(documents.id, detachIds));
     }
 
@@ -1553,9 +1597,9 @@ export async function detachOrDeleteContainedDocuments(
     return removed.length;
   };
 
-  // Run inside the caller's transaction when supplied (chat-session teardown
-  // shares the tx that deletes the `chat_sessions` row, making the two atomic),
-  // else open our own.
+  // Run inside the caller's transaction when supplied (chat-session and
+  // end-user teardown share the tx that deletes the parent row, making the two
+  // atomic), else open our own.
   const deletedCount = tx ? await teardown(tx) : await db.transaction(teardown);
   recordDocumentDeleted(deletedCount);
 }
@@ -1567,9 +1611,22 @@ export async function detachOrDeleteContainedDocuments(
  * orphaned: a committed delete always leaves a durable, replayable deletion job
  * that the background worker executes. Authorization (owner/admin permission OR
  * creator) is enforced by the caller.
+ *
+ * Org-first lock order (see {@link detachOrDeleteContainedDocuments}): this
+ * transaction ends up writing `organizations` through the counter decrement, so
+ * it must take that row's lock BEFORE the document's — otherwise it holds a
+ * `documents` lock while waiting on an org lock that an org/application cascade
+ * (which locks org → documents) already holds, and Postgres kills one of the two.
  */
 export async function deleteDocument(scope: AppScope, docId: string): Promise<void> {
   await db.transaction(async (tx) => {
+    await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId))
+      .for("update")
+      .limit(1);
+
     const [row] = await tx
       .select({ storageKey: documents.storageKey })
       .from(documents)
@@ -1647,68 +1704,86 @@ export async function clearDocumentExpiry(scope: AppScope, docId: string): Promi
 
 /**
  * Delete unreferenced documents whose retention deadline has passed
- * (`expiresAt < now()`), in batches. Linked documents remain durable until
- * their consumer runs disappear. Rows are locked before links are checked, so
- * run creation and GC cannot race. Database state commits before the
- * best-effort storage purge. Returns the number of rows removed.
+ * (`expiresAt < now()`), in batches, ONE ORG AT A TIME. Linked documents remain
+ * durable until their consumer runs disappear. Returns the number of rows
+ * removed.
+ *
+ * The sweep is org-scoped precisely so it can take the org row's lock BEFORE any
+ * `documents` lock — the same order every writer and every parent cascade uses
+ * (see {@link detachOrDeleteContainedDocuments}). A global batch could not: it
+ * would lock documents across orgs first and only reach `organizations` through
+ * the counter decrement, which is exactly the ABBA cycle that made this
+ * every-15-minutes sweep abort an organization or application deletion.
  */
 export async function cleanupExpiredDocuments(): Promise<number> {
+  // Orgs holding at least one expired document. Read outside any transaction —
+  // it only decides which orgs to visit; each org's set is re-read under its own
+  // lock below.
+  const orgRows = await db
+    .selectDistinct({ orgId: documents.orgId })
+    .from(documents)
+    .where(and(isNotNull(documents.expiresAt), lt(documents.expiresAt, new Date())));
+
   let totalRemoved = 0;
-  while (true) {
-    const removed = await db.transaction(async (tx) => {
-      const expired = await tx
-        .select({ id: documents.id })
-        .from(documents)
-        .where(
-          and(
-            isNotNull(documents.expiresAt),
-            lt(documents.expiresAt, new Date()),
-            notExists(
-              tx
-                .select({ documentId: documentLinks.documentId })
-                .from(documentLinks)
-                .where(eq(documentLinks.documentId, documents.id)),
+  for (const { orgId } of orgRows) {
+    while (true) {
+      const removed = await db.transaction(async (tx) => {
+        await tx
+          .select({ id: organizations.id })
+          .from(organizations)
+          .where(eq(organizations.id, orgId))
+          .for("update")
+          .limit(1);
+
+        const expired = await tx
+          .select({ id: documents.id })
+          .from(documents)
+          .where(
+            and(
+              eq(documents.orgId, orgId),
+              isNotNull(documents.expiresAt),
+              lt(documents.expiresAt, new Date()),
+              notExists(
+                tx
+                  .select({ documentId: documentLinks.documentId })
+                  .from(documentLinks)
+                  .where(eq(documentLinks.documentId, documents.id)),
+              ),
             ),
-          ),
-        )
-        .limit(500)
-        .for("update", { skipLocked: true });
-      if (expired.length === 0) return [];
+          )
+          .limit(500)
+          .for("update", { skipLocked: true });
+        if (expired.length === 0) return [];
 
-      const ids = expired.map((r) => r.id);
-      const linked = await tx
-        .selectDistinct({ documentId: documentLinks.documentId })
-        .from(documentLinks)
-        .where(inArray(documentLinks.documentId, ids));
-      const linkedIds = new Set(linked.map((row) => row.documentId));
-      const removableIds = ids.filter((id) => !linkedIds.has(id));
-      if (removableIds.length === 0) return [];
+        const ids = expired.map((r) => r.id);
+        const linked = await tx
+          .selectDistinct({ documentId: documentLinks.documentId })
+          .from(documentLinks)
+          .where(inArray(documentLinks.documentId, ids));
+        const linkedIds = new Set(linked.map((row) => row.documentId));
+        const removableIds = ids.filter((id) => !linkedIds.has(id));
+        if (removableIds.length === 0) return [];
 
-      const removed = await tx
-        .delete(documents)
-        .where(inArray(documents.id, removableIds))
-        .returning({
-          orgId: documents.orgId,
-          size: documents.size,
-          storageKey: documents.storageKey,
-        });
-      // Fold the removed bytes back per org (a batch may span orgs).
-      const perOrg = new Map<string, number>();
-      for (const r of removed) perOrg.set(r.orgId, (perOrg.get(r.orgId) ?? 0) + r.size);
-      for (const [orgId, bytes] of perOrg) await decrementOrgDocumentBytes(tx, orgId, bytes);
+        const removed = await tx
+          .delete(documents)
+          .where(inArray(documents.id, removableIds))
+          .returning({ size: documents.size, storageKey: documents.storageKey });
+        const bytes = removed.reduce((sum, r) => sum + r.size, 0);
+        if (bytes > 0) await decrementOrgDocumentBytes(tx, orgId, bytes);
 
-      // Transactional outbox: enqueue the storage purge atomically with the row
-      // delete (replaces the old best-effort post-commit delete).
-      const jobs = removed
-        .map((r) => storageKeyToDeletionJob(r.storageKey, "document_expired"))
-        .filter((j): j is StorageDeletionJobInput => j !== null);
-      await enqueueStorageDeletion(tx, jobs);
-      return removed;
-    });
-    if (removed.length === 0) break;
-    recordDocumentDeleted(removed.length);
-    totalRemoved += removed.length;
-    if (removed.length < 500) break;
+        // Transactional outbox: enqueue the storage purge atomically with the row
+        // delete (replaces the old best-effort post-commit delete).
+        const jobs = removed
+          .map((r) => storageKeyToDeletionJob(r.storageKey, "document_expired"))
+          .filter((j): j is StorageDeletionJobInput => j !== null);
+        await enqueueStorageDeletion(tx, jobs);
+        return removed;
+      });
+      if (removed.length === 0) break;
+      recordDocumentDeleted(removed.length);
+      totalRemoved += removed.length;
+      if (removed.length < 500) break;
+    }
   }
   return totalRemoved;
 }

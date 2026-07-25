@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "../../helpers/db.ts";
 import { eq } from "drizzle-orm";
-import { packages, documents } from "@appstrate/db/schema";
+import { packages, documents, runs } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
@@ -182,13 +182,13 @@ describe("listGlobalRuns", () => {
     expect(result.total).toBe(0);
   });
 
-  async function seedOutputDocument(runId: string) {
+  async function seedRunDocument(runId: string, purpose: "agent_output" | "user_upload") {
     const docId = `doc_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
     await db.insert(documents).values({
       id: docId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      purpose: "agent_output",
+      purpose,
       runId,
       storageKey: `documents/${ctx.defaultAppId}/${docId}/out.txt`,
       name: "out.txt",
@@ -196,7 +196,10 @@ describe("listGlobalRuns", () => {
       size: 3,
       sha256: crypto.randomUUID().replace(/-/g, ""),
     });
+    return docId;
   }
+
+  const seedOutputDocument = (runId: string) => seedRunDocument(runId, "agent_output");
 
   it("reports document_counts: input from run.input URIs, output from documents rows", async () => {
     const pkg = await seedPackage({
@@ -231,6 +234,35 @@ describe("listGlobalRuns", () => {
 
     expect(byId[withDocs.id]?.document_counts).toEqual({ input: 2, output: 3 });
     expect(byId[empty.id]?.document_counts).toEqual({ input: 0, output: 0 });
+  });
+
+  it("does not count a materialized INPUT upload as an output document", async () => {
+    // A run triggered with one file input and publishing nothing. The
+    // materialized `user_upload` carries the SAME run_id as any output would, so
+    // an unfiltered count reported it twice — once as input (from the run's
+    // `document://` URI) and once as output.
+    const pkg = await seedPackage({
+      id: `@globalruns/agent-${crypto.randomUUID().slice(0, 8)}`,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
+    const run = await seedRun({
+      packageId: pkg.id,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "success",
+      startedAt: new Date(),
+      input: {},
+    });
+    const docId = await seedRunDocument(run.id, "user_upload");
+    await db
+      .update(runs)
+      .set({ input: { file: `document://${docId}` } })
+      .where(eq(runs.id, run.id));
+
+    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const row = result.data.find((r) => r.id === run.id);
+    expect(row?.document_counts).toEqual({ input: 1, output: 0 });
   });
 
   it("orders by startedAt DESC and paginates", async () => {

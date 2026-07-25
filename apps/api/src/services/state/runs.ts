@@ -29,6 +29,7 @@ import {
   schedules,
   llmUsage,
   notifications,
+  organizations,
   documents,
   documentLinks,
   runStatusValues,
@@ -135,8 +136,15 @@ function enrichedRunSelect(actor: Actor | null) {
     // served by the `idx_documents_run` (run_id-leading) index so the list
     // read stays a single query with no N+1. Coerced to Number in the mapper
     // (postgres.js returns count() as a numeric string).
+    //
+    // MUST filter on `purpose`: a run's materialized INPUT uploads carry the
+    // same `run_id`, so an unfiltered count reported a file-input run that
+    // published nothing as `input: 1, output: 1` — the very same document,
+    // counted twice, straight to the user. Every other count site filters the
+    // same way.
     outputDocumentCount: sql<number>`(
-      select count(*) from ${documents} where ${documents.runId} = ${runs.id}
+      select count(*) from ${documents}
+      where ${documents.runId} = ${runs.id} and ${documents.purpose} = 'agent_output'
     )`,
   };
 }
@@ -1116,35 +1124,65 @@ export async function getRun(scope: AppScope, id: string) {
 }
 
 export async function deletePackageRuns(scope: AppScope, packageId: string): Promise<number> {
-  // Resolve the run ids first so the documents they contain can be
-  // detach-or-deleted BEFORE the runs are removed — the runs' FK cascade would
-  // otherwise destroy `documents` rows (and their `document_links`) a live
-  // consumer still needs, silently amputating a rerun's inputs.
-  const runRows = await db
-    .select({ id: runs.id })
-    .from(runs)
-    .where(
-      scopedWhere(runs, {
-        orgId: scope.orgId,
-        applicationId: scope.applicationId,
-        extra: [eq(runs.packageId, packageId)],
-      }),
-    );
-  if (runRows.length === 0) return 0;
-  const runIds = runRows.map((r) => r.id);
+  // Enumeration, documents teardown and the runs delete are ONE transaction,
+  // opened by locking the org row — the same serialization point every document
+  // write takes (`createDocumentFromStream`) and the same org-first order the
+  // organization / application / end-user cascades use.
+  //
+  // Splitting it (teardown, commit, delete) left a window in which a document
+  // published by a still-live sidecar — or by an at-least-once retry of the
+  // end-of-run publication sweep — landed on a run that had already been
+  // enumerated. The runs delete then cascaded that fresh row away with NO outbox
+  // job (bytes orphaned in the bucket) and NO counter decrement (the org
+  // over-counted until the next daily reconcile). Under the org lock the two
+  // serialize: either the publish commits first and we detach-or-delete it, or
+  // it commits after and its FK insert fails against the deleted run, dropping
+  // its own object.
+  return db.transaction(async (tx) => {
+    await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId))
+      .for("update")
+      .limit(1);
 
-  // Contained-documents teardown in its own transaction, then the runs delete.
-  // Separate statements: a crash between them leaves the docs already handled
-  // (detached or deleted) and the runs still present — the next delete attempt
-  // re-runs both idempotently (re-handling finds nothing left to detach/delete,
-  // the runs delete finishes the job).
-  await detachOrDeleteContainedDocuments({ runIds });
+    // Lock the parent package before enumerating its runs — same guard as the
+    // application / end-user cascades, so a concurrent package delete cannot
+    // interleave with this teardown.
+    await tx
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, packageId))
+      .for("update")
+      .limit(1);
 
-  // Scoped to the SELECTed ids — not the package predicate — so a run created
-  // concurrently after the SELECT is left for the next delete call instead of
-  // being deleted without its documents going through detach-or-delete.
-  const deleted = await db.delete(runs).where(inArray(runs.id, runIds)).returning({ id: runs.id });
-  return deleted.length;
+    const runRows = await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(
+        scopedWhere(runs, {
+          orgId: scope.orgId,
+          applicationId: scope.applicationId,
+          extra: [eq(runs.packageId, packageId)],
+        }),
+      );
+    if (runRows.length === 0) return 0;
+    const runIds = runRows.map((r) => r.id);
+
+    // Documents FIRST: the runs' FK cascade would otherwise destroy `documents`
+    // rows (and their `document_links`) a live consumer still needs, silently
+    // amputating a rerun's inputs.
+    await detachOrDeleteContainedDocuments({ runIds }, tx);
+
+    // Scoped to the SELECTed ids — not the package predicate — so a run created
+    // concurrently after the SELECT is left for the next delete call instead of
+    // being deleted without its documents going through detach-or-delete.
+    const deleted = await tx
+      .delete(runs)
+      .where(inArray(runs.id, runIds))
+      .returning({ id: runs.id });
+    return deleted.length;
+  });
 }
 
 export type RunListPage = ListEnvelope<EnrichedRun> & { total: number };

@@ -86,6 +86,60 @@ function isWithinReuseWindow(consumedAt: Date): boolean {
   return consumedAt.getTime() + consumedRetentionMs() > Date.now();
 }
 
+/**
+ * Grace added to the reuse window before the GC may drop a consumed upload.
+ *
+ * A RE-consume does not touch the row (only the first consume stamps
+ * `consumedAt`), so an in-flight re-consume is invisible to the sweep: locking
+ * the row would not see it either. Without a margin, a rerun that passed the
+ * reuse-window check microseconds before the boundary can have its source object
+ * deleted WHILE it streams — the run then dies on an opaque storage error.
+ *
+ * The margin must therefore cover the longest single consume. A consume streams
+ * at most `DEFAULT_MAX_SIZE` (100 MB) from storage into the run workspace; one
+ * hour is ~3 orders of magnitude above the observed cost of that copy and still
+ * only defers the deletion of already-expired bytes by an hour. Any consume that
+ * was ALLOWED to start (i.e. began before `consumedAt + retention`) is therefore
+ * guaranteed to have finished before the sweep can remove its object.
+ */
+const CONSUME_GRACE_MS = 60 * 60 * 1000;
+
+/**
+ * Durable fallback when an INLINE storage delete fails.
+ *
+ * The three inline deletes in this file (consume-failure rollback, and the
+ * short-body / checksum-mismatch drops in the proxy sink) are deliberately
+ * synchronous: the upload's storage key is derived from its id, so the client's
+ * retry re-PUTs to the SAME key, and both backends create exclusively (O_EXCL /
+ * `If-None-Match: *`). The object must be gone BEFORE the retry — routing the
+ * happy path through the outbox would defer the delete by up to a worker
+ * interval, 409-ing every retry until then, and worse: the worker would then
+ * delete the retry's freshly-written bytes.
+ *
+ * When the inline delete FAILS, though, the leftover object blocks the retry
+ * indefinitely and would only be purged when the upload row itself expires. That
+ * failure — and only that failure — is handed to the outbox: it is a delete
+ * whose target the client cannot recreate until it lands, so the worker's retry
+ * is strictly an improvement and cannot race a re-PUT (a re-PUT can only succeed
+ * after the object is gone, i.e. after the job completed).
+ */
+async function enqueueUploadObjectDeletion(
+  bucket: string,
+  path: string,
+  reason: string,
+): Promise<void> {
+  try {
+    await db.transaction((tx) => enqueueStorageDeletion(tx, { bucket, storageKey: path, reason }));
+  } catch (err) {
+    logger.warn("failed to enqueue upload object deletion", {
+      bucket,
+      path,
+      reason,
+      error: getErrorMessage(err),
+    });
+  }
+}
+
 /** Returned to the client from POST /api/uploads. */
 export interface CreateUploadResponse {
   object: "upload";
@@ -603,11 +657,15 @@ export async function consumeUploadStream(
     // The storage adapter's `deleteFile` is idempotent on ENOENT, so calling
     // it even when there's nothing to delete (missing-binary error path)
     // is safe.
-    await storageDelete(bucket!, path).catch((delErr) => {
+    await storageDelete(bucket!, path).catch(async (delErr) => {
       logger.warn("failed to delete upload storage after consume error", {
         uploadId,
         error: getErrorMessage(delErr),
       });
+      // The object now blocks the client's re-PUT (exclusive create) and would
+      // linger until the row expires — hand it to the outbox so a retrying
+      // worker unblocks the retry. See {@link enqueueUploadObjectDeletion}.
+      await enqueueUploadObjectDeletion(bucket!, path, "upload_consume_rollback");
     });
     // Release the claim so the row can be re-consumed after the client re-uploads.
     // Guarded by `consumedAt = claimedAt` so we only ever release OUR claim —
@@ -719,8 +777,9 @@ export async function writeProxyUploadContent(
     try {
       await storageDelete(bucket, path);
     } catch {
-      // Best-effort: a leftover short object still fails the consume-time
-      // size re-check; GC sweeps it with the expired upload row.
+      // The inline drop failed, so the short object would block the token's
+      // retry (exclusive create) until the row expires — enqueue it.
+      await enqueueUploadObjectDeletion(bucket, path, "upload_short_body");
     }
     throw invalidRequest(`body is ${bytes} bytes but the signed size is ${maxSize}`);
   }
@@ -732,7 +791,9 @@ export async function writeProxyUploadContent(
       try {
         await storageDelete(bucket, path);
       } catch {
-        // Best-effort: a leftover object still fails the consume-time sha check.
+        // Same as the short-body case: a leftover object blocks the retry, so
+        // the failed inline delete becomes a durable outbox job.
+        await enqueueUploadObjectDeletion(bucket, path, "upload_checksum_mismatch");
       }
       throw checksumMismatch("uploaded bytes do not match the declared sha256");
     }
@@ -757,29 +818,35 @@ export async function writeProxyUploadContent(
  * rows and their deletion jobs are removed/inserted in ONE transaction, so a
  * committed row delete can never silently orphan the object. Returns the number
  * of rows removed.
+ *
+ * The consumed branch waits `UPLOAD_RETENTION_HOURS + CONSUME_GRACE_MS` — the
+ * grace is what keeps the sweep from deleting an object out from under a rerun
+ * that started re-consuming just inside the reuse window (a re-consume never
+ * touches the row, so it is invisible to any lock). Selection and deletion are
+ * in the SAME transaction under `FOR UPDATE SKIP LOCKED`, so two sweeps (or a
+ * sweep and a first-consume rollback) never act on the same stale snapshot.
  */
 export async function cleanupExpiredUploads(): Promise<number> {
   let totalRemoved = 0;
   // Drain in batches — a long-running instance may accumulate more than the
   // per-query cap between sweeps.
   while (true) {
-    const now = new Date();
-    const consumedCutoff = new Date(now.getTime() - consumedRetentionMs());
-    const expired = await db
-      .select({ id: uploads.id, storageKey: uploads.storageKey })
-      .from(uploads)
-      .where(
-        or(
-          and(lt(uploads.expiresAt, now), isNull(uploads.consumedAt)),
-          and(isNotNull(uploads.consumedAt), lt(uploads.consumedAt, consumedCutoff)),
-        ),
-      )
-      .limit(500);
+    const removed = await db.transaction(async (tx) => {
+      const now = new Date();
+      const consumedCutoff = new Date(now.getTime() - consumedRetentionMs() - CONSUME_GRACE_MS);
+      const expired = await tx
+        .select({ id: uploads.id, storageKey: uploads.storageKey })
+        .from(uploads)
+        .where(
+          or(
+            and(lt(uploads.expiresAt, now), isNull(uploads.consumedAt)),
+            and(isNotNull(uploads.consumedAt), lt(uploads.consumedAt, consumedCutoff)),
+          ),
+        )
+        .limit(500)
+        .for("update", { skipLocked: true });
+      if (expired.length === 0) return 0;
 
-    if (expired.length === 0) break;
-
-    const ids = expired.map((r) => r.id);
-    await db.transaction(async (tx) => {
       const jobs = expired
         .map((row) => {
           const [bucket, ...rest] = row.storageKey.split("/");
@@ -788,10 +855,18 @@ export async function cleanupExpiredUploads(): Promise<number> {
         })
         .filter((j): j is StorageDeletionJobInput => j !== null);
       await enqueueStorageDeletion(tx, jobs);
-      await tx.delete(uploads).where(inArray(uploads.id, ids));
+      await tx.delete(uploads).where(
+        inArray(
+          uploads.id,
+          expired.map((r) => r.id),
+        ),
+      );
+      return expired.length;
     });
-    totalRemoved += expired.length;
-    if (expired.length < 500) break;
+
+    if (removed === 0) break;
+    totalRemoved += removed;
+    if (removed < 500) break;
   }
   return totalRemoved;
 }

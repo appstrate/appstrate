@@ -58,7 +58,8 @@ import type { RunStatusChangeParams, UsageRecordedParams } from "@appstrate/core
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import { gone } from "@appstrate/core/api-errors";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
-import { deleteRunWorkspace } from "./run-workspace-storage.ts";
+import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
+import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { runResultSchema } from "../lib/jsonb-schemas.ts";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { TokenUsage } from "@appstrate/shared-types";
@@ -550,41 +551,54 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       ? checkpointSlot.content
       : null;
 
-  const rowsAffected = await db
-    .update(runs)
-    .set({
-      status,
-      result: resultToPersist,
-      error: errorMessage,
-      completedAt: now,
-      duration: resolvedDurationMs,
-      cost: cost > 0 ? cost : null,
-      sinkClosedAt: now,
-      // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
-      // sidecar `run_history` tool. The unified `package_persistence`
-      // store only keeps the latest checkpoint per actor (last-write-wins
-      // on the unique index); `runs.checkpoint` preserves the per-run
-      // history so agents can inspect what each prior run emitted.
-      ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
-      // Terminal artifacts summary from the container's outputs sweep. Only
-      // written when the runner reported it (older containers omit it) — an
-      // absent value leaves the column null rather than clobbering it. Does NOT
-      // affect `status` above: a `partial` summary coexists with a run success.
-      ...(result.artifacts !== undefined ? { artifacts: result.artifacts } : {}),
-      // The finalize body is the authoritative terminal usage. Metric events
-      // may still update this column before finalize for live charts, but the
-      // close path writes the terminal value exactly once. When a non-success
-      // terminal carried no usage, the column keeps its last-known snapshot
-      // ATOMICALLY (COALESCE evaluates in the UPDATE itself — a metric event
-      // landing between the JS read above and this CAS cannot be clobbered
-      // by a stale value); zeros only when nothing was ever recorded.
-      tokenUsage: preserveLastKnownUsage
-        ? sql`COALESCE(${runs.tokenUsage}, ${JSON.stringify({ input_tokens: 0, output_tokens: 0 })}::jsonb)`
-        : validatedUsage,
-      ...(metadata ? { metadata } : {}),
-    })
-    .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
-    .returning({ id: runs.id });
+  // The CAS and the run-workspace teardown enqueue are ONE transaction: the
+  // moment a run is durably terminal, the record that purges its provisioning
+  // objects is durable too. (The enqueue is a bounded INSERT of two rows and
+  // does NO storage I/O — the outbox worker performs the physical deletes — so
+  // it adds no latency to the terminal broadcast below.)
+  const rowsAffected = await db.transaction(async (tx) => {
+    const closed = await tx
+      .update(runs)
+      .set({
+        status,
+        result: resultToPersist,
+        error: errorMessage,
+        completedAt: now,
+        duration: resolvedDurationMs,
+        cost: cost > 0 ? cost : null,
+        sinkClosedAt: now,
+        // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
+        // sidecar `run_history` tool. The unified `package_persistence`
+        // store only keeps the latest checkpoint per actor (last-write-wins
+        // on the unique index); `runs.checkpoint` preserves the per-run
+        // history so agents can inspect what each prior run emitted.
+        ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
+        // Terminal artifacts summary from the container's outputs sweep. Only
+        // written when the runner reported it (older containers omit it) — an
+        // absent value leaves the column null rather than clobbering it. Does NOT
+        // affect `status` above: a `partial` summary coexists with a run success.
+        ...(result.artifacts !== undefined ? { artifacts: result.artifacts } : {}),
+        // The finalize body is the authoritative terminal usage. Metric events
+        // may still update this column before finalize for live charts, but the
+        // close path writes the terminal value exactly once. When a non-success
+        // terminal carried no usage, the column keeps its last-known snapshot
+        // ATOMICALLY (COALESCE evaluates in the UPDATE itself — a metric event
+        // landing between the JS read above and this CAS cannot be clobbered
+        // by a stale value); zeros only when nothing was ever recorded.
+        tokenUsage: preserveLastKnownUsage
+          ? sql`COALESCE(${runs.tokenUsage}, ${JSON.stringify({ input_tokens: 0, output_tokens: 0 })}::jsonb)`
+          : validatedUsage,
+        ...(metadata ? { metadata } : {}),
+      })
+      .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
+      .returning({ id: runs.id });
+    // Only the CAS winner enqueues — a losing retry would re-enqueue keys the
+    // winner already queued (deduped by the outbox, but pointless work).
+    if (closed.length > 0) {
+      await enqueueStorageDeletion(tx, runWorkspaceDeletionJobs(run.id, "run_workspace_deleted"));
+    }
+    return closed;
+  });
 
   if (rowsAffected.length === 0) {
     logger.debug("finalizeRun idempotent — sink already closed", { runId: run.id });
@@ -608,24 +622,16 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // run's own terminal status. Emitted on the CAS winner only (exactly-once).
   if (result.artifacts?.status === "partial") recordDocumentPartialPublication();
 
-  // Drop the run's workspace provisioning archive (the AFPS bundle + input
-  // docs the agent fetched at startup via GET /api/runs/:runId/workspace).
-  // This is the crash-safety net for the launcher's own happy-path teardown:
-  // finalizeRun is the single CAS-guarded convergence for every termination
-  // path — natural finalize, watchdog stall sweep, and container-exit
-  // synthesis — so the object is dropped even when the launcher teardown
-  // never runs (e.g. the API replica that launched the run crashed; a later
-  // watchdog tick on any replica still routes through here). Storage exposes
-  // no list/TTL primitive, so this deterministic by-runId delete is what
-  // prevents orphaned archives — not a time-based reaper.
-  //
-  // Fire-and-forget: cleanup must NOT sit on the critical path between the
-  // CAS close and the terminal status broadcast below — a slow/unreachable
-  // object store must never delay the run's terminal signal or the runner's
-  // finalize HTTP response. deleteRunWorkspace swallows + logs its own
-  // failures, and deleting a missing object (remote-origin runs never
-  // provision one) is a harmless idempotent no-op.
-  void deleteRunWorkspace(run.id);
+  // The run's workspace provisioning archive (the AFPS bundle + input docs the
+  // agent fetched at startup) was enqueued for deletion INSIDE the CAS
+  // transaction above. finalizeRun is the single CAS-guarded convergence for
+  // every termination path — natural finalize, watchdog stall sweep, container-
+  // exit synthesis — so the objects are dropped even when the launcher teardown
+  // never runs (e.g. the API replica that launched the run crashed). Enqueuing
+  // there rather than firing-and-forgetting here is what makes it crash-safe: a
+  // SIGKILL (OOM, rolling deploy, eviction) between the commit and this line
+  // used to lose the teardown outright — the run is terminal, so
+  // `listOrphanRunIds()` never returns it and nothing ever replayed it.
 
   // 7. Side effects — only the CAS winner reaches here, so memories and
   //    log rows are written exactly once.

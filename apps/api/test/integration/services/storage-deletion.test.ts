@@ -93,6 +93,20 @@ function split(storageKey: string): { bucket: string; inKey: string } {
   return { bucket: bucket!, inKey: rest.join("/") };
 }
 
+/**
+ * Operator "retry now" on a backed-off job. `retryStorageDeletionJob` refuses a
+ * job parked within one lease window of now (it could be executing right now),
+ * so park it at the backoff cap first — which is where the dead letters an
+ * operator actually retries sit.
+ */
+async function operatorRetry(jobId: string): Promise<boolean> {
+  await db
+    .update(storageDeletionJobs)
+    .set({ nextAttemptAt: new Date(Date.now() + 6 * 60 * 60 * 1000) })
+    .where(eq(storageDeletionJobs.id, jobId));
+  return retryStorageDeletionJob(jobId);
+}
+
 describe("storage-deletion outbox", () => {
   let ctx: TestContext;
   let scope: Scope;
@@ -147,7 +161,7 @@ describe("storage-deletion outbox", () => {
     expect(afterFail!.nextAttemptAt.getTime()).toBeGreaterThan(Date.now());
 
     // Reset the backoff (operator retry), then a succeeding pass completes it.
-    await retryStorageDeletionJob(job.id);
+    expect(await operatorRetry(job.id)).toBe(true);
     const okKeys: string[] = [];
     const ok = await processStorageDeletionJobs({
       deleteFile: async (b, k) => void okKeys.push(`${b}/${k}`),
@@ -185,7 +199,10 @@ describe("storage-deletion outbox", () => {
       .from(storageDeletionJobs)
       .where(eq(storageDeletionJobs.storageKey, "ok/a.txt"));
     expect(ok!.completedAt).not.toBeNull();
-    expect(ok!.attempts).toBe(0);
+    // `attempts` counts CLAIMS (incremented by the claim itself), so a job that
+    // succeeded on its first claim sits at 1 — that is what makes a job whose
+    // execution kills the process still climb toward the dead-letter threshold.
+    expect(ok!.attempts).toBe(1);
 
     const [bad] = await db
       .select()
@@ -306,7 +323,7 @@ describe("storage-deletion outbox", () => {
       .select({ id: storageDeletionJobs.id })
       .from(storageDeletionJobs)
       .where(eq(storageDeletionJobs.storageKey, manifestKey));
-    await retryStorageDeletionJob(job!.id);
+    expect(await operatorRetry(job!.id)).toBe(true);
     const retried = await processStorageDeletionJobs({ deleteFile, downloadFile });
     expect(retried.completed).toBe(1);
     expect(deleted.slice(-3)).toEqual([
@@ -528,5 +545,138 @@ describe("storage-deletion outbox", () => {
     // Every key deleted exactly once — no overlap between the two passes.
     expect(seen.length).toBe(8);
     expect(new Set(seen).size).toBe(8);
+    // …and no claim ordinal was lost: each job was claimed exactly once, so its
+    // counter reads 1. A pass settling a job another pass had re-claimed would
+    // show up here as a clobbered counter.
+    const rows = await db.select().from(storageDeletionJobs);
+    expect(rows.map((r) => r.attempts)).toEqual(Array(8).fill(1));
+  });
+
+  // ---------------------------------------------------------------------------
+  // Crash safety: the claim, not the settle, is what counts an attempt
+  // ---------------------------------------------------------------------------
+
+  it("counts the attempt at CLAIM time, so a job that kills its worker still reaches dead-letter", async () => {
+    await db.transaction((tx) =>
+      enqueueStorageDeletion(tx, {
+        bucket: "documents",
+        storageKey: "crash/loop",
+        reason: "document_deleted",
+      }),
+    );
+    const [job] = await db
+      .select()
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, "crash/loop"));
+
+    // The counter is already advanced WHILE the delete executes: if the process
+    // died right here (OOM on a pathological manifest) — never reaching any
+    // settle — the row would still carry the attempt.
+    let observedDuringExecution = -1;
+    await processStorageDeletionJobs({
+      deleteFile: async () => {
+        const [live] = await db
+          .select({ attempts: storageDeletionJobs.attempts })
+          .from(storageDeletionJobs)
+          .where(eq(storageDeletionJobs.id, job!.id));
+        observedDuringExecution = live!.attempts;
+        throw new Error("worker died here");
+      },
+      rand: () => 0,
+    });
+    expect(observedDuringExecution).toBe(1);
+
+    // Replay the crash loop: each lease expiry hands the job to a new worker
+    // that dies the same way. The counter must keep climbing until the job is
+    // visible as a dead letter — the old settle-only increment left it pinned at
+    // 0 forever, invisible to both the list and the metric.
+    for (let i = 0; i < STORAGE_DELETION_DEAD_LETTER_THRESHOLD; i++) {
+      // Lease expires (the worker that held it is gone). Backdated rather than
+      // stamped "now" so the row is due whatever the API↔DB clock skew.
+      await db
+        .update(storageDeletionJobs)
+        .set({ nextAttemptAt: new Date(Date.now() - 60 * 60 * 1000) })
+        .where(eq(storageDeletionJobs.id, job!.id));
+      await processStorageDeletionJobs({
+        deleteFile: async () => {
+          throw new Error("worker died here");
+        },
+        rand: () => 0,
+      });
+    }
+
+    const [after] = await db
+      .select()
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.id, job!.id));
+    expect(after!.attempts).toBeGreaterThanOrEqual(STORAGE_DELETION_DEAD_LETTER_THRESHOLD);
+    expect(after!.completedAt).toBeNull();
+    const dead = await listStorageDeletionJobs({ status: "dead", limit: 50 });
+    expect(dead.items.some((i) => i.id === job!.id)).toBe(true);
+  });
+
+  it("refuses an operator retry on a job that may still be executing", async () => {
+    await db.transaction((tx) =>
+      enqueueStorageDeletion(tx, {
+        bucket: "documents",
+        storageKey: "leased/x",
+        reason: "document_deleted",
+      }),
+    );
+    // A pass claims it (leases it forward) and then hangs — from the outside this
+    // is indistinguishable from a short backoff, so "retry now" must refuse
+    // rather than hand the same object to a second concurrent pass.
+    await processStorageDeletionJobs({
+      deleteFile: async () => {
+        throw new Error("still working on it");
+      },
+      rand: () => 0,
+    });
+    const [job] = await db
+      .select()
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, "leased/x"));
+    expect(await retryStorageDeletionJob(job!.id)).toBe(false);
+    // Parked beyond any possible lease (the dead-letter case) → retriable.
+    expect(await operatorRetry(job!.id)).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Retention: the completed tail must not grow forever
+  // ---------------------------------------------------------------------------
+
+  it("purges completed jobs past the retention window and keeps recent ones", async () => {
+    await db.insert(storageDeletionJobs).values([
+      {
+        id: "sdj_purge_old",
+        bucket: "documents",
+        storageKey: "purge/old",
+        reason: "document_deleted",
+        completedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      },
+      {
+        id: "sdj_purge_recent",
+        bucket: "documents",
+        storageKey: "purge/recent",
+        reason: "document_deleted",
+        completedAt: new Date(),
+      },
+      {
+        id: "sdj_purge_pending",
+        bucket: "documents",
+        storageKey: "purge/pending",
+        reason: "document_deleted",
+        nextAttemptAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    ]);
+
+    await processStorageDeletionJobs({ deleteFile: async () => {} });
+
+    const ids = (await db.select({ id: storageDeletionJobs.id }).from(storageDeletionJobs)).map(
+      (r) => r.id,
+    );
+    expect(ids).not.toContain("sdj_purge_old");
+    expect(ids).toContain("sdj_purge_recent");
+    expect(ids).toContain("sdj_purge_pending");
   });
 });

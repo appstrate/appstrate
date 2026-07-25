@@ -489,8 +489,9 @@ describe("cleanupExpiredUploads", () => {
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       { id, bytes: PDF_BYTES },
     );
-    // Simulate a row consumed > 24h ago (retention window is 24h).
-    const oldTimestamp = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    // Simulate a row consumed past the 24h retention window AND past the 1h
+    // in-flight-consume grace the sweep adds on top of it.
+    const oldTimestamp = new Date(Date.now() - 26 * 60 * 60 * 1000);
     await db.update(uploads).set({ consumedAt: oldTimestamp }).where(eq(uploads.id, id));
 
     const removed = await cleanupExpiredUploads();
@@ -530,6 +531,46 @@ describe("cleanupExpiredUploads", () => {
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row).toBeDefined();
     expect(row?.consumedAt).not.toBeNull();
+  });
+
+  it("does not delete an upload out from under a re-consume that is still streaming", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-gc-inflight" });
+    const id = "upl_gc_inflight_1";
+    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes: PDF_BYTES },
+    );
+    // Consumed 24h-minus-250ms ago: the reuse window is still open right now (so
+    // a rerun is allowed to start re-consuming) but elapses while it streams. A
+    // re-consume never touches the row, so nothing the sweep could lock would
+    // reveal it — only the grace margin keeps the object alive.
+    await db
+      .update(uploads)
+      .set({ consumedAt: new Date(Date.now() - 24 * 60 * 60 * 1000 + 250) })
+      .where(eq(uploads.id, id));
+
+    // A slow sink standing in for a large document streaming into a workspace.
+    const slowSink: UploadStreamSink = async (stream) => {
+      await new Promise((r) => setTimeout(r, 600));
+      return drainSink(stream);
+    };
+    const consuming = consumeUploadStream(
+      id,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      slowSink,
+    );
+
+    // The reuse window elapses mid-stream, then the sweep runs.
+    await new Promise((r) => setTimeout(r, 400));
+    await cleanupExpiredUploads();
+    await processStorageDeletionJobs();
+
+    // Row and object both survived, and the rerun's consume completed.
+    const meta = await consuming;
+    expect(meta.size).toBe(PDF_BYTES.length);
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
+    expect(await db.select().from(uploads).where(eq(uploads.id, id)).limit(1)).toHaveLength(1);
   });
 
   it("still sweeps expired unconsumed rows (regression on base case)", async () => {

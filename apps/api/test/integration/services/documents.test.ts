@@ -56,6 +56,7 @@ import {
   deleteDocument,
 } from "../../../src/services/documents.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
+import { deleteEndUser } from "../../../src/services/end-users.ts";
 
 /** Run `fn` with an env var temporarily overridden (cache reset around it). */
 async function withEnv(key: string, value: string, fn: () => Promise<void>): Promise<void> {
@@ -1131,6 +1132,89 @@ describe("documents service + routes", () => {
       .from(documentLinks)
       .where(eq(documentLinks.documentId, docX.id));
     expect(links).toHaveLength(1);
+  });
+
+  it("a document published while its runs are being deleted leaves no orphan and no over-count", async () => {
+    // The publish path and the runs teardown both serialize on the org row lock,
+    // so a document published DURING the delete either lands before the
+    // enumeration (and is detach-or-deleted with it) or fails its FK against the
+    // by-then-deleted run. When the teardown and the delete were two separate
+    // transactions, a document landing between them was destroyed by the FK
+    // cascade with NO outbox job (bytes stranded) and NO counter decrement.
+    await seedPackage({ id: "@chain/race", orgId: ctx.orgId });
+    const runId = await seedRunRow(scope, { packageId: "@chain/race" });
+    const { row: existing } = await publishStream(scope, runId, "before.txt", "before bytes");
+
+    const [, raced] = await Promise.all([
+      deletePackageRuns(scope, "@chain/race"),
+      (async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        return publishStream(scope, runId, "during.txt", "during bytes").catch(() => null);
+      })(),
+    ]);
+
+    // Whichever order won, the counter matches the surviving rows exactly.
+    const surviving = await db.select().from(documents).where(eq(documents.orgId, ctx.orgId));
+    expect(await orgBytesUsed(ctx.orgId)).toBe(surviving.reduce((sum, d) => sum + d.size, 0));
+
+    // …and no published object is left behind without its row. Drain the outbox,
+    // then every object whose row is gone must be gone too.
+    await processStorageDeletionJobs();
+    const survivingKeys = new Set(surviving.map((d) => d.storageKey));
+    const published = [existing.storageKey, raced?.row.storageKey].filter(
+      (k): k is string => typeof k === "string",
+    );
+    for (const storageKey of published) {
+      const [bucket, ...rest] = storageKey.split("/");
+      const stream = await downloadStream(bucket!, rest.join("/"));
+      if (survivingKeys.has(storageKey)) expect(stream).not.toBeNull();
+      else expect(stream).toBeNull();
+    }
+  });
+
+  it("deleteEndUser detaches a document a live run still consumes, and deletes the rest", async () => {
+    const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const producer = await seedRunRow(scope, { endUserId: eu.id });
+    const { row: consumed } = await publishStream(scope, producer, "kept.txt", "kept bytes", {
+      userId: null,
+      endUserId: eu.id,
+    });
+    const { row: unconsumed } = await publishStream(scope, producer, "gone.txt", "gone bytes", {
+      userId: null,
+      endUserId: eu.id,
+    });
+    // A live run consumes the first one — `runs.end_user_id` is SET NULL, so this
+    // consumer survives the end-user deletion and its input must survive too.
+    const consumer = await seedRunRow(scope, { endUserId: eu.id });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: consumed.id, consumerRunId: consumer, orgId: ctx.orgId });
+
+    await deleteEndUser(scope, eu.id);
+
+    // Detached, not destroyed: the row (and its bytes) survive with only the
+    // attribution dropped. Relying on the `documents.end_user_id` FK cascade
+    // used to delete it outright, breaking every later `rerun_from`.
+    const [kept] = await db.select().from(documents).where(eq(documents.id, consumed.id));
+    expect(kept).toBeDefined();
+    expect(kept!.endUserId).toBeNull();
+    expect(
+      await db.select().from(documentLinks).where(eq(documentLinks.documentId, consumed.id)),
+    ).toHaveLength(1);
+
+    // The unconsumed one is deleted through the same primitive: row gone,
+    // counter folded back to exactly the surviving document, outbox job queued.
+    expect(await db.select().from(documents).where(eq(documents.id, unconsumed.id))).toHaveLength(
+      0,
+    );
+    expect(await orgBytesUsed(ctx.orgId)).toBe(kept!.size);
+    const [, ...rest] = unconsumed.storageKey.split("/");
+    expect(
+      await db
+        .select()
+        .from(storageDeletionJobs)
+        .where(eq(storageDeletionJobs.storageKey, rest.join("/"))),
+    ).toHaveLength(1);
   });
 
   it("deletes an unconsumed document when its runs are deleted (row + counter + storage)", async () => {
