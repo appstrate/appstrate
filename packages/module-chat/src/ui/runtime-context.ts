@@ -3,18 +3,29 @@
 /**
  * The host→module injection seam. Everything the chat UI needs from the shell —
  * scoping headers, navigation, document services, translation — arrives through
- * these contexts, set once by `ChatPage` from its props.
+ * `ChatPage`'s props and is published from there.
  *
  * This is the ONLY direction the dependency runs: the module never imports the
  * web shell (nor the shell's API client, router, or i18n), and the shell never
  * imports module internals. A service the shell already owns (authenticated
- * download, staged upload, authenticated image preview) is injected rather than
+ * download, authenticated image preview, staged upload) is injected rather than
  * reimplemented here — one implementation, one set of error semantics.
  *
- * The `getHeaders` seam predates the rest: the OAuth connect card
- * (`oauth-connect-card.tsx`) opens a card-local SSE stream to `/api/realtime`,
- * and building that URL needs the caller's `X-Org-Id` / `X-Application-Id`,
- * which only the host knows.
+ * THREE contexts, no more:
+ *  - `getHeaders` — the OAuth connect card (`oauth-connect-card.tsx`) opens a
+ *    card-local SSE stream to `/api/realtime`, and building that URL needs the
+ *    caller's `X-Org-Id` / `X-Application-Id`, which only the host knows.
+ *  - `selectConversation` — navigation, see below.
+ *  - `ChatHost` — ONE bag of host services, memoized by `ChatPage` from its
+ *    props. Deliberately not one context per service: every member is
+ *    `useCallback`-stable in the host that mounts this UI, so a single memoized
+ *    object is exactly as re-render-stable as N contexts would be, and it needs
+ *    ONE missing-provider guard instead of N hand-tuned defaults that the single
+ *    call site (all props required) can never reach anyway.
+ *
+ * `uploadFile` is NOT in the bag: its only consumer is the composer's attachment
+ * adapter, which `ChatPage` builds itself and passes down as a prop — a context
+ * hop for a value that never leaves the file would be pure ceremony.
  */
 
 import { createContext, useContext } from "react";
@@ -54,34 +65,12 @@ export function useSelectConversation(): SelectConversation | null {
  */
 export type OpenDocument = (doc: { id: string; name: string }) => void;
 
-const OpenDocumentContext = createContext<OpenDocument | null>(null);
-
-export const OpenDocumentProvider = OpenDocumentContext.Provider;
-
-export function useOpenDocument(): OpenDocument | null {
-  return useContext(OpenDocumentContext);
-}
-
 /**
  * The host's authenticated document download (typed API client + user-facing
  * error toast). Injected, never reimplemented: a second raw-`fetch` copy here
  * would swallow failures the shell's implementation reports.
- *
- * `ChatPage` requires the prop, so the provider always holds the real one; the
- * default exists only so a component rendered outside the provider fails loudly
- * instead of silently doing nothing.
  */
 export type DownloadDocument = (id: string, name: string) => void;
-
-const DownloadDocumentContext = createContext<DownloadDocument>(() => {
-  throw new Error("module-chat: no downloadDocument injected (render inside <ChatPage>)");
-});
-
-export const DownloadDocumentProvider = DownloadDocumentContext.Provider;
-
-export function useDownloadDocument(): DownloadDocument {
-  return useContext(DownloadDocumentContext);
-}
 
 /**
  * The host's authenticated image-preview hook: a stored document id → an object
@@ -89,67 +78,59 @@ export function useDownloadDocument(): DownloadDocument {
  * back to the chip). A HOOK is injected — not a fetcher — so the shell keeps
  * ownership of the request, its scoping headers and the object-URL lifecycle.
  *
- * Call it like any hook (unconditionally, at the top of a component); the
- * default returns `null`, i.e. "no thumbnails", which is a valid rendering.
+ * Call it like any hook: unconditionally, at the top of a component (see
+ * `DocumentImageThumbnail`, which exists precisely so the call site is stable).
  */
 export type UseDocumentImageSrc = (id: string) => string | null;
-
-const DocumentImageSrcContext = createContext<UseDocumentImageSrc>(() => null);
-
-export const DocumentImageSrcProvider = DocumentImageSrcContext.Provider;
-
-/** Returns the injected hook — call the result as a hook (`useImageSrc(id)`). */
-export function useDocumentImageSrcHook(): UseDocumentImageSrc {
-  return useContext(DocumentImageSrcContext);
-}
 
 /**
  * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink),
  * returning the `upload://upl_x` URI the server materializes into a durable
  * document. Same function the shell hands to its own `<SchemaForm>` uploader —
  * the module adds only its staged-image preview cache on top (`upload.ts`).
+ * Travels as a `ChatPage` prop, not through context (see the file header).
  */
 export type UploadFile = (file: File, signal?: AbortSignal) => Promise<string>;
 
-const UploadFileContext = createContext<UploadFile>(() => {
-  throw new Error("module-chat: no uploadFile injected (render inside <ChatPage>)");
-});
-
-export const UploadFileProvider = UploadFileContext.Provider;
-
-export function useUploadFile(): UploadFile {
-  return useContext(UploadFileContext);
-}
-
 /**
- * The host's per-upload size cap in bytes — the same number the platform
- * enforces, owned by the shell so the module never hardcodes a server limit.
- * Guarding client-side is a UX fast-path only (the server still 413s).
- */
-const MaxUploadBytesContext = createContext<number>(Number.POSITIVE_INFINITY);
-
-export const MaxUploadBytesProvider = MaxUploadBytesContext.Provider;
-
-export function useMaxUploadBytes(): number {
-  return useContext(MaxUploadBytesContext);
-}
-
-/**
- * The host's i18next `t`, scoped to the chat namespace. The chat UI ships no
- * literal user-facing text: every string (including `aria-label`s) resolves
- * through here, so the shell's language — the same one `X-Chat-Locale` sends to
- * the assistant — is what the user reads.
+ * The host's i18next `t`, scoped to the chat namespace. The seam exists so the
+ * module never imports the shell's i18n framework: the shell resolves the key
+ * and the chat renders whatever comes back, in the same language as the answers
+ * (`X-Chat-Locale`). Keys are FLAT dotted strings, matching the locale JSONs
+ * verbatim.
  *
- * Keys are FLAT dotted strings, matching the locale JSONs verbatim. The default
- * echoes the key: a component rendered outside the provider is visibly broken
- * rather than silently French.
+ * The migration is INCOMPLETE: roughly two dozen literal French strings remain
+ * in `index.tsx`, `thread.tsx`, `thread-list.tsx`, `oauth-connect-card.tsx` and
+ * `tool-uis.tsx`. New user-facing text goes through `t`; the leftovers are a
+ * known debt, not a design.
  */
 export type ChatTranslate = (key: string, params?: Record<string, string | number>) => string;
 
-const ChatTranslateContext = createContext<ChatTranslate>((key) => key);
+/**
+ * The host services the chat UI consumes but does not implement. One object,
+ * one provider, one guard — see the file header for why this is not split.
+ */
+export interface ChatHost {
+  /** `null` when the host provides no in-app preview (fall back to download). */
+  openDocument: OpenDocument | null;
+  downloadDocument: DownloadDocument;
+  useDocumentImageSrc: UseDocumentImageSrc;
+  t: ChatTranslate;
+}
 
-export const ChatTranslateProvider = ChatTranslateContext.Provider;
+const ChatHostContext = createContext<ChatHost | null>(null);
 
-export function useChatTranslate(): ChatTranslate {
-  return useContext(ChatTranslateContext);
+export const ChatHostProvider = ChatHostContext.Provider;
+
+/**
+ * The injected host services. Throws when rendered outside `<ChatPage>`: every
+ * member is a REQUIRED prop there, so an absent provider is a wiring bug, and
+ * failing loudly beats a silent no-op download or an echoed translation key.
+ */
+export function useChatHost(): ChatHost {
+  const host = useContext(ChatHostContext);
+  if (!host) {
+    throw new Error("module-chat: no host services injected (render inside <ChatPage>)");
+  }
+  return host;
 }

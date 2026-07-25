@@ -16,7 +16,6 @@ import { useSidebarStore } from "../../stores/sidebar-store";
 import { DocumentPreview } from "../../components/document-preview";
 import { useDocumentDownload, useDocumentImageSrc } from "../../hooks/use-documents";
 import { useUploadClient } from "../../hooks/use-upload";
-import { UPLOAD_MAX_BYTES } from "../../api/uploads";
 
 export function ChatModulePage() {
   // Auto-collapse the global sidebar while in chat, restore on leave (same
@@ -95,7 +94,6 @@ export function ChatModulePage() {
         downloadDocument={onDownloadDocument}
         useDocumentImageSrc={useDocumentImageSrc}
         uploadFile={uploadFile}
-        maxUploadBytes={UPLOAD_MAX_BYTES}
         t={translate}
       />
       {previewDoc && <DocumentPreview doc={previewDoc} onClose={() => setPreviewDoc(null)} />}

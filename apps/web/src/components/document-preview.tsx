@@ -33,7 +33,6 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
 import { DownloadIcon } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
@@ -67,30 +66,34 @@ const INLINE_MARKDOWN_MAX_BYTES = 1_048_576; // 1 MiB
  * HTML; the server preview route deliberately serves it as inert `text/plain`.
  */
 function MarkdownPreview({ id, unavailable }: { id: string; unavailable: string }) {
-  // React Query owns the fetch (dedup, cancellation, retry) — no hand-rolled
-  // effect + state pair. Not `$api.useQuery`: the spec types this route's body
-  // as a `Blob`, and turning it into text is an async step a `select` can't do,
-  // so the typed `client.GET` runs inside the query fn instead. The key still
-  // follows the `[method, path, init]` convention. The client middleware throws
-  // on non-2xx, so failure surfaces as `isError` — openapi-fetch's `{ error }`
-  // branch is never populated here.
-  const { data, isPending, isError } = useQuery({
-    queryKey: ["get", "/api/documents/{id}/content", { params: { path: { id } } }],
-    queryFn: async () => {
-      const { data: blob } = await client.GET("/api/documents/{id}/content", {
-        params: { path: { id } },
-        parseAs: "blob",
-      });
-      return blob!.text();
-    },
-    staleTime: Infinity,
-  });
+  const [state, setState] = useState<{ text?: string; failed?: boolean }>({});
 
-  if (isPending) return <LoadingState />;
-  if (isError) return <ErrorState message={unavailable} />;
+  // A `key`ed remount per doc id gives fresh state, so no synchronous reset.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data, error } = await client.GET("/api/documents/{id}/content", {
+          params: { path: { id } },
+          parseAs: "text",
+        });
+        if (cancelled) return;
+        if (error || data === undefined) setState({ failed: true });
+        else setState({ text: data });
+      } catch {
+        if (!cancelled) setState({ failed: true });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (state.failed) return <ErrorState message={unavailable} />;
+  if (state.text === undefined) return <LoadingState />;
   return (
     <div className="bg-background h-full w-full overflow-auto p-4">
-      <Markdown>{data}</Markdown>
+      <Markdown>{state.text}</Markdown>
     </div>
   );
 }

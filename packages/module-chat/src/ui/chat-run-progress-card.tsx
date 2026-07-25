@@ -31,7 +31,7 @@ import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
 import { useLiveElapsedMs } from "./use-elapsed.ts";
-import { useChatTranslate } from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
 import {
   buildRunPageHref,
   isTerminalStatus,
@@ -147,7 +147,7 @@ export function ChatRunProgressCard({
   // rather than flashing straight to the last one. `current` carries a stable
   // `id` so the line element remounts on change and re-runs its enter animation.
   const current = useLogTicker(visibleLogEntries(logs));
-  const t = useChatTranslate();
+  const { t } = useChatHost();
   // Before any log line: "starting" while the run is still coming up (no status
   // yet, or pending), then "running" once it is — up until the first log
   // replaces it.

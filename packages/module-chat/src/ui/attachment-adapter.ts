@@ -14,22 +14,26 @@
  *  - `remove()` — no server round-trip (staging only happens in `send`; an
  *    abandoned upload record is swept by the upload GC).
  *
- * The uploader, the size cap and the translator all come from the host
- * injection seam (`runtime-context.ts`) — the adapter owns no transport and no
- * literal text.
+ * The uploader and the translator come from the host injection seam
+ * (`runtime-context.ts`) — the adapter owns no transport and no literal text.
+ * The size cap does NOT: `UPLOAD_MAX_BYTES` is a shared CONSTANT of the upload
+ * contract (deliberately not an env knob — see `@appstrate/core/storage`), the
+ * same value the create-upload route and the signed sink token encode. Reading
+ * it straight from core is one import; threading it through a prop, a provider
+ * and a context would only add ways for the browser to guard a stale number.
  */
 
 import type { AttachmentAdapter, CompleteAttachment, PendingAttachment } from "@assistant-ui/react";
+import { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
 import type { ChatTranslate, UploadFile } from "./runtime-context.ts";
 import { stageComposerFile } from "./upload.ts";
 
 export function createChatAttachmentAdapter(deps: {
   upload: UploadFile;
-  /** Per-upload byte cap the platform enforces (UX fast-path; server still 413s). */
-  maxBytes: number;
   t: ChatTranslate;
 }): AttachmentAdapter {
-  const { upload, maxBytes, t } = deps;
+  const { upload, t } = deps;
+  const maxBytes = UPLOAD_MAX_BYTES;
   const tooLarge = () =>
     new Error(t("upload.tooLarge", { max: Math.round(maxBytes / 1024 / 1024) }));
   return {

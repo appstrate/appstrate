@@ -15,7 +15,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { Button } from "@appstrate/ui/components/button";
 import {
   useDeleteDocument,
   useDocumentDownload,
@@ -145,22 +145,18 @@ export function DocumentListPanel({
 
   return (
     <>
-      {/* A real tab strip (same primitive as the run page's tabs) — the roving
-          focus + `role="tab"` semantics come with it, which a row of buttons
-          never had. */}
-      <Tabs
-        className="mb-4"
-        value={purpose}
-        onValueChange={(v) => onPurposeChange(v as PurposeFilter)}
-      >
-        <TabsList>
-          {PURPOSE_TABS.map((p) => (
-            <TabsTrigger key={p} value={p}>
-              {t(`filter.${p}`)}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      <div className="mb-4 flex items-center gap-1">
+        {PURPOSE_TABS.map((p) => (
+          <Button
+            key={p}
+            variant={purpose === p ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => onPurposeChange(p)}
+          >
+            {t(`filter.${p}`)}
+          </Button>
+        ))}
+      </div>
 
       {isLoading ? (
         <LoadingState />

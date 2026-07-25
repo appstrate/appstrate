@@ -15,12 +15,7 @@
 
 import { DownloadIcon, EyeIcon } from "lucide-react";
 import { documentActivation } from "./doc-activation.ts";
-import {
-  useChatTranslate,
-  useDocumentImageSrcHook,
-  useDownloadDocument,
-  useOpenDocument,
-} from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
 import type { OpenDocument } from "./runtime-context.ts";
 
 /** True for an `image/*` mime — the only content shown as a thumbnail. */
@@ -92,8 +87,10 @@ function DocumentImageThumbnail({
   opener: OpenDocument | null;
   onActivate: () => void;
 }) {
-  const useImageSrc = useDocumentImageSrcHook();
-  const src = useImageSrc(id);
+  // Destructured out of the host bag, then called at this component's top level
+  // — a stable, unconditional hook call position.
+  const { useDocumentImageSrc } = useChatHost();
+  const src = useDocumentImageSrc(id);
   if (!src)
     return <AttachmentChip name={name} label={label} opener={opener} onActivate={onActivate} />;
   return (
@@ -122,10 +119,8 @@ export function DocumentAttachment({
 }: {
   doc: { id: string; name: string; mime?: string | null };
 }) {
-  const opener = useOpenDocument();
-  const download = useDownloadDocument();
-  const t = useChatTranslate();
-  const { onActivate, label } = documentActivation(doc, opener, download, t);
+  const { openDocument: opener, downloadDocument, t } = useChatHost();
+  const { onActivate, label } = documentActivation(doc, opener, downloadDocument, t);
   if (isImageMime(doc.mime)) {
     return (
       <DocumentImageThumbnail
