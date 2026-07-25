@@ -119,6 +119,87 @@
       .spinner.hidden {
         visibility: hidden;
       }
+      /* Tab strip — second chrome row, only while the panel is open. */
+      .tabs {
+        display: none;
+        align-items: stretch;
+        box-sizing: border-box;
+        height: 32px;
+        margin-left: auto;
+        padding: 0 8px;
+        gap: 4px;
+        overflow-x: auto;
+        border-bottom: 1px solid #e0e0e0;
+      }
+      body:not([data-mode="webapp"]) .tabs {
+        display: flex;
+      }
+      .tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 220px;
+        padding: 0 8px;
+        border: none;
+        border-radius: 6px 6px 0 0;
+        background: transparent;
+        color: #6e6e73;
+        font-size: 12px;
+        cursor: pointer;
+        -webkit-app-region: no-drag;
+        white-space: nowrap;
+      }
+      .tab:hover {
+        background: #e8e8ed;
+      }
+      .tab[data-active="true"] {
+        background: #ffffff;
+        color: #1d1d1f;
+        box-shadow: 0 -1px 0 #d2d2d7 inset;
+      }
+      .tab-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* An agent-owned tab is visually distinct: the person must be able
+         to tell at a glance which surfaces are not theirs. */
+      .tab-owner {
+        flex: 0 0 auto;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #34c759;
+      }
+      .tab[data-state="paused_by_user"] .tab-owner {
+        background: #ff9500;
+      }
+      .tab-action {
+        border: none;
+        background: none;
+        color: inherit;
+        cursor: pointer;
+        padding: 0 2px;
+        font-size: 11px;
+        -webkit-app-region: no-drag;
+      }
+      .tab-action:hover {
+        color: #007aff;
+      }
+      .tab-new {
+        flex: 0 0 auto;
+        align-self: center;
+        border: none;
+        background: none;
+        color: #6e6e73;
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+        padding: 0 6px;
+        -webkit-app-region: no-drag;
+      }
+      .tab-new:hover {
+        color: #1d1d1f;
+      }
       @keyframes spin {
         to {
           transform: rotate(360deg);
@@ -173,9 +254,11 @@
         </button>
       </div>
     </div>
+    <div class="tabs" id="tabs"></div>
     <script>
       const $ = (id) => document.getElementById(id);
       const bar = $("bar");
+      const tabsEl = $("tabs");
       const browserControls = $("browser-controls");
       const focusButton = $("focus-browser");
       const urlInput = $("url");
@@ -222,9 +305,83 @@
 
       window.appstrate.onLayoutChanged(({ mode, browserWidth }) => {
         bar.dataset.mode = mode;
-        browserControls.style.width = mode === "browser" ? "100%" : `${browserWidth}px`;
+        document.body.dataset.mode = mode;
+        const panelWidth = mode === "browser" ? "100%" : `${browserWidth}px`;
+        browserControls.style.width = panelWidth;
+        tabsEl.style.width = panelWidth;
         focusButton.title = mode === "browser" ? "Show split view" : "Focus browser";
       });
+
+      // Tab strip. The list is owned by the main process (see tabs.ts);
+      // this only renders it and sends intents back.
+      function renderTabs(tabs) {
+        tabsEl.replaceChildren();
+        for (const tab of tabs) {
+          const el = document.createElement("div");
+          el.className = "tab";
+          el.dataset.active = String(tab.active);
+          el.dataset.state = tab.state;
+
+          if (tab.owner.kind === "run") {
+            const dot = document.createElement("span");
+            dot.className = "tab-owner";
+            dot.title =
+              tab.state === "paused_by_user"
+                ? "You took this tab over — the agent is waiting"
+                : `Driven by ${tab.owner.agentName || "an agent"}`;
+            el.appendChild(dot);
+          }
+
+          const label = document.createElement("span");
+          label.className = "tab-label";
+          label.textContent = tab.title || hostOf(tab.url) || "New tab";
+          label.addEventListener("click", () => window.appstrate.selectTab(tab.tab_id));
+          el.appendChild(label);
+
+          // Handing a tab back is an explicit act: an agent never
+          // resumes on its own after a takeover.
+          if (tab.state === "paused_by_user") {
+            const resume = document.createElement("button");
+            resume.className = "tab-action";
+            resume.textContent = "↩";
+            resume.title = "Give the tab back to the agent";
+            resume.addEventListener("click", (e) => {
+              e.stopPropagation();
+              window.appstrate.resumeTab(tab.tab_id);
+            });
+            el.appendChild(resume);
+          }
+
+          const close = document.createElement("button");
+          close.className = "tab-action";
+          close.textContent = "✕";
+          close.title = "Close tab";
+          close.addEventListener("click", (e) => {
+            e.stopPropagation();
+            window.appstrate.closeTab(tab.tab_id);
+          });
+          el.appendChild(close);
+
+          tabsEl.appendChild(el);
+        }
+        const add = document.createElement("button");
+        add.className = "tab-new";
+        add.textContent = "+";
+        add.title = "New tab";
+        add.addEventListener("click", () => window.appstrate.newTab());
+        tabsEl.appendChild(add);
+      }
+
+      function hostOf(url) {
+        try {
+          return new URL(url).host;
+        } catch {
+          return "";
+        }
+      }
+
+      window.appstrate.onTabsChanged(renderTabs);
+      window.appstrate.listTabs().then(renderTabs);
     </script>
   </body>
 </html>

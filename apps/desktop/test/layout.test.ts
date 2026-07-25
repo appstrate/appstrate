@@ -12,19 +12,25 @@ describe("desktop layout", () => {
     expect(layout.browser).toEqual(layout.webapp);
   });
 
-  it("places the browser on the right in split mode", () => {
+  it("places the browser on the right in split mode, below the tab strip", () => {
     const layout = calculateDesktopLayout(1200, 800, "split");
 
-    expect(layout.webapp).toEqual({ x: 0, y: 44, width: 624, height: 756 });
-    expect(layout.browser).toEqual({ x: 625, y: 44, width: 575, height: 756 });
+    expect(layout.chrome).toEqual({ x: 0, y: 0, width: 1200, height: 76 });
+    expect(layout.webapp).toEqual({ x: 0, y: 76, width: 624, height: 724 });
+    expect(layout.browser).toEqual({ x: 625, y: 76, width: 575, height: 724 });
     expect(layout.browser.x - layout.webapp.width).toBe(1);
   });
 
   it("keeps both surfaces full-sized when the browser is focused", () => {
     const layout = calculateDesktopLayout(1200, 800, "browser");
 
-    expect(layout.browser).toEqual({ x: 0, y: 44, width: 1200, height: 756 });
+    expect(layout.browser).toEqual({ x: 0, y: 76, width: 1200, height: 724 });
     expect(layout.webapp).toEqual(layout.browser);
+  });
+
+  it("hides the tab strip row while only the webapp shows", () => {
+    expect(calculateDesktopLayout(1200, 800, "webapp").chrome.height).toBe(44);
+    expect(calculateDesktopLayout(1200, 800, "split").chrome.height).toBe(76);
   });
 
   it("opens and closes the panel without conflating browser focus", () => {

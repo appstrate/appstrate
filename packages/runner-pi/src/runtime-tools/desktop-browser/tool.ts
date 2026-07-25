@@ -55,6 +55,14 @@ export const desktopBrowserTool = defineTool({
     "stopping at the first failure (result: {completed, results[], error?}); use it to TEST a " +
     "sequence while analyzing a site, then freeze it into a skill file and call the " +
     "`desktop_batch` tool instead. " +
+    "Tabs: you work in your own browser profile, separate from the user's and from other " +
+    "agents'. Commands without `tab_id` all act on one implicit tab, which is enough for most " +
+    "jobs. Open more only when you genuinely need two pages at once (waiting on a code in a " +
+    "webmail while a form stays open): `browser.tabs.open` {} returns {tab_id} to pass as the " +
+    "top-level `tab_id` of later commands, `browser.tabs.list` {} shows yours, " +
+    "`browser.tabs.close` {tab_id} releases one. Up to 3 at a time; they all close when the run " +
+    "ends. 409 means another run holds that surface or the user took the tab over (they are " +
+    "clearing a login or a challenge — wait and retry); 410 means the tab is gone, open a new one. " +
     "Returns 503 when no desktop is connected for this user. Use " +
     "`browser.capture_credential` followed by the integration's credential-injecting `api_call` " +
     "instead of reading tokens into your context. " +
@@ -83,8 +91,17 @@ export const desktopBrowserTool = defineTool({
           "browser.download_status",
           "browser.capture_credential",
           "browser.batch",
+          "browser.tabs.open",
+          "browser.tabs.close",
+          "browser.tabs.list",
         ],
         description: "Browser primitive to invoke on the user's local Chromium.",
+      },
+      tab_id: {
+        type: "string",
+        description:
+          "Tab returned by `browser.tabs.open`. Omit it to use your implicit tab — that is " +
+          "the right default unless you deliberately keep several pages open at once.",
       },
       params: {
         type: "object",

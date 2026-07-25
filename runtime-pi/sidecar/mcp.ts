@@ -1277,6 +1277,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         timeout_ms?: number;
         integration_id?: string;
         substitute_params?: boolean;
+        tab_id?: string;
       };
       // Sidecar-local download methods — the data-plane legs the
       // agent-side `desktop_download` extension drives. `download_pull`
@@ -1309,6 +1310,7 @@ function buildSidecarTools(options: MountMcpOptions): {
             ...(args.substitute_params !== undefined
               ? { substitute_params: args.substitute_params }
               : {}),
+            ...(args.tab_id !== undefined ? { tab_id: args.tab_id } : {}),
           }),
         });
       } catch (err) {

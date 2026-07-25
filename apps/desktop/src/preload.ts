@@ -30,7 +30,28 @@ contextBridge.exposeInMainWorld("appstrate", {
   ): void => {
     ipcRenderer.on("layout:changed", (_event, layout) => cb(layout));
   },
+  // Tab strip. The main process owns the tab list; the renderer renders
+  // it and sends back intents.
+  listTabs: (): Promise<TabSummary[]> => ipcRenderer.invoke("tabs:list"),
+  newTab: (): Promise<void> => ipcRenderer.invoke("tabs:new"),
+  selectTab: (tabId: string): Promise<void> => ipcRenderer.invoke("tabs:select", tabId),
+  closeTab: (tabId: string): Promise<void> => ipcRenderer.invoke("tabs:close", tabId),
+  resumeTab: (tabId: string): Promise<void> => ipcRenderer.invoke("tabs:resume", tabId),
+  onTabsChanged: (cb: (tabs: TabSummary[]) => void): void => {
+    ipcRenderer.on("tabs:changed", (_event, tabs: TabSummary[]) => cb(tabs));
+  },
 });
+
+/** Mirror of `TabSummary` in `../tabs.ts`, kept local so the preload
+ * bundle stays free of main-process imports. */
+interface TabSummary {
+  tab_id: string;
+  owner: { kind: "user" } | { kind: "run"; runId: string; agentName?: string };
+  state: "idle" | "driving" | "paused_by_user";
+  url: string;
+  title: string;
+  active: boolean;
+}
 
 contextBridge.exposeInMainWorld("appstrateSetup", {
   saveInstance: (payload: { url: string; profile?: string | null }): Promise<void> =>
