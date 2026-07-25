@@ -73,23 +73,19 @@ function agentManifest(name: string, session?: "isolated" | "agent" | "user") {
 }
 
 async function seedAgentPackage(id: string, orgId: string, userId: string): Promise<void> {
-  const [scope, name] = id.slice(1).split("/") as [string, string];
   await db
     .insert(packages)
     .values({
       id,
-      scope: `@${scope}`,
-      name,
       type: "agent",
       orgId,
       createdBy: userId,
       draftManifest: agentManifest(id),
-      manifest: agentManifest(id),
       source: "local",
     })
     .onConflictDoUpdate({
       target: packages.id,
-      set: { manifest: agentManifest(id), draftManifest: agentManifest(id) },
+      set: { draftManifest: agentManifest(id) },
     });
 }
 

@@ -30,9 +30,13 @@ const agentMethodProperty = {
     "browser.tabs.open",
     "browser.tabs.close",
     "browser.tabs.list",
+    "browser.request_human",
   ],
   description:
-    "Agent browser primitive. `browser.tabs.open` {} opens a tab in the agent's own browser " +
+    "Agent browser primitive. `browser.request_human` {message} parks the run on the person: " +
+    "the desktop shows the message on that tab and this call stays pending until they hand it " +
+    "back ({resumed:true}) or it times out ({timed_out:true}, tab still parked). " +
+    "`browser.tabs.open` {} opens a tab in the agent's own browser " +
     "profile and returns {tab_id}; `browser.tabs.close` {tab_id} and `browser.tabs.list` {} " +
     "manage them. Commands without `tab_id` act on the run's implicit tab, opened on first " +
     "use — an agent that never mentions tabs behaves exactly as before. " +

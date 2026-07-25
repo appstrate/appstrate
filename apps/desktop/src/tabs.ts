@@ -42,11 +42,19 @@ export type TabOwner = { kind: "user" } | { kind: "run"; runId: string; agentNam
 /**
  * `idle` — owned but not currently executing a command.
  * `driving` — a command is in flight.
- * `paused_by_user` — the human took over; agent commands are refused
- *   until they hand it back. This is the hybrid mode: a person clears
- *   what the agent cannot (hardware 2FA, SSO, an anti-bot challenge).
+ * `paused_by_user` — the human took over unprompted; agent commands are
+ *   refused until they hand it back.
+ * `awaiting_human` — the AGENT asked for help and stopped by itself
+ *   (`browser.request_human`). Same refusal, opposite intent: nobody was
+ *   interrupted, the run is waiting on a person to clear what it cannot
+ *   (hardware 2FA, SSO, an anti-bot challenge).
  */
-export type TabState = "idle" | "driving" | "paused_by_user";
+export type TabState = "idle" | "driving" | "paused_by_user" | "awaiting_human";
+
+/** Both hand-back states refuse agent commands until the user resumes. */
+export function isHandedToUser(state: TabState): boolean {
+  return state === "paused_by_user" || state === "awaiting_human";
+}
 
 export interface TabRecord {
   tabId: string;
@@ -56,6 +64,8 @@ export interface TabRecord {
   authorizedUris: readonly string[];
   webContents: WebContents;
   dispose(): void;
+  /** What the agent asked the person to do, while `awaiting_human`. */
+  humanRequest?: string;
 }
 
 /** Wire-shaped summary (snake_case) returned by `tabs.list`. */
@@ -66,6 +76,7 @@ export interface TabSummary {
   url: string;
   title: string;
   active: boolean;
+  human_request?: string;
 }
 
 export interface TabSurface {
@@ -116,6 +127,12 @@ export interface TabManager {
   activate(tabId: string): void;
   activeTabId(): string | null;
   pause(tabId: string): boolean;
+  /**
+   * The agent stops and asks for a person. Unlike `pause`, this is the
+   * run's own decision, so there is nothing to interrupt and no command
+   * racing the human.
+   */
+  requestHuman(tabId: string, message: string): boolean;
   resume(tabId: string): boolean;
   setState(tabId: string, state: TabState): void;
   closeForRun(runId: string): string[];
@@ -204,8 +221,13 @@ export function createTabManager(host: TabHost): TabManager {
         throw new TabError(ERR_TAB_FORBIDDEN, `tab ${tabId} is not owned by this run`);
       }
     }
-    if (record.state === "paused_by_user" && opts?.allowPaused !== true) {
-      throw new TabError(ERR_TAB_PAUSED, `tab ${tabId} was taken over by the user`);
+    if (isHandedToUser(record.state) && opts?.allowPaused !== true) {
+      throw new TabError(
+        ERR_TAB_PAUSED,
+        record.state === "awaiting_human"
+          ? `tab ${tabId} is waiting on the user you asked for help`
+          : `tab ${tabId} was taken over by the user`,
+      );
     }
     return record;
   }
@@ -239,6 +261,7 @@ export function createTabManager(host: TabHost): TabManager {
             url: safe(() => tab.webContents.getURL(), ""),
             title: safe(() => tab.webContents.getTitle(), ""),
             active: tab.tabId === active,
+            ...(tab.humanRequest !== undefined ? { human_request: tab.humanRequest } : {}),
           },
         ];
       }),
@@ -252,21 +275,29 @@ export function createTabManager(host: TabHost): TabManager {
       const tab = tabs.get(tabId);
       // Only an agent-owned tab can be "taken over" — a user tab was
       // never driven in the first place.
-      if (!tab || tab.owner.kind !== "run" || tab.state === "paused_by_user") return false;
+      if (!tab || tab.owner.kind !== "run" || isHandedToUser(tab.state)) return false;
       tab.state = "paused_by_user";
+      return true;
+    },
+    requestHuman: (tabId, message) => {
+      const tab = tabs.get(tabId);
+      if (!tab || tab.owner.kind !== "run") return false;
+      tab.state = "awaiting_human";
+      tab.humanRequest = message;
       return true;
     },
     resume: (tabId) => {
       const tab = tabs.get(tabId);
-      if (!tab || tab.state !== "paused_by_user") return false;
+      if (!tab || !isHandedToUser(tab.state)) return false;
       tab.state = "idle";
+      delete tab.humanRequest;
       return true;
     },
     setState: (tabId, state) => {
       const tab = tabs.get(tabId);
-      // Never let a command transition out of `paused_by_user`: only an
-      // explicit user hand-back (resume) clears a takeover.
-      if (!tab || tab.state === "paused_by_user") return;
+      // Never let a command transition out of a hand-back: only an
+      // explicit user resume clears one.
+      if (!tab || isHandedToUser(tab.state)) return;
       tab.state = state;
     },
     closeForRun: (runId) => {

@@ -360,12 +360,57 @@ function handleTabsMethod(tabs: TabManager, req: JsonRpcRequest): unknown {
   }
 }
 
+/**
+ * `human.request` — the agent stops and asks for a person.
+ *
+ * Deliberately NOT a browser command: it drives no page, it changes who
+ * holds the tab. The platform then waits for the matching `tab.resumed`
+ * before letting the run continue, so the person is never racing a
+ * command that is already in flight.
+ */
+function handleHumanRequest(
+  tabs: TabManager,
+  req: JsonRpcRequest,
+  onRequest: (tabId: string, message: string) => void,
+): unknown {
+  const message = (req.params as { message?: unknown } | undefined)?.message;
+  if (typeof message !== "string" || message.trim().length === 0) {
+    throw new TabError(ERR_INVALID_PARAMS, "human.request needs a `message` for the user");
+  }
+  const runId = req.meta?.run_id;
+  // `allowPaused`: re-asking while already waiting is legitimate (the
+  // platform's wait timed out and the run asked again), and must refresh
+  // the message rather than fail.
+  const tab = resolveTabForLifecycle(tabs, req, runId);
+  if (!tabs.requestHuman(tab.tabId, message.slice(0, 500))) {
+    throw new TabError(ERR_TAB_FORBIDDEN, "only an agent-owned tab can ask for a person");
+  }
+  onRequest(tab.tabId, message);
+  return { awaiting_human: true };
+}
+
+function resolveTabForLifecycle(
+  tabs: TabManager,
+  req: JsonRpcRequest,
+  runId: string | undefined,
+): TabRecord {
+  if (!req.tab_id) throw new TabError(ERR_INVALID_PARAMS, "human.request must address a tab_id");
+  return tabs.require(req.tab_id, {
+    allowPaused: true,
+    ...(runId !== undefined ? { runId } : {}),
+  });
+}
+
 async function dispatch(
   tabs: TabManager,
   req: JsonRpcRequest,
   notify: Notify,
+  onHumanRequest: (tabId: string, message: string) => void,
 ): Promise<JsonRpcResponse> {
   try {
+    if (req.method === "human.request") {
+      return successResponse(req.id, handleHumanRequest(tabs, req, onHumanRequest));
+    }
     if (req.method.startsWith("tabs.")) {
       return successResponse(req.id, handleTabsMethod(tabs, req));
     }
@@ -411,6 +456,8 @@ export function start(opts: {
   instance: string;
   getCookieHeader: () => Promise<string | null>;
   tabs: TabManager;
+  /** Surface an agent's help request: banner, notification, tab strip. */
+  onHumanRequest: (tabId: string, message: string) => void;
   onStateChange?: (state: "connecting" | "connected" | "disconnected") => void;
   onError?: (err: unknown) => void;
 }): BridgeClient {
@@ -496,7 +543,7 @@ export function start(opts: {
       if (!req.id || !req.method) return;
       const step = async (): Promise<void> => {
         if (stopped || socket.readyState !== WebSocket.OPEN) return;
-        const response = await dispatch(opts.tabs, req, notify);
+        const response = await dispatch(opts.tabs, req, notify, opts.onHumanRequest);
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify(response));
         }
@@ -506,7 +553,7 @@ export function start(opts: {
       // detach it from under the first. Different tabs run in parallel —
       // that is the whole point of protocol 2. Tab lifecycle verbs touch
       // no debugger, so they bypass the chain entirely.
-      if (req.method.startsWith("tabs.")) {
+      if (req.method.startsWith("tabs.") || req.method === "human.request") {
         void step().catch((err) => opts.onError?.(err));
         return;
       }

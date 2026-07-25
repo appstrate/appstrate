@@ -124,6 +124,7 @@ import { createTabManager, type TabManager } from "./tabs.ts";
 import { clearEphemeralProfile, purgeStaleAgentProfiles } from "./profiles.ts";
 import {
   calculateDesktopLayout,
+  insetForAgent,
   toggleBrowserFocus,
   togglePanel,
   type ViewMode,
@@ -176,6 +177,9 @@ function createTabSurface(
       nodeIntegration: false,
       sandbox: true,
       partition,
+      // Reports pointer input so a person who only CLICKS in an agent's
+      // tab is noticed. Exposes nothing to the page (see the file).
+      preload: resolveRendererPath("tab-preload.cjs"),
     },
   });
   const contents = view.webContents;
@@ -265,10 +269,35 @@ function createTabSurface(
   return { view, webContents: contents };
 }
 
-/** Push the tab list to the navbar renderer (tab strip lands in lot 4). */
+/** Push the tab list to the navbar renderer (drives strip + banner). */
 function refreshTabStrip(): void {
   if (!tabManager || !navView) return;
   navView.webContents.send("tabs:changed", tabManager.list());
+}
+
+/**
+ * Colour the frame around the active tab: who is holding this surface.
+ *
+ * The colour is the WINDOW's background, showing through an inset view.
+ * Nothing is injected into the page, so no site can detect the marker
+ * and no page CSS can break it — which also matters because the sites
+ * agents work on are precisely the ones running bot detection.
+ */
+const FRAME_NEUTRAL = "#e0e0e0";
+const FRAME_AGENT = "#007aff";
+const FRAME_WAITING = "#ff9500";
+
+function applyBrowserChrome(): void {
+  if (!mainWindow) return;
+  const tabId = tabManager?.activeTabId();
+  const tab = tabId ? tabManager?.get(tabId) : undefined;
+  const colour =
+    tab?.owner.kind !== "run"
+      ? FRAME_NEUTRAL
+      : tab.state === "awaiting_human" || tab.state === "paused_by_user"
+        ? FRAME_WAITING
+        : FRAME_AGENT;
+  mainWindow.contentView.setBackgroundColor(colour);
 }
 
 /** The active tab's WebContents, or null when no tab is open. */
@@ -433,9 +462,14 @@ function createMainWindow(): BaseWindow {
 function applyLayout(win: BaseWindow): void {
   if (!webappView || !navView) return;
   const bounds = win.getContentBounds();
-  const layout = calculateDesktopLayout(bounds.width, bounds.height, activePane);
+  const activeTab = tabManager?.activeTabId();
+  const activeRecord = activeTab ? tabManager?.get(activeTab) : undefined;
+  const banner = activeRecord?.humanRequest !== undefined;
+  const framed = activeRecord?.owner.kind === "run";
+  const layout = calculateDesktopLayout(bounds.width, bounds.height, activePane, { banner });
   navView.setBounds(layout.chrome);
   webappView.setBounds(layout.webapp);
+  applyBrowserChrome();
   // Every tab keeps the SAME full browser bounds. They are stacked, and
   // only the z-order picks the one on screen — a zero-sized or detached
   // tab would stop painting, which is exactly what breaks the in-page
@@ -443,8 +477,9 @@ function applyLayout(win: BaseWindow): void {
   const activeTabId = tabManager?.activeTabId() ?? null;
   const content = win.contentView;
   let activeTabView: WebContentsView | null = null;
+  const tabBounds = insetForAgent(layout.browser, framed);
   for (const [contents, view] of tabViews) {
-    view.setBounds(layout.browser);
+    view.setBounds(tabBounds);
     const tab = tabManager?.byWebContents(contents);
     if (tab && tab.tabId === activeTabId) {
       activeTabView = view;
@@ -521,6 +556,19 @@ function registerNavIpc(): void {
   });
   ipcMain.handle("layout:close-browser", (): void => {
     setActivePane("webapp");
+  });
+
+  // Pointer input inside a tab (from `tab-preload.cjs`). Same rule as
+  // the keyboard path: only an IDLE agent tab is taken over, because a
+  // command in flight is the agent's own synthetic input.
+  ipcMain.on("tab:pointer-input", (event) => {
+    const tab = tabManager?.byWebContents(event.sender);
+    if (!tab || tab.owner.kind !== "run" || tab.state !== "idle") return;
+    if (tabManager?.pause(tab.tabId)) {
+      bridge?.notify("tab.paused", { tab_id: tab.tabId, reason: "user_pointer" });
+      refreshTabStrip();
+      applyBrowserChrome();
+    }
   });
 
   // Tab strip IPC. The renderer half lands in lot 4; the main-process
@@ -854,6 +902,22 @@ function startBridgeFor(instance: string): BridgeClient | null {
       }
     },
     tabs: tabManager,
+    onHumanRequest: (tabId, message): void => {
+      // Bring the surface the person is being asked about to the front,
+      // open the browser panel if it was closed, and tell them — the
+      // window is usually in the background when this fires.
+      try {
+        tabManager?.activate(tabId);
+      } catch {
+        // tab vanished between request and surfacing
+      }
+      if (activePane === "webapp") setActivePane("split");
+      const agent = tabManager?.get(tabId)?.owner;
+      const who = agent?.kind === "run" ? (agent.agentName ?? "An agent") : "An agent";
+      void notify(`${who} needs you`, message);
+      refreshTabStrip();
+      applyBrowserChrome();
+    },
     onStateChange: (state): void => {
       bridgeState = state;
       refreshTray();

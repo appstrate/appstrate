@@ -69,6 +69,7 @@ import {
 import { registerRunSecrets, scrubRunSecrets } from "./secret-scrub.ts";
 import {
   acquireDesktopOriginLease,
+  awaitHumanHandoff,
   assertTabBudget,
   forgetDesktopTab,
   listDesktopTabsForRun,
@@ -76,6 +77,7 @@ import {
   recordDesktopExposure,
   registerDesktopTab,
   requireDesktopTab,
+  setDesktopTabPaused,
   DesktopLeaseConflictError,
   DesktopExposureConflictError,
   DesktopTabGoneError,
@@ -731,6 +733,7 @@ const AGENT_BROWSER_METHODS = [
   "browser.tabs.open",
   "browser.tabs.close",
   "browser.tabs.list",
+  "browser.request_human",
 ] as const;
 
 const TAB_LIFECYCLE_METHODS = new Set<string>([
@@ -738,6 +741,13 @@ const TAB_LIFECYCLE_METHODS = new Set<string>([
   "browser.tabs.close",
   "browser.tabs.list",
 ]);
+
+/**
+ * How long one `browser.request_human` call parks the run. Kept under
+ * the platform's own request ceilings; a person who needs longer just
+ * makes the agent ask again, and the tab stays parked in between.
+ */
+const HUMAN_HANDOFF_TIMEOUT_MS = 110_000;
 
 const commandFields = {
   params: z.record(z.string(), z.unknown()).optional(),
@@ -971,6 +981,49 @@ export function createDesktopRouter(): Hono<AppEnv> {
     }
 
     let dispatchedParams: unknown = body.params ?? {};
+
+    // `browser.request_human` — the agent stops and asks for a person
+    // (a code by SMS, a hardware key, a challenge it cannot clear). The
+    // desktop parks the tab and shows the message; this call stays
+    // pending until the user hands the tab back, so nothing the agent
+    // sends can race what the person is doing. A timeout is not a
+    // failure: the tab stays parked and the run may ask again.
+    if (body.method === "browser.request_human") {
+      const message = (body.params as { message?: unknown } | undefined)?.message;
+      if (typeof message !== "string" || message.trim().length === 0) {
+        throw invalidRequest(
+          "`params.message` must tell the user what you need from them",
+          "params",
+        );
+      }
+      try {
+        await sendCommand(
+          run.userId,
+          "human.request",
+          { message },
+          { timeoutMs: 15_000, tabId: tabId!, runId },
+        );
+      } catch (err) {
+        throw desktopErrorToApiError(err);
+      }
+      // Mark it parked HERE rather than waiting for the desktop's
+      // notification: the tab belongs to the person from the moment the
+      // request lands, and any other command from this run in the
+      // meantime must get a clear 409 instead of a desktop-side refusal
+      // surfacing as a bad gateway.
+      setDesktopTabPaused(run.userId, tabId!, true);
+      logger.info("Desktop run parked on a human", { runId, tabId, module: "desktop" });
+      const resumed = await awaitHumanHandoff(run.userId, tabId!, HUMAN_HANDOFF_TIMEOUT_MS);
+      return c.json({
+        result: resumed
+          ? { resumed: true }
+          : {
+              resumed: false,
+              timed_out: true,
+              hint: "the tab is still parked — ask again to keep waiting, or stop and report",
+            },
+      });
+    }
 
     // `browser.capture_credential` — the write-only path that lands a
     // freshly-logged-in session token (or any in-page secret) into the

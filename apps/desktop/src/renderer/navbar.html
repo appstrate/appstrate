@@ -170,7 +170,8 @@
         border-radius: 50%;
         background: #34c759;
       }
-      .tab[data-state="paused_by_user"] .tab-owner {
+      .tab[data-state="paused_by_user"] .tab-owner,
+      .tab[data-state="awaiting_human"] .tab-owner {
         background: #ff9500;
       }
       .tab-action {
@@ -199,6 +200,48 @@
       }
       .tab-new:hover {
         color: #1d1d1f;
+      }
+      /* Hand-back banner: what the agent is asking the person to do. */
+      .banner {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        box-sizing: border-box;
+        height: 40px;
+        margin-left: auto;
+        padding: 0 12px;
+        background: #fff4e5;
+        border-bottom: 1px solid #ffd8a8;
+        font-size: 12px;
+        color: #7a4a00;
+      }
+      body[data-banner="true"]:not([data-mode="webapp"]) .banner {
+        display: flex;
+      }
+      .banner-icon {
+        flex: 0 0 auto;
+        font-size: 14px;
+      }
+      .banner-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .banner-resume {
+        flex: 0 0 auto;
+        border: 1px solid #ff9500;
+        border-radius: 6px;
+        background: #ff9500;
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: 500;
+        padding: 5px 12px;
+        cursor: pointer;
+        -webkit-app-region: no-drag;
+      }
+      .banner-resume:hover {
+        background: #e68600;
       }
       @keyframes spin {
         to {
@@ -255,10 +298,17 @@
       </div>
     </div>
     <div class="tabs" id="tabs"></div>
+    <div class="banner" id="banner">
+      <span class="banner-icon">⏸</span>
+      <span class="banner-text" id="banner-text"></span>
+      <button class="banner-resume" id="banner-resume">Rendre la main</button>
+    </div>
     <script>
       const $ = (id) => document.getElementById(id);
       const bar = $("bar");
       const tabsEl = $("tabs");
+      const bannerText = $("banner-text");
+      const bannerResume = $("banner-resume");
       const browserControls = $("browser-controls");
       const focusButton = $("focus-browser");
       const urlInput = $("url");
@@ -315,6 +365,21 @@
       // Tab strip. The list is owned by the main process (see tabs.ts);
       // this only renders it and sends intents back.
       function renderTabs(tabs) {
+        // The banner belongs to the ACTIVE tab: an agent waiting in a
+        // background tab shows up as an amber dot in the strip, and only
+        // becomes a banner once you look at it.
+        const active = tabs.find((t) => t.active);
+        const request = active && active.human_request ? active.human_request : "";
+        document.body.dataset.banner = request ? "true" : "false";
+        if (request) {
+          const who =
+            active.owner.kind === "run" && active.owner.agentName
+              ? active.owner.agentName
+              : "L'agent";
+          bannerText.textContent = `${who} : ${request}`;
+          bannerResume.onclick = () => window.appstrate.resumeTab(active.tab_id);
+        }
+
         tabsEl.replaceChildren();
         for (const tab of tabs) {
           const el = document.createElement("div");
@@ -326,9 +391,11 @@
             const dot = document.createElement("span");
             dot.className = "tab-owner";
             dot.title =
-              tab.state === "paused_by_user"
-                ? "You took this tab over — the agent is waiting"
-                : `Driven by ${tab.owner.agentName || "an agent"}`;
+              tab.state === "awaiting_human"
+                ? `${tab.owner.agentName || "L'agent"} attend une action de ta part`
+                : tab.state === "paused_by_user"
+                  ? "Tu as repris la main — l'agent attend"
+                  : `Piloté par ${tab.owner.agentName || "un agent"}`;
             el.appendChild(dot);
           }
 

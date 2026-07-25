@@ -55,6 +55,14 @@ export const desktopBrowserTool = defineTool({
     "stopping at the first failure (result: {completed, results[], error?}); use it to TEST a " +
     "sequence while analyzing a site, then freeze it into a skill file and call the " +
     "`desktop_batch` tool instead. " +
+    "`browser.request_human` {message} — STOP and ask the person for help when you cannot " +
+    "get through yourself: a code sent by SMS or email, a hardware key, a challenge, a login " +
+    "you have no credentials for. Their screen shows your message on the tab, they act, then " +
+    "they hand it back and this call returns {resumed:true}. Write the message as an " +
+    "instruction to a colleague ('enter the code just sent to your phone, then hand back'). " +
+    "{timed_out:true} means they have not answered yet: the tab is still waiting for them, so " +
+    "ask again to keep waiting, or stop and report. Prefer this over guessing or retrying a " +
+    "step that needs a human. " +
     "Tabs: you work in your own browser profile, separate from the user's and from other " +
     "agents'. Commands without `tab_id` all act on one implicit tab, which is enough for most " +
     "jobs. Open more only when you genuinely need two pages at once (waiting on a code in a " +
@@ -94,6 +102,7 @@ export const desktopBrowserTool = defineTool({
           "browser.tabs.open",
           "browser.tabs.close",
           "browser.tabs.list",
+          "browser.request_human",
         ],
         description: "Browser primitive to invoke on the user's local Chromium.",
       },

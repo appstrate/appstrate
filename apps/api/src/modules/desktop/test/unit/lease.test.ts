@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   acquireDesktopOriginLease,
+  awaitHumanHandoff,
   assertTabBudget,
   clearDesktopLeases,
   forgetDesktopTab,
@@ -143,6 +144,42 @@ describe("origin lease", () => {
     expect(() => acquireDesktopOriginLease(AGENT_A, "https://portal.example.com/", "r2")).toThrow(
       DesktopLeaseConflictError,
     );
+  });
+});
+
+describe("human handoff", () => {
+  it("keeps the run parked until the user hands the tab back", async () => {
+    registerDesktopTab("u1", "r1", "tab_1", AGENT_A);
+    const parked = awaitHumanHandoff("u1", "tab_1", 5_000);
+
+    let settled = false;
+    void parked.then(() => (settled = true));
+    await Bun.sleep(20);
+    expect(settled).toBe(false);
+
+    handleDesktopTabNotification("u1", "tab.resumed", { tab_id: "tab_1" });
+    expect(await parked).toBe(true);
+  });
+
+  it("reports a timeout without failing — the tab stays parked", async () => {
+    registerDesktopTab("u1", "r1", "tab_1", AGENT_A);
+    expect(await awaitHumanHandoff("u1", "tab_1", 30)).toBe(false);
+  });
+
+  it("stops waiting when the user closes the parked tab", async () => {
+    registerDesktopTab("u1", "r1", "tab_1", AGENT_A);
+    const parked = awaitHumanHandoff("u1", "tab_1", 5_000);
+    handleDesktopTabNotification("u1", "tab.closed", { tab_id: "tab_1" });
+    expect(await parked).toBe(false);
+  });
+
+  it("does not wake a run parked on a different tab", async () => {
+    registerDesktopTab("u1", "r1", "tab_1", AGENT_A);
+    registerDesktopTab("u1", "r2", "tab_2", AGENT_B);
+    const parked = awaitHumanHandoff("u1", "tab_1", 60);
+
+    handleDesktopTabNotification("u1", "tab.resumed", { tab_id: "tab_2" });
+    expect(await parked).toBe(false);
   });
 });
 
