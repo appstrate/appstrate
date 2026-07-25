@@ -29,6 +29,8 @@ import { zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { toISO } from "../lib/date-helpers.ts";
+import { enqueueStorageDeletion } from "./storage-deletion.ts";
+import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 
 // ─────────────────────────────────────────────
 // Version creation
@@ -444,12 +446,21 @@ export async function deletePackageVersion(packageId: string, version: string): 
     // Delete the version row (CASCADE removes packageVersionDependencies)
     await tx.delete(packageVersions).where(eq(packageVersions.id, row.id));
 
+    // Purge the artifact through the transactional outbox, IN THIS TRANSACTION
+    // — was a best-effort `deleteVersionZip` after commit, whose failure (or a
+    // crash in the window) silently orphaned the ZIP forever. The outbox row
+    // commits atomically with the row delete, so the worker retries the
+    // idempotent physical delete until it succeeds.
+    await enqueueStorageDeletion(tx, {
+      bucket: AGENT_PACKAGES_BUCKET,
+      storageKey: versionZipKey(packageId, version),
+      reason: "version_deleted",
+    });
+
     return true;
   });
 
   if (deleted) {
-    // Best-effort storage cleanup (outside transaction — don't fail if missing)
-    await deleteVersionZip(packageId, version);
     logger.info("Deleted package version", { packageId, version });
   }
 

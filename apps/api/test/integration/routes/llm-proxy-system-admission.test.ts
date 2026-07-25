@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * System-model proxy path: remote runs only discover their model at inference
- * time, so `/api/llm-proxy` must gate the resolved system preset before
- * upstream spend. The same path also forces OpenAI-compatible streaming usage
+ * Proxy admission path: remote runs only discover their model at inference
+ * time, so `/api/llm-proxy` must gate the resolved preset before upstream
+ * spend. The system-preset path also forces OpenAI-compatible streaming usage
  * on the wire and stamps the resulting ledger row as platform-paid.
+ *
+ * The seam dispatches `beforeUsage` for EVERY call with a usage context, BYOK
+ * included — the platform reports `credentialSource` as a fact and the metering
+ * module decides. Two invariants are pinned here against regression:
+ *   - `usage_context_required` (400) still applies ONLY to platform-supplied
+ *     calls; a contextless BYOK call stays allowed (headless BYOK API keys).
+ *   - the chat loopback is still admitted once, at turn start, never twice.
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -21,7 +28,13 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage, seedRun } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedOrgModel,
+  seedOrgModelProviderKey,
+  seedPackage,
+  seedRun,
+} from "../../helpers/seed.ts";
 import { updateRun } from "../../../src/services/state/runs.ts";
 import {
   getSystemModels,
@@ -87,6 +100,44 @@ async function buildHarness(): Promise<Harness> {
     runOrigin: "remote",
   });
   return { ctx, apiKey: key.rawKey, runId: run.id };
+}
+
+/**
+ * An org-owned (BYOK) preset served by the same `openai-completions` route:
+ * the organization's own provider credential, so the resolved model is NOT a
+ * system model. Used to prove the seam gates BYOK calls too.
+ */
+async function seedByokPreset(ctx: TestContext): Promise<string> {
+  const providerKey = await seedOrgModelProviderKey({
+    orgId: ctx.orgId,
+    label: "Org Upstream",
+    apiShape: "openai-completions",
+    baseUrl: "https://api.openai.test/v1",
+    apiKey: "sk-org-byok",
+  });
+  const model = await seedOrgModel({
+    orgId: ctx.orgId,
+    credentialId: providerKey.id,
+    label: "BYOK Preset",
+    modelId: "gpt-4o-2024-08-06",
+    enabled: true,
+    cost: { input: 5, output: 15, cacheRead: 0, cacheWrite: 0 },
+  });
+  return model.id;
+}
+
+/** Non-streaming upstream reply the openai-completions adapter can parse. */
+function completionResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      id: "c1",
+      object: "chat.completion",
+      model: "gpt-4o-2024-08-06",
+      choices: [{ index: 0, message: { role: "assistant", content: "ok" } }],
+      usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
 }
 
 function headers(h: Harness, withRun = true): Record<string, string> {
@@ -173,8 +224,8 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
         context: "run",
         packageId: "@system/proxy-agent",
         runningCount: 1,
-        // The seam only runs for a resolved system preset, so the call being
-        // admitted is platform-funded inference whatever the run declared.
+        // Derived from the preset THIS call resolved to (a system preset here),
+        // not from the credential the referenced run declared.
         credentialSource: "system",
         // Remote origin — the platform funds no compute for this run.
         executionPlane: "remote",
@@ -244,9 +295,8 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
         context: "run",
         packageId: "@system/proxy-agent",
         runningCount: 2,
-        // The seam only runs for a resolved system preset, so the call is
-        // platform-funded inference whatever the RUN declared (`model_source`
-        // is "system" here, but it is not read).
+        // Derived from the resolved preset, not from the RUN's declared
+        // credential (`model_source` is "system" here, but it is not read).
         credentialSource: "system",
         // Platform-origin run → the platform hosts the compute.
         executionPlane: "platform",
@@ -386,6 +436,117 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
 
     expect(res.status).toBe(200);
     expect(upstreamHit).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("dispatches beforeUsage for a BYOK call with a run context, reporting credentialSource 'org'", async () => {
+    // The escape this closes: the seam used to return early for any preset that
+    // was not system-provided, so a BYOK call never reached the hook at all. The
+    // platform was deciding, on the module's behalf, that the operation was
+    // free — but it still runs on platform-orchestrated infrastructure, and a
+    // module gating on subscription status must be able to refuse it. The
+    // platform now reports the FACT (`credentialSource: "org"`) and the module
+    // decides; this one allows.
+    const h = await buildHarness();
+    const byokPreset = await seedByokPreset(h.ctx);
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+
+    let upstreamHits = 0;
+    globalThis.fetch = (async () => {
+      upstreamHits += 1;
+      return completionResponse();
+    }) as unknown as typeof fetch;
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: headers(h),
+      body: JSON.stringify({
+        model: byokPreset,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(upstreamHits).toBe(1);
+    expect(calls).toEqual([
+      {
+        orgId: h.ctx.orgId,
+        context: "run",
+        packageId: "@system/proxy-agent",
+        runningCount: 1,
+        // The org spends its OWN credential — reported, not used to skip.
+        credentialSource: "org",
+        // The harness run is remote-origin: the caller supplies the host.
+        executionPlane: "remote",
+        // This seam owns no compute quote (see the system cases above).
+        timeoutSeconds: null,
+      },
+    ]);
+  });
+
+  it("lets a metering module refuse a BYOK proxy call", async () => {
+    // The product decision this encodes: a BYOK operation for an organization
+    // whose subscription is suspended IS blocked. Platform compute is
+    // platform-funded, so the module gets to say no — impossible while the
+    // platform hid the call from it.
+    const h = await buildHarness();
+    const byokPreset = await seedByokPreset(h.ctx);
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances(
+      [gateModule({ code: "subscription_suspended", message: "Suspended", status: 402 }, calls)],
+      fakeInitCtx(),
+    );
+
+    let upstreamHit = false;
+    globalThis.fetch = (async () => {
+      upstreamHit = true;
+      return new Response("must not be called", { status: 599 });
+    }) as unknown as typeof fetch;
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: headers(h),
+      body: JSON.stringify({
+        model: byokPreset,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    expect(res.status).toBe(402);
+    expect(upstreamHit).toBe(false);
+    expect(calls).toHaveLength(1);
+    expect((calls[0] as { credentialSource: string }).credentialSource).toBe("org");
+  });
+
+  it("allows a contextless BYOK call and dispatches nothing (known, deliberate gap)", async () => {
+    // `BeforeUsageParams` cannot be built without a context (`packageId` for a
+    // run, a session for chat), so a BYOK call with neither X-Run-Id nor the
+    // chat loopback has no shape to report — it is admitted undispatched.
+    // Requiring a context here instead would turn headless BYOK API-key usage
+    // into a 400, which is the regression this pins against.
+    const h = await buildHarness();
+    const byokPreset = await seedByokPreset(h.ctx);
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+
+    let upstreamHits = 0;
+    globalThis.fetch = (async () => {
+      upstreamHits += 1;
+      return completionResponse();
+    }) as unknown as typeof fetch;
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: headers(h, false),
+      body: JSON.stringify({
+        model: byokPreset,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(upstreamHits).toBe(1);
     expect(calls).toHaveLength(0);
   });
 

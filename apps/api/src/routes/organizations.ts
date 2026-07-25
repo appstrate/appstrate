@@ -10,6 +10,7 @@ import {
   getUserOrganizations,
   getOrgById,
   updateOrganization,
+  assertOrgDeletable,
   deleteOrganization,
   getOrgMembers,
   getOrgMember,
@@ -292,6 +293,23 @@ router.delete("/:orgId", async (c) => {
   await requireOrgRole(c, orgId, ["owner"], "Only the owner can delete the organization");
 
   try {
+    // Refuse FIRST, notify SECOND, delete THIRD — the order is load-bearing,
+    // do not reorder.
+    //
+    // `onOrgDelete` handlers do destructive work outside this database and
+    // outside any transaction we can roll back (the cloud module drains
+    // billing then cancels the Stripe subscription and drops the billing
+    // account; the mcp module drops the org from the RFC 8707 audience
+    // allowlist). `deleteOrganization` refuses — from inside its transaction —
+    // when runs are in progress. With the emit first, that refusal left a
+    // surviving-but-gutted organization no repair path can rebuild. Asserting
+    // deletability up front means modules only ever observe a deletion the
+    // platform has already committed to.
+    //
+    // Both calls throw plain Errors, and both land on the same 400
+    // `delete_failed` below — the wire contract is unchanged.
+    await assertOrgDeletable(orgId);
+
     // Notify modules of org deletion (non-fatal — errors isolated per module, FK CASCADE handles cleanup)
     await emitEvent("onOrgDelete", orgId);
 

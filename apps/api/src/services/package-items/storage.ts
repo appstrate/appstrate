@@ -5,8 +5,19 @@ import { computeIntegrity } from "@appstrate/core/integrity";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../../lib/logger.ts";
-import { PACKAGE_ITEMS_BUCKET } from "./config.ts";
+import {
+  PACKAGE_ITEMS_BUCKET,
+  SYSTEM_STORAGE_NAMESPACE,
+  packageItemKey,
+  packageItemOwnerNamespace,
+} from "./config.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+
+// Re-exported for the existing import sites (`system-packages.ts` and friends)
+// — the constant + namespace resolver now live in the leaf `config.ts` so the
+// deletion outbox and the orphan scanner can derive keys without pulling this
+// module's storage/zip graph.
+export { SYSTEM_STORAGE_NAMESPACE, packageItemKey, packageItemOwnerNamespace };
 
 // ─────────────────────────────────────────────
 // Package item Storage (full ZIP)
@@ -21,7 +32,7 @@ export async function uploadPackageFiles(
 ): Promise<string> {
   const zip = zipArtifact(normalizedFiles, 6);
   const integrity = computeIntegrity(zip);
-  const path = `${orgId}/${type}/${itemId}.afps`;
+  const path = packageItemKey(type, orgId, itemId);
   try {
     await storage.uploadFile(PACKAGE_ITEMS_BUCKET, path, zip);
   } catch (err) {
@@ -31,9 +42,6 @@ export async function uploadPackageFiles(
   }
   return integrity;
 }
-
-/** Global namespace for system packages in S3 (not org-scoped). */
-export const SYSTEM_STORAGE_NAMESPACE = "_system";
 
 /**
  * Where a package's files live in the bucket. Derived from the package
@@ -55,8 +63,8 @@ export async function downloadPackageFiles(
   expectedIntegrity?: string | null,
   ownership?: PackageStorageOwnership,
 ): Promise<Record<string, Uint8Array> | null> {
-  const orgPath = `${orgId}/${type}/${itemId}.afps`;
-  const systemPath = `${SYSTEM_STORAGE_NAMESPACE}/${type}/${itemId}.afps`;
+  const orgPath = packageItemKey(type, orgId, itemId);
+  const systemPath = packageItemKey(type, SYSTEM_STORAGE_NAMESPACE, itemId);
 
   let data: Awaited<ReturnType<typeof storage.downloadFile>>;
   if (ownership === "system") {
@@ -84,12 +92,8 @@ export async function downloadPackageFiles(
   return unzipArtifact(bytes);
 }
 
-/** Delete a package item's files from Storage. */
-export async function deletePackageFiles(
-  type: "agents" | "skills" | "integrations" | "mcp-servers",
-  orgId: string,
-  itemId: string,
-): Promise<void> {
-  const path = `${orgId}/${type}/${itemId}.afps`;
-  await storage.deleteFile(PACKAGE_ITEMS_BUCKET, path);
-}
+// NOTE: there is deliberately no `deletePackageFiles` here. Physical deletion
+// of a package item's bytes goes through the transactional outbox
+// (`packageStorageDeletionJobs` → `enqueueStorageDeletion`), enqueued in the
+// same transaction as the `packages` row delete. A direct delete helper is how
+// the previous silent-orphan bug happened, so the affordance is gone.

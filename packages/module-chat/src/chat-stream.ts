@@ -347,22 +347,29 @@ export async function handleChatStream(
   const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
   const isSubscription = subscription.subscription;
 
-  // Admission gate — non-subscription (built-in / API-key) turns only. A
-  // subscription turn spends the user's OWN credential (`credentialSource`
-  // `org`) and is never gated. For the turns that do reach it, the platform
+  // Admission gate — EVERY turn, whichever engine serves it. The platform
   // resolves system-provided vs. org-owned server-side and dispatches
-  // `beforeUsage` (chat context) with that fact — every turn, not only the
-  // system-provided ones; a metering module quotes it and decides. Gated BEFORE
-  // the phase-B preamble so a rejected turn opens no MCP session and persists no
-  // user message.
-  if (!isSubscription) {
-    const rejection = await deps.checkUsageAllowed({
-      orgId,
-      presetId: chosen.id,
-      sessionId: meteringSessionId,
-    });
-    if (rejection) return usageRejectionResponse(rejection);
-  }
+  // `beforeUsage` (chat context) with that fact; a metering module quotes it and
+  // decides.
+  //
+  // A subscription turn used to skip this entirely, on the reasoning that it
+  // spends the user's OWN credential (`credentialSource` `org`) and therefore
+  // costs nothing. That is the module's call to make, not the platform's: the
+  // turn is driven by the IN-PROCESS Pi engine, so the platform funds its
+  // compute even when it funds no inference, and a module gating on
+  // subscription status must be able to refuse it. We report
+  // `subscription: true` — the one fact this module owns, since it picked the
+  // engine — and the platform derives the credential source from it.
+  //
+  // Gated BEFORE the phase-B preamble so a rejected turn opens no MCP session
+  // and persists no user message.
+  const rejection = await deps.checkUsageAllowed({
+    orgId,
+    presetId: chosen.id,
+    sessionId: meteringSessionId,
+    subscription: isSubscription,
+  });
+  if (rejection) return usageRejectionResponse(rejection);
 
   // ── Preamble phase B (parallel) ──────────────────────────────────────────
   // The caller-context block (both paths) and the platform MCP probe (ai-sdk

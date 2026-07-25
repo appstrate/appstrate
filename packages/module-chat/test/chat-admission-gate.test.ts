@@ -2,16 +2,20 @@
 
 /**
  * Chat admission gate — `handleChatStream` calls `deps.checkUsageAllowed` for
- * the non-subscription (built-in / API-key) branch BEFORE it opens an MCP
- * session, persists the user message, or starts inference. A rejection becomes
- * an RFC 9457 `application/problem+json` with the hook's status (402 flows
- * through for a soft-cap block).
+ * EVERY turn BEFORE it opens an MCP session, persists the user message, or
+ * starts inference. A rejection becomes an RFC 9457
+ * `application/problem+json` with the hook's status (402 flows through for a
+ * soft-cap block).
  *
  * Locked here:
  *   - a gate rejection short-circuits to 402 with NO user message and NO usage
  *     row written (an ephemeral turn writes nothing at all);
- *   - the subscription branch is NEVER gated (`checkUsageAllowed` is not even
- *     called) — a subscription turn spends the user's own credential.
+ *   - the SUBSCRIPTION branch is gated too, reporting `subscription: true`. It
+ *     used to skip admission entirely on the reasoning that it spends the
+ *     user's own credential — but the turn is driven by the in-process Pi
+ *     engine, so the platform funds its compute, and whether that costs
+ *     anything is the metering module's call, not the platform's. A rejection
+ *     there must abort before any MCP handshake or user-message persist.
  *
  * Style follows the module's other handler tests (caller-context.test.ts): the
  * exported handler is driven directly with a fake Hono context + injected
@@ -77,6 +81,8 @@ function fakeContext(opts: {
 interface DepsOverrides {
   checkUsageAllowed: ChatPlatformDeps["checkUsageAllowed"];
   resolveSubscriptionChatModel?: ChatPlatformDeps["resolveSubscriptionChatModel"];
+  /** Collects every platform path the turn dispatched (proves no MCP handshake). */
+  dispatchPaths?: string[];
 }
 
 /** Deps whose `dispatch` serves `/api/models`; everything else is scripted. */
@@ -84,6 +90,7 @@ function fakeDeps(o: DepsOverrides): ChatPlatformDeps {
   return {
     dispatch: async (req) => {
       const path = new URL(req.url).pathname;
+      o.dispatchPaths?.push(path);
       if (path === "/api/models") return Response.json(MODELS_PAYLOAD);
       return new Response("unexpected dispatch: " + path, { status: 500 });
     },
@@ -176,8 +183,12 @@ describe("chat admission gate (handleChatStream)", () => {
     await assertDbCount(llmUsage, eq(llmUsage.orgId, ctx.orgId), 0);
   });
 
-  it("does NOT gate the subscription branch (checkUsageAllowed is never called)", async () => {
-    let gateCalls = 0;
+  it("gates the subscription branch too, reporting subscription: true", async () => {
+    // The escape this closes: a subscription turn used to skip admission
+    // entirely. It reports the one fact this module owns — it chose the
+    // in-process engine — and the platform derives `credentialSource: "org"`
+    // from it (see apps/api check-usage-allowed.test.ts).
+    const gateArgs: Parameters<ChatPlatformDeps["checkUsageAllowed"]>[0][] = [];
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
@@ -185,14 +196,14 @@ describe("chat admission gate (handleChatStream)", () => {
       body: { messages: [userTurn("u1", "hello")] },
     });
     // A subscription model whose credential is dead short-circuits to the
-    // reconnect response — a clean way to prove the gate was skipped without
-    // standing up the Pi engine.
+    // reconnect response — a clean way to observe the turn past the gate
+    // without standing up the Pi engine.
     const res = await handleChatStream(
       c,
       fakeDeps({
-        checkUsageAllowed: async () => {
-          gateCalls += 1;
-          return REJECTION;
+        checkUsageAllowed: async (args) => {
+          gateArgs.push(args);
+          return null;
         },
         resolveSubscriptionChatModel: async (): Promise<SubscriptionChatResolution> => ({
           subscription: true,
@@ -201,9 +212,65 @@ describe("chat admission gate (handleChatStream)", () => {
       }),
     );
 
-    // Reconnect (401), NOT a gate (402) — and the gate was never consulted.
+    // Admitted → the turn proceeds and hits the reconnect (401) branch.
     expect(res.status).toBe(401);
-    expect(gateCalls).toBe(0);
+    expect(gateArgs).toEqual([
+      {
+        orgId: ctx.orgId,
+        presetId: "sysmodel",
+        // Ephemeral turn (no session id in the body) → nothing to attribute.
+        sessionId: null,
+        subscription: true,
+      },
+    ]);
+  });
+
+  it("a subscription turn blocked by the gate returns 402, opens no MCP session and persists no user message", async () => {
+    const sessionId = "chs_gate_subscription";
+    const dispatchPaths: string[] = [];
+    const c = fakeContext({
+      orgId: ctx.orgId,
+      user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
+      applicationId: ctx.defaultAppId,
+      body: { id: sessionId, messages: [userTurn("u1", "hello")] },
+    });
+    const res = await handleChatStream(
+      c,
+      fakeDeps({
+        checkUsageAllowed: async () => REJECTION,
+        // A LIVE subscription binding: without the gate this turn would go on to
+        // drive the in-process Pi engine on platform compute.
+        resolveSubscriptionChatModel: async (): Promise<SubscriptionChatResolution> => ({
+          subscription: true,
+          model: {
+            modelId: "claude-sonnet-4-20250514",
+            apiShape: "anthropic-messages",
+            baseUrl: "https://api.anthropic.test",
+            cost: null,
+            contextWindow: null,
+            maxTokens: null,
+            reasoning: false,
+            input: null,
+            accessToken: "at-test",
+          },
+        }),
+        dispatchPaths,
+      }),
+    );
+
+    expect(res.status).toBe(402);
+    expect((await res.json()) as { code: string }).toMatchObject({ code: "over_cap" });
+
+    // The only platform call made was the model list — no MCP handshake, and
+    // the Pi engine never started.
+    expect(dispatchPaths).toEqual(["/api/models"]);
+    // No user message, no metered usage. (The session ROW shell is created
+    // before the preamble on purpose — see the ai-sdk case above.)
+    const messages = await db
+      .select({ seq: chatMessages.seq })
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionId, sessionId));
+    expect(messages).toHaveLength(0);
     await assertDbCount(llmUsage, eq(llmUsage.orgId, ctx.orgId), 0);
   });
 });

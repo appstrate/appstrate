@@ -1,18 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Admission gate for platform-paid calls that enter through `/api/llm-proxy`.
+ * Admission gate for calls that enter through `/api/llm-proxy` — platform-paid
+ * and BYOK alike.
  *
  * A run only discovers its model at inference time when it executes off-platform,
- * so the proxy is the first place that can know a call resolved to a system
- * preset. This seam applies the module `beforeUsage` hook immediately before
- * the upstream request, using only server-validated context.
+ * so the proxy is the first place that can know which credential a call resolved
+ * to. This seam applies the module `beforeUsage` hook immediately before the
+ * upstream request, using only server-validated context.
+ *
+ * The platform does NOT pre-classify a call as free. Whose credential the
+ * resolved preset spends is reported as the `credentialSource` fact
+ * (`"system"` for a platform-supplied preset, `"org"` for one the organization
+ * configured with its own credential) and the metering module decides. A module
+ * that meters only platform-supplied inference quotes a BYOK call at zero and
+ * admits it — same outcome as the old `isSystemModel` early return, decided in
+ * the right place; a module that gates on subscription status can refuse it,
+ * which the old early return made impossible.
  *
  * Exactly one billable unit per hook dispatch:
  *   - run context  → one dispatch per proxy call (the call IS the unit).
  *   - chat context → zero dispatches; first-party chat already gated the turn
  *     at admission, and the signed loopback identity validated here proves
  *     this call is that same turn.
+ *   - no context   → a platform-supplied call is REFUSED (400
+ *     `usage_context_required`); a BYOK call is allowed through undispatched
+ *     (see the deliberate gap documented below).
  */
 
 import type { ResolvedModel } from "./org-models.ts";
@@ -41,22 +54,39 @@ export async function enforceSystemProxyAdmission(args: {
   resolved: ResolvedModel;
   usageContext: SystemProxyUsageContext;
 }): Promise<void> {
-  // BYOK/API-key presets spend the org's own credential, and OSS deployments
-  // may intentionally expose system presets without a billing module.
-  if (!args.resolved.isSystemModel || !hasHook("beforeUsage")) return;
+  // OSS deployments may intentionally expose system presets without a metering
+  // module. No hook → nothing to admit and no context requirement to enforce
+  // (the 400 below exists to protect the quota gates a module provides).
+  if (!hasHook("beforeUsage")) return;
 
-  // A platform-paid raw proxy call must belong to a validated product surface:
-  // X-Run-Id for an agent, or the signed first-party loopback identity for
-  // chat. Refusing an unattributed system call prevents a headless API key from
-  // bypassing the run/chat quota gates while still allowing BYOK proxy calls.
+  // Whose credential this call spends. A FACT reported onward, never a filter:
+  // a BYOK call is dispatched too, and it is the module that decides whether it
+  // costs anything.
+  const credentialSource = args.resolved.isSystemModel ? ("system" as const) : ("org" as const);
+
   if (!args.usageContext) {
-    throw new ApiError({
-      status: 400,
-      code: "usage_context_required",
-      title: "Usage Context Required",
-      detail:
-        "Platform-provided model calls must include a valid X-Run-Id or originate from the first-party chat loopback.",
-    });
+    // A platform-paid raw proxy call must belong to a validated product surface:
+    // X-Run-Id for an agent, or the signed first-party loopback identity for
+    // chat. Refusing an unattributed system call prevents a headless API key
+    // from bypassing the run/chat quota gates.
+    if (credentialSource === "system") {
+      throw new ApiError({
+        status: 400,
+        code: "usage_context_required",
+        title: "Usage Context Required",
+        detail:
+          "Platform-provided model calls must include a valid X-Run-Id or originate from the first-party chat loopback.",
+      });
+    }
+    // KNOWN, DELIBERATE GAP — a contextless BYOK call dispatches nothing.
+    // `BeforeUsageParams` cannot be built without a context (the `run` member
+    // requires `packageId`, the `chat` member a session surface), so there is
+    // no shape to report here. Requiring a context for BYOK instead would turn
+    // headless BYOK API-key usage — an explicitly supported, self-funded
+    // pattern — into a 400, which is a worse failure than not metering a call
+    // the platform funds no inference for. Closing the gap needs a contract
+    // change (a context-less usage surface), not a filter added here.
+    return;
   }
 
   // `checkUsageAllowed` already called `beforeUsage` once for this exact turn
@@ -70,10 +100,10 @@ export async function enforceSystemProxyAdmission(args: {
   // origin. There is no "already admitted" short-circuit, because the unit the
   // preflight gate admitted is not the unit being admitted here:
   //
-  //   - `run-preflight-gates.ts` admits a run LAUNCH once, for a
-  //     platform-origin run resolving a system model. That run's inference
-  //     then flows through the sidecar (`MODEL_BASE_URL`), which never touches
-  //     `/api/llm-proxy`.
+  //   - `run-preflight-gates.ts` admits a run LAUNCH once (every run, whatever
+  //     its credential source or execution plane). A platform-origin run's
+  //     inference then flows through the sidecar (`MODEL_BASE_URL`), which
+  //     never touches `/api/llm-proxy`.
   //   - This seam admits ONE raw proxy call, a distinct billable unit that
   //     mints its own `llm_usage` row (`source='proxy'`). It is never the
   //     continuation of the launch the preflight gate admitted.
@@ -103,10 +133,11 @@ export async function enforceSystemProxyAdmission(args: {
     // active, so the DB count normally includes it. Keep a floor of one
     // against a status/count race.
     runningCount: Math.max(1, await getRunningRunCountForOrg({ orgId: args.orgId })),
-    // This seam only runs for a resolved SYSTEM preset (`resolved.isSystemModel`
-    // is checked above), so the call being admitted is platform-funded
-    // inference by construction — whatever credential the RUN itself declared.
-    credentialSource: "system" as const,
+    // Derived from the preset THIS call resolved to, never from the credential
+    // the referenced RUN declared (`runs.model_source` is not read here): a run
+    // admitted as BYOK can still route a system-preset call through this seam,
+    // and vice versa. The fact describes the call being admitted.
+    credentialSource,
     executionPlane:
       args.usageContext.runOrigin === "platform" ? ("platform" as const) : ("remote" as const),
     // Not determinable at this seam — the proxy holds no agent manifest — and

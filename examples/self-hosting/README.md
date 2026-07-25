@@ -330,19 +330,19 @@ It never touches `.env` or runs Docker; restart the stack afterwards
 
 See `.env.example` for all available environment variables. Key settings:
 
-| Variable                                  | Description                                                                                                                                    |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD`     | Database credentials                                                                                                                           |
-| `BETTER_AUTH_SECRET`                      | Session signing secret (32 bytes hex)                                                                                                          |
-| `CONNECTION_ENCRYPTION_KEY`               | Credential encryption key (32 bytes base64)                                                                                                    |
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO admin credentials                                                                                                                        |
-| `APP_URL`                                 | Public URL (for OAuth callbacks, email links)                                                                                                  |
-| `USERCONTENT_URL`                         | Optional — separate origin for agent-HTML previews (recommended in production; see below)                                                      |
-| `TRUSTED_ORIGINS`                         | CORS origins (comma-separated)                                                                                                                 |
-| `SYSTEM_PROVIDER_KEYS`                    | Pre-configured LLM provider credentials (JSON array)                                                                                           |
-| `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`                                                                                            |
-| `RUN_ADAPTER`                             | Agent execution backend: `docker` (default) or `firecracker` (microVMs)                                                                        |
-| `FIRECRACKER_RUNNER_URL` / `_TOKEN`       | Firecracker only: appstrate-runner daemon URL (`unix:///run/appstrate-runner/runner.sock` co-located, `https://` remote) + shared bearer token |
+| Variable                                  | Description                                                                                                                                      |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD`     | Database credentials                                                                                                                             |
+| `BETTER_AUTH_SECRET`                      | Session signing secret (32 bytes hex)                                                                                                            |
+| `CONNECTION_ENCRYPTION_KEY`               | Credential encryption key (32 bytes base64)                                                                                                      |
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO admin credentials                                                                                                                          |
+| `APP_URL`                                 | Public URL (for OAuth callbacks, email links)                                                                                                    |
+| `USERCONTENT_URL`                         | Optional — separate origin for agent-HTML previews (recommended in production; must be a different host than `APP_URL` or boot fails; see below) |
+| `TRUSTED_ORIGINS`                         | CORS origins (comma-separated)                                                                                                                   |
+| `SYSTEM_PROVIDER_KEYS`                    | Pre-configured LLM provider credentials (JSON array)                                                                                             |
+| `LOG_LEVEL`                               | Logging verbosity: `debug`, `info`, `warn`, `error`                                                                                              |
+| `RUN_ADAPTER`                             | Agent execution backend: `docker` (default) or `firecracker` (microVMs)                                                                          |
+| `FIRECRACKER_RUNNER_URL` / `_TOKEN`       | Firecracker only: appstrate-runner daemon URL (`unix:///run/appstrate-runner/runner.sock` co-located, `https://` remote) + shared bearer token   |
 
 ### Firecracker execution backend (optional)
 
@@ -434,13 +434,26 @@ cookie-less preview. That HTML is untrusted (agent-generated), so it is served
 from a dedicated preview route with an opaque-sandbox iframe, a strict CSP, and
 an injected meta CSP. For the strongest isolation in production, set
 `USERCONTENT_URL` to a **separate registrable domain** (eTLD+1) pointed at the
-same server — e.g. `usercontent.example.com` alongside `appstrate.example.com`.
-A distinct registrable domain gives the preview its own cookie jar, storage
-partition, and process (browser site isolation), so untrusted preview script
-can never reach the app's session even if the sandbox is somehow defeated. When
-unset, previews are served same-origin on `APP_URL` (still hardened) — fine for
+same server — e.g. `appstrate-usercontent.example` alongside
+`appstrate.example.com`. A distinct registrable domain gives the preview its own
+cookie jar, storage partition, and process (browser site isolation), so
+untrusted preview script can never reach the app's session even if the sandbox
+is somehow defeated. A sibling subdomain (`usercontent.example.com`) is the
+weaker fallback: it is a different origin and a different storage partition, but
+it still receives any cookie scoped to the parent domain. When unset, previews
+are served same-origin on `APP_URL` (still hardened, and agent HTML is only
+served as active content inside the dashboard's sandboxed iframe) — fine for
 render-only content, but a separate origin is recommended once agents can emit
 HTML for other users to view.
+
+**Do not point `USERCONTENT_URL` at `APP_URL`'s host.** Setting the variable is
+what tells the platform the preview origin is isolated, which makes it serve
+agent HTML as active content in _every_ loading context — including a top-level
+tab. On the app's own host that means agent-authored inline script running with
+the dashboard's `localStorage` and non-HttpOnly cookies. The platform enforces
+this: a `USERCONTENT_URL` sharing `APP_URL`'s host (identical value, or the same
+host on another port or scheme) **fails boot**, as does a non-`https://` value
+when `NODE_ENV=production`.
 
 ### Reverse proxy body size & timeouts (uploads)
 

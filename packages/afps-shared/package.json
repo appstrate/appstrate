@@ -52,11 +52,9 @@
     "./backoff": "./src/backoff.ts"
   },
   "dependencies": {
+    "@types/semver": "^7.7.1",
     "fflate": "^0.8.3",
     "semver": "^7.8.4"
-  },
-  "devDependencies": {
-    "@types/semver": "^7.7.1"
   },
   "peerDependencies": {
     "typescript": "^5"

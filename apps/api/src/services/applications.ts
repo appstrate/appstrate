@@ -160,6 +160,11 @@ export async function deleteApplication(orgId: string, applicationId: string) {
     for (const r of runRows) {
       storageJobs.push(...runWorkspaceDeletionJobs(r.id, "application_deleted"));
     }
+    // No package artifacts to enumerate here: `packages` is ORG-scoped (it has
+    // no `application_id`), so this cascade drops only the `application_packages`
+    // join rows — the `agent-packages` / `library-packages` objects stay owned
+    // by the org and are purged by `deleteOrganization`. Verified against
+    // `packages/db/src/schema/packages.ts`.
     await enqueueStorageDeletion(tx, storageJobs);
 
     const bytes = docRows.reduce((sum, row) => sum + row.size, 0);

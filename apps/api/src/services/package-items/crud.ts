@@ -8,7 +8,8 @@ import { extractDependencies } from "@appstrate/core/dependencies";
 import { buildPackageId } from "@appstrate/core/naming";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
-import { deletePackageFiles } from "./storage.ts";
+import { enqueueStorageDeletion } from "../storage-deletion.ts";
+import { packageStorageDeletionJobs } from "../package-storage-deletion.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import {
   orgOrSystemFilter,
@@ -344,16 +345,33 @@ export async function deleteOrgItem(
     return { ok: false, error: "IN_USE", dependents };
   }
 
-  // Scope delete to non-ephemeral rows only: deleting a shadow package
-  // here would cascade-wipe its runs history.
-  await db.delete(packages).where(
-    scopedWhere(packages, {
-      orgId,
-      extra: [eq(packages.id, itemId), eq(packages.type, cfg.type), notEphemeralFilter()],
-    }),
-  );
+  await db.transaction(async (tx) => {
+    // Enumerate BEFORE the delete: `ON DELETE CASCADE` on `package_versions`
+    // makes every published artifact's key unrecoverable the moment the
+    // `packages` row goes. This previously ran as a bare delete followed by a
+    // best-effort `deletePackageFiles`, which removed only the
+    // `library-packages` object and orphaned every `agent-packages` version ZIP
+    // of the item outright — a permanent leak on an ordinary user action.
+    const jobs = await packageStorageDeletionJobs(tx, orgId, itemId, "package_deleted");
 
-  await deletePackageFiles(cfg.storageFolder, orgId, itemId);
+    // Scope delete to non-ephemeral rows only: deleting a shadow package
+    // here would cascade-wipe its runs history.
+    const deleted = await tx
+      .delete(packages)
+      .where(
+        scopedWhere(packages, {
+          orgId,
+          extra: [eq(packages.id, itemId), eq(packages.type, cfg.type), notEphemeralFilter()],
+        }),
+      )
+      .returning({ id: packages.id });
+
+    // Enqueue ONLY when the row actually went. The enumeration matches on
+    // (org, id) while the delete additionally filters on type and
+    // non-ephemeral, so a type mismatch would otherwise queue the deletion of
+    // an object whose row is still live.
+    if (deleted.length > 0) await enqueueStorageDeletion(tx, jobs);
+  });
 
   return { ok: true };
 }

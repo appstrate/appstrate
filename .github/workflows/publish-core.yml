@@ -70,6 +70,18 @@ jobs:
           CONSUMER_DRIFT_POLICY: ${{ vars.CONSUMER_DRIFT_POLICY || 'fail' }}
         run: bun scripts/check-consumer-versions.ts
 
+      # Last gate before the artifact becomes immutable on npm. The `tsc --noEmit`
+      # step above runs inside the workspace, where root devDependencies hoist type
+      # packages into the shared node_modules — it cannot see a dependency we forgot
+      # to declare. This packs the tarball and typechecks every exported subpath in
+      # a clean npm project outside the monorepo (~5 s, installs from npm).
+      # It also enforces the leaf-first release order: a bumped
+      # @appstrate/afps-shared range that is not on npm yet fails here rather than
+      # for the first consumer to run `npm install`.
+      - name: Verify the published artifact resolves for consumers
+        working-directory: .
+        run: bun scripts/verify-package-resolves.ts packages/core
+
       - name: Publish to npm
         run: npm publish --access public --provenance
         env:

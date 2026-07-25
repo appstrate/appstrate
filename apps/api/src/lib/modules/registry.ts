@@ -124,8 +124,8 @@ function buildPlatformServices(): PlatformServices {
     },
     // Chat seam — the chat module resolves a subscription model's real binding +
     // fresh token (credential resolution stays server-side), meters each turn,
-    // and gates non-subscription admission through these, since it has no DB
-    // access.
+    // and gates admission for EVERY turn (subscription included) through these,
+    // since it has no DB access.
     resolveSubscriptionChatModel,
     recordChatUsage,
     checkUsageAllowed,

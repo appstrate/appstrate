@@ -33,6 +33,26 @@ const jsonEnv = <T>(defaultValue: string) =>
       }
     });
 
+// Production-hardening gate for operator-facing base URLs: `https://` is
+// mandatory once `NODE_ENV=production`, with `http://localhost` / `127.0.0.1`
+// exempt (a production build behind a local reverse proxy that terminates TLS
+// is a legitimate self-host layout). Shared by every such URL so they hold the
+// SAME standard instead of each inventing its own.
+const isProductionSafeUrl = (v: string): boolean =>
+  v.startsWith("https://") || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(v);
+
+// Host of an absolute URL (lowercased by the URL parser, port and path
+// stripped), or null when the value does not parse. Refinements compare parsed
+// hosts rather than raw strings — `https://a.example.com` and
+// `https://a.example.com/` are the same host — and must never throw.
+const urlHost = (v: string): string | null => {
+  try {
+    return new URL(v).hostname;
+  } catch {
+    return null;
+  }
+};
+
 // ─── Schema ──────────────────────────────────────────────────
 //
 // MAINTAINER NOTE: this Zod schema is the single source of truth for env
@@ -527,7 +547,38 @@ const envSchema = z
     // on `APP_URL` (still hardened: opaque-sandbox iframe + strict CSP + injected
     // meta CSP), which is defensible for render-only content. Cloud always sets
     // it. No trailing slash required — it is trimmed when the URL is built.
-    USERCONTENT_URL: z.string().optional(),
+    //
+    // ENFORCED (boot fails, loudly): an absolute URL whose HOST differs from
+    // `APP_URL`'s — plus https:// in production, the same rule `APP_URL`
+    // carries. This is not stylistic. `mayServeActiveHtml()` treats a
+    // configured value as PROOF of separation and serves agent HTML as ACTIVE
+    // content in EVERY loading context, dropping the same-origin mode's
+    // fail-closed `Sec-Fetch-Dest: iframe` requirement. Copy-paste `APP_URL`
+    // in here and agent-authored inline script (the CSP grants
+    // `script-src 'unsafe-inline'` — the page has to render) executes
+    // TOP-LEVEL on the app's own host, with the SPA's localStorage,
+    // non-HttpOnly cookies and same-origin navigation: stored XSS reachable by
+    // any org member who can make an agent emit HTML. Presence must therefore
+    // never be mistaken for separation.
+    //
+    // The bar is HOST inequality — deliberately ONE check, sitting between the
+    // two obvious candidates:
+    //  - Stricter than ORIGIN inequality, because cookies are host-scoped, not
+    //    origin-scoped: `https://app.example.com` and
+    //    `https://app.example.com:8443` are different origins that share one
+    //    cookie jar, so a port- or scheme-only "separation" is not one.
+    //  - Weaker than requiring a different REGISTRABLE domain (eTLD+1), which
+    //    is genuinely the stronger boundary — a sibling subdomain still
+    //    receives cookies scoped to the parent (`Domain=.example.com`) and
+    //    shares the site for `SameSite` purposes. Not machine-enforced because
+    //    deciding eTLD+1 correctly requires the Public Suffix List
+    //    (`example.co.uk`, `*.github.io`), a data dependency this dependency-light
+    //    package will not carry, and a hand-rolled "last two labels" heuristic
+    //    would both reject legitimate deployments and hand out false assurance.
+    //    A separate registrable domain stays the documented RECOMMENDATION
+    //    (docs/ENV.md, examples/self-hosting/README.md); a separate host is the
+    //    machine-checked FLOOR.
+    USERCONTENT_URL: z.url().optional(),
 
     // Redis (optional — falls back to in-memory adapters when absent)
     REDIS_URL: z.string().optional(),
@@ -723,14 +774,38 @@ const envSchema = z
       "WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS must be strictly less than REMOTE_RUN_REPLAY_WINDOW_SECONDS so a replayed event cannot slip past the dedup cache between expiries",
     path: ["WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS"],
   })
+  .refine((env) => env.NODE_ENV !== "production" || isProductionSafeUrl(env.APP_URL), {
+    message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
+    path: ["APP_URL"],
+  })
+  // The untrusted-preview origin must actually BE a different origin. See the
+  // long note on USERCONTENT_URL above: the preview route reads its presence as
+  // proof of isolation, so a same-host value silently turns agent-authored
+  // inline script into top-level script on the app's own host.
+  .refine(
+    (env) => {
+      if (!env.USERCONTENT_URL) return true;
+      const appHost = urlHost(env.APP_URL);
+      const previewHost = urlHost(env.USERCONTENT_URL);
+      // `APP_URL` is not URL-validated; when it cannot be parsed there is
+      // nothing to compare against and its own malformation is the real bug.
+      return appHost === null || previewHost === null || appHost !== previewHost;
+    },
+    {
+      message:
+        "USERCONTENT_URL must be a DIFFERENT host than APP_URL — a copy of APP_URL (or the same host on another port/scheme) is not isolation. The document-preview route treats a configured USERCONTENT_URL as proof of separation and then serves agent-authored HTML as ACTIVE content in every loading context, so a same-host value makes untrusted inline script execute on the app's own host: the SPA's localStorage, its non-HttpOnly cookies and same-origin navigation. Point it at a separate domain resolving to the same server (ideally a separate registrable domain / eTLD+1, e.g. appstrate-usercontent.example vs app.example.com), or leave it unset to keep the fail-closed same-origin preview mode.",
+      path: ["USERCONTENT_URL"],
+    },
+  )
   .refine(
     (env) =>
       env.NODE_ENV !== "production" ||
-      env.APP_URL.startsWith("https://") ||
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(env.APP_URL),
+      !env.USERCONTENT_URL ||
+      isProductionSafeUrl(env.USERCONTENT_URL),
     {
-      message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
-      path: ["APP_URL"],
+      message:
+        "USERCONTENT_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
+      path: ["USERCONTENT_URL"],
     },
   );
 

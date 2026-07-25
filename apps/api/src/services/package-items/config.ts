@@ -28,7 +28,39 @@ export function storageFolderForType(type: PackageType): PackageTypeConfig["stor
 }
 
 // ─────────────────────────────────────────────
-// Package items storage bucket
+// Package items storage bucket + key layout
 // ─────────────────────────────────────────────
 
 export const PACKAGE_ITEMS_BUCKET = "library-packages";
+
+/** Global namespace for system packages in the bucket (they have no org). */
+export const SYSTEM_STORAGE_NAMESPACE = "_system";
+
+/**
+ * The bucket namespace a package's files live under, derived from the row's
+ * `orgId`: a real org id, or the global `_system/` namespace when `orgId` is
+ * null (system packages, synced from `system-packages/` at boot).
+ *
+ * Callers that reconcile the bucket against the DB MUST go through this so a
+ * system object is never mistaken for an orphan, and an org-scoped purge never
+ * reaches into `_system/`.
+ */
+export function packageItemOwnerNamespace(orgId: string | null): string {
+  return orgId ?? SYSTEM_STORAGE_NAMESPACE;
+}
+
+/**
+ * In-bucket key of a package item's ZIP:
+ * `{orgId|_system}/{storageFolder}/{itemId}.afps`.
+ *
+ * `itemId` is the `@scope/name` package id (so the key legitimately contains a
+ * `/`). One builder so the upload, the deletion outbox and the orphan scanner
+ * cannot drift — a job pointing at a key nobody wrote deletes nothing.
+ */
+export function packageItemKey(
+  storageFolder: PackageTypeConfig["storageFolder"],
+  ownerNamespace: string,
+  itemId: string,
+): string {
+  return `${ownerNamespace}/${storageFolder}/${itemId}.afps`;
+}

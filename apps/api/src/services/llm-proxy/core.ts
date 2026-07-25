@@ -61,12 +61,19 @@ export interface ProxyCallInputs {
   /** Override the request-body cap. Defaults to 10 MiB. */
   maxRequestBytes?: number;
   /**
-   * Admission seam invoked after a system preset is resolved and after a
+   * Admission seam invoked after the preset is resolved and after a
    * response-cache miss, but before any upstream request. The route wires this
    * to the module `beforeUsage` hook with its validated chat/run context.
-   * Org-owned presets never invoke it.
+   *
+   * Invoked for EVERY resolved preset, org-owned ones included. Whether the
+   * preset spends a platform-supplied credential is a FACT the seam reports
+   * onward (`credentialSource`), never a filter applied here: a BYOK call still
+   * occupies the platform's proxy and belongs to an operation the platform may
+   * be funding elsewhere, so the decision that it costs nothing belongs to the
+   * metering module. Do not re-introduce an `isSystemModel` guard around this
+   * call — that guard was the admission bypass this seam exists to close.
    */
-  beforeSystemUpstream?: (resolved: ResolvedModel, presetId: string) => Promise<void>;
+  beforeUpstream?: (resolved: ResolvedModel, presetId: string) => Promise<void>;
 }
 
 export class LlmProxyUnsupportedModelError extends Error {
@@ -188,13 +195,14 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     cacheKeyForWrite = probe.cacheKey;
   }
 
-  // Cached responses spend no provider tokens. On a cache miss, gate every
-  // platform-paid proxy call immediately before the upstream request. This
-  // closes the remote-run path where run creation cannot know whether the
-  // remote runner will later select a system preset.
-  if (resolved.isSystemModel) {
-    await inputs.beforeSystemUpstream?.(resolved, presetId);
-  }
+  // Cached responses spend no provider tokens. On a cache miss, gate EVERY
+  // proxy call immediately before the upstream request — platform-paid and
+  // BYOK alike. This closes the remote-run path where run creation cannot know
+  // whether the remote runner will later select a system preset, and it stops
+  // the platform from deciding on the metering module's behalf that an
+  // org-credential call is free (the seam reports `credentialSource` and the
+  // module decides).
+  await inputs.beforeUpstream?.(resolved, presetId);
 
   const upstreamUrl = joinUpstreamUrl(resolved.baseUrl, inputs.upstreamPath);
 
