@@ -104,8 +104,10 @@ describe("GET/POST /api/admin/storage-deletion-jobs — platform operator guard"
       headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { items: unknown[]; nextCursor: string | null };
-    expect(Array.isArray(body.items)).toBe(true);
+    const body = (await res.json()) as { object: string; data: unknown[]; hasMore: boolean };
+    expect(body.object).toBe("list");
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.hasMore).toBe(false);
   });
 
   it("refuses a non-session token that resolves the allowlisted operator", async () => {

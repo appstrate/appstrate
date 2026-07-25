@@ -218,6 +218,20 @@
       "when": 1784929744240,
       "tag": "0030_validate_deferred_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784965825181,
+      "tag": "0031_cost_non_negative",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1784965825182,
+      "tag": "0032_validate_cost_non_negative",
+      "breakpoints": true
     }
   ]
 }

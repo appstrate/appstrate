@@ -43,7 +43,7 @@ import {
   consumeUploadStream,
   peekUploads,
   parseUploadUri,
-  isUnsniffableMime,
+  isTextShapedMime,
   sniffedMimeMatchesDeclared,
   normalizeMime,
   type UploadMeta,
@@ -61,10 +61,11 @@ import {
   parseDocumentUri,
   documentUri,
 } from "@appstrate/core/document-uri";
-import { getActor, tryGetActor } from "../lib/actor.ts";
+import { getActor } from "../lib/actor.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
+import { extensionForMime } from "@appstrate/core/naming";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
 import {
   streamRunDocument,
@@ -387,21 +388,14 @@ export function parseDataUri(uri: string, fieldName: string): InlineFile {
   return { mime, ...(name ? { name } : {}), bytes };
 }
 
-/** Common extensions for text-shaped MIMEs `file-type` cannot sniff. */
-const MIME_EXT: Record<string, string> = {
-  "text/plain": "txt",
-  "text/markdown": "md",
-  "text/csv": "csv",
-  "text/html": "html",
-  "application/json": "json",
-  "application/xml": "xml",
-  "application/x-yaml": "yaml",
-  "application/yaml": "yaml",
-};
-
-/** Best-effort filename extension for a MIME type (fallback for unnamed inline files). */
+/**
+ * Extension for an unnamed inline file. The shared MIME table names what it
+ * knows; anything else falls back to the MIME subtype when that is already a
+ * plausible extension, and finally to `bin` — an inline file always lands on
+ * disk, so it always needs a name.
+ */
 function extFromMime(mime: string): string {
-  const known = MIME_EXT[mime];
+  const known = extensionForMime(mime);
   if (known) return known;
   const subtype = mime.split("/")[1] ?? "";
   return /^[a-z0-9]{1,8}$/.test(subtype) ? subtype : "bin";
@@ -653,12 +647,11 @@ export async function parseRequestInput(
 
         // The run-triggering actor — resolved once and threaded into both the
         // document ACL check AND the upload ownership gate (peek/consume), so a
-        // member can only deliver documents/uploads they may read. The document
-        // ACL REQUIRES a principal (strict `getActor`); the upload ownership gate
-        // scopes leniently (`tryGetActor` → tenant-only when absent), so
-        // upload/inline-only inputs never hard-require a principal in context.
-        const actor =
-          docRefs.length > 0 ? getActor(c) : resolved.length > 0 ? tryGetActor(c) : undefined;
+        // member can only deliver documents/uploads they may read. Both gates
+        // REQUIRE a principal: every route reaching here is authenticated, and a
+        // missing actor used to degrade the upload gate to tenant-only scoping
+        // (any org member could consume another member's staged bytes).
+        const actor = getActor(c);
 
         // Resolve every `document://` reference through the container ACL (D2):
         // the run-triggering actor must be able to read the document, else it is
@@ -667,7 +660,7 @@ export async function parseRequestInput(
           docRefs.length > 0
             ? await Promise.all(
                 docRefs.map(async ({ ref, id }) => {
-                  const doc = await getDocumentForActor({ orgId, applicationId }, actor!, id);
+                  const doc = await getDocumentForActor({ orgId, applicationId }, actor, id);
                   // Cross-actor ACL (S2): resolving a run is org-wide-visible to
                   // members, but a `user_upload` is creator-only content — a
                   // member must not deliver another member's private upload into
@@ -728,7 +721,7 @@ export async function parseRequestInput(
         );
         inline.forEach(({ ref, file }, i) => {
           const sniffed = inlineSniffed[i]?.mime;
-          if (file.mime !== "application/octet-stream" && !isUnsniffableMime(file.mime)) {
+          if (file.mime !== "application/octet-stream" && !isTextShapedMime(file.mime)) {
             if (!sniffedMimeMatchesDeclared(file.mime, sniffed)) {
               throw invalidRequest(
                 sniffed

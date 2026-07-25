@@ -3,7 +3,7 @@
 
 import { mkdir, unlink, realpath, writeFile, open, readdir, stat } from "node:fs/promises";
 import { join, dirname, normalize, relative, sep, resolve as resolvePath } from "node:path";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { signKeyringToken, verifyKeyringToken } from "@appstrate/afps-shared/signed-token";
 import type {
   Storage,
   CreateUploadUrlOptions,
@@ -41,13 +41,13 @@ export interface FileSystemStorageConfig {
 }
 
 /**
- * Normalize an upload-signing secret into a keyring. A plain string is split
- * on commas (rotation: prepend the new key); empty segments are dropped.
+ * HMAC domain separator for upload tokens. The upload keyring
+ * (`UPLOAD_SIGNING_SECRET`) also signs document-preview tokens, so binding each
+ * signature to its purpose is what makes the two non-interchangeable in BOTH
+ * directions — a preview token can never be replayed at the upload sink, and an
+ * upload token can never be replayed at the preview route.
  */
-function toUploadKeyring(secret: string | readonly string[]): string[] {
-  const keys = typeof secret === "string" ? secret.split(",") : [...secret];
-  return keys.filter((k) => k.length > 0);
-}
+const UPLOAD_TOKEN_DOMAIN = "fs-upload.v1.";
 
 /** Payload encoded inside an upload token. */
 export interface FsUploadTokenPayload {
@@ -68,18 +68,14 @@ export interface FsUploadTokenPayload {
 }
 
 /**
- * Encode + HMAC-sign an upload token with the FIRST key of the keyring.
- * Format: base64url(JSON).base64url(HMAC-SHA256).
+ * Encode + HMAC-sign an upload token with the FIRST key of the keyring, bound
+ * to {@link UPLOAD_TOKEN_DOMAIN}. Format: base64url(JSON).base64url(HMAC-SHA256).
  */
 export function signFsUploadToken(
   payload: FsUploadTokenPayload,
   secret: string | readonly string[],
 ): string {
-  const [activeKey] = toUploadKeyring(secret);
-  if (!activeKey) throw new Error("signFsUploadToken requires at least one signing key");
-  const body = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
-  const sig = createHmac("sha256", activeKey).update(body).digest("base64url");
-  return `${body}.${sig}`;
+  return signKeyringToken(UPLOAD_TOKEN_DOMAIN, payload, secret);
 }
 
 /**
@@ -91,26 +87,8 @@ export function verifyFsUploadToken(
   token: string,
   secret: string | readonly string[],
 ): FsUploadTokenPayload | null {
-  const dot = token.indexOf(".");
-  if (dot <= 0) return null;
-  const body = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  const a = Buffer.from(sig);
-  let valid = false;
-  for (const key of toUploadKeyring(secret)) {
-    const b = Buffer.from(createHmac("sha256", key).update(body).digest("base64url"));
-    if (a.length === b.length && timingSafeEqual(a, b)) {
-      valid = true;
-      break;
-    }
-  }
-  if (!valid) return null;
-  let payload: FsUploadTokenPayload;
-  try {
-    payload = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as FsUploadTokenPayload;
-  } catch {
-    return null;
-  }
+  const payload = verifyKeyringToken<FsUploadTokenPayload>(UPLOAD_TOKEN_DOMAIN, token, secret);
+  if (!payload) return null;
   if (typeof payload.e !== "number" || payload.e < Math.floor(Date.now() / 1000)) return null;
   if (typeof payload.k !== "string" || !payload.k) return null;
   return payload;

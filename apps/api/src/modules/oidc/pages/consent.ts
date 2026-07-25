@@ -18,7 +18,12 @@ import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
-const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
+/**
+ * Consent-screen descriptions, French (the hosted OAuth pages are FR-only).
+ * Exported so the scope-label parity test can assert coverage against the
+ * authoritative scope vocabulary.
+ */
+export const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   openid: "Votre identité",
   profile: "Votre profil",
   email: "Votre adresse email",
@@ -27,13 +32,29 @@ const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   "agents:run": "Lancer des agents pour vous",
   "runs:read": "Consulter votre historique d'exécutions",
   "runs:cancel": "Annuler vos exécutions en cours",
+  "documents:read": "Consulter les documents produits par vos exécutions",
   "integrations:read": "Lister vos intégrations et connexions",
   "integrations:connect": "Ajouter des connexions en votre nom",
   "integrations:disconnect": "Retirer vos connexions",
   "skills:read": "Lister les skills disponibles",
   "models:read": "Lister les modèles LLM disponibles",
+  "llm-proxy:call": "Utiliser les modèles LLM configurés en votre nom",
+  // Module-contributed scopes (MCP module, `endUserGrantable`). Not in the
+  // static `APPSTRATE_BUILTIN_SCOPES` list, but requestable at runtime — so
+  // they need a description here just the same.
+  "mcp:read": "Découvrir les opérations disponibles via MCP",
+  "mcp:invoke": "Exécuter des opérations via MCP en votre nom",
 };
 
+/**
+ * Human description for a scope, falling back to the raw scope string.
+ *
+ * The fallback keeps the page rendering, but a user asked to grant
+ * `llm-proxy:call` verbatim cannot meaningfully consent — so the fallback is a
+ * crash guard, never the plan. `test/unit/oauth-scope-labels.test.ts` fails when
+ * an authoritative scope reaches here without an entry above (and does the same
+ * for the dashboard's `oauthClients.scopeLabels.*` locale keys).
+ */
 function describeScope(scope: string): string {
   return SCOPE_DESCRIPTIONS_FR[scope] ?? scope;
 }

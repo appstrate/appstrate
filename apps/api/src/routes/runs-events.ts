@@ -33,6 +33,7 @@ import { getRunAttribution } from "../services/state/runs.ts";
 import { recordAudit } from "../services/audit.ts";
 import { actorFromIds } from "../lib/actor.ts";
 import { decodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
+import { documentUri } from "@appstrate/core/document-uri";
 import {
   downloadRunWorkspace,
   downloadRunDocumentsManifest,
@@ -391,9 +392,10 @@ export function createRunsEventsRouter() {
     // would silently overwrite one document with another. The platform build
     // path can't produce one (assignWorkspaceNames dedupes); this guards a
     // corrupted / hand-built manifest with a typed 400 instead.
-    // (Pre-upgrade manifests key on `name` only — fall back rather than 400
-    // a run that was launched before workspace names existed.)
-    assertUniqueWorkspaceNames(manifest.documents.map((d) => d.workspace_name ?? d.name));
+    // `workspace_name` is guaranteed present: `parseRunDocumentsManifest` (the
+    // single reader, shared with the deletion path) rejects any entry without a
+    // safe single-segment name before this point.
+    assertUniqueWorkspaceNames(manifest.documents.map((d) => d.workspace_name));
     return c.json(manifest);
   });
 
@@ -484,7 +486,7 @@ export function createRunsEventsRouter() {
     return c.json(
       {
         id: row.id,
-        uri: `document://${row.id}`,
+        uri: documentUri(row.id),
         name: row.name,
         mime: row.mime,
         size: row.size,

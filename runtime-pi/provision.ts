@@ -156,16 +156,15 @@ export async function provisionDocuments(deps: ProvisionDeps): Promise<void> {
 
   // The manifest carries a `name` (human display name) and a `workspace_name`
   // (the unique single-segment filename to write on disk); the platform
-  // guarantees `workspace_name` is unique per run so two documents never
-  // overwrite each other here (see the platform's run-document-naming.ts).
-  // A pre-upgrade platform serves manifests without `workspace_name` — fall
-  // back to `name` (the old on-disk key) rather than silently provisioning
-  // zero documents.
+  // guarantees `workspace_name` is present and unique per run — its manifest
+  // reader rejects any entry without one — so two documents never overwrite
+  // each other here (see the platform's run-document-naming.ts). The runtime
+  // still type-checks the field rather than trusting the JSON blindly.
   const manifest = (await manifestRes.json()) as {
-    documents?: { workspace_name?: unknown; name?: unknown }[];
+    documents?: { workspace_name?: unknown }[];
   };
   const names = (manifest.documents ?? [])
-    .map((d) => d.workspace_name ?? d.name)
+    .map((d) => d.workspace_name)
     .filter((n): n is string => typeof n === "string" && n.length > 0);
   if (names.length === 0) return;
 

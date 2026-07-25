@@ -13,11 +13,12 @@ import { client } from "./client";
 /**
  * Per-upload byte cap the platform enforces (`POST /api/uploads` rejects a
  * larger declared size). Client-side it is a UX fast-path only — the server is
- * the authoritative gate — but it belongs HERE, next to the uploader, so every
- * surface that guards a file size (SchemaForm fields, the chat composer via
- * `ChatPage`'s injection) reads one number instead of hardcoding its own.
+ * the authoritative gate — so it is RE-EXPORTED from the shared storage
+ * contract rather than restated here: the SPA, the create-upload route schema,
+ * and the token the sink verifies all read the same constant, and a change to
+ * the platform ceiling cannot leave the browser guarding the old number.
  */
-export const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+export { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
 
 export const uploadClient: UploadFn = async (file, signal) => {
   const { data: desc } = await client.POST("/api/uploads", {

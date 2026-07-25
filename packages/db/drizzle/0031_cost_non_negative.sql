@@ -1,0 +1,23 @@
+-- Money floor at the column, not only in the application.
+--
+-- `llm_usage.cost_usd` is the append-only spend ledger billing reads (the cloud
+-- sweeper debits credits off it by serial-id cursor) and `runs.cost` is the
+-- denormalized per-run cache of the same money. Both were clamped to >= 0 only
+-- by their writers: one bad rate table, one sign slip in a provider's usage
+-- payload, or one new write path that bypasses `recordLlmUsage`, and an org gets
+-- CREDITED for spending — with no later pass able to notice, since the runner
+-- upsert only ever advances a row monotonically upward from whatever it holds.
+--
+-- Both constraints are added `NOT VALID` (drizzle-kit cannot express it, so the
+-- generated statements are hand-extended): `NOT VALID` still enforces the check
+-- on every INSERT and UPDATE from this moment on, it only skips the verification
+-- scan of pre-existing rows — which on `llm_usage`, the highest-volume table
+-- here, would hold an ACCESS EXCLUSIVE lock for the length of a full-table read.
+-- Migration 0032 performs that scan separately under SHARE UPDATE EXCLUSIVE
+-- (concurrent reads AND writes allowed), the same split migrations 0020/0021 and
+-- 0029/0030 use.
+--
+-- NULL passes both checks (standard SQL CHECK semantics): `runs.cost` is NULL
+-- until a run reports usage.
+ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_cost_usd_non_negative" CHECK (cost_usd >= 0) NOT VALID;--> statement-breakpoint
+ALTER TABLE "runs" ADD CONSTRAINT "runs_cost_non_negative" CHECK (cost >= 0) NOT VALID;

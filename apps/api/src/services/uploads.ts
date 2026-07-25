@@ -36,7 +36,7 @@ import {
   createUploadUrl,
 } from "@appstrate/db/storage";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { StorageAlreadyExistsError } from "@appstrate/core/storage";
+import { StorageAlreadyExistsError, UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
 import { UPLOAD_URI_PREFIX, UPLOAD_ID_RE } from "@appstrate/core/document-uri";
 import { MAX_FILENAME_LEN, sanitizeFilename } from "@appstrate/core/naming";
 import { getEnv } from "@appstrate/env";
@@ -57,7 +57,7 @@ import { SHA256_HEX_RE } from "../lib/digest.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import {
   normalizeMime,
-  isUnsniffableMime,
+  isTextShapedMime,
   sniffedMimeMatchesDeclared,
   shouldEnforceSniffedMime,
 } from "./mime-policy.ts";
@@ -65,11 +65,10 @@ import {
 // Re-exported so existing importers (input-parser, tests) keep a single import
 // site while the policy itself lives in `mime-policy.ts` (the one module shared
 // by uploads AND agent-output ingestion). Do not re-implement here.
-export { normalizeMime, isUnsniffableMime, sniffedMimeMatchesDeclared };
+export { normalizeMime, isTextShapedMime, sniffedMimeMatchesDeclared };
 
 const UPLOAD_BUCKET = "uploads";
 const DEFAULT_EXPIRY_SECONDS = 900; // 15 min
-const DEFAULT_MAX_SIZE = 100 * 1024 * 1024; // 100 MB absolute ceiling
 
 /**
  * Post-consume reuse window in milliseconds. Within `consumedAt + this`, a
@@ -96,7 +95,7 @@ function isWithinReuseWindow(consumedAt: Date): boolean {
  * deleted WHILE it streams — the run then dies on an opaque storage error.
  *
  * The margin must therefore cover the longest single consume. A consume streams
- * at most `DEFAULT_MAX_SIZE` (100 MB) from storage into the run workspace; one
+ * at most `UPLOAD_MAX_BYTES` (100 MiB) from storage into the run workspace; one
  * hour is ~3 orders of magnitude above the observed cost of that copy and still
  * only defers the deletion of already-expired bytes by an hour. Any consume that
  * was ALLOWED to start (i.e. began before `consumedAt + retention`) is therefore
@@ -239,7 +238,7 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
   if (params.size <= 0) {
     throw invalidRequest("size must be a positive integer", "size");
   }
-  const maxSize = params.maxSize ?? DEFAULT_MAX_SIZE;
+  const maxSize = params.maxSize ?? UPLOAD_MAX_BYTES;
   if (params.size > maxSize) {
     throw invalidRequest(`size exceeds ${maxSize} bytes`, "size");
   }
@@ -375,46 +374,49 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
  * principal (run-triggering user/end-user, or chat-session owner) — an upload is
  * readable ONLY by the principal that created it, so peek/consume reject a
  * non-creator with the same 404 a missing/cross-tenant row gets (no existence
- * oracle). Optional for backward-compatible service callers that pre-date
- * ownership; when omitted the ownership gate is skipped (tenant scoping still
- * applies).
+ * oracle).
+ *
+ * REQUIRED: every path that reaches here runs behind authentication and has a
+ * principal. It used to be optional "for callers that pre-date ownership", and
+ * that optionality was not a convenience — it was a hole: omitting the field
+ * silently disabled the ownership gate entirely and left tenant-only scoping,
+ * i.e. any member of the org could consume any other member's staged bytes.
  */
 export interface UploadAccessContext {
   orgId: string;
   applicationId: string;
-  actor?: Actor;
+  actor: Actor;
 }
 
 /**
  * Ownership gate: does `actor` match the principal recorded on the upload row?
  * A `user`/API-key upload records `createdBy`; an end-user upload records
- * `endUserId`. A row with NEITHER recorded (legacy pre-migration rows, drained
- * within the retention window) has no owner to enforce, so it is allowed. A
+ * `endUserId`. A row with NEITHER recorded has no owner to enforce, so it is
+ * allowed — that shape is only reachable for rows written before end-user
+ * attribution existed, and those drain within `UPLOAD_RETENTION_HOURS`. A
  * recorded owner that does not match the actor is rejected by the caller as a
  * 404 (indistinguishable from missing — same convention as the documents ACL).
  */
 function actorOwnsUpload(
   row: { createdBy: string | null; endUserId: string | null },
-  actor: Actor | undefined,
+  actor: Actor,
 ): boolean {
-  if (!actor) return true; // no principal supplied → tenant-only scoping
-  if (row.createdBy === null && row.endUserId === null) return true; // unattributed legacy row
+  if (row.createdBy === null && row.endUserId === null) return true; // unattributed row
   return actor.type === "user" ? row.createdBy === actor.id : row.endUserId === actor.id;
 }
 
 /**
  * SQL ownership predicate for the atomic consume claim: the acting principal
- * matches the row's recorded creator, OR the row is unattributed (legacy).
+ * matches the row's recorded creator, OR the row is unattributed.
  * Mirrors {@link actorOwnsUpload} in SQL so a non-owner NEVER wins the claim
  * (which would mark another member's upload consumed and let the rollback path
- * delete its bytes). Undefined when no actor is supplied (tenant-only scoping).
+ * delete its bytes).
  */
-function ownershipClaimFilter(actor: Actor | undefined): SQL | undefined {
-  if (!actor) return undefined;
+function ownershipClaimFilter(actor: Actor): SQL {
   const unattributed = and(isNull(uploads.createdBy), isNull(uploads.endUserId));
   const mine =
     actor.type === "user" ? eq(uploads.createdBy, actor.id) : eq(uploads.endUserId, actor.id);
-  return or(mine, unattributed);
+  return or(mine, unattributed)!;
 }
 
 /**
@@ -502,7 +504,6 @@ export async function consumeUploadStream(
   // non-owner can never win it — otherwise their claim would mark another
   // member's upload consumed and the rollback path would delete its bytes.
   const claimedAt = new Date();
-  const ownership = ownershipClaimFilter(ctx.actor);
   const [claimed] = await db
     .update(uploads)
     .set({ consumedAt: claimedAt })
@@ -511,7 +512,7 @@ export async function consumeUploadStream(
         eq(uploads.id, uploadId),
         eq(uploads.orgId, ctx.orgId),
         eq(uploads.applicationId, ctx.applicationId),
-        ...(ownership ? [ownership] : []),
+        ownershipClaimFilter(ctx.actor),
         isNull(uploads.consumedAt),
         sql`${uploads.expiresAt} >= now()`,
       ),

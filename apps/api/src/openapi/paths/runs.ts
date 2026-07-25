@@ -210,6 +210,24 @@ export const runsPaths = {
             },
           },
         },
+        "413": {
+          description:
+            "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
+            "(4 MiB decoded), or the run's input documents together exceed " +
+            "`WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). " +
+            "Both are refused before the run launches, so nothing is charged and no workspace is " +
+            'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
+            'many files".',
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "412": {
           description: "Missing integration connection (`missing_integration_connection`)",
           content: {
@@ -520,6 +538,24 @@ export const runsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "413": {
+          description:
+            "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
+            "(4 MiB decoded), or the run's input documents together exceed " +
+            "`WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). " +
+            "Both are refused before the run launches, so nothing is charged and no workspace is " +
+            'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
+            'many files".',
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "412": {
           description: "Missing integration connection (`missing_integration_connection`)",
           content: {

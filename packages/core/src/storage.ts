@@ -1,6 +1,22 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Absolute per-file ceiling on a staged upload, in bytes (100 MiB).
+ *
+ * Deliberately a CONSTANT, not an env knob: the number is signed into every
+ * upload token (`payload.s`), enforced again while the sink streams, and shown
+ * to the user by the browser uploader before a single byte leaves the page.
+ * Three enforcement points that must agree — so they read one exported value
+ * instead of each hardcoding `100 * 1024 * 1024`.
+ *
+ * The DURABLE per-document cap is separate and operator-tunable
+ * (`DOCUMENT_MAX_FILE_BYTES`, same 100 MiB default): a deployment may lower what
+ * it stores forever without touching the staging contract the signed tokens and
+ * the client encode.
+ */
+export const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
 /** Options for creating a direct-upload URL. */
 export interface CreateUploadUrlOptions {
   /** Declared MIME type (advisory; storage adapters may enforce it in the signature). */

@@ -53,11 +53,27 @@ const arrayFileSchema: JSONSchemaObject = {
 };
 
 /** Minimal Hono context stub — parseRequestInput only reads the JSON body and orgId/applicationId. */
-function fakeCtx(body: unknown, ctx: { orgId: string; applicationId: string }): Context {
+/**
+ * Minimal Hono context stub. A principal is always present: `parseRequestInput`
+ * resolves the acting actor with the strict `getActor`, mirroring the fact that
+ * every route reaching it sits behind authentication (the actor gates both the
+ * document ACL and the staged-upload ownership check).
+ */
+function fakeCtx(
+  body: unknown,
+  ctx: { orgId: string; applicationId: string; user?: { id: string } },
+): Context {
+  const user = ctx.user ?? { id: "usr_input_parser_test" };
   return {
     req: { json: async () => body },
     get: (key: string) =>
-      key === "orgId" ? ctx.orgId : key === "applicationId" ? ctx.applicationId : undefined,
+      key === "orgId"
+        ? ctx.orgId
+        : key === "applicationId"
+          ? ctx.applicationId
+          : key === "user"
+            ? user
+            : undefined,
   } as unknown as Context;
 }
 

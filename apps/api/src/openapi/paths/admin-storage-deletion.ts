@@ -5,18 +5,18 @@ const storageDeletionJobSchema = {
   required: [
     "id",
     "bucket",
-    "storageKey",
+    "storage_key",
     "reason",
     "attempts",
-    "nextAttemptAt",
-    "completedAt",
-    "lastError",
+    "next_attempt_at",
+    "completed_at",
+    "last_error",
     "createdAt",
   ],
   properties: {
     id: { type: "string", example: "sdj_0c9f…" },
     bucket: { type: "string", example: "documents" },
-    storageKey: {
+    storage_key: {
       type: "string",
       description: "In-bucket object key (no bucket prefix).",
       example: "app_abc/doc_def/report.pdf",
@@ -29,9 +29,9 @@ const storageDeletionJobSchema = {
         "materialization_failed).",
     },
     attempts: { type: "integer", description: "Delete attempts made so far." },
-    nextAttemptAt: { type: "string", format: "date-time" },
-    completedAt: { type: ["string", "null"], format: "date-time" },
-    lastError: { type: ["string", "null"] },
+    next_attempt_at: { type: "string", format: "date-time" },
+    completed_at: { type: ["string", "null"], format: "date-time" },
+    last_error: { type: ["string", "null"] },
     createdAt: { type: "string", format: "date-time" },
   },
 } as const;
@@ -65,25 +65,31 @@ export const adminStorageDeletionPaths = {
           schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
         },
         {
-          name: "cursor",
+          name: "startingAfter",
           in: "query",
           required: false,
           schema: { type: "string" },
-          description: "Opaque cursor — the `nextCursor` returned by a prior page.",
+          description:
+            "Cursor — the `id` of the last job of the previous page. Follow the RFC 5988 " +
+            '`Link: <…>; rel="next"` response header instead of building it by hand.',
         },
       ],
       responses: {
         "200": {
           description: "A page of storage-deletion jobs.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            Link: { $ref: "#/components/headers/Link" },
+          },
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["items", "nextCursor"],
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  items: { type: "array", items: storageDeletionJobSchema },
-                  nextCursor: { type: ["string", "null"] },
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: storageDeletionJobSchema },
+                  hasMore: { type: "boolean" },
                 },
               },
             },

@@ -237,13 +237,13 @@ describe("storage-deletion outbox", () => {
       .where(eq(storageDeletionJobs.id, j!.id));
 
     const dead = await listStorageDeletionJobs({ status: "dead", limit: 50 });
-    expect(dead.items.some((i) => i.id === j!.id)).toBe(true);
+    expect(dead.data.some((i) => i.id === j!.id)).toBe(true);
     // Dead is a subset of pending.
     const pending = await listStorageDeletionJobs({ status: "pending", limit: 50 });
-    expect(pending.items.some((i) => i.id === j!.id)).toBe(true);
+    expect(pending.data.some((i) => i.id === j!.id)).toBe(true);
     // Not completed → absent from the completed list.
     const completed = await listStorageDeletionJobs({ status: "completed", limit: 50 });
-    expect(completed.items.some((i) => i.id === j!.id)).toBe(false);
+    expect(completed.data.some((i) => i.id === j!.id)).toBe(false);
 
     // Retry resets nextAttemptAt to ~now (keeps it retrying — never abandoned).
     expect(await retryStorageDeletionJob(j!.id)).toBe(true);
@@ -271,16 +271,17 @@ describe("storage-deletion outbox", () => {
     );
 
     const seen: string[] = [];
-    let cursor: string | undefined;
-    do {
+    let startingAfter: string | undefined;
+    for (;;) {
       const page = await listStorageDeletionJobs({
         status: "pending",
         limit: 1,
-        ...(cursor ? { cursor } : {}),
+        ...(startingAfter ? { startingAfter } : {}),
       });
-      seen.push(...page.items.map((item) => item.id));
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor);
+      seen.push(...page.data.map((item) => item.id));
+      if (!page.hasMore) break;
+      startingAfter = page.data.at(-1)!.id;
+    }
 
     expect(seen).toEqual(["sdj_cursor_c", "sdj_cursor_b", "sdj_cursor_a"]);
     expect(new Set(seen).size).toBe(3);
@@ -612,7 +613,7 @@ describe("storage-deletion outbox", () => {
     expect(after!.attempts).toBeGreaterThanOrEqual(STORAGE_DELETION_DEAD_LETTER_THRESHOLD);
     expect(after!.completedAt).toBeNull();
     const dead = await listStorageDeletionJobs({ status: "dead", limit: 50 });
-    expect(dead.items.some((i) => i.id === job!.id)).toBe(true);
+    expect(dead.data.some((i) => i.id === job!.id)).toBe(true);
   });
 
   it("refuses an operator retry on a job that may still be executing", async () => {

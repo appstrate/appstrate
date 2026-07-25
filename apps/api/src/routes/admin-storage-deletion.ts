@@ -26,6 +26,7 @@ import type { AppEnv } from "../types/index.ts";
 import { forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import { isPlatformAdmin } from "@appstrate/db/auth-policy";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { listStorageDeletionJobs, retryStorageDeletionJob } from "../services/storage-deletion.ts";
 
 /**
@@ -62,7 +63,9 @@ function requirePlatformAdmin(c: Context<AppEnv>): void {
 const listQuerySchema = z.object({
   status: z.enum(["pending", "dead", "completed"]).default("pending"),
   limit: z.coerce.number().int().min(1).max(200).default(50),
-  cursor: z.string().optional(),
+  // Stripe-style cursor: the id of the last row of the previous page, exactly
+  // as `/api/end-users` and the document gallery take it.
+  startingAfter: z.string().optional(),
 });
 
 export function createAdminStorageDeletionRouter(): Hono<AppEnv> {
@@ -76,10 +79,15 @@ export function createAdminStorageDeletionRouter(): Hono<AppEnv> {
     const parsed = listQuerySchema.safeParse({
       status: c.req.query("status"),
       limit: c.req.query("limit"),
-      cursor: c.req.query("cursor"),
+      startingAfter: c.req.query("startingAfter"),
     });
     if (!parsed.success) throw invalidRequest("Invalid query parameters");
     const result = await listStorageDeletionJobs(parsed.data);
+    setCursorLinkHeader({
+      c,
+      hasMore: result.hasMore,
+      lastId: result.data.at(-1)?.id,
+    });
     return c.json(result);
   });
 

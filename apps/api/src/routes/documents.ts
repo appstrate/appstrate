@@ -37,6 +37,7 @@ import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/error
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { createDownloadUrl } from "@appstrate/db/storage";
+import { attachmentDisposition } from "@appstrate/core/naming";
 import { zDocumentPurposeEnum } from "@appstrate/db/schema";
 import {
   getDocumentForActor,
@@ -59,18 +60,6 @@ import {
   resolveHtmlPreviewMode,
   PREVIEW_MAX_BYTES,
 } from "../services/document-preview.ts";
-
-/**
- * Build a safe `Content-Disposition: attachment` header for a filename.
- * Emits both an ASCII fallback (control chars incl. CR/LF, quotes, backslashes,
- * and non-ASCII collapsed to `_`, so no header injection or client parse break)
- * and an RFC 5987 `filename*` with the UTF-8 name percent-encoded, which
- * compliant clients prefer for the real (possibly non-ASCII) name.
- */
-function attachmentDisposition(name: string): string {
-  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "download";
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
-}
 
 export function createDocumentsRouter() {
   const router = new Hono<AppEnv>();

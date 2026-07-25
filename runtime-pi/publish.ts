@@ -30,7 +30,21 @@ import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
 import type { PublishedDocument } from "@appstrate/core/runtime-tool-defs";
 import type { RunArtifactsSummary } from "@appstrate/afps-runtime/runner";
 
-/** Minimal Content-Type inference from a file extension. */
+/**
+ * Content-Type inference from a file extension, for the publish request the
+ * container sends.
+ *
+ * This is the INVERSE direction of the platform's canonical MIME→extension
+ * table (`@appstrate/core/naming`), not a copy of it, and it is NOT redundant
+ * with the server's magic-byte sniffing: the server relabels a published
+ * document only when `file-type` actually recognises the bytes, so for every
+ * text-shaped format below (html, txt, md, csv, json, xml, svg, yaml) the
+ * declaration made HERE is what ends up stored. Binary entries (png/jpeg/gif/
+ * pdf/zip) are the redundant half — the server re-derives those from the bytes.
+ *
+ * Keep the text entries in step with the platform table so a file round-trips
+ * through the same format on both sides.
+ */
 const MIME_BY_EXT: Record<string, string> = {
   ".html": "text/html",
   ".htm": "text/html",
@@ -38,6 +52,8 @@ const MIME_BY_EXT: Record<string, string> = {
   ".md": "text/markdown",
   ".csv": "text/csv",
   ".json": "application/json",
+  ".yaml": "application/yaml",
+  ".yml": "application/yaml",
   ".xml": "application/xml",
   ".pdf": "application/pdf",
   ".png": "image/png",

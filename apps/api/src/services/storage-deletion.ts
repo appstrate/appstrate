@@ -30,6 +30,8 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { getEnv } from "@appstrate/env";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
+import { listResponse } from "../lib/list-response.ts";
+import type { ListEnvelope } from "@appstrate/shared-types";
 import {
   RUN_WORKSPACE_BUCKET,
   parseRunWorkspaceManifestKey,
@@ -366,16 +368,22 @@ async function emitBacklogMetrics(): Promise<void> {
 
 export type StorageDeletionJobStatus = "pending" | "dead" | "completed";
 
-/** A storage-deletion job row as surfaced to the admin list. */
+/**
+ * A storage-deletion job row as surfaced to the admin list.
+ *
+ * Wire casing per `docs/CASING_CONVENTIONS.md`: domain fields are snake_case;
+ * only `id` and `createdAt` sit on the universal DB-convention carve-out list
+ * (`completed_at`, like every other domain timestamp, does NOT).
+ */
 export interface StorageDeletionJobView {
   id: string;
   bucket: string;
-  storageKey: string;
+  storage_key: string;
   reason: string;
   attempts: number;
-  nextAttemptAt: string;
-  completedAt: string | null;
-  lastError: string | null;
+  next_attempt_at: string;
+  completed_at: string | null;
+  last_error: string | null;
   createdAt: string;
 }
 
@@ -398,74 +406,63 @@ function statusFilter(status: StorageDeletionJobStatus) {
  * List storage-deletion jobs for the operator surface, newest-first, keyset-
  * paginated on the exact `(created_at, id)` sort tuple. `dead` = pending past
  * the attempt threshold (still retrying).
+ *
+ * Pagination is the codebase's Stripe-style cursor idiom (see
+ * `docs/CASING_CONVENTIONS.md` → "Pagination styles"): `startingAfter` carries
+ * the id of the last row of the previous page — the same contract as
+ * `/api/end-users` and the document gallery — and the response is the standard
+ * `{ object: "list", data, hasMore }` envelope. The cursor row is looked up to
+ * recover its `created_at`, so the keyset comparison stays on the full sort
+ * tuple; a cursor id that no longer exists (the job completed and was swept)
+ * simply drops its clause and the page starts at the head.
  */
 export async function listStorageDeletionJobs(params: {
   status: StorageDeletionJobStatus;
   limit: number;
-  cursor?: string;
-}): Promise<{ items: StorageDeletionJobView[]; nextCursor: string | null }> {
+  startingAfter?: string;
+}): Promise<ListEnvelope<StorageDeletionJobView>> {
   const limit = Math.min(Math.max(params.limit, 1), 200);
-  const cursor = params.cursor ? decodeStorageDeletionCursor(params.cursor) : null;
+  const conditions = [statusFilter(params.status)];
+
+  if (params.startingAfter) {
+    const [cursor] = await db
+      .select({ createdAt: storageDeletionJobs.createdAt, id: storageDeletionJobs.id })
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.id, params.startingAfter))
+      .limit(1);
+    if (cursor) {
+      conditions.push(
+        or(
+          lt(storageDeletionJobs.createdAt, cursor.createdAt),
+          and(
+            eq(storageDeletionJobs.createdAt, cursor.createdAt),
+            lt(storageDeletionJobs.id, cursor.id),
+          ),
+        )!,
+      );
+    }
+  }
+
   const rows = await db
     .select()
     .from(storageDeletionJobs)
-    .where(
-      cursor
-        ? and(
-            statusFilter(params.status),
-            or(
-              lt(storageDeletionJobs.createdAt, cursor.createdAt),
-              and(
-                eq(storageDeletionJobs.createdAt, cursor.createdAt),
-                lt(storageDeletionJobs.id, cursor.id),
-              ),
-            ),
-          )
-        : statusFilter(params.status),
-    )
+    .where(and(...conditions))
     .orderBy(desc(storageDeletionJobs.createdAt), desc(storageDeletionJobs.id))
     .limit(limit + 1);
 
   const hasMore = rows.length > limit;
-  const page = hasMore ? rows.slice(0, limit) : rows;
-  const items: StorageDeletionJobView[] = page.map((r) => ({
+  const data: StorageDeletionJobView[] = (hasMore ? rows.slice(0, limit) : rows).map((r) => ({
     id: r.id,
     bucket: r.bucket,
-    storageKey: r.storageKey,
+    storage_key: r.storageKey,
     reason: r.reason,
     attempts: r.attempts,
-    nextAttemptAt: r.nextAttemptAt.toISOString(),
-    completedAt: r.completedAt ? r.completedAt.toISOString() : null,
-    lastError: r.lastError,
+    next_attempt_at: r.nextAttemptAt.toISOString(),
+    completed_at: r.completedAt ? r.completedAt.toISOString() : null,
+    last_error: r.lastError,
     createdAt: r.createdAt.toISOString(),
   }));
-  const nextCursor = hasMore
-    ? encodeStorageDeletionCursor(page.at(-1)!.createdAt, page.at(-1)!.id)
-    : null;
-  return { items, nextCursor };
-}
-
-function encodeStorageDeletionCursor(createdAt: Date, id: string): string {
-  return Buffer.from(JSON.stringify([createdAt.toISOString(), id])).toString("base64url");
-}
-
-function decodeStorageDeletionCursor(cursor: string): { createdAt: Date; id: string } | null {
-  try {
-    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
-    if (
-      !Array.isArray(parsed) ||
-      parsed.length !== 2 ||
-      typeof parsed[0] !== "string" ||
-      typeof parsed[1] !== "string" ||
-      parsed[1].length === 0
-    ) {
-      return null;
-    }
-    const createdAt = new Date(parsed[0]);
-    return Number.isNaN(createdAt.getTime()) ? null : { createdAt, id: parsed[1] };
-  } catch {
-    return null;
-  }
+  return listResponse(data, { hasMore });
 }
 
 /**

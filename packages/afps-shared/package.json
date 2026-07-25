@@ -47,6 +47,7 @@
     "./token-usage": "./src/token-usage.ts",
     "./ssrf-dns": "./src/ssrf-dns.ts",
     "./guarded-fetch": "./src/guarded-fetch.ts",
+    "./signed-token": "./src/signed-token.ts",
     "./unzip-bounded": "./src/unzip-bounded.ts",
     "./backoff": "./src/backoff.ts"
   },

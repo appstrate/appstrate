@@ -6167,8 +6167,8 @@ export interface operations {
             query?: {
                 status?: "pending" | "dead" | "completed";
                 limit?: number;
-                /** @description Opaque cursor — the `nextCursor` returned by a prior page. */
-                cursor?: string;
+                /** @description Cursor — the `id` of the last job of the previous page. Follow the RFC 5988 `Link: <…>; rel="next"` response header instead of building it by hand. */
+                startingAfter?: string;
             };
             header?: never;
             path?: never;
@@ -6180,11 +6180,14 @@ export interface operations {
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
+                    Link: components["headers"]["Link"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        items: {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
                             /** @example sdj_0c9f… */
                             id: string;
                             /** @example documents */
@@ -6193,20 +6196,20 @@ export interface operations {
                              * @description In-bucket object key (no bucket prefix).
                              * @example app_abc/doc_def/report.pdf
                              */
-                            storageKey: string;
+                            storage_key: string;
                             /** @description Why the object is being purged (document_deleted | document_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | materialization_failed). */
                             reason: string;
                             /** @description Delete attempts made so far. */
                             attempts: number;
                             /** Format: date-time */
-                            nextAttemptAt: string;
+                            next_attempt_at: string;
                             /** Format: date-time */
-                            completedAt: string | null;
-                            lastError: string | null;
+                            completed_at: string | null;
+                            last_error: string | null;
                             /** Format: date-time */
                             createdAt: string;
                         }[];
-                        nextCursor: string | null;
+                        hasMore: boolean;
                     };
                 };
             };
@@ -6993,6 +6996,16 @@ export interface operations {
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input documents together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
+            413: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -18302,6 +18315,16 @@ export interface operations {
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input documents together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
+            413: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;
                 };
                 content: {

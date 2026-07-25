@@ -21,7 +21,7 @@
 
 import { z } from "zod";
 import type { RunStatus as DbRunStatus, TerminalRunStatus } from "@appstrate/db/schema";
-import { parseDocumentUri } from "@appstrate/core/document-uri";
+import { documentUri, parseDocumentUri } from "@appstrate/core/document-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -338,7 +338,7 @@ function asChatRunDocument(raw: unknown): ChatRunDocument | undefined {
   if (!r) return undefined;
   // `id` in the tool result; `document_id` in the `document.published` log frame.
   const id = nonEmptyString(r.id) ?? nonEmptyString(r.document_id);
-  const uri = nonEmptyString(r.uri) ?? (id ? `document://${id}` : undefined);
+  const uri = nonEmptyString(r.uri) ?? (id ? documentUri(id) : undefined);
   const name = nonEmptyString(r.name);
   if (!id || !uri || !name) return undefined;
   const doc: ChatRunDocument = { id, uri, name };

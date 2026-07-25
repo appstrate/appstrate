@@ -33,9 +33,27 @@ import {
 } from "@appstrate/db/storage";
 import { eq } from "drizzle-orm";
 import { ApiError } from "../../../src/lib/errors.ts";
+import type { Actor } from "@appstrate/connect";
 
 const UPLOAD_BUCKET = "uploads";
 const PDF_BYTES = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]); // %PDF-1.4\n
+
+/**
+ * The acting principal for peek/consume. `UploadAccessContext.actor` is
+ * REQUIRED — the ownership gate has no "skip" mode — and the rows seeded below
+ * are unattributed (`createdBy: null`), which any actor may consume; the
+ * creator-vs-stranger matrix is covered by `upload-hardening.test.ts`.
+ */
+const TEST_ACTOR: Actor = { type: "user", id: "usr_upload_consume_test" };
+
+/** `{ orgId, applicationId, actor }` for a test context. */
+function access(ctx: { orgId: string; defaultAppId: string }): {
+  orgId: string;
+  applicationId: string;
+  actor: Actor;
+} {
+  return { orgId: ctx.orgId, applicationId: ctx.defaultAppId, actor: TEST_ACTOR };
+}
 
 /**
  * Drain the upload stream the way the run-trigger sink does: sniff the MIME
@@ -92,14 +110,11 @@ describe("consumeUploadStream", () => {
   it("concurrent consume of the same upload: both succeed (multi-use)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-race" });
     const id = "upl_race_1";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
 
     const settled = await Promise.allSettled([
-      consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink),
-      consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink),
+      consumeUploadStream(id, access(ctx), drainSink),
+      consumeUploadStream(id, access(ctx), drainSink),
     ]);
     // Every consumer streams the same immutable object — no loser.
     expect(settled.filter((s) => s.status === "fulfilled")).toHaveLength(2);
@@ -108,22 +123,11 @@ describe("consumeUploadStream", () => {
   it("a second sequential consume succeeds within the reuse window (#634)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-seq" });
     const id = "upl_seq_1";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
-    const first = await consumeUploadStream(
-      id,
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      drainSink,
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
+    const first = await consumeUploadStream(id, access(ctx), drainSink);
     const [afterFirst] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
 
-    const second = await consumeUploadStream(
-      id,
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      drainSink,
-    );
+    const second = await consumeUploadStream(id, access(ctx), drainSink);
     expect(second).toEqual(first);
 
     // consumedAt anchors the reuse window at the FIRST consume — never bumped.
@@ -134,43 +138,29 @@ describe("consumeUploadStream", () => {
   it("re-consume works even after the PUT-window expiry (cancel → re-run)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-reuse-expired" });
     const id = "upl_reuse_expired_1";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
-    await consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink);
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
+    await consumeUploadStream(id, access(ctx), drainSink);
     // Simulate the re-trigger arriving after the 15-min PUT window closed.
     await db
       .update(uploads)
       .set({ expiresAt: new Date(Date.now() - 60_000) })
       .where(eq(uploads.id, id));
 
-    const meta = await consumeUploadStream(
-      id,
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      drainSink,
-    );
+    const meta = await consumeUploadStream(id, access(ctx), drainSink);
     expect(meta.size).toBe(PDF_BYTES.length);
   });
 
   it("re-consume after the reuse window has elapsed reports 410 gone", async () => {
     const ctx = await createTestContext({ orgSlug: "org-reuse-gone" });
     const id = "upl_reuse_gone_1";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
     // Consumed 25h ago — outside the 24h default reuse window.
     await db
       .update(uploads)
       .set({ consumedAt: new Date(Date.now() - 25 * 60 * 60 * 1000) })
       .where(eq(uploads.id, id));
     try {
-      await consumeUploadStream(
-        id,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        drainSink,
-      );
+      await consumeUploadStream(id, access(ctx), drainSink);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -182,21 +172,10 @@ describe("consumeUploadStream", () => {
     const owner = await createTestContext({ orgSlug: "org-reuse-owner" });
     const other = await createTestContext({ orgSlug: "org-reuse-other" });
     const id = "upl_reuse_cross_1";
-    await seedUpload(
-      { orgId: owner.orgId, applicationId: owner.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
-    await consumeUploadStream(
-      id,
-      { orgId: owner.orgId, applicationId: owner.defaultAppId },
-      drainSink,
-    );
+    await seedUpload(access(owner), { id, bytes: PDF_BYTES });
+    await consumeUploadStream(id, access(owner), drainSink);
     try {
-      await consumeUploadStream(
-        id,
-        { orgId: other.orgId, applicationId: other.defaultAppId },
-        drainSink,
-      );
+      await consumeUploadStream(id, access(other), drainSink);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -208,16 +187,9 @@ describe("consumeUploadStream", () => {
     const owner = await createTestContext({ orgSlug: "org-owner" });
     const other = await createTestContext({ orgSlug: "org-other" });
     const id = "upl_cross_1";
-    await seedUpload(
-      { orgId: owner.orgId, applicationId: owner.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
+    await seedUpload(access(owner), { id, bytes: PDF_BYTES });
     try {
-      await consumeUploadStream(
-        id,
-        { orgId: other.orgId, applicationId: other.defaultAppId },
-        drainSink,
-      );
+      await consumeUploadStream(id, access(other), drainSink);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -228,16 +200,9 @@ describe("consumeUploadStream", () => {
   it("expired upload reports 410 gone", async () => {
     const ctx = await createTestContext({ orgSlug: "org-expired" });
     const id = "upl_expired_1";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES, expiresInSec: -10 },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES, expiresInSec: -10 });
     try {
-      await consumeUploadStream(
-        id,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        drainSink,
-      );
+      await consumeUploadStream(id, access(ctx), drainSink);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -248,16 +213,9 @@ describe("consumeUploadStream", () => {
   it("size mismatch is rejected (prevents declared-small / uploaded-huge abuse)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-size" });
     const id = "upl_size_1";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES, sizeOverride: 1 },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES, sizeOverride: 1 });
     try {
-      await consumeUploadStream(
-        id,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        drainSink,
-      );
+      await consumeUploadStream(id, access(ctx), drainSink);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -269,16 +227,9 @@ describe("consumeUploadStream", () => {
   it("missing storage binary reports a clear 400", async () => {
     const ctx = await createTestContext({ orgSlug: "org-missing" });
     const id = "upl_missing_1";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES, skipStoragePut: true },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES, skipStoragePut: true });
     try {
-      await consumeUploadStream(
-        id,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        drainSink,
-      );
+      await consumeUploadStream(id, access(ctx), drainSink);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -290,18 +241,8 @@ describe("consumeUploadStream", () => {
     const ctx = await createTestContext({ orgSlug: "org-text" });
     const id = "upl_text_1";
     const bytes = Buffer.from("hello world\n", "utf-8");
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes, mime: "text/plain" },
-    );
-    const consumed = await consumeUploadStream(
-      id,
-      {
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-      },
-      drainSink,
-    );
+    await seedUpload(access(ctx), { id, bytes, mime: "text/plain" });
+    const consumed = await consumeUploadStream(id, access(ctx), drainSink);
     expect(consumed.size).toBe(bytes.length);
     expect(consumed.mime).toBe("text/plain");
   });
@@ -310,16 +251,9 @@ describe("consumeUploadStream", () => {
     const ctx = await createTestContext({ orgSlug: "org-spoof" });
     const id = "upl_spoof_1";
     const bytes = Buffer.from("this is not a pdf", "utf-8");
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes, mime: "application/pdf" },
-    );
+    await seedUpload(access(ctx), { id, bytes, mime: "application/pdf" });
     try {
-      await consumeUploadStream(
-        id,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        drainSink,
-      );
+      await consumeUploadStream(id, access(ctx), drainSink);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -356,15 +290,8 @@ describe("consumeUploadStream", () => {
       }),
     );
     const declared = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes, mime: declared },
-    );
-    const consumed = await consumeUploadStream(
-      id,
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      drainSink,
-    );
+    await seedUpload(access(ctx), { id, bytes, mime: declared });
+    const consumed = await consumeUploadStream(id, access(ctx), drainSink);
     expect(consumed.size).toBe(bytes.length);
     expect(consumed.mime).toBe(declared);
   });
@@ -378,15 +305,8 @@ describe("consumeUploadStream", () => {
     const cfb = new Uint8Array(512);
     cfb.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
     const bytes = Buffer.from(cfb);
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes, mime: "application/vnd.ms-excel" },
-    );
-    const consumed = await consumeUploadStream(
-      id,
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      drainSink,
-    );
+    await seedUpload(access(ctx), { id, bytes, mime: "application/vnd.ms-excel" });
+    const consumed = await consumeUploadStream(id, access(ctx), drainSink);
     expect(consumed.size).toBe(bytes.length);
     expect(consumed.mime).toBe("application/vnd.ms-excel");
   });
@@ -395,16 +315,9 @@ describe("consumeUploadStream", () => {
     const ctx = await createTestContext({ orgSlug: "org-zip-spoof" });
     const id = "upl_zip_spoof_1";
     const bytes = Buffer.from(zipSync({ "a.txt": new TextEncoder().encode("hi") }));
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes, mime: "application/pdf" },
-    );
+    await seedUpload(access(ctx), { id, bytes, mime: "application/pdf" });
     try {
-      await consumeUploadStream(
-        id,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        drainSink,
-      );
+      await consumeUploadStream(id, access(ctx), drainSink);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -417,16 +330,9 @@ describe("consumeUploadStream", () => {
     const ctx = await createTestContext({ orgSlug: "org-rollback" });
     const id = "upl_rollback_1";
     // Size mismatch is a deterministic post-claim failure path.
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 });
     try {
-      await consumeUploadStream(
-        id,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        drainSink,
-      );
+      await consumeUploadStream(id, access(ctx), drainSink);
       throw new Error("expected to throw");
     } catch (e) {
       expect((e as ApiError).status).toBe(400);
@@ -440,13 +346,10 @@ describe("consumeUploadStream", () => {
     const ctx = await createTestContext({ orgSlug: "org-cleanup-ok" });
     const id = "upl_cleanup_ok_1";
     const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
 
-    await consumeUploadStream(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, drainSink);
+    await consumeUploadStream(id, access(ctx), drainSink);
 
     // Object + row survive the consume — they back the post-consume reuse
     // window and are dropped by the GC sweep once it elapses.
@@ -459,17 +362,10 @@ describe("consumeUploadStream", () => {
     const ctx = await createTestContext({ orgSlug: "org-cleanup-err" });
     const id = "upl_cleanup_err_1";
     const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 });
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
 
-    await consumeUploadStream(
-      id,
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      drainSink,
-    ).catch(() => {});
+    await consumeUploadStream(id, access(ctx), drainSink).catch(() => {});
 
     // Release path drops the bytes so re-upload to a fresh slot can succeed.
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
@@ -485,10 +381,7 @@ describe("cleanupExpiredUploads", () => {
     const ctx = await createTestContext({ orgSlug: "org-gc-consumed" });
     const id = "upl_gc_old_1";
     const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
     // Simulate a row consumed past the 24h retention window AND past the 1h
     // in-flight-consume grace the sweep adds on top of it.
     const oldTimestamp = new Date(Date.now() - 26 * 60 * 60 * 1000);
@@ -518,10 +411,7 @@ describe("cleanupExpiredUploads", () => {
   it("keeps consumed rows still within the retention window", async () => {
     const ctx = await createTestContext({ orgSlug: "org-gc-recent" });
     const id = "upl_gc_recent_1";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
     // Consumed 1h ago — well within the 24h window.
     const recentTimestamp = new Date(Date.now() - 60 * 60 * 1000);
     await db.update(uploads).set({ consumedAt: recentTimestamp }).where(eq(uploads.id, id));
@@ -537,10 +427,7 @@ describe("cleanupExpiredUploads", () => {
     const ctx = await createTestContext({ orgSlug: "org-gc-inflight" });
     const id = "upl_gc_inflight_1";
     const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
     // Consumed 24h-minus-250ms ago: the reuse window is still open right now (so
     // a rerun is allowed to start re-consuming) but elapses while it streams. A
     // re-consume never touches the row, so nothing the sweep could lock would
@@ -555,11 +442,7 @@ describe("cleanupExpiredUploads", () => {
       await new Promise((r) => setTimeout(r, 600));
       return drainSink(stream);
     };
-    const consuming = consumeUploadStream(
-      id,
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      slowSink,
-    );
+    const consuming = consumeUploadStream(id, access(ctx), slowSink);
 
     // The reuse window elapses mid-stream, then the sweep runs.
     await new Promise((r) => setTimeout(r, 400));
@@ -576,10 +459,7 @@ describe("cleanupExpiredUploads", () => {
   it("still sweeps expired unconsumed rows (regression on base case)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-gc-expired" });
     const id = "upl_gc_expired_1";
-    await seedUpload(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      { id, bytes: PDF_BYTES, expiresInSec: -60 },
-    );
+    await seedUpload(access(ctx), { id, bytes: PDF_BYTES, expiresInSec: -60 });
 
     const removed = await cleanupExpiredUploads();
     expect(removed).toBeGreaterThanOrEqual(1);

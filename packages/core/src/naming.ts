@@ -217,9 +217,88 @@ export function decodeFilenameHeader(raw: string): string | null {
 }
 
 /**
+ * Canonical MIME → filename-extension table for the text-shaped and common
+ * document formats the platform names files after. Values carry no leading dot.
+ *
+ * ONE table because the same question is asked on both sides of the run
+ * boundary: the platform names an unnamed inline `data:` input
+ * (`services/input-parser.ts`), and the runtime names a spilled MCP resource
+ * inside the container (`runner-pi/.../resource-spill.ts`). They used to hold
+ * separate lists that disagreed — the platform knew YAML but not `text/xml` or
+ * PDF, the runtime the reverse — so the same payload could land as `report.yaml`
+ * on one side and `report.bin` on the other.
+ */
+const MIME_EXTENSIONS: ReadonlyMap<string, string> = new Map([
+  ["text/plain", "txt"],
+  ["text/markdown", "md"],
+  ["text/csv", "csv"],
+  ["text/html", "html"],
+  ["text/xml", "xml"],
+  ["application/json", "json"],
+  ["application/xml", "xml"],
+  ["application/x-yaml", "yaml"],
+  ["application/yaml", "yaml"],
+  ["application/pdf", "pdf"],
+]);
+
+/**
+ * Best-effort filename extension for a MIME type, or null when nothing sensible
+ * can be derived. Tolerates a parameterized value (`text/csv; charset=utf-8`).
+ *
+ * Beyond the explicit table, the RFC 6839 structured suffixes (`+json`, `+xml`,
+ * `+yaml`) and the `text/*` family resolve to their base format — the same
+ * suffix convention `mime-policy.ts` uses to decide a MIME is text-shaped.
+ *
+ * Callers decide what "unknown" means for them: the input parser falls back to
+ * the MIME subtype (then `bin`) because a file on disk must have SOME name,
+ * while the resource spiller simply leaves the basename extensionless.
+ *
+ * The one-line parameter strip below is deliberately inlined rather than taken
+ * from `apps/api/src/services/mime-policy.ts` (`normalizeMime`): core sits BELOW
+ * the API in the dependency graph — and below the container runtime, the other
+ * consumer — so it cannot import the policy module.
+ */
+export function extensionForMime(mime: string | undefined): string | null {
+  if (!mime) return null;
+  const base = mime.split(";", 1)[0]!.trim().toLowerCase();
+  const known = MIME_EXTENSIONS.get(base);
+  if (known) return known;
+  if (base.endsWith("+json")) return "json";
+  if (base.endsWith("+xml")) return "xml";
+  if (base.endsWith("+yaml")) return "yaml";
+  if (base.startsWith("text/")) return "txt";
+  return null;
+}
+
+/**
+ * Build the `Content-Disposition: attachment` header value for a stored file.
+ *
+ * RFC 5987 / RFC 6266 two-part form, emitted for EVERY download branch:
+ *
+ *  - `filename="…"` — the ASCII fallback for legacy clients. Control chars
+ *    (incl. CR/LF), quotes, backslashes and every non-ASCII code point collapse
+ *    to `_`, so the value can neither split the response nor break the client's
+ *    quoted-string parse.
+ *  - `filename*=UTF-8''…` — the real, possibly non-ASCII name, percent-encoded.
+ *    Compliant clients prefer it, so an accented or CJK name downloads intact.
+ *
+ * Lives here — next to {@link sanitizeFilename}, which is what keeps a CR/LF out
+ * of the stored name in the first place — because the platform serves a document
+ * through TWO code paths: the proxy stream sets this header itself, and the S3
+ * backend binds it into the presigned GET as `response-content-disposition`.
+ * When each path built its own value, the presigned branch degraded a non-ASCII
+ * name to a quote-stripped, mojibake-prone `filename="…"` while the proxy branch
+ * returned it correctly. One builder, one behaviour.
+ */
+export function attachmentDisposition(name: string): string {
+  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "download";
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+/**
  * MCP tool name validation.
  *
- * Format: `{namespace_snake}__{tool_snake}` \u2014 two snake_case tokens
+ * Format: `{namespace_snake}__{tool_snake}` — two snake_case tokens
  * joined by a double underscore. Hard length ceiling 56 chars leaves
  * headroom under the 64-char OpenAI/Anthropic limit for downstream
  * host re-prefixing (e.g. some CLI hosts add their own
