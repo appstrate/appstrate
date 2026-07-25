@@ -118,8 +118,9 @@ import {
   suggestProfileName,
   type Config,
 } from "./config.ts";
-import { start as startBridge, type BridgeClient } from "./bridge/client.ts";
+import { start as startBridge, matchesAuthorizedUri, type BridgeClient } from "./bridge/client.ts";
 import { installDownloadInterceptor } from "./bridge/downloads.ts";
+import { createTabManager, type TabManager } from "./tabs.ts";
 import {
   calculateDesktopLayout,
   toggleBrowserFocus,
@@ -129,8 +130,14 @@ import {
 
 let mainWindow: BaseWindow | null = null;
 let navView: WebContentsView | null = null;
-let browserView: WebContentsView | null = null;
 let webappView: WebContentsView | null = null;
+/**
+ * Tab registry (protocol 2). `tabViews` maps each tab's WebContents back
+ * to the view that hosts it, which is what the layout pass needs; the
+ * manager itself stays Electron-agnostic.
+ */
+let tabManager: TabManager | null = null;
+const tabViews = new Map<Electron.WebContents, WebContentsView>();
 let activePane: ViewMode = "webapp";
 let tray: Tray | null = null;
 let bridge: BridgeClient | null = null;
@@ -147,6 +154,127 @@ let currentConfig: Config | null = null;
 function persistentPartition(kind: "webapp" | "browser"): string {
   const profile = encodeURIComponent(currentConfig?.defaultProfile ?? "default");
   return `persist:appstrate-${kind}-${profile}`;
+}
+
+/**
+ * Build a browser tab surface bound to `partition`.
+ *
+ * Everything the single `browserView` used to get at startup is applied
+ * per tab here: denied permissions, no background throttling (a hidden
+ * tab whose timers are throttled starves in-page challenges), the
+ * download interceptor, and the navigation guard carrying THIS tab's
+ * `authorized_uris`.
+ */
+function createTabSurface(
+  win: BaseWindow,
+  partition: string,
+): { view: WebContentsView; webContents: Electron.WebContents } {
+  const view = new WebContentsView({
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      partition,
+    },
+  });
+  const contents = view.webContents;
+  denyRemotePermissions(contents.session);
+  contents.setBackgroundThrottling(false);
+  installDownloadInterceptor(contents.session, _debugLog);
+  void contents.loadURL("about:blank");
+
+  // Navigation boundary, per tab. v1 kept a single mutable
+  // `activeAuthorizedUris` in the bridge, so the last command's
+  // perimeter applied to whatever navigated next; with tabs that would
+  // let one run's boundary govern another run's surface.
+  contents.on("will-navigate", (event, target) => {
+    const tab = tabManager?.byWebContents(contents);
+    const allowed = tab?.authorizedUris ?? [];
+    if (allowed.length === 0) return;
+    if (!allowed.some((spec) => matchesAuthorizedUri(spec, target))) {
+      event.preventDefault();
+      _debugLog(`[tabs] blocked navigation outside authorized_uris: ${target}\n`);
+    }
+  });
+
+  // A popup opens a REAL tab now, inheriting the opener's owner,
+  // partition and boundary. v1 forced it into the same pane because a
+  // detached window was invisible to the bridge; inheritance keeps
+  // redirect-based logins (gov auth, OAuth) drivable without ever
+  // handing a surface to a different run.
+  contents.setWindowOpenHandler(({ url }) => {
+    if (!/^https?:/i.test(url)) return { action: "deny" };
+    const opener = tabManager?.byWebContents(contents);
+    if (!opener || !tabManager) {
+      void contents.loadURL(url);
+      return { action: "deny" };
+    }
+    try {
+      const child = tabManager.open({
+        owner: opener.owner,
+        partition: opener.partition,
+        authorizedUris: opener.authorizedUris,
+      });
+      void child.webContents.loadURL(url);
+    } catch {
+      // Quota reached — fall back to v1 behaviour rather than losing
+      // the navigation entirely.
+      void contents.loadURL(url);
+    }
+    return { action: "deny" };
+  });
+
+  // Human takeover detection. Only while the tab is IDLE: the agent's
+  // own CDP keystrokes arrive during `driving`, and pausing on those
+  // would make every fill look like a takeover.
+  contents.on("before-input-event", (_event, input) => {
+    if (input.type !== "keyDown") return;
+    const tab = tabManager?.byWebContents(contents);
+    if (!tab || tab.owner.kind !== "run" || tab.state !== "idle") return;
+    if (tabManager?.pause(tab.tabId)) {
+      bridge?.notify("tab.paused", { tab_id: tab.tabId });
+      refreshTabStrip();
+    }
+  });
+
+  const pushUrl = (): void => {
+    const tab = tabManager?.byWebContents(contents);
+    if (!tab || tabManager?.activeTabId() !== tab.tabId) return;
+    navView?.webContents.send("nav:url-changed", contents.getURL());
+  };
+  contents.on("did-navigate", pushUrl);
+  contents.on("did-navigate-in-page", pushUrl);
+  contents.on("did-start-loading", () => {
+    const tab = tabManager?.byWebContents(contents);
+    if (tab && tabManager?.activeTabId() === tab.tabId) {
+      navView?.webContents.send("nav:loading-changed", true);
+    }
+  });
+  contents.on("did-stop-loading", () => {
+    const tab = tabManager?.byWebContents(contents);
+    if (tab && tabManager?.activeTabId() === tab.tabId) {
+      navView?.webContents.send("nav:loading-changed", false);
+    }
+    refreshTabStrip();
+  });
+  contents.on("page-title-updated", () => refreshTabStrip());
+
+  win.contentView.addChildView(view);
+  tabViews.set(contents, view);
+  return { view, webContents: contents };
+}
+
+/** Push the tab list to the navbar renderer (tab strip lands in lot 4). */
+function refreshTabStrip(): void {
+  if (!tabManager || !navView) return;
+  navView.webContents.send("tabs:changed", tabManager.list());
+}
+
+/** The active tab's WebContents, or null when no tab is open. */
+function activeTabContents(): Electron.WebContents | null {
+  const tabId = tabManager?.activeTabId();
+  if (!tabId) return null;
+  return tabManager?.get(tabId)?.webContents ?? null;
 }
 
 function denyRemotePermissions(ses: Electron.Session): void {
@@ -202,45 +330,38 @@ function createMainWindow(): BaseWindow {
     _debugLog(`[main] loadFile failed: ${err}\n`);
   });
 
-  // Browser view — what the agent + user both drive. Sandboxed,
-  // no nodeIntegration. The bridge talks to this view's webContents
-  // directly from the main process (no IPC).
-  browserView = new WebContentsView({
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      partition: persistentPartition("browser"),
+  // Tab registry. Each tab is its own sandboxed WebContentsView bound to
+  // the partition the platform minted for it (one profile per agent by
+  // default), so no run inherits another's cookies. Downloads are
+  // auto-accepted per tab: an agent-ordered one goes to the platform,
+  // anything else lands in `~/Documents/AppstrateDesktop/<host>/`.
+  tabManager = createTabManager({
+    create: (partition) => {
+      const { view, webContents } = createTabSurface(win, partition);
+      return {
+        webContents,
+        dispose: (): void => {
+          tabViews.delete(webContents);
+          win.contentView.removeChildView(view);
+          // `WebContentsView` releases its renderer when the underlying
+          // WebContents is closed; `close()` is the supported path.
+          try {
+            webContents.close();
+          } catch {
+            // already gone
+          }
+        },
+      };
+    },
+    activate: (): void => {
+      applyLayout(win);
+      refreshTabStrip();
     },
   });
-  denyRemotePermissions(browserView.webContents.session);
-  // A hidden WebContentsView gets its timers/rAF throttled by Chromium —
-  // which starves Cloudflare Turnstile (and any similar in-page
-  // challenge) while the user is on the webapp pane. Agents drive this
-  // pane precisely when it is NOT being watched: keep it full-speed.
-  browserView.webContents.setBackgroundThrottling(false);
-  browserView.webContents.loadURL("about:blank");
 
-  // Keep `target="_blank"` / `window.open` navigations IN this pane. By
-  // default Electron spawns a DETACHED native window for them, which the
-  // bridge does not drive (it only pilots this WebContentsView) — a login
-  // that opens in a popup (Revenu Québec's gov auth, most OAuth redirect
-  // flows) would then be invisible to the agent, stranded in a window
-  // nothing controls. Deny the popup and load the URL here instead;
-  // redirect-based flows return to their redirect_uri in this same pane.
-  const paneContents = browserView.webContents;
-  paneContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) void paneContents.loadURL(url);
-    return { action: "deny" };
-  });
-
-  // Auto-accept downloads. Any `<a download>` click or programmatic
-  // download triggered by the agent (or the user) lands in
-  // `~/Documents/AppstrateDesktop/<site-host>/` without a save dialog.
-  // POC scope: no allowlist by site, no concurrency cap, no overwrite
-  // protection. A shipped app would gate this per-site and surface a
-  // tray notification per completed download.
-  installDownloadInterceptor(browserView.webContents.session, _debugLog);
+  // One user-owned tab so the window is never empty and the navbar
+  // always has a target. It is NOT drivable by any run.
+  tabManager.open({ owner: { kind: "user" }, partition: persistentPartition("browser") });
 
   // Webapp view — the Appstrate SPA, loaded into a full Chromium surface.
   // This is what the user actually sees and interacts with: org switcher,
@@ -256,11 +377,11 @@ function createMainWindow(): BaseWindow {
   });
   denyRemotePermissions(webappView.webContents.session);
 
-  // Default: webapp on TOP, browser pane attached UNDERNEATH (never
-  // detached — a detached view's document reports visibilityState
-  // "hidden" and visibility-gated in-page code like Cloudflare
-  // Turnstile refuses to run; see setActivePane).
-  win.contentView.addChildView(browserView);
+  // Default: webapp on TOP, tabs attached UNDERNEATH (never detached —
+  // a detached view's document reports visibilityState "hidden" and
+  // visibility-gated in-page code like Cloudflare Turnstile refuses to
+  // run; see setActivePane). Tab views were already attached by
+  // `createTabSurface`; applyLayout owns the z-order from here.
   win.contentView.addChildView(webappView);
   win.contentView.addChildView(navView);
 
@@ -269,23 +390,9 @@ function createMainWindow(): BaseWindow {
   applyLayout(win);
   win.on("resize", () => applyLayout(win));
 
-  // Push URL + loading state updates to the navbar renderer so the URL
-  // bar reflects reality regardless of whether the user, the agent, or
-  // an in-page navigation triggered the change.
-  const sendUrl = (): void => {
-    if (!navView || !browserView) return;
-    navView.webContents.send("nav:url-changed", browserView.webContents.getURL());
-  };
-  browserView.webContents.on("did-navigate", sendUrl);
-  browserView.webContents.on("did-navigate-in-page", sendUrl);
-  browserView.webContents.on("did-start-loading", () => {
-    navView?.webContents.send("nav:loading-changed", true);
-  });
-  browserView.webContents.on("did-stop-loading", () => {
-    navView?.webContents.send("nav:loading-changed", false);
-  });
-
-  for (const contents of [navView.webContents, browserView.webContents, webappView.webContents]) {
+  // Per-tab URL/loading pushes are wired in `createTabSurface`; only the
+  // panel accelerator is window-wide.
+  for (const contents of [navView.webContents, webappView.webContents]) {
     contents.on("before-input-event", (event, input) => {
       if (
         input.type === "keyDown" &&
@@ -302,8 +409,10 @@ function createMainWindow(): BaseWindow {
   win.on("closed", () => {
     mainWindow = null;
     navView = null;
-    browserView = null;
     webappView = null;
+    tabManager?.closeAll();
+    tabManager = null;
+    tabViews.clear();
   });
 
   return win;
@@ -315,20 +424,36 @@ function createMainWindow(): BaseWindow {
  * in the two focused modes; split mode places the surfaces side by side.
  */
 function applyLayout(win: BaseWindow): void {
-  if (!webappView || !navView || !browserView) return;
+  if (!webappView || !navView) return;
   const bounds = win.getContentBounds();
   const layout = calculateDesktopLayout(bounds.width, bounds.height, activePane);
   navView.setBounds(layout.chrome);
   webappView.setBounds(layout.webapp);
-  browserView.setBounds(layout.browser);
-
+  // Every tab keeps the SAME full browser bounds. They are stacked, and
+  // only the z-order picks the one on screen — a zero-sized or detached
+  // tab would stop painting, which is exactly what breaks the in-page
+  // challenges agents have to get through.
+  const activeTabId = tabManager?.activeTabId() ?? null;
   const content = win.contentView;
+  let activeTabView: WebContentsView | null = null;
+  for (const [contents, view] of tabViews) {
+    view.setBounds(layout.browser);
+    const tab = tabManager?.byWebContents(contents);
+    if (tab && tab.tabId === activeTabId) {
+      activeTabView = view;
+      continue;
+    }
+    // Re-adding a child moves it to the top of the stack, so pushing the
+    // inactive tabs first leaves the active one above them.
+    content.addChildView(view);
+  }
+  if (activeTabView) content.addChildView(activeTabView);
+
   if (activePane === "webapp") {
-    content.addChildView(browserView);
     content.addChildView(webappView);
-  } else {
+  } else if (activeTabView) {
     content.addChildView(webappView);
-    content.addChildView(browserView);
+    content.addChildView(activeTabView);
   }
   content.addChildView(navView);
   navView.webContents.send("layout:changed", {
@@ -338,7 +463,7 @@ function applyLayout(win: BaseWindow): void {
 }
 
 function setActivePane(next: ViewMode): void {
-  if (!mainWindow || !webappView || !navView || !browserView) return;
+  if (!mainWindow || !webappView || !navView) return;
   if (activePane === next) return;
   activePane = next;
   applyLayout(mainWindow);
@@ -351,24 +476,35 @@ function setActivePane(next: ViewMode): void {
 function registerNavIpc(): void {
   ipcMain.handle("nav:navigate", async (_evt, url: string): Promise<void> => {
     _debugLog(`[ipc] nav:navigate ${url}\n`);
-    if (!browserView || typeof url !== "string") return;
-    await browserView.webContents.loadURL(url).catch((err) => {
+    const contents = activeTabContents();
+    if (!contents || typeof url !== "string") return;
+    // Typing an address into an agent-driven tab IS a takeover: the
+    // person is steering. Pause it so the run cannot fight them for the
+    // page, and let them hand it back explicitly.
+    pauseActiveTabIfAgentOwned();
+    await contents.loadURL(url).catch((err) => {
       _debugLog(`[ipc] loadURL failed: ${err}\n`);
     });
   });
   ipcMain.handle("nav:back", (): void => {
-    const nav = browserView?.webContents.navigationHistory;
-    if (nav?.canGoBack()) nav.goBack();
+    const nav = activeTabContents()?.navigationHistory;
+    if (nav?.canGoBack()) {
+      pauseActiveTabIfAgentOwned();
+      nav.goBack();
+    }
   });
   ipcMain.handle("nav:forward", (): void => {
-    const nav = browserView?.webContents.navigationHistory;
-    if (nav?.canGoForward()) nav.goForward();
+    const nav = activeTabContents()?.navigationHistory;
+    if (nav?.canGoForward()) {
+      pauseActiveTabIfAgentOwned();
+      nav.goForward();
+    }
   });
   ipcMain.handle("nav:reload", (): void => {
-    browserView?.webContents.reload();
+    activeTabContents()?.reload();
   });
   ipcMain.handle("nav:open-devtools", (): void => {
-    browserView?.webContents.openDevTools({ mode: "detach" });
+    activeTabContents()?.openDevTools({ mode: "detach" });
   });
   ipcMain.handle("layout:toggle-panel", (): void => {
     setActivePane(togglePanel(activePane));
@@ -379,6 +515,52 @@ function registerNavIpc(): void {
   ipcMain.handle("layout:close-browser", (): void => {
     setActivePane("webapp");
   });
+
+  // Tab strip IPC. The renderer half lands in lot 4; the main-process
+  // half is here so the manager stays the single owner of tab state.
+  ipcMain.handle("tabs:list", (): unknown => tabManager?.list() ?? []);
+  ipcMain.handle("tabs:new", (): void => {
+    tabManager?.open({ owner: { kind: "user" }, partition: persistentPartition("browser") });
+    refreshTabStrip();
+  });
+  ipcMain.handle("tabs:select", (_evt, tabId: string): void => {
+    if (typeof tabId !== "string") return;
+    try {
+      tabManager?.activate(tabId);
+    } catch (err) {
+      _debugLog(`[ipc] tabs:select failed: ${err}\n`);
+    }
+  });
+  ipcMain.handle("tabs:close", (_evt, tabId: string): void => {
+    if (typeof tabId !== "string") return;
+    const tab = tabManager?.get(tabId);
+    tabManager?.close(tabId);
+    if (tab?.owner.kind === "run") {
+      bridge?.notify("tab.closed", { tab_id: tabId, reason: "user_closed" });
+    }
+    refreshTabStrip();
+  });
+  ipcMain.handle("tabs:resume", (_evt, tabId: string): void => {
+    if (typeof tabId !== "string") return;
+    if (tabManager?.resume(tabId)) {
+      bridge?.notify("tab.resumed", { tab_id: tabId });
+      refreshTabStrip();
+    }
+  });
+}
+
+/**
+ * Mark the active tab as taken over when the human drives it through the
+ * local chrome. No-op on user-owned tabs (nothing to take over) and on
+ * tabs already paused.
+ */
+function pauseActiveTabIfAgentOwned(): void {
+  const tabId = tabManager?.activeTabId();
+  if (!tabId) return;
+  if (tabManager?.pause(tabId)) {
+    bridge?.notify("tab.paused", { tab_id: tabId });
+    refreshTabStrip();
+  }
 }
 
 function buildTrayMenu(): Menu {
@@ -454,7 +636,7 @@ function buildTrayMenu(): Menu {
       label: "Open browser pane DevTools",
       accelerator: "CmdOrCtrl+Alt+I",
       click: (): void => {
-        browserView?.webContents.openDevTools({ mode: "detach" });
+        activeTabContents()?.openDevTools({ mode: "detach" });
       },
     },
     {
@@ -501,7 +683,7 @@ async function signOut(): Promise<void> {
   bridgeState = "disconnected";
   const cfg = currentConfig ?? (await readConfigFile());
   const instance = cfg ? activeInstance(cfg) : null;
-  if (!instance || !webappView || !browserView) return;
+  if (!instance || !webappView) return;
   try {
     const host = new URL(instance).hostname;
     const cookies = await webappView.webContents.session.cookies.get({ domain: host });
@@ -646,7 +828,7 @@ async function ensureInstanceConfigured(): Promise<{
  * value, not its transport scheme.
  */
 function startBridgeFor(instance: string): BridgeClient | null {
-  if (!browserView) return null;
+  if (!tabManager) return null;
   return startBridge({
     instance,
     getCookieHeader: async (): Promise<string | null> => {
@@ -664,7 +846,7 @@ function startBridgeFor(instance: string): BridgeClient | null {
         return null;
       }
     },
-    webContents: browserView.webContents,
+    tabs: tabManager,
     onStateChange: (state): void => {
       bridgeState = state;
       refreshTray();
@@ -685,7 +867,7 @@ async function bootstrap(): Promise<void> {
   const { config, instance } = resolved;
   currentConfig = config;
   mainWindow ??= createMainWindow();
-  if (!browserView || !webappView) return;
+  if (!tabManager || !webappView) return;
   // Point the webapp pane at the configured instance. The SPA either
   // shows the dashboard (cookie present) or its own login form.
   webappView.webContents.loadURL(instance).catch((err) => {

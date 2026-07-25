@@ -45,6 +45,13 @@ interface PendingDownload {
   notify: Notify;
   expiresAt: number;
   timer: ReturnType<typeof setTimeout>;
+  /**
+   * The tab that ordered it. With one surface this was implicit; with
+   * tabs it is load-bearing — two runs downloading at the same time
+   * would otherwise claim each other's file through the FIFO match, and
+   * a run would receive a document it was never allowed to see.
+   */
+  webContents: WebContents;
 }
 
 const pending: PendingDownload[] = [];
@@ -83,6 +90,7 @@ export async function startDownload(
   const entry: PendingDownload = {
     params: p,
     notify,
+    webContents: wc,
     expiresAt: Date.now() + PENDING_TIMEOUT_MS,
     timer: setTimeout(() => {
       const index = pending.indexOf(entry);
@@ -112,13 +120,22 @@ export async function startDownload(
 }
 
 /**
- * Install the single `will-download` listener for the browser pane's
- * session. Replaces the previous main.ts inline handler: agent-ordered
- * downloads (pending FIFO) go to a temp file and get uploaded to the
- * platform; anything else keeps the user-facing default (Documents dir).
+ * Install the `will-download` listener for a session. Agent-ordered
+ * downloads (pending FIFO, matched within the ORDERING TAB) go to a temp
+ * file and get uploaded to the platform; anything else keeps the
+ * user-facing default (Documents dir).
+ *
+ * Idempotent per session: with one partition per agent profile there are
+ * now several sessions, and a tab reusing an already-equipped session
+ * must not stack a second listener (which would double-handle every
+ * download).
  */
+const equippedSessions = new WeakSet<Session>();
+
 export function installDownloadInterceptor(session: Session, debugLog: (m: string) => void): void {
-  session.on("will-download", (_event, item) => {
+  if (equippedSessions.has(session)) return;
+  equippedSessions.add(session);
+  session.on("will-download", (_event, item, webContents) => {
     const now = Date.now();
     for (let i = pending.length - 1; i >= 0; i--) {
       if (pending[i]!.expiresAt <= now) {
@@ -128,11 +145,15 @@ export function installDownloadInterceptor(session: Session, debugLog: (m: strin
     }
     const itemUrl = item.getURL();
     const itemUrlChain = item.getURLChain();
+    // Match within the ordering tab only. A selector order is bound to
+    // the tab whose control was clicked; a URL order to the tab that
+    // asked for that URL.
     const matchingIndex = pending.findIndex(
-      ({ params }) =>
-        params.selector !== undefined ||
-        params.url === itemUrl ||
-        (params.url !== undefined && itemUrlChain.includes(params.url)),
+      (entry) =>
+        entry.webContents === webContents &&
+        (entry.params.selector !== undefined ||
+          entry.params.url === itemUrl ||
+          (entry.params.url !== undefined && itemUrlChain.includes(entry.params.url))),
     );
     const agentOrder = matchingIndex >= 0 ? pending.splice(matchingIndex, 1)[0] : undefined;
     if (!agentOrder) {

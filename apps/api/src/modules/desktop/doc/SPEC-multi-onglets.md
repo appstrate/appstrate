@@ -123,10 +123,18 @@ enveloppe (pas dans `params`, qui reste le domaine de la méthode):
 }
 ```
 
-`tab_id` absent en v2 est une erreur `-32602`. La compatibilité
-descendante est assurée côté plateforme, pas côté wire: c'est la
-plateforme qui ouvre un onglet implicite pour un agent qui n'en demande
-pas (voir §5).
+Une commande d'agent se reconnaît à `meta.run_id` et **doit** nommer son
+`tab_id`: sans cela elle serait appliquée à l'onglet du moment, c'est à
+dire à une surface que la plateforme ne lui a pas louée. Elle échoue en
+`-32602`.
+
+Une commande utilisateur (`/api/desktop/me/command`, pilotage manuel) n'a
+pas de `run_id` et peut omettre `tab_id`: elle agit alors sur l'onglet
+actif, ce qu'une personne appelle « le navigateur ».
+
+La compatibilité descendante des agents est assurée côté plateforme, pas
+côté wire: c'est la plateforme qui ouvre un onglet implicite pour un
+agent qui n'en demande pas (voir §5).
 
 ### 3.3 Nouveaux verbes
 

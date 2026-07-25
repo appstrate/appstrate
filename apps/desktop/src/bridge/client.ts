@@ -9,9 +9,15 @@
  * `browser-api` wrappers against the supplied `WebContents`.
  *
  * Protocol: JSON-RPC 2.0, no batching (see `protocol.ts`):
- *   server → client:  { jsonrpc, id, method, params }
+ *   server → client:  { jsonrpc, id, method, tab_id?, params }
  *   client → server:  { jsonrpc, id, result } | { jsonrpc, id, error: { code, message } }
- *   client → server:  { jsonrpc, method, params }   (notifications: download events)
+ *   client → server:  { jsonrpc, method, params }   (notifications: download + tab events)
+ *
+ * Protocol 2 addresses a TAB rather than "the browser". Agent commands
+ * (recognised by `meta.run_id`) must name their `tab_id`; user-driven
+ * commands (`/api/desktop/me/command`) may omit it and act on the active
+ * tab. Ownership, session partition and the `authorized_uris` boundary
+ * are all properties OF THE TAB, frozen when the platform opened it.
  *
  * Reconnect: exponential backoff up to 30 s, with a `getCookieHeader()`
  * callback derived fresh on every reconnect attempt. The owner (main.ts)
@@ -21,13 +27,16 @@
  */
 
 import { WebSocket } from "ws";
-import type { Event, WebContents } from "electron";
+import type { WebContents } from "electron";
 import * as api from "./browser-api.ts";
 import * as cdp from "./cdp.ts";
 import { startDownload, type Notify } from "./downloads.ts";
+import { TabError, type TabManager, type TabOwner, type TabRecord } from "../tabs.ts";
 import {
   ERR_EXECUTION,
+  ERR_INVALID_PARAMS,
   ERR_METHOD_NOT_FOUND,
+  ERR_TAB_NOT_FOUND,
   errorResponse,
   notification,
   successResponse,
@@ -35,12 +44,17 @@ import {
   type JsonRpcResponse,
 } from "./protocol.ts";
 
-const BRIDGE_PROTOCOL_VERSION = "1";
+const BRIDGE_PROTOCOL_VERSION = "2";
 const BRIDGE_PATH = `/api/desktop/bridge?protocol=${BRIDGE_PROTOCOL_VERSION}`;
 const MAX_WS_PAYLOAD_BYTES = 16 * 1024 * 1024;
 
 export interface BridgeClient {
   stop(): void;
+  /**
+   * Emit a desktop-initiated notification (tab lifecycle, download
+   * progress). Best effort: dropped while the socket is down.
+   */
+  notify(method: string, params?: unknown): void;
 }
 
 type Handler = (
@@ -50,7 +64,7 @@ type Handler = (
   authorizedUris: readonly string[],
 ) => Promise<unknown> | unknown;
 
-function matchesAuthorizedUri(spec: string, target: string): boolean {
+export function matchesAuthorizedUri(spec: string, target: string): boolean {
   try {
     const escaped = spec.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
     const pattern = `^${escaped
@@ -248,20 +262,122 @@ async function runBatch(
 }
 const ERR_INVALID_PARAMS_CODE = -32602;
 
+/**
+ * Resolve the tab a command addresses.
+ *
+ * An agent command carries `meta.run_id` and MUST name its tab: letting
+ * it fall back to "whatever is in front" would let a run drive a surface
+ * the platform never leased it. A user-driven command (the manual
+ * `/api/desktop/me/command` path) has no run id and acts on the active
+ * tab, which is what a person means by "the browser".
+ */
+function resolveTab(tabs: TabManager, req: JsonRpcRequest): TabRecord {
+  const runId = req.meta?.run_id;
+  if (req.tab_id) {
+    return tabs.require(req.tab_id, runId !== undefined ? { runId } : undefined);
+  }
+  if (runId !== undefined) {
+    throw new TabError(ERR_INVALID_PARAMS, "agent commands must address a tab_id");
+  }
+  const active = tabs.activeTabId();
+  if (!active) throw new TabError(ERR_TAB_NOT_FOUND, "no tab is open");
+  return tabs.require(active);
+}
+
+/**
+ * Tab lifecycle verbs. They only touch bookkeeping (and Electron view
+ * creation), never the CDP debugger, so they run outside the per-tab
+ * command chain.
+ */
+function handleTabsMethod(tabs: TabManager, req: JsonRpcRequest): unknown {
+  const p = (req.params ?? {}) as {
+    tab_id?: unknown;
+    partition?: unknown;
+    authorized_uris?: unknown;
+    agent_name?: unknown;
+    background?: unknown;
+  };
+  const runId = req.meta?.run_id;
+  switch (req.method) {
+    case "tabs.open": {
+      // The partition is minted platform-side from the agent manifest's
+      // `desktop_browser.session` mode. The desktop never derives it:
+      // that is what keeps one agent's profile out of another's.
+      if (typeof p.partition !== "string" || p.partition.length === 0) {
+        throw new TabError(ERR_INVALID_PARAMS, "tabs.open requires a `partition` string");
+      }
+      const owner: TabOwner =
+        runId !== undefined
+          ? {
+              kind: "run",
+              runId,
+              ...(typeof p.agent_name === "string" ? { agentName: p.agent_name } : {}),
+            }
+          : { kind: "user" };
+      const authorizedUris = req.meta?.authorized_uris ?? [];
+      const tab = tabs.open({
+        owner,
+        partition: p.partition,
+        authorizedUris,
+        background: p.background === true,
+      });
+      return { tab_id: tab.tabId };
+    }
+    case "tabs.close": {
+      if (typeof p.tab_id !== "string") {
+        throw new TabError(ERR_INVALID_PARAMS, "tabs.close requires `tab_id`");
+      }
+      // A taken-over tab stays closable by its owner: the run is done
+      // with it either way, and leaving it open would leak a surface.
+      tabs.require(p.tab_id, { allowPaused: true, ...(runId !== undefined ? { runId } : {}) });
+      tabs.close(p.tab_id);
+      return null;
+    }
+    case "tabs.activate": {
+      if (typeof p.tab_id !== "string") {
+        throw new TabError(ERR_INVALID_PARAMS, "tabs.activate requires `tab_id`");
+      }
+      tabs.require(p.tab_id, { allowPaused: true, ...(runId !== undefined ? { runId } : {}) });
+      tabs.activate(p.tab_id);
+      return null;
+    }
+    case "tabs.list":
+      // Deliberately unfiltered: the platform holds the leases and does
+      // its own filtering per run. The desktop is not the place to
+      // re-derive who may see what.
+      return { tabs: tabs.list() };
+    default:
+      throw new TabError(ERR_METHOD_NOT_FOUND, `unknown method: ${req.method}`);
+  }
+}
+
 async function dispatch(
-  wc: WebContents,
+  tabs: TabManager,
   req: JsonRpcRequest,
   notify: Notify,
 ): Promise<JsonRpcResponse> {
-  const handler = handlers[req.method];
-  if (!handler) {
-    return errorResponse(req.id, ERR_METHOD_NOT_FOUND, `unknown method: ${req.method}`);
-  }
   try {
-    const authorizedUris = req.meta?.authorized_uris ?? [];
-    assertAuthorizedBrowserState(wc, req.method, req.params, authorizedUris);
-    const result = await handler(wc, req.params, notify, authorizedUris);
-    return successResponse(req.id, result);
+    if (req.method.startsWith("tabs.")) {
+      return successResponse(req.id, handleTabsMethod(tabs, req));
+    }
+    const handler = handlers[req.method];
+    if (!handler) {
+      return errorResponse(req.id, ERR_METHOD_NOT_FOUND, `unknown method: ${req.method}`);
+    }
+    const tab = resolveTab(tabs, req);
+    // The boundary belongs to the TAB, frozen when the platform opened
+    // it. A per-command `meta` value can only ever be the fallback for
+    // the user-driven path, never a way to widen an agent's perimeter.
+    const authorizedUris =
+      tab.authorizedUris.length > 0 ? tab.authorizedUris : (req.meta?.authorized_uris ?? []);
+    assertAuthorizedBrowserState(tab.webContents, req.method, req.params, authorizedUris);
+    tabs.setState(tab.tabId, "driving");
+    try {
+      const result = await handler(tab.webContents, req.params, notify, authorizedUris);
+      return successResponse(req.id, result);
+    } finally {
+      tabs.setState(tab.tabId, "idle");
+    }
   } catch (err) {
     const code =
       err instanceof Error && typeof (err as { code?: unknown }).code === "number"
@@ -285,7 +401,7 @@ async function dispatch(
 export function start(opts: {
   instance: string;
   getCookieHeader: () => Promise<string | null>;
-  webContents: WebContents;
+  tabs: TabManager;
   onStateChange?: (state: "connecting" | "connected" | "disconnected") => void;
   onError?: (err: unknown) => void;
 }): BridgeClient {
@@ -294,19 +410,6 @@ export function start(opts: {
   let backoffMs = 1_000;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let connectGeneration = 0;
-  let commandChain: Promise<void> = Promise.resolve();
-  let activeAuthorizedUris: readonly string[] = [];
-
-  const guardNavigation = (event: Event, target: string): void => {
-    if (
-      activeAuthorizedUris.length > 0 &&
-      !activeAuthorizedUris.some((spec) => matchesAuthorizedUri(spec, target))
-    ) {
-      event.preventDefault();
-      opts.onError?.(new Error(`blocked navigation outside authorized_uris: ${target}`));
-    }
-  };
-  opts.webContents.on("will-navigate", guardNavigation);
 
   const url = `${opts.instance.replace(/^http/, "ws")}${BRIDGE_PATH}`;
 
@@ -382,19 +485,24 @@ export function start(opts: {
         return; // malformed → ignore
       }
       if (!req.id || !req.method) return;
-      // Browser operations share one WebContents and one transient CDP
-      // debugger. Serial execution prevents navigation/input races and a
-      // command detaching the debugger while another still uses it.
-      commandChain = commandChain
-        .then(async () => {
-          if (stopped || socket.readyState !== WebSocket.OPEN) return;
-          activeAuthorizedUris = req.meta?.authorized_uris ?? [];
-          const response = await dispatch(opts.webContents, req, notify);
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify(response));
-          }
-        })
-        .catch((err) => opts.onError?.(err));
+      const step = async (): Promise<void> => {
+        if (stopped || socket.readyState !== WebSocket.OPEN) return;
+        const response = await dispatch(opts.tabs, req, notify);
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(response));
+        }
+      };
+      // Commands targeting the SAME tab stay strictly ordered: they share
+      // that tab's transient CDP debugger, and a second command would
+      // detach it from under the first. Different tabs run in parallel —
+      // that is the whole point of protocol 2. Tab lifecycle verbs touch
+      // no debugger, so they bypass the chain entirely.
+      if (req.method.startsWith("tabs.")) {
+        void step().catch((err) => opts.onError?.(err));
+        return;
+      }
+      const chainKey = req.tab_id ?? opts.tabs.activeTabId() ?? "__no_tab__";
+      opts.tabs.chain(chainKey, () => step().catch((err) => opts.onError?.(err)));
     });
 
     socket.on("close", () => {
@@ -417,6 +525,7 @@ export function start(opts: {
   void connect();
 
   return {
+    notify,
     stop(): void {
       stopped = true;
       connectGeneration++;
@@ -426,7 +535,6 @@ export function start(opts: {
       }
       const socket = ws;
       ws = null;
-      opts.webContents.removeListener("will-navigate", guardNavigation);
       socket?.close();
     },
   };
