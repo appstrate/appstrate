@@ -1182,7 +1182,7 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
     // Documents FIRST: the runs' FK cascade would otherwise destroy `documents`
     // rows (and their `document_links`) a live consumer still needs, silently
     // amputating a rerun's inputs.
-    await detachOrDeleteContainedDocuments({ runIds }, tx);
+    await detachOrDeleteContainedDocuments({ runIds, orgId: scope.orgId }, tx);
 
     // Scoped to the SELECTed ids — not the package predicate — so a run created
     // concurrently after the SELECT is left for the next delete call instead of

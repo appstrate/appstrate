@@ -14,7 +14,7 @@ import {
   injectMetaCsp,
   isHtmlMime,
   previewKind,
-  resolveHtmlPreviewMode,
+  mayServeActiveHtml,
 } from "../../../src/services/document-preview.ts";
 import { signFsUploadToken, verifyFsUploadToken } from "@appstrate/core/storage-fs";
 
@@ -169,26 +169,22 @@ describe("buildInertPreviewCsp", () => {
   });
 });
 
-describe("resolveHtmlPreviewMode", () => {
+describe("mayServeActiveHtml", () => {
   it("keeps agent HTML active in every context once a separate origin isolates it", () => {
     for (const dest of ["iframe", "document", "empty", "object", null]) {
-      expect(resolveHtmlPreviewMode({ separateOrigin: true, secFetchDest: dest })).toBe("active");
+      expect(mayServeActiveHtml({ separateOrigin: true, secFetchDest: dest })).toBe(true);
     }
   });
 
   it("same-origin: active ONLY for a proven nested-document load", () => {
-    expect(resolveHtmlPreviewMode({ separateOrigin: false, secFetchDest: "iframe" })).toBe(
-      "active",
-    );
+    expect(mayServeActiveHtml({ separateOrigin: false, secFetchDest: "iframe" })).toBe(true);
   });
 
   it("same-origin: fails closed on a top-level navigation, a bare fetch, and a missing header", () => {
     // `document` is the shared-link / new-tab case the whole gate exists for:
     // there is no sandbox attribute there, so the script would run on APP_URL.
     for (const dest of ["document", "empty", "object", "embed", "frame", "", null, "IFRAME"]) {
-      expect(resolveHtmlPreviewMode({ separateOrigin: false, secFetchDest: dest })).toBe(
-        "inert-source",
-      );
+      expect(mayServeActiveHtml({ separateOrigin: false, secFetchDest: dest })).toBe(false);
     }
   });
 });

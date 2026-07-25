@@ -57,7 +57,7 @@ import {
   buildPreviewCsp,
   buildInertPreviewCsp,
   injectMetaCsp,
-  resolveHtmlPreviewMode,
+  mayServeActiveHtml,
   PREVIEW_MAX_BYTES,
 } from "../services/document-preview.ts";
 
@@ -253,7 +253,7 @@ export function createDocumentsRouter() {
  *    on a dedicated `USERCONTENT_URL` origin, or (same-origin mode) inside the
  *    SPA's opaque `sandbox="allow-scripts"` iframe. Any other loading context,
  *    a top-level navigation above all, degrades to inert `text/plain` source.
- *    See {@link resolveHtmlPreviewMode}.
+ *    See {@link mayServeActiveHtml}.
  *  - `image` / `pdf` / `text` — INERT content streamed byte-for-byte with a
  *    minimal `default-src 'none'` CSP, `inline` disposition and `nosniff`; text
  *    is always relabelled `text/plain` so no markdown→HTML sniff is possible.
@@ -329,9 +329,9 @@ export function createDocumentPreviewRouter() {
       // USERCONTENT_URL — the OSS default) that means the SPA's
       // `sandbox="allow-scripts"` iframe and nothing else; a top-level
       // navigation to the same absolute `preview_url` would run agent script
-      // on APP_URL itself. See `resolveHtmlPreviewMode`.
+      // on APP_URL itself. See `mayServeActiveHtml`.
       const html = await new Response(stream).text();
-      const mode = resolveHtmlPreviewMode({
+      const active = mayServeActiveHtml({
         separateOrigin: Boolean(env.USERCONTENT_URL),
         secFetchDest: c.req.header("Sec-Fetch-Dest") ?? null,
       });
@@ -347,7 +347,7 @@ export function createDocumentPreviewRouter() {
         Vary: "Sec-Fetch-Dest",
       };
 
-      if (mode === "inert-source") {
+      if (!active) {
         // Same bytes, relabelled: `text/plain` + `nosniff` means the browser
         // renders the markup as source and never parses it as a document, so
         // nothing executes in the app origin. `default-src 'none'` on top.

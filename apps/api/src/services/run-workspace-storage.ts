@@ -42,27 +42,6 @@ import {
   type RunDocumentsManifest,
 } from "./run-workspace-manifest.ts";
 
-const BUCKET = RUN_WORKSPACE_BUCKET;
-
-const bundleKey = runWorkspaceBundleKey;
-const manifestKey = runWorkspaceManifestKey;
-const documentKey = runWorkspaceDocumentKey;
-
-/**
- * Re-exported from the layout leaf so every consumer keeps ONE import site.
- * Cascade-delete paths (org / application / run finalize) enqueue a run's bundle
- * + manifest keys into the transactional deletion outbox WITHOUT reading storage
- * inside their transaction; the worker expands a manifest job into its document
- * objects, deleting the manifest last so retries retain the deletion index.
- */
-export {
-  RUN_WORKSPACE_BUCKET,
-  runWorkspaceBundleKey,
-  runWorkspaceManifestKey,
-  type RunDocumentMeta,
-  type RunDocumentsManifest,
-};
-
 /**
  * The deletion-outbox jobs that purge every object of a run's workspace: the
  * bundle plus the manifest, which the worker expands into the run's document
@@ -72,8 +51,8 @@ export {
  */
 export function runWorkspaceDeletionJobs(runId: string, reason: string): StorageDeletionJobInput[] {
   return [
-    { bucket: BUCKET, storageKey: bundleKey(runId), reason },
-    { bucket: BUCKET, storageKey: manifestKey(runId), reason },
+    { bucket: RUN_WORKSPACE_BUCKET, storageKey: runWorkspaceBundleKey(runId), reason },
+    { bucket: RUN_WORKSPACE_BUCKET, storageKey: runWorkspaceManifestKey(runId), reason },
   ];
 }
 
@@ -91,7 +70,7 @@ export function streamRunDocument(
   name: string,
   stream: ReadableStream<Uint8Array>,
 ): Promise<string> {
-  return storage.uploadStream(BUCKET, documentKey(runId, name), stream);
+  return storage.uploadStream(RUN_WORKSPACE_BUCKET, runWorkspaceDocumentKey(runId, name), stream);
 }
 
 /**
@@ -108,8 +87,8 @@ export function writeRunDocumentsManifest(
   assertUniqueWorkspaceNames(documents.map((d) => d.workspace_name));
   const manifest: RunDocumentsManifest = { documents };
   return storage.uploadFile(
-    BUCKET,
-    manifestKey(runId),
+    RUN_WORKSPACE_BUCKET,
+    runWorkspaceManifestKey(runId),
     new TextEncoder().encode(JSON.stringify(manifest)),
   );
 }
@@ -125,12 +104,12 @@ export async function uploadRunBundle(
   bundle: Buffer | Uint8Array | undefined,
 ): Promise<void> {
   if (!bundle) return;
-  await storage.uploadFile(BUCKET, bundleKey(runId), bundle);
+  await storage.uploadFile(RUN_WORKSPACE_BUCKET, runWorkspaceBundleKey(runId), bundle);
 }
 
 /** Fetch the run's bundle (`agent-package.afps` bytes). Returns null when none. */
 export async function downloadRunWorkspace(runId: string): Promise<Buffer | null> {
-  const data = await storage.downloadFile(BUCKET, bundleKey(runId));
+  const data = await storage.downloadFile(RUN_WORKSPACE_BUCKET, runWorkspaceBundleKey(runId));
   return data ? Buffer.from(data) : null;
 }
 
@@ -143,8 +122,8 @@ export async function downloadRunWorkspace(runId: string): Promise<Buffer | null
 export async function downloadRunDocumentsManifest(
   runId: string,
 ): Promise<RunDocumentsManifest | null> {
-  const key = manifestKey(runId);
-  const data = await storage.downloadFile(BUCKET, key);
+  const key = runWorkspaceManifestKey(runId);
+  const data = await storage.downloadFile(RUN_WORKSPACE_BUCKET, key);
   if (!data) return null;
   return parseRunDocumentsManifest(data, key);
 }
@@ -154,7 +133,7 @@ export function downloadRunDocumentStream(
   runId: string,
   name: string,
 ): Promise<ReadableStream<Uint8Array> | null> {
-  return storage.downloadStream(BUCKET, documentKey(runId, name));
+  return storage.downloadStream(RUN_WORKSPACE_BUCKET, runWorkspaceDocumentKey(runId, name));
 }
 
 /**
@@ -171,12 +150,19 @@ export function downloadRunDocumentStream(
  * propagated, so it can't mask the failure the caller is already unwinding.
  */
 export async function deleteRunDocuments(runId: string, names: string[]): Promise<void> {
-  const keys = [manifestKey(runId), ...names.map((n) => documentKey(runId, n))];
+  const keys = [
+    runWorkspaceManifestKey(runId),
+    ...names.map((n) => runWorkspaceDocumentKey(runId, n)),
+  ];
   try {
     await db.transaction((tx) =>
       enqueueStorageDeletion(
         tx,
-        keys.map((k) => ({ bucket: BUCKET, storageKey: k, reason: "run_input_rollback" })),
+        keys.map((k) => ({
+          bucket: RUN_WORKSPACE_BUCKET,
+          storageKey: k,
+          reason: "run_input_rollback",
+        })),
       ),
     );
   } catch (error) {

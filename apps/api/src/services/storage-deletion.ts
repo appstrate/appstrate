@@ -18,7 +18,7 @@
  * problem, never a reason to drop the job.
  */
 
-import { and, eq, gt, lt, lte, isNull, isNotNull, inArray, sql, desc, gte, or } from "drizzle-orm";
+import { and, eq, lt, lte, isNull, isNotNull, inArray, sql, desc, gte, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { storageDeletionJobs } from "@appstrate/db/schema";
 import {
@@ -36,7 +36,7 @@ import {
   RUN_WORKSPACE_BUCKET,
   parseRunWorkspaceManifestKey,
   parseRunDocumentsManifest,
-  runWorkspaceDocumentKeys,
+  runWorkspaceDocumentKey,
 } from "./run-workspace-manifest.ts";
 
 /** A Drizzle executor — either the root `db` or an open transaction handle. */
@@ -83,18 +83,6 @@ const DEFAULT_BATCH_LIMIT = 50;
  * deletes (see {@link DEFAULT_BATCH_LIMIT}) rather than a single one.
  */
 const CLAIM_LEASE_MS = 15 * 60 * 1000;
-
-/**
- * How long a COMPLETED job is retained before the purge drops it. The table
- * takes one row per deleted object and would otherwise grow without bound; the
- * completed tail is only kept as a short operator audit trail (the object is
- * already gone). Served by the `idx_storage_deletion_jobs_completed` partial
- * index, so the purge never scans the hot pending set.
- */
-const COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-
-/** Max completed rows purged per pass — bounds the delete's lock set. */
-const COMPLETED_PURGE_LIMIT = 1_000;
 
 /**
  * Exponential backoff for the Nth attempt, capped and jittered. `min(2^attempts
@@ -193,8 +181,8 @@ async function deleteStorageTarget(
     // validated as a single path segment BEFORE it becomes a key, so a corrupted
     // manifest can never steer a delete outside the run's own prefix.
     const manifest = parseRunDocumentsManifest(manifestBytes, storageKey);
-    for (const key of runWorkspaceDocumentKeys(runId, manifest)) {
-      await del(bucket, key);
+    for (const name of new Set(manifest.documents.map((d) => d.workspace_name))) {
+      await del(bucket, runWorkspaceDocumentKey(runId, name));
     }
   }
 
@@ -317,27 +305,8 @@ export async function processStorageDeletionJobs(
     }
   }
 
-  await purgeCompletedJobs();
   await emitBacklogMetrics();
   return { claimed: claimedJobs.length, completed, failed };
-}
-
-/**
- * Drop completed jobs past {@link COMPLETED_RETENTION_MS}. Bounded per pass and
- * served by the completed-only partial index. Best-effort — a failed purge is a
- * housekeeping miss, never a reason to fail the pass.
- */
-async function purgeCompletedJobs(): Promise<void> {
-  try {
-    const stale = db
-      .select({ id: storageDeletionJobs.id })
-      .from(storageDeletionJobs)
-      .where(lt(storageDeletionJobs.completedAt, dbClockDeadline(-COMPLETED_RETENTION_MS)))
-      .limit(COMPLETED_PURGE_LIMIT);
-    await db.delete(storageDeletionJobs).where(inArray(storageDeletionJobs.id, stale));
-  } catch (err) {
-    logger.warn("storage deletion completed-job purge failed", { error: getErrorMessage(err) });
-  }
 }
 
 /** Cheap COUNT/MIN over the pending set → the outbox backlog gauges. */
@@ -413,8 +382,7 @@ function statusFilter(status: StorageDeletionJobStatus) {
  * `/api/end-users` and the document gallery — and the response is the standard
  * `{ object: "list", data, hasMore }` envelope. The cursor row is looked up to
  * recover its `created_at`, so the keyset comparison stays on the full sort
- * tuple; a cursor id that no longer exists (the job completed and was swept)
- * simply drops its clause and the page starts at the head.
+ * tuple.
  */
 export async function listStorageDeletionJobs(params: {
   status: StorageDeletionJobStatus;
@@ -468,25 +436,12 @@ export async function listStorageDeletionJobs(params: {
 /**
  * Reset a pending job's `next_attempt_at` to now so the next worker pass retries
  * it immediately (operator "retry now"). Returns whether a row was reset.
- *
- * Refuses a job that could be EXECUTING right now: a claim parks
- * `next_attempt_at` exactly one lease ahead, so anything due within
- * {@link CLAIM_LEASE_MS} is indistinguishable from a live lease. Resetting it
- * would hand the same object to a second concurrent pass. Jobs the operator
- * actually retries — dead letters — sit at the 6h backoff cap, far outside that
- * horizon; a job parked inside it becomes due on its own within minutes anyway.
  */
 export async function retryStorageDeletionJob(id: string): Promise<boolean> {
   const reset = await db
     .update(storageDeletionJobs)
     .set({ nextAttemptAt: sql`now()` })
-    .where(
-      and(
-        eq(storageDeletionJobs.id, id),
-        isNull(storageDeletionJobs.completedAt),
-        gt(storageDeletionJobs.nextAttemptAt, dbClockDeadline(CLAIM_LEASE_MS)),
-      ),
-    )
+    .where(and(eq(storageDeletionJobs.id, id), isNull(storageDeletionJobs.completedAt)))
     .returning({ id: storageDeletionJobs.id });
   return reset.length > 0;
 }
@@ -505,9 +460,12 @@ let passInFlight = false;
  *
  * Passes are single-flight WITHIN a process: a pass that outlives the interval
  * (degraded storage backend) must not have the next tick start a second pass
- * against the same backlog. Two overlapping passes on one instance would fight
- * over leases and burn claim ordinals on jobs already being executed. Across
- * instances the claim's `SKIP LOCKED` lease still does the partitioning.
+ * against the same backlog. The claim's `SKIP LOCKED` lease would keep the two
+ * passes on disjoint rows (they run on separate pool connections), so this is
+ * not a correctness guard — it bounds concurrency: during a storage outage every
+ * pass runs long, and letting each tick pile on another in-flight pass would
+ * multiply the connections and the doomed delete calls against an already-sick
+ * backend instead of simply falling behind.
  */
 export function startStorageDeletionWorker(): void {
   if (workerTimer) return;

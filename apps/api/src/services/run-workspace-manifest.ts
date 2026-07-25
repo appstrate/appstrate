@@ -120,14 +120,3 @@ export function parseRunDocumentsManifest(
     }),
   };
 }
-
-/**
- * Every in-bucket document key a manifest names, de-duplicated. The keys are
- * safe by construction — {@link parseRunDocumentsManifest} has already rejected
- * any entry whose name is not a single path segment.
- */
-export function runWorkspaceDocumentKeys(runId: string, manifest: RunDocumentsManifest): string[] {
-  return [...new Set(manifest.documents.map((d) => d.workspace_name))].map((name) =>
-    runWorkspaceDocumentKey(runId, name),
-  );
-}

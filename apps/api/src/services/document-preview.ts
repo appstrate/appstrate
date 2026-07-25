@@ -197,16 +197,10 @@ export function buildPreviewCsp(appOrigin: string): string {
 }
 
 /**
- * How the preview route must serve an `html` document for THIS request.
- *
- *  - `active` — parse and execute as `text/html` (the hardened CSP path).
- *  - `inert-source` — serve the same bytes relabelled `text/plain`, so the
- *    browser shows the source instead of running it.
- */
-export type HtmlPreviewMode = "active" | "inert-source";
-
-/**
- * Decide whether agent HTML may be served as ACTIVE content for this request.
+ * Decide whether agent HTML may be served as ACTIVE content for this request
+ * (`true` = parse and execute as `text/html` under the hardened CSP; `false` =
+ * serve the same bytes relabelled `text/plain`, so the browser shows the source
+ * instead of running it).
  *
  * The CSP built by {@link buildPreviewCsp} blocks exfiltration (`connect-src`,
  * `form-action`, `img-src`, `base-uri`) but NOT script execution itself — that
@@ -230,19 +224,19 @@ export type HtmlPreviewMode = "active" | "inert-source";
  * decision is fail-CLOSED: active HTML requires a proven nested-document load
  * (`iframe`); a top-level navigation (`document`), a bare `fetch` (`empty`),
  * an `object`/`embed` load, and a MISSING header (non-browser client, or a
- * browser too old to send it — Safari < 16.4) all degrade to `inert-source`.
+ * browser too old to send it — Safari < 16.4) all degrade to inert source.
  * Degrading rather than erroring keeps the link useful: the holder of a valid
  * token may read the source, which it could download anyway — it just cannot
  * make it execute in the app origin.
  */
-export function resolveHtmlPreviewMode(input: {
+export function mayServeActiveHtml(input: {
   /** True when the preview is served from a dedicated `USERCONTENT_URL` origin. */
   separateOrigin: boolean;
   /** Raw `Sec-Fetch-Dest` request header, or null when absent. */
   secFetchDest: string | null;
-}): HtmlPreviewMode {
-  if (input.separateOrigin) return "active";
-  return input.secFetchDest === "iframe" ? "active" : "inert-source";
+}): boolean {
+  if (input.separateOrigin) return true;
+  return input.secFetchDest === "iframe";
 }
 
 /**

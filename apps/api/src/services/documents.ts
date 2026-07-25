@@ -38,14 +38,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  documents,
-  documentLinks,
-  organizations,
-  chatSessions,
-  endUsers,
-  runs,
-} from "@appstrate/db/schema";
+import { documents, documentLinks, organizations, chatSessions } from "@appstrate/db/schema";
 import type { DocumentPurpose } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
@@ -71,7 +64,8 @@ import {
 } from "../lib/errors.ts";
 import { resolveAgentOutputMime } from "./mime-policy.ts";
 import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
-import { consumeUploadStream, peekUploads, sanitizeFilename, parseUploadUri } from "./uploads.ts";
+import { sanitizeFilename } from "@appstrate/core/naming";
+import { consumeUploadStream, peekUploads, parseUploadUri } from "./uploads.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import {
   recordDocumentCreated,
@@ -1444,13 +1438,6 @@ export async function listDocumentsForActor(
 // ---------------------------------------------------------------------------
 
 /**
- * Which set of documents a teardown owns. Every parent whose FK would otherwise
- * cascade-destroy `documents` rows goes through this one primitive.
- */
-export type DocumentContainerSelector =
-  { runIds: string[] } | { chatSessionId: string } | { endUserId: string };
-
-/**
  * Container-teardown for a deleted run set, chat session, or end-user: decide,
  * per contained document, whether to DETACH it (a live consumer outside the
  * deleted set still references it — the "durable & chainable" promise) or DELETE
@@ -1481,11 +1468,21 @@ export type DocumentContainerSelector =
  * (and delete it + enqueue its job), or the publish's insert fails the FK
  * against the by-then-deleted parent and drops its own object.
  *
+ * The run and end-user variants carry their `orgId` explicitly: both callers
+ * already resolved it (it is the app scope they are authorized against) and
+ * already hold that very org lock, so re-deriving it from the container rows
+ * would only be a second read of a value the caller had all along. The chat
+ * variant crosses the module boundary with the session id alone, so its org is
+ * looked up here.
+ *
  * The caller MUST invoke this BEFORE deleting the runs/session/end-user, else
  * the FK cascade destroys the `documents` rows (and their links) first.
  */
 export async function detachOrDeleteContainedDocuments(
-  container: DocumentContainerSelector,
+  container:
+    | { runIds: string[]; orgId: string }
+    | { chatSessionId: string }
+    | { endUserId: string; orgId: string },
   tx?: DbOrTx,
 ): Promise<void> {
   const runIds = "runIds" in container ? container.runIds : null;
@@ -1500,36 +1497,19 @@ export async function detachOrDeleteContainedDocuments(
       ? eq(documents.chatSessionId, chatSessionId)
       : eq(documents.endUserId, endUserId!);
 
-  /** The org(s) owning this container — locked before anything else is read. */
-  const containerOrgIds = async (exec: DbOrTx): Promise<string[]> => {
-    if (runIds) {
-      const rows = await exec
-        .selectDistinct({ orgId: runs.orgId })
-        .from(runs)
-        .where(inArray(runs.id, runIds));
-      return rows.map((r) => r.orgId);
-    }
-    if (chatSessionId) {
-      const rows = await exec
+  const teardown = async (exec: DbOrTx): Promise<number> => {
+    // Org-first (see the doc comment). One container, one org: supplied by the
+    // caller, or read from the chat session for the module-boundary variant.
+    let orgId: string | null = "orgId" in container ? container.orgId : null;
+    if (orgId === null) {
+      const [session] = await exec
         .select({ orgId: chatSessions.orgId })
         .from(chatSessions)
-        .where(eq(chatSessions.id, chatSessionId))
+        .where(eq(chatSessions.id, chatSessionId!))
         .limit(1);
-      return rows.map((r) => r.orgId);
+      orgId = session?.orgId ?? null;
     }
-    const rows = await exec
-      .select({ orgId: endUsers.orgId })
-      .from(endUsers)
-      .where(eq(endUsers.id, endUserId!))
-      .limit(1);
-    return rows.map((r) => r.orgId);
-  };
-
-  const teardown = async (exec: DbOrTx): Promise<number> => {
-    // Org-first (see the doc comment). Sorted so a multi-org batch always takes
-    // the locks in the same order and two such batches cannot deadlock either.
-    const orgIds = [...new Set(await containerOrgIds(exec))].sort();
-    for (const orgId of orgIds) {
+    if (orgId !== null) {
       await exec
         .select({ id: organizations.id })
         .from(organizations)

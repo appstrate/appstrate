@@ -324,7 +324,7 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
     // amputating any later `rerun_from`. The primitive detaches those (dropping
     // only the attribution), deletes the rest, and owns their counter decrement
     // + outbox jobs.
-    await detachOrDeleteContainedDocuments({ endUserId }, tx);
+    await detachOrDeleteContainedDocuments({ endUserId, orgId: scope.orgId }, tx);
 
     const uploadRows = await tx
       .select({ storageKey: uploads.storageKey })

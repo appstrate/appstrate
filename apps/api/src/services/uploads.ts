@@ -103,42 +103,6 @@ function isWithinReuseWindow(consumedAt: Date): boolean {
  */
 const CONSUME_GRACE_MS = 60 * 60 * 1000;
 
-/**
- * Durable fallback when an INLINE storage delete fails.
- *
- * The three inline deletes in this file (consume-failure rollback, and the
- * short-body / checksum-mismatch drops in the proxy sink) are deliberately
- * synchronous: the upload's storage key is derived from its id, so the client's
- * retry re-PUTs to the SAME key, and both backends create exclusively (O_EXCL /
- * `If-None-Match: *`). The object must be gone BEFORE the retry — routing the
- * happy path through the outbox would defer the delete by up to a worker
- * interval, 409-ing every retry until then, and worse: the worker would then
- * delete the retry's freshly-written bytes.
- *
- * When the inline delete FAILS, though, the leftover object blocks the retry
- * indefinitely and would only be purged when the upload row itself expires. That
- * failure — and only that failure — is handed to the outbox: it is a delete
- * whose target the client cannot recreate until it lands, so the worker's retry
- * is strictly an improvement and cannot race a re-PUT (a re-PUT can only succeed
- * after the object is gone, i.e. after the job completed).
- */
-async function enqueueUploadObjectDeletion(
-  bucket: string,
-  path: string,
-  reason: string,
-): Promise<void> {
-  try {
-    await db.transaction((tx) => enqueueStorageDeletion(tx, { bucket, storageKey: path, reason }));
-  } catch (err) {
-    logger.warn("failed to enqueue upload object deletion", {
-      bucket,
-      path,
-      reason,
-      error: getErrorMessage(err),
-    });
-  }
-}
-
 /** Returned to the client from POST /api/uploads. */
 export interface CreateUploadResponse {
   object: "upload";
@@ -184,13 +148,6 @@ export type UploadStreamSink = (
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
-
-// Re-exported so existing importers (documents, run-document-naming, routes,
-// tests) keep a single import site. The rule itself now lives in
-// `@appstrate/core/naming`: the agent container must apply the IDENTICAL rule
-// to predict the `documents.name` the server will store, which is half of the
-// `(run_id, sha256, name)` dedup identity. Do not re-implement here.
-export { sanitizeFilename };
 
 /**
  * Extract the upload id from an `upload://upl_xxx` URI. Returns null if the
@@ -658,15 +615,11 @@ export async function consumeUploadStream(
     // The storage adapter's `deleteFile` is idempotent on ENOENT, so calling
     // it even when there's nothing to delete (missing-binary error path)
     // is safe.
-    await storageDelete(bucket!, path).catch(async (delErr) => {
+    await storageDelete(bucket!, path).catch((delErr) => {
       logger.warn("failed to delete upload storage after consume error", {
         uploadId,
         error: getErrorMessage(delErr),
       });
-      // The object now blocks the client's re-PUT (exclusive create) and would
-      // linger until the row expires — hand it to the outbox so a retrying
-      // worker unblocks the retry. See {@link enqueueUploadObjectDeletion}.
-      await enqueueUploadObjectDeletion(bucket!, path, "upload_consume_rollback");
     });
     // Release the claim so the row can be re-consumed after the client re-uploads.
     // Guarded by `consumedAt = claimedAt` so we only ever release OUR claim —
@@ -775,13 +728,7 @@ export async function writeProxyUploadContent(
     // Exact-size binding (see doc comment): the object was created but is
     // shorter than the declared size — remove it so the token can be reused
     // for a clean retry instead of the mismatch surfacing at consume time.
-    try {
-      await storageDelete(bucket, path);
-    } catch {
-      // The inline drop failed, so the short object would block the token's
-      // retry (exclusive create) until the row expires — enqueue it.
-      await enqueueUploadObjectDeletion(bucket, path, "upload_short_body");
-    }
+    await storageDelete(bucket, path).catch(() => {});
     throw invalidRequest(`body is ${bytes} bytes but the signed size is ${maxSize}`);
   }
   if (hasher && sha256) {
@@ -789,13 +736,7 @@ export async function writeProxyUploadContent(
     if (actual !== sha256) {
       // Wrong bytes for the declared checksum — drop the object before it can be
       // consumed, so a retry with the correct bytes re-PUTs cleanly.
-      try {
-        await storageDelete(bucket, path);
-      } catch {
-        // Same as the short-body case: a leftover object blocks the retry, so
-        // the failed inline delete becomes a durable outbox job.
-        await enqueueUploadObjectDeletion(bucket, path, "upload_checksum_mismatch");
-      }
+      await storageDelete(bucket, path).catch(() => {});
       throw checksumMismatch("uploaded bytes do not match the declared sha256");
     }
   }

@@ -25,7 +25,7 @@
 
 import { ApiError } from "../lib/errors.ts";
 import { sanitizeStorageKey } from "./file-storage.ts";
-import { sanitizeFilename } from "./uploads.ts";
+import { sanitizeFilename } from "@appstrate/core/naming";
 
 /**
  * 400 raised when two input documents resolve to the same workspace filename.
