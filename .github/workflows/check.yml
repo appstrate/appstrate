@@ -40,3 +40,40 @@ jobs:
           UPLOAD_SIGNING_SECRET: ci-dummy-upload-signing-secret
           RUN_TOKEN_SECRET: ci-dummy-run-token-secret
           CONNECT_SESSION_SECRET: ci-dummy-connect-session-secret
+
+  # `bun run check` above CANNOT catch a missing dependency in a source-only
+  # package: the root devDependencies hoist type packages into the shared
+  # node_modules, so `tsc` is green here while `npm install @appstrate/core` in a
+  # clean consumer project fails with TS2307/TS7016. This job packs the real
+  # artifact and typechecks every exported subpath in a throwaway npm project
+  # outside the workspace. It installs from the public npm registry — measured at
+  # ~5 s with a cold npm cache, so the job is dominated by checkout + toolchain
+  # setup — but it is kept out of the `check` job because it must NOT run inside a
+  # workspace install. `timeout-minutes: 15` is deliberate headroom for a slow or
+  # degraded registry, not an expected runtime.
+  package-resolution:
+    name: Package resolves for consumers (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [packages/core, packages/afps-shared]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # No `bun install` on purpose — the script only uses Bun stdlib + npm, and a
+      # workspace install is precisely the environment that hides the defect.
+      - name: Verify ${{ matrix.package }} resolves in a clean consumer install
+        run: bun scripts/verify-package-resolves.ts ${{ matrix.package }}
