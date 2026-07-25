@@ -61,6 +61,79 @@ export function classifyDockerNetworkError(
 }
 
 /**
+ * Detect Moby's "image is not present locally" failure on container create.
+ *
+ * `POST /containers/create` **never pulls**: a missing image comes back as
+ * `404 {"message":"No such image: <ref>"}` (Moby
+ * `daemon/container_operations.go` → `errdefs.NotFound`). The Docker CLI
+ * implements create → 404 → pull → retry itself — that is precisely what
+ * `docker run --pull=missing` (the default) means — so every direct Engine
+ * API client has to reproduce it or inherit a container-create that breaks
+ * the moment a host image prune runs.
+ *
+ * The match gates on **status 404 + the stable `No such image` prefix**
+ * rather than the full message: the suffix varies by reference shape (tag
+ * vs digest, `(tag: latest)` embellishment). Other 404s from the same
+ * endpoint (notably an unknown network in `NetworkingConfig`) must NOT
+ * match — pulling would not fix them.
+ */
+export function isMissingImageError(status: number, body: string): boolean {
+  if (status !== 404) return false;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const message = (parsed as { message?: unknown }).message;
+    return typeof message === "string" && message.startsWith("No such image");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Create a container, healing a locally-missing image exactly once.
+ *
+ * The flow:
+ *   1. Try to create the container.
+ *   2. On a `No such image` 404, pull the image and retry — **once**.
+ *   3. Any other response (including other 404s) is returned untouched so
+ *      the caller's normal error path reports it verbatim.
+ *
+ * Why this exists: runtime images are only referenced by containers while a
+ * run is in flight, so a host-level `docker image prune -a` (Coolify's
+ * scheduled Docker cleanup, a disk-pressure sweep, an operator) reclaims
+ * them between runs. Without this, every subsequent run fails with a bare
+ * 404 until the API process restarts and re-runs its boot-time pre-pull.
+ *
+ * Deliberately **one** retry: a second `No such image` after a successful
+ * pull means the reference itself is wrong (bad tag/digest/platform), not a
+ * cold cache. Looping would convert a clear failure into a hang.
+ *
+ * The response body is inspected through `clone()` so the original response
+ * stays unread for the caller's error handler.
+ *
+ * Dependencies are injected so this helper is trivially unit-testable
+ * without touching the real Docker socket.
+ */
+export async function createContainerWithImagePull(
+  createContainer: () => Promise<Response>,
+  pullImage: () => Promise<void>,
+  log: { warn: (msg: string, data?: Record<string, unknown>) => void } = {
+    warn: () => {},
+  },
+): Promise<Response> {
+  const res = await createContainer();
+  // Fast path: only a 404 can be a missing image, so nothing else pays the
+  // cost of buffering a response clone.
+  if (res.status !== 404) return res;
+
+  const body = await res.clone().text();
+  if (!isMissingImageError(res.status, body)) return res;
+
+  log.warn("Container image missing locally (pruned?) — pulling once and retrying", { body });
+  await pullImage();
+  return createContainer();
+}
+
+/**
  * Create a network with opportunistic recovery on pool exhaustion.
  *
  * The flow:

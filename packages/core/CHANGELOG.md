@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Major release: the durable **documents** surface (URIs, storage enumeration +
 download presign, filename transport, RBAC resource, telemetry, the
-`publish_document` runtime tool) and a **module-contract cleanup** that removes
-two extension points with zero implementers and makes hook dispatch modes
-type-safe.
+`publish_document` runtime tool), a **module-contract cleanup** that removes two
+extension points with zero implementers and makes hook dispatch modes type-safe,
+and **quote-based admission** — `beforeUsage` now reports neutral execution facts
+for EVERY run and EVERY chat turn instead of firing only for operations the
+platform had pre-classified as metered.
 
 > **Release ordering.** Everything published between `core@4.0.0` and this tag
 > shipped in the platform without a version bump — the surface below therefore
@@ -20,6 +22,13 @@ type-safe.
 > no-op) because the dependency range never moved past `^4.0.0`, so per-plan
 > storage entitlements never applied. Bump every consumer (see
 > `scripts/check-consumer-versions.ts`) and drop that cast.
+
+> **Deploy ordering — modules BEFORE the platform.** `beforeUsage` now fires for
+> operations it never fired for before (see Changed). A module still running the
+> old code will be asked to admit operations it has no policy for, and — because
+> the platform no longer decides on its behalf that an operation consumes
+> nothing — will admit or reject them by accident. Deploy every module that
+> implements `beforeUsage` on this contract first, then the platform.
 
 ### Added
 
@@ -93,7 +102,86 @@ opts?)` returns a browser-usable GET URL (S3 presign with
 - **`@appstrate/core/module`** — `FirstMatchHooks` / `BroadcastHooks` (see
   Changed).
 
+- **`BeforeUsageParams` carries the operation's execution facts.** Both members
+  of the union gain `credentialSource` and `executionPlane`; the `run` member
+  also gains `timeoutSeconds`. They are FACTS, not verdicts — the module turns
+  them into a policy decision. The widening is BREAKING for anything that
+  CONSTRUCTS these params (module test fakes, essentially): the new fields are
+  required. A hook that only READS its params keeps compiling.
+  - **`credentialSource`** — whose credential is spent on inference.
+    `"system"` (a platform-supplied credential: a `SYSTEM_PROVIDER_KEYS` entry
+    or a system model preset), `"org"` (the organization spends its OWN
+    credential — a BYOK API key or a provider subscription it authorized over
+    OAuth), or, on `run` only, `null` when a remote-origin run resolves its
+    model later on its own host. `null` is not a coverage gap: if such a run
+    routes inference through the platform's system model proxy, that seam
+    dispatches its own `beforeUsage` with a `credentialSource` that IS known
+    there. The name matches the `llm_usage.credential_source` ledger column a
+    metering module reconciles against; the `runs.model_source` database column
+    is the same concept under an older, persisted name — deliberately not
+    renamed.
+  - **`executionPlane`** — whose compute runs the work. `"platform"` (a
+    sandboxed container or microVM the platform operates, or the platform's own
+    chat process) or `"remote"` (the caller supplies the host). Always
+    `"platform"` on `chat`, and present rather than omitted there so a module
+    can read the field off either member without first narrowing on `context`.
+    Reported as an axis independent of `credentialSource` on purpose: an
+    organization can spend its own credential and still occupy platform
+    compute, or supply its own host while spending a platform-supplied
+    credential. A module that collapses the two into a single signal mis-admits
+    one of those combinations.
+  - **`timeoutSeconds`** (`run` only) — the run's EFFECTIVE timeout in seconds,
+    i.e. the agent's declared timeout after the platform ceiling has been
+    applied. It is the upper bound on how long the run may occupy platform
+    compute, NOT a prediction of its actual duration. `null` means "contribute
+    nothing for compute here", and is deliberate rather than unknown: the
+    system-proxy seam admits the inference of an ALREADY-RUNNING run whose
+    compute was accounted for when the run itself was admitted (platform
+    plane), or is not platform-supplied at all (remote plane). A consumer must
+    NOT read `null` as "unknown, assume the worst" — that would account for the
+    same run's compute twice. A module that does not account for duration can
+    ignore the field entirely.
+
 ### Changed (BREAKING)
+
+- **`beforeUsage` is dispatched for EVERY run and EVERY chat turn.** It
+  previously fired only for an operation the platform had already classified as
+  metered — in practice, only when the resolved model came from a
+  platform-supplied credential; an operation on the organization's own
+  credential never reached the hook at all. That classification hard-coded "the
+  organization brings its own credential ⇒ nothing is consumed", which stops
+  holding the moment platform compute is accounted for: such a run still
+  occupies a sandbox the platform operates. The platform now reports the facts
+  and the module applies its own policy — **including the decision that an
+  operation consumes nothing**, which is no longer made on the module's behalf.
+  A module that accounts only for platform-supplied inference reaches the same
+  outcome as before by returning `null` when `credentialSource !== "system"`;
+  one that also accounts for platform compute reads `executionPlane` and
+  `timeoutSeconds`, with no change to this type and no change to where the hook
+  fires. An operation that consumes neither a platform-supplied credential nor
+  platform compute — `credentialSource !== "system"` and
+  `executionPlane !== "platform"` — is the case to short-circuit first. Because
+  the set of dispatched operations GROWS, this is breaking behaviourally even
+  for a module whose code still type-checks: deploy modules before the platform.
+
+- **`PlatformServices.checkUsageAllowed`** — same signature, no pre-filter. The
+  platform still resolves system-provided vs. organization-owned server-side
+  (that is what keeps the chat module dumb — it has no model-registry access),
+  but it now REPORTS the resolution as `credentialSource` instead of using it to
+  decide whether to dispatch. A turn on the organization's own credential is
+  dispatched all the same, because a chat turn always executes in the platform's
+  own process. Subscription turns still never call this.
+
+- **The system-model proxy seam gates every run-context call.** `/api/llm-proxy`
+  no longer short-circuits admission for a platform-origin run that declared a
+  system credential. A preflight quote is issued ONCE per run launch while the
+  number of proxy calls attachable to that run id is unbounded, run attribution
+  binds an API-key principal only to org + application (so any key of the
+  application can stamp a live run's id onto its own calls), and once platform
+  compute is billed the organization's balance moves DURING the run. A module
+  therefore sees one dispatch per proxy call, carrying
+  `credentialSource: "system"`, the referenced run's `executionPlane`, and
+  `timeoutSeconds: null`.
 
 - **`ModuleHooks` is split by dispatch mode.** `ModuleHooks` is now
   `FirstMatchHooks & BroadcastHooks`. Modules are unaffected (the declaration
@@ -220,7 +308,9 @@ accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
     union: `{ context: "run"; packageId; runningCount }` and
     `{ context: "chat"; sessionId }` (both carry `orgId`). Same return contract
     as the old gate: `UsageRejection { code, message, status? }` to block, or
-    null to allow. `RunRejection` is renamed to `UsageRejection`.
+    null to allow. `RunRejection` is renamed to `UsageRejection`. _(Params
+    widened in 5.0.0 with `credentialSource` / `executionPlane` /
+    `timeoutSeconds`.)_
   - **`ModuleEvents.onUsageRecorded`** (`UsageRecordedParams`) — broadcast after
     each `llm_usage` ledger row is appended, carrying per-row attribution
     (source, principal, context, credential source, token counts, `costUsd`).
@@ -236,7 +326,10 @@ accessToken)`, the sidecar `/llm` oauth branch's only header policy. Forces the
     Removed). Never projects `real_model` / `api`.
   - **`PlatformServices.checkUsageAllowed`** — chat-surface entry into
     `beforeUsage`; the platform decides system-provided vs. org-owned and only
-    dispatches the hook for a system-provided model.
+    dispatches the hook for a system-provided model. _(Superseded in 5.0.0: the
+    hook is dispatched for every turn and the resolution is reported as the
+    `credentialSource` fact — this describes 4.0.0 behaviour, not current
+    behaviour.)_
   - **`ChatUsageRecord.cost`** — the model's catalog per-token rates; the
     platform seam computes the equivalent USD via the shared `computeTokenCost`
     formula so the chat / proxy / runner producers can't drift.

@@ -211,7 +211,18 @@ async function handleProxy(
     throw invalidRequest(`run ${runAttribution.id} has no agent package attribution`);
   }
   const usageContext = runAttribution
-    ? ({ context: "run", packageId: runAttribution.packageId! } as const)
+    ? ({
+        context: "run",
+        packageId: runAttribution.packageId!,
+        // ATTRIBUTION DATA, NOT A GATING INPUT. The admission seam reports this
+        // onward as the `beforeUsage` `executionPlane` fact (platform-origin →
+        // `"platform"`, otherwise `"remote"`) so a metering module can tell
+        // platform compute from caller-supplied compute. It must never decide
+        // WHETHER the hook fires: this field's previous life as half of an
+        // "already admitted at preflight" skip condition was an admission
+        // bypass, and the seam now gates every run-context system call.
+        runOrigin: runAttribution.runOrigin,
+      } as const)
     : c.get("firstPartyLoopback")
       ? ({ context: "chat", sessionId: chatSessionId } as const)
       : null;

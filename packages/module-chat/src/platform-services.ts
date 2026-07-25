@@ -77,11 +77,12 @@ export interface ChatPlatformDeps {
   cleanupSessionDocuments(chatSessionId: string, tx?: ChatDbTx): Promise<void>;
   /**
    * Admission gate for a non-subscription (built-in / API-key) turn. The
-   * platform decides whether the chosen preset is system-provided and, if so,
-   * dispatches the `beforeUsage` hook; an org's own model is never gated.
-   * Returns a {@link UsageRejection} to block the turn (surfaced as an RFC 9457
-   * problem response with the hook's status — 402 flows through), or null to
-   * allow.
+   * platform resolves whether the chosen preset is system-provided and reports
+   * it as a fact to the `beforeUsage` hook, which it dispatches for every such
+   * turn — a metering module decides what an org-credential turn costs, the
+   * platform no longer decides it is free. Returns a {@link UsageRejection} to
+   * block the turn (surfaced as an RFC 9457 problem response with the hook's
+   * status — 402 flows through), or null to allow.
    */
   checkUsageAllowed(args: {
     orgId: string;

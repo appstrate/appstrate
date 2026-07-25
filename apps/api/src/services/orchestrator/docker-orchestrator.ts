@@ -83,9 +83,15 @@ export class DockerOrchestrator implements RunOrchestrator {
    * {@link initialize} or ensured by a prior run). {@link ensureImages}
    * skips these — the per-run `imageExists` inspect round-trip was pure
    * overhead on the run-boot critical path for images that are pulled
-   * once at boot and effectively never disappear mid-lifetime. If a host
-   * prune removes one anyway, the container create fails with a clear
-   * `No such image` and the next boot's `initialize()` re-pulls.
+   * once at boot and effectively never disappear mid-lifetime.
+   *
+   * This cache is an optimisation only, never a correctness assumption: a
+   * host image prune between runs invalidates it silently, so the entry
+   * can be a lie. Correctness lives one layer down in `createContainer`,
+   * which heals a `No such image` 404 by pulling and retrying once — after
+   * which the cached "verified" claim is true again. Long-lived API
+   * processes therefore self-heal mid-lifetime instead of failing every
+   * run until the next restart.
    */
   private verifiedImages = new Set<string>();
 

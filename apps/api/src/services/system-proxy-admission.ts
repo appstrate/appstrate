@@ -21,7 +21,20 @@ import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError } from "../lib/errors.ts";
 
 export type SystemProxyUsageContext =
-  { context: "run"; packageId: string } | { context: "chat"; sessionId: string | null } | null;
+  | {
+      context: "run";
+      packageId: string;
+      /**
+       * Where the referenced run's compute lives. ATTRIBUTION DATA ONLY: it is
+       * reported onward as the hook's `executionPlane` fact and is never read
+       * as a gating input. This field previously formed half of an
+       * "already admitted at preflight" skip condition; that short-circuit was
+       * removed (see the comment on the dispatch below) and must not come back.
+       */
+      runOrigin: "platform" | "remote";
+    }
+  | { context: "chat"; sessionId: string | null }
+  | null;
 
 export async function enforceSystemProxyAdmission(args: {
   orgId: string;
@@ -65,9 +78,14 @@ export async function enforceSystemProxyAdmission(args: {
   //     mints its own `llm_usage` row (`source='proxy'`). It is never the
   //     continuation of the launch the preflight gate admitted.
   //
-  // Skipping the hook for `runOrigin === "platform" && modelSource === "system"`
-  // — as this used to — was therefore not "avoiding a double gate", it was an
-  // open bypass: an org past its quota (so every new run/turn is rejected)
+  // Skipping the hook when the referenced run was platform-origin AND declared
+  // a system credential (`runs.model_source`) — as this used to — was therefore
+  // not "avoiding a double gate", it was an open bypass: a preflight quote is
+  // issued ONCE per run launch while the number of proxy calls attachable to
+  // that run id is unbounded, and once platform compute is billed the org's
+  // balance moves DURING the run, so admitting at launch gates later calls
+  // against a stale balance. An org past its quota (so every new run/turn is
+  // rejected)
   // could keep spending indefinitely by stamping `X-Run-Id` of ANY still-alive
   // platform system run onto its proxy calls. `assertRunAttributable` only
   // binds an API-key principal to org + application, so any key in the app can
@@ -85,6 +103,19 @@ export async function enforceSystemProxyAdmission(args: {
     // active, so the DB count normally includes it. Keep a floor of one
     // against a status/count race.
     runningCount: Math.max(1, await getRunningRunCountForOrg({ orgId: args.orgId })),
+    // This seam only runs for a resolved SYSTEM preset (`resolved.isSystemModel`
+    // is checked above), so the call being admitted is platform-funded
+    // inference by construction — whatever credential the RUN itself declared.
+    credentialSource: "system" as const,
+    executionPlane:
+      args.usageContext.runOrigin === "platform" ? ("platform" as const) : ("remote" as const),
+    // Not determinable at this seam — the proxy holds no agent manifest — and
+    // deliberately not faked. `null` means "contribute no compute component
+    // here": this seam admits the inference of an ALREADY-RUNNING run whose
+    // compute was either quoted at its own preflight (platform plane) or is not
+    // platform-funded at all (remote plane). Passing a guessed duration, or `0`
+    // as a sentinel, would double-count that same run's compute.
+    timeoutSeconds: null,
   };
 
   const rejection = await callHook("beforeUsage", params);
