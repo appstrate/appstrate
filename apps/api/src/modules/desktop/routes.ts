@@ -68,11 +68,19 @@ import {
 } from "./registry.ts";
 import { registerRunSecrets, scrubRunSecrets } from "./secret-scrub.ts";
 import {
-  acquireDesktopLease,
-  releaseDesktopLease,
+  acquireDesktopOriginLease,
+  assertTabBudget,
+  forgetDesktopTab,
+  listDesktopTabsForRun,
+  noteDesktopTabOrigin,
   recordDesktopExposure,
+  registerDesktopTab,
+  requireDesktopTab,
   DesktopLeaseConflictError,
   DesktopExposureConflictError,
+  DesktopTabGoneError,
+  DesktopTabPausedError,
+  DesktopTabQuotaError,
 } from "./lease.ts";
 import {
   createDownload,
@@ -81,7 +89,11 @@ import {
   DOWNLOADS_BUCKET,
 } from "./downloads.ts";
 import { downloadStream as storageDownloadStream } from "@appstrate/db/storage";
-import { DESKTOP_BRIDGE_MAX_FRAME_BYTES, DESKTOP_BRIDGE_PROTOCOL_VERSION } from "./protocol.ts";
+import {
+  DESKTOP_BRIDGE_MAX_FRAME_BYTES,
+  DESKTOP_BRIDGE_PROTOCOL_VERSION,
+  DESKTOP_BRIDGE_SUPPORTED_PROTOCOLS,
+} from "./protocol.ts";
 
 /**
  * Translate a registry rejection into the platform's RFC 9457 error
@@ -96,8 +108,25 @@ export function desktopErrorToApiError(err: unknown, scrub?: (text: string) => s
   if (err instanceof DesktopLeaseConflictError) {
     return conflict(
       "desktop_in_use",
-      "This desktop browser is already controlled by another active run",
+      "This browser surface is already controlled by another active run",
     );
+  }
+  if (err instanceof DesktopTabPausedError) {
+    return conflict(
+      "desktop_tab_paused",
+      `${err.message} — it stays yours, but you cannot drive it until they hand it back`,
+    );
+  }
+  if (err instanceof DesktopTabQuotaError) {
+    return conflict("desktop_tab_quota", err.message);
+  }
+  if (err instanceof DesktopTabGoneError) {
+    return new ApiError({
+      status: 410,
+      code: "desktop_tab_gone",
+      title: "Gone",
+      detail: `${err.message} — open a new tab with browser.tabs.open`,
+    });
   }
   if (err instanceof DesktopExposureConflictError) {
     return conflict("desktop_secret_boundary", err.message);
@@ -183,10 +212,45 @@ export function substituteInValue(value: unknown, fields: Record<string, string>
 
 type RunContext = Awaited<ReturnType<typeof verifyRunToken>>["run"];
 
+/**
+ * Session modes, declared as `desktop_browser.session` in the agent
+ * manifest. They decide WHICH Chromium profile the agent's tabs live in,
+ * which is what decides who can read the sessions it opens.
+ *
+ *   isolated — a throwaway profile per run. Nothing survives it.
+ *   agent    — one persistent profile per agent (the default). Sessions
+ *              are reused across ITS runs, and are unreadable by any
+ *              other agent.
+ *   user     — the human's own browser profile. Opt-in, for the hybrid
+ *              cases where a login cannot be automated at all.
+ *
+ * Default matters: v1 put every run in the user's profile, so a session
+ * one agent opened stayed available to the next one. `agent` keeps the
+ * convenience (no re-login every run) without the shared pot.
+ */
+export type DesktopSessionMode = "isolated" | "agent" | "user";
+
+/**
+ * Sentinel for the user's own browser profile. The desktop resolves it
+ * against its active instance profile; the platform never learns the
+ * concrete partition name, and every `user`-mode agent maps to the same
+ * key, which is what makes the origin lease serialize them.
+ */
+export const USER_PARTITION_SPEC = "@user";
+
+function partitionSpec(mode: DesktopSessionMode, packageId: string, runId: string): string {
+  if (mode === "user") return USER_PARTITION_SPEC;
+  if (mode === "isolated") return `appstrate-run-${runId}`;
+  // `@scope/name` → a filesystem-safe, collision-free profile key.
+  return `persist:appstrate-agent-${packageId.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")}`;
+}
+
 interface RunDesktopPolicy {
   runtimeTools: ReadonlySet<string>;
   integrations: ReadonlySet<string>;
   authorizedUris: readonly string[];
+  sessionMode: DesktopSessionMode;
+  partition: string;
   touchedAt: number;
 }
 
@@ -204,7 +268,11 @@ async function loadRunDesktopPolicy(run: RunContext, runId: string): Promise<Run
   const manifest = asRecord(agent.manifest);
   const runtimeToolsRaw = manifest.runtime_tools;
   const integrations = asRecord(asRecord(manifest.dependencies).integrations);
-  const authorizedUrisRaw = asRecord(manifest.desktop_browser).authorized_uris;
+  const desktopBrowser = asRecord(manifest.desktop_browser);
+  const authorizedUrisRaw = desktopBrowser.authorized_uris;
+  const sessionRaw = desktopBrowser.session;
+  const sessionMode: DesktopSessionMode =
+    sessionRaw === "isolated" || sessionRaw === "user" ? sessionRaw : "agent";
   const policy: RunDesktopPolicy = {
     runtimeTools: new Set(
       Array.isArray(runtimeToolsRaw)
@@ -215,6 +283,8 @@ async function loadRunDesktopPolicy(run: RunContext, runId: string): Promise<Run
     authorizedUris: Array.isArray(authorizedUrisRaw)
       ? authorizedUrisRaw.filter((value): value is string => typeof value === "string")
       : [],
+    sessionMode,
+    partition: partitionSpec(sessionMode, run.packageId, runId),
     touchedAt: Date.now(),
   };
   policyByRun.set(runId, policy);
@@ -373,6 +443,7 @@ async function captureCredential(
   run: RunContext,
   runId: string,
   body: { params?: unknown; timeout_ms?: number },
+  tabId: string,
 ): Promise<Response> {
   if (!run.userId) {
     throw forbidden("capture_credential requires a user-owned run");
@@ -432,6 +503,8 @@ async function captureCredential(
       {
         timeoutMs: body.timeout_ms,
         authorizedUris: capturePolicy.authorizedUris,
+        tabId,
+        runId,
       },
     );
   } catch (err) {
@@ -534,6 +607,111 @@ async function resolveSubstitutionFields(
   return fields;
 }
 
+/**
+ * Open a tab for a run and record the lease. The partition comes from
+ * the agent's declared session mode — the desktop never picks it, which
+ * is what keeps one agent's profile out of another's.
+ */
+async function openRunTab(
+  run: RunContext,
+  runId: string,
+  policy: RunDesktopPolicy,
+  timeoutMs?: number,
+): Promise<string> {
+  const userId = run.userId!;
+  assertTabBudget(userId, runId);
+  const raw = await sendCommand(
+    userId,
+    "tabs.open",
+    { partition: policy.partition, agent_name: run.packageId, background: true },
+    {
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      authorizedUris: policy.authorizedUris,
+      runId,
+    },
+  );
+  const tabId = (raw as { tab_id?: unknown } | undefined)?.tab_id;
+  if (typeof tabId !== "string" || tabId.length === 0) {
+    throw badGateway("desktop did not return a tab id");
+  }
+  registerDesktopTab(userId, runId, tabId, policy.partition);
+  logger.info("Desktop tab opened", {
+    runId,
+    tabId,
+    partition: policy.partition,
+    sessionMode: policy.sessionMode,
+    module: "desktop",
+  });
+  return tabId;
+}
+
+/**
+ * Resolve which tab a command drives.
+ *
+ * An explicit `tab_id` is validated against the run's leases. Without
+ * one, the run gets its IMPLICIT tab: the first it owns, or a freshly
+ * opened one. That fallback is what lets every pre-tabs agent keep
+ * working with no manifest change — it simply never names a tab.
+ */
+async function resolveRunTab(
+  run: RunContext,
+  runId: string,
+  policy: RunDesktopPolicy,
+  requested: string | undefined,
+  timeoutMs?: number,
+): Promise<string> {
+  const userId = run.userId!;
+  if (requested) {
+    requireDesktopTab(userId, runId, requested);
+    return requested;
+  }
+  const owned = listDesktopTabsForRun(runId).filter((entry) => entry.userId === userId);
+  if (owned.length > 0) {
+    const tabId = owned[0]!.tabId;
+    requireDesktopTab(userId, runId, tabId);
+    return tabId;
+  }
+  return openRunTab(run, runId, policy, timeoutMs);
+}
+
+/** `browser.tabs.*` — tab lifecycle, answered platform-side. */
+async function handleTabsCommand(
+  c: Context<AppEnv>,
+  run: RunContext,
+  runId: string,
+  policy: RunDesktopPolicy,
+  body: { method: string; tab_id?: string; timeout_ms?: number },
+): Promise<Response> {
+  const userId = run.userId!;
+  if (body.method === "browser.tabs.open") {
+    const tabId = await openRunTab(run, runId, policy, body.timeout_ms);
+    return c.json({ result: { tab_id: tabId } });
+  }
+  if (body.method === "browser.tabs.list") {
+    // Only this run's tabs: the desktop hosts other runs' surfaces and
+    // the user's own, and neither is any of this agent's business.
+    return c.json({
+      result: {
+        tabs: listDesktopTabsForRun(runId)
+          .filter((entry) => entry.userId === userId)
+          .map((entry) => ({ tab_id: entry.tabId })),
+      },
+    });
+  }
+  if (!body.tab_id) {
+    throw invalidRequest("`tab_id` is required to close a tab", "tab_id");
+  }
+  requireDesktopTab(userId, runId, body.tab_id);
+  await sendCommand(
+    userId,
+    "tabs.close",
+    { tab_id: body.tab_id },
+    { ...(body.timeout_ms !== undefined ? { timeoutMs: body.timeout_ms } : {}), runId },
+  );
+  forgetDesktopTab(userId, body.tab_id);
+  return c.json({ result: { closed: true } });
+}
+
 const DIRECT_BROWSER_METHODS = [
   "browser.navigate",
   "browser.click",
@@ -550,7 +728,16 @@ const AGENT_BROWSER_METHODS = [
   "browser.download_status",
   "browser.capture_credential",
   "browser.batch",
+  "browser.tabs.open",
+  "browser.tabs.close",
+  "browser.tabs.list",
 ] as const;
+
+const TAB_LIFECYCLE_METHODS = new Set<string>([
+  "browser.tabs.open",
+  "browser.tabs.close",
+  "browser.tabs.list",
+]);
 
 const commandFields = {
   params: z.record(z.string(), z.unknown()).optional(),
@@ -567,6 +754,7 @@ export const desktopAgentCommandSchema = z.object({
   ...commandFields,
   integration_id: z.string().optional(),
   substitute_params: z.boolean().optional(),
+  tab_id: z.string().optional(),
 });
 
 async function readJsonBody(c: { req: { json(): Promise<unknown> } }): Promise<unknown> {
@@ -627,12 +815,13 @@ export function createDesktopRouter(): Hono<AppEnv> {
         });
         throw forbidden("Origin not allowed for the desktop bridge");
       }
-      if (c.req.query("protocol") !== DESKTOP_BRIDGE_PROTOCOL_VERSION) {
+      const protocol = c.req.query("protocol") ?? "";
+      if (!(DESKTOP_BRIDGE_SUPPORTED_PROTOCOLS as readonly string[]).includes(protocol)) {
         throw new ApiError({
           status: 426,
           code: "desktop_protocol_mismatch",
           title: "Upgrade Required",
-          detail: `Desktop bridge protocol ${DESKTOP_BRIDGE_PROTOCOL_VERSION} is required`,
+          detail: `Desktop bridge protocol ${DESKTOP_BRIDGE_PROTOCOL_VERSION} is required (accepted: ${DESKTOP_BRIDGE_SUPPORTED_PROTOCOLS.join(", ")})`,
         });
       }
       await next();
@@ -694,18 +883,18 @@ export function createDesktopRouter(): Hono<AppEnv> {
     const user = c.get("user");
     if (!user) throw unauthorized("Authentication required");
     const body = parseBody(desktopCommandSchema, await readJsonBody(c));
-    const leaseOwner = "manual";
+    // No lease here any more. This path carries no run id, so the
+    // desktop routes it to the ACTIVE USER TAB and refuses outright if
+    // that tab belongs to a run — a manual caller must not reach into a
+    // surface an agent is working in, exactly as an agent cannot reach
+    // into the user's.
     try {
-      const { requiresReset } = acquireDesktopLease(user.id, leaseOwner);
-      if (requiresReset) await sendCommand(user.id, "browser.reset", {});
       const result = await sendCommand(user.id, body.method, body.params ?? {}, {
-        timeoutMs: body.timeout_ms,
+        ...(body.timeout_ms !== undefined ? { timeoutMs: body.timeout_ms } : {}),
       });
       return c.json({ result });
     } catch (err) {
       throw desktopErrorToApiError(err);
-    } finally {
-      releaseDesktopLease(user.id, leaseOwner);
     }
   });
 
@@ -746,16 +935,35 @@ export function createDesktopRouter(): Hono<AppEnv> {
     }
 
     // Status polling reads platform state and never touches Electron.
-    // Every command that does drive the single browser surface first
-    // acquires the run's exclusive lease.
+    // Everything else resolves (and, the first time, opens) the tab this
+    // run drives.
+    let tabId: string | null = null;
     if (body.method !== "browser.download_status") {
       if (!isConnected(run.userId)) {
         throw serviceUnavailable("No Appstrate Desktop connected for this user");
       }
       try {
-        const { requiresReset } = acquireDesktopLease(run.userId, runId);
-        if (requiresReset) {
-          await sendCommand(run.userId, "browser.reset", {}, { timeoutMs: body.timeout_ms });
+        if (TAB_LIFECYCLE_METHODS.has(body.method)) {
+          return await handleTabsCommand(c, run, runId, policy, body);
+        }
+        tabId = await resolveRunTab(run, runId, policy, body.tab_id, body.timeout_ms);
+        // Serialize runs that share a profile on the same site. With one
+        // profile per agent the keys never collide, so this only fires
+        // between two runs of the same agent, or under `session: "user"`.
+        const navigationTargets = [
+          body.method === "browser.navigate" || body.method === "browser.download"
+            ? (body.params as { url?: unknown } | undefined)?.url
+            : undefined,
+          ...(batchSteps ?? []).map((step) =>
+            step?.method === "browser.navigate" || step?.method === "browser.download"
+              ? (step.params as { url?: unknown } | undefined)?.url
+              : undefined,
+          ),
+        ];
+        for (const target of navigationTargets) {
+          if (typeof target !== "string") continue;
+          acquireDesktopOriginLease(policy.partition, target, runId);
+          noteDesktopTabOrigin(run.userId, tabId, target);
         }
       } catch (err) {
         throw desktopErrorToApiError(err);
@@ -774,11 +982,11 @@ export function createDesktopRouter(): Hono<AppEnv> {
     // gets back only `{ captured: true, fields }`, never a value.
     if (body.method === "browser.capture_credential") {
       try {
-        recordDesktopExposure(run.userId, runId, "credential_substitution");
+        recordDesktopExposure(policy.partition, runId, "credential_substitution");
       } catch (err) {
         throw desktopErrorToApiError(err);
       }
-      return captureCredential(c, run, runId, body);
+      return captureCredential(c, run, runId, body, tabId!);
     }
 
     const requestsEvaluate =
@@ -792,7 +1000,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
     }
     if (requestsEvaluate) {
       try {
-        recordDesktopExposure(run.userId, runId, "arbitrary_evaluate");
+        recordDesktopExposure(policy.partition, runId, "arbitrary_evaluate");
       } catch (err) {
         throw desktopErrorToApiError(err);
       }
@@ -819,7 +1027,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
     if (body.substitute_params && body.method !== "browser.batch") {
       const fields = await resolveSubstitutionFields(body.integration_id, run, runId);
       try {
-        recordDesktopExposure(run.userId, runId, "credential_substitution");
+        recordDesktopExposure(policy.partition, runId, "credential_substitution");
       } catch (err) {
         throw desktopErrorToApiError(err);
       }
@@ -857,7 +1065,7 @@ export function createDesktopRouter(): Hono<AppEnv> {
       if (body.substitute_params) {
         fields = await resolveSubstitutionFields(body.integration_id, run, runId);
         try {
-          recordDesktopExposure(run.userId, runId, "credential_substitution");
+          recordDesktopExposure(policy.partition, runId, "credential_substitution");
         } catch (err) {
           throw desktopErrorToApiError(err);
         }
@@ -915,6 +1123,8 @@ export function createDesktopRouter(): Hono<AppEnv> {
           {
             timeoutMs: body.timeout_ms,
             authorizedUris: policy.authorizedUris,
+            ...(tabId ? { tabId } : {}),
+            runId,
           },
         );
         return c.json({ result: scrubRunSecrets(runId, result) });
@@ -963,6 +1173,8 @@ export function createDesktopRouter(): Hono<AppEnv> {
           {
             timeoutMs: body.timeout_ms,
             authorizedUris: policy.authorizedUris,
+            ...(tabId ? { tabId } : {}),
+            runId,
           },
         );
       } catch (err) {
@@ -985,6 +1197,8 @@ export function createDesktopRouter(): Hono<AppEnv> {
       const result = await sendCommand(run.userId, body.method, dispatchedParams, {
         timeoutMs: body.timeout_ms,
         authorizedUris: policy.authorizedUris,
+        ...(tabId ? { tabId } : {}),
+        runId,
       });
       return c.json({ result: scrubRunSecrets(runId, result) });
     } catch (err) {

@@ -149,7 +149,18 @@ export async function sendCommand(
   userId: string,
   method: string,
   params: unknown,
-  opts?: { timeoutMs?: number; authorizedUris?: readonly string[] },
+  opts?: {
+    timeoutMs?: number;
+    authorizedUris?: readonly string[];
+    /** Target tab (protocol 2). Omitted only on `tabs.open`. */
+    tabId?: string;
+    /**
+     * Owning run. The desktop refuses a run-attributed command that does
+     * not name a tab, and refuses a tab owned by anyone else — a second
+     * fence behind the platform's own lease check.
+     */
+    runId?: string;
+  },
 ): Promise<unknown> {
   const client = clients.get(userId);
   if (!client) throw new DesktopNotConnectedError(userId);
@@ -163,13 +174,18 @@ export async function sendCommand(
       reject(new DesktopCommandTimeoutError(method, timeoutMs));
     }, timeoutMs);
     pending.set(id, { userId, resolve, reject, timer });
+    const meta = {
+      ...(opts?.authorizedUris ? { authorized_uris: opts.authorizedUris } : {}),
+      ...(opts?.runId ? { run_id: opts.runId } : {}),
+    };
     client.send(
       JSON.stringify({
         jsonrpc: "2.0",
         id,
         method,
         params,
-        ...(opts?.authorizedUris ? { meta: { authorized_uris: opts.authorizedUris } } : {}),
+        ...(opts?.tabId ? { tab_id: opts.tabId } : {}),
+        ...(Object.keys(meta).length > 0 ? { meta } : {}),
       }),
     );
   });

@@ -112,11 +112,27 @@ function buildIntegrationManifest(id: string) {
  * the JSON-RPC reply the real bridge posts back over the socket.
  */
 function fakeDesktop(userId: string, reply: unknown | ((frame: { params: unknown }) => unknown)) {
-  const sent: Array<{ id: string; method: string; params: unknown }> = [];
+  const sent: Array<{ id: string; method: string; params: unknown; tab_id?: string }> = [];
+  const tabFrames: Array<{ method: string; params: unknown }> = [];
+  let tabSeq = 0;
   const client = {
     userId,
     send(payload: string): void {
-      const frame = JSON.parse(payload) as { id: string; method: string; params: unknown };
+      const frame = JSON.parse(payload) as {
+        id: string;
+        method: string;
+        params: unknown;
+        tab_id?: string;
+      };
+      // Tab lifecycle is answered like the real desktop does, and kept
+      // out of `sent` so assertions stay about the browser commands
+      // under test.
+      if (frame.method.startsWith("tabs.")) {
+        tabFrames.push({ method: frame.method, params: frame.params });
+        const result = frame.method === "tabs.open" ? { tab_id: `tab_${++tabSeq}` } : null;
+        void Promise.resolve().then(() => handleClientFrame(userId, { id: frame.id, result }));
+        return;
+      }
       sent.push(frame);
       // Reply on the next tick so the awaiting `sendCommand` promise is
       // already registered.
@@ -128,7 +144,7 @@ function fakeDesktop(userId: string, reply: unknown | ((frame: { params: unknown
     close(): void {},
   };
   registerClient(client);
-  return { client, sent };
+  return { client, sent, tabFrames };
 }
 
 describe("Desktop module — /api/desktop/me/*", () => {
@@ -217,6 +233,11 @@ describe("Desktop module — /api/desktop/me/*", () => {
       headers: { ...authHeaders(ctx), Upgrade: "websocket" },
     });
     expect(res.status).toBe(426);
+
+    const unknown = await app.request("/api/desktop/bridge?protocol=99", {
+      headers: { ...authHeaders(ctx), Upgrade: "websocket" },
+    });
+    expect(unknown.status).toBe(426);
   });
 
   it("never reaches another user's desktop", async () => {
@@ -331,9 +352,18 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     expect(connected.sent).toHaveLength(0);
   });
 
-  it("rejects a second run trying to control the same browser", async () => {
-    connected = fakeDesktop(ctx.user.id, { ok: true });
-    expect((await post({ method: "browser.screenshot" })).status).toBe(200);
+  async function postAs(otherRunId: string, body: unknown): Promise<Response> {
+    return app.request("/internal/desktop-command", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${signRunToken(otherRunId)}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function seedSecondRun(): Promise<string> {
     const otherRun = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
@@ -341,16 +371,67 @@ describe("Desktop module — POST /internal/desktop-command", () => {
       userId: ctx.user.id,
       status: "running",
     });
-    const res = await app.request("/internal/desktop-command", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${signRunToken(otherRun.id)}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ method: "browser.screenshot" }),
+    return otherRun.id;
+  }
+
+  it("lets two runs work side by side, each in its own tab", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    expect((await post({ method: "browser.screenshot" })).status).toBe(200);
+
+    // v1 answered 409 here: one run owned the whole browser.
+    const otherRunId = await seedSecondRun();
+    expect((await postAs(otherRunId, { method: "browser.screenshot" })).status).toBe(200);
+
+    const tabIds = new Set(connected.sent.map((frame) => frame.tab_id));
+    expect(tabIds.size).toBe(2);
+  });
+
+  it("serializes two runs of the same agent on the same site", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    const nav = { method: "browser.navigate", params: { url: "https://somesite.example/a" } };
+    expect((await post(nav)).status).toBe(200);
+
+    // Same agent means the same browser profile: the two runs would read
+    // each other's cookies, so the second one waits instead.
+    const otherRunId = await seedSecondRun();
+    const res = await postAs(otherRunId, {
+      method: "browser.navigate",
+      params: { url: "https://somesite.example/b" },
     });
     expect(res.status).toBe(409);
-    expect(connected.sent).toHaveLength(1);
+    expect((await res.json()).code).toBe("desktop_in_use");
+  });
+
+  it("refuses to drive a tab owned by another run", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    expect((await post({ method: "browser.screenshot" })).status).toBe(200);
+    const stolen = connected.sent[0]!.tab_id!;
+
+    const otherRunId = await seedSecondRun();
+    const res = await postAs(otherRunId, { method: "browser.screenshot", tab_id: stolen });
+    expect(res.status).toBe(409);
+  });
+
+  it("reports a closed tab as gone", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    expect((await post({ method: "browser.screenshot" })).status).toBe(200);
+    const tabId = connected.sent[0]!.tab_id!;
+
+    const closed = await post({ method: "browser.tabs.close", tab_id: tabId });
+    expect(closed.status).toBe(200);
+
+    const res = await post({ method: "browser.screenshot", tab_id: tabId });
+    expect(res.status).toBe(410);
+  });
+
+  it("caps how many tabs one run may open", async () => {
+    connected = fakeDesktop(ctx.user.id, { ok: true });
+    for (let i = 0; i < 3; i++) {
+      expect((await post({ method: "browser.tabs.open" })).status).toBe(200);
+    }
+    const res = await post({ method: "browser.tabs.open" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("desktop_tab_quota");
   });
 
   it("returns 503 when the owner has no desktop connected", async () => {

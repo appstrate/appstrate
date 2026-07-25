@@ -27,9 +27,16 @@ const agentMethodProperty = {
     "browser.download_status",
     "browser.capture_credential",
     "browser.batch",
+    "browser.tabs.open",
+    "browser.tabs.close",
+    "browser.tabs.list",
   ],
   description:
-    "Agent browser primitive. `browser.download` {url?|selector?, filename?, max_bytes?} " +
+    "Agent browser primitive. `browser.tabs.open` {} opens a tab in the agent's own browser " +
+    "profile and returns {tab_id}; `browser.tabs.close` {tab_id} and `browser.tabs.list` {} " +
+    "manage them. Commands without `tab_id` act on the run's implicit tab, opened on first " +
+    "use — an agent that never mentions tabs behaves exactly as before. " +
+    "`browser.download` {url?|selector?, filename?, max_bytes?} " +
     "downloads a direct URL or atomically clicks a page control and returns {download_id, state}; " +
     "`browser.download_status` {download_id} reports " +
     "started/downloading/uploaded/failed with pct — both are answered by the platform, " +
@@ -88,6 +95,12 @@ export const desktopSchemas = {
       substitute_params: {
         type: "boolean",
         description: "Enable `{{field}}` substitution from `integration_id`'s credentials.",
+      },
+      tab_id: {
+        type: "string",
+        description:
+          "Tab to drive, from `browser.tabs.open`. Omitted, the command uses the run's " +
+          "implicit tab. 409 when another run owns it or the user took it over, 410 once closed.",
       },
     },
   },

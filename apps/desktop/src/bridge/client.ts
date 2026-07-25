@@ -36,6 +36,7 @@ import {
   ERR_EXECUTION,
   ERR_INVALID_PARAMS,
   ERR_METHOD_NOT_FOUND,
+  ERR_TAB_FORBIDDEN,
   ERR_TAB_NOT_FOUND,
   errorResponse,
   notification,
@@ -281,7 +282,15 @@ function resolveTab(tabs: TabManager, req: JsonRpcRequest): TabRecord {
   }
   const active = tabs.activeTabId();
   if (!active) throw new TabError(ERR_TAB_NOT_FOUND, "no tab is open");
-  return tabs.require(active);
+  const tab = tabs.require(active);
+  // The manual API path drives USER tabs only. Ownership has to cut both
+  // ways: a run never reaches a user tab, and an API caller never reaches
+  // a tab a run is working in. The person physically at the machine can
+  // still take a tab over through the local chrome, which pauses it.
+  if (tab.owner.kind !== "user") {
+    throw new TabError(ERR_TAB_FORBIDDEN, `the active tab is driven by run ${tab.owner.runId}`);
+  }
+  return tab;
 }
 
 /**

@@ -36,7 +36,11 @@ import {
 } from "./downloads.ts";
 import { clearRunSecrets } from "./secret-scrub.ts";
 import { clearRunEphemeralCredentials } from "../../services/run-ephemeral-credentials.ts";
-import { clearDesktopLeases, releaseDesktopLeaseByRun } from "./lease.ts";
+import {
+  clearDesktopLeases,
+  handleDesktopTabNotification,
+  releaseDesktopLeaseByRun,
+} from "./lease.ts";
 import { desktopPaths } from "./openapi/paths.ts";
 import { desktopSchemas } from "./openapi/schemas.ts";
 
@@ -45,9 +49,16 @@ const desktopModule: AppstrateModule = {
 
   async init() {
     // The module owns no tables; the only wiring is the notification
-    // intake — desktop-initiated JSON-RPC notifications (download
-    // lifecycle) flow from the WS registry into the downloads service.
-    setNotificationHandler(handleDesktopNotification);
+    // intake — desktop-initiated JSON-RPC notifications flow from the WS
+    // registry into the tab leases (a person closing or taking over a
+    // tab) and the downloads service (transfer lifecycle).
+    setNotificationHandler((userId, method, params) => {
+      if (method.startsWith("tab.")) {
+        handleDesktopTabNotification(userId, method, params);
+        return;
+      }
+      handleDesktopNotification(userId, method, params);
+    });
     startDownloadSweeper();
   },
 
@@ -94,14 +105,17 @@ const desktopModule: AppstrateModule = {
   events: {
     onRunStatusChange: async (params: RunStatusChangeParams) => {
       if (params.status === "started") return;
-      const releasedUserIds = releaseDesktopLeaseByRun(params.runId);
+      const releasedTabs = releaseDesktopLeaseByRun(params.runId);
       clearRunSecrets(params.runId);
       clearRunEphemeralCredentials(params.runId);
       clearRunDesktopPolicy(params.runId);
       clearDownloadsForRun(params.runId);
+      // Close what the run opened rather than blanking a shared surface.
+      // For an `isolated` agent this is also what destroys its throwaway
+      // profile: the partition dies with its last view.
       await Promise.allSettled(
-        releasedUserIds.map((userId) =>
-          sendCommand(userId, "browser.release", {}, { timeoutMs: 5_000 }),
+        releasedTabs.map(({ userId, tabId }) =>
+          sendCommand(userId, "tabs.close", { tab_id: tabId }, { timeoutMs: 5_000 }),
         ),
       );
     },
