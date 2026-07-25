@@ -140,15 +140,15 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     throw new LlmProxyUnsupportedSubscriptionError(resolved.providerId);
   }
 
-  // OpenAI-compatible streaming usage is opt-in. Force it server-side for
-  // system presets even when a remote/third-party client forgot the flag:
-  // billing must not depend on the caller SDK doing the right thing. Org-owned
-  // custom endpoints are left untouched for compatibility.
-  const includeStreamUsage =
-    resolved.isSystemModel &&
-    (inputs.adapter.apiShape === "openai-completions" ||
-      inputs.adapter.apiShape === "mistral-conversations");
-  const rewrittenBody = request.rewriteModel(resolved.modelId, { includeStreamUsage });
+  // Usage reporting is forced by the ADAPTER (the protocol registry), not by an
+  // apiShape check here: each wire family knows what its own upstream needs to
+  // emit usage (openai-compatible: `stream_options.include_usage`; anthropic:
+  // nothing). It applies to EVERY preset — a call on an org-owned preset that
+  // returns no parseable usage is just as unaccounted as a system one, and the
+  // ledger feeds `runs.cost` and the org's own usage views either way.
+  const rewrittenBody = request.rewriteModel(resolved.modelId, (body) =>
+    inputs.adapter.forceUsageReporting?.(body),
+  );
 
   // Model-alias swap (issue #727). When the resolved preset is an alias, the
   // upstream echoes the REAL id in its response `model` field (and may name it

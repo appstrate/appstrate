@@ -1311,19 +1311,47 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.cost).toBeCloseTo(0.0042, 5);
   });
 
-  it("does not synthesise when result.cost is zero — empty ledger stays empty", async () => {
+  it("pins a zero-COST terminal snapshot that still consumed tokens", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent", {
       tokenUsage: { input_tokens: 100, output_tokens: 50 },
     });
 
-    // A run that bridge-emitted `cost: 0` (e.g. cached LLM call, no
-    // billable tokens) MUST NOT pollute the ledger with a $0 row.
+    // A run that bridge-emitted `cost: 0` (free model, no catalog rate) still
+    // consumed tokens. The terminal ledger barrier makes that snapshot durable
+    // BEFORE the CAS settles the run — the row can no longer be written
+    // afterwards, so "write it later" is not an option. The monotonic upsert's
+    // second level (equal cost, higher token total) is what keeps a zero-cost
+    // model's token columns advancing.
     const res = await postFinalize(runId, {
       status: "success",
       output: { ok: true },
       durationMs: 100,
       usage: { input_tokens: 100, output_tokens: 50 },
       cost: 0,
+    });
+    expect(res.status).toBe(200);
+
+    const ledger = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.costUsd).toBe(0);
+    expect(ledger[0]!.inputTokens).toBe(100);
+    expect(ledger[0]!.outputTokens).toBe(50);
+  });
+
+  it("mints no ledger row for a run that consumed nothing at all", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // Zero tokens AND no reported cost — there is no accounting fact to pin,
+    // so the barrier writes nothing. (The zero-token liveness heuristic turns
+    // this into a failed run; that is asserted elsewhere.)
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      usage: { input_tokens: 0, output_tokens: 0 },
     });
     expect(res.status).toBe(200);
 

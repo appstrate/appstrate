@@ -24,6 +24,19 @@
  *      broadcast it AFTER commit (via {@link emitUsageRecorded}). This keeps a
  *      row whose transaction later rolls back from firing a phantom event.
  *
+ * Runner-row write contract (the one mutable row shape on the ledger):
+ *
+ *   - ONE row per run, upserted monotonically — its `cost_usd` may only grow;
+ *   - it stops being writable the instant its run reaches a terminal status,
+ *     because that is exactly when a billing cursor may claim it by serial id
+ *     (`state/runs.ts:settledSql`). A later snapshot is REFUSED and logged as a
+ *     billing loss rather than applied to a claimed row — see
+ *     {@link runNotTerminalSql};
+ *   - consequently a runner write is never deferred to the durable retry queue
+ *     (`llm-usage-retry.ts`): an asynchronous replay could only land after the
+ *     run settled. Runner snapshots are cumulative, so a failed write is
+ *     repaired by the next metric event or by finalize's terminal barrier.
+ *
  * It is intentionally a thin insert+emit seam, not a framework: cost is already
  * computed by each caller (they own the token→USD arithmetic and persistence
  * policy), and the runner's monotonic upsert is expressed as one opt-in flag
@@ -32,10 +45,11 @@
  */
 
 import { db, type Db } from "@appstrate/db/client";
-import { llmUsage } from "@appstrate/db/schema";
-import { sql } from "drizzle-orm";
+import { llmUsage, runs, terminalRunStatusValues } from "@appstrate/db/schema";
+import { and, eq, sql } from "drizzle-orm";
 import type { UsageRecordedParams } from "@appstrate/core/module";
 import { emitEvent } from "../lib/modules/module-loader.ts";
+import { logger } from "../lib/logger.ts";
 
 /** Credential set that reached the upstream provider for a ledger row. */
 export type CredentialSource = "system" | "org";
@@ -95,6 +109,39 @@ export interface RecordLlmUsageOptions {
    */
   deferEmit?: (event: UsageRecordedParams) => void;
 }
+
+/**
+ * SQL guard: the conflicting runner row's run is NOT terminal yet.
+ *
+ * Post-settlement immutability (the runner row's write contract). A runner row
+ * is ONE cumulative row per run, and a billing consumer claims it by its serial
+ * `id` the moment it is `settled` — which `state/runs.ts:settledSql` defines as
+ * "its run reached a terminal status". A serial id is claimed exactly once and
+ * never revisited, so an UPDATE landing after that instant raises a total nobody
+ * will ever re-read: the delta is silently un-billed.
+ *
+ * The upsert therefore refuses to mutate a row whose run is already terminal,
+ * using the SAME status predicate as `settledSql` so the two can never drift.
+ * Ordering makes this a narrow window rather than a functional restriction: the
+ * `appstrate.metric` ingestion path writes inside the transaction that CASes on
+ * `sink_closed_at IS NULL` (a post-close event never reaches the ledger at all),
+ * and `finalizeRun` writes its terminal snapshot BEFORE its own CAS. What is
+ * left is a genuine concurrent-finalize race (two termination paths for the same
+ * run), and it is reported as a billing-loss error rather than applied blindly.
+ *
+ * The structurally lossless alternative — inserting the delta as a NEW ledger
+ * row so it gets a fresh, sweepable id — is blocked by the partial unique index
+ * `uq_llm_usage_runner_run_id` (at most one runner row per run) and needs a
+ * migration; see `docs/architecture/RUN_COST.md`.
+ */
+const runNotTerminalSql = sql`NOT EXISTS (
+  SELECT 1 FROM ${runs}
+  WHERE ${runs.id} = ${llmUsage.runId}
+    AND ${runs.status} IN (${sql.join(
+      terminalRunStatusValues.map((s) => sql`${s}`),
+      sql`, `,
+    )})
+)`;
 
 /** Derive the module-facing `(contextType, contextId)` from a row's attribution. */
 function resolveContext(
@@ -179,16 +226,23 @@ export async function recordLlmUsage(
               cacheWriteTokens: sql`EXCLUDED.cache_write_tokens`,
               costUsd: sql`EXCLUDED.cost_usd`,
             },
+            // The monotonic advance is additionally gated on the run still
+            // being non-terminal — see {@link runNotTerminalSql}: a settled row
+            // has already been claimed by its serial id, so growing it strands
+            // the delta.
             setWhere: sql`
-              EXCLUDED.cost_usd > ${llmUsage.costUsd}
-              OR (
-                EXCLUDED.cost_usd = ${llmUsage.costUsd}
-                AND EXCLUDED.input_tokens + EXCLUDED.output_tokens
-                      + COALESCE(EXCLUDED.cache_read_tokens, 0)
-                      + COALESCE(EXCLUDED.cache_write_tokens, 0)
-                    > ${llmUsage.inputTokens} + ${llmUsage.outputTokens}
-                      + COALESCE(${llmUsage.cacheReadTokens}, 0)
-                      + COALESCE(${llmUsage.cacheWriteTokens}, 0)
+              ${runNotTerminalSql}
+              AND (
+                EXCLUDED.cost_usd > ${llmUsage.costUsd}
+                OR (
+                  EXCLUDED.cost_usd = ${llmUsage.costUsd}
+                  AND EXCLUDED.input_tokens + EXCLUDED.output_tokens
+                        + COALESCE(EXCLUDED.cache_read_tokens, 0)
+                        + COALESCE(EXCLUDED.cache_write_tokens, 0)
+                      > ${llmUsage.inputTokens} + ${llmUsage.outputTokens}
+                        + COALESCE(${llmUsage.cacheReadTokens}, 0)
+                        + COALESCE(${llmUsage.cacheWriteTokens}, 0)
+                )
               )
             `,
           })
@@ -209,7 +263,16 @@ export async function recordLlmUsage(
         : await executor.insert(llmUsage).values(values).returning({ id: llmUsage.id });
 
   const llmUsageId = inserted[0]?.id ?? null;
-  if (llmUsageId === null) return null;
+  if (llmUsageId === null) {
+    // A runner no-op is either a harmless replay (an equal-or-lower cumulative
+    // snapshot) or the post-settlement rejection above — which is a real,
+    // silent-until-now loss of billable spend and must leave a trace. One PK
+    // lookup on the run tells the two apart, and only ever runs on a no-op.
+    if (entry.source === "runner" && entry.runId) {
+      await traceRejectedTerminalRunnerWrite(executor, entry);
+    }
+    return null;
+  }
 
   const params: UsageRecordedParams = {
     llmUsageId,
@@ -239,6 +302,32 @@ export async function recordLlmUsage(
   }
 
   return llmUsageId;
+}
+
+/**
+ * Log the post-settlement rejection of a late runner snapshot (see
+ * {@link runNotTerminalSql}). Called only when the monotonic upsert wrote
+ * nothing, and only for runner rows: reads the run's status plus the stored
+ * total so the operator sees exactly how much spend was refused and on which
+ * run. A run row that vanished (deleted mid-flight) is not a rejection — the
+ * conflicting row was detached to `run_id = NULL` and the insert took the plain
+ * path.
+ */
+async function traceRejectedTerminalRunnerWrite(executor: Db, entry: LlmUsageEntry): Promise<void> {
+  const [row] = await executor
+    .select({ status: runs.status, storedCost: llmUsage.costUsd })
+    .from(runs)
+    .leftJoin(llmUsage, and(eq(llmUsage.runId, runs.id), eq(llmUsage.source, "runner")))
+    .where(eq(runs.id, entry.runId!))
+    .limit(1);
+  if (!row || !(terminalRunStatusValues as readonly string[]).includes(row.status)) return;
+  logger.error("llm_usage: refused a runner snapshot on an already-settled run", {
+    runId: entry.runId,
+    orgId: entry.orgId,
+    runStatus: row.status,
+    storedCostUsd: row.storedCost,
+    refusedCostUsd: entry.costUsd,
+  });
 }
 
 /**

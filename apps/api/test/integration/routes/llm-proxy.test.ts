@@ -195,6 +195,69 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(row!.costUsd).toBeCloseTo(0.00098, 6);
   });
 
+  it("forces stream_options.include_usage on an ORG-owned preset too", async () => {
+    // Usage reporting is opt-in on this wire. Forcing it only for SYSTEM presets
+    // left every org-owned streaming call unpriced whenever the caller SDK
+    // omitted the flag — the row landed with zero tokens and the org's own
+    // `runs.cost` under-reported. The adapter now forces it for every preset.
+    const h = await buildHarness();
+    let forwardedBody: Record<string, unknown> | null = null;
+    mockUpstream(async (_input, init) => {
+      forwardedBody = JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)) as Record<
+        string,
+        unknown
+      >;
+      return new Response(
+        `data: {"id":"c1","choices":[{"delta":{"content":"ok"}}]}\n\n` +
+          `data: {"id":"c1","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n` +
+          `data: [DONE]\n\n`,
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    });
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        stream: true,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(forwardedBody).toMatchObject({ stream_options: { include_usage: true } });
+  });
+
+  it("records an accountable zero row when a 2xx carries no parseable usage", async () => {
+    // The provider was paid for this call. Recording nothing made it invisible
+    // to `runs.cost` AND to the billing cursor; it is now a marked zero row.
+    const h = await buildHarness();
+    mockUpstream(
+      async () =>
+        new Response(JSON.stringify({ id: "chatcmpl_x", choices: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
+    expect(row).toBeDefined();
+    expect(row!.inputTokens).toBe(0);
+    expect(row!.outputTokens).toBe(0);
+    expect(row!.costUsd).toBe(0);
+    // Marked so ops can count and locate every paid-but-unpriced call.
+    expect(row!.requestId?.startsWith("usage-unparsed:")).toBe(true);
+  });
+
   it("returns 403 when the API key is missing llm-proxy:call scope", async () => {
     const h = await buildHarness({ scopes: ["runs:read"] });
     mockUpstream(async () => new Response("should not be called", { status: 599 }));

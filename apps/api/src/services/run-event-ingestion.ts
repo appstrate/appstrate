@@ -481,25 +481,35 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     }
   }
 
-  // 4b. Write the runner-source ledger row from `result.cost` when the
-  //     `appstrate.metric` event never landed (e.g. process exited
-  //     before the fire-and-forget POST resolved). The metric handler
-  //     and this fallback both target the same partial unique index
-  //     (run_id WHERE source='runner'); whichever lands first owns the
-  //     row, the other is a no-op via ON CONFLICT DO NOTHING — no
-  //     pre-check needed.
-  if (typeof result.cost === "number" && result.cost > 0) {
+  // 4b. TERMINAL LEDGER BARRIER — the last point at which this run's runner row
+  //     can still be written. The CAS below flips the run to a terminal status,
+  //     which is exactly what makes its runner row `settled`: from that instant
+  //     a billing cursor may claim the row by its serial id, once, and never
+  //     revisit it (`state/runs.ts:settledSql`). Anything still owed must
+  //     therefore be DURABLY in Postgres before the CAS, not merely scheduled —
+  //     hence `required: true`, which propagates a write failure so the run
+  //     stays open and finalize is retried.
+  //
+  //     The barrier is NOT conditioned on `result.cost > 0`. Every
+  //     platform-synthesised terminal (`synthesiseFinalize`: stall watchdog,
+  //     boot orphan sweep, container crash/timeout/cancel) builds an empty
+  //     RunResult that never carries `cost` — precisely the paths where the
+  //     run's last cumulative snapshot is most likely to be in doubt. Gating on
+  //     cost meant those runs settled with no barrier at all.
+  //
+  //     A run that consumed nothing (no tokens, no reported cost) has no runner
+  //     row to make durable and is skipped — the barrier exists to pin an
+  //     existing accounting fact, not to mint empty ones.
+  const terminalCost = typeof result.cost === "number" ? result.cost : null;
+  if (terminalCost !== null || tokenUsageIsNonZero(validatedUsage)) {
     await writeRunnerLedgerRow(
       { orgId: run.orgId, applicationId: run.applicationId },
       run.id,
       {
-        cost: result.cost,
+        cost: terminalCost,
         usage: validatedUsage,
         modelSource: run.modelSource,
       },
-      // Do not settle the run until its authoritative cumulative snapshot is
-      // directly visible. The Cloud cursor claims a runner row once by serial
-      // id and cannot safely observe a later asynchronous update to that id.
       { required: true },
     );
   }
@@ -874,6 +884,21 @@ export function capUtf8Text(value: string, maxBytes: number): { text: string; tr
  */
 function runHadZeroTokens(usage: TokenUsage): boolean {
   return (usage.input_tokens ?? 0) === 0 && (usage.output_tokens ?? 0) === 0;
+}
+
+/**
+ * Did this run consume ANY tokens, in any of the four buckets? Distinct from
+ * {@link runHadZeroTokens} (a liveness heuristic on the two roundtrip buckets):
+ * this one decides whether there is an accounting fact to pin at the terminal
+ * ledger barrier, so a cache-only turn counts too.
+ */
+function tokenUsageIsNonZero(usage: TokenUsage): boolean {
+  return (
+    (usage.input_tokens ?? 0) > 0 ||
+    (usage.output_tokens ?? 0) > 0 ||
+    (usage.cache_read_input_tokens ?? 0) > 0 ||
+    (usage.cache_creation_input_tokens ?? 0) > 0
+  );
 }
 
 /**

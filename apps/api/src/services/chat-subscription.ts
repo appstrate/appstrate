@@ -121,8 +121,32 @@ export async function resolveSubscriptionChatModel(
  * `credentialSource="org"`. Cost is derived here from the token counts + the
  * model's catalog rates with the shared `computeTokenCost` formula — the same
  * source and arithmetic as the proxy/runner rows.
+ *
+ * KNOWN LABELLING GAP — `source: "proxy"` is inaccurate for this producer. The
+ * turn runs on the IN-PROCESS Pi engine and never traverses `/api/llm-proxy/*`,
+ * but `llm_usage.source` is a two-value enum (`proxy | runner`) documented to
+ * modules as "the inference proxy or the agent runner", and the settled
+ * predicate keys off `source <> 'runner'`. A third value is a DB enum change +
+ * migration + core contract change, all outside this file's remit. `proxy` is
+ * the correct choice among the two available: the row IS immutable at insert
+ * (settled immediately), which is exactly what the predicate needs. The
+ * attribution that actually matters downstream — `chat_session_id`,
+ * `credential_source` — is exact.
  */
 export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
+  // Floor every count at zero: a negative token count would yield a negative
+  // `cost_usd`, which SUBTRACTS from the org's ledger (nothing re-checks the
+  // sign downstream). Same guard as the proxy adapters' `tokenCount`.
+  const inputTokens = Math.max(0, record.inputTokens);
+  const outputTokens = Math.max(0, record.outputTokens);
+  const cacheReadTokens =
+    record.cacheReadTokens === undefined || record.cacheReadTokens === null
+      ? null
+      : Math.max(0, record.cacheReadTokens);
+  const cacheWriteTokens =
+    record.cacheWriteTokens === undefined || record.cacheWriteTokens === null
+      ? null
+      : Math.max(0, record.cacheWriteTokens);
   try {
     await recordLlmUsageReliably(
       {
@@ -134,16 +158,16 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         realModel: record.modelId,
         api: record.apiShape,
         credentialSource: "org",
-        inputTokens: record.inputTokens,
-        outputTokens: record.outputTokens,
-        cacheReadTokens: record.cacheReadTokens ?? null,
-        cacheWriteTokens: record.cacheWriteTokens ?? null,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
         costUsd: computeTokenCost(
           {
-            input_tokens: record.inputTokens,
-            output_tokens: record.outputTokens,
-            cache_read_input_tokens: record.cacheReadTokens ?? 0,
-            cache_creation_input_tokens: record.cacheWriteTokens ?? 0,
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            cache_read_input_tokens: cacheReadTokens ?? 0,
+            cache_creation_input_tokens: cacheWriteTokens ?? 0,
           },
           record.cost,
         ),

@@ -140,9 +140,25 @@ describe("listLlmUsage / getSettledFrontierId", () => {
     });
     await db.insert(llmUsage).values([
       // Runner row on an in-flight run → cost still growing → unsettled.
-      { source: "runner", orgId: ctx.orgId, runId: activeRun.id, costUsd: 0.5 },
+      // `credential_source` is stamped (a PLATFORM run's runner row carries
+      // `runs.model_source`), so these rows are authoritative spend, not the
+      // NULL-credential mirror of a proxy-metered remote run — that shape is
+      // excluded from this read and covered in `llm-usage-settlement.test.ts`.
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId: activeRun.id,
+        credentialSource: "system",
+        costUsd: 0.5,
+      },
       // Runner row on a terminal run → settled.
-      { source: "runner", orgId: ctx.orgId, runId: doneRun.id, costUsd: 0.5 },
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId: doneRun.id,
+        credentialSource: "system",
+        costUsd: 0.5,
+      },
       // Proxy row (immutable at insert) → settled even attributed to the live run.
       {
         source: "proxy",

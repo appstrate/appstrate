@@ -39,11 +39,15 @@ export interface ParsedProxyRequest {
   stream: boolean;
   /**
    * Produce a fresh body byte sequence with `model` swapped for
-   * `upstreamModelId`. When `includeStreamUsage` is set, a streaming
-   * OpenAI-compatible request is also forced to ask for the terminal usage
-   * frame. The rest of the payload is preserved.
+   * `upstreamModelId`. The optional `mutate` callback receives the parsed body
+   * right before re-encoding — the seam the protocol adapter uses to force
+   * usage reporting on (`LlmProxyAdapter.forceUsageReporting`). The rest of the
+   * payload is preserved.
    */
-  rewriteModel(upstreamModelId: string, opts?: { includeStreamUsage?: boolean }): Uint8Array;
+  rewriteModel(
+    upstreamModelId: string,
+    mutate?: (body: Record<string, unknown>) => void,
+  ): Uint8Array;
 }
 
 /**
@@ -70,15 +74,12 @@ export function parseProxyRequest(rawBody: Uint8Array): ParsedProxyRequest {
   return {
     presetId: model,
     stream: obj["stream"] === true,
-    rewriteModel(upstreamModelId: string, opts?: { includeStreamUsage?: boolean }): Uint8Array {
+    rewriteModel(
+      upstreamModelId: string,
+      mutate?: (body: Record<string, unknown>) => void,
+    ): Uint8Array {
       obj["model"] = upstreamModelId;
-      if (opts?.includeStreamUsage && obj["stream"] === true) {
-        const current = obj["stream_options"];
-        obj["stream_options"] =
-          current && typeof current === "object" && !Array.isArray(current)
-            ? { ...(current as Record<string, unknown>), include_usage: true }
-            : { include_usage: true };
-      }
+      mutate?.(obj);
       return new TextEncoder().encode(JSON.stringify(obj));
     },
   };
@@ -95,6 +96,23 @@ export function extractUsageObject(body: unknown): Record<string, unknown> | nul
 /** Coerce an unknown value into a finite number, or undefined. */
 export function numberOrUndefined(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * Coerce an unknown value into a finite token COUNT — a non-negative number —
+ * or undefined when the field is absent/unparseable.
+ *
+ * A token bucket is priced as `count × rate`, so a negative count reported by a
+ * misbehaving upstream would produce a NEGATIVE `cost_usd`: it would *reduce*
+ * the run's cost (`computeRunCost` SUMs the ledger) and, on a system-credential
+ * row, the corresponding debit. Nothing downstream re-checks the sign (there is
+ * no CHECK on `llm_usage.cost_usd`), so the floor is applied here, at the single
+ * point where wire numbers enter the accounting path. Every adapter reads token
+ * fields through this helper — never through {@link numberOrUndefined}.
+ */
+export function tokenCount(v: unknown): number | undefined {
+  const n = numberOrUndefined(v);
+  return n === undefined ? undefined : Math.max(0, n);
 }
 
 /**

@@ -11,12 +11,19 @@
  *     response;
  *   - insert a usage row whose cost is Σ(tokens × cost/1e6), handing transient
  *     DB failures to the durable usage-retry queue.
+ *
+ * Accounting invariant: EVERY 2xx upstream reply produces exactly one ledger
+ * row. When usage cannot be parsed (interrupted SSE tap, non-JSON body, a
+ * provider that emitted no usage frame) the row is written with zero tokens and
+ * a marked `request_id` — see {@link UNPARSED_USAGE_REQUEST_ID_PREFIX}. Upstream
+ * ERRORS (non-2xx) are the only un-metered branch: no tokens were produced.
  */
 
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeTokenCost } from "@appstrate/afps-runtime/runner";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
+import type { LlmUsageEntry } from "../llm-usage-ledger.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 import {
@@ -162,54 +169,79 @@ export interface RecordUsageInputs {
 }
 
 /**
+ * Prefix stamped on the `request_id` of a row recorded for a 2xx upstream reply
+ * whose usage could NOT be parsed (SSE tap interrupted, non-JSON body, provider
+ * that emitted no usage frame). `request_id` is a server-side dedup key that no
+ * consumer parses, which makes it the one place a marker can live without a
+ * schema change — `SELECT … WHERE request_id LIKE 'usage-unparsed:%'` gives ops
+ * the exact list of paid-but-unpriced calls.
+ */
+export const UNPARSED_USAGE_REQUEST_ID_PREFIX = "usage-unparsed:";
+
+/**
  * Insert one `llm_usage` row (source="proxy") via the single ledger writer.
  * A transient DB failure is durably queued with the same request id; if BOTH
  * Postgres and the retry queue are unavailable, the error propagates instead of
  * silently losing billable usage.
+ *
+ * A 2xx reply with NO parseable usage still writes a row — zero tokens, zero
+ * cost, `request_id` marked with {@link UNPARSED_USAGE_REQUEST_ID_PREFIX}. The
+ * provider was paid for that call; recording nothing made it invisible to
+ * `runs.cost` AND to the billing cursor, so the platform could not even count
+ * how much it was blind to. An accountable zero row is auditable; silence is
+ * not.
+ *
+ * `writeEntry` is the ledger seam — the durable proxy write by default, injected
+ * by tests that assert the SHAPE of the row this function builds.
  */
-export async function recordProxyUsage(inputs: RecordUsageInputs): Promise<void> {
-  if (!inputs.usage) {
+export async function recordProxyUsage(
+  inputs: RecordUsageInputs,
+  writeEntry: (entry: LlmUsageEntry) => Promise<void> = (entry) =>
+    recordLlmUsageReliably(entry, { onConflict: "proxy-idempotent" }),
+): Promise<void> {
+  const unparsed = inputs.usage === null;
+  if (unparsed) {
     logger.error("llm-proxy: successful response contained no parseable usage", {
       orgId: inputs.principal.orgId,
       presetId: inputs.presetId,
+      runId: inputs.runId,
       credentialSource: inputs.resolved.isSystemModel ? "system" : "org",
     });
-    return;
   }
+  const usage: UpstreamUsage = inputs.usage ?? { inputTokens: 0, outputTokens: 0 };
 
-  await recordLlmUsageReliably(
-    {
-      source: "proxy",
-      orgId: inputs.principal.orgId,
-      apiKeyId: inputs.principal.kind === "api_key" ? inputs.principal.apiKeyId : null,
-      userId: inputs.principal.kind === "jwt_user" ? inputs.principal.userId : null,
-      // Attribution invariant: `runId` must reference a run in
-      // `principal.orgId` — the route validates the caller-supplied
-      // `X-Run-Id` before the upstream call (`assertRunAttributable`), and
-      // the composite FK `llm_usage(run_id, org_id) → runs(id, org_id)`
-      // enforces it structurally for every new row. A row is attributed to at
-      // most one context (ledger check `llm_usage_context_single`), so a
-      // run-pinned call never also carries a chat session id — runId wins.
-      runId: inputs.runId,
-      chatSessionId: inputs.runId ? null : inputs.chatSessionId,
-      model: inputs.presetId,
-      realModel: inputs.resolved.modelId,
-      api: inputs.resolved.apiShape,
-      // Which credential set reached the provider: platform (system) models vs
-      // the org's own key. The resolved model already carries the flag.
-      credentialSource: inputs.resolved.isSystemModel ? "system" : "org",
-      inputTokens: inputs.usage.inputTokens,
-      outputTokens: inputs.usage.outputTokens,
-      cacheReadTokens: inputs.usage.cacheReadTokens ?? null,
-      cacheWriteTokens: inputs.usage.cacheWriteTokens ?? null,
-      costUsd: computeCostUsd(inputs.usage, inputs.resolved.cost ?? null),
-      durationMs: inputs.durationMs,
-      // Stable across durable retries. `proxy-idempotent` maps an uncertain
-      // post-commit acknowledgement to a no-op on replay.
-      requestId: crypto.randomUUID(),
-    },
-    { onConflict: "proxy-idempotent" },
-  );
+  await writeEntry({
+    source: "proxy",
+    orgId: inputs.principal.orgId,
+    apiKeyId: inputs.principal.kind === "api_key" ? inputs.principal.apiKeyId : null,
+    userId: inputs.principal.kind === "jwt_user" ? inputs.principal.userId : null,
+    // Attribution invariant: `runId` must reference a run in
+    // `principal.orgId` — the route validates the caller-supplied
+    // `X-Run-Id` before the upstream call (`assertRunAttributable`), and
+    // the composite FK `llm_usage(run_id, org_id) → runs(id, org_id)`
+    // enforces it structurally for every new row. A row is attributed to at
+    // most one context (ledger check `llm_usage_context_single`), so a
+    // run-pinned call never also carries a chat session id — runId wins.
+    runId: inputs.runId,
+    chatSessionId: inputs.runId ? null : inputs.chatSessionId,
+    model: inputs.presetId,
+    realModel: inputs.resolved.modelId,
+    api: inputs.resolved.apiShape,
+    // Which credential set reached the provider: platform (system) models vs
+    // the org's own key. The resolved model already carries the flag.
+    credentialSource: inputs.resolved.isSystemModel ? "system" : "org",
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens ?? null,
+    cacheWriteTokens: usage.cacheWriteTokens ?? null,
+    costUsd: computeCostUsd(usage, inputs.resolved.cost ?? null),
+    durationMs: inputs.durationMs,
+    // Stable across durable retries. `proxy-idempotent` maps an uncertain
+    // post-commit acknowledgement to a no-op on replay.
+    requestId: unparsed
+      ? `${UNPARSED_USAGE_REQUEST_ID_PREFIX}${crypto.randomUUID()}`
+      : crypto.randomUUID(),
+  });
 }
 
 export function computeCostUsd(usage: UpstreamUsage, cost: ModelCost | null): number {
@@ -262,6 +294,13 @@ export interface MeteredForwardOptions {
   logLabel: string;
   /** Side-effect hook on an upstream error (e.g. a `logger.warn`). */
   onUpstreamError?: (status: number) => void;
+  /**
+   * Ledger writer. Defaults to {@link recordProxyUsage} (the single ledger
+   * writer); injected by tests that exercise the forwarding branches without a
+   * database. Every 2xx branch calls it exactly once — including the ones that
+   * could not parse usage, which is what makes a paid call impossible to lose.
+   */
+  recordUsage?: (inputs: RecordUsageInputs) => Promise<void>;
 }
 
 /** `controller.close()` throws if the stream is already closed/errored (e.g. the
@@ -354,8 +393,9 @@ export async function forwardMeteredResponse(
 ): Promise<Response> {
   const { swap, cache, logLabel } = options;
 
+  const record = options.recordUsage ?? recordProxyUsage;
   const meter = (usage: UpstreamUsage | null): Promise<void> =>
-    recordProxyUsage({
+    record({
       principal: ctx.principal,
       runId: ctx.runId,
       chatSessionId: ctx.chatSessionId,
@@ -431,11 +471,14 @@ export async function forwardMeteredResponse(
   try {
     parsed = JSON.parse(bodyText);
   } catch {
-    // Non-JSON 2xx (unexpected) — forward without metering. With a swap the
-    // alias contract can't be upheld on an unparsable body (the echoed real
-    // model id can't be rewritten), so synthesize the neutral envelope and
-    // degrade the 2xx to a 502: a body the caller can't use as a completion
-    // must not masquerade as a success.
+    // Non-JSON 2xx (unexpected): the upstream accepted and billed the call, so
+    // it is METERED as an unparseable-usage row (zero tokens, marked request
+    // id) rather than dropped — an invisible paid call is worse than a
+    // zero-priced one. With a swap the alias contract can't be upheld on an
+    // unparsable body (the echoed real model id can't be rewritten), so
+    // synthesize the neutral envelope and degrade the 2xx to a 502: a body the
+    // caller can't use as a completion must not masquerade as a success.
+    await meter(null);
     if (swap) {
       return syntheticAliasErrorResponse(
         swap,
