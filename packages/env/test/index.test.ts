@@ -14,6 +14,7 @@ const TRACKED = [
   "AUTH_DISABLE_SIGNUP",
   "AUTH_DISABLE_ORG_CREATION",
   "TRUST_PROXY",
+  "USERCONTENT_URL",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -38,6 +39,7 @@ function setBaseEnv(): void {
   process.env.NODE_ENV = "test";
   delete process.env.APP_URL;
   delete process.env.BETTER_AUTH_ACTIVE_KID;
+  delete process.env.USERCONTENT_URL;
 }
 
 describe("BETTER_AUTH_SECRETS namespace-collision scrub", () => {
@@ -258,5 +260,122 @@ describe("boolean env vars accept empty string (compose `${VAR:-}` pattern)", ()
   it("TRUST_PROXY: invalid value fails fast", () => {
     process.env.TRUST_PROXY = "maybe";
     expect(() => getEnv()).toThrow(/TRUST_PROXY/);
+  });
+});
+
+// USERCONTENT_URL is the origin agent-authored HTML previews are served from.
+// The preview route reads its PRESENCE as proof of isolation and then serves
+// that HTML as active content in every loading context (`mayServeActiveHtml`),
+// so a value sharing APP_URL's host means untrusted inline script executes on
+// the app's own host. The floor is host inequality — stricter than origin
+// inequality (cookies are host-scoped, so another port/scheme is not
+// separation), and boot must fail rather than silently degrade.
+describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("unset is valid (same-origin preview mode — the OSS default)", () => {
+    delete process.env.USERCONTENT_URL;
+    expect(getEnv().USERCONTENT_URL).toBeUndefined();
+  });
+
+  it("empty string is treated as unset (compose `${VAR:-}` pattern)", () => {
+    process.env.USERCONTENT_URL = "";
+    expect(getEnv().USERCONTENT_URL).toBeUndefined();
+  });
+
+  it("a distinct host passes through verbatim", () => {
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "https://usercontent.example.net";
+    expect(getEnv().USERCONTENT_URL).toBe("https://usercontent.example.net");
+  });
+
+  it("a sibling subdomain of APP_URL is accepted (host differs — the documented floor)", () => {
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "https://usercontent.example.com";
+    expect(getEnv().USERCONTENT_URL).toBe("https://usercontent.example.com");
+  });
+
+  it("rejects a value identical to APP_URL (the copy-paste foot-gun)", () => {
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "https://app.example.com";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL must be a DIFFERENT host than APP_URL/);
+  });
+
+  it("rejects a value differing from APP_URL only by a trailing slash", () => {
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "https://app.example.com/";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL must be a DIFFERENT host than APP_URL/);
+  });
+
+  it("rejects a value differing from APP_URL only by an explicit default port", () => {
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "https://app.example.com:443";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL must be a DIFFERENT host than APP_URL/);
+  });
+
+  it("rejects the same host on a different port (different origin, SAME cookie jar)", () => {
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "https://app.example.com:8443";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL must be a DIFFERENT host than APP_URL/);
+  });
+
+  it("rejects the same host on a different scheme", () => {
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "http://app.example.com";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL must be a DIFFERENT host than APP_URL/);
+  });
+
+  it("host comparison is case-insensitive (URL parsing lowercases the host)", () => {
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "https://APP.Example.COM";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL must be a DIFFERENT host than APP_URL/);
+  });
+
+  it("rejects a value matching APP_URL's default `http://localhost:3000`", () => {
+    delete process.env.APP_URL;
+    process.env.USERCONTENT_URL = "http://localhost:3000";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL must be a DIFFERENT host than APP_URL/);
+  });
+
+  it("rejects a non-URL string (bare hostname, no scheme)", () => {
+    process.env.USERCONTENT_URL = "usercontent.example.com";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL/);
+  });
+
+  it("rejects a non-URL string (free text)", () => {
+    process.env.USERCONTENT_URL = "not a url";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL/);
+  });
+
+  it("requires https:// when NODE_ENV=production (same rule APP_URL carries)", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "http://usercontent.example.com";
+    expect(() => getEnv()).toThrow(/USERCONTENT_URL must use https:\/\/ when NODE_ENV=production/);
+  });
+
+  it("accepts https:// in production", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.USERCONTENT_URL = "https://usercontent.example.com";
+    expect(getEnv().USERCONTENT_URL).toBe("https://usercontent.example.com");
+  });
+
+  it("exempts http://localhost in production (TLS-terminating local proxy)", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "http://127.0.0.1:3000";
+    process.env.USERCONTENT_URL = "http://localhost:3000";
+    expect(getEnv().USERCONTENT_URL).toBe("http://localhost:3000");
   });
 });

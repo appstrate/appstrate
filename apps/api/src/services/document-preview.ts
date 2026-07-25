@@ -207,10 +207,13 @@ export function buildPreviewCsp(appOrigin: string): string {
  * is by design, the page has to render. Whether execution is harmless depends
  * entirely on WHICH origin the script ends up running in:
  *
- *  - **Separate `USERCONTENT_URL` origin** — always safe. The script runs on a
- *    throwaway registrable domain with its own cookie jar and storage
- *    partition; it cannot reach the app's session no matter how the response
- *    is loaded. `active` unconditionally.
+ *  - **Separate `USERCONTENT_URL` origin** — safe. The script runs on a
+ *    throwaway domain with its own cookie jar and storage partition; it cannot
+ *    reach the app's session no matter how the response is loaded. `active`
+ *    unconditionally. This branch trusts that the configured origin really is
+ *    separate, which is why the env schema (`@appstrate/env`) refuses to boot
+ *    when `USERCONTENT_URL` shares `APP_URL`'s host — presence must never be
+ *    taken as proof of separation on its own.
  *  - **Same-origin mode (`USERCONTENT_URL` unset — the OSS default)** — safe
  *    ONLY inside the SPA's `sandbox="allow-scripts"` iframe, which gives the
  *    document an opaque origin. `preview_url` is an absolute URL with a 300 s
