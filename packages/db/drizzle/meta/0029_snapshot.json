@@ -3053,6 +3053,10 @@
         "llm_usage_context_single": {
           "name": "llm_usage_context_single",
           "value": "run_id IS NULL OR chat_session_id IS NULL"
+        },
+        "llm_usage_cost_usd_non_negative": {
+          "name": "llm_usage_cost_usd_non_negative",
+          "value": "cost_usd >= 0"
         }
       },
       "isRLSEnabled": false
@@ -4084,6 +4088,10 @@
         "runs_open_sink_has_secret": {
           "name": "runs_open_sink_has_secret",
           "value": "sink_expires_at IS NULL OR sink_secret_encrypted IS NOT NULL"
+        },
+        "runs_cost_non_negative": {
+          "name": "runs_cost_non_negative",
+          "value": "cost >= 0"
         }
       },
       "isRLSEnabled": false
@@ -5481,7 +5489,7 @@
         },
         "size": {
           "name": "size",
-          "type": "bigint",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
@@ -5952,22 +5960,6 @@
           "method": "btree",
           "with": {}
         },
-        "idx_documents_user": {
-          "name": "idx_documents_user",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"documents\".\"user_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_documents_application": {
           "name": "idx_documents_application",
           "columns": [
@@ -6187,22 +6179,6 @@
           ],
           "isUnique": true,
           "where": "\"storage_deletion_jobs\".\"completed_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_storage_deletion_jobs_completed": {
-          "name": "idx_storage_deletion_jobs_completed",
-          "columns": [
-            {
-              "expression": "completed_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"storage_deletion_jobs\".\"completed_at\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, timestamp, bigint, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, uuid, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
@@ -46,14 +46,8 @@ export const uploads = pgTable(
     name: text("name").notNull(),
     /** Declared MIME type (re-verified server-side via magic-byte sniffing). */
     mime: text("mime").notNull(),
-    /**
-     * Size in bytes (declared, then verified on consumption). bigint, NOT
-     * int4: an upload is materialized into `documents`, whose `size` is
-     * bigint, and the whole upload → materialize → document path would
-     * otherwise carry a silent ~2.1 GB ceiling on the staging half of a
-     * pipeline whose durable half has none.
-     */
-    size: bigint("size", { mode: "number" }).notNull(),
+    /** Size in bytes (declared, then verified on consumption). */
+    size: integer("size").notNull(),
     /**
      * Optional client-declared SHA-256 of the payload (hex, lowercase). When
      * present it is enforced server-side: the S3 presign binds an

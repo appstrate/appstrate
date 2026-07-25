@@ -119,11 +119,10 @@ export const documents = pgTable(
     index("idx_documents_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    // Same reasoning for the `user` SET NULL action: a dashboard user's
-    // deletion has to find and null every document row that attributes to it.
-    index("idx_documents_user")
-      .on(table.userId)
-      .where(sql`${table.userId} IS NOT NULL`),
+    // No index on `user_id`: it is only ever read ANDed under `org_id` +
+    // `application_id` (`listDocumentsForActor`), which
+    // `idx_documents_org_app_created` already serves, and there is no
+    // user-deletion path in the platform for its SET NULL action to scan.
     // Same reasoning for the `applications` cascade. NOT covered by
     // `idx_documents_org_app_created`: `application_id` is not that index's
     // LEADING column, so it cannot serve an application-only lookup.
@@ -143,8 +142,7 @@ export const documents = pgTable(
     // above: a run delete normally goes through the service path, which
     // detaches documents still consumed by live runs (`document_links`) BEFORE
     // deleting; the cascade is the fallback for the unprotected remainder.
-    // Created NOT VALID in migration 0029 (Drizzle cannot express NOT VALID)
-    // and VALIDATEd in 0030.
+    // Created (and validated — the table is empty) in migration 0029.
     foreignKey({
       name: "documents_run_id_org_id_fk",
       columns: [table.runId, table.orgId],
@@ -218,9 +216,8 @@ export const documentLinks = pgTable(
     // Tenant-integrity FKs — the link's document and its consuming run must
     // both be the org named on the row. Without them a cross-tenant link is
     // insertable and turns into a denial of deletion for the victim org (see
-    // the table doc). Created NOT VALID in migration 0029 (Drizzle cannot
-    // express NOT VALID) and VALIDATEd in 0030; both tables are empty in
-    // production, so that validation is free.
+    // the table doc). Created in migration 0029; both tables are empty in
+    // production, so the validation scan is free.
     foreignKey({
       name: "document_links_document_id_org_id_fk",
       columns: [table.documentId, table.orgId],
