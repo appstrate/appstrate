@@ -321,9 +321,11 @@ export const runs = pgTable(
     // subtract from any org-level aggregation built on it. The application
     // clamps, but the clamp is one code path away from being bypassed — the
     // column itself is where the invariant belongs. NULL (cost not yet known)
-    // passes, per standard CHECK semantics. Added `NOT VALID` in migration 0031
-    // and validated in 0032 (repo discipline: never scan a hot table under
-    // ACCESS EXCLUSIVE at ADD CONSTRAINT time).
+    // passes, per standard CHECK semantics. Added validated in migration 0029:
+    // splitting it into `NOT VALID` + a later `VALIDATE` buys nothing here,
+    // because the migrator applies the whole pending batch in ONE transaction
+    // and holds ACCESS EXCLUSIVE until it commits either way. The scan is why a
+    // pre-existing negative row aborts the deploy — see `docs/architecture/RUN_COST.md`.
     check("runs_cost_non_negative", sql`cost >= 0`),
   ],
 );
@@ -567,9 +569,14 @@ export const llmUsage = pgTable(
     // intact (a plain composite SET NULL would null org_id too → error). Drizzle
     // cannot express the column list; the live action is hand-written in raw SQL
     // migration 0028. The `.onDelete("set null")` below is the closest Drizzle
-    // approximation (only the column list is inexpressible) — if drizzle-kit ever
-    // materialised it, a plain composite SET NULL fails loudly on the NOT-NULL
-    // org_id instead of silently re-cascading ledger rows away.
+    // approximation (only the column list is inexpressible).
+    //
+    // That approximation is NOT a safety net. A `db:push` against a live
+    // database silently replaces `SET NULL (run_id)` with a plain composite
+    // `SET NULL` (`confdelsetcols` → NULL); the breakage surfaces only at the
+    // first run deletion, as `null value in column "org_id"`, and every run
+    // deletion fails from then on. Production migrates via `migrate()` and never
+    // `push`, which is what keeps this safe — do not run `db:push` against it.
     foreignKey({
       name: "llm_usage_run_id_org_id_fk",
       columns: [table.runId, table.orgId],
@@ -609,7 +616,8 @@ export const llmUsage = pgTable(
     // MONOTONICALLY on cost — a negative value would both credit an org for
     // spending and pin the row below every later advance. Enforced in the column
     // rather than only in `recordLlmUsage`, which is a single code path away from
-    // being bypassed. Added `NOT VALID` in migration 0031, validated in 0032.
+    // being bypassed. Added validated in migration 0029 — see the sibling floor
+    // on `runs.cost` for why it is not split into `NOT VALID` + `VALIDATE`.
     check("llm_usage_cost_usd_non_negative", sql`cost_usd >= 0`),
   ],
 );
