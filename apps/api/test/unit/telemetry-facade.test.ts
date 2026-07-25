@@ -32,7 +32,7 @@ import {
   recordProcessAnomaly,
   recordDocumentCreated,
   recordDocumentDeleted,
-  recordDocumentQuotaRejection,
+  recordDocumentStorageLimitRejection,
   recordDocumentPartialPublication,
   setQueueDepthSource,
   shutdownTelemetry,
@@ -74,8 +74,8 @@ function fakeProvider(opts: { trust?: boolean; withMiddleware?: boolean } = {}) 
       void calls.push({ method: "recordStorageDeletionResult", args }),
     recordDocumentCreated: (...args) => void calls.push({ method: "recordDocumentCreated", args }),
     recordDocumentDeleted: (...args) => void calls.push({ method: "recordDocumentDeleted", args }),
-    recordDocumentQuotaRejection: (...args) =>
-      void calls.push({ method: "recordDocumentQuotaRejection", args }),
+    recordDocumentStorageLimitRejection: (...args) =>
+      void calls.push({ method: "recordDocumentStorageLimitRejection", args }),
     recordDocumentPartialPublication: (...args) =>
       void calls.push({ method: "recordDocumentPartialPublication", args }),
     setQueueDepthSource: (source) => {
@@ -117,7 +117,7 @@ describe("telemetry façade — no provider (module absent)", () => {
     expect(() => recordProcessAnomaly({ kind: "uncaughtException" })).not.toThrow();
     expect(() => recordDocumentCreated({ purpose: "agent_output" })).not.toThrow();
     expect(() => recordDocumentDeleted(3)).not.toThrow();
-    expect(() => recordDocumentQuotaRejection()).not.toThrow();
+    expect(() => recordDocumentStorageLimitRejection()).not.toThrow();
     expect(() => recordDocumentPartialPublication()).not.toThrow();
     await expect(shutdownTelemetry()).resolves.toBeUndefined();
   });
@@ -168,13 +168,13 @@ describe("telemetry façade — provider installed", () => {
 
     recordDocumentCreated({ purpose: "user_upload" });
     recordDocumentDeleted(4);
-    recordDocumentQuotaRejection();
+    recordDocumentStorageLimitRejection();
     recordDocumentPartialPublication();
 
     expect(calls).toEqual([
       { method: "recordDocumentCreated", args: [{ purpose: "user_upload" }] },
       { method: "recordDocumentDeleted", args: [4] },
-      { method: "recordDocumentQuotaRejection", args: [] },
+      { method: "recordDocumentStorageLimitRejection", args: [] },
       { method: "recordDocumentPartialPublication", args: [] },
     ]);
   });

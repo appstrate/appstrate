@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   fetchRunDocuments,
   launchRunAndWait,
@@ -39,7 +39,7 @@ async function collectSteps(
 }
 
 describe("run_and_wait client", () => {
-  test("launches an agent run, yields the run id, then yields the terminal run", async () => {
+  it("launches an agent run, yields the run id, then yields the terminal run", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = [];
     const responses = [
       jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" }),
@@ -77,7 +77,7 @@ describe("run_and_wait client", () => {
     ]);
   });
 
-  test("projects the terminal run onto the documented payload (no metrics leak)", async () => {
+  it("projects the terminal run onto the documented payload (no metrics leak)", async () => {
     const responses = [
       jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" }),
       jsonResponse({
@@ -115,7 +115,7 @@ describe("run_and_wait client", () => {
     ]);
   });
 
-  test("validates before dispatching", async () => {
+  it("validates before dispatching", async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error("should not fetch");
     });
@@ -125,7 +125,7 @@ describe("run_and_wait client", () => {
     ]);
   });
 
-  test("rejects an unparseable agent reference before dispatching", async () => {
+  it("rejects an unparseable agent reference before dispatching", async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error("should not fetch");
     });
@@ -137,7 +137,7 @@ describe("run_and_wait client", () => {
     ).resolves.toEqual([{ error: "Invalid agent reference: acme/writer (expected @scope/name)." }]);
   });
 
-  test("rejects an inline run without a top-level prompt before dispatching", async () => {
+  it("rejects an inline run without a top-level prompt before dispatching", async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error("should not fetch");
     });
@@ -147,7 +147,7 @@ describe("run_and_wait client", () => {
     expect(steps[0]?.error).toContain("top-level argument");
   });
 
-  test("tells the caller to move a prompt nested inside the manifest", async () => {
+  it("tells the caller to move a prompt nested inside the manifest", async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error("should not fetch");
     });
@@ -160,7 +160,7 @@ describe("run_and_wait client", () => {
     expect(steps[0]?.error).toContain("found inside `manifest`");
   });
 
-  test("returns a bounded timeout payload", async () => {
+  it("returns a bounded timeout payload", async () => {
     const fetchImpl = fakeFetch(async () =>
       jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" }),
     );
@@ -179,7 +179,7 @@ describe("run_and_wait client", () => {
     ]);
   });
 
-  test("does not let an in-flight long poll overrun the wait budget", async () => {
+  it("does not let an in-flight long poll overrun the wait budget", async () => {
     const calls: string[] = [];
     const fetchImpl = fakeFetch(async (input, init) => {
       calls.push(String(input));
@@ -217,7 +217,7 @@ describe("run_and_wait client", () => {
     ]);
   });
 
-  test("enriches the terminal step with the run's published documents", async () => {
+  it("enriches the terminal step with the run's published documents", async () => {
     const fetchImpl = fakeFetch(async (input) => {
       const url = String(input);
       if (url.endsWith("/run")) {
@@ -274,7 +274,7 @@ describe("run_and_wait client", () => {
     });
   });
 
-  test("leaves the payload document-free when the run published none", async () => {
+  it("leaves the payload document-free when the run published none", async () => {
     const fetchImpl = fakeFetch(async (input) => {
       const url = String(input);
       if (url.endsWith("/run")) {
@@ -296,7 +296,7 @@ describe("run_and_wait client", () => {
     expect(steps[1]).not.toHaveProperty("documents");
   });
 
-  test("fetchRunDocuments swallows a non-2xx response", async () => {
+  it("fetchRunDocuments swallows a non-2xx response", async () => {
     const fetchImpl = fakeFetch(async () => jsonResponse({ error: "nope" }, 500));
     await expect(
       fetchRunDocuments("run_1", {
@@ -307,7 +307,7 @@ describe("run_and_wait client", () => {
     ).resolves.toEqual([]);
   });
 
-  test("honors abort before dispatching", async () => {
+  it("honors abort before dispatching", async () => {
     const controller = new AbortController();
     controller.abort(new Error("stop"));
     const fetchImpl = fakeFetch(async () => {
@@ -343,7 +343,7 @@ describe("launchRunAndWait launch body", () => {
     return { fetchImpl, captured: () => seen };
   }
 
-  test("kind:inline forwards manifest, prompt, input, and config", async () => {
+  it("kind:inline forwards manifest, prompt, input, and config", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -370,7 +370,7 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
-  test("kind:inline omits input when none is provided", async () => {
+  it("kind:inline omits input when none is provided", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     await launchRunAndWait(
@@ -381,7 +381,7 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()?.body).toEqual({ manifest: { name: "tmp" }, prompt: "do it" });
   });
 
-  test("kind:agent forwards input in the launch body", async () => {
+  it("kind:agent forwards input in the launch body", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     await launchRunAndWait(
@@ -396,7 +396,7 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
-  test("exposes the launch HTTP status on success", async () => {
+  it("exposes the launch HTTP status on success", async () => {
     const fetchImpl = fakeFetch(async () => jsonResponse({ id: "run_1", status: "pending" }, 201));
 
     const result = await launchRunAndWait(

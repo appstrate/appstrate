@@ -447,7 +447,7 @@ export function requireAdmin() {
 
 ### Orphaned run recovery
 
-On platform startup, any runs left in `pending` or `running` state from a previous crash are listed and finalized through `synthesiseFinalize` → `finalizeRun`. Routing through the canonical terminal-state pipeline (rather than a direct `UPDATE`) ensures the `afterRun` hook fires for every orphan, so billing and observability modules see the exact same lifecycle whether a run terminated cleanly, was cancelled, timed out, or was killed by a server crash. This also prevents stale run tokens from remaining valid:
+On platform startup, any runs left in `pending` or `running` state from a previous crash are listed and finalized through `synthesiseFinalize` → `finalizeRun`. Routing through the canonical terminal-state pipeline (rather than a direct `UPDATE`) ensures the `onRunStatusChange` event fires for every orphan, so billing and observability modules see the exact same lifecycle whether a run terminated cleanly, was cancelled, timed out, or was killed by a server crash. This also prevents stale run tokens from remaining valid:
 
 ```typescript
 // boot.ts — startup

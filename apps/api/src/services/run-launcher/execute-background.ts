@@ -179,7 +179,8 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
     // we fill in the terminal state the platform observed.
     if (lifecycle.cancelled) {
       // Cancel route already routed the run through `synthesiseFinalize`,
-      // which CAS'd the sink closed and ran `afterRun`. Nothing to do here.
+      // which CAS'd the sink closed and drove the terminal transition. Nothing
+      // to do here.
       return;
     }
 

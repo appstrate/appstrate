@@ -54,6 +54,7 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
+import { documentUri } from "@appstrate/core/document-uri";
 import { db, type Db } from "@appstrate/db/client";
 import { type CredentialSource } from "../llm-usage-ledger.ts";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
@@ -214,7 +215,7 @@ export async function persistRunEvent(
           null,
           {
             document_id: documentId,
-            uri: typeof event.uri === "string" ? event.uri : `document://${documentId}`,
+            uri: typeof event.uri === "string" ? event.uri : documentUri(documentId),
             name: typeof event.name === "string" ? event.name : null,
             mime: typeof event.mime === "string" ? event.mime : null,
             size: typeof event.size === "number" ? event.size : null,

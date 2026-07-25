@@ -4070,7 +4070,7 @@ export interface paths {
         put?: never;
         /**
          * Terminal RunResult — close the sink (HMAC, idempotent)
-         * @description Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, fires the `afterRun` module hook. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-firing hooks.
+         * @description Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.
          */
         post: operations["finalizeRemoteRun"];
         delete?: never;

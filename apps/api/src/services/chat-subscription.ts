@@ -22,7 +22,6 @@
 
 import type { ChatUsageRecord, SubscriptionChatResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeTokenCost } from "@appstrate/afps-runtime/runner";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
@@ -99,13 +98,7 @@ export async function resolveSubscriptionChatModel(
     subscription: true,
     model: {
       modelId: resolved.modelId ?? presetId,
-      // `ResolvedModel.apiShape` is still typed `string` all the way up
-      // through `ModelDefinition` (model-registry.ts) even though the registry
-      // RESOLVES it from a `ModelProviderDefinition.apiShape` — the value is
-      // always a `ModelApiShape`, the chain's types just have not been
-      // tightened yet. Narrow at this boundary so the published chat contract
-      // carries the union instead of propagating the looseness.
-      apiShape: (resolved.apiShape ?? provider.apiShape) as ModelApiShape,
+      apiShape: resolved.apiShape,
       baseUrl: resolved.baseUrl ?? provider.defaultBaseUrl,
       cost: resolved.cost ?? null,
       contextWindow: resolved.contextWindow ?? null,

@@ -1454,7 +1454,7 @@ export async function listRunLogs(args: {
 /**
  * List all in-flight run IDs at server startup. The caller (boot) feeds
  * each id through `synthesiseFinalize` so the same lifecycle that fires
- * for clean termination (afterRun, terminal log, onRunStatusChange) also
+ * for clean termination (terminal log, onRunStatusChange) also
  * fires for runs that survived a server crash. Without that convergence, the
  * run stays non-terminal forever, so its cumulative runner ledger row never
  * settles — and a cursor consumer, which must never advance past an unsettled

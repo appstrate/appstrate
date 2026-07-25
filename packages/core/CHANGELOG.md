@@ -61,7 +61,12 @@ opts?)` returns a browser-usable GET URL (S3 presign with
 - **`@appstrate/core/telemetry`** — `StorageDeletionStats`,
   `recordStorageDeletionSweep()`, `recordStorageDeletionResult()`,
   `recordDocumentCreated()`, `recordDocumentDeleted()`,
-  `recordDocumentQuotaRejection()`, `recordDocumentPartialPublication()`.
+  `recordDocumentStorageLimitRejection()`, `recordDocumentPartialPublication()`.
+  The rejection counter is named for the thing it counts — a write refused by
+  the per-org **byte ceiling** (403 `storage_limit_exceeded`) — not for a
+  commercial allowance: core is Apache-2.0 and carries no billing vocabulary on
+  its exported surface. The provider-side counter it feeds is
+  `appstrate.documents.storage_limit_rejections`.
 
 - **`@appstrate/core/runtime-tool-defs`** — the `publish_document` runtime tool:
   `PublishedDocument`, `DocumentPublishedEvent`, `documentPublishedEvent()`,

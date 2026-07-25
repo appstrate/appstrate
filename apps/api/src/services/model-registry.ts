@@ -7,6 +7,7 @@ import { loadSystemRegistry } from "../lib/system-registry.ts";
 import { modelCostSchema } from "@appstrate/core/module";
 import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 
 // --- Types ---
@@ -23,7 +24,7 @@ export interface SystemModelProviderCredentialDefinition {
   /** Registered ModelProviderDefinition id this env entry binds to (e.g. "anthropic", "openai"). */
   providerId: string;
   /** Resolved from registry at boot — never persisted. */
-  apiShape: string;
+  apiShape: ModelApiShape;
   /** Resolved from registry at boot (with override if `baseUrlOverridable`) — never persisted. */
   baseUrl: string;
   apiKey: string;
@@ -41,7 +42,7 @@ export interface ModelDefinition extends ModelMetadata {
   /** Registered ModelProviderDefinition id — propagated from the parent system key. */
   providerId: string;
   /** Resolved from registry at boot — never persisted. */
-  apiShape: string;
+  apiShape: ModelApiShape;
   /** Resolved from registry at boot — never persisted. */
   baseUrl: string;
   modelId: string;

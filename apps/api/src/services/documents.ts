@@ -76,7 +76,7 @@ import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-
 import {
   recordDocumentCreated,
   recordDocumentDeleted,
-  recordDocumentQuotaRejection,
+  recordDocumentStorageLimitRejection,
 } from "@appstrate/core/telemetry";
 import { sanitizeStorageKey } from "./file-storage.ts";
 import { getRun } from "./state/runs.ts";
@@ -386,7 +386,7 @@ function assertWithinOrgQuota(used: number, addBytes: number, limit: number | un
     // One quota rejection per logical over-limit write. This is the single
     // assert seam — the pre-flight fast reject and the FOR UPDATE re-check both
     // route through it, and only one of them ever fires for a given write.
-    recordDocumentQuotaRejection();
+    recordDocumentStorageLimitRejection();
     throw storageLimitExceeded(`Organization storage limit (${limit} bytes) would be exceeded`);
   }
 }
@@ -1140,7 +1140,7 @@ export async function materializeRunUploads(
     // Fail the run loudly rather than leaving it pointing at documents it never
     // got — a clear terminal beats a silently broken run. Route through the
     // canonical convergence point (`synthesiseFinalize` → `finalizeRun`) so the
-    // `afterRun`/billing hooks fire like any other terminal transition, instead
+    // terminal broadcast fires like any other terminal transition, instead
     // of writing `runs.status` directly. The run has not launched its container
     // yet (createRun already stamped the sink secret), so this is a clean failed
     // finalize.

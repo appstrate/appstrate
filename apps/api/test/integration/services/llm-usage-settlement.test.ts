@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage, runs } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
@@ -35,7 +35,11 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
-import { recordLlmUsageReliably } from "../../../src/services/llm-usage-retry.ts";
+import {
+  recordLlmUsageReliably,
+  initLlmUsageRetryWorker,
+  _resetLlmUsageRetryWorkerForTests,
+} from "../../../src/services/llm-usage-retry.ts";
 import { getRunSinkContext, finalizeRun } from "../../../src/services/run-event-ingestion.ts";
 import {
   computeRunCost,
@@ -46,6 +50,24 @@ import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 
 const AGENT = "@settleorg/settle-agent";
 const RUN_SECRET = "c".repeat(43);
+
+/**
+ * Poll `read` until it returns a defined value. Used to observe a queue worker's
+ * effect, which is inherently asynchronous. Bounded by an ATTEMPT COUNT rather
+ * than a wall-clock deadline, so a slow CI box cannot turn a pass into a flake;
+ * returns undefined on exhaustion and lets the caller's assertion report it.
+ */
+async function waitFor<T>(
+  read: () => Promise<T | undefined>,
+  attempts = 60,
+): Promise<T | undefined> {
+  for (let i = 0; i < attempts; i++) {
+    const value = await read();
+    if (value !== undefined) return value;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return undefined;
+}
 
 async function seedSinkRun(
   ctx: TestContext,
@@ -221,6 +243,80 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     expect(await runnerRow(runId)).toBeUndefined();
     expect(await listLlmUsage({})).toEqual([]);
   });
+
+  it("a run cannot settle with a stale total: a failed barrier write leaves it non-terminal", async () => {
+    // The barrier is what makes settlement safe — but only if a FAILED barrier
+    // write actually stops the CAS. If `required: true` ever stopped
+    // propagating (or the barrier moved after the CAS), the run would flip
+    // terminal while the ledger still holds the PREVIOUS cumulative total: the
+    // billing cursor would claim that stale row by its serial id, once, and
+    // never revisit it — the final delta silently lost.
+    //
+    // A CHECK constraint that rejects the terminal snapshot's cost simulates
+    // the transient Postgres fault. Dropped in `finally` (with IF EXISTS) so a
+    // failing assertion cannot leak it into the rest of the process.
+    const runId = await seedSinkRun(ctx);
+    // The run already has a durable cumulative total of $3.
+    await recordLlmUsage(
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 100,
+        outputTokens: 50,
+        costUsd: 3,
+      },
+      { onConflict: "runner-monotonic" },
+    );
+
+    await db.execute(
+      sql`ALTER TABLE llm_usage ADD CONSTRAINT _test_reject_barrier CHECK (cost_usd != 7)`,
+    );
+    try {
+      const run = await getRunSinkContext(runId);
+      const result = emptyRunResult();
+      result.status = "success";
+      // The terminal snapshot the barrier must make durable: $7, superseding $3.
+      result.cost = 7;
+
+      // Pin the failure to the simulated barrier fault. Without naming the
+      // constraint, a ReferenceError or a typo inside `finalizeRun` would throw
+      // too — and would leave exactly the same "run still running, row still
+      // unsettled" state, so every assertion below would pass for the wrong
+      // reason. Drizzle wraps the driver error, so the constraint name is on
+      // the cause, not the top-level message.
+      let barrierError: unknown;
+      try {
+        await finalizeRun({ run: run!, result });
+      } catch (err) {
+        barrierError = err;
+      }
+      expect(barrierError).toBeDefined();
+      const cause = (barrierError as { cause?: { message?: string; constraint?: string } }).cause;
+      expect(
+        `${(barrierError as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`,
+      ).toContain("_test_reject_barrier");
+
+      // The CAS never ran: the run is still open, so its ledger row is NOT
+      // settled and no cursor consumer can claim it.
+      const [runRow] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(runRow!.status).toBe("running");
+      expect(runRow!.completedAt).toBeNull();
+
+      const rows = await listLlmUsage({});
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.settled).toBe(false);
+      // And the total is still the last DURABLE one — never the stale-but-settled
+      // combination the barrier exists to prevent.
+      expect(rows[0]!.costUsd).toBe(3);
+      // The cursor frontier stays BELOW this row's serial id, so a billing
+      // consumer cannot advance past (and thereby permanently skip) it.
+      expect(await getSettledFrontierId()).toBeLessThan(rows[0]!.id);
+    } finally {
+      await db.execute(sql`ALTER TABLE llm_usage DROP CONSTRAINT IF EXISTS _test_reject_barrier`);
+    }
+  });
 });
 
 describe("llm_usage durable retry — runner rows are never deferred", () => {
@@ -264,9 +360,17 @@ describe("llm_usage durable retry — runner rows are never deferred", () => {
     expect(await runnerRow(runId)).toBeUndefined();
   });
 
-  it("still absorbs a failed PROXY write into the durable queue", async () => {
+  it("absorbs a failed PROXY write into the durable queue and the worker PERSISTS it", async () => {
     // Proxy rows keep the queue: each is an immutable per-call fact that gets a
     // FRESH serial id when it lands, so a late replay is still swept and billed.
+    //
+    // The contract is not "the call did not throw" — it is that the row
+    // eventually reaches Postgres. Assert the end state: after the retry worker
+    // drains, the row exists with the exact figures that failed to write
+    // directly. Without this, a queue that silently dropped every job would
+    // still pass.
+    const requestId = `req_${crypto.randomUUID()}`;
+
     await recordLlmUsageReliably(
       {
         source: "proxy",
@@ -276,10 +380,42 @@ describe("llm_usage durable retry — runner rows are never deferred", () => {
         inputTokens: 10,
         outputTokens: 5,
         costUsd: 0.5,
-        requestId: `req_${crypto.randomUUID()}`,
+        requestId,
       },
       { executor: failingExecutor, onConflict: "proxy-idempotent" },
     );
+
+    // The direct write failed, so nothing is in Postgres yet — the row exists
+    // only as a queued job.
+    expect(await db.select().from(llmUsage).where(eq(llmUsage.requestId, requestId))).toHaveLength(
+      0,
+    );
+
+    // Start the consumer: it replays the job against the REAL db (the failing
+    // executor never travels with the job).
+    await initLlmUsageRetryWorker();
+    try {
+      const landed = await waitFor(async () => {
+        const [row] = await db
+          .select()
+          .from(llmUsage)
+          .where(eq(llmUsage.requestId, requestId))
+          .limit(1);
+        return row;
+      });
+
+      expect(landed).toBeDefined();
+      expect(landed!.source).toBe("proxy");
+      expect(landed!.orgId).toBe(ctx.orgId);
+      expect(landed!.inputTokens).toBe(10);
+      expect(landed!.outputTokens).toBe(5);
+      expect(landed!.costUsd).toBe(0.5);
+      // A fresh serial id above any cursor watermark — that is what makes a
+      // late replay billable rather than stranded behind the frontier.
+      expect(landed!.id).toBeGreaterThan(0);
+    } finally {
+      await _resetLlmUsageRetryWorkerForTests();
+    }
   });
 });
 

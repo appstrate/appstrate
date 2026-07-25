@@ -216,12 +216,12 @@ Staged uploads (the `uploads` bucket) are bounded on three axes before they ever
 
 The telemetry façade (`@appstrate/core/telemetry`, backed by `@appstrate/module-observability` when installed; a true no-op otherwise) emits documents counters at the service seams:
 
-| Metric                                     | Attributes | Emitted at                                                                           |
-| ------------------------------------------ | ---------- | ------------------------------------------------------------------------------------ |
-| `appstrate.documents.created`              | `purpose`  | `commitDocumentRow` (the sole commit seam — a dedup replay never counts).            |
-| `appstrate.documents.deleted`              | —          | Every row removed: explicit delete, container detach-or-delete, retention GC.        |
-| `appstrate.documents.quota_rejections`     | —          | `assertWithinOrgQuota` — once per logical over-limit write (pre-flight OR re-check). |
-| `appstrate.documents.partial_publications` | —          | `finalizeRun` CAS winner, when the artifacts summary `status` is `partial`.          |
+| Metric                                         | Attributes | Emitted at                                                                           |
+| ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------------ |
+| `appstrate.documents.created`                  | `purpose`  | `commitDocumentRow` (the sole commit seam — a dedup replay never counts).            |
+| `appstrate.documents.deleted`                  | —          | Every row removed: explicit delete, container detach-or-delete, retention GC.        |
+| `appstrate.documents.storage_limit_rejections` | —          | `assertWithinOrgQuota` — once per logical over-limit write (pre-flight OR re-check). |
+| `appstrate.documents.partial_publications`     | —          | `finalizeRun` CAS winner, when the artifacts summary `status` is `partial`.          |
 
 These complement the phase-3 storage-deletion gauges (`appstrate.storage_deletion.backlog` / `.oldest_pending_age_seconds` / `.dead_letters` / `.result`). No per-org used/limit gauge — that is a per-org API concern (`GET /organizations/:id`), not a global metric.
 

@@ -365,7 +365,16 @@ describe("consumeUploadStream", () => {
     await seedUpload(access(ctx), { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 });
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
 
-    await consumeUploadStream(id, access(ctx), drainSink).catch(() => {});
+    // Assert the failure's identity rather than swallowing it: a blanket
+    // `.catch(() => {})` also passes when the consume throws for an unrelated
+    // reason (or never reaches the release path at all), which would leave the
+    // object-deletion assertion below testing nothing in particular.
+    try {
+      await consumeUploadStream(id, access(ctx), drainSink);
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect((e as ApiError).status).toBe(400);
+    }
 
     // Release path drops the bytes so re-upload to a fresh slot can succeed.
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
@@ -428,26 +437,55 @@ describe("cleanupExpiredUploads", () => {
     const id = "upl_gc_inflight_1";
     const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
     await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
-    // Consumed 24h-minus-250ms ago: the reuse window is still open right now (so
-    // a rerun is allowed to start re-consuming) but elapses while it streams. A
-    // re-consume never touches the row, so nothing the sweep could lock would
-    // reveal it — only the grace margin keeps the object alive.
+    // A re-consume never touches the row, so nothing the sweep could lock would
+    // reveal it — only the grace margin keeps the object alive while it streams.
+    //
+    // The window transition is driven by MOVING `consumedAt`, never by sleeping:
+    // the old version raced a 250 ms "window still open" margin against process
+    // scheduling (a GC pause before the consume started turned the re-consume
+    // into a 410 and failed the test), and used a bare `setTimeout(400)` as the
+    // synchronisation primitive for "the stream has started".
+    //
+    // Phase 1 — consumed 1 h ago: the reuse window is unambiguously OPEN, so the
+    // re-consume is allowed to start regardless of scheduling.
     await db
       .update(uploads)
-      .set({ consumedAt: new Date(Date.now() - 24 * 60 * 60 * 1000 + 250) })
+      .set({ consumedAt: new Date(Date.now() - 60 * 60 * 1000) })
       .where(eq(uploads.id, id));
 
     // A slow sink standing in for a large document streaming into a workspace.
+    // It signals when it has begun, then blocks on an explicit gate the test
+    // releases — so "mid-stream" is a fact, not a timing guess.
+    let streamStarted: () => void;
+    const streaming = new Promise<void>((resolve) => {
+      streamStarted = resolve;
+    });
+    let releaseSink: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseSink = resolve;
+    });
     const slowSink: UploadStreamSink = async (stream) => {
-      await new Promise((r) => setTimeout(r, 600));
+      streamStarted();
+      await gate;
       return drainSink(stream);
     };
     const consuming = consumeUploadStream(id, access(ctx), slowSink);
 
-    // The reuse window elapses mid-stream, then the sweep runs.
-    await new Promise((r) => setTimeout(r, 400));
+    // Deterministically mid-stream: the sink is running and parked on the gate.
+    await streaming;
+
+    // Phase 2 — the reuse window elapses WHILE the stream is in flight. Simulated
+    // by ageing `consumedAt` past the 24 h window rather than by waiting for it.
+    await db
+      .update(uploads)
+      .set({ consumedAt: new Date(Date.now() - 24 * 60 * 60 * 1000 - 60 * 1000) })
+      .where(eq(uploads.id, id));
+
     await cleanupExpiredUploads();
     await processStorageDeletionJobs();
+
+    // The sweep has already run; only now does the stream finish.
+    releaseSink!();
 
     // Row and object both survived, and the rerun's consume completed.
     const meta = await consuming;

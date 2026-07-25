@@ -533,37 +533,45 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
     );
 
-    const first = await app.request(`/api/runs/${runId}/events`, {
-      method: "POST",
-      headers: stickyHeaders,
-      body,
-    });
-    expect(first.status).toBeGreaterThanOrEqual(500);
+    // The DROP is part of the test flow (it lifts the simulated failure), but it
+    // MUST also run when an assertion above it throws — otherwise the constraint
+    // survives on the shared test database and poisons every later test in this
+    // process. `IF EXISTS` makes the finally idempotent with the in-flow drop.
+    try {
+      const first = await app.request(`/api/runs/${runId}/events`, {
+        method: "POST",
+        headers: stickyHeaders,
+        body,
+      });
+      expect(first.status).toBeGreaterThanOrEqual(500);
 
-    // Lift the transient failure and retry with the EXACT SAME envelope
-    // (same body, same webhook-id, same HMAC). Before the cleanup the
-    // replay key was sticky for `replayWindow` seconds and this retry
-    // would have been swallowed as "replay" with the event never
-    // persisted.
-    await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+      // Lift the transient failure and retry with the EXACT SAME envelope
+      // (same body, same webhook-id, same HMAC). Before the cleanup the
+      // replay key was sticky for `replayWindow` seconds and this retry
+      // would have been swallowed as "replay" with the event never
+      // persisted.
+      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
 
-    const second = await app.request(`/api/runs/${runId}/events`, {
-      method: "POST",
-      headers: stickyHeaders,
-      body,
-    });
-    expect(second.status).toBe(200);
-    expect(((await second.json()) as { outcome: string }).outcome).toBe("persisted");
+      const second = await app.request(`/api/runs/${runId}/events`, {
+        method: "POST",
+        headers: stickyHeaders,
+        body,
+      });
+      expect(second.status).toBe(200);
+      expect(((await second.json()) as { outcome: string }).outcome).toBe("persisted");
 
-    // And the event actually landed in run_logs (proves the retry did
-    // real ingestion, not a stale-key passthrough).
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.lastEventSequence).toBe(1);
-    const logs = await db
-      .select()
-      .from(runLogs)
-      .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "__poison__")));
-    expect(logs).toHaveLength(1);
+      // And the event actually landed in run_logs (proves the retry did
+      // real ingestion, not a stale-key passthrough).
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.lastEventSequence).toBe(1);
+      const logs = await db
+        .select()
+        .from(runLogs)
+        .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "__poison__")));
+      expect(logs).toHaveLength(1);
+    } finally {
+      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT IF EXISTS _test_reject_poison`);
+    }
   });
 
   // Phase 2: a `document.published` event (emitted by the publish_document
@@ -1767,6 +1775,37 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     return { started: () => seen };
   }
 
+  /**
+   * Wait until `started()` has observed at least `n` events.
+   *
+   * `emitEvent` is fire-and-forget, so a single `setTimeout(0)` tick is NOT a
+   * guarantee that the async listener chain has run — it only happened to work.
+   * Poll instead, bounded by an attempt count so a slow box cannot flake.
+   */
+  async function waitForStarted(
+    started: () => RunStatusChangeParams[],
+    n: number,
+    attempts = 100,
+  ): Promise<RunStatusChangeParams[]> {
+    for (let i = 0; i < attempts && started().length < n; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return started();
+  }
+
+  /**
+   * Give any pending emit a bounded chance to land, then return what was seen.
+   * Used for NEGATIVE assertions — polling cannot prove a negative, so this
+   * makes the "nothing was emitted" claim rest on a real settle window rather
+   * than on one macrotask tick.
+   */
+  async function settleStarted(
+    started: () => RunStatusChangeParams[],
+  ): Promise<RunStatusChangeParams[]> {
+    await new Promise((r) => setTimeout(r, 150));
+    return started();
+  }
+
   async function seedPendingRemoteRun(): Promise<string> {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await db.insert(runs).values({
@@ -1790,8 +1829,7 @@ describe("remote run.started — emitted at first event, not at row insert", () 
 
     // No event yet — the row was created `pending`; nothing should have
     // emitted `started` (the old insert-time emit is gone).
-    await new Promise((r) => setTimeout(r, 0));
-    expect(started()).toHaveLength(0);
+    expect(await settleStarted(started)).toHaveLength(0);
 
     // First signed event arrives → DB flips pending → running.
     const envelope = buildEnvelope(
@@ -1803,10 +1841,8 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     const res = await postEvent(runId, envelope);
     expect(res.status).toBe(200);
 
-    // emitEvent is fire-and-forget — let the microtask/timer queue drain.
-    await new Promise((r) => setTimeout(r, 0));
-
-    const events = started();
+    // emitEvent is fire-and-forget — poll until the listener chain has run.
+    const events = await waitForStarted(started, 1);
     expect(events).toHaveLength(1);
     expect(events[0]!.runId).toBe(runId);
     expect(events[0]!.status).toBe("started");
@@ -1832,9 +1868,10 @@ describe("remote run.started — emitted at first event, not at row insert", () 
       );
       expect(res.status).toBe(200);
     }
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(started()).toHaveLength(1);
+    // Wait for the FIRST emit to land, then confirm no further one follows —
+    // "exactly once" needs both halves, and a bare tick proved neither.
+    await waitForStarted(started, 1);
+    expect(await settleStarted(started)).toHaveLength(1);
   });
 });
 

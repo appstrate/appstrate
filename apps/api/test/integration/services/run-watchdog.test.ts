@@ -208,7 +208,7 @@ describe("run watchdog — unified stall detection", () => {
   // already written `llm_usage` rows; the watchdog's call to
   // `finalizeRun` reads `computeRunCost` from that ledger and
   // persists `runs.cost` on the failed terminal status, so the
-  // afterRun (cloud billing) hook fires with the right value even
+  // `onRunStatusChange` broadcast carries the right value even
   // when the container never posted /finalize itself.
   it("captures cost for a crashed run whose metric event landed before the crash", async () => {
     const stale = new Date(Date.now() - 3600_000);

@@ -748,35 +748,32 @@ describe("documents service + routes", () => {
   it("concurrent identical (sha256, name) run publishes never double-insert or double-count", async () => {
     // Same content + same name from two racing publishes. The partial unique
     // index `(run_id, sha256, name) WHERE purpose = 'agent_output'` guarantees a
-    // single row and a single byte-count no matter which caller wins — the
-    // safety invariant asserted unconditionally below.
+    // single row and a single byte-count no matter which caller wins.
     //
-    // NOTE: which path the loser takes is timing-dependent: the fast-path SELECT
-    // may already see the winner (→ dedup 200), OR both may miss it and race on
-    // the insert (→ 23505). The latter recovery is currently BROKEN — see the
-    // report: `isUniqueViolation` (documents.ts) does not unwrap Drizzle's
-    // `DrizzleQueryError`, so a real concurrent-insert race rethrows the raw DB
-    // error instead of returning the dedup winner. The dedup-contract assertions
-    // below therefore run only when BOTH publishes resolved (the fast-path
-    // timing); the single-row / single-count invariant is always enforced.
+    // Which path the loser takes is timing-dependent: the fast-path SELECT may
+    // already see the winner (→ dedup 200), OR both may miss it and race on the
+    // insert (→ 23505). BOTH are now recovered: `isUniqueViolation`
+    // (documents.ts) walks the `cause` chain, so Drizzle's `DrizzleQueryError`
+    // wrapper no longer hides the PG code and the loser re-reads the winner's
+    // row instead of rethrowing. The dedup contract is therefore asserted
+    // UNCONDITIONALLY — a regression that reintroduces the rethrow fails here
+    // rather than silently skipping the assertions.
     const runId = await seedRunRow(scope);
-    const results = await Promise.allSettled([
+    const [r1, r2] = await Promise.all([
       publishStream(scope, runId, "same.txt", "identical-bytes"),
       publishStream(scope, runId, "same.txt", "identical-bytes"),
     ]);
 
-    // The DB unique index makes double-insert / double-count impossible either way.
+    // The DB unique index makes double-insert / double-count impossible.
     const rows = await db.select().from(documents).where(eq(documents.runId, runId));
     expect(rows).toHaveLength(1);
     expect(await orgBytesUsed(ctx.orgId)).toBe("identical-bytes".length);
 
-    // When the recovery works (fast-path timing), both resolve to the same row
-    // with exactly one fresh insert and one dedup.
-    if (results[0]!.status === "fulfilled" && results[1]!.status === "fulfilled") {
-      const [r1, r2] = [results[0].value, results[1].value];
-      expect(r1.row.id).toBe(r2.row.id);
-      expect(r1.deduped).not.toBe(r2.deduped);
-    }
+    // Both publishes resolve to the SAME row: exactly one fresh insert, exactly
+    // one dedup — whichever of the two paths the loser actually took.
+    expect(r1.row.id).toBe(r2.row.id);
+    expect(r1.row.id).toBe(rows[0]!.id);
+    expect([r1.deduped, r2.deduped].filter(Boolean)).toHaveLength(1);
   });
 
   it("GET /content: 403 for a member who is not the upload's creator, 200 for an agent_output", async () => {
@@ -1145,13 +1142,28 @@ describe("documents service + routes", () => {
     const runId = await seedRunRow(scope, { packageId: "@chain/race" });
     const { row: existing } = await publishStream(scope, runId, "before.txt", "before bytes");
 
-    const [, raced] = await Promise.all([
+    // Both legs start in the same tick — no `setTimeout` handicap. A sleep here
+    // would let the delete finish first whenever it happens to be fast, quietly
+    // degrading the "race" into a sequential case that proves nothing.
+    //
+    // The raced publish may legitimately fail (its run row is being deleted
+    // underneath it), so its rejection is captured rather than thrown — but it
+    // is captured with its identity intact and asserted on below, instead of
+    // being blanket-swallowed by `.catch(() => null)`.
+    const [, racedResult] = await Promise.allSettled([
       deletePackageRuns(scope, "@chain/race"),
-      (async () => {
-        await new Promise((r) => setTimeout(r, 5));
-        return publishStream(scope, runId, "during.txt", "during bytes").catch(() => null);
-      })(),
+      publishStream(scope, runId, "during.txt", "during bytes"),
     ]);
+    const raced = racedResult.status === "fulfilled" ? racedResult.value : null;
+    if (racedResult.status === "rejected") {
+      // Only a lost race is acceptable: the run vanished mid-publish. Any other
+      // failure (a bug in publishStream, a ReferenceError) must surface.
+      const reason = racedResult.reason as { status?: number; message?: string };
+      const text = `${reason?.message ?? ""}`;
+      expect(
+        reason?.status === 404 || reason?.status === 409 || /run|foreign key|not found/i.test(text),
+      ).toBe(true);
+    }
 
     // Whichever order won, the counter matches the surviving rows exactly.
     const surviving = await db.select().from(documents).where(eq(documents.orgId, ctx.orgId));
@@ -1319,6 +1331,33 @@ describe("documents service + routes", () => {
           sha256: "abc",
         }))(),
     ).rejects.toThrow();
+
+    // Pin the rejection to the CHECK under test. A bare `.toThrow()` also
+    // passes on an FK violation, a NOT NULL violation, or a renamed column —
+    // i.e. it would keep passing if the constraint were dropped entirely.
+    // Drizzle wraps the driver error, so the constraint name is on the cause.
+    let error: unknown;
+    try {
+      await db.insert(documents).values({
+        id: `doc_${crypto.randomUUID()}`,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        purpose: "agent_output",
+        runId,
+        chatSessionId: sessionId,
+        storageKey: "documents/x/y/z2.txt",
+        name: "z2.txt",
+        mime: "text/plain",
+        size: 3,
+        sha256: "abc",
+      });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeDefined();
+    const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+    const text = `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
+    expect(text).toContain("chk_documents_single_container");
   });
 
   it("createRun atomically records consumption links", async () => {

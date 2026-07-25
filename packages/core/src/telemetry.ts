@@ -77,7 +77,7 @@ export interface TelemetryProvider {
   recordStorageDeletionResult(attrs: { result: string }): void;
   recordDocumentCreated(attrs: { purpose: string }): void;
   recordDocumentDeleted(count: number): void;
-  recordDocumentQuotaRejection(): void;
+  recordDocumentStorageLimitRejection(): void;
   recordDocumentPartialPublication(): void;
   setQueueDepthSource(source: QueueDepthSource): void;
   /**
@@ -239,10 +239,10 @@ export function recordDocumentDeleted(count = 1): void {
  * (403 `storage_limit_exceeded`). Emitted from the single quota-assert seam
  * (`assertWithinOrgQuota`), which fires exactly once per logical rejection (the
  * pre-flight fast reject OR the `FOR UPDATE` re-check, never both). Feeds
- * `appstrate.documents.quota_rejections`.
+ * `appstrate.documents.storage_limit_rejections`.
  */
-export function recordDocumentQuotaRejection(): void {
-  provider?.recordDocumentQuotaRejection();
+export function recordDocumentStorageLimitRejection(): void {
+  provider?.recordDocumentStorageLimitRejection();
 }
 
 /**

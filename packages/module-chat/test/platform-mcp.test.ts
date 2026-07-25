@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { wrapRunAndWaitTool } from "../src/platform-mcp.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -56,7 +56,7 @@ async function collectRunAndWait(
 }
 
 describe("platform MCP run_and_wait wrapper", () => {
-  test("emits a preliminary run id, then the terminal run enriched with documents", async () => {
+  it("emits a preliminary run id, then the terminal run enriched with documents", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       const url = String(input);
@@ -132,7 +132,7 @@ describe("platform MCP run_and_wait wrapper", () => {
     ]);
   });
 
-  test("surfaces launch failures without polling", async () => {
+  it("surfaces launch failures without polling", async () => {
     const calls: string[] = [];
     const fetchImpl: typeof fetch = async (input) => {
       calls.push(String(input));
@@ -149,7 +149,7 @@ describe("platform MCP run_and_wait wrapper", () => {
     expect(calls).toHaveLength(1);
   });
 
-  test("splits connect links out of streamed step payloads (typed connectOffer)", async () => {
+  it("splits connect links out of streamed step payloads (typed connectOffer)", async () => {
     const url = "https://test.local/api/integrations/connect/start?token=SECRET";
     const responses = [
       jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" }),
@@ -205,7 +205,7 @@ describe("platform MCP run_and_wait wrapper", () => {
     expect(terminal.connectOffer).toEqual({ connect_url: url });
   });
 
-  test("validates arguments before dispatching", async () => {
+  it("validates arguments before dispatching", async () => {
     const fetchImpl: typeof fetch = async () => {
       throw new Error("should not fetch");
     };
