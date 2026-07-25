@@ -5,6 +5,174 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] — 2026-07-25
+
+Major release: the durable **documents** surface (URIs, storage enumeration +
+download presign, filename transport, RBAC resource, telemetry, the
+`publish_document` runtime tool) and a **module-contract cleanup** that removes
+two extension points with zero implementers and makes hook dispatch modes
+type-safe.
+
+> **Release ordering.** Everything published between `core@4.0.0` and this tag
+> shipped in the platform without a version bump — the surface below therefore
+> accumulated across several PRs. `cloud` read `PlatformServices.setDocumentStorageLimit`
+> through a structural cast with a silent degradation path (log once, then
+> no-op) because the dependency range never moved past `^4.0.0`, so per-plan
+> storage entitlements never applied. Bump every consumer (see
+> `scripts/check-consumer-versions.ts`) and drop that cast.
+
+### Added
+
+- **`@appstrate/core/document-uri`** (new subpath) — the shared vocabulary for
+  the durable document store: `DOCUMENT_URI_PREFIX`, `UPLOAD_URI_PREFIX`,
+  `DOCUMENT_ID_RE`, `UPLOAD_ID_RE`, `isDocumentUri()`, `isUploadUri()`,
+  `isAttachmentUri()`, `parseDocumentUri()`, `documentUri()`,
+  `extractDocumentIds()`, `extractDocumentIdsFromText()`.
+
+- **`@appstrate/core/storage`** — object enumeration + browser download.
+  `Storage.listObjects(bucket, prefix?)` yields `StorageObject`
+  (`{ key, size?, lastModified? }`) lazily, paginating internally (S3
+  ListObjectsV2 continuation tokens, filesystem recursive walk), for the
+  orphan-reconciliation operator tool. `Storage.createDownloadUrl(bucket, path,
+opts?)` returns a browser-usable GET URL (S3 presign with
+  `response-content-disposition` / `response-content-type` overrides via
+  `CreateDownloadUrlOptions`), or `null` when the backend cannot produce one.
+  `CreateUploadUrlOptions` gains `sha256` — a client-declared lowercase-hex
+  digest bound server-side (`x-amz-checksum-sha256` signed into the presigned
+  PUT; encoded into the proxy sink's signed token so the streamed bytes are
+  re-hashed). Both backends (`storage-s3`, `storage-fs`) implement all three.
+
+- **`@appstrate/core/naming`** — filename transport, shared because BOTH ends of
+  the run-to-platform document channel must apply the same rule (the API
+  sanitizes `X-Document-Name` into `documents.name`, which is part of the
+  `(run_id, sha256, name)` dedup identity, and the agent container has to
+  PREDICT that stored name): `MAX_FILENAME_LEN`, `sanitizeFilename()`,
+  `MAX_ENCODED_FILENAME_HEADER_LEN`, `encodeFilenameHeader()`,
+  `decodeFilenameHeader()`.
+
+- **`@appstrate/core/api-errors`** — `storageLimitExceeded()`,
+  `documentCountExceeded()`, `checksumMismatch()`, `uploadStagingLimitExceeded()`.
+
+- **`@appstrate/core/permissions`** — new core resource `documents`
+  (`"read" | "delete"`), added to `CoreResources` and `CORE_RESOURCE_NAMES`.
+  `read` gates the family the way `runs:read` gates runs; the per-document
+  container ACL stays the fine-grained layer.
+
+- **`@appstrate/core/telemetry`** — `StorageDeletionStats`,
+  `recordStorageDeletionSweep()`, `recordStorageDeletionResult()`,
+  `recordDocumentCreated()`, `recordDocumentDeleted()`,
+  `recordDocumentQuotaRejection()`, `recordDocumentPartialPublication()`.
+
+- **`@appstrate/core/runtime-tool-defs`** — the `publish_document` runtime tool:
+  `PublishedDocument`, `DocumentPublishedEvent`, `documentPublishedEvent()`,
+  `DocumentUploader`, `buildPublishDocumentDef(uploader)`. Unlike the pure event
+  emitters it performs an HTTP upload, so it is built with an injected uploader
+  in the runtime entrypoint rather than by `buildRuntimeToolDefs`.
+
+- **`@appstrate/core/run-and-wait-client`** — `RunAndWaitDocument`,
+  `fetchRunDocuments()`, `runAndWaitStepsWithDocuments()`.
+
+- **`@appstrate/core/chat-contract`** — `ChatAttachmentRequest` /
+  `ResolvedChatAttachment`: the plain-field shapes the chat module hands across
+  `ctx.services` so the platform materializes an `upload://` (or validates a
+  `document://`) server-side.
+
+- **`PlatformServices.resolveChatAttachment()`** — materialize/validate a chat
+  composer attachment into a stable `document://` URI.
+- **`PlatformServices.cleanupSessionDocuments(chatSessionId, tx?)`** —
+  detach-or-delete a deleted session's documents inside the caller's own
+  transaction, so the teardown and the `chat_sessions` delete commit atomically.
+- **`PlatformServices.setDocumentStorageLimit(orgId, bytes)`** — set/clear an
+  org's document-storage byte ceiling, enforced by the platform inside its own
+  document-write transaction.
+
+- **`@appstrate/core/module`** — `FirstMatchHooks` / `BroadcastHooks` /
+  `HOOK_DISPATCH_MODES` / `HookDispatchMode` (see Changed).
+
+### Changed (BREAKING)
+
+- **`ModuleHooks` is split by dispatch mode.** `ModuleHooks` is now
+  `FirstMatchHooks & BroadcastHooks`, and the new `HOOK_DISPATCH_MODES` table
+  (`satisfies Record<keyof ModuleHooks, HookDispatchMode>`) records the mode of
+  every hook name. Modules are unaffected — `hooks?: Partial<ModuleHooks>` is
+  unchanged — but the platform's dispatchers now accept only their own half.
+  Previously the mode was a property of the CALL SITE alone: `beforeSignup` is
+  broadcast to every module, yet nothing in the types stopped a future
+  `callHook("beforeSignup", …)` from silently skipping every signup gate but the
+  first, nor a `callAllHooks("beforeUsage", …)` from discarding every rejection.
+
+- **`ModulePermissionContribution` is now typed against `ModuleResources`.**
+  It distributes over the augmentation, so `resource` pins the legal `actions`
+  instead of both being `string`. A module contributing permissions MUST ship
+  its `declare module "@appstrate/core/permissions"` block — without it the type
+  resolves to `never`. Previously a typo produced a permission that type-checked
+  at the guard site but was never granted at boot: a permanent 403 with no
+  failing check anywhere.
+
+- **`LlmUsageLedgerRow.source`** is `"proxy" | "runner"` instead of `string` —
+  the same column was two different types in the same file, so a cursor consumer
+  lost exhaustiveness. Its documentation also now states that `"proxy"` covers
+  the in-process chat engine, which never traverses the proxy (distinguish a
+  chat turn by `contextType`, never by `source`).
+
+- **`SubscriptionChatModel.apiShape` / `ChatUsageRecord.apiShape`** are
+  `ModelApiShape` instead of `string`, and both `cost` fields are `ModelCost`
+  instead of a re-inlined structural copy whose JSDoc already claimed to be that
+  type.
+
+- **`RUNTIME_TOOL_CATALOG` no longer lists `report`; `SELECTABLE_RUNTIME_TOOLS`
+  gains `publish_document`.** `report` stays selectable at the manifest/runtime
+  boundary but is hidden from the editor — new agents publish `report.md` as a
+  document. `SELECTABLE_RUNTIME_TOOLS` is now composed from the new
+  `EVENT_EMITTER_RUNTIME_TOOLS` (`EventEmitterRuntimeTool`), which is the subset
+  `buildRuntimeToolDefs` can construct standalone. `schema/agent.schema.json`
+  accepts `publish_document` in `runtime_tools`.
+
+- **`BeforeUsageParams` (`context: "run"`) — `runningCount` semantics.** It is
+  now the PROJECTED in-flight count INCLUDING the run being admitted, so a
+  concurrency-aware gate no longer treats the first run as zero cost. Type
+  unchanged; a module's arithmetic must be reviewed.
+
+### Removed (BREAKING)
+
+Both removals are extension points with **zero implementers** across oss +
+`packages/module-*` + cloud. `scripts/verify-module-contract.ts` now audits hook
+and event names individually (not just the `hooks`/`events` contract members),
+so a re-added name with no owner fails the check instead of surviving a release.
+
+- **`ModuleHooks.afterRun` removed.** The post-run metadata patch (`(params:
+RunStatusChangeParams) => Promise<Record<string, unknown> | null>`, whose
+  result was persisted to `runs.metadata`). Its last consumer moved to sweeping
+  the `llm_usage` ledger by cursor. `RunStatusChangeParams` is unchanged and
+  still carries the same terminal payload — a module that needs the terminal
+  fact listens to `onRunStatusChange`, which now fires with exactly the params
+  `afterRun` received. The one capability lost is writing to `runs.metadata`;
+  nothing used it.
+
+- **`ModuleEvents.onUsageRecorded` + `UsageRecordedParams` removed.** The
+  per-row ledger broadcast was emitted on every `llm_usage` write and listened
+  to by nobody, while documenting a subtle contract (a `source:"runner"` row is
+  cumulative and re-fires under one stable id, so consumers had to
+  replace-by-id and never sum). The ledger is a PULL surface:
+  `PlatformServices.usage.list` / `usage.settledFrontier` sweep it by serial-`id`
+  cursor, which is what a consumer that must not miss spend had to use anyway.
+
+### Fixed
+
+- **`PlatformServices.usage.list` — documented row invisibility.** A remote run
+  metered through the inference proxy also carries the runner's cumulative
+  MIRROR row (`source` `"runner"`, `credentialSource` null); the service excludes
+  it on every read so the spend is not double-counted, and a consumer must NOT
+  re-apply the rule. The consequence is now stated: returned ids are not
+  contiguous, a batch is "the next `limit` VISIBLE rows after `afterId`", and an
+  empty batch therefore always means "caught up". `usage.settledFrontier()` is
+  computed over the same visible set.
+
+- **License neutrality in the published contract.** The Apache-2.0 module
+  contract named the proprietary `cloud` module six times in JSDoc and used
+  "Billing-neutral" / "plan/quota" / "over-quota" vocabulary. Identifiers were
+  already neutral; the comments now are too.
+
 ## [4.0.0] — 2026-07-21
 
 > **Release ordering.** This release bumps `@appstrate/afps-shared` to

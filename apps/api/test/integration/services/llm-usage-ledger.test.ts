@@ -4,46 +4,26 @@
  * `recordLlmUsage` — the single writer of the append-only `llm_usage` ledger
  * (`services/llm-usage-ledger.ts`). Every producer (inference proxy, agent
  * runner sink, subscription chat) inserts through it, so this locks down the
- * three behaviours they all rely on:
+ * two behaviours they all rely on:
  *
  *   1. the plain insert (proxy / chat) — returns the new serial id;
  *   2. the runner's two-level monotonic upsert against
  *      `uq_llm_usage_runner_run_id` — a higher cumulative cost wins, or an equal
  *      cost with a higher token total (so a zero-cost model still advances), a
  *      regressing write is a no-op that returns null, an exact duplicate re-emits
- *      nothing, and the token columns move with the snapshot;
- *   3. the `onUsageRecorded` broadcast — correct context/credential derivation,
- *      never the server-side-only `real_model` / `api`, and no event when the
- *      monotonic upsert did not write.
+ *      nothing, and the token columns move with the snapshot.
  *
  * The DB check constraint that forbids a row carrying BOTH a run and a chat
  * session (`llm_usage_context_single`) is asserted here too.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
-import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
-import type {
-  AppstrateModule,
-  ModuleInitContext,
-  UsageRecordedParams,
-} from "@appstrate/core/module";
 import { llmUsage, chatSessions } from "@appstrate/db/schema";
-
-/** Minimal init context — the fake module only needs its event handler invoked. */
-function fakeInitCtx(): ModuleInitContext {
-  return {
-    redisUrl: null,
-    appUrl: "http://localhost:3000",
-    getSendMail: async () => () => {},
-    getOrgAdminEmails: async () => [],
-    services: {} as ModuleInitContext["services"],
-  };
-}
 
 /** Row read-back helper: the full stored row for a ledger id. */
 async function rowById(id: number) {
@@ -298,198 +278,21 @@ describe("recordLlmUsage — runner monotonic upsert", () => {
     expect(row!.inputTokens).toBe(200);
     expect(row!.outputTokens).toBe(100);
   });
-});
 
-describe("recordLlmUsage — onUsageRecorded broadcast", () => {
-  let ctx: TestContext;
-  const events: UsageRecordedParams[] = [];
-
-  const observer: AppstrateModule = {
-    manifest: { id: "test-usage-observer", name: "Usage observer", version: "0.0.0" },
-    async init() {},
-    events: {
-      onUsageRecorded: (params) => {
-        events.push(params);
-      },
-    },
-  };
-
-  beforeEach(async () => {
-    await truncateAll();
-    events.length = 0;
-    resetModules();
-    await loadModulesFromInstances([observer], fakeInitCtx());
-    ctx = await createTestContext({ orgSlug: "ledgerevent" });
-    await seedAgent({ id: "@ledgerevent/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-  });
-
-  afterEach(() => {
-    resetModules();
-  });
-
-  // The producer void()s the emit (fire-and-forget) — flush the microtask/timer
-  // queue so the synchronous handler has certainly run before asserting.
-  async function flush() {
-    await new Promise((r) => setTimeout(r, 0));
-  }
-
-  it("emits with run context + credentialSource, and NEVER the server-side real_model/api", async () => {
-    const run = await seedRun({
-      packageId: "@ledgerevent/agent",
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
-      status: "success",
-    });
-    const id = await recordLlmUsage({
-      source: "proxy",
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-      runId: run.id,
-      model: "appstrate-medium",
-      realModel: "deepseek-chat-SECRET",
-      api: "openai-completions",
-      credentialSource: "system",
-      inputTokens: 100,
-      outputTokens: 50,
-      costUsd: 0.01,
-      requestId: "req_event_run",
-    });
-    await flush();
-
-    expect(events).toHaveLength(1);
-    const ev = events[0]!;
-    expect(ev.llmUsageId).toBe(id!);
-    expect(ev.orgId).toBe(ctx.orgId);
-    expect(ev.userId).toBe(ctx.user.id);
-    expect(ev.source).toBe("proxy");
-    expect(ev.contextType).toBe("run");
-    expect(ev.contextId).toBe(run.id);
-    expect(ev.credentialSource).toBe("system");
-    expect(ev.model).toBe("appstrate-medium");
-    expect(ev.costUsd).toBeCloseTo(0.01, 10);
-
-    // Hard guarantee: the backing binding never rides the module event.
-    expect(Object.keys(ev)).not.toContain("realModel");
-    expect(Object.keys(ev)).not.toContain("api");
-    expect(JSON.stringify(ev)).not.toContain("deepseek-chat-SECRET");
-    expect(JSON.stringify(ev)).not.toContain("openai-completions");
-  });
-
-  it("derives chat context for a chat-attributed row and null for an unattributed one", async () => {
-    await db.insert(chatSessions).values({
-      id: "chs_event_1",
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-    });
-    await recordLlmUsage({
-      source: "proxy",
-      orgId: ctx.orgId,
-      chatSessionId: "chs_event_1",
-      credentialSource: "org",
-      inputTokens: 5,
-      outputTokens: 5,
-      costUsd: 0.001,
-      requestId: "req_event_chat",
-    });
-    await recordLlmUsage({
-      source: "proxy",
-      orgId: ctx.orgId,
-      credentialSource: null,
-      inputTokens: 5,
-      outputTokens: 5,
-      costUsd: 0.001,
-      requestId: "req_event_bare",
-    });
-    await flush();
-
-    expect(events).toHaveLength(2);
-    const chatEv = events.find((e) => e.contextType === "chat")!;
-    expect(chatEv.contextId).toBe("chs_event_1");
-    const bareEv = events.find((e) => e.contextType === null)!;
-    expect(bareEv.contextId).toBeNull();
-    expect(bareEv.credentialSource).toBeNull();
-  });
-
-  it("does NOT emit when a runner-monotonic upsert loses the conflict (no row written)", async () => {
-    const run = await seedRun({
-      packageId: "@ledgerevent/agent",
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
-      status: "running",
-    });
-    const base = {
-      source: "runner" as const,
-      orgId: ctx.orgId,
-      runId: run.id,
-      credentialSource: "system" as const,
-    };
-
-    // First write inserts → one event.
-    await recordLlmUsage(
-      { ...base, inputTokens: 200, outputTokens: 100, costUsd: 0.5 },
-      { onConflict: "runner-monotonic" },
-    );
-    await flush();
-    expect(events).toHaveLength(1);
-
-    // A regressing write is a no-op (returns null) → the broadcast must NOT fire
-    // a second time (a cursor consumer would otherwise see a phantom event).
-    const lost = await recordLlmUsage(
-      { ...base, inputTokens: 1, outputTokens: 1, costUsd: 0.3 },
-      { onConflict: "runner-monotonic" },
-    );
-    await flush();
-    expect(lost).toBeNull();
-    expect(events).toHaveLength(1);
-  });
-
-  it("zero-cost runner row: an equal cost with a higher token total updates the row AND re-emits", async () => {
-    const run = await seedRun({
-      packageId: "@ledgerevent/agent",
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
-      status: "running",
-    });
-    const base = {
-      source: "runner" as const,
-      orgId: ctx.orgId,
-      runId: run.id,
-      credentialSource: "system" as const,
-    };
-
-    // A free / zero-rate model pins cost at 0 on every cumulative metric event.
+  it("zero-cost runner row: an equal cost with a higher token total still advances", async () => {
+    // A free / zero-rate model pins cost at 0 on every cumulative metric event,
+    // so a cost-only rule would freeze the token columns at their first values.
     const id1 = await recordLlmUsage(
-      {
-        ...base,
-        inputTokens: 100,
-        outputTokens: 50,
-        cacheReadTokens: 10,
-        cacheWriteTokens: 5,
-        costUsd: 0,
-      },
+      { ...runnerEntry(0, 100, 50), cacheReadTokens: 10, cacheWriteTokens: 5 },
       { onConflict: "runner-monotonic" },
     );
-    await flush();
     expect(typeof id1).toBe("number");
-    expect(events).toHaveLength(1);
 
-    // Same cost (still 0) but the cumulative token snapshot grew — the token
-    // tiebreak must advance the row (a cost-only rule would freeze the columns)
-    // and re-emit, consistent with a real change.
     const id2 = await recordLlmUsage(
-      {
-        ...base,
-        inputTokens: 200,
-        outputTokens: 100,
-        cacheReadTokens: 20,
-        cacheWriteTokens: 10,
-        costUsd: 0,
-      },
+      { ...runnerEntry(0, 200, 100), cacheReadTokens: 20, cacheWriteTokens: 10 },
       { onConflict: "runner-monotonic" },
     );
-    await flush();
     expect(id2).toBe(id1);
-    expect(events).toHaveLength(2);
 
     const row = await rowById(id1!);
     expect(row!.costUsd).toBeCloseTo(0, 10);
@@ -499,35 +302,16 @@ describe("recordLlmUsage — onUsageRecorded broadcast", () => {
     expect(row!.cacheWriteTokens).toBe(10);
   });
 
-  it("an exact duplicate (same cost AND same tokens) is a no-op that neither updates nor re-emits", async () => {
-    const run = await seedRun({
-      packageId: "@ledgerevent/agent",
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
-      status: "running",
-    });
-    const entry = {
-      source: "runner" as const,
-      orgId: ctx.orgId,
-      runId: run.id,
-      credentialSource: "system" as const,
-      inputTokens: 200,
-      outputTokens: 100,
-      costUsd: 0.5,
-    };
-
+  it("an exact duplicate (same cost AND same tokens) is a no-op that changes nothing", async () => {
+    const entry = runnerEntry(0.5, 200, 100);
     const id1 = await recordLlmUsage(entry, { onConflict: "runner-monotonic" });
-    await flush();
     expect(typeof id1).toBe("number");
-    expect(events).toHaveLength(1);
 
-    // Replaying the identical cumulative snapshot must change nothing and fire
-    // nothing — the idempotence cursor consumers rely on (strict inequalities on
-    // both cost and the token tiebreak).
+    // Replaying the identical cumulative snapshot must change nothing — the
+    // idempotence cursor consumers rely on (strict inequalities on both cost
+    // and the token tiebreak).
     const dup = await recordLlmUsage(entry, { onConflict: "runner-monotonic" });
-    await flush();
     expect(dup).toBeNull();
-    expect(events).toHaveLength(1);
 
     const row = await rowById(id1!);
     expect(row!.costUsd).toBeCloseTo(0.5, 10);

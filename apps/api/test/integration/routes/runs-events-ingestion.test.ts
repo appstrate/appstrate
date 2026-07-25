@@ -78,7 +78,7 @@ async function seedRunWithSink(
      * the row without usage (exercises the heuristic on purpose).
      */
     tokenUsage?: Record<string, number> | null;
-    /** Persisted on `runs.modelSource` — forwarded to the `afterRun` hook. */
+    /** Persisted on `runs.modelSource` — forwarded to the terminal broadcast. */
     modelSource?: string | null;
     /** Persisted on `runs.versionRef` — pins the manifest finalize validates against. */
     versionRef?: string;
@@ -1515,13 +1515,12 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 });
 
 // ---------------------------------------------------------------------------
-// `afterRun` hook contract — finalize MUST forward `runs.modelSource` so
-// module billing handlers can distinguish platform-paid (system) runs from
-// BYOK (org) runs. Skipping the field collapses every run to "system" in
-// cloud's `recordUsage` fallback and silently bills runs the platform was
-// never paid for.
+// Terminal broadcast contract — finalize MUST forward `runs.modelSource` so a
+// metering subscriber can distinguish platform-paid (system) runs from BYOK
+// (org) runs. Skipping the field collapses every run to "system" in a
+// subscriber's fallback and silently charges runs the platform never paid for.
 // ---------------------------------------------------------------------------
-describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () => {
+describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -1536,17 +1535,16 @@ describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () =>
     resetModules();
   });
 
-  async function captureAfterRunParams(): Promise<{
+  async function captureTerminalParams(): Promise<{
     captured: () => RunStatusChangeParams | null;
   }> {
     let last: RunStatusChangeParams | null = null;
     const mod: AppstrateModule = {
-      manifest: { id: "afterrun-spy", name: "After-Run Spy", version: "1.0.0" },
+      manifest: { id: "terminal-spy", name: "Terminal Spy", version: "1.0.0" },
       async init() {},
-      hooks: {
-        afterRun: async (params) => {
-          last = params;
-          return null;
+      events: {
+        onRunStatusChange: (params) => {
+          if (params.status !== "started") last = params;
         },
       },
     };
@@ -1560,8 +1558,8 @@ describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () =>
     return { captured: () => last };
   }
 
-  it("forwards runs.modelSource = 'system' to the afterRun hook", async () => {
-    const { captured } = await captureAfterRunParams();
+  it("forwards runs.modelSource = 'system' to the terminal broadcast", async () => {
+    const { captured } = await captureTerminalParams();
     const runId = await seedRunWithSink(ctx, "@test/hook-agent", { modelSource: "system" });
     const res = await postFinalize(runId, {
       status: "success",
@@ -1573,8 +1571,8 @@ describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () =>
     expect(captured()!.modelSource).toBe("system");
   });
 
-  it("forwards runs.modelSource = 'org' (BYOK) to the afterRun hook so cloud skips billing", async () => {
-    const { captured } = await captureAfterRunParams();
+  it("forwards runs.modelSource = 'org' (BYOK) so a metering subscriber can skip it", async () => {
+    const { captured } = await captureTerminalParams();
     const runId = await seedRunWithSink(ctx, "@test/hook-agent", { modelSource: "org" });
     const res = await postFinalize(runId, {
       status: "success",
@@ -1587,7 +1585,7 @@ describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () =>
   });
 
   it("omits modelSource when the run row has none (legacy / inline runs)", async () => {
-    const { captured } = await captureAfterRunParams();
+    const { captured } = await captureTerminalParams();
     const runId = await seedRunWithSink(ctx, "@test/hook-agent", { modelSource: null });
     const res = await postFinalize(runId, {
       status: "success",

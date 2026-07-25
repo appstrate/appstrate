@@ -4,6 +4,8 @@ import type { Hono } from "hono";
 import type { AppConfig } from "@appstrate/shared-types";
 import type {
   AppstrateModule,
+  BroadcastHooks,
+  FirstMatchHooks,
   ModelProviderDefinition,
   ModuleInitContext,
   ModuleHooks,
@@ -11,6 +13,7 @@ import type {
   AuthStrategy,
   ModulePermissionContribution,
 } from "@appstrate/core/module";
+import { HOOK_DISPATCH_MODES, type HookDispatchMode } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
   CORE_RESOURCE_NAMES,
@@ -494,23 +497,6 @@ export async function applyModuleFeatures(base: AppConfig): Promise<AppConfig> {
 // Agnostic hook system
 // ---------------------------------------------------------------------------
 
-/**
- * Call a named hook — returns the result from the FIRST module that
- * provides it, or `undefined` if no module provides it.
- *
- * **First-match-wins:** Modules are iterated in topological init order.
- * If the first module that provides a hook returns a value (including `null`),
- * subsequent modules are never consulted. Load order (determined by
- * `manifest.dependencies` topological sort) defines priority — modules with
- * no dependencies keep the order they appear in `MODULES`.
- *
- * Example: `MODULES=cloud,quota` — if both provide `beforeUsage`,
- * cloud runs first. To force ordering regardless of env order, add
- * `dependencies: ["cloud"]` on quota so the topo sort always places cloud
- * earlier.
- *
- * For broadcast-to-all semantics, use `emitEvent()` instead.
- */
 // Internal type: hooks/events objects cast to indexable records for dynamic dispatch.
 // The public types (ModuleHooks/ModuleEvents) are strict — this cast is only used
 // inside the loader where dispatch is inherently dynamic (by hook/event name).
@@ -520,10 +506,53 @@ type AnyHandler = (...args: any[]) => any;
 /** Unwrap the Promise return type of a hook. */
 type HookResult<K extends keyof ModuleHooks> = Awaited<ReturnType<ModuleHooks[K]>>;
 
-export async function callHook<K extends keyof ModuleHooks>(
+/**
+ * Refuse to dispatch a hook in a mode other than the one the contract pins for
+ * it (`HOOK_DISPATCH_MODES` in `@appstrate/core/module`).
+ *
+ * The type parameters below already make the mistake unrepresentable in typed
+ * code. This is the belt for the braces: a `as never` cast, a JS caller, or a
+ * hook renamed on one side only would otherwise turn a broadcast GATE into
+ * first-match-wins — every signup gate but the first silently skipped, failing
+ * open with no error anywhere. Throwing is correct: both dispatchers back
+ * security-relevant decisions, so an unclassifiable call must abort, never
+ * proceed in the wrong mode.
+ */
+function assertDispatchMode(name: keyof ModuleHooks, expected: HookDispatchMode): void {
+  const declared: HookDispatchMode | undefined = HOOK_DISPATCH_MODES[name];
+  if (declared !== expected) {
+    throw new Error(
+      `Hook "${name}" is declared "${declared ?? "unknown"}" in HOOK_DISPATCH_MODES but was ` +
+        `dispatched as "${expected}". Use ${
+          expected === "first-match" ? "callAllHooks()" : "callHook()"
+        } instead, or reclassify the hook in @appstrate/core/module.`,
+    );
+  }
+}
+
+/**
+ * Call a FIRST-MATCH-WINS hook ({@link FirstMatchHooks}) — returns the result
+ * from the FIRST module that provides it, or `undefined` if no module does.
+ *
+ * Modules are iterated in topological init order. If the first module that
+ * provides the hook returns a value (including `null`), subsequent modules are
+ * never consulted. Load order (`manifest.dependencies` topological sort)
+ * defines priority — modules with no dependencies keep the order they appear
+ * in `MODULES`.
+ *
+ * Example: `MODULES=admission,metering` — if both provide `beforeUsage`,
+ * `admission` runs first. To force ordering regardless of env order, add
+ * `dependencies: ["admission"]` on `metering` so the topo sort always places
+ * `admission` earlier.
+ *
+ * Broadcast hooks are NOT callable here (the signature rejects them): use
+ * {@link callAllHooks}. For side-effect-only fan-out, use {@link emitEvent}.
+ */
+export async function callHook<K extends keyof FirstMatchHooks>(
   name: K,
   ...args: Parameters<ModuleHooks[K]>
 ): Promise<HookResult<K> | undefined> {
+  assertDispatchMode(name, "first-match");
   for (const mod of _modules.values()) {
     const hook = (mod.hooks as Record<string, AnyHandler> | undefined)?.[name];
     if (hook) {
@@ -534,17 +563,22 @@ export async function callHook<K extends keyof ModuleHooks>(
 }
 
 /**
- * Broadcast a hook to EVERY loaded module (vs {@link callHook}'s
- * first-match-wins). For the rare hooks whose semantics are "every module
- * participates" — currently `beforeSignup` / `afterSignup`, where the cloud
- * free-tier gate AND the OIDC per-client signup policy both must run on each
- * signup. Errors PROPAGATE (unlike {@link emitEvent}): a throwing
- * `beforeSignup` aborts user creation, which is the gate's whole purpose.
+ * Broadcast a {@link BroadcastHooks} hook to EVERY loaded module (vs
+ * {@link callHook}'s first-match-wins). These are the gates whose semantics are
+ * "every module participates" — `beforeSignup` / `afterSignup`, where a
+ * metering module's free-tier gate AND the OIDC per-client signup policy both
+ * must run on each signup. Errors PROPAGATE (unlike {@link emitEvent}): a
+ * throwing `beforeSignup` aborts user creation, which is the gate's whole
+ * purpose.
+ *
+ * First-match hooks are NOT callable here (the signature rejects them):
+ * broadcasting `beforeUsage` would discard every rejection but the last.
  */
-export async function callAllHooks<K extends keyof ModuleHooks>(
+export async function callAllHooks<K extends keyof BroadcastHooks>(
   name: K,
   ...args: Parameters<ModuleHooks[K]>
 ): Promise<void> {
+  assertDispatchMode(name, "broadcast");
   for (const mod of _modules.values()) {
     const hook = (mod.hooks as Record<string, AnyHandler> | undefined)?.[name];
     if (hook) await hook(...args);

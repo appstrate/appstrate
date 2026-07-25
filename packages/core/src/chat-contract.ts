@@ -16,6 +16,13 @@
  * apps/api ↔ module-chat through `ctx.services` only.
  */
 
+// Type-only imports (erased at emit), so the `module.ts` ↔ `chat-contract.ts`
+// pair carries no runtime cycle. Both symbols are the canonical, already
+// published ones — re-declaring them here is what let the chat surface drift
+// from the model-provider surface it mirrors.
+import type { ModelCost } from "./module.ts";
+import type { ModelApiShape } from "./sidecar-types.ts";
+
 /**
  * A subscription (oauth2) model resolved for one chat turn: the real upstream
  * binding + a fresh access token. Everything the Pi SDK needs to build its
@@ -26,11 +33,11 @@ export interface SubscriptionChatModel {
   /** Real upstream model id (e.g. `claude-haiku-4-5`) — NOT the preset id. */
   modelId: string;
   /** Pi `MODEL_API` shape (`anthropic-messages`, `openai-codex-responses`, …). */
-  apiShape: string;
+  apiShape: ModelApiShape;
   /** Provider upstream base URL (`https://api.anthropic.com`, `https://chatgpt.com/backend-api`). */
   baseUrl: string;
-  /** Per-token cost ({@link ModelCost} shape), or `null` when the catalog has none. */
-  cost: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null;
+  /** Per-1M-token catalog rates, or `null` when the catalog has none. */
+  cost: ModelCost | null;
   contextWindow: number | null;
   maxTokens: number | null;
   reasoning: boolean;
@@ -105,19 +112,19 @@ export interface ChatUsageRecord {
   /** Real upstream model id — stored as `llm_usage.real_model`. */
   modelId: string;
   /** Pi `MODEL_API` shape — stored as `llm_usage.api`. */
-  apiShape: string;
+  apiShape: ModelApiShape;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens?: number | null;
   cacheWriteTokens?: number | null;
   /**
-   * Model's catalog per-token pricing ({@link SubscriptionChatModel.cost}
-   * shape), or null when the catalog has none. The platform seam computes the
-   * equivalent USD cost from this + the token counts using the SAME shared
-   * formula as the proxy/runner paths — the chat engine passes rates, not a
-   * pre-computed dollar figure, so all three producers can't drift.
+   * Model's catalog per-1M-token rates, or null when the catalog has none. The
+   * platform seam computes the equivalent USD cost from this + the token counts
+   * using the SAME shared formula as the proxy/runner paths — the chat engine
+   * passes rates, not a pre-computed dollar figure, so all three producers
+   * can't drift.
    */
-  cost: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null;
+  cost: ModelCost | null;
   durationMs: number;
 }
 

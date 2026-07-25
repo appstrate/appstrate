@@ -12,7 +12,7 @@
  *                                   → ordering buffer → AppstrateEventSink.handle
  *                                   → sequence counter advance
  *   - {@link finalizeRun}   — terminal RunResult → flush buffer → close
- *                                   sink → afterRun / onRunStatusChange hooks
+ *                                   sink → onRunStatusChange broadcast
  *
  * Invariant: `appendRunLog()` and status-lifecycle updates have **exactly one**
  * caller chain, rooted here. `AppstrateEventSink.handle()` is instantiated
@@ -39,7 +39,6 @@ import {
   recordDocumentPartialPublication,
 } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
-import { emitUsageRecorded } from "./llm-usage-ledger.ts";
 import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
@@ -52,9 +51,9 @@ import { actorFromIds } from "../lib/actor.ts";
 import { getRunEffectiveAgent } from "./run-effective-agent.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
-import type { RunStatusChangeParams, UsageRecordedParams } from "@appstrate/core/module";
+import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import { gone } from "@appstrate/core/api-errors";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
@@ -143,7 +142,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
   // observability/billing. `RunSinkContext.packageId` is typed as a non-null
   // string, so a raw `row as RunSinkContext` cast would smuggle a runtime null
   // past every finalize consumer (getRunEffectiveAgent, memory/pinned persistence,
-  // afterRun / onRunStatusChange hook params) — silently skipping finalization
+  // onRunStatusChange event params) — silently skipping finalization
   // side-effects for a deleted-agent run. Recover the agent's `@scope/name`
   // from the INSERT-time snapshot (stamped precisely for this deleted-agent
   // case) so finalize still runs with a stable identity; fall back to a neutral
@@ -287,12 +286,11 @@ async function ingestInner(
  *   4. Build the result payload (`{ output }`) mirroring the legacy
  *      platform shape; consumers of `runs.result` get the same structure
  *      whether the run executed in-process or came from a remote runner.
- *   5. Fire the `afterRun` hook to collect module-provided metadata (billing,
- *      usage quotas, ...).
- *   6. CAS-update the run row (status, result, cost, metadata,
- *      sink_closed_at). Idempotent: zero rows affected = already finalized.
- *   7. Persist memories + checkpoint into the unified store + terminal log rows.
- *   8. Emit `onRunStatusChange` (modules react asynchronously).
+ *   5. Build the terminal params shared by the CAS and the broadcast.
+ *   6. CAS-update the run row (status, result, cost, sink_closed_at).
+ *      Idempotent: zero rows affected = already finalized.
+ *   7. Persist memories + checkpoint into the unified store + terminal log
+ *      rows, then emit `onRunStatusChange` (modules react asynchronously).
  *
  * Idempotent by CAS on `sink_closed_at IS NULL`: concurrent finalize retries
  * from HttpSink end up applying once.
@@ -524,14 +522,12 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // loses the value the moment `isRunning` flips to false.
   const resolvedDurationMs = result.durationMs ?? now.getTime() - run.startedAt.getTime();
 
-  // 5. afterRun hook — the hook SHOULD be idempotent (callers may retry on
-  //    transient failures) so it runs before the CAS. Any metadata it
-  //    returns is included atomically in the same UPDATE.
-  // Forward `runs.model_source` so the `afterRun` hook can distinguish
-  // platform-paid runs (system models) from BYOK runs (org models) without
-  // a re-query. Cloud's billing handler keys credit recording on this —
-  // omitting the field made it silently bill every run as `"system"`.
-  const hookParams: RunStatusChangeParams = {
+  // 5. Terminal params shared by the CAS below and the `onRunStatusChange`
+  //    broadcast in step 7. Forwarding `runs.model_source` lets a subscriber
+  //    tell platform-paid runs (system models) from BYOK runs (org models)
+  //    without a re-query — a metering subscriber keys its recording on it,
+  //    and omitting the field made it treat every run as `"system"`.
+  const terminalParams: RunStatusChangeParams = {
     orgId: run.orgId,
     runId: run.id,
     packageId: run.packageId,
@@ -542,16 +538,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     ...(cost > 0 ? { cost } : {}),
     ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
   };
-  let metadata: Record<string, unknown> | null = null;
-  try {
-    metadata = (await callHook("afterRun", hookParams)) ?? null;
-  } catch (err) {
-    logger.error("afterRun hook failed on remote run finalize", {
-      runId: run.id,
-      err: getErrorMessage(err),
-    });
-  }
-
   // 6. CAS close — single gate for all subsequent side effects. Concurrent
   //    finalize retries (platform synthesis vs container POST) hit the same
   //    row; the CAS lets exactly one proceed.
@@ -598,7 +584,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         tokenUsage: preserveLastKnownUsage
           ? sql`COALESCE(${runs.tokenUsage}, ${JSON.stringify({ input_tokens: 0, output_tokens: 0 })}::jsonb)`
           : validatedUsage,
-        ...(metadata ? { metadata } : {}),
       })
       .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`))
       .returning({ id: runs.id });
@@ -767,8 +752,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     });
   }
 
-  // 8. Status-change broadcast with the enriched params (including
-  //    validation-failure errors and any afterRun metadata). Fired BEFORE the
+  // 7. Status-change broadcast with the enriched params (including
+  //    validation-failure errors). Fired BEFORE the
   //    notification fan-out so the multi-row INSERT can never sit between the
   //    CAS close and the broadcast — the broadcast is what updates the UI and
   //    fires webhooks, so it must not wait on bell bookkeeping.
@@ -782,7 +767,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   if (errorMessage) broadcastExtra.error = errorMessage;
   if (resultToPersist && status === "success") broadcastExtra.result = resultToPersist;
   const broadcastParams: RunStatusChangeParams = {
-    ...hookParams,
+    ...terminalParams,
     ...(Object.keys(broadcastExtra).length > 0 ? { extra: broadcastExtra } : {}),
   };
   void emitEvent("onRunStatusChange", broadcastParams);
@@ -815,9 +800,9 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
  *
  *   - `POST /api/runs/:id/cancel` — user-triggered cancellation. Without
  *     this convergence, the cancel route used to write `status='cancelled'`
- *     directly and the `afterRun` hook never fired — billing modules
- *     observed zero charge for cancelled runs that had already burned LLM
- *     tokens (issue #12 follow-up).
+ *     directly and the terminal ledger barrier + `onRunStatusChange`
+ *     broadcast never ran — metering subscribers observed zero charge for
+ *     cancelled runs that had already burned LLM tokens (issue #12 follow-up).
  *   - `listOrphanRunIds` + boot loop — runs that were `running` when the
  *     server crashed are finalised here so billing/observability hooks see
  *     the exact same lifecycle as a clean termination.
@@ -1022,10 +1007,6 @@ async function persistEventAndAdvance(
   // event's CAS would tolerate without retrying the dropped one.
   const scope = { orgId: run.orgId, applicationId: run.applicationId };
   const firstEvent = run.lastEventSequence === 0;
-  // Ledger `onUsageRecorded` events written inside the transaction below are
-  // collected here and broadcast only AFTER the commit — emitting inline would
-  // announce a row a rollback erases (a phantom event).
-  const pendingUsage: UsageRecordedParams[] = [];
   const claimed = await db.transaction(async (tx) => {
     const rows = await tx
       .update(runs)
@@ -1043,7 +1024,6 @@ async function persistEventAndAdvance(
     await persistRunEvent(tx, scope, run.id, event, {
       writeLedger: true,
       modelSource: run.modelSource,
-      deferEmit: (usageEvent) => pendingUsage.push(usageEvent),
     });
 
     // No runner emits `run.started`, so flip status → running on the
@@ -1077,12 +1057,6 @@ async function persistEventAndAdvance(
   }
 
   run.lastEventSequence = sequence;
-
-  // Post-commit broadcast of any `onUsageRecorded` event the ledger write
-  // collected inside the transaction above. Deferred to here so a rolled-back
-  // ledger row can never fire a phantom event; the CAS committed, so the row is
-  // now durable.
-  for (const usageEvent of pendingUsage) emitUsageRecorded(usageEvent);
 
   // Emit `run.started` for remote-origin runs at the moment the DB
   // actually transitions pending → running (the first ingested event).

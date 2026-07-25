@@ -5,8 +5,9 @@
  * (`success | failed | timeout | cancelled`) must flow through `finalizeRun`
  * (or `synthesiseFinalize`, which calls it). Without this invariant, a
  * future regression that reintroduces a direct `db.update(runs).set({
- * status: 'cancelled' })` would silently bypass the `afterRun` hook and
- * skip billing — exactly the bug this whole PR fixes.
+ * status: 'cancelled' })` would silently bypass the terminal pipeline — the
+ * `llm_usage` cost aggregation, the ledger settlement barrier and the
+ * `onRunStatusChange` broadcast — exactly the bug this whole PR fixes.
  *
  * The test grep-walks `apps/api/src/**` and fails if a `runs` UPDATE that
  * sets a terminal status appears in any file other than the canonical
@@ -138,7 +139,7 @@ describe("finalize convergence — static guard", () => {
             snippet: hit.window.slice(0, 200),
             reason:
               "UPDATE on `runs` writes a terminal status outside the convergence allowlist. " +
-              "Route the transition through `synthesiseFinalize` so `afterRun` (billing) fires.",
+              "Route the transition through `synthesiseFinalize` so the terminal pipeline runs.",
           });
         }
       }
@@ -163,7 +164,7 @@ describe("finalize convergence — static guard", () => {
         .map((v) => `\n  ${v.file}:${v.line}\n    → ${v.reason}\n    snippet: ${v.snippet}`)
         .join("\n");
       throw new Error(
-        `Found ${violations.length} convergence violation(s). Every terminal-status transition on \`runs\` MUST flow through \`finalizeRun\` so the \`afterRun\` hook fires for billing/observability:${report}`,
+        `Found ${violations.length} convergence violation(s). Every terminal-status transition on \`runs\` MUST flow through \`finalizeRun\` so cost settlement + the terminal broadcast happen:${report}`,
       );
     }
 

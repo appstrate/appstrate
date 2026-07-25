@@ -9,6 +9,7 @@ import {
   registerModuleRoutes,
   applyModuleFeatures,
   callHook,
+  callAllHooks,
   hasHook,
   emitEvent,
   shutdownModules,
@@ -23,7 +24,22 @@ import type {
   ModuleInitContext,
   AuthStrategy,
 } from "@appstrate/core/module";
+import { HOOK_DISPATCH_MODES } from "@appstrate/core/module";
 import type { AppConfig } from "@appstrate/shared-types";
+
+// The fictitious resources these tests contribute. `ModulePermissionContribution`
+// is now typed against this augmentation, so a test module can no longer invent
+// a resource the type system has never heard of — the same guard a real module
+// gets. Deliberately-invalid inputs below are cast, which is exactly the point:
+// reaching them now requires opting out of the types.
+declare module "@appstrate/core/permissions" {
+  interface ModuleResources {
+    tasks: "read" | "write";
+    internal: "sweep";
+    "module-billing": "view";
+    shared: "read";
+  }
+}
 
 function mockModule(id: string, overrides: Partial<AppstrateModule> = {}): AppstrateModule {
   return {
@@ -237,39 +253,105 @@ describe("module-loader", () => {
       expect(hasHook("beforeSignup")).toBe(false);
     });
 
-    it("callHook('afterRun') returns the metadata patch from the first matching module", async () => {
-      const mod = mockModule("billing", {
-        hooks: { afterRun: async () => ({ creditsUsed: 42 }) },
-      });
-      await loadModulesFromInstances([mod], mockCtx());
-
-      const result = await callHook("afterRun", {
-        orgId: "o",
-        runId: "r",
-        packageId: "a",
-        applicationId: "app",
-        status: "success",
-        cost: 0.05,
-        duration: 1234,
-        modelSource: "system",
-      });
-      expect(result).toEqual({ creditsUsed: 42 });
-    });
-
-    it("callHook('afterRun') returns undefined when no module provides the hook", async () => {
+    it("callHook returns undefined when no module provides the hook", async () => {
       await loadModulesFromInstances([], mockCtx());
 
-      const result = await callHook("afterRun", {
+      const result = await callHook("beforeUsage", {
         orgId: "o",
-        runId: "r",
+        context: "run",
         packageId: "a",
-        applicationId: "app",
-        status: "success",
-        cost: 0,
-        duration: 100,
-        modelSource: null,
+        runningCount: 1,
       });
       expect(result).toBeUndefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Dispatch-mode integrity.
+  //
+  // A hook's dispatch mode used to be a property of the CALL SITE alone:
+  // `beforeSignup` is a gate EVERY module must get to veto, but nothing
+  // stopped a `callHook("beforeSignup", …)` from silently skipping every
+  // module after the first — a security control failing open with no error.
+  // The types now reject that; these tests pin the runtime half, which is
+  // what an untyped caller (a cast, plain JS) would hit.
+  // ---------------------------------------------------------------------
+  describe("hook dispatch mode", () => {
+    // Erase the name/arg typing exactly the way a JS caller or a stale,
+    // un-recompiled call site would — the signatures already reject these
+    // calls, so this is the only way to reach the runtime guard.
+    type UntypedDispatch = (name: string, ...args: unknown[]) => Promise<unknown>;
+    const untypedCallHook = callHook as unknown as UntypedDispatch;
+    const untypedCallAllHooks = callAllHooks as unknown as UntypedDispatch;
+
+    it("classifies every hook exactly once, matching its contract half", () => {
+      expect(HOOK_DISPATCH_MODES).toEqual({
+        beforeUsage: "first-match",
+        beforeSignup: "broadcast",
+        afterSignup: "broadcast",
+      });
+    });
+
+    it("callHook REFUSES a broadcast hook instead of silently skipping modules", async () => {
+      const first = mock(async () => {});
+      const second = mock(async () => {});
+      await loadModulesFromInstances(
+        [
+          mockModule("gate-a", { hooks: { beforeSignup: first } }),
+          mockModule("gate-b", { hooks: { beforeSignup: second } }),
+        ],
+        mockCtx(),
+      );
+
+      await expect(untypedCallHook("beforeSignup", "user@example.com")).rejects.toThrow(
+        /declared "broadcast".*dispatched as "first-match"/s,
+      );
+      // The load-bearing assertion: the second gate was never bypassed,
+      // because nothing ran at all.
+      expect(first).toHaveBeenCalledTimes(0);
+      expect(second).toHaveBeenCalledTimes(0);
+    });
+
+    it("callAllHooks REFUSES a first-match hook instead of discarding rejections", async () => {
+      await loadModulesFromInstances(
+        [mockModule("gate", { hooks: { beforeUsage: async () => null } })],
+        mockCtx(),
+      );
+
+      await expect(
+        untypedCallAllHooks("beforeUsage", {
+          orgId: "o",
+          context: "run",
+          packageId: "a",
+          runningCount: 1,
+        }),
+      ).rejects.toThrow(/declared "first-match".*dispatched as "broadcast"/s);
+    });
+
+    it("callAllHooks runs EVERY module's broadcast gate", async () => {
+      const calls: string[] = [];
+      await loadModulesFromInstances(
+        [
+          mockModule("gate-a", {
+            hooks: {
+              beforeSignup: async () => {
+                calls.push("a");
+              },
+            },
+          }),
+          mockModule("gate-b", {
+            hooks: {
+              beforeSignup: async () => {
+                calls.push("b");
+              },
+            },
+          }),
+        ],
+        mockCtx(),
+      );
+
+      await callAllHooks("beforeSignup", "user@example.com");
+      expect(calls).toEqual(["a", "b"]);
     });
   });
 
@@ -366,8 +448,8 @@ describe("module-loader", () => {
       // No module-provided hooks. Core does not use the module hook system
       // for its own logic, so this strictly reflects the module surface.
       expect(hasHook("beforeUsage")).toBe(false);
-      expect(hasHook("afterRun")).toBe(false);
       expect(hasHook("beforeSignup")).toBe(false);
+      expect(hasHook("afterSignup")).toBe(false);
 
       // emitEvent is a silent no-op when no module listens — no handlers run
       // and no error propagates.
@@ -547,8 +629,11 @@ describe("module-loader", () => {
 
     it("rejects redefining a core resource (e.g. agents)", async () => {
       const mod = mockModule("rogue", {
+        // Cast: `agents` is a CORE resource, so it is absent from
+        // `ModuleResources` and the type already refuses it. The runtime guard
+        // must refuse it too, for a module that opted out of the types.
         permissionsContribution: () => [
-          { resource: "agents", actions: ["pwn"], grantTo: ["owner"] },
+          { resource: "agents", actions: ["pwn"], grantTo: ["owner"] } as never,
         ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
@@ -578,8 +663,9 @@ describe("module-loader", () => {
 
     it("rejects malformed resource name", async () => {
       const mod = mockModule("tasks", {
+        // Cast: an un-augmented / mis-cased name no longer type-checks.
         permissionsContribution: () => [
-          { resource: "Tasks", actions: ["read"], grantTo: ["owner"] },
+          { resource: "Tasks", actions: ["read"], grantTo: ["owner"] } as never,
         ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
@@ -589,8 +675,9 @@ describe("module-loader", () => {
 
     it("rejects malformed action name", async () => {
       const mod = mockModule("tasks", {
+        // Cast: `READ` is not one of the actions `tasks` declares.
         permissionsContribution: () => [
-          { resource: "tasks", actions: ["READ"], grantTo: ["owner"] },
+          { resource: "tasks", actions: ["READ" as never], grantTo: ["owner"] },
         ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
