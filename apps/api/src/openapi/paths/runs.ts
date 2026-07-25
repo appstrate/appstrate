@@ -179,7 +179,8 @@ export const runsPaths = {
           },
         },
         "402": {
-          description: "Quota exceeded (Cloud only)",
+          description:
+            "Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -528,7 +529,8 @@ export const runsPaths = {
           },
         },
         "402": {
-          description: "Quota exceeded (Cloud only)",
+          description:
+            "Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1176,7 +1178,8 @@ export const runsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "402": {
-          description: "Quota exceeded (Cloud only)",
+          description:
+            "Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

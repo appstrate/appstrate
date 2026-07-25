@@ -28,6 +28,21 @@ import { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
 import type { ChatTranslate, UploadFile } from "./runtime-context.ts";
 import { stageComposerFile } from "./upload.ts";
 
+/**
+ * Map an upload rejection to its composer message key. The org storage quota
+ * and the staging budget are the only two the user can act on (free space, or
+ * wait for staged uploads to be consumed); everything else stays generic.
+ */
+function uploadFailureKey(err: unknown): string {
+  const code =
+    typeof err === "object" && err !== null && "code" in err
+      ? (err as { code?: unknown }).code
+      : undefined;
+  if (code === "storage_limit_exceeded") return "upload.storageLimit";
+  if (code === "upload_staging_limit_exceeded") return "upload.stagingLimit";
+  return "upload.failed";
+}
+
 export function createChatAttachmentAdapter(deps: {
   upload: UploadFile;
   t: ChatTranslate;
@@ -56,10 +71,13 @@ export function createChatAttachmentAdapter(deps: {
       let uri: string;
       try {
         uri = await stageComposerFile(upload, attachment.file);
-      } catch {
+      } catch (err) {
         // The host uploader's message is technical (status codes, English) and
         // ends up in the composer chip — surface the translated one instead.
-        throw new Error(t("upload.failed"));
+        // Two rejections ARE actionable by the user, so they keep their own
+        // wording; `code` is read structurally to avoid depending on the host's
+        // error class.
+        throw new Error(t(uploadFailureKey(err)));
       }
       return {
         ...attachment,

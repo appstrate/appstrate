@@ -4,6 +4,8 @@
   "doc.downloadOf": "Télécharger {{name}}",
   "upload.tooLarge": "Fichier trop volumineux ({{max}} Mo maximum).",
   "upload.failed": "Échec de l'envoi du fichier.",
+  "upload.storageLimit": "Espace de stockage insuffisant pour cette organisation.",
+  "upload.stagingLimit": "Trop d'envois en attente. Réessayez dans quelques minutes.",
   "run.fallbackLabel": "Run",
   "run.starting": "Lancement",
   "run.running": "Exécution en cours",

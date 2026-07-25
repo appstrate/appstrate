@@ -29,7 +29,9 @@ input          = max(0, prompt_tokens − cacheRead − cacheWrite)
 
 `prompt_tokens` is the TOTAL prompt in every dialect (OpenAI `cached_tokens ⊂ prompt_tokens`; DeepSeek `prompt_tokens = hit + miss`; OpenRouter additionally folds `cache_write_tokens` into `cached_tokens`), so both cache buckets are carved back out of `input`. Anthropic's wire fields are already disjoint and map 1:1. Parity is enforced by `apps/api/test/unit/llm-proxy-usage-parity.test.ts`, which also fails if the installed pi-ai stops matching the transcribed formula.
 
-Every count is floored at zero at the adapter boundary (`helpers.tokenCount`, and the same clamp in `recordChatUsage`): a negative count would produce a negative `cost_usd` that SUBTRACTS from the run's cost and from the corresponding debit. There is **no CHECK constraint** on `llm_usage.cost_usd` — the floor is application-side only.
+Every count is floored at zero at the adapter boundary (`helpers.tokenCount`, and the same clamp in `recordChatUsage`): a negative count would produce a negative `cost_usd` that SUBTRACTS from the run's cost and from the corresponding debit. That application-side floor is backed by two DB constraints — `llm_usage_cost_usd_non_negative` and `runs_cost_non_negative` (migration `0029`) — so a write path that bypasses `recordLlmUsage` fails loudly instead of silently crediting an org.
+
+Both constraints validate pre-existing rows when they are added. On an instance carrying a historical negative row the boot migration aborts, by design: a negative cost is a billing error that must surface at deploy time rather than keep subtracting. Check before deploying with `SELECT count(*) FROM llm_usage WHERE cost_usd < 0;` and `SELECT count(*) FROM runs WHERE cost < 0;` — both must return 0.
 
 ## Every paid call reaches the ledger
 
@@ -70,6 +72,5 @@ The predicate is applied by **all three** ledger reads — `computeRunCost`, `li
 ## Known trade-offs (deferred)
 
 - **Float precision**: `runs.cost`, `llm_usage.cost_usd` and `credential_proxy_usage.cost_usd` are `doublePrecision` (IEEE-754). Summing many sub-cent per-call costs accumulates rounding drift, so `runs.cost` can disagree with a re-summation by sub-cent amounts — relevant because `cloud/` bills off this data. Migrating to `numeric` is the correct fix but is a **cross-repo change**: `postgres.js` returns `numeric` as a **string**, so every read site (here + the private `cloud/` module) must parse it, in lockstep.
-- **No `cost_usd >= 0` CHECK**: the non-negativity of token counts is enforced in application code only. A DB-level `CHECK (cost_usd >= 0)` would make it structural.
 - **Lossless late runner snapshot**: dropping the single-row unique index and inserting post-settlement deltas as new rows would bill them instead of refusing them (see _Post-settlement immutability_).
 - **`source` enum**: a third value (e.g. `chat`) would remove the labelling inaccuracy of the in-process chat producer.
