@@ -464,7 +464,9 @@ function applyLayout(win: BaseWindow): void {
   const bounds = win.getContentBounds();
   const activeTab = tabManager?.activeTabId();
   const activeRecord = activeTab ? tabManager?.get(activeTab) : undefined;
-  const banner = activeRecord?.humanRequest !== undefined;
+  // ANY waiting agent raises the bar, not just the one in front: it is the
+  // only surface a person sees when the browser panel is closed.
+  const banner = tabManager?.list().some((tab) => tab.human_request !== undefined) === true;
   const framed = activeRecord?.owner.kind === "run";
   const layout = calculateDesktopLayout(bounds.width, bounds.height, activePane, { banner });
   navView.setBounds(layout.chrome);
@@ -584,6 +586,15 @@ function registerNavIpc(): void {
       tabManager?.activate(tabId);
     } catch (err) {
       _debugLog(`[ipc] tabs:select failed: ${err}\n`);
+    }
+  });
+  ipcMain.handle("tabs:reveal", (_evt, tabId: string): void => {
+    if (typeof tabId !== "string") return;
+    try {
+      tabManager?.activate(tabId);
+      if (activePane === "webapp") setActivePane("split");
+    } catch (err) {
+      _debugLog(`[ipc] tabs:reveal failed: ${err}\n`);
     }
   });
   ipcMain.handle("tabs:close", (_evt, tabId: string): void => {
@@ -903,15 +914,10 @@ function startBridgeFor(instance: string): BridgeClient | null {
     },
     tabs: tabManager,
     onHumanRequest: (tabId, message): void => {
-      // Bring the surface the person is being asked about to the front,
-      // open the browser panel if it was closed, and tell them — the
-      // window is usually in the background when this fires.
-      try {
-        tabManager?.activate(tabId);
-      } catch {
-        // tab vanished between request and surfacing
-      }
-      if (activePane === "webapp") setActivePane("split");
+      // Deliberately NOT stealing the view: the hand-back bar spans both
+      // panes, so the request is visible without hijacking what the
+      // person is doing. They click "Voir" when they are ready. A system
+      // notification covers the window being in the background.
       const agent = tabManager?.get(tabId)?.owner;
       const who = agent?.kind === "run" ? (agent.agentName ?? "An agent") : "An agent";
       void notify(`${who} needs you`, message);

@@ -24,8 +24,11 @@ export type ViewMode = "webapp" | "split" | "browser";
  * through it.
  */
 export function chromeHeight(mode: ViewMode, banner = false): number {
-  if (mode === "webapp") return CHROME_HEIGHT;
-  return CHROME_HEIGHT + TAB_STRIP_HEIGHT + (banner ? BANNER_HEIGHT : 0);
+  // The hand-back bar counts in EVERY mode: it sits above both panes so a
+  // waiting agent stays visible with the browser panel closed.
+  const bar = banner ? BANNER_HEIGHT : 0;
+  if (mode === "webapp") return CHROME_HEIGHT + bar;
+  return CHROME_HEIGHT + TAB_STRIP_HEIGHT + bar;
 }
 
 export interface ViewBounds {

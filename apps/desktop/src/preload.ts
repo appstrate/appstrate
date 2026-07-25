@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld("appstrate", {
   listTabs: (): Promise<TabSummary[]> => ipcRenderer.invoke("tabs:list"),
   newTab: (): Promise<void> => ipcRenderer.invoke("tabs:new"),
   selectTab: (tabId: string): Promise<void> => ipcRenderer.invoke("tabs:select", tabId),
+  /** Open the browser panel AND bring this tab up — used by the hand-back bar. */
+  revealTab: (tabId: string): Promise<void> => ipcRenderer.invoke("tabs:reveal", tabId),
   closeTab: (tabId: string): Promise<void> => ipcRenderer.invoke("tabs:close", tabId),
   resumeTab: (tabId: string): Promise<void> => ipcRenderer.invoke("tabs:resume", tabId),
   onTabsChanged: (cb: (tabs: TabSummary[]) => void): void => {

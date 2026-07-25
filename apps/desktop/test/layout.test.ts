@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { calculateDesktopLayout, toggleBrowserFocus, togglePanel } from "../src/layout.ts";
+import {
+  calculateDesktopLayout,
+  insetForAgent,
+  toggleBrowserFocus,
+  togglePanel,
+} from "../src/layout.ts";
 
 describe("desktop layout", () => {
   it("keeps both surfaces full-sized when the browser panel is closed", () => {
@@ -31,6 +36,25 @@ describe("desktop layout", () => {
   it("hides the tab strip row while only the webapp shows", () => {
     expect(calculateDesktopLayout(1200, 800, "webapp").chrome.height).toBe(44);
     expect(calculateDesktopLayout(1200, 800, "split").chrome.height).toBe(76);
+  });
+
+  it("makes room for the hand-back bar in EVERY mode", () => {
+    // A waiting agent must stay visible with the browser panel closed,
+    // so the bar is not part of the browser chrome.
+    expect(calculateDesktopLayout(1200, 800, "webapp", { banner: true }).chrome.height).toBe(84);
+    expect(calculateDesktopLayout(1200, 800, "split", { banner: true }).chrome.height).toBe(116);
+    expect(calculateDesktopLayout(1200, 800, "browser", { banner: true }).webapp.y).toBe(116);
+  });
+
+  it("frames an agent-driven surface without shrinking a user tab", () => {
+    const layout = calculateDesktopLayout(1200, 800, "browser");
+    expect(insetForAgent(layout.browser, false)).toEqual(layout.browser);
+    expect(insetForAgent(layout.browser, true)).toEqual({
+      x: 3,
+      y: 79,
+      width: 1194,
+      height: 718,
+    });
   });
 
   it("opens and closes the panel without conflating browser focus", () => {
