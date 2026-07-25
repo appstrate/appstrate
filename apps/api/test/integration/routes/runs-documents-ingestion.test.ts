@@ -299,5 +299,42 @@ describe("POST /api/runs/:runId/documents — agent-output ingestion", () => {
       );
       expect(res.status).toBe(401);
     });
+
+    it("refuses a replayed webhook-id — one signed header set, one upload", async () => {
+      const runId = await seedRun(ctx);
+      // The HMAC covers an EMPTY body, so a captured header set would otherwise
+      // authenticate an unbounded number of DIFFERENT bodies inside the
+      // timestamp tolerance — each one a new document (distinct sha256 defeats
+      // the (run, sha256, name) dedup), spending the org quota and the run's
+      // document budget. Claiming the webhook-id makes the header set
+      // single-use, matching what body-signing gives the /events path.
+      const captured = docHeaders(RUN_SECRET, "first.txt");
+
+      const first = await postDoc(runId, captured, "original bytes");
+      expect(first.status).toBe(201);
+      const firstId = ((await first.json()) as { id: string }).id;
+
+      // Same headers, DIFFERENT bytes and name — the shape the body-less
+      // signature cannot distinguish.
+      const replay = await postDoc(
+        runId,
+        { ...captured, "X-Document-Name": "smuggled.txt" },
+        "attacker bytes",
+      );
+      expect(replay.status).toBe(409);
+      expect((await replay.json()) as { code: string }).toMatchObject({
+        code: "message_replayed",
+      });
+
+      // Exactly one document exists, and the quota moved exactly once.
+      const rows = await db.select().from(documents).where(eq(documents.runId, runId));
+      expect(rows.map((r) => r.id)).toEqual([firstId]);
+      expect(await orgBytesUsed(ctx.orgId)).toBe("original bytes".length);
+
+      // A fresh msgId (what the runtime uploader signs on every attempt — see
+      // runtime-pi/publish.ts) is unaffected.
+      const retry = await postDoc(runId, docHeaders(RUN_SECRET, "second.txt"), "more bytes");
+      expect(retry.status).toBe(201);
+    });
   });
 });

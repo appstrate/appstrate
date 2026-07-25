@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { documents, organizations, runs, uploads, storageDeletionJobs } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
@@ -276,9 +276,17 @@ describe("documents hardening — cross-phase interactions", () => {
 
     // Simulate the backoff window elapsing (the periodic worker would wake once
     // next_attempt_at passes) so the parked jobs are due again — no sleep.
+    //
+    // `sql\`now()\``, NOT `new Date()`: the claim predicate is
+    // `next_attempt_at <= now()` evaluated by POSTGRES, while `new Date()` is the
+    // app clock. Any skew where the DB clock trails the app clock (routinely the
+    // case under Docker Desktop on macOS) leaves the jobs "not yet due", the
+    // second pass claims nothing, and the test fails — or, worse, passes by luck.
+    // The service itself never mixes the two (`dbClockDeadline`, `sql\`now()\``);
+    // the test must not either.
     await db
       .update(storageDeletionJobs)
-      .set({ nextAttemptAt: new Date() })
+      .set({ nextAttemptAt: sql`now()` })
       .where(isNull(storageDeletionJobs.completedAt));
 
     // Second pass: the flaky counter is past its failure budget → all succeed.

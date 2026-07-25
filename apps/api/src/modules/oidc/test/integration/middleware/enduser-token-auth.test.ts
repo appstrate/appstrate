@@ -496,4 +496,131 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     // Strategy returns null (membership check fails) → 401.
     expect(res.status).toBe(401);
   });
+
+  // -------------------------------------------------------------------------
+  // `documents:read` over OIDC
+  //
+  // The documents read routes are gated on `documents:read`. An OIDC token's
+  // permissions are derived from its SCOPES, so the scope has to be in the
+  // requestable vocabulary (`OIDC_ALLOWED_SCOPES`, which also feeds
+  // `APPSTRATE_BUILTIN_SCOPES` → discovery `scopes_supported`) or every OIDC
+  // caller loses document access outright — including `run_and_wait`'s
+  // document enrichment, which is best-effort and would silently return an
+  // EMPTY list rather than an error.
+  // -------------------------------------------------------------------------
+
+  /** Publish an `agent_output` document on a fresh run in the given app. */
+  async function seedRunDocument(opts: { endUserId?: string } = {}): Promise<{
+    runId: string;
+    docId: string;
+  }> {
+    const { runs } = await import("@appstrate/db/schema");
+    const { createDocumentFromStream } = await import("../../../../../services/documents.ts");
+    const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await db.insert(runs).values({
+      id: runId,
+      orgId,
+      applicationId,
+      status: "success",
+      endUserId: opts.endUserId ?? null,
+    });
+    const { row } = await createDocumentFromStream(
+      { orgId, applicationId },
+      runId,
+      { userId: null, endUserId: opts.endUserId ?? null },
+      null,
+      {
+        name: "deliverable.txt",
+        mime: "text/plain",
+        body: new Blob([new TextEncoder().encode("oidc deliverable")]).stream(),
+      },
+    );
+    return { runId, docId: row.id };
+  }
+
+  async function addDashboardMembership(role: "admin" | "member" = "admin"): Promise<void> {
+    const { organizationMembers } = await import("@appstrate/db/schema");
+    await db.insert(organizationMembers).values({ userId: authUserId, orgId, role });
+  }
+
+  it("dashboard token carrying documents:read reads the org's documents", async () => {
+    await addDashboardMembership();
+    const { docId } = await seedRunDocument();
+
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "admin",
+      email: "stage3@example.com",
+      scope: "openid documents:read",
+    });
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "X-Application-Id": applicationId,
+    };
+
+    const list = await app.request("/api/documents", { headers });
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { data: Array<{ id: string }> };
+    expect(body.data.map((d) => d.id)).toContain(docId);
+
+    const one = await app.request(`/api/documents/${docId}`, { headers });
+    expect(one.status).toBe(200);
+
+    const content = await app.request(`/api/documents/${docId}/content`, { headers });
+    expect(content.status).toBe(200);
+    expect(await content.text()).toBe("oidc deliverable");
+  });
+
+  it("dashboard token without documents:read is refused on every read route", async () => {
+    await addDashboardMembership();
+    const { docId } = await seedRunDocument();
+
+    // A token that requested a DIFFERENT, legitimate scope: the caller is a
+    // real org admin (whose role grants `documents:read`), so only the token's
+    // scope set stands between it and the documents — which is exactly the
+    // property the gate is supposed to have.
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "admin",
+      email: "stage3@example.com",
+      scope: "openid runs:read",
+    });
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "X-Application-Id": applicationId,
+    };
+
+    for (const path of [
+      "/api/documents",
+      `/api/documents/${docId}`,
+      `/api/documents/${docId}/content`,
+    ]) {
+      const res = await app.request(path, { headers });
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it("end-user token carrying documents:read reads its own run's document", async () => {
+    const { docId } = await seedRunDocument({ endUserId });
+
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      application_id: applicationId,
+      email: "stage3@example.com",
+      scope: "openid runs:read documents:read",
+    });
+    const res = await app.request(`/api/documents/${docId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Application-Id": applicationId,
+      },
+    });
+    expect(res.status).toBe(200);
+  });
 });

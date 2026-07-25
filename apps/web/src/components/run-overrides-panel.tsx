@@ -12,7 +12,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { uploadClient } from "../api/uploads";
+import { useUploadClient } from "../hooks/use-upload";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
@@ -115,6 +115,7 @@ export function RunOverridesPanel({
   const { data: orgProxies } = useProxies();
   const { data: registry } = useProvidersRegistry();
   const labels = useSchemaFormLabels();
+  const upload = useUploadClient();
 
   // Local form state for the SchemaForm. Initialised with the resolved
   // config the user would otherwise run with (persisted ∪ current
@@ -241,7 +242,7 @@ export function RunOverridesPanel({
             <SchemaForm
               wrapper={wrapper}
               formData={configValues}
-              upload={uploadClient}
+              upload={upload}
               labels={labels}
               onChange={(e) => setConfigForm(e.formData as Record<string, unknown>)}
             />

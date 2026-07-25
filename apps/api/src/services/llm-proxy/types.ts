@@ -37,17 +37,27 @@ export function buildLlmProxyPrincipal(args: {
  * buckets are DISJOINT and billed independently —
  * `input×input_rate + output×output_rate + cacheRead×cacheRead_rate +
  * cacheWrite×cacheWrite_rate`. `inputTokens` is therefore the cache-MISS input
- * only; it MUST NOT include the cache-read tokens. Anthropic's wire fields are
- * already disjoint (`input_tokens` excludes `cache_read_input_tokens`), but
- * OpenAI-compatible `prompt_tokens` includes the cache reads (OpenAI:
- * `cached_tokens ⊂ prompt_tokens`; DeepSeek: `prompt_tokens = hit + miss`), so
- * the openai adapter subtracts them out before populating this field.
+ * only; it MUST NOT include the cache-read or cache-write tokens. Anthropic's
+ * wire fields are already disjoint (`input_tokens` excludes
+ * `cache_read_input_tokens` and `cache_creation_input_tokens`), but
+ * OpenAI-compatible `prompt_tokens` is the TOTAL prompt (OpenAI:
+ * `cached_tokens ⊂ prompt_tokens`; DeepSeek: `prompt_tokens = hit + miss`;
+ * OpenRouter additionally folds `cache_write_tokens` into `cached_tokens`), so
+ * the openai adapter subtracts both cache buckets out before populating this
+ * field — using the SAME formula as the runner's pi-ai parser, so the two
+ * ingestion paths price identical consumption identically.
+ *
+ * Every count is non-negative: adapters read wire numbers through
+ * `helpers.tokenCount`, which floors at 0 so a misbehaving upstream cannot
+ * produce a negative `cost_usd`.
  */
 export interface UpstreamUsage {
-  /** Cache-MISS input tokens only — excludes `cacheReadTokens` (see above). */
+  /** Cache-MISS input tokens only — excludes both cache buckets (see above). */
   inputTokens: number;
   outputTokens: number;
+  /** Set only when the provider reported a cache-read count. */
   cacheReadTokens?: number;
+  /** Set only when the provider reported a cache-write count. */
   cacheWriteTokens?: number;
 }
 
@@ -64,6 +74,19 @@ export interface LlmProxyAdapter {
   readonly apiShape: string;
   /** Build the upstream request headers (auth + protocol-specific). */
   buildUpstreamHeaders(incoming: Headers, apiKey: string): Record<string, string>;
+  /**
+   * Mutate the outgoing request body so the upstream is REQUIRED to report
+   * usage — the accounting counterpart of {@link parseJsonUsage} /
+   * {@link parseSseUsage}. The core calls it on every forwarded request, for
+   * every preset (system and org-owned alike): an unreported usage is a paid
+   * call the ledger cannot price, so it must never depend on the caller SDK
+   * asking nicely.
+   *
+   * Omitted by protocols that always report usage (anthropic-messages). Adding
+   * a fifth apiShape therefore means implementing — or not implementing — this
+   * hook on the new adapter; the core never branches on `apiShape`.
+   */
+  forceUsageReporting?(body: Record<string, unknown>): void;
   /** Extract usage from a non-streaming JSON body. Returns null if the shape is unexpected. */
   parseJsonUsage(body: unknown): UpstreamUsage | null;
   /** Extract usage from a streamed SSE payload. Returns null if none was observed. */

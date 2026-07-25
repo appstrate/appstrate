@@ -5,18 +5,18 @@ const storageDeletionJobSchema = {
   required: [
     "id",
     "bucket",
-    "storageKey",
+    "storage_key",
     "reason",
     "attempts",
-    "nextAttemptAt",
-    "completedAt",
-    "lastError",
+    "next_attempt_at",
+    "completed_at",
+    "last_error",
     "createdAt",
   ],
   properties: {
     id: { type: "string", example: "sdj_0c9f…" },
     bucket: { type: "string", example: "documents" },
-    storageKey: {
+    storage_key: {
       type: "string",
       description: "In-bucket object key (no bucket prefix).",
       example: "app_abc/doc_def/report.pdf",
@@ -29,9 +29,9 @@ const storageDeletionJobSchema = {
         "materialization_failed).",
     },
     attempts: { type: "integer", description: "Delete attempts made so far." },
-    nextAttemptAt: { type: "string", format: "date-time" },
-    completedAt: { type: ["string", "null"], format: "date-time" },
-    lastError: { type: ["string", "null"] },
+    next_attempt_at: { type: "string", format: "date-time" },
+    completed_at: { type: ["string", "null"], format: "date-time" },
+    last_error: { type: ["string", "null"] },
     createdAt: { type: "string", format: "date-time" },
   },
 } as const;
@@ -43,10 +43,14 @@ export const adminStorageDeletionPaths = {
       tags: ["Admin"],
       summary: "List storage-deletion outbox jobs",
       description:
-        "Platform-admin only (`AUTH_PLATFORM_ADMIN_EMAILS`). Lists jobs from the transactional " +
-        "storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = " +
-        "pending jobs past the dead-letter attempt threshold (still retrying — the threshold is " +
-        "a visibility line, not an abandon point).",
+        "Platform-operator surface. Requires an authentic first-party dashboard SESSION whose " +
+        "realm is `platform` AND whose email is in `AUTH_PLATFORM_ADMIN_EMAILS`; API keys and " +
+        "OIDC-issued bearer tokens are refused outright, whatever their scopes. Lists jobs from " +
+        "the transactional storage-deletion outbox, newest-first, keyset-paginated on " +
+        "`(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold " +
+        "(still retrying — the threshold is a visibility line, not an abandon point). The " +
+        "listing is instance-global: rows carry the bucket + in-bucket key of objects belonging " +
+        "to ANY organization. Rate-limited to 60/min.",
       parameters: [
         {
           name: "status",
@@ -61,25 +65,31 @@ export const adminStorageDeletionPaths = {
           schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
         },
         {
-          name: "cursor",
+          name: "startingAfter",
           in: "query",
           required: false,
           schema: { type: "string" },
-          description: "Opaque cursor — the `nextCursor` returned by a prior page.",
+          description:
+            "Cursor — the `id` of the last job of the previous page. Follow the RFC 5988 " +
+            '`Link: <…>; rel="next"` response header instead of building it by hand.',
         },
       ],
       responses: {
         "200": {
           description: "A page of storage-deletion jobs.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            Link: { $ref: "#/components/headers/Link" },
+          },
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["items", "nextCursor"],
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  items: { type: "array", items: storageDeletionJobSchema },
-                  nextCursor: { type: ["string", "null"] },
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: storageDeletionJobSchema },
+                  hasMore: { type: "boolean" },
                 },
               },
             },
@@ -88,6 +98,7 @@ export const adminStorageDeletionPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
@@ -97,8 +108,10 @@ export const adminStorageDeletionPaths = {
       tags: ["Admin"],
       summary: "Retry a storage-deletion job now",
       description:
-        "Platform-admin only. Resets a pending job's `next_attempt_at` to now so the next worker " +
-        "pass retries it immediately. No-op (404) on a completed or unknown job.",
+        "Same platform-operator session gate as the listing above (session + `platform` realm + " +
+        "allowlisted email). Resets a pending job's `next_attempt_at` to now so the next worker " +
+        "pass retries it immediately. No-op (404) on a completed or unknown job. " +
+        "Rate-limited to 30/min.",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       responses: {
         "200": {
@@ -120,6 +133,7 @@ export const adminStorageDeletionPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },

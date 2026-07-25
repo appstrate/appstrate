@@ -73,7 +73,7 @@ let processAnomaly: Counter | undefined;
 let storageDeletionResult: Counter | undefined;
 let documentsCreated: Counter | undefined;
 let documentsDeleted: Counter | undefined;
-let documentsQuotaRejections: Counter | undefined;
+let documentsStorageLimitRejections: Counter | undefined;
 let documentsPartialPublications: Counter | undefined;
 
 // Last-value snapshot of the storage-deletion outbox backlog, pushed by the
@@ -291,7 +291,7 @@ function createInstruments(m: Meter): void {
   }).addCallback((result) => result.observe(storageDeletionDeadLetters));
 
   // Documents lifecycle counters (documents-hardening). Created/deleted track
-  // the durable-document population churn; quota_rejections + partial_publications
+  // the durable-document population churn; storage_limit_rejections + partial_publications
   // are the health signals (a write refused for want of quota; a run that lost a
   // deliverable at finalize). `purpose` on `created` is a 2-value dimension
   // (agent_output|user_upload) — bounded, no clamp needed.
@@ -301,9 +301,12 @@ function createInstruments(m: Meter): void {
   documentsDeleted = m.createCounter("appstrate.documents.deleted", {
     description: "Count of document rows removed (explicit delete, teardown, or retention GC).",
   });
-  documentsQuotaRejections = m.createCounter("appstrate.documents.quota_rejections", {
-    description: "Count of writes rejected for overrunning the org storage limit (403).",
-  });
+  documentsStorageLimitRejections = m.createCounter(
+    "appstrate.documents.storage_limit_rejections",
+    {
+      description: "Count of writes rejected for overrunning the org storage limit (403).",
+    },
+  );
   documentsPartialPublications = m.createCounter("appstrate.documents.partial_publications", {
     description:
       "Count of runs finalized with a partial artifacts summary (a deliverable was lost).",
@@ -532,9 +535,9 @@ export function recordDocumentDeleted(count: number): void {
   documentsDeleted?.add(count);
 }
 
-export function recordDocumentQuotaRejection(): void {
+export function recordDocumentStorageLimitRejection(): void {
   if (!enabled) return;
-  documentsQuotaRejections?.add(1);
+  documentsStorageLimitRejections?.add(1);
 }
 
 export function recordDocumentPartialPublication(): void {
@@ -612,7 +615,7 @@ export async function _resetObservabilityForTesting(): Promise<void> {
   storageDeletionResult = undefined;
   documentsCreated = undefined;
   documentsDeleted = undefined;
-  documentsQuotaRejections = undefined;
+  documentsStorageLimitRejections = undefined;
   documentsPartialPublications = undefined;
   queueDepthProvider = null;
 }

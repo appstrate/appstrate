@@ -98,7 +98,7 @@ export async function resolveSubscriptionChatModel(
     subscription: true,
     model: {
       modelId: resolved.modelId ?? presetId,
-      apiShape: resolved.apiShape ?? provider.apiShape,
+      apiShape: resolved.apiShape,
       baseUrl: resolved.baseUrl ?? provider.defaultBaseUrl,
       cost: resolved.cost ?? null,
       contextWindow: resolved.contextWindow ?? null,
@@ -121,8 +121,32 @@ export async function resolveSubscriptionChatModel(
  * `credentialSource="org"`. Cost is derived here from the token counts + the
  * model's catalog rates with the shared `computeTokenCost` formula — the same
  * source and arithmetic as the proxy/runner rows.
+ *
+ * KNOWN LABELLING GAP — `source: "proxy"` is inaccurate for this producer. The
+ * turn runs on the IN-PROCESS Pi engine and never traverses `/api/llm-proxy/*`,
+ * but `llm_usage.source` is a two-value enum (`proxy | runner`) documented to
+ * modules as "the inference proxy or the agent runner", and the settled
+ * predicate keys off `source <> 'runner'`. A third value is a DB enum change +
+ * migration + core contract change, all outside this file's remit. `proxy` is
+ * the correct choice among the two available: the row IS immutable at insert
+ * (settled immediately), which is exactly what the predicate needs. The
+ * attribution that actually matters downstream — `chat_session_id`,
+ * `credential_source` — is exact.
  */
 export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
+  // Floor every count at zero: a negative token count would yield a negative
+  // `cost_usd`, which SUBTRACTS from the org's ledger (nothing re-checks the
+  // sign downstream). Same guard as the proxy adapters' `tokenCount`.
+  const inputTokens = Math.max(0, record.inputTokens);
+  const outputTokens = Math.max(0, record.outputTokens);
+  const cacheReadTokens =
+    record.cacheReadTokens === undefined || record.cacheReadTokens === null
+      ? null
+      : Math.max(0, record.cacheReadTokens);
+  const cacheWriteTokens =
+    record.cacheWriteTokens === undefined || record.cacheWriteTokens === null
+      ? null
+      : Math.max(0, record.cacheWriteTokens);
   try {
     await recordLlmUsageReliably(
       {
@@ -134,16 +158,16 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         realModel: record.modelId,
         api: record.apiShape,
         credentialSource: "org",
-        inputTokens: record.inputTokens,
-        outputTokens: record.outputTokens,
-        cacheReadTokens: record.cacheReadTokens ?? null,
-        cacheWriteTokens: record.cacheWriteTokens ?? null,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
         costUsd: computeTokenCost(
           {
-            input_tokens: record.inputTokens,
-            output_tokens: record.outputTokens,
-            cache_read_input_tokens: record.cacheReadTokens ?? 0,
-            cache_creation_input_tokens: record.cacheWriteTokens ?? 0,
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            cache_read_input_tokens: cacheReadTokens ?? 0,
+            cache_creation_input_tokens: cacheWriteTokens ?? 0,
           },
           record.cost,
         ),
@@ -167,11 +191,20 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  * Chat admission gate — the chat-surface entry into the `beforeUsage` hook.
  *
  * The chat module calls this for its non-subscription (built-in / API-key)
- * branch before starting a turn. The gate decides system-provided vs. org-owned
- * SERVER-SIDE (`isSystemModel` on the chosen preset) so the module stays dumb:
- *   - org's own API-key model → never gated (returns null immediately);
- *   - system-provided model → dispatch `beforeUsage` (chat context). A rejection
- *     flows back for the module to surface as an RFC 9457 problem response.
+ * branch before starting a turn. The gate resolves system-provided vs. org-owned
+ * SERVER-SIDE (`isSystemModel` on the chosen preset) so the chat module stays
+ * dumb — it has no model-registry access — but that resolution is REPORTED as
+ * the `credentialSource` fact, not used to pre-filter:
+ *
+ *   - every turn dispatches `beforeUsage` (chat context) with
+ *     `credentialSource` + `executionPlane`; a rejection flows back for the
+ *     module to surface as an RFC 9457 problem response.
+ *   - a turn on the org's own credential reports `credentialSource: "org"`. The
+ *     platform no longer declares it free and skips the hook: a chat turn always
+ *     runs inside the platform's own process, so the platform funds its compute
+ *     even when it funds no inference. A module that meters only
+ *     platform-supplied inference quotes that turn at zero and admits it — same
+ *     outcome as the old early return, but decided by the module.
  *
  * Returns null when no module provides the hook (OSS mode allows everything).
  */
@@ -180,13 +213,18 @@ export async function checkUsageAllowed(args: {
   presetId: string;
   sessionId: string | null;
 }): Promise<UsageRejection | null> {
-  // An org's own model spends the org's own credential — never platform-metered.
-  if (!isSystemModel(args.presetId)) return null;
   if (!hasHook("beforeUsage")) return null;
   const rejection = await callHook("beforeUsage", {
     orgId: args.orgId,
     context: "chat",
     sessionId: args.sessionId,
+    // A chat turn resolves its model on the platform before admission, so the
+    // credential source is always determinable here (never `null`, unlike a
+    // remote-origin run).
+    credentialSource: isSystemModel(args.presetId) ? "system" : "org",
+    // A turn executes in the platform's own process — never on a
+    // caller-supplied host.
+    executionPlane: "platform",
   });
   return rejection ?? null;
 }

@@ -29,6 +29,7 @@ import {
 } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
 const SYSTEM_PRESET = "system-proxy-test";
@@ -75,8 +76,9 @@ async function buildHarness(): Promise<Harness> {
     orgId: ctx.orgId,
     type: "agent",
   });
-  // Remote origin — the run shape this admission seam exists for. Platform
-  // runs are admitted once at preflight and skip the proxy-side hook.
+  // Remote origin — the run shape that MOST obviously needs this seam (it
+  // resolves its model off-platform). Platform-origin runs are gated here too;
+  // see the borrowed-run bypass test below.
   const run = await seedRun({
     packageId: pkg.id,
     orgId: ctx.orgId,
@@ -171,14 +173,32 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
         context: "run",
         packageId: "@system/proxy-agent",
         runningCount: 1,
+        // The seam only runs for a resolved system preset, so the call being
+        // admitted is platform-funded inference whatever the run declared.
+        credentialSource: "system",
+        // Remote origin — the platform funds no compute for this run.
+        executionPlane: "remote",
+        // The proxy holds no manifest: "contribute no compute component here",
+        // never a guessed duration (which would double-count).
+        timeoutSeconds: null,
       },
     ]);
   });
 
-  it("does not re-dispatch beforeUsage for a platform-origin run (already gated at preflight)", async () => {
-    // Same rejecting module as the remote-run 402 test — but the run is
-    // platform-origin, so the proxy admission must NOT gate it a second time:
-    // the call reaches upstream and the hook records zero dispatches.
+  it("refuses the quota bypass that borrows a live platform run's X-Run-Id", async () => {
+    // The bypass: an org past its quota (every new run/turn rejected) stamps
+    // `X-Run-Id` of a still-alive platform-origin, system-model run onto raw
+    // proxy calls. `assertRunAttributable` only binds an API-key principal to
+    // org + application, so ANY key of the app can borrow ANY live run — and
+    // the proxy used to skip admission entirely for that run shape, buying
+    // unbounded platform-paid spend until the borrowed run expired.
+    //
+    // The run LAUNCH the preflight gate admitted and a raw proxy call are two
+    // different billable units (the launch's inference goes through the
+    // sidecar and never reaches this route), so the call gets gated here. The
+    // preflight quote is also issued exactly once while the number of proxy
+    // calls attachable to that run id is unbounded, and the org's balance moves
+    // during the run — a launch-time verdict would be stale by now.
     const h = await buildHarness();
     const platformRun = await seedRun({
       packageId: "@system/proxy-agent",
@@ -202,16 +222,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     let upstreamHit = false;
     globalThis.fetch = (async () => {
       upstreamHit = true;
-      return new Response(
-        JSON.stringify({
-          id: "c1",
-          object: "chat.completion",
-          model: "upstream-system-model",
-          choices: [{ index: 0, message: { role: "assistant", content: "ok" } }],
-          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
+      return new Response("must not be called", { status: 599 });
     }) as unknown as typeof fetch;
 
     const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
@@ -223,12 +234,36 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
       }),
     });
 
-    expect(res.status).toBe(200);
-    expect(upstreamHit).toBe(true);
-    expect(calls).toHaveLength(0);
+    expect(res.status).toBe(402);
+    expect(upstreamHit).toBe(false);
+    // …and gated EXACTLY once for the one call — no double dispatch on the
+    // legitimate path either.
+    expect(calls).toEqual([
+      {
+        orgId: h.ctx.orgId,
+        context: "run",
+        packageId: "@system/proxy-agent",
+        runningCount: 2,
+        // The seam only runs for a resolved system preset, so the call is
+        // platform-funded inference whatever the RUN declared (`model_source`
+        // is "system" here, but it is not read).
+        credentialSource: "system",
+        // Platform-origin run → the platform hosts the compute.
+        executionPlane: "platform",
+        // …but this seam owns no compute: that run's compute was quoted at its
+        // own preflight. `null` = "contribute no compute component here".
+        timeoutSeconds: null,
+      },
+    ]);
   });
 
-  it("dispatches beforeUsage for platform runs that were not system-admitted at preflight", async () => {
+  it("dispatches beforeUsage for BYOK and model-source-less platform runs too", async () => {
+    // Gating is independent of the referenced run's persisted `model_source`:
+    // the seam never reads it. A platform BYOK run (or a legacy/unresolved row)
+    // was admitted at preflight with a ZERO model component — correct, since
+    // its own inference spends the org's credential — so attaching that active
+    // run id to a raw SYSTEM-preset proxy request would otherwise launder
+    // platform-funded inference through a run quoted at zero.
     const h = await buildHarness();
     const byokRun = await seedRun({
       packageId: "@system/proxy-agent",
@@ -276,20 +311,82 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     }
 
     expect(upstreamHits).toBe(0);
-    expect(calls).toEqual([
+    // Platform origin → `executionPlane: "platform"`, but `timeoutSeconds: null`
+    // so the module quotes NO compute component here: that run's compute was
+    // already quoted at its own preflight.
+    const expectedCall: BeforeUsageParams = {
+      orgId: h.ctx.orgId,
+      context: "run",
+      packageId: "@system/proxy-agent",
+      runningCount: 3,
+      credentialSource: "system",
+      executionPlane: "platform",
+      timeoutSeconds: null,
+    };
+    expect(calls).toEqual([expectedCall, expectedCall]);
+  });
+
+  it("does not re-dispatch beforeUsage for a first-party chat loopback call (already admitted at turn start)", async () => {
+    // The chat surface owns the hook at turn admission (`checkUsageAllowed`),
+    // which now fires for every turn — system or org credential. The signed
+    // loopback identity is still load-bearing here (it is what distinguishes
+    // chat from an unattributed raw proxy call), but dispatching again would
+    // gate the same turn twice.
+    const h = await buildHarness();
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances(
+      [
+        gateModule(
+          { code: "quota_exceeded", message: "Credit quota exceeded", status: 402 },
+          calls,
+        ),
+      ],
+      fakeInitCtx(),
+    );
+
+    let upstreamHit = false;
+    globalThis.fetch = (async () => {
+      upstreamHit = true;
+      return new Response(
+        JSON.stringify({
+          id: "c1",
+          object: "chat.completion",
+          model: "upstream-system-model",
+          choices: [{ index: 0, message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const loopback = mintLoopbackToken(
       {
+        userId: h.ctx.user.id,
+        email: h.ctx.user.email ?? "u@test",
+        name: h.ctx.user.name ?? "U",
         orgId: h.ctx.orgId,
-        context: "run",
-        packageId: "@system/proxy-agent",
-        runningCount: 3,
+        orgRole: "owner",
       },
-      {
-        orgId: h.ctx.orgId,
-        context: "run",
-        packageId: "@system/proxy-agent",
-        runningCount: 3,
+      { chatSessionId: "chs_loopback" },
+    );
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${loopback}`,
+        "x-org-id": h.ctx.orgId,
+        "x-application-id": h.ctx.defaultAppId,
+        "content-type": "application/json",
       },
-    ]);
+      body: JSON.stringify({
+        model: SYSTEM_PRESET,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(upstreamHit).toBe(true);
+    expect(calls).toHaveLength(0);
   });
 
   it("refuses an unattributed raw system call while leaving BYOK semantics untouched", async () => {

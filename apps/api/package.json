@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@appstrate/afps-runtime": "workspace:*",
+    "@appstrate/afps-shared": "workspace:*",
     "@appstrate/connect": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",

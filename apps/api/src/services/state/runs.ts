@@ -29,6 +29,7 @@ import {
   schedules,
   llmUsage,
   notifications,
+  organizations,
   documents,
   documentLinks,
   runStatusValues,
@@ -135,8 +136,15 @@ function enrichedRunSelect(actor: Actor | null) {
     // served by the `idx_documents_run` (run_id-leading) index so the list
     // read stays a single query with no N+1. Coerced to Number in the mapper
     // (postgres.js returns count() as a numeric string).
+    //
+    // MUST filter on `purpose`: a run's materialized INPUT uploads carry the
+    // same `run_id`, so an unfiltered count reported a file-input run that
+    // published nothing as `input: 1, output: 1` — the very same document,
+    // counted twice, straight to the user. Every other count site filters the
+    // same way.
     outputDocumentCount: sql<number>`(
-      select count(*) from ${documents} where ${documents.runId} = ${runs.id}
+      select count(*) from ${documents}
+      where ${documents.runId} = ${runs.id} and ${documents.purpose} = 'agent_output'
     )`,
   };
 }
@@ -564,6 +572,11 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
           consumedDocumentIds.map((documentId) => ({
             documentId,
             consumerRunId: id,
+            // Tenant column, enforced by the two composite FKs on
+            // `document_links`: the document AND the consuming run must both
+            // belong to this org, so a cross-tenant link — which would block the
+            // victim org from ever deleting its own document — cannot be written.
+            orgId: scope.orgId,
           })),
         )
         .onConflictDoNothing();
@@ -706,6 +719,43 @@ export async function recordRunDegradedIntegration(
 }
 
 /**
+ * SQL boolean — is this ledger row something OTHER than the runner mirror of a
+ * proxy-metered run? The single expression of the no-double-count rule, applied
+ * by EVERY read of the ledger: the aggregate `runs.cost` read
+ * ({@link computeRunCost}) and the module-facing cursor read
+ * ({@link listLlmUsage} / {@link getSettledFrontierId}).
+ *
+ * A remote-origin run whose inference flows through the system llm-proxy gets
+ * BOTH per-call proxy rows (`source='proxy'`, each with `credential_source`
+ * stamped) AND the runner's cumulative side-channel mirror row
+ * (`source='runner'`, `credential_source IS NULL` — a remote run resolves no
+ * platform model, so `runs.model_source` is NULL). Both describe the SAME spend,
+ * so any consumer summing all rows counts that run twice. The rule: when a run
+ * has proxy rows, its NULL-credential runner mirror is not a spend fact.
+ *
+ * A platform run's runner row carries a non-NULL `credential_source` (from
+ * `runs.model_source`) and stays authoritative; a remote run with ONLY a runner
+ * row (no proxy) keeps it; a detached row (`run_id IS NULL`) is never a mirror.
+ *
+ * Applying it in the SERVICE — rather than documenting it for consumers — is
+ * deliberate: the cursor read is the platform's public metering surface
+ * (`PlatformServices.usage.list`), and a consumer that forgot the filter
+ * double-billed every remote run. The rule is now unskippable, and identical on
+ * both read paths by construction.
+ */
+const notRunnerMirrorSql = sql<boolean>`NOT (
+  ${llmUsage.source} = 'runner'
+  AND ${llmUsage.credentialSource} IS NULL
+  AND ${llmUsage.runId} IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM ${llmUsage} AS mirrored_proxy
+    WHERE mirrored_proxy.run_id = ${llmUsage.runId}
+      AND mirrored_proxy.org_id = ${llmUsage.orgId}
+      AND mirrored_proxy.source = 'proxy'
+  )
+)`;
+
+/**
  * Compute the total attributable spend for a run from the unified
  * `llm_usage` ledger (proxy + runner rows). Called by `finalizeRun` to
  * cache the canonical `runs.cost` value at terminal time. This is the
@@ -717,17 +767,8 @@ export async function recordRunDegradedIntegration(
  * avoids adding a redundant SUM here.
  *
  * One scalar SUM over the `(run_id)` index — cheap even on long runs.
- *
- * Remote-run mirror exclusion: a remote-origin run whose inference flows through
- * the system llm-proxy gets BOTH per-call proxy rows (`source='proxy'`, each
- * with `credential_source` stamped) AND the runner's cumulative side-channel
- * mirror row (`source='runner'`, `credential_source IS NULL` — remote runs
- * resolve no platform model so `runs.model_source` is NULL). Both cover the SAME
- * spend, so summing all rows double-counts (display only — cloud never debits
- * the NULL runner row). The rule: when a run has proxy rows, drop the
- * NULL-credential runner mirror. A platform run's runner row carries a
- * non-NULL `credential_source` (from `runs.model_source`) and stays
- * authoritative; a remote run with ONLY a runner row (no proxy) keeps it.
+ * The runner mirror of a proxy-metered run is excluded via the shared
+ * {@link notRunnerMirrorSql} predicate.
  *
  * `orgId` is mandatory: `llm_usage.run_id` alone is caller-suppliable on the
  * proxy path (`X-Run-Id`), so the aggregate must be structurally inseparable
@@ -742,25 +783,7 @@ export async function computeRunCost(runId: string, orgId: string): Promise<numb
       total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
     })
     .from(llmUsage)
-    .where(
-      and(
-        eq(llmUsage.runId, runId),
-        eq(llmUsage.orgId, orgId),
-        // Exclude the runner mirror row (source='runner', credential_source
-        // NULL) ONLY when this run also has proxy rows covering the same spend
-        // — otherwise a remote run with only its runner row would sum to 0.
-        sql`NOT (
-          ${llmUsage.source} = 'runner'
-          AND ${llmUsage.credentialSource} IS NULL
-          AND EXISTS (
-            SELECT 1 FROM ${llmUsage} AS proxy_row
-            WHERE proxy_row.run_id = ${runId}
-              AND proxy_row.org_id = ${orgId}
-              AND proxy_row.source = 'proxy'
-          )
-        )`,
-      ),
-    );
+    .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, orgId), notRunnerMirrorSql));
 
   return Number(llm?.total ?? 0);
 }
@@ -1111,35 +1134,65 @@ export async function getRun(scope: AppScope, id: string) {
 }
 
 export async function deletePackageRuns(scope: AppScope, packageId: string): Promise<number> {
-  // Resolve the run ids first so the documents they contain can be
-  // detach-or-deleted BEFORE the runs are removed — the runs' FK cascade would
-  // otherwise destroy `documents` rows (and their `document_links`) a live
-  // consumer still needs, silently amputating a rerun's inputs.
-  const runRows = await db
-    .select({ id: runs.id })
-    .from(runs)
-    .where(
-      scopedWhere(runs, {
-        orgId: scope.orgId,
-        applicationId: scope.applicationId,
-        extra: [eq(runs.packageId, packageId)],
-      }),
-    );
-  if (runRows.length === 0) return 0;
-  const runIds = runRows.map((r) => r.id);
+  // Enumeration, documents teardown and the runs delete are ONE transaction,
+  // opened by locking the org row — the same serialization point every document
+  // write takes (`createDocumentFromStream`) and the same org-first order the
+  // organization / application / end-user cascades use.
+  //
+  // Splitting it (teardown, commit, delete) left a window in which a document
+  // published by a still-live sidecar — or by an at-least-once retry of the
+  // end-of-run publication sweep — landed on a run that had already been
+  // enumerated. The runs delete then cascaded that fresh row away with NO outbox
+  // job (bytes orphaned in the bucket) and NO counter decrement (the org
+  // over-counted until the next daily reconcile). Under the org lock the two
+  // serialize: either the publish commits first and we detach-or-delete it, or
+  // it commits after and its FK insert fails against the deleted run, dropping
+  // its own object.
+  return db.transaction(async (tx) => {
+    await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId))
+      .for("update")
+      .limit(1);
 
-  // Contained-documents teardown in its own transaction, then the runs delete.
-  // Separate statements: a crash between them leaves the docs already handled
-  // (detached or deleted) and the runs still present — the next delete attempt
-  // re-runs both idempotently (re-handling finds nothing left to detach/delete,
-  // the runs delete finishes the job).
-  await detachOrDeleteContainedDocuments({ runIds });
+    // Lock the parent package before enumerating its runs — same guard as the
+    // application / end-user cascades, so a concurrent package delete cannot
+    // interleave with this teardown.
+    await tx
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, packageId))
+      .for("update")
+      .limit(1);
 
-  // Scoped to the SELECTed ids — not the package predicate — so a run created
-  // concurrently after the SELECT is left for the next delete call instead of
-  // being deleted without its documents going through detach-or-delete.
-  const deleted = await db.delete(runs).where(inArray(runs.id, runIds)).returning({ id: runs.id });
-  return deleted.length;
+    const runRows = await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(
+        scopedWhere(runs, {
+          orgId: scope.orgId,
+          applicationId: scope.applicationId,
+          extra: [eq(runs.packageId, packageId)],
+        }),
+      );
+    if (runRows.length === 0) return 0;
+    const runIds = runRows.map((r) => r.id);
+
+    // Documents FIRST: the runs' FK cascade would otherwise destroy `documents`
+    // rows (and their `document_links`) a live consumer still needs, silently
+    // amputating a rerun's inputs.
+    await detachOrDeleteContainedDocuments({ runIds, orgId: scope.orgId }, tx);
+
+    // Scoped to the SELECTed ids — not the package predicate — so a run created
+    // concurrently after the SELECT is left for the next delete call instead of
+    // being deleted without its documents going through detach-or-delete.
+    const deleted = await tx
+      .delete(runs)
+      .where(inArray(runs.id, runIds))
+      .returning({ id: runs.id });
+    return deleted.length;
+  });
 }
 
 export type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
@@ -1401,7 +1454,7 @@ export async function listRunLogs(args: {
 /**
  * List all in-flight run IDs at server startup. The caller (boot) feeds
  * each id through `synthesiseFinalize` so the same lifecycle that fires
- * for clean termination (afterRun, terminal log, onRunStatusChange) also
+ * for clean termination (terminal log, onRunStatusChange) also
  * fires for runs that survived a server crash. Without that convergence, the
  * run stays non-terminal forever, so its cumulative runner ledger row never
  * settles — and a cursor consumer, which must never advance past an unsettled
@@ -1468,6 +1521,14 @@ const settledSql = sql<boolean>`(${llmUsage.source} <> 'runner' OR ${runs.status
  * unswept spend preserved. A cursor consumer processes settled rows only and
  * never advances past the first unsettled row. `real_model` / `api` are NEVER
  * selected (server-side only).
+ *
+ * The runner MIRROR of a proxy-metered run is never returned
+ * ({@link notRunnerMirrorSql}): its spend is already carried, per call, by the
+ * proxy rows of the same run, so returning it would double-count for any
+ * consumer that does not filter. Skipping those ids is safe for the cursor —
+ * the batch is the next `limit` VISIBLE rows after `afterId`, so an empty batch
+ * still means "caught up" — and it also keeps a long-running remote run's
+ * unsettled mirror from pinning the frontier for rows nobody will ever bill.
  */
 export async function listLlmUsage(args: {
   afterId?: number;
@@ -1495,6 +1556,7 @@ export async function listLlmUsage(args: {
     .where(
       and(
         gt(llmUsage.id, afterId),
+        notRunnerMirrorSql,
         args.credentialSource ? eq(llmUsage.credentialSource, args.credentialSource) : undefined,
       ),
     )
@@ -1526,6 +1588,11 @@ export async function listLlmUsage(args: {
  * usage forever once it settles. Stopping at the first unsettled row prevents
  * that. Single query: LEFT JOIN `runs` so {@link settledSql} resolves, then read
  * `MIN(id) FILTER (unsettled)` and `MAX(id)` together.
+ *
+ * Scoped to the rows {@link listLlmUsage} can actually return
+ * ({@link notRunnerMirrorSql}) — a frontier computed over rows the consumer
+ * never sees would either stall on an invisible unsettled mirror or sit above
+ * ids that were skipped.
  */
 export async function getSettledFrontierId(): Promise<number> {
   const [row] = await db
@@ -1534,7 +1601,8 @@ export async function getSettledFrontierId(): Promise<number> {
       maxId: sql<number | null>`MAX(${llmUsage.id})`,
     })
     .from(llmUsage)
-    .leftJoin(runs, eq(llmUsage.runId, runs.id));
+    .leftJoin(runs, eq(llmUsage.runId, runs.id))
+    .where(notRunnerMirrorSql);
   const minUnsettled = row?.minUnsettled == null ? null : Number(row.minUnsettled);
   if (minUnsettled != null) return minUnsettled - 1;
   return row?.maxId == null ? 0 : Number(row.maxId);

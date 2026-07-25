@@ -3,6 +3,7 @@
 import type { z } from "zod";
 import type { ModelCost } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
 import type { AgentIntegrationEntry } from "./integrations.ts";
@@ -646,7 +647,7 @@ export interface OrgModelInfo extends ModelMetadata {
    * GET projection strips the backing so a dashboard user never learns the
    * provider/endpoint/upstream id behind the alias. Always set otherwise.
    */
-  apiShape: string | null;
+  apiShape: ModelApiShape | null;
   /**
    * The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`).
    * Distinguishes subscription providers that share an `apiShape` with an
@@ -711,7 +712,7 @@ export interface ModelProviderCredentialInfo {
    * the env key. Custom credentials always carry them (the admin configured
    * the binding themselves).
    */
-  apiShape: string | null;
+  apiShape: ModelApiShape | null;
   baseUrl: string | null;
   source: "built-in" | "custom";
   /** Auth mode of the underlying credential (matches the registry vocabulary). */
@@ -748,7 +749,7 @@ export interface ProviderRegistryEntry {
   iconUrl: string;
   description: string | null;
   docsUrl: string | null;
-  apiShape: string;
+  apiShape: ModelApiShape;
   defaultBaseUrl: string;
   baseUrlOverridable: boolean;
   authMode: "api_key" | "oauth2";

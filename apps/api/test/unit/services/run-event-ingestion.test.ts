@@ -22,7 +22,7 @@ process.env.CONNECTION_ENCRYPTION_KEY ??= VALID_KEY_BASE64;
 process.env.BETTER_AUTH_SECRET ??= "test-better-auth-secret-16chars";
 process.env.UPLOAD_SIGNING_SECRET ??= "test-upload-signing-secret-16ch";
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { sign } from "@appstrate/afps-runtime/events";
 import { encrypt } from "@appstrate/connect";
 import { ApiError } from "@appstrate/core/api-errors";
@@ -52,7 +52,7 @@ describe("verifyRunSignatureHeaders", () => {
   const secret = "s".repeat(32);
   const body = JSON.stringify({ specversion: "1.0", type: "log.written" });
 
-  test("accepts a well-formed signed request", () => {
+  it("accepts a well-formed signed request", () => {
     const timestampSec = Math.floor(Date.now() / 1000);
     const headers = sign({ msgId: "msg_1", timestampSec, body, secret });
     const run = makeRun({ sinkSecretEncrypted: encrypt(secret) });
@@ -68,7 +68,7 @@ describe("verifyRunSignatureHeaders", () => {
     ).not.toThrow();
   });
 
-  test("rejects missing headers with code=missing_signature_headers", () => {
+  it("rejects missing headers with code=missing_signature_headers", () => {
     const run = makeRun({ sinkSecretEncrypted: encrypt(secret) });
     try {
       verifyRunSignatureHeaders({
@@ -86,7 +86,7 @@ describe("verifyRunSignatureHeaders", () => {
     }
   });
 
-  test("rejects non-numeric timestamp with code=invalid_timestamp", () => {
+  it("rejects non-numeric timestamp with code=invalid_timestamp", () => {
     const run = makeRun({ sinkSecretEncrypted: encrypt(secret) });
     try {
       verifyRunSignatureHeaders({
@@ -102,7 +102,7 @@ describe("verifyRunSignatureHeaders", () => {
     }
   });
 
-  test("rejects tampered body with code=invalid_signature", () => {
+  it("rejects tampered body with code=invalid_signature", () => {
     const timestampSec = Math.floor(Date.now() / 1000);
     const signed = sign({ msgId: "msg_1", timestampSec, body, secret });
     const run = makeRun({ sinkSecretEncrypted: encrypt(secret) });
@@ -121,7 +121,7 @@ describe("verifyRunSignatureHeaders", () => {
     }
   });
 
-  test("rejects stale timestamp with code=timestamp_out_of_tolerance", () => {
+  it("rejects stale timestamp with code=timestamp_out_of_tolerance", () => {
     const staleSec = Math.floor(Date.now() / 1000) - 10 * 60; // 10 min ago > 5 min tolerance
     const signed = sign({ msgId: "msg_1", timestampSec: staleSec, body, secret });
     const run = makeRun({ sinkSecretEncrypted: encrypt(secret) });
@@ -140,7 +140,7 @@ describe("verifyRunSignatureHeaders", () => {
     }
   });
 
-  test("rejects signature computed with the wrong secret", () => {
+  it("rejects signature computed with the wrong secret", () => {
     const timestampSec = Math.floor(Date.now() / 1000);
     // Signer uses `otherSecret`, server stores `secret` — mismatch must fail.
     const signed = sign({
@@ -167,11 +167,11 @@ describe("verifyRunSignatureHeaders", () => {
 });
 
 describe("assertSinkOpen", () => {
-  test("passes on an open sink", () => {
+  it("passes on an open sink", () => {
     expect(() => assertSinkOpen(makeRun())).not.toThrow();
   });
 
-  test("rejects a closed sink with code=run_sink_closed", () => {
+  it("rejects a closed sink with code=run_sink_closed", () => {
     try {
       assertSinkOpen(makeRun({ sinkClosedAt: new Date() }));
       expect.unreachable();
@@ -181,7 +181,7 @@ describe("assertSinkOpen", () => {
     }
   });
 
-  test("rejects an expired sink with code=run_sink_expired", () => {
+  it("rejects an expired sink with code=run_sink_expired", () => {
     try {
       assertSinkOpen(makeRun({ sinkExpiresAt: new Date(Date.now() - 1000) }));
       expect.unreachable();
@@ -190,7 +190,7 @@ describe("assertSinkOpen", () => {
     }
   });
 
-  test("closed takes precedence over expired (operator clarity)", () => {
+  it("closed takes precedence over expired (operator clarity)", () => {
     // If both are set, `closed` is the authoritative reason — the sink
     // was explicitly closed, expiry is then moot.
     try {
@@ -208,7 +208,7 @@ describe("assertSinkOpen", () => {
 });
 
 describe("mintSinkCredentials", () => {
-  test("returns absolute URLs derived from appUrl + runId", () => {
+  it("returns absolute URLs derived from appUrl + runId", () => {
     const creds = mintSinkCredentials({
       runId: "run_abc",
       appUrl: "https://app.example.com",
@@ -218,7 +218,7 @@ describe("mintSinkCredentials", () => {
     expect(creds.finalize_url).toBe("https://app.example.com/api/runs/run_abc/events/finalize");
   });
 
-  test("strips a trailing slash from appUrl (idempotent join)", () => {
+  it("strips a trailing slash from appUrl (idempotent join)", () => {
     const creds = mintSinkCredentials({
       runId: "run_abc",
       appUrl: "https://app.example.com/",
@@ -227,7 +227,7 @@ describe("mintSinkCredentials", () => {
     expect(creds.url).toBe("https://app.example.com/api/runs/run_abc/events");
   });
 
-  test("mints a base64url secret of 32 bytes of entropy", () => {
+  it("mints a base64url secret of 32 bytes of entropy", () => {
     const a = mintSinkCredentials({ runId: "r", appUrl: "http://x", ttlSeconds: 60 });
     const b = mintSinkCredentials({ runId: "r", appUrl: "http://x", ttlSeconds: 60 });
     // base64url for 32 random bytes is 43 chars (no padding).
@@ -238,7 +238,7 @@ describe("mintSinkCredentials", () => {
     expect(a.secret).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
-  test("expiresAt is approximately now + ttlSeconds (±1s)", () => {
+  it("expiresAt is approximately now + ttlSeconds (±1s)", () => {
     const ttl = 1800;
     const before = Date.now();
     const creds = mintSinkCredentials({ runId: "r", appUrl: "http://x", ttlSeconds: ttl });

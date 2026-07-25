@@ -4,15 +4,15 @@
  * In-chat run progress component. Rendered for every run-launch tool-call (`runAgent` /
  * `runInline` / `run_and_wait`) — from the moment it starts, before the run id
  * is even known — so the card keeps a constant two-line height with no
- * transient "Lancement…" placeholder swap.
+ * transient placeholder swap.
  *
  * Line 1: the package name. Line 2: the run's own log-tool output (rows the sink
  * tags `event='log'`, i.e. the agent's explicit `log` runtime tool — NOT runtime
  * lifecycle or tool-call breadcrumbs), streamed live over the run's SSE channel
  * (`useRunLogStream`) and paced one at a time (`useLogTicker`, ≥500ms each) with
  * a fade/slide animation so a burst reads as a sequence rather than a flash.
- * Before the first log the line reads "Lancement" (still starting), then
- * "Exécution en cours" once running; once terminal it settles on the final outcome. A
+ * Before the first log the line reads `run.starting` (still starting), then
+ * `run.running` once running; once terminal it settles on the final outcome. A
  * leading status glyph (centered across both lines) shows the run state; the
  * live execution time and a link to the run's page sit on the right. Clicking
  * the card opens the raw input/output detail modal (`details`).
@@ -31,13 +31,13 @@ import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
 import { useLiveElapsedMs } from "./use-elapsed.ts";
-import { useChatHeaders, useOpenDocument } from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
 import {
   buildRunPageHref,
   isTerminalStatus,
   mergeRunDocuments,
   publishedDocumentsFromLogs,
-  terminalRunLineText,
+  runStatusLineKey,
   visibleLogEntries,
   type ChatRunDocument,
   type RunStatus,
@@ -53,18 +53,11 @@ import type { ToolPhase } from "./tool-result.ts";
  * authenticated download.
  */
 function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
-  const getHeaders = useChatHeaders();
-  const opener = useOpenDocument();
   if (documents.length === 0) return null;
   return (
     <div className="pointer-events-auto flex flex-wrap gap-1.5 px-3 pb-2">
       {documents.map((doc) => (
-        <DocumentAttachment
-          key={doc.id}
-          doc={{ id: doc.id, name: doc.name, mime: doc.mime }}
-          opener={opener}
-          getHeaders={getHeaders}
-        />
+        <DocumentAttachment key={doc.id} doc={{ id: doc.id, name: doc.name, mime: doc.mime }} />
       ))}
     </div>
   );
@@ -154,10 +147,11 @@ export function ChatRunProgressCard({
   // rather than flashing straight to the last one. `current` carries a stable
   // `id` so the line element remounts on change and re-runs its enter animation.
   const current = useLogTicker(visibleLogEntries(logs));
-  // Before any log line: "Lancement" while the run is still starting (no status
-  // yet, or pending), then "Exécution en cours" once it is running — up until the
-  // first log replaces it.
-  const placeholder = effectiveStatus === "running" ? "Exécution en cours" : "Lancement";
+  const { t } = useChatHost();
+  // Before any log line: "starting" while the run is still coming up (no status
+  // yet, or pending), then "running" once it is — up until the first log
+  // replaces it.
+  const placeholder = t(effectiveStatus === "running" ? "run.running" : "run.starting");
 
   // Once the run is terminal, the live log line is replaced by a fixed status
   // label so the card settles on the actual outcome instead of freezing on
@@ -167,9 +161,9 @@ export function ChatRunProgressCard({
   const terminal = isTerminalStatus(effectiveStatus);
   const launchFailed = !runId && phase === "error";
   const line = terminal
-    ? { id: -1, text: terminalRunLineText(effectiveStatus) }
+    ? { id: -1, text: t(runStatusLineKey(effectiveStatus)) }
     : launchFailed
-      ? { id: -1, text: errorText ?? "Échec du lancement" }
+      ? { id: -1, text: errorText ?? t("run.launchFailed") }
       : current;
   const effectiveRunHref = runHref ?? (runId ? buildRunPageHref(packageId, runId) : undefined);
 
@@ -183,7 +177,7 @@ export function ChatRunProgressCard({
           nesting interactive elements. */}
       <button
         type="button"
-        aria-label="Détails du run"
+        aria-label={t("run.details")}
         className="hover:bg-muted/40 absolute inset-0 z-0 rounded-lg"
         onClick={() => setOpen(true)}
       />
@@ -193,7 +187,9 @@ export function ChatRunProgressCard({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           {/* Line 1: package name + live execution time + run-page link */}
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium">{agentLabel ?? "Run"}</span>
+            <span className="truncate text-sm font-medium">
+              {agentLabel ?? t("run.fallbackLabel")}
+            </span>
             <span className="ml-auto flex shrink-0 items-center gap-2">
               {elapsedMs !== undefined ? (
                 <span className="text-muted-foreground text-xs tabular-nums">
@@ -204,7 +200,7 @@ export function ChatRunProgressCard({
                 <a
                   href={effectiveRunHref}
                   className="text-muted-foreground hover:text-foreground pointer-events-auto"
-                  title="Ouvrir la page du run"
+                  title={t("run.openPage")}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <ExternalLinkIcon className="size-3.5" />

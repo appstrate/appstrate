@@ -420,12 +420,11 @@ export function createRunsRouter() {
   //
   // Funnels through `synthesiseFinalize` so the cancellation traverses the
   // exact same terminal-state pipeline as success/timeout/fail: cost is
-  // aggregated from `llm_usage`, `afterRun` fires (billing in cloud, …),
-  // the `run_completed` log row + `onRunStatusChange` broadcast happen
-  // exactly once. Pre-fix, this route wrote `status='cancelled'` and closed
-  // the sink directly — `afterRun` was never called and the cloud module
-  // never debited credits for cancelled runs that had already burned LLM
-  // tokens.
+  // aggregated from `llm_usage`, the runner ledger row settles, and the
+  // `run_completed` log row + `onRunStatusChange` broadcast happen exactly
+  // once. Pre-fix, this route wrote `status='cancelled'` and closed the sink
+  // directly — no terminal broadcast fired and the cloud module never debited
+  // credits for cancelled runs that had already burned LLM tokens.
   router.post("/runs/:id/cancel", requirePermission("runs", "cancel"), async (c) => {
     const runId = c.req.param("id")!;
     const scope = getAppScope(c);

@@ -200,8 +200,8 @@ export async function boot(): Promise<void> {
   // cleanup, and containers must be cleaned before orchestrator init.
   //
   // Each orphan flows through `synthesiseFinalize` → `finalizeRun` so the
-  // afterRun hook fires (billing, observability, ...) for runs that burned
-  // LLM tokens before the previous process died. The CAS in `finalizeRun`
+  // `onRunStatusChange` event fires (billing, observability, ...) for runs that
+  // burned LLM tokens before the previous process died. The CAS in `finalizeRun`
   // makes this race-safe against a delayed metric POST that lands during
   // the same boot window.
   const orchestrator = getOrchestrator();

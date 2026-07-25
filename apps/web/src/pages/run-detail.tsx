@@ -21,7 +21,7 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunDocumentsTab } from "../components/run-documents-tab";
-import { useDocuments } from "../hooks/use-documents";
+import { invalidateOrgStorage } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { RunArtifactsBanner } from "../components/run-artifacts-banner";
@@ -107,10 +107,11 @@ export function RunDetailPage() {
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
   const hasRunMemory = runMemoryCount > 0;
 
-  // Document count for the tab badge. The tab body runs the same query (identical
-  // key) so React Query dedups it into a single request.
-  const { data: documentsPage } = useDocuments({ runId, limit: 100 });
-  const documentCount = documentsPage?.data.length ?? 0;
+  // Document count for the tab badge — read off the run DTO the page already
+  // has (same field `run-row.tsx` renders). Listing the run's documents just to
+  // count them cost a request on every run page and silently saturated at the
+  // page size; the list query now runs only when the tab is actually opened.
+  const documentCount = (run?.document_counts.input ?? 0) + (run?.document_counts.output ?? 0);
 
   // Default tab: "result" if the run produced output or a legacy report.
   // useTabWithHash respects the URL hash if present.
@@ -153,10 +154,14 @@ export function RunDetailPage() {
           return [...prev, entry];
         });
         // A published document arrives as a `type='result' event='document'`
-        // log frame — invalidate the run's documents list so the tab (and its
-        // badge) picks up the new file without a dedicated SSE channel.
+        // log frame — invalidate the run's documents list (the tab body), the
+        // run itself (its `document_counts` drives the tab badge) and the org
+        // storage total those new bytes just moved, without a dedicated SSE
+        // channel.
         if (entry.type === "result" && entry.event === "document") {
           void qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
+          void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, applicationId, runId) });
+          invalidateOrgStorage(qc);
         }
       },
       [qc, orgId, applicationId, runId],

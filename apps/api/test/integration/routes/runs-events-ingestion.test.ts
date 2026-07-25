@@ -78,7 +78,7 @@ async function seedRunWithSink(
      * the row without usage (exercises the heuristic on purpose).
      */
     tokenUsage?: Record<string, number> | null;
-    /** Persisted on `runs.modelSource` — forwarded to the `afterRun` hook. */
+    /** Persisted on `runs.modelSource` — forwarded to the terminal broadcast. */
     modelSource?: string | null;
     /** Persisted on `runs.versionRef` — pins the manifest finalize validates against. */
     versionRef?: string;
@@ -533,37 +533,45 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
     );
 
-    const first = await app.request(`/api/runs/${runId}/events`, {
-      method: "POST",
-      headers: stickyHeaders,
-      body,
-    });
-    expect(first.status).toBeGreaterThanOrEqual(500);
+    // The DROP is part of the test flow (it lifts the simulated failure), but it
+    // MUST also run when an assertion above it throws — otherwise the constraint
+    // survives on the shared test database and poisons every later test in this
+    // process. `IF EXISTS` makes the finally idempotent with the in-flow drop.
+    try {
+      const first = await app.request(`/api/runs/${runId}/events`, {
+        method: "POST",
+        headers: stickyHeaders,
+        body,
+      });
+      expect(first.status).toBeGreaterThanOrEqual(500);
 
-    // Lift the transient failure and retry with the EXACT SAME envelope
-    // (same body, same webhook-id, same HMAC). Before the cleanup the
-    // replay key was sticky for `replayWindow` seconds and this retry
-    // would have been swallowed as "replay" with the event never
-    // persisted.
-    await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+      // Lift the transient failure and retry with the EXACT SAME envelope
+      // (same body, same webhook-id, same HMAC). Before the cleanup the
+      // replay key was sticky for `replayWindow` seconds and this retry
+      // would have been swallowed as "replay" with the event never
+      // persisted.
+      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
 
-    const second = await app.request(`/api/runs/${runId}/events`, {
-      method: "POST",
-      headers: stickyHeaders,
-      body,
-    });
-    expect(second.status).toBe(200);
-    expect(((await second.json()) as { outcome: string }).outcome).toBe("persisted");
+      const second = await app.request(`/api/runs/${runId}/events`, {
+        method: "POST",
+        headers: stickyHeaders,
+        body,
+      });
+      expect(second.status).toBe(200);
+      expect(((await second.json()) as { outcome: string }).outcome).toBe("persisted");
 
-    // And the event actually landed in run_logs (proves the retry did
-    // real ingestion, not a stale-key passthrough).
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.lastEventSequence).toBe(1);
-    const logs = await db
-      .select()
-      .from(runLogs)
-      .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "__poison__")));
-    expect(logs).toHaveLength(1);
+      // And the event actually landed in run_logs (proves the retry did
+      // real ingestion, not a stale-key passthrough).
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.lastEventSequence).toBe(1);
+      const logs = await db
+        .select()
+        .from(runLogs)
+        .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "__poison__")));
+      expect(logs).toHaveLength(1);
+    } finally {
+      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT IF EXISTS _test_reject_poison`);
+    }
   });
 
   // Phase 2: a `document.published` event (emitted by the publish_document
@@ -679,24 +687,64 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.artifacts).toBeNull();
   });
 
-  it("rejects a malformed artifacts summary with a 400 (Zod)", async () => {
+  it("never fails finalize on a MALFORMED artifacts summary — 200, field degrades to null", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
+    // `artifacts` is a SOFT partial-deliverables signal: finalize reports the
+    // outcome of an already-finished run, so a cosmetic field must never turn
+    // a successful run's finalize into a hard 400 the container cannot recover
+    // from — the run would then sit `running` until the watchdog synthesised a
+    // timeout, i.e. a successful run reported as failed. Anything invalid
+    // degrades to `undefined` (column null) instead.
     const res = await postFinalize(runId, {
       memories: [],
       output: { ok: true },
       logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
-      // `status` outside the enum + `published` a string → strict schema rejects.
+      // `status` outside the enum + `published` a string.
       artifacts: { status: "mostly", published: "two", failed: [] },
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
 
-    // The run was NOT closed by the rejected POST.
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.sinkClosedAt).toBeNull();
+    // The run finalized normally: terminal status, sink closed, output kept.
+    expect(row?.status).toBe("success");
+    expect(row?.sinkClosedAt).not.toBeNull();
+    expect((row?.result as { output?: unknown } | null)?.output).toEqual({ ok: true });
+    // Only the cosmetic field was dropped.
     expect(row?.artifacts).toBeNull();
+  });
+
+  it("STRIPS unknown artifacts keys instead of rejecting them (deployments are not atomic)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // A runtime image newer than the platform can legitimately add a field to
+    // the summary — or to a `failed` entry. An extra cosmetic key must not
+    // cost the run its finalize, so unknown keys are stripped and everything
+    // the platform DOES understand is persisted.
+    const res = await postFinalize(runId, {
+      memories: [],
+      output: { ok: true },
+      logs: [],
+      status: "success",
+      usage: { input_tokens: 10, output_tokens: 5 },
+      artifacts: {
+        status: "partial",
+        published: 1,
+        failed: [{ name: "outputs/big.csv", code: "file_too_large", detail: "from a newer image" }],
+        skipped: 7,
+      },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.artifacts).toEqual({
+      status: "partial",
+      published: 1,
+      failed: [{ name: "outputs/big.csv", code: "file_too_large" }],
+    });
   });
 
   it("tolerates an OVERSIZED artifacts summary — finalize 200, persisted truncated", async () => {
@@ -1271,19 +1319,47 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.cost).toBeCloseTo(0.0042, 5);
   });
 
-  it("does not synthesise when result.cost is zero — empty ledger stays empty", async () => {
+  it("pins a zero-COST terminal snapshot that still consumed tokens", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent", {
       tokenUsage: { input_tokens: 100, output_tokens: 50 },
     });
 
-    // A run that bridge-emitted `cost: 0` (e.g. cached LLM call, no
-    // billable tokens) MUST NOT pollute the ledger with a $0 row.
+    // A run that bridge-emitted `cost: 0` (free model, no catalog rate) still
+    // consumed tokens. The terminal ledger barrier makes that snapshot durable
+    // BEFORE the CAS settles the run — the row can no longer be written
+    // afterwards, so "write it later" is not an option. The monotonic upsert's
+    // second level (equal cost, higher token total) is what keeps a zero-cost
+    // model's token columns advancing.
     const res = await postFinalize(runId, {
       status: "success",
       output: { ok: true },
       durationMs: 100,
       usage: { input_tokens: 100, output_tokens: 50 },
       cost: 0,
+    });
+    expect(res.status).toBe(200);
+
+    const ledger = await db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.costUsd).toBe(0);
+    expect(ledger[0]!.inputTokens).toBe(100);
+    expect(ledger[0]!.outputTokens).toBe(50);
+  });
+
+  it("mints no ledger row for a run that consumed nothing at all", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // Zero tokens AND no reported cost — there is no accounting fact to pin,
+    // so the barrier writes nothing. (The zero-token liveness heuristic turns
+    // this into a failed run; that is asserted elsewhere.)
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      usage: { input_tokens: 0, output_tokens: 0 },
     });
     expect(res.status).toBe(200);
 
@@ -1447,13 +1523,12 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 });
 
 // ---------------------------------------------------------------------------
-// `afterRun` hook contract — finalize MUST forward `runs.modelSource` so
-// module billing handlers can distinguish platform-paid (system) runs from
-// BYOK (org) runs. Skipping the field collapses every run to "system" in
-// cloud's `recordUsage` fallback and silently bills runs the platform was
-// never paid for.
+// Terminal broadcast contract — finalize MUST forward `runs.modelSource` so a
+// metering subscriber can distinguish platform-paid (system) runs from BYOK
+// (org) runs. Skipping the field collapses every run to "system" in a
+// subscriber's fallback and silently charges runs the platform never paid for.
 // ---------------------------------------------------------------------------
-describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () => {
+describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -1468,17 +1543,16 @@ describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () =>
     resetModules();
   });
 
-  async function captureAfterRunParams(): Promise<{
+  async function captureTerminalParams(): Promise<{
     captured: () => RunStatusChangeParams | null;
   }> {
     let last: RunStatusChangeParams | null = null;
     const mod: AppstrateModule = {
-      manifest: { id: "afterrun-spy", name: "After-Run Spy", version: "1.0.0" },
+      manifest: { id: "terminal-spy", name: "Terminal Spy", version: "1.0.0" },
       async init() {},
-      hooks: {
-        afterRun: async (params) => {
-          last = params;
-          return null;
+      events: {
+        onRunStatusChange: (params) => {
+          if (params.status !== "started") last = params;
         },
       },
     };
@@ -1492,8 +1566,8 @@ describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () =>
     return { captured: () => last };
   }
 
-  it("forwards runs.modelSource = 'system' to the afterRun hook", async () => {
-    const { captured } = await captureAfterRunParams();
+  it("forwards runs.modelSource = 'system' to the terminal broadcast", async () => {
+    const { captured } = await captureTerminalParams();
     const runId = await seedRunWithSink(ctx, "@test/hook-agent", { modelSource: "system" });
     const res = await postFinalize(runId, {
       status: "success",
@@ -1505,8 +1579,8 @@ describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () =>
     expect(captured()!.modelSource).toBe("system");
   });
 
-  it("forwards runs.modelSource = 'org' (BYOK) to the afterRun hook so cloud skips billing", async () => {
-    const { captured } = await captureAfterRunParams();
+  it("forwards runs.modelSource = 'org' (BYOK) so a metering subscriber can skip it", async () => {
+    const { captured } = await captureTerminalParams();
     const runId = await seedRunWithSink(ctx, "@test/hook-agent", { modelSource: "org" });
     const res = await postFinalize(runId, {
       status: "success",
@@ -1519,7 +1593,7 @@ describe("POST /api/runs/:runId/events/finalize — afterRun hook params", () =>
   });
 
   it("omits modelSource when the run row has none (legacy / inline runs)", async () => {
-    const { captured } = await captureAfterRunParams();
+    const { captured } = await captureTerminalParams();
     const runId = await seedRunWithSink(ctx, "@test/hook-agent", { modelSource: null });
     const res = await postFinalize(runId, {
       status: "success",
@@ -1701,6 +1775,37 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     return { started: () => seen };
   }
 
+  /**
+   * Wait until `started()` has observed at least `n` events.
+   *
+   * `emitEvent` is fire-and-forget, so a single `setTimeout(0)` tick is NOT a
+   * guarantee that the async listener chain has run — it only happened to work.
+   * Poll instead, bounded by an attempt count so a slow box cannot flake.
+   */
+  async function waitForStarted(
+    started: () => RunStatusChangeParams[],
+    n: number,
+    attempts = 100,
+  ): Promise<RunStatusChangeParams[]> {
+    for (let i = 0; i < attempts && started().length < n; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return started();
+  }
+
+  /**
+   * Give any pending emit a bounded chance to land, then return what was seen.
+   * Used for NEGATIVE assertions — polling cannot prove a negative, so this
+   * makes the "nothing was emitted" claim rest on a real settle window rather
+   * than on one macrotask tick.
+   */
+  async function settleStarted(
+    started: () => RunStatusChangeParams[],
+  ): Promise<RunStatusChangeParams[]> {
+    await new Promise((r) => setTimeout(r, 150));
+    return started();
+  }
+
   async function seedPendingRemoteRun(): Promise<string> {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await db.insert(runs).values({
@@ -1724,8 +1829,7 @@ describe("remote run.started — emitted at first event, not at row insert", () 
 
     // No event yet — the row was created `pending`; nothing should have
     // emitted `started` (the old insert-time emit is gone).
-    await new Promise((r) => setTimeout(r, 0));
-    expect(started()).toHaveLength(0);
+    expect(await settleStarted(started)).toHaveLength(0);
 
     // First signed event arrives → DB flips pending → running.
     const envelope = buildEnvelope(
@@ -1737,10 +1841,8 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     const res = await postEvent(runId, envelope);
     expect(res.status).toBe(200);
 
-    // emitEvent is fire-and-forget — let the microtask/timer queue drain.
-    await new Promise((r) => setTimeout(r, 0));
-
-    const events = started();
+    // emitEvent is fire-and-forget — poll until the listener chain has run.
+    const events = await waitForStarted(started, 1);
     expect(events).toHaveLength(1);
     expect(events[0]!.runId).toBe(runId);
     expect(events[0]!.status).toBe("started");
@@ -1766,9 +1868,10 @@ describe("remote run.started — emitted at first event, not at row insert", () 
       );
       expect(res.status).toBe(200);
     }
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(started()).toHaveLength(1);
+    // Wait for the FIRST emit to land, then confirm no further one follows —
+    // "exactly once" needs both halves, and a bare tick proved neither.
+    await waitForStarted(started, 1);
+    expect(await settleStarted(started)).toHaveLength(1);
   });
 });
 

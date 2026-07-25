@@ -14,8 +14,9 @@ import {
   injectMetaCsp,
   isHtmlMime,
   previewKind,
+  mayServeActiveHtml,
 } from "../../../src/services/document-preview.ts";
-import { signFsUploadToken } from "@appstrate/core/storage-fs";
+import { signFsUploadToken, verifyFsUploadToken } from "@appstrate/core/storage-fs";
 
 const SECRET = "unit-preview-secret-key-0123456789";
 
@@ -49,14 +50,27 @@ describe("preview token", () => {
     expect(verifyPreviewToken(signedWithOld, [newKey, oldKey])).not.toBeNull();
   });
 
-  it("does not accept an upload token as a preview token (domain separation)", () => {
-    // An upload token shares the same secret but a different HMAC domain — it
-    // must never validate as a preview capability.
+  it("domain separation holds in BOTH directions against upload tokens", () => {
+    // Upload tokens and preview tokens share the `UPLOAD_SIGNING_SECRET`
+    // keyring, so the only thing keeping one from being replayed as the other
+    // is the HMAC domain each is signed under. Both types now carry one (the
+    // shared codec takes it as a required argument), so neither direction
+    // validates — previously only the preview side was bound, and the upload
+    // side was protected by nothing more than its payload shape.
     const uploadToken = signFsUploadToken(
       { k: "documents/x", s: 0, m: "", e: nowSec() + 60 },
       SECRET,
     );
     expect(verifyPreviewToken(uploadToken, SECRET)).toBeNull();
+
+    // Deliberately give the preview token an UPLOAD-shaped payload too, so the
+    // rejection can only come from the domain-separated signature — not from a
+    // missing field the upload verifier happens to check.
+    const previewToken = signPreviewToken(
+      { d: "doc_abc12345", o: "org_1", e: nowSec() + 60, k: "documents/x", s: 0, m: "" } as never,
+      SECRET,
+    );
+    expect(verifyFsUploadToken(previewToken, SECRET)).toBeNull();
   });
 });
 
@@ -152,5 +166,25 @@ describe("buildInertPreviewCsp", () => {
   it("denies everything and pins frame-ancestors to the app origin", () => {
     const csp = buildInertPreviewCsp("https://app.example");
     expect(csp).toBe("default-src 'none'; frame-ancestors https://app.example");
+  });
+});
+
+describe("mayServeActiveHtml", () => {
+  it("keeps agent HTML active in every context once a separate origin isolates it", () => {
+    for (const dest of ["iframe", "document", "empty", "object", null]) {
+      expect(mayServeActiveHtml({ separateOrigin: true, secFetchDest: dest })).toBe(true);
+    }
+  });
+
+  it("same-origin: active ONLY for a proven nested-document load", () => {
+    expect(mayServeActiveHtml({ separateOrigin: false, secFetchDest: "iframe" })).toBe(true);
+  });
+
+  it("same-origin: fails closed on a top-level navigation, a bare fetch, and a missing header", () => {
+    // `document` is the shared-link / new-tab case the whole gate exists for:
+    // there is no sandbox attribute there, so the script would run on APP_URL.
+    for (const dest of ["document", "empty", "object", "embed", "frame", "", null, "IFRAME"]) {
+      expect(mayServeActiveHtml({ separateOrigin: false, secFetchDest: dest })).toBe(false);
+    }
   });
 });

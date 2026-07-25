@@ -354,3 +354,31 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     traceparent: source.TRACEPARENT || undefined,
   };
 }
+
+/** Sink variables captured into {@link RuntimeEnv.sink} and then scrubbed. */
+const SINK_ENV_KEYS = [
+  "APPSTRATE_SINK_SECRET",
+  "APPSTRATE_SINK_URL",
+  "APPSTRATE_SINK_FINALIZE_URL",
+] as const;
+
+/**
+ * Remove the run's sink credentials from the environment once
+ * {@link parseRuntimeEnv} has captured them into {@link RuntimeEnv.sink}.
+ *
+ * Same zero-knowledge reasoning as the `delete process.env.SIDECAR_URL` in
+ * `entrypoint.ts`: the agent loop runs arbitrary model-chosen commands through
+ * the Pi bash extension, and the agent's input (an email body, a fetched page,
+ * an input document) is attacker-controllable. `env | grep SINK` would hand a
+ * prompt-injected agent the HMAC key for its own run, which is enough to forge
+ * a `status: "success"` finalize the platform cannot distinguish from the real
+ * one, or to POST documents straight to `/api/runs/:id/documents` past the
+ * `runtime_tools` gate up to the per-run cap.
+ *
+ * Safe: nothing downstream re-reads these from the environment. The sink, the
+ * document uploader and the provisioning fetches all take the captured
+ * `env.sink` struct.
+ */
+export function scrubSinkEnv(source: NodeJS.ProcessEnv = process.env): void {
+  for (const key of SINK_ENV_KEYS) delete source[key];
+}

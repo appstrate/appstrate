@@ -23,15 +23,13 @@ import { invalidRequest, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { getActor, actorInsert } from "../lib/actor.ts";
 import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
+import { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
+import { normalizeMime } from "../services/mime-policy.ts";
 import { getEnv } from "@appstrate/env";
 
 const createUploadSchema = z.object({
   name: z.string().min(1).max(255),
-  size: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(100 * 1024 * 1024),
+  size: z.coerce.number().int().positive().max(UPLOAD_MAX_BYTES),
   mime: z.string().min(1).max(255),
   // Optional client integrity claim: lowercase-hex SHA-256, verified
   // server-side (S3 checksum on PUT, proxy-sink re-hash, and again at consume).
@@ -46,8 +44,9 @@ export function createUploadsRouter() {
 
   // POST /api/uploads — create an upload descriptor (signed URL + DB row)
   // 20/min/user — aligned with POST /agents/:id/run. Each descriptor reserves
-  // up to 100 MB of signed PUT capacity, so a higher ceiling would let a single
-  // session book multi-GB of storage slots per minute before GC catches up.
+  // up to `UPLOAD_MAX_BYTES` of signed PUT capacity, so a higher ceiling would
+  // let a single session book multi-GB of storage slots per minute before GC
+  // catches up.
   router.post("/", rateLimit(20), async (c) => {
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
@@ -110,14 +109,13 @@ export function createUploadContentRouter() {
     const payload = verifyFsUploadToken(token, env.UPLOAD_SIGNING_SECRET);
     if (!payload) throw unauthorized("invalid or expired upload token");
 
-    // Normalize both sides: strip parameters (charset, boundary, …) and
-    // lowercase. Prevents "application/pdf" vs "application/pdf; charset=…"
-    // from mismatching, and catches attackers padding the signed MIME with
-    // extra params.
-    const normalize = (v: string) => v.split(";")[0]?.trim().toLowerCase() ?? "";
+    // Normalize both sides through the shared MIME policy: strip parameters
+    // (charset, boundary, …) and lowercase. Prevents "application/pdf" vs
+    // "application/pdf; charset=…" from mismatching, and catches attackers
+    // padding the signed MIME with extra params.
     const declaredType = c.req.header("content-type");
-    const signedMime = normalize(payload.m);
-    if (signedMime && declaredType && normalize(declaredType) !== signedMime) {
+    const signedMime = normalizeMime(payload.m);
+    if (signedMime && declaredType && normalizeMime(declaredType) !== signedMime) {
       throw invalidRequest(`Content-Type '${declaredType}' does not match signed '${payload.m}'`);
     }
 

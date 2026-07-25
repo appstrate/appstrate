@@ -36,8 +36,8 @@ export interface RunSinkContext {
   versionRef: string;
   /**
    * Model source resolved at run creation time (`"system"` for platform-paid
-   * models, `"org"` for BYOK). Forwarded to the `afterRun` hook so module
-   * billing handlers can distinguish billable from non-billable runs.
+   * models, `"org"` for BYOK). Forwarded to the `onRunStatusChange` event so
+   * module listeners can distinguish billable from non-billable runs.
    */
   modelSource: string | null;
 }

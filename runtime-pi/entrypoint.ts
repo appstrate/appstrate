@@ -67,7 +67,7 @@ import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
-import { parseRuntimeEnv, RuntimeEnvError } from "./env.ts";
+import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "./env.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import {
   createRuntimeEventDrainer,
@@ -164,6 +164,11 @@ try {
   }
   process.exit(1);
 }
+
+// Zero-knowledge, part 1 (part 2 is `delete process.env.SIDECAR_URL` below):
+// the sink URL/secret are now captured in `env.sink`, so drop them from the
+// environment before any agent-controlled code can run. See `scrubSinkEnv`.
+scrubSinkEnv();
 
 const AGENT_RUN_ID = env.runId;
 

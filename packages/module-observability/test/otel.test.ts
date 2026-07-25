@@ -34,7 +34,7 @@ import {
   recordLlmLatency,
   recordDocumentCreated,
   recordDocumentDeleted,
-  recordDocumentQuotaRejection,
+  recordDocumentStorageLimitRejection,
   recordDocumentPartialPublication,
   setQueueDepthProvider,
   _resetObservabilityForTesting,
@@ -95,7 +95,7 @@ describe("observability — disabled (no-op)", () => {
     expect(() => recordLlmLatency(5, { api_shape: "openai", status: 200 })).not.toThrow();
     expect(() => recordDocumentCreated({ purpose: "agent_output" })).not.toThrow();
     expect(() => recordDocumentDeleted(2)).not.toThrow();
-    expect(() => recordDocumentQuotaRejection()).not.toThrow();
+    expect(() => recordDocumentStorageLimitRejection()).not.toThrow();
     expect(() => recordDocumentPartialPublication()).not.toThrow();
     expect(currentTraceparent()).toBeUndefined();
   });
@@ -251,14 +251,14 @@ describe("observability — enabled (in-memory exporters)", () => {
     recordDocumentCreated({ purpose: "user_upload" });
     recordDocumentDeleted(3); // one batch delete of 3 rows
     recordDocumentDeleted(1); // one explicit delete
-    recordDocumentQuotaRejection();
+    recordDocumentStorageLimitRejection();
     recordDocumentPartialPublication();
     await _forceFlushForTesting();
 
     const rms = metricExporter.getMetrics();
     const created = findMetric(rms, "appstrate.documents.created");
     const deleted = findMetric(rms, "appstrate.documents.deleted");
-    const quota = findMetric(rms, "appstrate.documents.quota_rejections");
+    const quota = findMetric(rms, "appstrate.documents.storage_limit_rejections");
     const partial = findMetric(rms, "appstrate.documents.partial_publications");
 
     expect(created).toBeDefined();

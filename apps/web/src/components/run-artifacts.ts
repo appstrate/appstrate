@@ -29,20 +29,15 @@ export function artifactFailureCodeKey(code: string): string {
 }
 
 /**
- * Safe-narrow the untyped `run.artifacts` blob to the list of LOST deliverables,
- * returning it ONLY when the run is genuinely `partial` (at least one failure).
- * Returns `null` for a null/complete/malformed summary so the banner renders
- * nothing. Pure — unit-tested without a DOM.
+ * The list of LOST deliverables, returned ONLY when the run's outputs sweep is
+ * genuinely `partial` (at least one failure); `null` otherwise, so the banner
+ * renders nothing. The summary is fully described by the run DTO
+ * (`RunArtifactsSummary | null`) — no re-narrowing of an `unknown` blob, which
+ * only hid where the shape would drift. Pure — unit-tested without a DOM.
  */
 export function partialArtifactFailures(
-  artifacts: unknown,
-): Array<{ name: string; code: string }> | null {
-  if (artifacts == null || typeof artifacts !== "object") return null;
-  const a = artifacts as Partial<RunArtifactsSummary>;
-  if (a.status !== "partial") return null;
-  if (!Array.isArray(a.failed) || a.failed.length === 0) return null;
-  return a.failed.filter(
-    (f): f is { name: string; code: string } =>
-      !!f && typeof f.name === "string" && typeof f.code === "string",
-  );
+  artifacts: RunArtifactsSummary | null | undefined,
+): RunArtifactsSummary["failed"] | null {
+  if (!artifacts || artifacts.status !== "partial") return null;
+  return artifacts.failed.length > 0 ? artifacts.failed : null;
 }

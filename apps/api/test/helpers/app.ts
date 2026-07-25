@@ -62,6 +62,7 @@ import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "../../src/routes/uploads.ts";
 import { createDocumentsRouter, createDocumentPreviewRouter } from "../../src/routes/documents.ts";
+import { createAdminStorageDeletionRouter } from "../../src/routes/admin-storage-deletion.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
@@ -266,6 +267,10 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/uploads/_content", createUploadContentRouter());
   app.route("/api/uploads", createUploadsRouter());
   app.route("/api", createDocumentsRouter());
+  // Platform-operator storage-deletion outbox. Mirrors production wiring; the
+  // route family carries its own operator guard (session + `platform` realm +
+  // `AUTH_PLATFORM_ADMIN_EMAILS`), which is what its tests exercise.
+  app.route("/api/admin/storage-deletion-jobs", createAdminStorageDeletionRouter());
   for (const mod of extraModules) {
     const moduleRouter = mod.createRouter?.();
     // Modules mount at the HTTP origin root — they declare full paths

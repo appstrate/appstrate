@@ -32,7 +32,8 @@ import { createDocumentFromStream } from "../services/documents.ts";
 import { getRunAttribution } from "../services/state/runs.ts";
 import { recordAudit } from "../services/audit.ts";
 import { actorFromIds } from "../lib/actor.ts";
-import { sanitizeFilename } from "../services/uploads.ts";
+import { decodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
+import { documentUri } from "@appstrate/core/document-uri";
 import {
   downloadRunWorkspace,
   downloadRunDocumentsManifest,
@@ -90,9 +91,9 @@ const MAX_ARTIFACT_CODE_LEN = 64;
  * Clamp an oversized artifacts summary to the ingest bounds BEFORE Zod
  * validation, so a version-skewed container that emits an over-long `failed`
  * list (or over-long name/code strings) still finalizes with a TRUNCATED
- * summary rather than tripping a hard 400. Only SIZE is clamped — a non-array
- * `failed`, non-string name/code, or unknown keys pass through untouched and the
- * strict schema still rejects them (a genuine shape violation stays a 400). Pure
+ * summary rather than tripping a hard 400. Only SIZE is clamped here; the
+ * schema behind it strips unknown keys and `.catch`es anything still invalid,
+ * so the whole field degrades to absent rather than failing the finalize. Pure
  * + defensive: any non-object / missing-`failed` input is returned unchanged.
  */
 function clampArtifacts(input: unknown): unknown {
@@ -111,7 +112,12 @@ function clampArtifacts(input: unknown): unknown {
   return { ...obj, failed };
 }
 
-const RunResultSchema = z
+/**
+ * Exported so the tolerance contract above can be unit-tested directly
+ * (apps/api/test/unit/finalize-artifacts-tolerance.test.ts) without a DB or a
+ * signed request. The route is the only production consumer.
+ */
+export const RunResultSchema = z
   .object({
     memories: z
       .array(
@@ -173,38 +179,41 @@ const RunResultSchema = z
     // finalize successfully while new agents publish markdown documents.
     report: z.string().optional().catch(undefined),
     // Terminal outputs-sweep summary (documents hardening). Snake_case inner
-    // keys, matching the persisted `runs.artifacts` column. The summary is a
-    // SOFT partial-deliverables SIGNAL — an oversized one must never turn a
-    // (possibly successful) run's finalize into a hard 400. So size overruns are
-    // CLAMPED, not rejected: `clampArtifacts` truncates an over-long `failed`
-    // list (≤1000) and over-long name/code strings (≤512 / ≤64) BEFORE
-    // validation — mirroring the producer bounds in runtime-pi/publish.ts, so a
-    // version-skewed container that emits a runaway loss list still finalizes
-    // with a truncated summary rather than failing. The object shape itself
-    // stays `.strict()` (unknown keys still rejected) and status/published stay
-    // strictly typed — genuine type/shape violations (not mere size) are still a
-    // 400. Absence is fine — older containers do not send it, column stays null.
+    // keys, matching the persisted `runs.artifacts` column.
+    //
+    // A SOFT partial-deliverables SIGNAL. Finalize reports the outcome of an
+    // ALREADY-FINISHED run, so this cosmetic field must NEVER turn a successful
+    // run's finalize into a hard 400 the container cannot recover from (the run
+    // would then sit `running` until the watchdog synthesised a timeout, i.e. a
+    // successful run reported as failed). It is therefore tolerant end to end:
+    //   - size overruns are CLAMPED by `clampArtifacts` before validation (an
+    //     over-long `failed` list, over-long name/code strings), mirroring the
+    //     producer bounds in runtime-pi/publish.ts;
+    //   - unknown keys are STRIPPED rather than rejected: deployments are not
+    //     atomic, so a runtime image newer than the platform can legitimately
+    //     add a field to a `failed` entry, and an extra cosmetic key must not
+    //     cost the run its finalize;
+    //   - anything still invalid degrades to `undefined` via `.catch`, leaving
+    //     the column null while the run finalizes normally.
+    // Absence is fine too: older containers do not send it.
     artifacts: z
       .preprocess(
         clampArtifacts,
-        z
-          .object({
-            status: z.enum(["complete", "partial"]),
-            published: z.number().int().nonnegative(),
-            failed: z
-              .array(
-                z
-                  .object({
-                    name: z.string().max(512),
-                    code: z.string().max(64),
-                  })
-                  .strict(),
-              )
-              .max(1000),
-          })
-          .strict(),
+        z.object({
+          status: z.enum(["complete", "partial"]),
+          published: z.number().int().nonnegative(),
+          failed: z
+            .array(
+              z.object({
+                name: z.string().max(512),
+                code: z.string().max(64),
+              }),
+            )
+            .max(1000),
+        }),
       )
-      .optional(),
+      .optional()
+      .catch(undefined),
   })
   .passthrough();
 
@@ -240,7 +249,26 @@ export function createRunsEventsRouter() {
   // — or get starved by — the high-rate event-ingestion budget above.
   const documentLimiter = rateLimitRunDocuments(30, 6);
 
-  router.post("/runs/:runId/events", eventLimiter, verifyRunSignature, async (c) => {
+  // MIDDLEWARE ORDER — the signature guard runs FIRST on every route below,
+  // the per-run limiter second. Both limiters key on the `:runId` from the
+  // URL, so a limiter placed first would let anyone who merely knows a runId
+  // burn a legitimate run's ingestion budget with unsigned garbage — a remote
+  // DoS on that run's event stream and finalize sweep. Verifying first means
+  // only the authentic run can spend its own budget.
+  //
+  // What bounds the work done BEFORE authentication (one `getRunSinkContext`
+  // DB read per attempt, including a flood of random runIds) is not these
+  // limiters but the coarse per-IP FAILURE budget inside the guard itself
+  // (`assertRunSinkAuthBudget` / `recordRunSinkAuthFailure`,
+  // `middleware/rate-limit.ts`): it charges only REJECTED attempts, so signed
+  // traffic from a fleet of runners behind one NAT egress address is never
+  // throttled while an unauthenticated flood is capped.
+  //
+  // No handler depends on the limiter having run: both limiters are
+  // `emitHeaders: false` (no response header the handler reads) and their only
+  // effect is consuming a point or throwing 429.
+
+  router.post("/runs/:runId/events", verifyRunSignature, eventLimiter, async (c) => {
     // verifyRunSignature populated these. The runtime assertion is a
     // belt-and-suspenders against refactoring mistakes (types say
     // optional because AppEnv.Variables is a union with auth-less HMAC
@@ -266,7 +294,7 @@ export function createRunsEventsRouter() {
     });
   });
 
-  router.post("/runs/:runId/events/finalize", eventLimiter, verifyRunSignature, async (c) => {
+  router.post("/runs/:runId/events/finalize", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
 
     const parsed = RunResultSchema.safeParse(await c.req.json());
@@ -310,7 +338,7 @@ export function createRunsEventsRouter() {
   // open-sink row. No sequence advance, no log row, no ordering
   // semantics. The watchdog reads `last_heartbeat_at` exclusively,
   // so this endpoint is the minimum-viable liveness beacon.
-  router.post("/runs/:runId/events/heartbeat", eventLimiter, verifyRunSignature, async (c) => {
+  router.post("/runs/:runId/events/heartbeat", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     // Short-circuit if the sink is already closing — the runner's next
     // event will observe 410 anyway, no need to race.
@@ -336,7 +364,7 @@ export function createRunsEventsRouter() {
   // no bundle was provisioned, which the runtime treats as a fatal
   // provisioning fault (never a legitimately-empty workspace — the platform
   // always uploads the agent package).
-  router.get("/runs/:runId/workspace", eventLimiter, verifyRunSignature, async (c) => {
+  router.get("/runs/:runId/workspace", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const archive = await downloadRunWorkspace(run.id);
     if (!archive) throw notFound(`no workspace provisioned for run ${run.id}`);
@@ -355,7 +383,7 @@ export function createRunsEventsRouter() {
   // enumerates this, then fetches each document by name. A 404 means the run
   // carries no input documents (the common case), which the runtime treats as
   // an empty document set — not a fault.
-  router.get("/runs/:runId/documents", eventLimiter, verifyRunSignature, async (c) => {
+  router.get("/runs/:runId/documents", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const manifest = await downloadRunDocumentsManifest(run.id);
     if (!manifest) throw notFound(`no input documents for run ${run.id}`);
@@ -364,9 +392,10 @@ export function createRunsEventsRouter() {
     // would silently overwrite one document with another. The platform build
     // path can't produce one (assignWorkspaceNames dedupes); this guards a
     // corrupted / hand-built manifest with a typed 400 instead.
-    // (Pre-upgrade manifests key on `name` only — fall back rather than 400
-    // a run that was launched before workspace names existed.)
-    assertUniqueWorkspaceNames(manifest.documents.map((d) => d.workspace_name ?? d.name));
+    // `workspace_name` is guaranteed present: `parseRunDocumentsManifest` (the
+    // single reader, shared with the deletion path) rejects any entry without a
+    // safe single-segment name before this point.
+    assertUniqueWorkspaceNames(manifest.documents.map((d) => d.workspace_name));
     return c.json(manifest);
   });
 
@@ -384,11 +413,9 @@ export function createRunsEventsRouter() {
   // enforced transactionally (403). Idempotent for the sweep's retries: an
   // identical (run, sha256, name) upload returns the existing document (200).
   //
-  // Middleware order — HMAC verification runs BEFORE the rate limiter. The
-  // limiter keys on the runId from the URL, so if it ran first an UNauthenticated
-  // attacker who merely knows a runId could spend a legitimate run's document
-  // budget with garbage requests (a DoS on the run's finalize sweep). Verifying
-  // the run signature first means only the authentic run can consume its budget.
+  // Signature before limiter — see the MIDDLEWARE ORDER note at the top of
+  // this router. Here the budget being protected is the run's finalize
+  // `outputs/` sweep.
   router.post("/runs/:runId/documents", verifyRunUploadSignature, documentLimiter, async (c) => {
     const run = c.get("run")!;
 
@@ -404,9 +431,23 @@ export function createRunsEventsRouter() {
       throw conflict("run_not_running", `run ${run.id} is not running (status: ${runRow.status})`);
     }
 
+    // `X-Document-Name` carries a percent-encoded (encodeURIComponent) UTF-8
+    // filename, because an HTTP field value is ISO-8859-1 by spec and cannot
+    // carry a raw `report.md` in CJK or even a French accent without being
+    // rejected by the sender or mojibaked in transit. Decoding is strict: a
+    // value outside the encoder's alphabet, an over-long one, or a malformed
+    // escape is a typed 400 rather than a guess, so a mis-encoded client fails
+    // loudly instead of silently storing a corrupted deliverable name.
     const rawName = c.req.header("X-Document-Name");
     if (!rawName) throw invalidRequest("X-Document-Name header is required", "X-Document-Name");
-    const name = sanitizeFilename(rawName);
+    const decodedName = decodeFilenameHeader(rawName);
+    if (decodedName === null) {
+      throw invalidRequest(
+        "X-Document-Name must be a percent-encoded (encodeURIComponent) UTF-8 filename",
+        "X-Document-Name",
+      );
+    }
+    const name = sanitizeFilename(decodedName);
 
     const mime = c.req.header("Content-Type");
     if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
@@ -445,7 +486,7 @@ export function createRunsEventsRouter() {
     return c.json(
       {
         id: row.id,
-        uri: `document://${row.id}`,
+        uri: documentUri(row.id),
         name: row.name,
         mime: row.mime,
         size: row.size,
@@ -459,7 +500,7 @@ export function createRunsEventsRouter() {
   // straight from storage so neither the platform nor the agent buffers the
   // whole payload. The agent streams the response body to `documents/<name>`.
   // A 404 on a document the manifest listed is a fatal provisioning fault.
-  router.get("/runs/:runId/documents/:name", eventLimiter, verifyRunSignature, async (c) => {
+  router.get("/runs/:runId/documents/:name", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const name = c.req.param("name");
     const stream = await downloadRunDocumentStream(run.id, name);

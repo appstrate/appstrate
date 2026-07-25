@@ -139,19 +139,29 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.
   //
-  //     `modelSource: null` — a remote-origin run resolves NO platform model at
-  //     creation (the runner executes on its own host with its own model +
-  //     credentials; `runs.model_source` stays NULL — see the createRunRow
-  //     comment below). So the run-surface `beforeUsage` hook is skipped: it is
-  //     not cheaply determinable here whether the run will route inference
-  //     through the system proxy, and any inference that does is metered
-  //     per-call on the proxy rows (`credential_source:"system"`), which carry
-  //     the platform attribution. Gating a remote run's OWN-credential
-  //     inference here would be the spurious-402 bug on the remote path.
+  //     The hook is NOT skipped on this path — it is dispatched with the facts
+  //     that describe a remote run, and the module decides:
+  //
+  //     `credentialSource: null` — a remote-origin run resolves NO platform
+  //     model at creation (the runner executes on its own host with its own
+  //     model + credentials; `runs.model_source` stays NULL — see the
+  //     createRunRow comment below), so the credential that will pay for
+  //     inference is genuinely unknown here and the model component is
+  //     unquotable. Any inference the run DOES route through the platform's
+  //     system proxy is admitted at that seam (`system-proxy-admission.ts`),
+  //     where the source is known, and metered per-call on the proxy rows
+  //     (`credential_source:"system"`).
+  //
+  //     `executionPlane: "remote"` — the caller supplies the host, so the
+  //     platform funds no compute and the compute component is zero. Together
+  //     the two facts describe a fully self-funded operation, which is what a
+  //     module short-circuits instead of the platform pre-classifying it as
+  //     free (that pre-classification was the old spurious-402 workaround).
   const gates = await runPreflightGates({
     orgId,
     agent: input.agent,
-    modelSource: null,
+    credentialSource: null,
+    executionPlane: "remote",
   });
   if (!gates.ok) return { ok: false, error: gates.error };
   const { agent } = gates;

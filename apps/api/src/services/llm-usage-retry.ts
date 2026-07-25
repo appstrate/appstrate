@@ -1,14 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Durable retry path for `llm_usage` writes.
+ * Durable retry path for `llm_usage` PROXY writes.
  *
  * Provider bytes may already be consumed when metering runs (especially SSE),
  * so a transient Postgres failure cannot be repaired by retrying the LLM call.
- * Failed ledger writes are therefore handed to the platform queue: Redis-backed
- * in production, local in-memory in embedded single-instance mode. Proxy jobs
- * replay a stable request_id and runner jobs use their monotonic run upsert, so
- * every retry is idempotent.
+ * Failed proxy ledger writes are therefore handed to the platform queue:
+ * Redis-backed in production, local in-memory in embedded single-instance mode.
+ * A proxy job replays a stable request_id, so the retry is idempotent, and the
+ * replayed row gets a FRESH serial id above any cursor watermark — it is billed
+ * whenever it eventually lands, even long after its run is terminal.
+ *
+ * Runner rows are deliberately NOT eligible for the queue. They are cumulative
+ * snapshots into a single per-run row that stops being writable the moment the
+ * run settles (`llm-usage-ledger.ts`), so an asynchronous replay could only ever
+ * land on a row a billing consumer already claimed — raising a total nobody
+ * re-reads, i.e. silent under-billing. A failed runner write instead propagates:
+ * on the `appstrate.metric` ingestion path it rolls back the surrounding
+ * transaction (the sequence is not advanced, the runner re-POSTs the event and
+ * its next cumulative snapshot supersedes the lost one), and on the finalize
+ * path it keeps the run unsettled until its terminal snapshot is durable.
  */
 
 import { createQueue, type JobQueue } from "../infra/queue/index.ts";
@@ -24,7 +35,12 @@ const QUEUE_NAME = "llm-usage-retry";
 const RETRY_ATTEMPTS = 288; // five-minute cap => roughly 24 hours of retries
 const MAX_BACKOFF_MS = 5 * 60_000;
 
-type RetryConflictMode = NonNullable<RecordLlmUsageOptions["onConflict"]>;
+/**
+ * Only proxy rows are queue-eligible (see the module doc), so a queued job
+ * always replays through the proxy dedup mode — the write mode travels with the
+ * job so the consumer never has to re-derive it from the entry.
+ */
+type RetryConflictMode = "proxy-idempotent";
 
 interface LlmUsageRetryJob {
   entry: LlmUsageEntry;
@@ -71,12 +87,17 @@ export async function initLlmUsageRetryWorker(): Promise<void> {
 /**
  * Persist a ledger entry, durably enqueueing it when the direct write fails.
  *
- * `required` is used by run finalization: the terminal runner snapshot must be
- * visible in Postgres before the run becomes settled, otherwise Cloud could
- * claim an older cumulative row and never revisit its serial id. In that one
- * path we propagate the DB error so finalize is retried and the run remains
- * unsettled. Every other path may safely enqueue because its context is still
- * active or the proxy row will receive a fresh serial id when replayed.
+ * The error PROPAGATES instead of being enqueued when either:
+ *   - the entry is a `runner` row — an asynchronous replay of a cumulative
+ *     snapshot can only land after the run settled, where it is refused (see
+ *     the module doc). The caller's transaction rolls back / finalize is
+ *     retried, which is the correct recovery for a cumulative producer;
+ *   - the caller passed `required` (run finalization's terminal barrier), so a
+ *     run can never become settled while its authoritative snapshot is not yet
+ *     visible in Postgres.
+ *
+ * Proxy rows keep the durable queue: each is an immutable per-call fact that
+ * receives a fresh serial id when it lands, so a late replay is still billed.
  */
 export async function recordLlmUsageReliably(
   entry: LlmUsageEntry,
@@ -86,16 +107,14 @@ export async function recordLlmUsageReliably(
     await recordLlmUsage(entry, opts);
     return;
   } catch (directError) {
-    if (opts.required) throw directError;
+    if (opts.required || entry.source === "runner") throw directError;
 
-    const onConflict: RetryConflictMode =
-      opts.onConflict ?? (entry.source === "runner" ? "runner-monotonic" : "proxy-idempotent");
     try {
       await (
         await getQueue()
       ).add(
         "persist-usage",
-        { entry, onConflict },
+        { entry, onConflict: "proxy-idempotent" },
         { attempts: RETRY_ATTEMPTS, backoff: { type: "custom" } },
       );
       logger.warn("Queued llm_usage write after direct persistence failure", {

@@ -14,7 +14,7 @@ import { z } from "zod";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
-import type { OrgRole } from "./permissions.ts";
+import type { ModuleResource, ModuleResources, OrgRole } from "./permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
 import type {
   ChatAttachmentRequest,
@@ -30,7 +30,7 @@ import type { OrchestratorRegistration } from "./platform-types.ts";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
-  /** Unique identifier (e.g. "cloud", "oidc"). */
+  /** Unique identifier (e.g. "webhooks", "oidc"). */
   id: string;
   /** Human-readable name. */
   name: string;
@@ -150,18 +150,25 @@ export interface AppstrateModule {
   betterAuthPlugins?(): unknown[];
 
   /**
-   * Named hooks (first-match-wins).
-   * The platform invokes hooks by name — only the first module that provides
-   * a given hook is called. For broadcast-to-all semantics, use `events`.
+   * Named hooks. Each hook name has ONE dispatch mode, fixed by which half of
+   * the contract declares it:
    *
-   * Naming: `beforeX` (gates), `afterX` (post-lifecycle patches).
+   *   - {@link FirstMatchHooks} — only the first module providing the hook is
+   *     called; its answer is authoritative.
+   *   - {@link BroadcastHooks} — every module providing the hook is called and
+   *     a throwing handler aborts the operation.
+   *
+   * Unlike `events`, a hook returns a value and/or gates the operation.
+   *
+   * Naming: `beforeX` (gates), `afterX` (post-lifecycle side effects).
    *
    * Priority order: topological order from `manifest.dependencies`. Modules
    * without dependencies keep the order they appear in `MODULES`.
    *
-   * Example: `MODULES=admission,metering` — if both provide `beforeUsage`,
-   * `admission` runs first. To force ordering, add `dependencies: ["admission"]`
-   * on `metering` so the topo sort always places `admission` earlier.
+   * Example: `MODULES=admission,metering` — if both provide `beforeUsage`
+   * (first-match-wins), `admission` runs first and `metering` is never
+   * consulted. To force ordering, add `dependencies: ["admission"]` on
+   * `metering` so the topo sort always places `admission` earlier.
    */
   hooks?: Partial<ModuleHooks>;
 
@@ -175,7 +182,7 @@ export interface AppstrateModule {
   events?: Partial<ModuleEvents>;
 
   /**
-   * Email template overrides (e.g. branded versions for Cloud).
+   * Email template overrides (e.g. an operator's own branded versions).
    * Collected after init and merged into the email registry.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -309,48 +316,71 @@ export interface AppstrateModule {
  * One resource's RBAC contribution from a module — declares the actions
  * available, which org roles grant them, and whether they can be issued
  * through API keys. See `AppstrateModule.permissionsContribution`.
+ *
+ * Distributes over {@link ModuleResources}: the `resource` literal PINS the
+ * legal `actions` for that entry, so the runtime contribution can no longer
+ * drift from the compile-time `declare module` augmentation that guards the
+ * call sites. When both halves were plain `string`, a typo (`"taks"`, or an
+ * action the augmentation never declared) produced a permission that type-
+ * checked at the guard — `requireModulePermission("tasks", "read")` reads the
+ * augmentation — yet was never granted at boot, because the contribution wrote
+ * `taks:read` into the role set. The result was a permanent 403 with nothing
+ * failing anywhere; consumers documented the invariant by hand instead.
+ *
+ * A module that contributes permissions MUST therefore ship the `declare
+ * module` block: without it `ModuleResources` stays empty, this type resolves
+ * to `never`, and `permissionsContribution()` cannot return anything.
  */
-export interface ModulePermissionContribution {
-  /** Resource name (e.g. "tasks"). Must be unique across loaded modules and disjoint from core resources. */
-  resource: string;
-  /** Actions the module supports for this resource (e.g. ["read", "write"]). */
-  actions: readonly string[];
-  /**
-   * Org roles that grant every listed action. The platform writes the
-   * union into `resolvePermissions(role)`. Omit a role to leave it
-   * without access (e.g. `viewer` typically only sees `:read`).
-   *
-   * Granular per-action grants (e.g. owner gets write, member gets read
-   * only) are supported by listing the resource multiple times with
-   * different `actions`/`grantTo` combinations.
-   */
-  grantTo: ReadonlyArray<OrgRole>;
-  /**
-   * When `true`, every `<resource>:<action>` produced by this entry is
-   * added to the API-key allowlist so org admins can mint keys with
-   * these scopes. Defaults to `false` — module permissions are
-   * session-only unless explicitly opted in.
-   */
-  apiKeyGrantable?: boolean;
-  /**
-   * When `true`, every `<resource>:<action>` produced by this entry can be
-   * carried by an end-user OAuth2/OIDC token (the embedding-app flow). The
-   * platform's OIDC strategy filters end-user JWT scopes against this
-   * allowlist before writing them to `c.get("permissions")` — without the
-   * opt-in, a module's resource is unreachable through end-user tokens
-   * even if the JWT advertises it.
-   *
-   * Defaults to `false` — module permissions are dashboard/instance/API-key
-   * only unless explicitly opted in. Use this for modules whose data is
-   * meant to be addressed per-end-user (per-user data streams, end-user
-   * profiles, notifications…). Avoid for admin/destructive surfaces (those should
-   * stay session-only or API-key-only).
-   *
-   * No-op on platforms that don't load the OIDC module — the flag is
-   * simply ignored when no end-user pipeline exists.
-   */
-  endUserGrantable?: boolean;
-}
+export type ModulePermissionContribution = {
+  [R in Extract<ModuleResource, string>]: {
+    /**
+     * Resource name (e.g. "tasks") — a key of the module's `ModuleResources`
+     * augmentation. Must be unique across loaded modules and disjoint from
+     * core resources (both enforced at boot).
+     */
+    resource: R;
+    /**
+     * Actions to grant for this resource, narrowed to those the augmentation
+     * declares for `R` (e.g. `["read", "write"]`).
+     */
+    actions: readonly Extract<ModuleResources[R], string>[];
+    /**
+     * Org roles that grant every listed action. The platform writes the
+     * union into `resolvePermissions(role)`. Omit a role to leave it
+     * without access (e.g. `viewer` typically only sees `:read`).
+     *
+     * Granular per-action grants (e.g. owner gets write, member gets read
+     * only) are supported by listing the resource multiple times with
+     * different `actions`/`grantTo` combinations.
+     */
+    grantTo: ReadonlyArray<OrgRole>;
+    /**
+     * When `true`, every `<resource>:<action>` produced by this entry is
+     * added to the API-key allowlist so org admins can mint keys with
+     * these scopes. Defaults to `false` — module permissions are
+     * session-only unless explicitly opted in.
+     */
+    apiKeyGrantable?: boolean;
+    /**
+     * When `true`, every `<resource>:<action>` produced by this entry can be
+     * carried by an end-user OAuth2/OIDC token (the embedding-app flow). The
+     * platform's OIDC strategy filters end-user JWT scopes against this
+     * allowlist before writing them to `c.get("permissions")` — without the
+     * opt-in, a module's resource is unreachable through end-user tokens
+     * even if the JWT advertises it.
+     *
+     * Defaults to `false` — module permissions are dashboard/instance/API-key
+     * only unless explicitly opted in. Use this for modules whose data is
+     * meant to be addressed per-end-user (per-user data streams, end-user
+     * profiles, notifications…). Avoid for admin/destructive surfaces (those should
+     * stay session-only or API-key-only).
+     *
+     * No-op on platforms that don't load the OIDC module — the flag is
+     * simply ignored when no end-user pipeline exists.
+     */
+    endUserGrantable?: boolean;
+  };
+}[Extract<ModuleResource, string>];
 
 // ---------------------------------------------------------------------------
 // Hook & event type maps — the typed contract
@@ -384,48 +414,78 @@ export interface AfterSignupContext {
   headers: Headers | null;
 }
 
-/** Known hooks and their signatures. */
-export interface ModuleHooks {
+/**
+ * Hooks dispatched FIRST-MATCH-WINS: the platform calls the first loaded
+ * module that provides one and never consults the rest, so the first module's
+ * verdict is authoritative.
+ *
+ * A hook belongs here iff exactly one answer is wanted. A gate that several
+ * modules may legitimately want to veto belongs in {@link BroadcastHooks} —
+ * first-match-wins would silently disable every implementer but one.
+ */
+export interface FirstMatchHooks {
   /**
    * Pre-usage admission gate — called before an org spends metered LLM usage on
-   * a given surface (an agent run or a chat turn). First-match-wins: the first
-   * module that provides it decides. Return a rejection to block the usage, or
-   * null/undefined to allow. The {@link BeforeUsageParams} context discriminates
-   * run vs. chat so a module can apply per-surface policy.
+   * a given surface (an agent run or a chat turn). Return a rejection to block
+   * the usage, or null/undefined to allow. The {@link BeforeUsageParams} context
+   * discriminates run vs. chat so a module can apply per-surface policy.
+   *
+   * First-match-wins is deliberate: the admission answer is a single verdict
+   * (`UsageRejection | null`) the caller turns into one HTTP status. Two modules
+   * answering would need a merge rule the contract does not define. Core cannot
+   * host the decision itself — the policy lives in the metering module's own
+   * database.
    */
   beforeUsage: (params: BeforeUsageParams) => Promise<UsageRejection | null>;
+}
+
+/**
+ * Hooks BROADCAST to EVERY loaded module, in load order, with errors
+ * PROPAGATING (unlike {@link ModuleEvents}, where a throwing handler is
+ * isolated and logged): the first handler that throws aborts the operation.
+ *
+ * A hook belongs here iff every module's verdict must be honoured. These are
+ * the gates where first-match-wins would be a security regression — the second
+ * and later implementers would be silently skipped.
+ */
+export interface BroadcastHooks {
   /**
    * Pre-signup gate — throw to reject signup (e.g. domain allowlist,
-   * free-tier usage limits, per-client org-signup policy).
+   * usage limits, per-client org-signup policy).
    *
-   * Unlike other hooks in this map, `beforeSignup` is dispatched to EVERY
-   * loaded module rather than first-match-wins (the platform calls all
-   * handlers in turn; any thrown error aborts the signup). This lets
-   * unrelated modules — e.g. cloud usage metering + OIDC auto-provisioning —
-   * coexist cleanly.
+   * Broadcast, not first-match-wins: unrelated modules — e.g. a metering
+   * module's free-tier gate + OIDC's per-client signup policy — must both get
+   * to refuse. Any thrown error aborts the signup. It is a hook rather than an
+   * event because Better Auth creates the user BELOW the module layer, so
+   * `packages/db` cannot import a module to ask.
    */
   beforeSignup: (email: string, ctx?: BeforeSignupContext) => Promise<void>;
   /**
    * Post-signup side effect — runs after the BA user row is committed with
-   * the freshly minted `user.id`. Symmetric with `beforeSignup`: dispatched
-   * to EVERY loaded module. Used by OIDC to auto-join the new user to the
+   * the freshly minted `user.id`. Symmetric with `beforeSignup`: broadcast to
+   * EVERY loaded module. Used by OIDC to auto-join the new user to the
    * org pinned by the in-flight OAuth client so the subsequent /authorize
    * redirect lands on the client's callback instead of the dashboard
    * onboarding flow.
    */
   afterSignup: (user: { id: string; email: string }, ctx?: AfterSignupContext) => Promise<void>;
-  /**
-   * Post-run hook — called on terminal status before the final run record is
-   * persisted. Symmetric with `beforeUsage`. Modules return a metadata patch
-   * stored as `runs.metadata` (e.g. `{ usage }` from the cloud metering
-   * module), or null to leave it untouched.
-   */
-  afterRun: (params: RunStatusChangeParams) => Promise<Record<string, unknown> | null>;
 }
+
+/**
+ * Every known hook, both dispatch modes — what a module declares under
+ * `AppstrateModule.hooks`. The dispatch mode of each name is fixed by which
+ * of {@link FirstMatchHooks} / {@link BroadcastHooks} declares it, and the
+ * platform's two dispatchers accept only their own half.
+ */
+export interface ModuleHooks extends FirstMatchHooks, BroadcastHooks {}
 
 /** Known events and their signatures. Handlers may be sync or async. */
 export interface ModuleEvents {
-  /** Run status changed — broadcast on every run lifecycle transition. */
+  /**
+   * Run status changed — broadcast on every run lifecycle transition. The run
+   * pipeline cannot import a module, and core must not know who reacts
+   * (webhooks today, an analytics or notification module tomorrow).
+   */
   onRunStatusChange: (params: RunStatusChangeParams) => void | Promise<void>;
   /**
    * Run kickoff was blocked because one or more integration connections were
@@ -438,28 +498,11 @@ export interface ModuleEvents {
   onRunConnectionMissing: (params: RunConnectionMissingParams) => void | Promise<void>;
   /** Org created — broadcast after a new organization is created. */
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
-  /** Org deleted — broadcast before an organization is deleted. */
-  onOrgDelete: (orgId: string) => void | Promise<void>;
   /**
-   * One `llm_usage` row was written to the platform's usage ledger — broadcast
-   * after the row is committed by the single ledger writer (post-commit for
-   * writes made inside a transaction, so a rolled-back row never fires). Carries
-   * the full per-row attribution (source, principal, context, credential source,
-   * token counts, equivalent cost).
-   *
-   * CUMULATIVE runner rows: a `source:"runner"` row is a running total, not a
-   * per-call delta. The SAME {@link UsageRecordedParams.llmUsageId} re-fires as
-   * the run progresses, each time carrying a higher cumulative token/cost
-   * snapshot (the writer keeps one row per run and monotonically raises it).
-   * Consumers MUST upsert/replace by `llmUsageId` — NEVER sum successive event
-   * payloads, or a run's usage is over-counted. (`source:"proxy"` rows are
-   * per-call and fire once each.)
-   *
-   * Advisory only: the row is authoritative and consumers that must never miss a
-   * row (or must reconcile the final total) should read the ledger by its serial
-   * `id` cursor rather than relying on this side-effect broadcast.
+   * Org deleted — broadcast BEFORE an organization is deleted, and awaited
+   * ahead of the cascade so a listener can still read the org's rows.
    */
-  onUsageRecorded: (params: UsageRecordedParams) => void | Promise<void>;
+  onOrgDelete: (orgId: string) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -898,10 +941,112 @@ export interface AuthStrategy {
  * concurrency-aware admission without treating the first run as zero cost);
  * `chat` carries the session id (null for an ephemeral turn with no persisted
  * session).
+ *
+ * Both surfaces additionally report two neutral execution facts —
+ * `credentialSource` (whose credential is spent on inference) and
+ * `executionPlane` (whose compute runs the work) — and a run also reports the
+ * upper bound on how long it may occupy that compute (`timeoutSeconds`).
+ *
+ * These are FACTS, not verdicts. The platform never classifies an operation as
+ * exempt and skips the hook on its behalf: it dispatches on every metered usage
+ * attempt and lets the module apply its own policy to the reported facts. That
+ * separation is what keeps the contract stable — a module that only cares about
+ * platform-supplied inference simply ignores operations where
+ * `credentialSource !== "system"`, while a module that also accounts for
+ * platform compute reads `executionPlane` and `timeoutSeconds`, with no change
+ * to this type and no change to where the hook fires.
  */
 export type BeforeUsageParams =
-  | { orgId: string; context: "run"; packageId: string; runningCount: number }
-  | { orgId: string; context: "chat"; sessionId: string | null };
+  | {
+      orgId: string;
+      context: "run";
+      packageId: string;
+      runningCount: number;
+      /**
+       * Whose credential is spent on the inference this run performs.
+       *
+       * - `"system"` — a platform-supplied credential is used (a
+       *   `SYSTEM_PROVIDER_KEYS` entry, or a system model preset). The
+       *   organization consumes a resource it does not own.
+       * - `"org"` — the organization spends its OWN credential: a BYOK API key
+       *   it configured, or a provider subscription it authorized over OAuth.
+       *   No platform-supplied credential is consumed for inference.
+       * - `null` — not determinable at admission time. A remote-origin run
+       *   resolves its model later, on its own host, so the platform cannot
+       *   know here which credential it will end up using. This is not a
+       *   coverage gap: if such a run later routes inference through the
+       *   platform's system model proxy, that seam dispatches its own
+       *   `beforeUsage` with a `credentialSource` that IS known there.
+       *
+       * Naming note: this matches the `llm_usage.credential_source` ledger
+       * column, which is what a metering module reconciles a run against after
+       * the fact. The `runs.model_source` database column is the same concept
+       * under an older, persisted name — deliberately not renamed.
+       */
+      credentialSource: "system" | "org" | null;
+      /**
+       * Whose compute runs the work.
+       *
+       * - `"platform"` — the run executes on infrastructure the platform
+       *   operates and is responsible for (a sandboxed container or microVM).
+       * - `"remote"` — the caller supplies the host. The platform orchestrates
+       *   and records the run but contributes no compute of its own.
+       *
+       * Reported separately from `credentialSource` because the two are
+       * genuinely independent: an organization can bring its own credential and
+       * still occupy platform compute, or supply its own host while using a
+       * platform-supplied credential. A module that collapses them into a
+       * single signal will mis-admit one of those combinations.
+       */
+      executionPlane: "platform" | "remote";
+      /**
+       * The upper bound on how long this run may occupy platform compute.
+       *
+       * - a number — the run's EFFECTIVE timeout in seconds: the agent's
+       *   declared timeout after the platform ceiling has been applied. It is a
+       *   ceiling, NOT a prediction of the actual duration; most runs finish
+       *   well before it.
+       * - `null` — not determinable at this admission point, and deliberately
+       *   so: the seam admitting the operation is not the seam that owns its
+       *   compute. Concretely, the system-proxy seam admits the inference of an
+       *   ALREADY-RUNNING run; that run's compute was already accounted for
+       *   when the run itself was admitted (platform plane), or is not
+       *   platform-supplied at all (remote plane). A consumer must therefore
+       *   read `null` as "contribute no compute component here", NOT as
+       *   "unknown, assume the worst" — assuming the worst would account for
+       *   the same run's compute twice.
+       *
+       * Present so a module that accounts for compute duration can derive its
+       * estimate from a fact already known at admission time, instead of
+       * needing a later widening of this contract. A module that does not
+       * account for duration can ignore the field entirely.
+       */
+      timeoutSeconds: number | null;
+    }
+  | {
+      orgId: string;
+      context: "chat";
+      sessionId: string | null;
+      /**
+       * Whose credential is spent on the inference for this chat turn.
+       *
+       * - `"system"` — the turn resolves to a platform-supplied model preset.
+       * - `"org"` — the turn resolves to a model the organization configured
+       *   with its own credential.
+       *
+       * Never `null` here: a chat turn resolves its model on the platform,
+       * before admission, so the fact is always determinable — unlike a
+       * remote-origin run, which resolves its model elsewhere.
+       */
+      credentialSource: "system" | "org";
+      /**
+       * Always `"platform"` for chat: a turn runs inside the platform's own
+       * process, never on a caller-supplied host. Present rather than omitted
+       * so a module can read `executionPlane` off either union member without
+       * first narrowing on `context`.
+       */
+      executionPlane: "platform";
+    };
 
 /** Structured rejection returned by `beforeUsage` when a module blocks usage. */
 export interface UsageRejection {
@@ -941,45 +1086,6 @@ export interface RunStatusChangeParams {
   packageEphemeral?: boolean;
   /** Additional data for webhook payloads (result, error, etc.). */
   extra?: Record<string, unknown>;
-}
-
-/**
- * Parameters passed to the `onUsageRecorded` event — the per-row projection of
- * one `llm_usage` ledger entry a module may observe.
- *
- * Deliberately OSS-neutral: it reports who paid the provider
- * ({@link credentialSource}), never how that maps to any downstream accounting.
- * The backing upstream model id and protocol family (`real_model` / `api`,
- * server-side-only columns) are NEVER exposed here.
- */
-export interface UsageRecordedParams {
-  /**
-   * Serial primary key of the `llm_usage` row — the ledger cursor value. For a
-   * `source:"runner"` row this id is STABLE across the run: the same id re-fires
-   * with an updated (higher) cumulative total as the run progresses, so key any
-   * state on it and replace-by-id, never accumulate. See `onUsageRecorded`.
-   */
-  llmUsageId: number;
-  orgId: string;
-  /** Authenticated user the usage is attributed to, when the principal was a user. */
-  userId?: string | null;
-  /** Which producer wrote the row: the inference proxy or the agent runner. */
-  source: "proxy" | "runner";
-  /** What the row is attributed to — an agent run, a chat session, or nothing. */
-  contextType: "run" | "chat" | null;
-  /** The run id / chat session id matching {@link contextType} (null when unattributed). */
-  contextId: string | null;
-  /** Which credential set reached the provider: platform-provided or the org's own. */
-  credentialSource: "system" | "org" | null;
-  /** Preset id (the catalog model the caller selected); never the backing upstream id. */
-  model?: string | null;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens?: number | null;
-  cacheWriteTokens?: number | null;
-  /** Equivalent cost (USD) at the model's catalog rates. */
-  costUsd: number;
-  durationMs?: number | null;
 }
 
 /**
@@ -1045,16 +1151,17 @@ export interface ModuleInitContext {
 // ---------------------------------------------------------------------------
 // PlatformServices — injected platform capabilities
 //
-// Deliberately minimal: a capability lands here ONLY when a real cross-tenant
-// consumer needs it (the same razor `scripts/verify-module-contract.ts`
-// applies to the `AppstrateModule` members). Today the sole consumer is the
-// `cloud` metering module, which sweeps the append-only `llm_usage` ledger by
-// serial-`id` cursor via `usage.list` / `usage.settledFrontier` and gates admission via
-// `checkUsageAllowed`. The previous broad surface (orchestrator / pubsub /
-// realtime / inline / packages / models / applications / run CRUD) mirrored
-// the in-process `chat` module that has since been removed — it carried zero
+// Deliberately minimal: a capability lands here ONLY when a real consumer
+// needs it. `scripts/verify-module-contract.ts` enforces that mechanically —
+// every member below must carry a ledger entry naming its consumers (adding one
+// without an entry fails `tsc`), and a member no module consumes fails the check
+// as dead surface, exactly like an `AppstrateModule` member would. Each member's
+// own JSDoc states why the consumer cannot obtain the capability any other way.
+// The previous broad surface (orchestrator /
+// pubsub / realtime / inline / packages / models / applications / run CRUD)
+// mirrored an in-process module that has since been removed — it carried zero
 // live consumers, so it was dropped rather than left as speculative API.
-// Re-add a member here the moment a second consumer genuinely needs it.
+// Re-add a member here the moment a consumer genuinely needs it.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1070,8 +1177,18 @@ export interface LlmUsageLedgerRow {
   orgId: string;
   /** Equivalent cost (USD) at the model's catalog rates. */
   costUsd: number;
-  /** Which producer wrote the row: the inference proxy or the agent runner. */
-  source: string;
+  /**
+   * Which producer wrote the row.
+   *
+   *  - `"proxy"` — an immutable per-call row. Covers BOTH the inference proxy
+   *    AND the in-process chat engine, which drives a subscription model
+   *    directly and never traverses the proxy: they share the producer tag
+   *    because they share the row shape (settled at insert, one row per call).
+   *    Distinguish a chat turn by {@link contextType} `"chat"`, never by this.
+   *  - `"runner"` — the agent runner's ONE cumulative row per run (see
+   *    {@link settled}).
+   */
+  source: "proxy" | "runner";
   /** What the row is attributed to — an agent run, a chat session, or nothing. */
   contextType: "run" | "chat" | null;
   /** The run id / chat session id matching {@link contextType} (null when unattributed). */
@@ -1091,7 +1208,11 @@ export interface LlmUsageLedgerRow {
 }
 
 export interface PlatformServices {
-  /** Structured JSON logger (pino). */
+  /**
+   * Structured JSON logger — the platform's OWN pino instance, so module output
+   * lands in one stream with one format. A module importing `apps/api`'s logger
+   * would couple itself to the app.
+   */
   logger: Logger;
   /**
    * HTTP middleware factories for module routes.
@@ -1125,9 +1246,23 @@ export interface PlatformServices {
    */
   usage: {
     /**
-     * Next ledger rows after `afterId` (exclusive, default 0), ordered by `id`
-     * ASC, capped by `limit` (service default 500, max 1000). Optional
+     * Next VISIBLE ledger rows after `afterId` (exclusive, default 0), ordered
+     * by `id` ASC, capped by `limit` (service default 500, max 1000). Optional
      * `credentialSource` filters to rows stamped `system` / `org`.
+     *
+     * NOT every ledger row is visible. A remote run whose inference flows
+     * through the platform's inference proxy is metered TWICE in the ledger:
+     * once per call by the proxy, and once more by the runner's cumulative
+     * side-channel mirror (`source` `"runner"`, `credentialSource` null, on a
+     * run that also has proxy rows). Both describe the same spend, so the
+     * service EXCLUDES the mirror on every read. A consumer must NOT re-apply
+     * that rule — it would then be filtering rows it never received.
+     *
+     * Consequence for the cursor: returned ids are NOT contiguous, and a batch
+     * is "the next `limit` VISIBLE rows after `afterId`", never "ids
+     * `afterId+1 … afterId+limit`". An empty batch therefore always means
+     * "caught up" — never "the next id is hidden, retry" — so a consumer may
+     * advance its watermark to the last id it received and stop.
      *
      * Head-of-line trade-off: the consumer must never advance its watermark past
      * the first UNSETTLED row (see {@link LlmUsageLedgerRow.settled}), so a single
@@ -1157,6 +1292,11 @@ export interface PlatformServices {
      * behind the watermark and its usage is dropped forever. `settledFrontier()`
      * stops at the first unsettled row, so no in-flight runner row is ever
      * stranded below the initial watermark.
+     *
+     * Computed over the SAME visible set as {@link list} (the runner mirror of a
+     * proxy-metered run is excluded from both): a frontier taken over rows the
+     * consumer can never receive would stall forever on an invisible unsettled
+     * mirror, or sit above ids that were skipped.
      */
     settledFrontier(): Promise<number>;
   };
@@ -1201,7 +1341,7 @@ export interface PlatformServices {
    * (purpose `user_upload`), or validate that an existing `document://` is
    * readable by the session owner. The chat module has no DB access, so
    * materialization + the container-inherited ACL check cross through here.
-   * Rejections (over-cap, over-quota, not-found/foreign document) are thrown as
+   * Rejections (over-cap, over-limit, not-found/foreign document) are thrown as
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
@@ -1225,14 +1365,28 @@ export interface PlatformServices {
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this for its non-subscription (built-in /
-   * API-key) branch before starting a turn; the platform decides whether the
-   * chosen model is system-provided and only then dispatches the hook (an org's
-   * own API-key model is never gated). Returns a {@link UsageRejection} to block
-   * the turn (the module surfaces it as an RFC 9457 problem response with the
-   * hook's status — 402 flows through), or null to allow. Subscription turns
-   * never call this (they spend the user's own credential, `credentialSource`
-   * `org`). Keeping the system-provided decision server-side keeps the chat
-   * module dumb — it has no model-registry access.
+   * API-key) branch before starting a turn, and the platform dispatches the
+   * hook for EVERY such turn. Returns a {@link UsageRejection} to block the
+   * turn (the module surfaces it as an RFC 9457 problem response with the
+   * hook's status — 402 flows through), or null to allow.
+   *
+   * The platform still resolves whether the chosen model is system-provided or
+   * organization-owned — keeping that resolution server-side is what keeps the
+   * chat module dumb, since it has no model-registry access — but it now
+   * REPORTS that resolution as the `credentialSource` fact instead of using it
+   * to pre-filter. A turn on the organization's own credential reports
+   * `credentialSource: "org"` and is dispatched all the same, because a chat
+   * turn always executes in the platform's own process: the platform supplies
+   * the compute even when it supplies no credential. `executionPlane` is
+   * consequently always `"platform"` on this surface.
+   *
+   * A module that only accounts for platform-supplied inference treats such a
+   * turn as contributing nothing and admits it — the same outcome the platform
+   * used to assume on the module's behalf, now decided by the module that owns
+   * the policy.
+   *
+   * Subscription turns never call this (they spend the user's own credential,
+   * `credentialSource` `org`).
    */
   checkUsageAllowed(args: {
     orgId: string;
@@ -1242,17 +1396,17 @@ export interface PlatformServices {
   /**
    * Set (or clear) an organization's per-org document storage limit — the
    * technical byte ceiling the platform enforces on durable-document writes.
-   * A metering/plan module (e.g. cloud) pilots per-org storage by mapping its
-   * own plan/quota to a byte value and writing it here; the platform then
-   * enforces `documents_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited`
-   * on every document write.
+   * A metering module pilots per-org storage by mapping whatever entitlement
+   * it owns onto a byte value and writing it here; the platform then enforces
+   * `documents_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited` on every
+   * document write.
    *
    *  - `bytes` a non-negative safe integer → the org's override.
    *  - `bytes` null → clears the override (back to the env default).
    *
-   * Billing-neutral by contract: the core knows only a byte limit, never a plan
-   * or price. Throws the platform's RFC 9457 errors — a 404 for an unknown
-   * `orgId`, a 400 for a negative / non-integer `bytes`.
+   * The core knows only a byte ceiling — never the entitlement it came from.
+   * Throws the platform's RFC 9457 errors — a 404 for an unknown `orgId`, a
+   * 400 for a negative / non-integer `bytes`.
    */
   setDocumentStorageLimit(orgId: string, bytes: number | null): Promise<void>;
 }

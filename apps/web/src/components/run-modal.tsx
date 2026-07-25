@@ -7,7 +7,7 @@ import { Spinner } from "./spinner";
 import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { uploadClient } from "../api/uploads";
+import { useUploadClient } from "../hooks/use-upload";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import type { AgentDetail } from "@appstrate/shared-types";
 
@@ -76,6 +76,7 @@ function RunModalForm({
   const [inputData, setInputData] = useState<Record<string, unknown>>(initialInput ?? {});
   const inputFormRef = useRef<RjsfForm>(null);
   const labels = useSchemaFormLabels();
+  const upload = useUploadClient();
 
   const handleSubmit = () => {
     if (hasInputFields && inputFormRef.current) {
@@ -94,7 +95,7 @@ function RunModalForm({
             ref={inputFormRef}
             wrapper={inputWrapper}
             formData={inputData}
-            upload={uploadClient}
+            upload={upload}
             labels={labels}
             onChange={(e) => setInputData(e.formData as Record<string, unknown>)}
             onSubmit={(e) => onSubmit(e.formData as Record<string, unknown>)}

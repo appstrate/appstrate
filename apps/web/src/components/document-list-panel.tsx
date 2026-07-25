@@ -88,18 +88,25 @@ export function DocumentListPanel({
 
   // Navigate while preserving the URL hash (the run page keeps its active tab in
   // the hash — react-router's setSearchParams would drop it) and any other
-  // existing search params. Both open and close PUSH a history entry, so the
-  // back button from an open modal lands on the param-less URL and closes it.
+  // existing search params.
+  //
+  // Opening PUSHES (so the back button closes the preview); closing REPLACES.
+  // Pushing on close too would stack `[page, page?preview=x, page]`, and then
+  // "back" from the closed state would REOPEN the preview instead of leaving
+  // the page — worse with every document consulted.
   const setPreviewParam = (id: string | null) => {
     const params = new URLSearchParams(location.search);
     if (id) params.set("preview", id);
     else params.delete("preview");
     const search = params.toString();
-    navigate({
-      pathname: location.pathname,
-      search: search ? `?${search}` : "",
-      hash: location.hash,
-    });
+    navigate(
+      {
+        pathname: location.pathname,
+        search: search ? `?${search}` : "",
+        hash: location.hash,
+      },
+      { replace: id === null },
+    );
   };
 
   // Wire the delete/keep handlers unconditionally — per-document visibility is
@@ -192,13 +199,7 @@ export function DocumentListPanel({
         isPending={deleteDoc.isPending}
       />
 
-      {previewDoc && (
-        <DocumentPreview
-          doc={previewDoc}
-          open={!!previewDoc}
-          onClose={() => setPreviewParam(null)}
-        />
-      )}
+      {previewDoc && <DocumentPreview doc={previewDoc} onClose={() => setPreviewParam(null)} />}
     </>
   );
 }

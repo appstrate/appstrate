@@ -179,7 +179,8 @@ export const runsPaths = {
           },
         },
         "402": {
-          description: "Quota exceeded (Cloud only)",
+          description:
+            "Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -204,6 +205,24 @@ export const runsPaths = {
         "410": {
           description:
             "A referenced upload has expired before consume, or its post-consume reuse window has elapsed (`upload_expired`) — stage a fresh upload and retry",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "413": {
+          description:
+            "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
+            "(4 MiB decoded), or the run's input documents together exceed " +
+            "`WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). " +
+            "Both are refused before the run launches, so nothing is charged and no workspace is " +
+            'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
+            'many files".',
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -510,7 +529,8 @@ export const runsPaths = {
           },
         },
         "402": {
-          description: "Quota exceeded (Cloud only)",
+          description:
+            "Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -520,6 +540,24 @@ export const runsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "413": {
+          description:
+            "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
+            "(4 MiB decoded), or the run's input documents together exceed " +
+            "`WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). " +
+            "Both are refused before the run launches, so nothing is charged and no workspace is " +
+            'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
+            'many files".',
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "412": {
           description: "Missing integration connection (`missing_integration_connection`)",
           content: {
@@ -1140,7 +1178,8 @@ export const runsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "402": {
-          description: "Quota exceeded (Cloud only)",
+          description:
+            "Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1264,7 +1303,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Terminal RunResult — close the sink (HMAC, idempotent)",
       description:
-        "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, fires the `afterRun` module hook. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-firing hooks.",
+        "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
@@ -1503,7 +1542,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Publish an agent-produced document (HMAC, streaming)",
       description:
-        "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 otherwise).",
+        "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         {
@@ -1511,7 +1550,8 @@ export const runsPaths = {
           in: "header",
           required: true,
           schema: { type: "string" },
-          description: "Display name for the document (sanitised server-side).",
+          description:
+            "Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max).",
         },
         {
           name: "Content-Type",
@@ -1573,13 +1613,32 @@ export const runsPaths = {
             },
           },
         },
-        "400": { description: "X-Document-Name or Content-Type header missing / empty body" },
+        "400": {
+          description:
+            "X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
+        },
         "401": { description: "Signature verification failed" },
         "403": { description: "storage_limit_exceeded" },
         "404": { description: "run_not_found" },
-        "409": { description: "run_not_running" },
+        "409": {
+          description:
+            "`run_not_running` — the run is not in `running` state. Or `message_replayed` — this " +
+            "`webhook-id` was already used for this run. Because the HMAC is verified over an " +
+            "EMPTY body, one captured header set would otherwise authenticate an unbounded " +
+            "number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat " +
+            "the (run, sha256, name) dedup), each spending the org quota and the run's document " +
+            "budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. " +
+            "The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected.",
+        },
         "410": { description: "run_sink_closed | run_sink_expired" },
-        "413": { description: "Document exceeds the per-file or per-run output limit" },
+        "413": {
+          description:
+            "`payload_too_large` — the document exceeds the per-file cap " +
+            "(`DOCUMENT_MAX_FILE_BYTES`) or the run's total output budget; the stream is cut " +
+            "mid-flight and any partial object deleted. Or `document_count_exceeded` — the run " +
+            "already holds `RUN_MAX_DOCUMENTS` documents. Distinct codes so a client can tell " +
+            '"one file too big" from "too many files".',
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

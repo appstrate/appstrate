@@ -31,7 +31,7 @@
  * The DTO is refetched on each open so the short-lived preview token is fresh.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DownloadIcon } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -40,6 +40,7 @@ import { Modal } from "./modal";
 import { Markdown } from "./markdown";
 import { LoadingState, ErrorState } from "./page-states";
 import { useDocument, useDocumentDownload } from "../hooks/use-documents";
+import { isMarkdownDoc } from "../lib/documents";
 import { client } from "../api/client";
 
 /**
@@ -56,18 +57,6 @@ export const PREVIEW_IFRAME_SANDBOX = "allow-scripts";
  * back to the existing behavior (plain-text preview or download).
  */
 const INLINE_MARKDOWN_MAX_BYTES = 1_048_576; // 1 MiB
-
-/**
- * Markdown detection: an explicit `text/markdown` mime (tolerating a
- * `; charset=…` parameter) or a `.md` filename served with a text-ish mime
- * (the preview route relabels markdown as `text/plain` to defeat md→HTML
- * sniffing — so rich rendering must be decided client-side from mime/name).
- */
-function isMarkdownDoc(mime: string, name: string): boolean {
-  const m = mime.toLowerCase();
-  if (m === "text/markdown" || m.startsWith("text/markdown;")) return true;
-  return name.toLowerCase().endsWith(".md") && m.startsWith("text/");
-}
 
 /**
  * Fetch a markdown document's bytes (authenticated via the typed client, which
@@ -146,58 +135,31 @@ function TextPreview({ url, unavailable }: { url: string; unavailable: string })
 
 export function DocumentPreview({
   doc,
-  open,
   onClose,
 }: {
   // Only id + name are needed here (the DTO satisfies this structurally); the
   // rest is refetched via `useDocument`. Keeping the surface minimal lets the
   // chat pass a bare `{ id, name }` without importing the full DTO type.
   doc: { id: string; name: string };
-  open: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation("documents");
   const download = useDocumentDownload();
-  // Refetch the DTO on open for a fresh preview token (tokens are short-lived).
-  const { data, isLoading, error } = useDocument(doc.id, open);
+  // Callers mount this modal only while it is open, so mounting IS opening:
+  // the DTO (and its short-lived preview token) is fetched fresh per open.
+  const { data, isLoading, error } = useDocument(doc.id);
   const previewUrl = data?.preview_url;
   const kind = data?.preview_kind;
   const frameTitle = t("preview.frameTitle", { name: doc.name });
 
-  // The single previewable-vs-download branch for EVERY consumer of this modal.
-  // "Click a document" resolves to: preview when the server minted a
-  // `preview_url`, download otherwise. Library rows gate their eye button on
-  // `previewable`, so they almost never reach the download side here; chat chips
-  // always open blind (no DTO in hand) and rely on this fallback. Keeping the
-  // decision HERE (not duplicated per caller) is the whole point.
-  //
-  // Once-per-open guard: `autoDownloadedRef` is set the moment we fire and reset
-  // only when `open` flips false, so unrelated re-renders (token refetch, parent
-  // state) never re-trigger, and a NEW open of another non-previewable doc — a
-  // fresh false→true transition — fires again.
-  const autoDownloadedRef = useRef(false);
-  useEffect(() => {
-    if (!open) {
-      autoDownloadedRef.current = false;
-      return;
-    }
-    // Wait until the DTO query settles successfully; a query `error` (403/404)
-    // is NOT a download signal — it keeps the ErrorState below.
-    if (isLoading || error || !data) return;
-    if (data.preview_url) return; // previewable → the modal renders the preview
-    if (autoDownloadedRef.current) return;
-    autoDownloadedRef.current = true;
-    void download(doc.id, doc.name);
-    onClose();
-  }, [open, isLoading, error, data, download, doc.id, doc.name, onClose]);
-
   function renderBody() {
     if (isLoading) return <LoadingState />;
     if (error) return <ErrorState message={getErrorMessage(error)} />;
-    // Non-previewable docs are handled by the auto-download effect above (fire
-    // download + onClose), so this ErrorState is effectively never seen. It
-    // stays only to keep renderBody total for the pathological frame where the
-    // effect hasn't run yet while still mounted.
+    // Not previewable (no server-minted URL): say so and let the footer's
+    // Download button be the way out. Downloading is a user decision taken on a
+    // click — never something this component fires from an effect behind the
+    // user's back (the same rule the tile follows: preview when the server says
+    // it can, download otherwise, decided at click time).
     if (!previewUrl) return <ErrorState message={t("preview.unavailable")} />;
 
     // Markdown → rich client-side render (below the size cap). Oversized md
@@ -248,7 +210,7 @@ export function DocumentPreview({
 
   return (
     <Modal
-      open={open}
+      open
       onClose={onClose}
       // Deep links (e.g. `?preview=<id>`) may target a doc outside the caller's
       // loaded page, so `doc.name` can be empty — fall back to the fetched DTO's name.

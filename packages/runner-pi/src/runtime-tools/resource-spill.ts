@@ -32,6 +32,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
+import { extensionForMime } from "@appstrate/core/naming";
 import type { CallToolResult } from "@appstrate/mcp-transport";
 import type { RuntimeEventEmitter } from "./mcp-forward.ts";
 
@@ -221,34 +222,12 @@ function decodeUriComponentSafe(s: string): string {
  */
 function ensureExtension(name: string, mimeType?: string): string {
   if (/\.[A-Za-z0-9]{1,8}$/.test(name)) return name;
-  const ext = extFromMime(mimeType);
+  // Shared MIME→extension table (`@appstrate/core/naming`) — the same one the
+  // platform names unnamed inline inputs with, so a file keeps the same
+  // extension whichever side of the run boundary named it. An unknown MIME
+  // leaves the basename alone here (nothing better than no extension).
+  const ext = extensionForMime(mimeType);
   return ext ? `${name}.${ext}` : name;
-}
-
-/** Map a MIME type to a file extension, or `null` when unknown. */
-function extFromMime(mimeType?: string): string | null {
-  if (!mimeType) return null;
-  const m = mimeType.split(";", 1)[0]!.trim().toLowerCase();
-  switch (m) {
-    case "application/json":
-      return "json";
-    case "text/html":
-      return "html";
-    case "text/plain":
-      return "txt";
-    case "text/csv":
-      return "csv";
-    case "application/xml":
-    case "text/xml":
-      return "xml";
-    case "application/pdf":
-      return "pdf";
-    default:
-      if (m.endsWith("+json")) return "json";
-      if (m.endsWith("+xml")) return "xml";
-      if (m.startsWith("text/")) return "txt";
-      return null;
-  }
 }
 
 /** Collapse anything outside a conservative filename charset to `_`. */

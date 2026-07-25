@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, type AttachmentAdapter } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
@@ -27,10 +27,19 @@ import { PanelLeftIcon } from "lucide-react";
 import { Thread } from "./thread.tsx";
 import {
   ChatHeadersProvider,
+  ChatHostProvider,
   SelectConversationProvider,
-  OpenDocumentProvider,
 } from "./runtime-context.ts";
-import type { GetHeaders, SelectConversation, OpenDocument } from "./runtime-context.ts";
+import type {
+  ChatHost,
+  ChatTranslate,
+  DownloadDocument,
+  GetHeaders,
+  OpenDocument,
+  SelectConversation,
+  UploadFile,
+  UseDocumentImageSrc,
+} from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
@@ -44,16 +53,6 @@ import {
 import { useSessions } from "./use-sessions.ts";
 import { subscribeModel, getSelectedModel, setSelectedModel } from "./model-store.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
-
-// The unified chat document renderer + its helpers, re-exported so the web shell
-// (Phase 2) can reuse the same square-thumbnail treatment for its own document
-// surfaces.
-export {
-  DocumentAttachment,
-  isImageMime,
-  useDocumentImageSrc,
-  ATTACHMENT_IMAGE_CLASS,
-} from "./document-attachment.tsx";
 
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
@@ -90,11 +89,20 @@ export interface ChatPageProps {
   onConversationChange?: SelectConversation;
   /**
    * Opens the host's in-app document preview for a clicked chat document
-   * (attachment thumbnail/chip or a run card's document chip). Provided by the
-   * web shell; when absent (embedded mounts) the chat falls back to the
-   * authenticated download. Delivered to deep tool UIs via context, not props.
+   * (attachment thumbnail/chip or a run card's document chip). Optional: when
+   * absent the chat falls back to `downloadDocument`. Delivered to deep tool UIs
+   * via context, not props.
    */
   onOpenDocument?: OpenDocument;
+  /**
+   * REQUIRED host services — the chat implements none of them itself (see
+   * `runtime-context.ts`): the authenticated download, the authenticated image
+   * preview hook, the staged uploader, and the translator for user-facing text.
+   */
+  downloadDocument: DownloadDocument;
+  useDocumentImageSrc: UseDocumentImageSrc;
+  uploadFile: UploadFile;
+  t: ChatTranslate;
 }
 
 export function ChatPage({
@@ -103,6 +111,10 @@ export function ChatPage({
   newChatKey,
   onConversationChange,
   onOpenDocument,
+  downloadDocument,
+  useDocumentImageSrc,
+  uploadFile,
+  t,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -170,10 +182,33 @@ export function ChatPage({
     return new Set(list.filter((s) => s.id !== activeId && s.unread).map((s) => s.id));
   }, [sessions.data, activeId]);
 
+  // The host services, published as ONE value (see `runtime-context.ts`). Every
+  // member is a stable host function, so this object is referentially stable
+  // between renders and consumers re-render no more than with a context each.
+  const host = useMemo<ChatHost>(
+    () => ({
+      openDocument: onOpenDocument ?? null,
+      downloadDocument,
+      useDocumentImageSrc,
+      t,
+    }),
+    [onOpenDocument, downloadDocument, useDocumentImageSrc, t],
+  );
+
+  // File attachments: the composer stages picked files through the HOST uploader
+  // and sends them as `upload://` file parts the server materializes into
+  // durable documents. Built HERE (where the host props land) and handed down as
+  // a single prop — its only consumer is the runtime mounted two components
+  // below, in this same file, so it needs no context hop.
+  const attachments = useMemo(
+    () => createChatAttachmentAdapter({ upload: uploadFile, t }),
+    [uploadFile, t],
+  );
+
   return (
     <ChatHeadersProvider value={getHeaders ?? null}>
       <SelectConversationProvider value={onConversationChange ?? null}>
-        <OpenDocumentProvider value={onOpenDocument ?? null}>
+        <ChatHostProvider value={host}>
           <div className="bg-background flex h-full w-full">
             <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
               <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
@@ -223,6 +258,7 @@ export function ChatPage({
                   getHeaders={getHeaders}
                   isPersisted={isPersisted}
                   onConversationChange={onConversationChange}
+                  attachments={attachments}
                   composerSlot={
                     <ModelSelect
                       models={models}
@@ -234,7 +270,7 @@ export function ChatPage({
               </main>
             </div>
           </div>
-        </OpenDocumentProvider>
+        </ChatHostProvider>
       </SelectConversationProvider>
     </ChatHeadersProvider>
   );
@@ -245,6 +281,8 @@ interface ConversationProps {
   getHeaders?: GetHeaders;
   isPersisted: boolean;
   onConversationChange?: SelectConversation;
+  /** Composer attachment adapter, built once by `ChatPage` from the host props. */
+  attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
 }
 
@@ -296,6 +334,7 @@ function ConversationInner({
   initialMessages,
   isPersisted,
   onConversationChange,
+  attachments,
   composerSlot,
 }: ConversationProps & { initialMessages: UIMessage[] }) {
   const queryClient = useQueryClient();
@@ -388,10 +427,6 @@ function ConversationInner({
     onConversationChange?.(id);
   }, [chat.messages.length, id, onConversationChange]);
 
-  // File attachments: the composer uploads picked files (2-step upload) and
-  // sends them as `upload://` file parts the server materializes into durable
-  // documents. Memoized on `getHeaders` (stable) so the runtime keeps one adapter.
-  const attachments = useMemo(() => createChatAttachmentAdapter(getHeaders), [getHeaders]);
   const runtime = useAISDKRuntime(chat, { adapters: { attachments } });
 
   return (

@@ -56,6 +56,7 @@ import {
   deleteDocument,
 } from "../../../src/services/documents.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
+import { deleteEndUser } from "../../../src/services/end-users.ts";
 
 /** Run `fn` with an env var temporarily overridden (cache reset around it). */
 async function withEnv(key: string, value: string, fn: () => Promise<void>): Promise<void> {
@@ -446,7 +447,9 @@ describe("documents service + routes", () => {
     const producerRun = await seedRunRow(scope);
     const { row: doc } = await publishStream(scope, producerRun, "shared.txt", "shared");
     const consumerRun = await seedRunRow(scope);
-    await db.insert(documentLinks).values({ documentId: doc.id, consumerRunId: consumerRun });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: doc.id, consumerRunId: consumerRun, orgId: ctx.orgId });
 
     const blocked = await app.request(`/api/documents/${doc.id}`, {
       method: "DELETE",
@@ -543,7 +546,9 @@ describe("documents service + routes", () => {
     const expired = await createDocumentFromUpload(scope, userActor, upExpired, { runId });
     const permanent = await createDocumentFromUpload(scope, userActor, upKeep, { runId });
     const consumerRun = await seedRunRow(scope);
-    await db.insert(documentLinks).values({ documentId: expired.id, consumerRunId: consumerRun });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: expired.id, consumerRunId: consumerRun, orgId: ctx.orgId });
 
     // Force the first document past its retention deadline.
     await db
@@ -743,35 +748,32 @@ describe("documents service + routes", () => {
   it("concurrent identical (sha256, name) run publishes never double-insert or double-count", async () => {
     // Same content + same name from two racing publishes. The partial unique
     // index `(run_id, sha256, name) WHERE purpose = 'agent_output'` guarantees a
-    // single row and a single byte-count no matter which caller wins — the
-    // safety invariant asserted unconditionally below.
+    // single row and a single byte-count no matter which caller wins.
     //
-    // NOTE: which path the loser takes is timing-dependent: the fast-path SELECT
-    // may already see the winner (→ dedup 200), OR both may miss it and race on
-    // the insert (→ 23505). The latter recovery is currently BROKEN — see the
-    // report: `isUniqueViolation` (documents.ts) does not unwrap Drizzle's
-    // `DrizzleQueryError`, so a real concurrent-insert race rethrows the raw DB
-    // error instead of returning the dedup winner. The dedup-contract assertions
-    // below therefore run only when BOTH publishes resolved (the fast-path
-    // timing); the single-row / single-count invariant is always enforced.
+    // Which path the loser takes is timing-dependent: the fast-path SELECT may
+    // already see the winner (→ dedup 200), OR both may miss it and race on the
+    // insert (→ 23505). BOTH are now recovered: `isUniqueViolation`
+    // (documents.ts) walks the `cause` chain, so Drizzle's `DrizzleQueryError`
+    // wrapper no longer hides the PG code and the loser re-reads the winner's
+    // row instead of rethrowing. The dedup contract is therefore asserted
+    // UNCONDITIONALLY — a regression that reintroduces the rethrow fails here
+    // rather than silently skipping the assertions.
     const runId = await seedRunRow(scope);
-    const results = await Promise.allSettled([
+    const [r1, r2] = await Promise.all([
       publishStream(scope, runId, "same.txt", "identical-bytes"),
       publishStream(scope, runId, "same.txt", "identical-bytes"),
     ]);
 
-    // The DB unique index makes double-insert / double-count impossible either way.
+    // The DB unique index makes double-insert / double-count impossible.
     const rows = await db.select().from(documents).where(eq(documents.runId, runId));
     expect(rows).toHaveLength(1);
     expect(await orgBytesUsed(ctx.orgId)).toBe("identical-bytes".length);
 
-    // When the recovery works (fast-path timing), both resolve to the same row
-    // with exactly one fresh insert and one dedup.
-    if (results[0]!.status === "fulfilled" && results[1]!.status === "fulfilled") {
-      const [r1, r2] = [results[0].value, results[1].value];
-      expect(r1.row.id).toBe(r2.row.id);
-      expect(r1.deduped).not.toBe(r2.deduped);
-    }
+    // Both publishes resolve to the SAME row: exactly one fresh insert, exactly
+    // one dedup — whichever of the two paths the loser actually took.
+    expect(r1.row.id).toBe(r2.row.id);
+    expect(r1.row.id).toBe(rows[0]!.id);
+    expect([r1.deduped, r2.deduped].filter(Boolean)).toHaveLength(1);
   });
 
   it("GET /content: 403 for a member who is not the upload's creator, 200 for an agent_output", async () => {
@@ -904,6 +906,72 @@ describe("documents service + routes", () => {
     expect(ownDto.preview_url).toContain(`/preview/documents/${upload.id}?t=`);
   });
 
+  it("gates all three read routes on documents:read — a narrowly scoped API key gets 403", async () => {
+    const runId = await seedRunRow(scope);
+    const { row: doc } = await publishStream(scope, runId, "gated.txt", "deliverable bytes");
+    const paths = [
+      "/api/documents",
+      `/api/documents/${doc.id}`,
+      `/api/documents/${doc.id}/content`,
+    ];
+
+    // The narrowest key the platform can mint: `validateScopes` accepts an
+    // empty scope list, so this key is a legitimate, fully authenticated
+    // principal of the org — it just holds no grant. Before `documents:read`
+    // existed it could list and download every agent_output of the app.
+    const unscoped = await seedApiKey({
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      createdBy: ctx.user.id,
+      scopes: [],
+    });
+    const unscopedHeaders = {
+      Authorization: `Bearer ${unscoped.rawKey}`,
+      "X-Application-Id": ctx.defaultAppId,
+    };
+    for (const path of paths) {
+      const res = await app.request(path, { headers: unscopedHeaders });
+      expect(res.status).toBe(403);
+      expect((await res.json()) as { code: string }).toMatchObject({ code: "forbidden" });
+    }
+
+    // A key carrying only `documents:delete` is still refused on reads — the
+    // grant is per action, not per family.
+    const deleteOnly = await seedApiKey({
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      createdBy: ctx.user.id,
+      scopes: ["documents:delete"],
+    });
+    const deleteOnlyRes = await app.request(paths[1]!, {
+      headers: {
+        Authorization: `Bearer ${deleteOnly.rawKey}`,
+        "X-Application-Id": ctx.defaultAppId,
+      },
+    });
+    expect(deleteOnlyRes.status).toBe(403);
+
+    // With the scope, the same principal reads normally.
+    const scoped = await seedApiKey({
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      createdBy: ctx.user.id,
+      scopes: ["documents:read"],
+    });
+    const scopedHeaders = {
+      Authorization: `Bearer ${scoped.rawKey}`,
+      "X-Application-Id": ctx.defaultAppId,
+    };
+    for (const path of paths) {
+      const res = await app.request(path, { headers: scopedHeaders });
+      expect(res.status).toBe(200);
+    }
+    const list = (await (await app.request(paths[0]!, { headers: scopedHeaders })).json()) as {
+      data: { id: string }[];
+    };
+    expect(list.data.map((d) => d.id)).toEqual([doc.id]);
+  });
+
   it("end-user (impersonated via API key) reads own docs, is blocked from others', and deletes own", async () => {
     const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     const euOther = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
@@ -912,6 +980,9 @@ describe("documents service + routes", () => {
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       createdBy: ctx.user.id,
+      // Reads now require the family grant; the DELETE below deliberately does
+      // NOT (it is authorized by the document's creator capability).
+      scopes: ["documents:read"],
     });
     const euHeaders = {
       Authorization: `Bearer ${key.rawKey}`,
@@ -1024,7 +1095,9 @@ describe("documents service + routes", () => {
     const runA = await seedRunRow(scope, { packageId: "@chain/producer" });
     const runB = await seedRunRow(scope, { packageId: "@chain/consumer" });
     const { row: docX } = await publishStream(scope, runA, "shared.txt", "shared bytes");
-    await db.insert(documentLinks).values({ documentId: docX.id, consumerRunId: runB });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: docX.id, consumerRunId: runB, orgId: ctx.orgId });
 
     const usedBefore = await orgBytesUsed(ctx.orgId);
 
@@ -1056,6 +1129,104 @@ describe("documents service + routes", () => {
       .from(documentLinks)
       .where(eq(documentLinks.documentId, docX.id));
     expect(links).toHaveLength(1);
+  });
+
+  it("a document published while its runs are being deleted leaves no orphan and no over-count", async () => {
+    // The publish path and the runs teardown both serialize on the org row lock,
+    // so a document published DURING the delete either lands before the
+    // enumeration (and is detach-or-deleted with it) or fails its FK against the
+    // by-then-deleted run. When the teardown and the delete were two separate
+    // transactions, a document landing between them was destroyed by the FK
+    // cascade with NO outbox job (bytes stranded) and NO counter decrement.
+    await seedPackage({ id: "@chain/race", orgId: ctx.orgId });
+    const runId = await seedRunRow(scope, { packageId: "@chain/race" });
+    const { row: existing } = await publishStream(scope, runId, "before.txt", "before bytes");
+
+    // Both legs start in the same tick — no `setTimeout` handicap. A sleep here
+    // would let the delete finish first whenever it happens to be fast, quietly
+    // degrading the "race" into a sequential case that proves nothing.
+    //
+    // The raced publish may legitimately fail (its run row is being deleted
+    // underneath it), so its rejection is captured rather than thrown — but it
+    // is captured with its identity intact and asserted on below, instead of
+    // being blanket-swallowed by `.catch(() => null)`.
+    const [, racedResult] = await Promise.allSettled([
+      deletePackageRuns(scope, "@chain/race"),
+      publishStream(scope, runId, "during.txt", "during bytes"),
+    ]);
+    const raced = racedResult.status === "fulfilled" ? racedResult.value : null;
+    if (racedResult.status === "rejected") {
+      // Only a lost race is acceptable: the run vanished mid-publish. Any other
+      // failure (a bug in publishStream, a ReferenceError) must surface.
+      const reason = racedResult.reason as { status?: number; message?: string };
+      const text = `${reason?.message ?? ""}`;
+      expect(
+        reason?.status === 404 || reason?.status === 409 || /run|foreign key|not found/i.test(text),
+      ).toBe(true);
+    }
+
+    // Whichever order won, the counter matches the surviving rows exactly.
+    const surviving = await db.select().from(documents).where(eq(documents.orgId, ctx.orgId));
+    expect(await orgBytesUsed(ctx.orgId)).toBe(surviving.reduce((sum, d) => sum + d.size, 0));
+
+    // …and no published object is left behind without its row. Drain the outbox,
+    // then every object whose row is gone must be gone too.
+    await processStorageDeletionJobs();
+    const survivingKeys = new Set(surviving.map((d) => d.storageKey));
+    const published = [existing.storageKey, raced?.row.storageKey].filter(
+      (k): k is string => typeof k === "string",
+    );
+    for (const storageKey of published) {
+      const [bucket, ...rest] = storageKey.split("/");
+      const stream = await downloadStream(bucket!, rest.join("/"));
+      if (survivingKeys.has(storageKey)) expect(stream).not.toBeNull();
+      else expect(stream).toBeNull();
+    }
+  });
+
+  it("deleteEndUser detaches a document a live run still consumes, and deletes the rest", async () => {
+    const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const producer = await seedRunRow(scope, { endUserId: eu.id });
+    const { row: consumed } = await publishStream(scope, producer, "kept.txt", "kept bytes", {
+      userId: null,
+      endUserId: eu.id,
+    });
+    const { row: unconsumed } = await publishStream(scope, producer, "gone.txt", "gone bytes", {
+      userId: null,
+      endUserId: eu.id,
+    });
+    // A live run consumes the first one — `runs.end_user_id` is SET NULL, so this
+    // consumer survives the end-user deletion and its input must survive too.
+    const consumer = await seedRunRow(scope, { endUserId: eu.id });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: consumed.id, consumerRunId: consumer, orgId: ctx.orgId });
+
+    await deleteEndUser(scope, eu.id);
+
+    // Detached, not destroyed: the row (and its bytes) survive with only the
+    // attribution dropped. Relying on the `documents.end_user_id` FK cascade
+    // used to delete it outright, breaking every later `rerun_from`.
+    const [kept] = await db.select().from(documents).where(eq(documents.id, consumed.id));
+    expect(kept).toBeDefined();
+    expect(kept!.endUserId).toBeNull();
+    expect(
+      await db.select().from(documentLinks).where(eq(documentLinks.documentId, consumed.id)),
+    ).toHaveLength(1);
+
+    // The unconsumed one is deleted through the same primitive: row gone,
+    // counter folded back to exactly the surviving document, outbox job queued.
+    expect(await db.select().from(documents).where(eq(documents.id, unconsumed.id))).toHaveLength(
+      0,
+    );
+    expect(await orgBytesUsed(ctx.orgId)).toBe(kept!.size);
+    const [, ...rest] = unconsumed.storageKey.split("/");
+    expect(
+      await db
+        .select()
+        .from(storageDeletionJobs)
+        .where(eq(storageDeletionJobs.storageKey, rest.join("/"))),
+    ).toHaveLength(1);
   });
 
   it("deletes an unconsumed document when its runs are deleted (row + counter + storage)", async () => {
@@ -1094,7 +1265,9 @@ describe("documents service + routes", () => {
     const up = await stageUpload(scope, ctx.user.id, "att.txt", new TextEncoder().encode("attach"));
     const doc = await createDocumentFromUpload(scope, userActor, up, { chatSessionId: sessionId });
     const runB = await seedRunRow(scope);
-    await db.insert(documentLinks).values({ documentId: doc.id, consumerRunId: runB });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: doc.id, consumerRunId: runB, orgId: ctx.orgId });
 
     const usedBefore = await orgBytesUsed(ctx.orgId);
     await detachOrDeleteContainedDocuments({ chatSessionId: sessionId });
@@ -1158,6 +1331,33 @@ describe("documents service + routes", () => {
           sha256: "abc",
         }))(),
     ).rejects.toThrow();
+
+    // Pin the rejection to the CHECK under test. A bare `.toThrow()` also
+    // passes on an FK violation, a NOT NULL violation, or a renamed column —
+    // i.e. it would keep passing if the constraint were dropped entirely.
+    // Drizzle wraps the driver error, so the constraint name is on the cause.
+    let error: unknown;
+    try {
+      await db.insert(documents).values({
+        id: `doc_${crypto.randomUUID()}`,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        purpose: "agent_output",
+        runId,
+        chatSessionId: sessionId,
+        storageKey: "documents/x/y/z2.txt",
+        name: "z2.txt",
+        mime: "text/plain",
+        size: 3,
+        sha256: "abc",
+      });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeDefined();
+    const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+    const text = `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
+    expect(text).toContain("chk_documents_single_container");
   });
 
   it("createRun atomically records consumption links", async () => {
@@ -1229,7 +1429,9 @@ describe("documents service + routes", () => {
       endUserId: euOwner.id,
     });
     const runB = await seedRunRow(scope, { endUserId: euOwner.id });
-    await db.insert(documentLinks).values({ documentId: doc.id, consumerRunId: runB });
+    await db
+      .insert(documentLinks)
+      .values({ documentId: doc.id, consumerRunId: runB, orgId: ctx.orgId });
 
     await deletePackageRuns(scope, "@chain/eu");
 

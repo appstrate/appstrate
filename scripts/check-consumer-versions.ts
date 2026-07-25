@@ -19,6 +19,17 @@ interface Consumer {
   paths: string[];
 }
 
+/**
+ * Every repo outside this monorepo that resolves `@appstrate/core` from npm.
+ *
+ * A repo missing from this list is invisible to the gate and drifts silently:
+ * `connect-helper` and `module-claude-code` both did, and `module-claude-code`
+ * sat on `^2.19.0` — three majors behind — still declaring
+ * `ModelProviderDefinition.oauthWireFormat`, a field core removed in 3.0.0.
+ * The rule: if it appears in the monorepo's dependency graph as an npm
+ * consumer, it belongs here. Workspace packages inside this repo do NOT (they
+ * resolve `workspace:*` and can never drift).
+ */
 const CONSUMERS: Consumer[] = [
   {
     repo: "appstrate/registry",
@@ -26,6 +37,12 @@ const CONSUMERS: Consumer[] = [
   },
   { repo: "appstrate/cloud", paths: ["package.json"] },
   { repo: "appstrate/portal", paths: ["package.json"] },
+  // Published to npm (public package, private source repo) — installed by
+  // end users via `npx`, so a stale core range ships to them directly.
+  { repo: "appstrate/connect-helper", paths: ["package.json"] },
+  // Standalone module repo: consumes core as a PEER dependency, which is why
+  // peerDependencies is inspected below alongside deps/devDeps.
+  { repo: "appstrate/module-claude-code", paths: ["package.json"] },
 ];
 
 const DEPENDENCY_NAME = "@appstrate/core";
@@ -128,9 +145,14 @@ async function main(): Promise<void> {
         continue;
       }
 
+      // `peerDependencies` is inspected too: a module repo declares core as a
+      // peer (the host platform supplies it), and that range is exactly the
+      // compatibility claim the module makes to operators. Reading only
+      // deps/devDeps let a peer-only consumer drift unchecked.
       const deps = {
         ...(pkg.dependencies as Record<string, string> | undefined),
         ...(pkg.devDependencies as Record<string, string> | undefined),
+        ...(pkg.peerDependencies as Record<string, string> | undefined),
       };
       const range = deps[DEPENDENCY_NAME];
       if (!range) {

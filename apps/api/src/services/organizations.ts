@@ -23,11 +23,7 @@ import { scopedWhere } from "../lib/db-helpers.ts";
 import { orgRunConcurrencyLockKey } from "./state/runs.ts";
 import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
-import {
-  RUN_WORKSPACE_BUCKET,
-  runWorkspaceBundleKey,
-  runWorkspaceManifestKey,
-} from "./run-workspace-storage.ts";
+import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -400,18 +396,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
       if (bucket && rest.length > 0)
         storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "org_deleted" });
     }
-    for (const r of runRows) {
-      storageJobs.push({
-        bucket: RUN_WORKSPACE_BUCKET,
-        storageKey: runWorkspaceBundleKey(r.id),
-        reason: "org_deleted",
-      });
-      storageJobs.push({
-        bucket: RUN_WORKSPACE_BUCKET,
-        storageKey: runWorkspaceManifestKey(r.id),
-        reason: "org_deleted",
-      });
-    }
+    for (const r of runRows) storageJobs.push(...runWorkspaceDeletionJobs(r.id, "org_deleted"));
     await enqueueStorageDeletion(tx, storageJobs);
 
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)

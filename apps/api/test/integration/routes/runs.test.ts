@@ -1155,7 +1155,7 @@ describe("Runs API", () => {
 
       // Convergence assertion — the cancel route flowed through finalizeRun
       // (status flipped to cancelled, sink closed). See `runs-cancel-
-      // convergence.test.ts` for the afterRun-hook side of the contract.
+      // convergence.test.ts` for the terminal-broadcast side of the contract.
       const final = await db
         .select({ status: runs.status, sinkClosedAt: runs.sinkClosedAt })
         .from(runs)

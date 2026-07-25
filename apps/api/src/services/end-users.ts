@@ -8,7 +8,7 @@
 
 import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, notifications, documents, uploads, organizations } from "@appstrate/db/schema";
+import { endUsers, notifications, uploads, organizations } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
@@ -19,7 +19,7 @@ import { toISORequired } from "../lib/date-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { assertApplicationInScope } from "./applications.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
-import { decrementOrgDocumentBytes, storageKeyToDeletionJob } from "./documents.ts";
+import { detachOrDeleteContainedDocuments, storageKeyToDeletionJob } from "./documents.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -317,24 +317,26 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
       .for("update");
     if (!lockedEndUser) throw notFound("End-user not found");
 
-    const docRows = await tx
-      .select({ storageKey: documents.storageKey, size: documents.size })
-      .from(documents)
-      .where(eq(documents.endUserId, endUserId));
+    // Documents go through the ONE detach-or-delete primitive, exactly like a
+    // run set or a chat session. `documents.end_user_id` cascades, so relying on
+    // the FK (as this path used to) destroyed an `agent_output` a LIVE run still
+    // consumes — breaking the durability the `document://` URI promises and
+    // amputating any later `rerun_from`. The primitive detaches those (dropping
+    // only the attribution), deletes the rest, and owns their counter decrement
+    // + outbox jobs.
+    await detachOrDeleteContainedDocuments({ endUserId, orgId: scope.orgId }, tx);
+
     const uploadRows = await tx
       .select({ storageKey: uploads.storageKey })
       .from(uploads)
       .where(eq(uploads.endUserId, endUserId));
 
     const storageJobs: StorageDeletionJobInput[] = [];
-    for (const r of [...docRows, ...uploadRows]) {
+    for (const r of uploadRows) {
       const job = storageKeyToDeletionJob(r.storageKey, "end_user_deleted");
       if (job) storageJobs.push(job);
     }
     await enqueueStorageDeletion(tx, storageJobs);
-
-    const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
-    if (bytes > 0) await decrementOrgDocumentBytes(tx, scope.orgId, bytes);
 
     await tx
       .delete(notifications)

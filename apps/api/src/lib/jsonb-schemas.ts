@@ -39,7 +39,7 @@ function withByteCap(maxBytes: number) {
   };
 }
 
-/** `runs.metadata` — opaque payload returned by the `afterRun` hook. */
+/** `runs.metadata` — opaque platform-written payload (e.g. `degraded_integrations`). */
 export const runMetadataSchema = z
   .record(z.string(), jsonValueSchema)
   .superRefine(withByteCap(8 * KB));

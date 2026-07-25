@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `POST /api/runs/:id/cancel` must converge on `finalizeRun` so the
- * `afterRun` hook fires for cancelled runs that already burned LLM tokens.
+ * `POST /api/runs/:id/cancel` must converge on `finalizeRun` so the terminal
+ * pipeline (cost aggregation + the `onRunStatusChange` broadcast) runs for
+ * cancelled runs that already burned LLM tokens.
  *
- * Pre-fix the cancel route wrote `status='cancelled'` directly and skipped
- * `afterRun`, leaking billing on every user-cancelled run that had reached
- * the LLM at least once. These tests pin the fix in place by spying on the
- * hook with a fake module — if a future refactor reintroduces the bypass,
- * the spy stops being called and the suite fails.
+ * Pre-fix the cancel route wrote `status='cancelled'` directly and skipped the
+ * whole pipeline, leaking spend on every user-cancelled run that had reached
+ * the LLM at least once. These tests pin the fix in place by subscribing to
+ * the terminal broadcast with a fake module — if a future refactor
+ * reintroduces the bypass, the spy stops being called and the suite fails.
  */
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
@@ -80,21 +81,25 @@ async function seedLlmUsage(
   });
 }
 
-interface AfterRunSpy {
+interface TerminalSpy {
   callCount(): number;
   lastParams(): RunStatusChangeParams | null;
   allParams(): RunStatusChangeParams[];
 }
 
-async function installAfterRunSpy(): Promise<AfterRunSpy> {
+/**
+ * Subscribe to the terminal `onRunStatusChange` broadcast. Non-terminal
+ * transitions (`started`) are ignored so the spy observes exactly what the
+ * cancel path is supposed to produce.
+ */
+async function installTerminalSpy(): Promise<TerminalSpy> {
   const calls: RunStatusChangeParams[] = [];
   const mod: AppstrateModule = {
     manifest: { id: "cancel-spy", name: "Cancel Spy", version: "1.0.0" },
     async init() {},
-    hooks: {
-      afterRun: async (params) => {
-        calls.push(params);
-        return null;
+    events: {
+      onRunStatusChange: (params) => {
+        if (params.status !== "started") calls.push(params);
       },
     },
   };
@@ -128,8 +133,8 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     resetModules();
   });
 
-  it("cancelling a running run with cost fires afterRun with the SUM(llm_usage) cost", async () => {
-    const spy = await installAfterRunSpy();
+  it("cancelling a running run with cost broadcasts the SUM(llm_usage) cost", async () => {
+    const spy = await installTerminalSpy();
     const runId = await seedCancellableRun(ctx, agentId, { modelSource: "system" });
     await seedLlmUsage(ctx, runId, 0.0551);
 
@@ -166,8 +171,8 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     expect(row!.sinkClosedAt).not.toBeNull();
   });
 
-  it("cancelling a pending run (never reached the LLM) fires afterRun without cost", async () => {
-    const spy = await installAfterRunSpy();
+  it("cancelling a pending run (never reached the LLM) broadcasts without cost", async () => {
+    const spy = await installTerminalSpy();
     const runId = await seedCancellableRun(ctx, agentId, {
       status: "pending",
       modelSource: "system",
@@ -190,7 +195,7 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
   });
 
   it("cancelling a BYOK run forwards modelSource='org' so the cloud module skips billing", async () => {
-    const spy = await installAfterRunSpy();
+    const spy = await installTerminalSpy();
     const runId = await seedCancellableRun(ctx, agentId, { modelSource: "org" });
     await seedLlmUsage(ctx, runId, 0.1);
 
@@ -207,14 +212,11 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
   });
 
   it("two concurrent cancels — finalizeRun's CAS lets exactly one terminal state land", async () => {
-    // The platform calls `afterRun` BEFORE the CAS in `finalizeRun`, so
-    // racing cancels can both invoke the hook with identical params (this
-    // is the design from issue #12 — `afterRun` consumers MUST be
-    // idempotent on `runId`, which the cloud module enforces via a unique
-    // index on `cloud_usage_records.run_id`). What this test pins is the
-    // CAS-side invariant: at most one finalize advances the row to
-    // terminal state, the second is a no-op.
-    const spy = await installAfterRunSpy();
+    // The terminal broadcast fires AFTER the CAS in `finalizeRun` and only
+    // for the CAS winner, so racing cancels produce exactly ONE terminal
+    // event. What this test pins is the CAS-side invariant: at most one
+    // finalize advances the row to terminal state, the second is a no-op.
+    const spy = await installTerminalSpy();
     const runId = await seedCancellableRun(ctx, agentId, { modelSource: "system" });
     await seedLlmUsage(ctx, runId, 0.02);
 
@@ -236,11 +238,8 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     expect(statuses[0]!).toBe(200);
     expect([200, 409]).toContain(statuses[1]!);
 
-    // afterRun MAY fire 1× or 2× depending on race ordering. Every call
-    // it does fire MUST carry the same parameters — concurrent finalizers
-    // observe the same source-of-truth (`runs` row + `llm_usage` ledger).
-    expect(spy.callCount()).toBeGreaterThanOrEqual(1);
-    expect(spy.callCount()).toBeLessThanOrEqual(2);
+    // Exactly one terminal broadcast — the CAS loser returns before it.
+    expect(spy.callCount()).toBe(1);
     for (const params of spy.allParams()) {
       expect(params.runId).toBe(runId);
       expect(params.status).toBe("cancelled");
@@ -256,8 +255,8 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     expect(row!.sinkClosedAt).not.toBeNull();
   });
 
-  it("cancel followed by a runner-posted finalize is a CAS no-op (afterRun fires once)", async () => {
-    const spy = await installAfterRunSpy();
+  it("cancel followed by a runner-posted finalize is a CAS no-op (one terminal broadcast)", async () => {
+    const spy = await installTerminalSpy();
     const runId = await seedCancellableRun(ctx, agentId, { modelSource: "system" });
     await seedLlmUsage(ctx, runId, 0.03);
 
@@ -283,7 +282,7 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     // Sink already closed by the cancel — runner's POST is rejected as gone.
     expect(finalizeRes.status).toBe(410);
 
-    // `afterRun` fired exactly once, on the cancel path.
+    // The terminal broadcast fired exactly once, on the cancel path.
     expect(spy.callCount()).toBe(1);
     expect(spy.lastParams()!.status).toBe("cancelled");
 
@@ -291,8 +290,8 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     expect(row!.status).toBe("cancelled");
   });
 
-  it("returns 409 for already-terminal runs without firing afterRun", async () => {
-    const spy = await installAfterRunSpy();
+  it("returns 409 for already-terminal runs without a terminal broadcast", async () => {
+    const spy = await installTerminalSpy();
     const runId = await seedCancellableRun(ctx, agentId);
     // Flip the run to a terminal state directly (simulating "already done").
     await db.update(runs).set({ status: "success" }).where(eq(runs.id, runId));

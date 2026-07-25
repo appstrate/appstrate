@@ -110,7 +110,12 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
     const docId = await seedDoc(ctx);
     const token = mintToken(docId, ctx.orgId, nowSec() + 300);
 
-    const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`);
+    // `Sec-Fetch-Dest: iframe` is what the SPA's `sandbox="allow-scripts"`
+    // iframe sends; in same-origin mode it is the only context served as
+    // ACTIVE html (see the degradation tests below).
+    const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`, {
+      headers: { "Sec-Fetch-Dest": "iframe" },
+    });
     expect(res.status).toBe(200);
 
     const appOrigin = new URL(getEnv().APP_URL).origin;
@@ -323,9 +328,80 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
     const docId = await seedDoc(ctx);
     const token = mintToken(docId, ctx.orgId, nowSec() + 300);
     await withEnv("USERCONTENT_URL", "https://usercontent.example", async () => {
-      const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`);
+      const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`, {
+        headers: { "Sec-Fetch-Dest": "iframe" },
+      });
       expect(res.status).toBe(200);
       expect(res.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
+    });
+  });
+
+  describe("same-origin mode — agent HTML never executes on the app origin", () => {
+    // `preview_url` is an ABSOLUTE url with a 300 s token, so it can be opened
+    // top-level (new tab, shared link). Without USERCONTENT_URL that origin is
+    // APP_URL, where there is no sandbox attribute: the agent's script would
+    // reach the SPA's localStorage/sessionStorage and non-HttpOnly cookies.
+    // Only a proven nested-document load is served as active HTML.
+    const degraded = ["document", "empty", "object", "embed"] as const;
+
+    for (const dest of degraded) {
+      it(`degrades to inert text/plain source for Sec-Fetch-Dest: ${dest}`, async () => {
+        const docId = await seedDoc(ctx);
+        const token = mintToken(docId, ctx.orgId, nowSec() + 300);
+        const res = await app.request(
+          `/preview/documents/${docId}?t=${encodeURIComponent(token)}`,
+          { headers: { "Sec-Fetch-Dest": dest } },
+        );
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+        expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+        // No script-src grant at all on the inert policy.
+        expect(res.headers.get("content-security-policy")).not.toContain("unsafe-inline");
+        expect(res.headers.get("vary")).toBe("Sec-Fetch-Dest");
+        // The source is still readable (the token holder could download it
+        // anyway) — it is simply never parsed as a document, so the meta CSP
+        // injection does not even happen.
+        const body = await res.text();
+        expect(body).toContain("<html>");
+        expect(body).not.toContain('<meta http-equiv="Content-Security-Policy"');
+      });
+    }
+
+    it("degrades when the header is absent (non-browser client, or a browser too old to send it)", async () => {
+      const docId = await seedDoc(ctx);
+      const token = mintToken(docId, ctx.orgId, nowSec() + 300);
+      const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    });
+
+    it("keeps serving active HTML in ANY context once USERCONTENT_URL isolates the origin", async () => {
+      const docId = await seedDoc(ctx);
+      const token = mintToken(docId, ctx.orgId, nowSec() + 300);
+      await withEnv("USERCONTENT_URL", "https://usercontent.example", async () => {
+        const res = await app.request(
+          `/preview/documents/${docId}?t=${encodeURIComponent(token)}`,
+          { headers: { "Sec-Fetch-Dest": "document" } },
+        );
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+        expect(res.headers.get("content-security-policy")).toContain("script-src 'unsafe-inline'");
+      });
+    });
+
+    it("leaves the inert kinds untouched (they never executed in the first place)", async () => {
+      const docId = await seedDoc(ctx, { mime: "text/markdown", body: "# hi" });
+      const token = mintToken(docId, ctx.orgId, nowSec() + 300);
+      const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`, {
+        headers: { "Sec-Fetch-Dest": "document" },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      expect(res.headers.get("content-disposition")).toBe("inline");
+      // The kind branch, not the html degradation — no Vary on this path.
+      expect(res.headers.get("vary")).toBeNull();
     });
   });
 });

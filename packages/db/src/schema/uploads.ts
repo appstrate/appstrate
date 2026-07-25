@@ -75,5 +75,18 @@ export const uploads = pgTable(
     index("idx_uploads_expires_unconsumed")
       .on(table.expiresAt)
       .where(sql`${table.consumedAt} IS NULL`),
+    // FK-side indexes. Postgres indexes the REFERENCED side of a foreign key,
+    // never the referencing one — so without these, deleting an organization,
+    // an end-user or a dashboard user seq-scans the whole of `uploads` (under
+    // the lock the cascade holds) just to find the rows to cascade or null.
+    index("idx_uploads_org").on(table.orgId),
+    // Partial (`IS NOT NULL`): dashboard-user uploads never enter this index.
+    index("idx_uploads_end_user")
+      .on(table.endUserId)
+      .where(sql`${table.endUserId} IS NOT NULL`),
+    // Partial (`IS NOT NULL`): end-user / unattributed uploads stay out.
+    index("idx_uploads_created_by")
+      .on(table.createdBy)
+      .where(sql`${table.createdBy} IS NOT NULL`),
   ],
 );

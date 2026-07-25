@@ -4,7 +4,6 @@ import { describe, expect, it } from "bun:test";
 import {
   buildRunPageHref,
   buildRunSseUrl,
-  documentContentHref,
   extractAgentLabel,
   extractRunDocuments,
   extractRunId,
@@ -22,7 +21,7 @@ import {
   publishedDocumentsFromLogs,
   resolveAttachmentContent,
   safeJsonParse,
-  terminalRunLineText,
+  runStatusLineKey,
   visibleLogEntries,
   type RunLogLine,
 } from "../src/ui/run-events.ts";
@@ -39,10 +38,13 @@ describe("run-events helpers", () => {
     expect(isTerminalStatus("running")).toBe(false);
     expect(isTerminalStatus(undefined)).toBe(false);
 
-    expect(terminalRunLineText("success")).toBe("Complété");
-    expect(terminalRunLineText("failed")).toBe("Échec");
-    expect(terminalRunLineText("timeout")).toBe("Expiré");
-    expect(terminalRunLineText("cancelled")).toBe("Annulé");
+    // Keys, not sentences — the host translator renders them (no literal text
+    // ships from this module).
+    expect(runStatusLineKey("success")).toBe("run.status.success");
+    expect(runStatusLineKey("failed")).toBe("run.status.failed");
+    expect(runStatusLineKey("timeout")).toBe("run.status.timeout");
+    expect(runStatusLineKey("cancelled")).toBe("run.status.cancelled");
+    expect(runStatusLineKey(undefined)).toBe("run.status.done");
   });
 
   it("extracts run id and status from invoke and run_and_wait results", () => {
@@ -196,10 +198,6 @@ describe("run-events helpers", () => {
       { id: "doc_2", uri: "document://doc_2", name: "data.json" },
     ];
     expect(mergeRunDocuments(persisted, live).map((d) => d.id)).toEqual(["doc_1", "doc_2"]);
-  });
-
-  it("builds the document content download URL", () => {
-    expect(documentContentHref("doc_1")).toBe("/api/documents/doc_1/content");
   });
 
   it("resolves a sent attachment's content to a downloadable document or inert", () => {

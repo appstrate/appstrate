@@ -15,8 +15,12 @@ import {
   tapSseUsage,
   guardSseTeardown,
   forwardMeteredResponse,
+  recordProxyUsage,
+  UNPARSED_USAGE_REQUEST_ID_PREFIX,
   type MeteredForwardContext,
+  type RecordUsageInputs,
 } from "../../src/services/llm-proxy/metering.ts";
+import type { LlmUsageEntry } from "../../src/services/llm-usage-ledger.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import type { UpstreamUsage } from "../../src/services/llm-proxy/types.ts";
@@ -158,6 +162,22 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
  * which no-ops when a branch never parses usage (error bodies, non-JSON) — a
  * stand-in is sufficient for these pure forwarding tests.
  */
+/**
+ * Ledger-writer seam for the forwarding tests: collects what WOULD be recorded
+ * so the branches can be exercised without a database (the DI point
+ * `MeteredForwardOptions.recordUsage` exists for exactly this).
+ */
+function collectUsage(): { calls: RecordUsageInputs[]; recordUsage: MeterSeam } {
+  const calls: RecordUsageInputs[] = [];
+  return {
+    calls,
+    recordUsage: async (inputs) => {
+      calls.push(inputs);
+    },
+  };
+}
+type MeterSeam = (inputs: RecordUsageInputs) => Promise<void>;
+
 function makeCtx(overrides: Partial<MeteredForwardContext> = {}): MeteredForwardContext {
   return {
     principal: { kind: "jwt_user", userId: "u", orgId: "o" },
@@ -232,6 +252,7 @@ describe("guardSseTeardown", () => {
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
       swap: { alias: "alias-model", real: "real-model" },
       logLabel: "test",
+      recordUsage: collectUsage().recordUsage,
     });
     const out = await readAll(res.body!);
     expect(out).toContain("alias-model");
@@ -335,11 +356,17 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
       headers: { "content-type": "text/html" },
     });
 
+    const meter = collectUsage();
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
       swap,
       logLabel: "test",
+      recordUsage: meter.recordUsage,
     });
 
+    // The call was accepted (and paid for) upstream — it is metered even though
+    // the caller receives a 502.
+    expect(meter.calls).toHaveLength(1);
+    expect(meter.calls[0]!.usage).toBeNull();
     expect(res.status).toBe(502);
     expect(res.headers.get("content-type")).toBe("application/json");
     const text = await res.text();
@@ -357,10 +384,112 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
 
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
       logLabel: "test",
+      recordUsage: collectUsage().recordUsage,
     });
 
     expect(res.status).toBe(200);
     expect(res.headers.get("server")).toBe("cloudflare");
     expect(await res.text()).toBe("plain text ok");
+  });
+});
+
+/**
+ * A 2xx reply the platform could not price is still a call the provider was paid
+ * for. It must reach the ledger as an ACCOUNTABLE zero row (explicitly marked),
+ * never as silence — otherwise it exists neither in `runs.cost` nor for billing,
+ * and nothing even counts how often it happens.
+ */
+describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () => {
+  it("meters an SSE stream that carried no usage frame", async () => {
+    const body = streamFrom([
+      `event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}\n\n`,
+      `event: message_stop\ndata: {"type":"message_stop"}\n\n`,
+    ]);
+    const upstream = new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+
+    const meter = collectUsage();
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+      logLabel: "test",
+      recordUsage: meter.recordUsage,
+    });
+    // The tap runs out-of-band of the client stream: drain the body first.
+    await readAll(res.body!);
+    // One tick for the detached tap → meter chain to settle.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(meter.calls).toHaveLength(1);
+    expect(meter.calls[0]!.usage).toBeNull();
+  });
+
+  it("meters a JSON 2xx whose body carries no usage object", async () => {
+    const upstream = new Response(JSON.stringify({ id: "cmpl_1", choices: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+    const meter = collectUsage();
+    await forwardMeteredResponse(upstream, openaiCompletionsAdapter, makeCtx(), {
+      logLabel: "test",
+      recordUsage: meter.recordUsage,
+    });
+
+    expect(meter.calls).toHaveLength(1);
+    expect(meter.calls[0]!.usage).toBeNull();
+  });
+
+  it("never meters an upstream ERROR — no tokens were produced", async () => {
+    const upstream = new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+      status: 429,
+      headers: { "content-type": "application/json" },
+    });
+
+    const meter = collectUsage();
+    await forwardMeteredResponse(upstream, openaiCompletionsAdapter, makeCtx(), {
+      logLabel: "test",
+      recordUsage: meter.recordUsage,
+    });
+
+    expect(meter.calls).toEqual([]);
+  });
+
+  it("builds a zero-token entry with a marked request_id for an unparseable usage", async () => {
+    // `recordProxyUsage` with the ledger writer injected: the row it hands to
+    // the single writer is what an operator can later find and count.
+    const written: LlmUsageEntry[] = [];
+    await recordProxyUsage(
+      {
+        principal: { kind: "jwt_user", userId: "u1", orgId: "org1" },
+        runId: "run_1",
+        chatSessionId: null,
+        presetId: "preset-1",
+        resolved: {
+          modelId: "gpt-4o",
+          apiShape: "openai-completions",
+          isSystemModel: true,
+          cost: { input: 3, output: 15 },
+        } as unknown as ResolvedModel,
+        usage: null,
+        durationMs: 120,
+      },
+      async (entry) => {
+        written.push(entry);
+      },
+    );
+
+    expect(written).toHaveLength(1);
+    const entry = written[0]!;
+    expect(entry.source).toBe("proxy");
+    expect(entry.runId).toBe("run_1");
+    expect(entry.inputTokens).toBe(0);
+    expect(entry.outputTokens).toBe(0);
+    expect(entry.cacheReadTokens).toBeNull();
+    expect(entry.cacheWriteTokens).toBeNull();
+    expect(entry.costUsd).toBe(0);
+    expect(entry.credentialSource).toBe("system");
+    expect(entry.requestId?.startsWith(UNPARSED_USAGE_REQUEST_ID_PREFIX)).toBe(true);
   });
 });

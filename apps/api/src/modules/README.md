@@ -85,7 +85,7 @@ or `ctx.applyMigrations` — those were removed in core 2.23.0.
 2. Better Auth tables (jwks, oauth_clients, …) are resolved by the adapter
    directly from the core barrel — no module-side registration.
 3. Core never imports from `apps/api/src/modules/`. If core needs data from a
-   module, use a hook (`beforeUsage`, `afterRun`) — never a direct import. A
+   module, use a hook (`beforeUsage`) or an event — never a direct import. A
    module reads another module's data via the platform API/events, never a
    cross-module SQL join.
 4. **Need a separate tenant?** A module that must own a physically isolated
@@ -168,7 +168,7 @@ Provider hooks (`ModelProviderHooks`):
 
 - **`extractTokenIdentity(accessToken) → ModelProviderIdentity | null`** — runs once at credential import + after every refresh. Maps the provider's claim vocabulary (e.g. a JWT payload) into the platform's well-known abstract slots: `{ accountId?, email? }`. The platform persists the result and never re-decodes.
 - **`buildApiKeyPlaceholder(accessToken) → string | null`** — builds the `MODEL_API_KEY` value the agent container sees, when the in-container LLM client expects a structurally meaningful shape (e.g. a JWT it will decode). Return `null` to fall back to the platform's generic dash-stripped placeholder. The real upstream credential never leaves the platform/sidecar boundary.
-- **`validateCredential(ctx) → CredentialValidationResult`** — validates a credential **offline** (no network), used by the connection test (`POST /api/models/test`). Implement it together with `credentialValidation: "offline"` on the provider definition: the platform then runs this local check instead of issuing any API call (subscription providers decode the token to confirm it is well-formed + unexpired). Return `{ ok: true }` for a valid credential or `{ ok: false, error, message }` otherwise. API-key providers omit it and fall back to the generic `GET ${baseUrl}/models` probe.
+- **`validateCredential(ctx) → CredentialValidationResult`** — validates a credential **offline** (no network), used by the connection test (`POST /api/models/test`). Offline validation is inferred from the **presence of this hook** — there is no flag on the provider definition to set. When it is present the platform runs this local check instead of issuing any API call (subscription providers decode the token to confirm it is well-formed + unexpired). Return `{ ok: true }` for a valid credential or `{ ok: false, error, message }` otherwise. API-key providers omit it and fall back to the generic `GET ${baseUrl}/models` probe. (Model _discovery_ without live probing is the separate, orthogonal `modelDiscovery: { mode: "static" }` field.)
 
 Declarative gate: `requiredIdentityClaims: readonly (keyof ModelProviderIdentity)[]` on the provider definition makes the platform refuse to import a credential whose mandatory slots can't be resolved — fail-loud at import time instead of silently persisting a dead credential.
 
@@ -206,10 +206,45 @@ Full design: `docs/architecture/OBSERVABILITY.md`.
 
 ## Hooks and events
 
-- **Hooks** (`callHook`, first-match-wins): `beforeUsage`, `afterRun`, `beforeSignup`. The first module that provides a hook is called, subsequent modules are skipped. `beforeUsage` gates metered LLM usage on a surface — a discriminated union over `run` (agent run) and `chat` (chat turn); `afterRun` returns a metadata patch persisted on the final run record, `beforeSignup` gates signup.
-- **Events** (`emitEvent`, broadcast-to-all): `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`. Handlers run for side effects only; errors in one handler are isolated and do not block others.
+A hook's dispatch mode is **fixed by the contract, per hook name** — it is not a
+property of the call site. `packages/core/src/module.ts` splits the map in two
+(`FirstMatchHooks` / `BroadcastHooks`); the platform's two dispatchers are typed
+to accept only their own half, so the wrong-mode call does not compile.
 
-Names are defined in `packages/core/src/module.ts` (`ModuleHooks`, `ModuleEvents`). To add a new hook or event, update that file first so both platform and modules see the same contract.
+- **First-match-wins hooks** (`callHook`, `FirstMatchHooks`): `beforeUsage`.
+  Only the first module providing it is called; its answer is authoritative.
+  `beforeUsage` gates metered LLM usage on a surface — a discriminated union
+  over `run` (agent run) and `chat` (chat turn). One verdict is wanted, so a
+  second implementer would need a merge rule the contract does not define.
+- **Broadcast hooks** (`callAllHooks`, `BroadcastHooks`): `beforeSignup`,
+  `afterSignup`. **Every** module providing them is called, in load order, and
+  errors **propagate** — a throwing `beforeSignup` aborts user creation. These
+  are gates several modules may legitimately veto (a metering module's
+  free-tier policy and OIDC's per-client org policy are independent), so
+  dispatching them first-match-wins would silently disable all but the first.
+- **Events** (`emitEvent`, broadcast-to-all): `onRunStatusChange`,
+  `onRunConnectionMissing`, `onOrgCreate`, `onOrgDelete`. Handlers run for side
+  effects only; errors in one handler are **isolated** and do not block others —
+  that isolation is the difference from a broadcast hook.
+
+Names are defined in `packages/core/src/module.ts` (`FirstMatchHooks` /
+`BroadcastHooks` / `ModuleHooks`, `ModuleEvents`). To add a new hook or event,
+update that file first — including its `scripts/verify-module-contract.ts`
+ledger entry — so both platform and modules
+see the same contract. A hook or event no module implements fails that check as
+dead surface.
+
+### `beforeUsage` — admission (core 5.0.0+)
+
+The hook is dispatched for **every** run and **every** chat turn, not for a subset the platform pre-selected. Each dispatch carries neutral execution facts, and the module turns them into a decision:
+
+- **`credentialSource`** — whose credential is spent on inference: `"system"` (platform-supplied credential or system model preset), `"org"` (the organization's own BYOK key or OAuth subscription), or — `run` only — `null` when a remote-origin run resolves its model later on its own host (any inference it then routes through the system model proxy is admitted at that seam instead).
+- **`executionPlane`** — whose compute runs the work: `"platform"` (a sandbox the platform operates, or its own chat process — always the case for `chat`) or `"remote"` (caller-supplied host).
+- **`timeoutSeconds`** (`run` only) — the effective post-ceiling upper bound on platform compute occupancy, or `null` at a seam that does not own the run's compute and must therefore contribute nothing for it (NOT "unknown, assume the worst" — that double-counts).
+
+**Deciding that an operation consumes nothing is the module's job**, not the platform's. The platform used to skip the hook whenever the organization brought its own credential; that assumption breaks as soon as platform compute is accounted for, since a BYOK run still occupies a platform-operated sandbox. A module that only cares about platform-supplied inference reproduces the old outcome by returning `null` when `credentialSource !== "system"`.
+
+An operation the organization supplies entirely by itself — `credentialSource !== "system"` **and** `executionPlane !== "platform"`, i.e. a remote BYOK run — should be short-circuited with `null` before the handler reads any of its own state (no DB round-trip, no account lookup): there is nothing for the platform to account for.
 
 ## Auth strategies
 
@@ -237,11 +272,13 @@ const jwtStrategy: AuthStrategy = {
       authMethod: "my-jwt",
       applicationId: payload.app_id,
       permissions: ["runs:read", "runs:write"],
-      // Optional end-user impersonation
+      // Optional end-user impersonation. `EndUserContext` is exactly
+      // `{ id, applicationId, name?, email? }` — core has no end-user role
+      // vocabulary, so there is no `role` field to set here.
       endUser: {
         id: payload.enduser_id,
         applicationId: payload.app_id,
-        role: payload.role ?? null,
+        email: payload.email,
       },
     };
   },

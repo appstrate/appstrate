@@ -593,7 +593,7 @@ interface DbOrgModelRow {
 interface DbModelCredentials {
   apiKey: string;
   providerId: string;
-  apiShape: string;
+  apiShape: ModelApiShape;
   baseUrl: string;
   accountId?: string;
 }

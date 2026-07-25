@@ -22,7 +22,8 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
+import { runs, storageDeletionJobs } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
 import { getTestApp } from "../../helpers/app.ts";
@@ -179,6 +180,63 @@ describe("run-workspace storage round-trip", () => {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await deleteRunWorkspace(runId); // must not throw
     expect(await downloadRunWorkspace(runId)).toBeNull();
+  });
+
+  it("enqueues the whole teardown even when reading the manifest fails, and the worker finishes it", async () => {
+    // Own the outbox for this test: the round-trip cases above leave their own
+    // pending jobs behind (this describe block has no per-test reset).
+    await truncateAll();
+    const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await seedWorkspace(runId, {
+      bundle: Buffer.from("BUNDLE"),
+      documents: [
+        { name: "a.txt", content: Buffer.from("aaa") },
+        { name: "b.txt", content: Buffer.from("bbb") },
+      ],
+    });
+
+    await deleteRunWorkspace(runId);
+
+    // Teardown does NO storage read: both keys are durably queued straight away.
+    // (It used to download the manifest first to derive the document keys — a
+    // transient 503 there enqueued NOTHING at all, and since the run is terminal
+    // nothing ever revisited it: the bytes were orphaned forever.)
+    const queued = await db
+      .select({ storageKey: storageDeletionJobs.storageKey })
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.bucket, "run-workspace"));
+    expect(new Set(queued.map((j) => j.storageKey))).toEqual(
+      new Set([`${runId}.afps`, `${runId}/manifest.json`]),
+    );
+
+    // The manifest expansion now lives in the WORKER, where a failed read is a
+    // retry — not a silent loss. The documents survive this pass untouched.
+    const failedPass = await processStorageDeletionJobs({
+      downloadFile: async () => {
+        throw new Error("storage 503 while reading the manifest");
+      },
+    });
+    expect(failedPass.failed).toBe(1);
+    expect(await downloadRunDocumentStream(runId, "a.txt")).not.toBeNull();
+    const [pending] = await db
+      .select()
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, `${runId}/manifest.json`));
+    expect(pending!.completedAt).toBeNull();
+    expect(pending!.lastError).toContain("503");
+
+    // Once storage recovers (lease/backoff elapsed), the retry purges everything.
+    // Backdated rather than stamped "now" so the row is due whatever the API↔DB
+    // clock skew.
+    await db
+      .update(storageDeletionJobs)
+      .set({ nextAttemptAt: new Date(Date.now() - 60 * 60 * 1000) })
+      .where(eq(storageDeletionJobs.storageKey, `${runId}/manifest.json`));
+    await processStorageDeletionJobs();
+    expect(await downloadRunWorkspace(runId)).toBeNull();
+    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    expect(await downloadRunDocumentStream(runId, "a.txt")).toBeNull();
+    expect(await downloadRunDocumentStream(runId, "b.txt")).toBeNull();
   });
 });
 

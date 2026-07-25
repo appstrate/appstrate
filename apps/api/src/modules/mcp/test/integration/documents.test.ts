@@ -73,7 +73,10 @@ async function apiKeyHeaders(ctx: TestContext): Promise<Record<string, string>> 
     orgId: ctx.orgId,
     applicationId: ctx.defaultAppId,
     createdBy: ctx.user.id,
-    scopes: ["mcp:read", "mcp:invoke"],
+    // `list_documents` / `resources/read` re-dispatch in-process to
+    // `GET /api/documents*`, which is gated on `documents:read` like every
+    // other caller — an MCP grant is not a document grant.
+    scopes: ["mcp:read", "mcp:invoke", "documents:read"],
   });
   return { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId };
 }

@@ -13,15 +13,23 @@
  * Paragon User Token): a backend-minted, scoped, short-TTL token — never the
  * API key, never the model — gates the unified connect surface.
  *
- * Format: `base64url(JSON payload).base64url(HMAC-SHA256)` — identical wire
- * shape to the FS upload token (`@appstrate/core/storage-fs`).
+ * Format: `base64url(JSON payload).base64url(HMAC-SHA256)` — the shared
+ * keyring-HMAC codec (`@appstrate/afps-shared/signed-token`), under this
+ * module's own domain.
  *
  * Secret is injected by the caller (`CONNECT_SESSION_SECRET`), kept separate
  * from other signing secrets so it can be rotated independently. A
  * comma-separated keyring enables online rotation: the FIRST key signs new
  * tokens, ALL keys verify. Each key must be ≥16 chars (and thus comma-free).
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { signKeyringToken, verifyKeyringToken } from "@appstrate/afps-shared/signed-token";
+
+/**
+ * HMAC domain separator. The secret is already dedicated to this flow, so the
+ * domain is belt-and-braces — but it is what keeps that isolation true if the
+ * deployment ever points `CONNECT_SESSION_SECRET` at a shared keyring.
+ */
+const CONNECT_SESSION_DOMAIN = "connect-session.v1.";
 
 /**
  * Claims encoded inside a connect-session token. Exactly one actor field
@@ -61,11 +69,6 @@ export interface ConnectSessionClaims {
   exp: number;
 }
 
-function toKeyring(secret: string | readonly string[]): string[] {
-  const keys = typeof secret === "string" ? secret.split(",") : [...secret];
-  return keys.filter((k) => k.length > 0);
-}
-
 function hasExactlyOneActor(c: { user_id?: string; end_user_id?: string }): boolean {
   return Boolean(c.user_id) !== Boolean(c.end_user_id);
 }
@@ -78,14 +81,10 @@ export function mintConnectSession(
   claims: ConnectSessionClaims,
   secret: string | readonly string[],
 ): string {
-  const [activeKey] = toKeyring(secret);
-  if (!activeKey) throw new Error("mintConnectSession requires at least one signing key");
   if (!hasExactlyOneActor(claims)) {
     throw new Error("mintConnectSession requires exactly one of user_id / end_user_id");
   }
-  const body = Buffer.from(JSON.stringify(claims), "utf-8").toString("base64url");
-  const sig = createHmac("sha256", activeKey).update(body).digest("base64url");
-  return `${body}.${sig}`;
+  return signKeyringToken(CONNECT_SESSION_DOMAIN, claims, secret);
 }
 
 /**
@@ -99,27 +98,8 @@ export function verifyConnectSession(
   token: string,
   secret: string | readonly string[],
 ): ConnectSessionClaims | null {
-  const dot = token.indexOf(".");
-  if (dot <= 0) return null;
-  const body = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  const a = Buffer.from(sig);
-  let valid = false;
-  for (const key of toKeyring(secret)) {
-    const b = Buffer.from(createHmac("sha256", key).update(body).digest("base64url"));
-    if (a.length === b.length && timingSafeEqual(a, b)) {
-      valid = true;
-      break;
-    }
-  }
-  if (!valid) return null;
-
-  let claims: ConnectSessionClaims;
-  try {
-    claims = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as ConnectSessionClaims;
-  } catch {
-    return null;
-  }
+  const claims = verifyKeyringToken<ConnectSessionClaims>(CONNECT_SESSION_DOMAIN, token, secret);
+  if (!claims) return null;
 
   if (claims.v !== 1) return null;
   if (typeof claims.exp !== "number" || claims.exp < Math.floor(Date.now() / 1000)) return null;

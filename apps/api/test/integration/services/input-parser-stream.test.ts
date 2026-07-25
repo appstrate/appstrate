@@ -62,11 +62,19 @@ async function seedUpload(
   });
 }
 
-/** Minimal Hono context stub — parseRequestInput reads the JSON body, orgId/applicationId, the actor (user/endUser), and (for rerun_from) endUser. */
+/**
+ * Minimal Hono context stub — parseRequestInput reads the JSON body,
+ * orgId/applicationId and the acting principal (end-user or dashboard user).
+ * A principal is ALWAYS present: the parser resolves it with the strict
+ * `getActor`, mirroring the fact that every route reaching it sits behind
+ * authentication, and it gates both the document ACL and the staged-upload
+ * ownership check. Tests that need a specific owner pass one explicitly.
+ */
 function fakeCtx(
   body: unknown,
   ctx: { orgId: string; applicationId: string; endUser?: { id: string }; user?: { id: string } },
 ): Context {
+  const user = ctx.endUser ? undefined : (ctx.user ?? { id: "usr_input_parser_test" });
   return {
     req: { json: async () => body },
     get: (key: string) =>
@@ -77,7 +85,7 @@ function fakeCtx(
           : key === "endUser"
             ? ctx.endUser
             : key === "user"
-              ? ctx.user
+              ? user
               : undefined,
   } as unknown as Context;
 }

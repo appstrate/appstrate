@@ -65,6 +65,18 @@ function findSpan(exporter: InMemorySpanExporter, name: string): ReadableSpan | 
 
 describe("observability() middleware", () => {
   let spanExporter: InMemorySpanExporter;
+  /**
+   * Snapshot of the trust flag taken ONCE, before any test touches it. Two
+   * tests below set/unset it; restoring to "absent" instead of to the original
+   * would silently strip the variable from the rest of the process whenever the
+   * ambient environment defines it.
+   */
+  const trustFlagSnapshot = process.env.OTEL_TRUST_INCOMING_TRACE;
+
+  function restoreTrustFlag(): void {
+    if (trustFlagSnapshot === undefined) delete process.env.OTEL_TRUST_INCOMING_TRACE;
+    else process.env.OTEL_TRUST_INCOMING_TRACE = trustFlagSnapshot;
+  }
 
   beforeEach(async () => {
     await _resetObservabilityForTesting();
@@ -82,6 +94,7 @@ describe("observability() middleware", () => {
 
   afterEach(async () => {
     await _resetObservabilityForTesting();
+    restoreTrustFlag();
   });
 
   it("names the SERVER span with the matched route template, not the wildcard", async () => {
@@ -209,7 +222,7 @@ describe("observability() middleware", () => {
       expect(span!.spanContext().traceId).toBe(inboundTraceId);
       expect(span!.parentSpanContext?.spanId).toBe(inboundSpanId);
     } finally {
-      delete process.env.OTEL_TRUST_INCOMING_TRACE;
+      restoreTrustFlag();
     }
   });
 });

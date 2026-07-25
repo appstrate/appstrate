@@ -4,6 +4,8 @@ import type { Hono } from "hono";
 import type { AppConfig } from "@appstrate/shared-types";
 import type {
   AppstrateModule,
+  BroadcastHooks,
+  FirstMatchHooks,
   ModelProviderDefinition,
   ModuleInitContext,
   ModuleHooks,
@@ -494,23 +496,6 @@ export async function applyModuleFeatures(base: AppConfig): Promise<AppConfig> {
 // Agnostic hook system
 // ---------------------------------------------------------------------------
 
-/**
- * Call a named hook — returns the result from the FIRST module that
- * provides it, or `undefined` if no module provides it.
- *
- * **First-match-wins:** Modules are iterated in topological init order.
- * If the first module that provides a hook returns a value (including `null`),
- * subsequent modules are never consulted. Load order (determined by
- * `manifest.dependencies` topological sort) defines priority — modules with
- * no dependencies keep the order they appear in `MODULES`.
- *
- * Example: `MODULES=cloud,quota` — if both provide `beforeUsage`,
- * cloud runs first. To force ordering regardless of env order, add
- * `dependencies: ["cloud"]` on quota so the topo sort always places cloud
- * earlier.
- *
- * For broadcast-to-all semantics, use `emitEvent()` instead.
- */
 // Internal type: hooks/events objects cast to indexable records for dynamic dispatch.
 // The public types (ModuleHooks/ModuleEvents) are strict — this cast is only used
 // inside the loader where dispatch is inherently dynamic (by hook/event name).
@@ -520,7 +505,25 @@ type AnyHandler = (...args: any[]) => any;
 /** Unwrap the Promise return type of a hook. */
 type HookResult<K extends keyof ModuleHooks> = Awaited<ReturnType<ModuleHooks[K]>>;
 
-export async function callHook<K extends keyof ModuleHooks>(
+/**
+ * Call a FIRST-MATCH-WINS hook ({@link FirstMatchHooks}) — returns the result
+ * from the FIRST module that provides it, or `undefined` if no module does.
+ *
+ * Modules are iterated in topological init order. If the first module that
+ * provides the hook returns a value (including `null`), subsequent modules are
+ * never consulted. Load order (`manifest.dependencies` topological sort)
+ * defines priority — modules with no dependencies keep the order they appear
+ * in `MODULES`.
+ *
+ * Example: `MODULES=admission,metering` — if both provide `beforeUsage`,
+ * `admission` runs first. To force ordering regardless of env order, add
+ * `dependencies: ["admission"]` on `metering` so the topo sort always places
+ * `admission` earlier.
+ *
+ * Broadcast hooks are NOT callable here (the signature rejects them): use
+ * {@link callAllHooks}. For side-effect-only fan-out, use {@link emitEvent}.
+ */
+export async function callHook<K extends keyof FirstMatchHooks>(
   name: K,
   ...args: Parameters<ModuleHooks[K]>
 ): Promise<HookResult<K> | undefined> {
@@ -534,14 +537,18 @@ export async function callHook<K extends keyof ModuleHooks>(
 }
 
 /**
- * Broadcast a hook to EVERY loaded module (vs {@link callHook}'s
- * first-match-wins). For the rare hooks whose semantics are "every module
- * participates" — currently `beforeSignup` / `afterSignup`, where the cloud
- * free-tier gate AND the OIDC per-client signup policy both must run on each
- * signup. Errors PROPAGATE (unlike {@link emitEvent}): a throwing
- * `beforeSignup` aborts user creation, which is the gate's whole purpose.
+ * Broadcast a {@link BroadcastHooks} hook to EVERY loaded module (vs
+ * {@link callHook}'s first-match-wins). These are the gates whose semantics are
+ * "every module participates" — `beforeSignup` / `afterSignup`, where a
+ * metering module's free-tier gate AND the OIDC per-client signup policy both
+ * must run on each signup. Errors PROPAGATE (unlike {@link emitEvent}): a
+ * throwing `beforeSignup` aborts user creation, which is the gate's whole
+ * purpose.
+ *
+ * First-match hooks are NOT callable here (the signature rejects them):
+ * broadcasting `beforeUsage` would discard every rejection but the last.
  */
-export async function callAllHooks<K extends keyof ModuleHooks>(
+export async function callAllHooks<K extends keyof BroadcastHooks>(
   name: K,
   ...args: Parameters<ModuleHooks[K]>
 ): Promise<void> {

@@ -10,11 +10,7 @@ import { scopedWhere } from "../lib/db-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { decrementOrgDocumentBytes, storageKeyToDeletionJob } from "./documents.ts";
-import {
-  RUN_WORKSPACE_BUCKET,
-  runWorkspaceBundleKey,
-  runWorkspaceManifestKey,
-} from "./run-workspace-storage.ts";
+import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 
 export const appSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),
@@ -162,16 +158,7 @@ export async function deleteApplication(orgId: string, applicationId: string) {
       if (job) storageJobs.push(job);
     }
     for (const r of runRows) {
-      storageJobs.push({
-        bucket: RUN_WORKSPACE_BUCKET,
-        storageKey: runWorkspaceBundleKey(r.id),
-        reason: "application_deleted",
-      });
-      storageJobs.push({
-        bucket: RUN_WORKSPACE_BUCKET,
-        storageKey: runWorkspaceManifestKey(r.id),
-        reason: "application_deleted",
-      });
+      storageJobs.push(...runWorkspaceDeletionJobs(r.id, "application_deleted"));
     }
     await enqueueStorageDeletion(tx, storageJobs);
 

@@ -52,6 +52,7 @@ import {
   projectDocumentMetadata,
   type DocumentCapabilities,
 } from "../../services/documents.ts";
+import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -218,22 +219,6 @@ const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
  * it (either kind) the read returns metadata only.
  */
 const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
-
-/**
- * Whether a mime type is textual enough to inline as `text` in a
- * `resources/read` result: `text/*`, JSON/XML (incl. `+json` / `+xml`
- * structured suffixes, which covers `image/svg+xml`).
- */
-function isTextualMime(mime: string): boolean {
-  const m = mime.toLowerCase().split(";")[0]!.trim();
-  return (
-    m.startsWith("text/") ||
-    m === "application/json" ||
-    m === "application/xml" ||
-    m.endsWith("+json") ||
-    m.endsWith("+xml")
-  );
-}
 
 /** A published run document → the MCP `resource_link` content block (spec 2025-06-18). */
 function documentResourceLink(doc: RunAndWaitDocument): {
@@ -1198,7 +1183,7 @@ export function buildDocumentResourceProvider(ctx: McpToolContext): AppstrateRes
       }
 
       // Downloadable → serve the bytes from storage directly (no 307 to follow).
-      if (isTextualMime(row.mime) && row.size <= RESOURCE_TEXT_MAX_BYTES) {
+      if (isTextShapedMime(normalizeMime(row.mime)) && row.size <= RESOURCE_TEXT_MAX_BYTES) {
         const stream = await streamDocumentContent(row.storageKey);
         if (stream) {
           const text = await new Response(stream).text();

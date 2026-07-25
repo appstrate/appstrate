@@ -316,6 +316,17 @@ export const runs = pgTable(
       "runs_open_sink_has_secret",
       sql`sink_expires_at IS NULL OR sink_secret_encrypted IS NOT NULL`,
     ),
+    // Money floor. `runs.cost` is a denormalized cache of the run's slice of the
+    // `llm_usage` ledger; a negative value is meaningless and would silently
+    // subtract from any org-level aggregation built on it. The application
+    // clamps, but the clamp is one code path away from being bypassed — the
+    // column itself is where the invariant belongs. NULL (cost not yet known)
+    // passes, per standard CHECK semantics. Added validated in migration 0029:
+    // splitting it into `NOT VALID` + a later `VALIDATE` buys nothing here,
+    // because the migrator applies the whole pending batch in ONE transaction
+    // and holds ACCESS EXCLUSIVE until it commits either way. The scan is why a
+    // pre-existing negative row aborts the deploy — see `docs/architecture/RUN_COST.md`.
+    check("runs_cost_non_negative", sql`cost >= 0`),
   ],
 );
 
@@ -531,10 +542,16 @@ export const llmUsage = pgTable(
     uniqueIndex("uq_llm_usage_proxy_request_id")
       .on(table.requestId)
       .where(sql`source = 'proxy' AND request_id IS NOT NULL`),
-    // Runner-source dedup: at most one runner row per run. The metric
-    // event carries a running total; the row is written once by whichever
-    // path lands first (the metric event handler or the finalize-time
-    // fallback). ON CONFLICT DO NOTHING enforces single-write.
+    // Runner-source dedup: at most one runner row per run. The metric event
+    // carries a cumulative running total, so the row is not written once — it
+    // is UPSERTED by every path that reports one (the metric event handler,
+    // the finalize-time terminal snapshot) via a two-level MONOTONIC
+    // `DO UPDATE` (a strictly higher cost wins; on an equal cost, a strictly
+    // higher token total wins — so a zero-rate model still advances). This
+    // index is what makes that upsert addressable, not a single-write gate.
+    // The advance is additionally refused once the run reaches a terminal
+    // status: from that instant the row is `settled` and a cursor consumer may
+    // already have claimed it by serial id. See `services/llm-usage-ledger.ts`.
     uniqueIndex("uq_llm_usage_runner_run_id")
       .on(table.runId)
       .where(sql`source = 'runner' AND run_id IS NOT NULL`),
@@ -552,9 +569,14 @@ export const llmUsage = pgTable(
     // intact (a plain composite SET NULL would null org_id too → error). Drizzle
     // cannot express the column list; the live action is hand-written in raw SQL
     // migration 0028. The `.onDelete("set null")` below is the closest Drizzle
-    // approximation (only the column list is inexpressible) — if drizzle-kit ever
-    // materialised it, a plain composite SET NULL fails loudly on the NOT-NULL
-    // org_id instead of silently re-cascading ledger rows away.
+    // approximation (only the column list is inexpressible).
+    //
+    // That approximation is NOT a safety net. A `db:push` against a live
+    // database silently replaces `SET NULL (run_id)` with a plain composite
+    // `SET NULL` (`confdelsetcols` → NULL); the breakage surfaces only at the
+    // first run deletion, as `null value in column "org_id"`, and every run
+    // deletion fails from then on. Production migrates via `migrate()` and never
+    // `push`, which is what keeps this safe — do not run `db:push` against it.
     foreignKey({
       name: "llm_usage_run_id_org_id_fk",
       columns: [table.runId, table.orgId],
@@ -589,6 +611,14 @@ export const llmUsage = pgTable(
     // a chat session, never both. NULL-friendly, so a detached row (both NULL)
     // still passes.
     check("llm_usage_context_single", sql`run_id IS NULL OR chat_session_id IS NULL`),
+    // Money floor. This ledger is what billing reads (the cloud sweeper debits
+    // credits off it by serial-id cursor), and the runner upsert advances a row
+    // MONOTONICALLY on cost — a negative value would both credit an org for
+    // spending and pin the row below every later advance. Enforced in the column
+    // rather than only in `recordLlmUsage`, which is a single code path away from
+    // being bypassed. Added validated in migration 0029 — see the sibling floor
+    // on `runs.cost` for why it is not split into `NOT VALID` + `VALIDATE`.
+    check("llm_usage_cost_usd_non_negative", sql`cost_usd >= 0`),
   ],
 );
 

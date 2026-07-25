@@ -11,14 +11,14 @@
  * isolation:
  *
  *  - {@link signPreviewToken} / {@link verifyPreviewToken} — HMAC capability
- *    tokens authorizing a GET of ONE document's preview for 5 minutes. They
- *    mirror the keyring-HMAC design of `signFsUploadToken`
- *    (`packages/core/src/storage-fs.ts`) and REUSE the same `UPLOAD_SIGNING_SECRET`
- *    keyring — no new boot secret. (Trade-off: a dedicated secret would let the
- *    preview capability rotate independently of upload URLs; reusing the upload
- *    secret keeps the OSS boot surface smaller. The static HMAC domain separator
- *    below means the two token types can never be substituted for each other
- *    even though they share the key.)
+ *    tokens authorizing a GET of ONE document's preview for 5 minutes. They are
+ *    the shared keyring-HMAC codec (`@appstrate/afps-shared/signed-token`, the
+ *    same one behind upload tokens) under the preview domain, and REUSE the
+ *    `UPLOAD_SIGNING_SECRET` keyring — no new boot secret. (Trade-off: a
+ *    dedicated secret would let the preview capability rotate independently of
+ *    upload URLs; reusing the upload secret keeps the OSS boot surface smaller.
+ *    The mandatory HMAC domain separator means the two token types can never be
+ *    substituted for each other even though they share the key.)
  *  - {@link buildPreviewCsp} — the strict CSP string, reused verbatim for both
  *    the response header and the injected `<meta>` tag.
  *  - {@link injectMetaCsp} — parse-time injection of a duplicate CSP as the first
@@ -26,7 +26,8 @@
  *    paths a header alone can miss.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { signKeyringToken, verifyKeyringToken } from "@appstrate/afps-shared/signed-token";
+import { normalizeMime } from "./mime-policy.ts";
 
 /** Preview capability lifetime — deliberately short (a render link, not a session). */
 export const PREVIEW_TOKEN_TTL_SECONDS = 300;
@@ -40,10 +41,11 @@ export const PREVIEW_TOKEN_TTL_SECONDS = 300;
 export const PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
- * Static HMAC domain separator. Prepended to the signed body so a valid upload
+ * Static HMAC domain separator. Mixed into the signed content so a valid upload
  * token (which shares the `UPLOAD_SIGNING_SECRET` keyring) can never be replayed
- * as a preview token, and vice-versa — even though the payload shapes and field
- * checks already differ, binding the signature to a purpose is defense in depth.
+ * as a preview token — and, since upload tokens carry their own domain, not the
+ * other way round either. The separation is symmetric because the shared codec
+ * takes the domain as a required argument, not an optional one.
  */
 const PREVIEW_TOKEN_DOMAIN = "doc-preview.v1.";
 
@@ -65,64 +67,29 @@ export interface PreviewTokenPayload {
   eu?: string | null;
 }
 
-/** Split a comma-separated secret into a keyring; drop empties. Mirrors storage-fs. */
-function toKeyring(secret: string | readonly string[]): string[] {
-  const keys = typeof secret === "string" ? secret.split(",") : [...secret];
-  return keys.filter((k) => k.length > 0);
-}
-
 /**
- * Encode + HMAC-sign a preview token with the FIRST key of the keyring.
- * Format: base64url(JSON).base64url(HMAC-SHA256), signed over the
- * domain-separated body. Mirrors `signFsUploadToken`.
+ * Encode + HMAC-sign a preview token with the FIRST key of the keyring, bound
+ * to {@link PREVIEW_TOKEN_DOMAIN}.
  */
 export function signPreviewToken(
   payload: PreviewTokenPayload,
   secret: string | readonly string[],
 ): string {
-  const [activeKey] = toKeyring(secret);
-  if (!activeKey) throw new Error("signPreviewToken requires at least one signing key");
-  const body = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
-  const sig = createHmac("sha256", activeKey)
-    .update(PREVIEW_TOKEN_DOMAIN + body)
-    .digest("base64url");
-  return `${body}.${sig}`;
+  return signKeyringToken(PREVIEW_TOKEN_DOMAIN, payload, secret);
 }
 
 /**
  * Verify + decode a preview token. Returns the payload on success, null on any
  * failure. Verifies against EVERY key of the keyring (constant-time per key) so
  * tokens signed before a rotation stay valid; rejects expired tokens and
- * payloads missing the required fields. Mirrors `verifyFsUploadToken`.
+ * payloads missing the required fields.
  */
 export function verifyPreviewToken(
   token: string,
   secret: string | readonly string[],
 ): PreviewTokenPayload | null {
-  const dot = token.indexOf(".");
-  if (dot <= 0) return null;
-  const body = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  const a = Buffer.from(sig);
-  let valid = false;
-  for (const key of toKeyring(secret)) {
-    const b = Buffer.from(
-      createHmac("sha256", key)
-        .update(PREVIEW_TOKEN_DOMAIN + body)
-        .digest("base64url"),
-    );
-    if (a.length === b.length && timingSafeEqual(a, b)) {
-      valid = true;
-      break;
-    }
-  }
-  if (!valid) return null;
-  let payload: PreviewTokenPayload;
-  try {
-    payload = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as PreviewTokenPayload;
-  } catch {
-    return null;
-  }
+  const payload = verifyKeyringToken<PreviewTokenPayload>(PREVIEW_TOKEN_DOMAIN, token, secret);
+  if (!payload) return null;
   if (typeof payload.e !== "number" || payload.e < Math.floor(Date.now() / 1000)) return null;
   if (typeof payload.d !== "string" || !payload.d) return null;
   if (typeof payload.o !== "string" || !payload.o) return null;
@@ -136,7 +103,7 @@ export function verifyPreviewToken(
  * {@link previewKind} (of which HTML is one kind).
  */
 export function isHtmlMime(mime: string): boolean {
-  return mime.split(";", 1)[0]!.trim().toLowerCase() === "text/html";
+  return normalizeMime(mime) === "text/html";
 }
 
 /**
@@ -184,7 +151,7 @@ const PREVIEW_TEXT_MIMES: ReadonlySet<string> = new Set([
  * only the type/subtype is matched.
  */
 export function previewKind(mime: string): PreviewKind | null {
-  const base = mime.split(";", 1)[0]!.trim().toLowerCase();
+  const base = normalizeMime(mime);
   if (base === "text/html") return "html";
   if (base === "application/pdf") return "pdf";
   if (PREVIEW_IMAGE_MIMES.has(base)) return "image";
@@ -227,6 +194,49 @@ export function buildPreviewCsp(appOrigin: string): string {
     `frame-ancestors ${appOrigin}`,
     "base-uri 'none'",
   ].join("; ");
+}
+
+/**
+ * Decide whether agent HTML may be served as ACTIVE content for this request
+ * (`true` = parse and execute as `text/html` under the hardened CSP; `false` =
+ * serve the same bytes relabelled `text/plain`, so the browser shows the source
+ * instead of running it).
+ *
+ * The CSP built by {@link buildPreviewCsp} blocks exfiltration (`connect-src`,
+ * `form-action`, `img-src`, `base-uri`) but NOT script execution itself — that
+ * is by design, the page has to render. Whether execution is harmless depends
+ * entirely on WHICH origin the script ends up running in:
+ *
+ *  - **Separate `USERCONTENT_URL` origin** — always safe. The script runs on a
+ *    throwaway registrable domain with its own cookie jar and storage
+ *    partition; it cannot reach the app's session no matter how the response
+ *    is loaded. `active` unconditionally.
+ *  - **Same-origin mode (`USERCONTENT_URL` unset — the OSS default)** — safe
+ *    ONLY inside the SPA's `sandbox="allow-scripts"` iframe, which gives the
+ *    document an opaque origin. `preview_url` is an absolute URL with a 300 s
+ *    token, so it can also be opened TOP-LEVEL (new tab, shared link). There
+ *    the sandbox attribute does not exist: the script runs on `APP_URL` with
+ *    full access to the SPA's `localStorage`/`sessionStorage`, non-HttpOnly
+ *    cookies, and same-origin navigation. That is the hole this closes.
+ *
+ * `Sec-Fetch-Dest` is a browser-set, script-unforgeable header, so it is the
+ * authoritative statement of the loading context. In same-origin mode the
+ * decision is fail-CLOSED: active HTML requires a proven nested-document load
+ * (`iframe`); a top-level navigation (`document`), a bare `fetch` (`empty`),
+ * an `object`/`embed` load, and a MISSING header (non-browser client, or a
+ * browser too old to send it — Safari < 16.4) all degrade to inert source.
+ * Degrading rather than erroring keeps the link useful: the holder of a valid
+ * token may read the source, which it could download anyway — it just cannot
+ * make it execute in the app origin.
+ */
+export function mayServeActiveHtml(input: {
+  /** True when the preview is served from a dedicated `USERCONTENT_URL` origin. */
+  separateOrigin: boolean;
+  /** Raw `Sec-Fetch-Dest` request header, or null when absent. */
+  secFetchDest: string | null;
+}): boolean {
+  if (input.separateOrigin) return true;
+  return input.secFetchDest === "iframe";
 }
 
 /**

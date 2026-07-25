@@ -3,13 +3,16 @@
 /**
  * Admission gate for platform-paid calls that enter through `/api/llm-proxy`.
  *
- * Platform-origin runs using a system model and chat turns are gated before
- * launch, but a remote run chooses its model later on its own host. The proxy
- * is therefore the first place that can know the remote call resolved to a
- * system preset. This seam applies the module `beforeUsage` hook immediately
- * before the upstream request, using only server-validated context. First-party
- * chat already owns that hook at turn admission; its signed loopback context
- * is validated here without dispatching the hook a second time.
+ * A run only discovers its model at inference time when it executes off-platform,
+ * so the proxy is the first place that can know a call resolved to a system
+ * preset. This seam applies the module `beforeUsage` hook immediately before
+ * the upstream request, using only server-validated context.
+ *
+ * Exactly one billable unit per hook dispatch:
+ *   - run context  → one dispatch per proxy call (the call IS the unit).
+ *   - chat context → zero dispatches; first-party chat already gated the turn
+ *     at admission, and the signed loopback identity validated here proves
+ *     this call is that same turn.
  */
 
 import type { ResolvedModel } from "./org-models.ts";
@@ -21,8 +24,14 @@ export type SystemProxyUsageContext =
   | {
       context: "run";
       packageId: string;
+      /**
+       * Where the referenced run's compute lives. ATTRIBUTION DATA ONLY: it is
+       * reported onward as the hook's `executionPlane` fact and is never read
+       * as a gating input. This field previously formed half of an
+       * "already admitted at preflight" skip condition; that short-circuit was
+       * removed (see the comment on the dispatch below) and must not come back.
+       */
       runOrigin: "platform" | "remote";
-      modelSource: string | null;
     }
   | { context: "chat"; sessionId: string | null }
   | null;
@@ -57,21 +66,35 @@ export async function enforceSystemProxyAdmission(args: {
   // raw proxy call.
   if (args.usageContext.context === "chat") return;
 
-  // A platform-origin run on a SYSTEM model was already admitted once at
-  // preflight (run-preflight-gates.ts). Its per-call proxy usage stays
-  // attributed, but re-dispatching the hook here would gate the same run twice
-  // and duplicate quota reads on every LLM call.
+  // Every run-context call reaching THIS seam is gated, whatever the run's
+  // origin. There is no "already admitted" short-circuit, because the unit the
+  // preflight gate admitted is not the unit being admitted here:
   //
-  // `runOrigin === "platform"` alone is NOT proof of prior admission: BYOK
-  // platform runs (`modelSource === "org"`) and legacy/unresolved rows
-  // (`modelSource === null`) deliberately skipped the system-usage hook. If one
-  // of those run ids is later attached to a raw system-preset proxy request, it
-  // must be admitted here just like a remote run. Otherwise an llm-proxy caller
-  // could use an active BYOK run as a billing context to bypass a quota rejection.
-  const admittedAtPreflight =
-    args.usageContext.runOrigin === "platform" && args.usageContext.modelSource === "system";
-  if (admittedAtPreflight) return;
-
+  //   - `run-preflight-gates.ts` admits a run LAUNCH once, for a
+  //     platform-origin run resolving a system model. That run's inference
+  //     then flows through the sidecar (`MODEL_BASE_URL`), which never touches
+  //     `/api/llm-proxy`.
+  //   - This seam admits ONE raw proxy call, a distinct billable unit that
+  //     mints its own `llm_usage` row (`source='proxy'`). It is never the
+  //     continuation of the launch the preflight gate admitted.
+  //
+  // Skipping the hook when the referenced run was platform-origin AND declared
+  // a system credential (`runs.model_source`) — as this used to — was therefore
+  // not "avoiding a double gate", it was an open bypass: a preflight quote is
+  // issued ONCE per run launch while the number of proxy calls attachable to
+  // that run id is unbounded, and once platform compute is billed the org's
+  // balance moves DURING the run, so admitting at launch gates later calls
+  // against a stale balance. An org past its quota (so every new run/turn is
+  // rejected)
+  // could keep spending indefinitely by stamping `X-Run-Id` of ANY still-alive
+  // platform system run onto its proxy calls. `assertRunAttributable` only
+  // binds an API-key principal to org + application, so any key in the app can
+  // borrow any live run as a billing context.
+  //
+  // The one-gate-per-unit invariant is preserved on the legitimate paths:
+  // chat returns above (its turn was gated by `checkUsageAllowed` before the
+  // loopback token was minted, and that turn IS this one call), and a run
+  // launch is gated exactly once by the preflight gate.
   const params = {
     orgId: args.orgId,
     context: "run" as const,
@@ -80,6 +103,19 @@ export async function enforceSystemProxyAdmission(args: {
     // active, so the DB count normally includes it. Keep a floor of one
     // against a status/count race.
     runningCount: Math.max(1, await getRunningRunCountForOrg({ orgId: args.orgId })),
+    // This seam only runs for a resolved SYSTEM preset (`resolved.isSystemModel`
+    // is checked above), so the call being admitted is platform-funded
+    // inference by construction — whatever credential the RUN itself declared.
+    credentialSource: "system" as const,
+    executionPlane:
+      args.usageContext.runOrigin === "platform" ? ("platform" as const) : ("remote" as const),
+    // Not determinable at this seam — the proxy holds no agent manifest — and
+    // deliberately not faked. `null` means "contribute no compute component
+    // here": this seam admits the inference of an ALREADY-RUNNING run whose
+    // compute was either quoted at its own preflight (platform plane) or is not
+    // platform-funded at all (remote plane). Passing a guessed duration, or `0`
+    // as a sentinel, would double-count that same run's compute.
+    timeoutSeconds: null,
   };
 
   const rejection = await callHook("beforeUsage", params);

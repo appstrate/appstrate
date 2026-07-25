@@ -117,10 +117,177 @@ export function toSlug(value: string, maxLen?: number): string {
   return maxLen && maxLen > 0 ? out.slice(0, maxLen) : out;
 }
 
+// ---------------------------------------------------------------------------
+// Filenames (documents / uploads)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ceiling on a stored filename. One constant so every producer and consumer of
+ * a document/upload `name` truncates at the same point.
+ */
+export const MAX_FILENAME_LEN = 255;
+
+/**
+ * Strip path separators + control characters from a caller-supplied filename.
+ *
+ * Defense in depth only: the actual path-traversal block lives in the storage
+ * layer (`makeKey()` rejects any raw bucket/path containing `..` or `\0` before
+ * touching the filesystem). This helper keeps the stored filename
+ * human-readable and prevents a `..` segment from surviving into the final
+ * on-disk path even if the storage check ever regressed.
+ *
+ * Control chars (`\x00-\x1f`, `\x7f`) are collapsed too: CR/LF in a name would
+ * otherwise survive into a stored filename and, on the download path, into a
+ * `Content-Disposition` header (a response-splitting / header-injection vector
+ * the presign path's quote-stripping alone does not cover).
+ *
+ * Lives in core (not in `apps/api`) because BOTH ends of the run-to-platform
+ * document channel must apply the exact same rule: the API sanitizes the
+ * incoming `X-Document-Name` before it becomes `documents.name`, and therefore
+ * part of the `(run_id, sha256, name)` dedup identity, while the agent
+ * container has to PREDICT that stored name to build a matching dedup key. When
+ * the rule was only reachable from the server, the two keys silently diverged
+ * on any name carrying a separator, a control char, `..`, or exceeding
+ * {@link MAX_FILENAME_LEN}, and an already-stored file was re-streamed in full.
+ */
+export function sanitizeFilename(name: string): string {
+  const cleaned = name
+    // eslint-disable-next-line no-control-regex
+    .replace(/[/\\\x00-\x1f\x7f]/g, "_")
+    .replace(/\.\.+/g, ".")
+    .trim();
+  if (!cleaned) return "file";
+  return cleaned.slice(0, MAX_FILENAME_LEN);
+}
+
+/**
+ * Ceiling on the ENCODED header value accepted by
+ * {@link decodeFilenameHeader}. A {@link MAX_FILENAME_LEN}-char name made of
+ * 3-byte code points percent-encodes to 255 * 3 * 3 = 2295 chars; 4096 leaves
+ * headroom for 4-byte code points while keeping the decode bounded.
+ */
+const MAX_ENCODED_FILENAME_HEADER_LEN = 4096;
+
+/**
+ * The exact alphabet `encodeURIComponent` can emit: the unreserved characters
+ * plus the `%` that introduces an escape. Anything else (a raw non-ASCII byte,
+ * a space, a `/`) proves the sender did NOT encode, and is rejected rather than
+ * guessed at.
+ */
+const ENCODED_FILENAME_RE = /^[A-Za-z0-9\-_.!~*'()%]+$/;
+
+/**
+ * Encode a filename for transport in an HTTP header value. HTTP field values
+ * are ISO-8859-1 by spec, so a non-ASCII name sent raw is either REFUSED by the
+ * sender (Bun's `Headers` throws on a CJK filename) or silently mojibaked (an
+ * accented name written UTF-8, read back Latin-1). Percent-encoding always
+ * lands inside {@link ENCODED_FILENAME_RE}, round-trips byte-for-byte, and
+ * leaves a plain ASCII name unchanged so logs stay readable.
+ */
+export function encodeFilenameHeader(name: string): string {
+  return encodeURIComponent(name);
+}
+
+/**
+ * Inverse of {@link encodeFilenameHeader}. Returns `null` (never a guess) for
+ * an over-long value, a value outside the encoder's alphabet (i.e. a raw,
+ * un-encoded name), or a malformed / invalid-UTF-8 escape sequence. Callers
+ * turn that `null` into a typed 400.
+ */
+export function decodeFilenameHeader(raw: string): string | null {
+  if (raw.length === 0 || raw.length > MAX_ENCODED_FILENAME_HEADER_LEN) return null;
+  if (!ENCODED_FILENAME_RE.test(raw)) return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    // Malformed escape (`%zz`, a truncated `%E4%`) or invalid UTF-8 (`%FF`).
+    return null;
+  }
+}
+
+/**
+ * Canonical MIME → filename-extension table for the text-shaped and common
+ * document formats the platform names files after. Values carry no leading dot.
+ *
+ * ONE table because the same question is asked on both sides of the run
+ * boundary: the platform names an unnamed inline `data:` input
+ * (`services/input-parser.ts`), and the runtime names a spilled MCP resource
+ * inside the container (`runner-pi/.../resource-spill.ts`). They used to hold
+ * separate lists that disagreed — the platform knew YAML but not `text/xml` or
+ * PDF, the runtime the reverse — so the same payload could land as `report.yaml`
+ * on one side and `report.bin` on the other.
+ */
+const MIME_EXTENSIONS: ReadonlyMap<string, string> = new Map([
+  ["text/plain", "txt"],
+  ["text/markdown", "md"],
+  ["text/csv", "csv"],
+  ["text/html", "html"],
+  ["text/xml", "xml"],
+  ["application/json", "json"],
+  ["application/xml", "xml"],
+  ["application/x-yaml", "yaml"],
+  ["application/yaml", "yaml"],
+  ["application/pdf", "pdf"],
+]);
+
+/**
+ * Best-effort filename extension for a MIME type, or null when nothing sensible
+ * can be derived. Tolerates a parameterized value (`text/csv; charset=utf-8`).
+ *
+ * Beyond the explicit table, the RFC 6839 structured suffixes (`+json`, `+xml`,
+ * `+yaml`) and the `text/*` family resolve to their base format — the same
+ * suffix convention `mime-policy.ts` uses to decide a MIME is text-shaped.
+ *
+ * Callers decide what "unknown" means for them: the input parser falls back to
+ * the MIME subtype (then `bin`) because a file on disk must have SOME name,
+ * while the resource spiller simply leaves the basename extensionless.
+ *
+ * The one-line parameter strip below is deliberately inlined rather than taken
+ * from `apps/api/src/services/mime-policy.ts` (`normalizeMime`): core sits BELOW
+ * the API in the dependency graph — and below the container runtime, the other
+ * consumer — so it cannot import the policy module.
+ */
+export function extensionForMime(mime: string | undefined): string | null {
+  if (!mime) return null;
+  const base = mime.split(";", 1)[0]!.trim().toLowerCase();
+  const known = MIME_EXTENSIONS.get(base);
+  if (known) return known;
+  if (base.endsWith("+json")) return "json";
+  if (base.endsWith("+xml")) return "xml";
+  if (base.endsWith("+yaml")) return "yaml";
+  if (base.startsWith("text/")) return "txt";
+  return null;
+}
+
+/**
+ * Build the `Content-Disposition: attachment` header value for a stored file.
+ *
+ * RFC 5987 / RFC 6266 two-part form, emitted for EVERY download branch:
+ *
+ *  - `filename="…"` — the ASCII fallback for legacy clients. Control chars
+ *    (incl. CR/LF), quotes, backslashes and every non-ASCII code point collapse
+ *    to `_`, so the value can neither split the response nor break the client's
+ *    quoted-string parse.
+ *  - `filename*=UTF-8''…` — the real, possibly non-ASCII name, percent-encoded.
+ *    Compliant clients prefer it, so an accented or CJK name downloads intact.
+ *
+ * Lives here — next to {@link sanitizeFilename}, which is what keeps a CR/LF out
+ * of the stored name in the first place — because the platform serves a document
+ * through TWO code paths: the proxy stream sets this header itself, and the S3
+ * backend binds it into the presigned GET as `response-content-disposition`.
+ * When each path built its own value, the presigned branch degraded a non-ASCII
+ * name to a quote-stripped, mojibake-prone `filename="…"` while the proxy branch
+ * returned it correctly. One builder, one behaviour.
+ */
+export function attachmentDisposition(name: string): string {
+  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "download";
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 /**
  * MCP tool name validation.
  *
- * Format: `{namespace_snake}__{tool_snake}` \u2014 two snake_case tokens
+ * Format: `{namespace_snake}__{tool_snake}` — two snake_case tokens
  * joined by a double underscore. Hard length ceiling 56 chars leaves
  * headroom under the 64-char OpenAI/Anthropic limit for downstream
  * host re-prefixing (e.g. some CLI hosts add their own

@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MIME policy — the ONE declared-vs-sniffed magic-byte compatibility module,
- * shared by every ingestion path so the rules cannot drift between them:
+ * MIME policy — the ONE module that normalizes a MIME string, decides whether it
+ * is text-shaped, and compares a declaration against sniffed magic bytes. Shared
+ * by every path that handles a MIME so the rules cannot drift between them:
  *
  *  - Staged-upload consume (`services/uploads.ts` → run workspace / durable doc)
+ *  - Proxy-upload sink (`routes/uploads.ts` — signed-vs-declared Content-Type)
  *  - Inline `data:` URI input (`services/input-parser.ts`)
  *  - Agent-output ingestion (`services/documents.ts` → `POST /runs/:id/documents`)
+ *  - Document preview classification (`services/document-preview.ts`)
+ *  - MCP `resources/read` inlining (`modules/mcp/tools.ts`)
+ *
+ * Leaf module: no DB, no storage, no HTTP — so the MCP tool layer and the
+ * preview primitives can share it without pulling in a service graph.
  *
  * Two enforcement *modes* consume the same policy, with a deliberate asymmetry:
  *
@@ -25,16 +32,28 @@ export function normalizeMime(mime: string): string {
 }
 
 /**
- * MIME prefixes/values where `file-type` cannot sniff a signature — these
- * formats have no magic bytes (plain text, JSON, CSV, XML source, JS, etc.).
- * For these we skip the sniff check and trust the declared mime. Callers
- * that need strict binary validation should declare a concrete binary MIME
- * (application/pdf, image/*, etc.) which `file-type` can identify.
+ * Is this MIME text-shaped — i.e. does the format carry its payload as text
+ * rather than as a binary container (plain text, JSON, CSV, XML source, YAML,
+ * JS, …)?
+ *
+ * ONE predicate, two consumers, because they ask the same question:
+ *
+ *  - **Sniff enforcement** ({@link shouldEnforceSniffedMime}): text-shaped
+ *    formats have no magic bytes, so `file-type` can never confirm them — the
+ *    strict declared-vs-sniffed check is skipped and the declared mime trusted.
+ *    Callers that need strict binary validation should declare a concrete binary
+ *    MIME (application/pdf, image/*, …) which `file-type` can identify.
+ *  - **MCP `resources/read`** (`modules/mcp/tools.ts`): text-shaped bytes are
+ *    inlined as a `text` block; anything else goes out as a base64 `blob`.
+ *
+ * The two used to carry separate lists and drifted: the MCP copy did not know
+ * about the YAML family (`application/x-yaml`, `+yaml`), so a YAML document was
+ * base64-blobbed instead of being handed to the model as readable text.
  */
-export function isUnsniffableMime(mime: string): boolean {
+export function isTextShapedMime(mime: string): boolean {
   if (mime.startsWith("text/")) return true;
   // Structured text payloads with no reliable magic signature.
-  const unsniffable = new Set([
+  const textShaped = new Set([
     "application/json",
     "application/x-ndjson",
     "application/ld+json",
@@ -49,7 +68,7 @@ export function isUnsniffableMime(mime: string): boolean {
     "application/x-www-form-urlencoded",
     "image/svg+xml", // XML-based, file-type never matches it
   ]);
-  if (unsniffable.has(mime)) return true;
+  if (textShaped.has(mime)) return true;
   // Structured-suffix convention (RFC 6839) — `+json`, `+xml`, `+yaml`.
   // Anything in these families is text-shaped and cannot be magic-sniffed.
   if (mime.endsWith("+json") || mime.endsWith("+xml") || mime.endsWith("+yaml")) return true;
@@ -141,12 +160,12 @@ export function sniffedMimeMatchesDeclared(declared: string, sniffed: string | u
 /**
  * Whether a declared MIME should be magic-byte enforced at all. Two escape
  * hatches skip the sniff check: `application/octet-stream` (the explicit "any
- * blob" marker) and text-ish MIMEs ({@link isUnsniffableMime}) which have no
+ * blob" marker) and text-ish MIMEs ({@link isTextShapedMime}) which have no
  * signature `file-type` can read. One predicate so every user-input path (upload
  * consume, inline data URI) gates the strict check identically.
  */
 export function shouldEnforceSniffedMime(declared: string): boolean {
-  return declared !== "" && declared !== "application/octet-stream" && !isUnsniffableMime(declared);
+  return declared !== "" && declared !== "application/octet-stream" && !isTextShapedMime(declared);
 }
 
 /**

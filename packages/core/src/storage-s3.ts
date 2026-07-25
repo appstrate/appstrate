@@ -21,6 +21,7 @@ import type {
 } from "./storage.ts";
 import { StorageAlreadyExistsError } from "./storage.ts";
 import { createProxyUploadDescriptor } from "./storage-fs.ts";
+import { attachmentDisposition } from "./naming.ts";
 
 /** Configuration for the S3 storage client. */
 export interface S3StorageConfig {
@@ -413,10 +414,11 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       const cmd = new GetObjectCommand({
         Bucket: config.bucket,
         Key: makeKey(bucket, path),
+        // Same builder as the proxy-stream branch (`routes/documents.ts`), so a
+        // non-ASCII name survives the presigned download instead of degrading
+        // to a quote-stripped ASCII-only `filename=`.
         ...(opts?.filename
-          ? {
-              ResponseContentDisposition: `attachment; filename="${opts.filename.replace(/"/g, "")}"`,
-            }
+          ? { ResponseContentDisposition: attachmentDisposition(opts.filename) }
           : {}),
         ...(opts?.contentType ? { ResponseContentType: opts.contentType } : {}),
       });

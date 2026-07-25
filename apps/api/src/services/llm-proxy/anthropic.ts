@@ -28,7 +28,7 @@
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
-import { extractUsageObject, numberOrUndefined, parseSseDataFrame } from "./helpers.ts";
+import { extractUsageObject, parseSseDataFrame, tokenCount } from "./helpers.ts";
 
 function readForwardedHeader(incoming: Headers, name: string): string | null {
   for (const [k, v] of incoming) {
@@ -93,11 +93,19 @@ export const anthropicMessagesAdapter: LlmProxyAdapter = {
   },
 };
 
+/**
+ * Anthropic's four wire fields map 1:1 onto the four cost buckets — unlike the
+ * OpenAI-compatible wire, `input_tokens` already EXCLUDES both cache counts, so
+ * no subtraction is needed and there is no `cache_write`-folded-into-`cache_read`
+ * dialect to reconcile. This is the same mapping pi-ai applies
+ * (`dist/providers/anthropic.js:336-339, 482-493`), so the proxy and the runner
+ * price an identical Anthropic reply identically.
+ */
 function usageFromAnthropicFields(u: Record<string, unknown>): UpstreamUsage {
-  const input = numberOrUndefined(u["input_tokens"]);
-  const output = numberOrUndefined(u["output_tokens"]);
-  const cacheRead = numberOrUndefined(u["cache_read_input_tokens"]);
-  const cacheWrite = numberOrUndefined(u["cache_creation_input_tokens"]);
+  const input = tokenCount(u["input_tokens"]);
+  const output = tokenCount(u["output_tokens"]);
+  const cacheRead = tokenCount(u["cache_read_input_tokens"]);
+  const cacheWrite = tokenCount(u["cache_creation_input_tokens"]);
   const result: UpstreamUsage = {
     inputTokens: input ?? 0,
     outputTokens: output ?? 0,

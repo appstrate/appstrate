@@ -94,7 +94,7 @@ describe("openaiCompletionsAdapter", () => {
     });
   });
 
-  it("prefers the DeepSeek-specific field when both cache sources are present", () => {
+  it("prefers the nested cached_tokens when both cache sources are present (pi-ai precedence)", () => {
     const usage = openaiCompletionsAdapter.parseJsonUsage({
       usage: {
         prompt_tokens: 100,
@@ -103,11 +103,31 @@ describe("openaiCompletionsAdapter", () => {
         prompt_tokens_details: { cached_tokens: 25 },
       },
     });
-    // 40 (DeepSeek) wins over 25 (OpenAI nested); inputTokens = 100 − 40.
+    // pi-ai reads `prompt_tokens_details.cached_tokens ?? prompt_cache_hit_tokens`
+    // — the nested field wins. inputTokens = 100 − 25.
     expect(usage).toEqual({
-      inputTokens: 60,
+      inputTokens: 75,
       outputTokens: 10,
-      cacheReadTokens: 40,
+      cacheReadTokens: 25,
+    });
+  });
+
+  it("splits cache writes out of the reported cached_tokens (OpenRouter dialect)", () => {
+    // The bucket the adapter used to ignore entirely: a provider reporting
+    // `cache_write_tokens` folds those tokens INTO `cached_tokens`, so the write
+    // count must be carved out of the cache-read bucket and out of input.
+    const usage = openaiCompletionsAdapter.parseJsonUsage({
+      usage: {
+        prompt_tokens: 1000,
+        completion_tokens: 50,
+        prompt_tokens_details: { cached_tokens: 400, cache_write_tokens: 300 },
+      },
+    });
+    expect(usage).toEqual({
+      inputTokens: 600, // 1000 − 100 (read) − 300 (write)
+      outputTokens: 50,
+      cacheReadTokens: 100, // 400 reported − 300 written
+      cacheWriteTokens: 300,
     });
   });
 
@@ -116,6 +136,15 @@ describe("openaiCompletionsAdapter", () => {
       usage: { prompt_tokens: 70, completion_tokens: 30 },
     });
     expect(usage).toEqual({ inputTokens: 70, outputTokens: 30 });
+  });
+
+  it("floors negative upstream counts at zero", () => {
+    // A negative count would produce a NEGATIVE cost_usd, which SUBTRACTS from
+    // the run's cost and from the corresponding debit. Never accepted.
+    const usage = openaiCompletionsAdapter.parseJsonUsage({
+      usage: { prompt_tokens: -100, completion_tokens: -5 },
+    });
+    expect(usage).toEqual({ inputTokens: 0, outputTokens: 0 });
   });
 
   it("returns null when usage is missing from the JSON body", () => {
@@ -245,6 +274,23 @@ describe("anthropicMessagesAdapter", () => {
       outputTokens: 42,
       cacheReadTokens: 120,
       cacheWriteTokens: 30,
+    });
+  });
+
+  it("floors negative upstream counts at zero", () => {
+    const usage = anthropicMessagesAdapter.parseJsonUsage({
+      usage: {
+        input_tokens: -10,
+        output_tokens: 5,
+        cache_read_input_tokens: -3,
+        cache_creation_input_tokens: -1,
+      },
+    });
+    expect(usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 5,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
     });
   });
 

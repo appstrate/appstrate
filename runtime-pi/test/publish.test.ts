@@ -13,10 +13,12 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtemp, mkdir, writeFile, symlink, realpath } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { verify } from "@appstrate/afps-runtime/events";
+import { sign, verify } from "@appstrate/afps-runtime/events";
 import { buildPublishDocumentDef } from "@appstrate/core/runtime-tool-defs";
+import { decodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
 import {
   createRunDocumentUploader,
   sweepOutputs,
@@ -29,16 +31,19 @@ import type { RunDocumentUploaderDeps, UploadFailureCode } from "../publish.ts";
 const SECRET = "test-run-secret-0123456789";
 
 interface Received {
-  name: string | null;
+  /** Sanitized name the server would store, i.e. `documents.name`. */
+  name: string;
+  /** The raw `X-Document-Name` wire value, before decoding. */
+  rawHeader: string;
   contentType: string | null;
   sha256: string;
   size: number;
 }
 
 interface ServerConfig {
-  /** Default HTTP status when `statusQueue` is empty (2xx → success JSON, else error). */
+  /** Default HTTP status when `statusQueue` is empty (2xx -> success JSON, else error). */
   status: number;
-  /** Per-request status sequence (consumed FIFO) — drives retry scenarios. */
+  /** Per-request status sequence (consumed FIFO) - drives retry scenarios. */
   statusQueue: number[];
   /** `Retry-After` header value to attach to a 429 response, if set. */
   retryAfter?: string;
@@ -47,6 +52,7 @@ interface ServerConfig {
 
 let server: ReturnType<typeof Bun.serve>;
 let sinkUrl: string; // .../api/runs/:id/events (uploader swaps to /documents)
+let documentsUrl: string; // the same URL with /events swapped for /documents
 let config: ServerConfig;
 
 function sha256Hex(bytes: Uint8Array): string {
@@ -70,9 +76,23 @@ beforeAll(() => {
 
       const bytes = new Uint8Array(await req.arrayBuffer());
       const sha256 = sha256Hex(bytes);
-      const name = req.headers.get("x-document-name");
+      // Mirrors `POST /api/runs/:runId/documents` in
+      // `apps/api/src/routes/runs-events.ts`: the name header is a
+      // percent-encoded UTF-8 filename, decoded STRICTLY (a malformed or
+      // un-encoded value is a typed 400, never a guess) and then sanitized into
+      // the value stored as `documents.name`.
+      const rawHeader = req.headers.get("x-document-name");
+      const decoded = rawHeader === null ? null : decodeFilenameHeader(rawHeader);
+      if (rawHeader === null || decoded === null) {
+        return Response.json(
+          { error: { code: "invalid_request", param: "X-Document-Name" } },
+          { status: 400 },
+        );
+      }
+      const name = sanitizeFilename(decoded);
       config.received.push({
         name,
+        rawHeader,
         contentType: req.headers.get("content-type"),
         sha256,
         size: bytes.byteLength,
@@ -89,7 +109,7 @@ beforeAll(() => {
       return Response.json({
         id,
         uri: `document://${id}`,
-        name: name ?? "unknown",
+        name,
         mime: req.headers.get("content-type") ?? "application/octet-stream",
         size: bytes.byteLength,
         sha256,
@@ -97,6 +117,7 @@ beforeAll(() => {
     },
   });
   sinkUrl = `http://localhost:${server.port}/api/runs/run_x/events`;
+  documentsUrl = `http://localhost:${server.port}/api/runs/run_x/documents`;
 });
 
 afterAll(() => server.stop(true));
@@ -266,6 +287,95 @@ describe("createRunDocumentUploader", () => {
     const err = await makeUploader(new Set())("f.txt").catch((e) => e);
     expect(err).toBeInstanceOf(UploadError);
     expect((err as UploadError).code).toBe("upload_failed");
+  });
+
+  it("round-trips a NON-ASCII document name to the server, byte for byte", async () => {
+    // The nominal case on a French/international product. Before the header was
+    // percent-encoded: the CJK and emoji names made `Headers` throw INSIDE the
+    // fetch try, which the retry loop read as a network fault (3 attempts,
+    // backoff, deliverable permanently lost as `upload_failed`); the accented
+    // name went out UTF-8 and came back Latin-1, so `rapport-Ã©tÃ©.md` is what
+    // got stored, listed in the UI and served in `Content-Disposition`.
+    const names = ["报告.md", "rapport-été.md", "\u{1f4ca}.png"];
+    for (const name of names) {
+      config = { status: 201, statusQueue: [], received: [] };
+      await writeFile(path.join(workspace, name), new TextEncoder().encode(`bytes-of-${name}`));
+      const keys = new Set<string>();
+
+      const doc = await makeUploader(keys)(name);
+
+      expect(doc.name).toBe(name);
+      expect(config.received).toHaveLength(1);
+      expect(config.received[0]!.name).toBe(name);
+      expect(keys.has(key(doc.sha256, name))).toBe(true);
+      // The value that actually travelled is pure ASCII and is not the raw name.
+      const raw = config.received[0]!.rawHeader;
+      expect(raw).not.toBe(name);
+      expect([...raw].every((ch) => ch.charCodeAt(0) < 128)).toBe(true);
+    }
+  });
+
+  it("leaves a plain ASCII name unchanged on the wire", async () => {
+    await writeFile(path.join(workspace, "report.html"), new TextEncoder().encode("<b>ok</b>"));
+    await makeUploader(new Set())("report.html");
+    expect(config.received[0]!.rawHeader).toBe("report.html");
+  });
+
+  it("fails immediately on a directory, without a single upload attempt", async () => {
+    // `publish_document({ path: "outputs" })` used to stream a directory,
+    // fail opaquely, and burn 3 attempts plus backoff before reporting
+    // `upload_failed`.
+    await mkdir(path.join(workspace, "outputs"), { recursive: true });
+    await expect(makeUploader(new Set())("outputs")).rejects.toThrow(/not a regular file/);
+    expect(config.received).toHaveLength(0);
+  });
+});
+
+describe("X-Document-Name decoding (server contract)", () => {
+  /** POST straight to the documents endpoint with hand-built headers. */
+  async function postWithNameHeader(headerValue: string): Promise<Response> {
+    return fetch(documentsUrl, {
+      method: "POST",
+      headers: {
+        ...sign({
+          msgId: randomUUID(),
+          timestampSec: Math.floor(Date.now() / 1000),
+          body: "",
+          secret: SECRET,
+        }),
+        "Content-Type": "text/markdown",
+        "X-Document-Name": headerValue,
+      },
+      body: "# hello",
+    });
+  }
+
+  it("rejects a RAW (un-encoded) name with a typed 400 instead of guessing", async () => {
+    // Latin-1-representable, so `Headers` happily sends it: this is exactly the
+    // value that used to be stored mojibaked. Guessing an encoding here would
+    // silently corrupt the deliverable's name, so the server refuses.
+    const res = await postWithNameHeader("rapport-été.md");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { param: string } };
+    expect(body.error.param).toBe("X-Document-Name");
+    expect(config.received).toHaveLength(0);
+  });
+
+  it("rejects a malformed percent-escape with a typed 400", async () => {
+    for (const bad of ["%E4%", "%zz.md", "truncated%"]) {
+      const res = await postWithNameHeader(bad);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { param: string } };
+      expect(body.error.param).toBe("X-Document-Name");
+    }
+    expect(config.received).toHaveLength(0);
+  });
+
+  it("accepts a properly encoded name", async () => {
+    const res = await postWithNameHeader(encodeURIComponent("rapport-été.md"));
+    expect(res.status).toBe(200);
+    expect(config.received).toHaveLength(1);
+    expect(config.received[0]!.name).toBe("rapport-été.md");
   });
 });
 
@@ -447,7 +557,8 @@ describe("sweepOutputs", () => {
           const buf = new Uint8Array(await new Response(body).arrayBuffer());
           const sha = sha256Hex(buf);
           if (sha === failSha) return new Response("boom", { status: 500 });
-          const name = (init?.headers as Record<string, string>)["X-Document-Name"];
+          const rawHeader = (init?.headers as Record<string, string>)["X-Document-Name"]!;
+          const name = sanitizeFilename(decodeFilenameHeader(rawHeader)!);
           const id = `doc_${sha.slice(0, 12)}`;
           return Response.json({
             id,
@@ -533,6 +644,90 @@ describe("sweepOutputs", () => {
     expect(config.received).toHaveLength(1);
     expect(config.received[0]!.name).toBe("data.csv");
     expect(warnings.some((w) => /hidden file/.test(w))).toBe(true);
+  });
+
+  it("keys the dedup on the SANITIZED name, matching the server index", async () => {
+    // `report..md` and `report.md` both sanitize to `report.md`, and the bytes
+    // are identical, so by the server identity `(run_id, sha256, name)` they are
+    // ONE document. Keying on the RAW basename produced two distinct container
+    // keys: the second file was streamed in full (up to the per-file cap, and
+    // spending the per-run upload rate-limit budget) only for the server's
+    // partial unique index to hand back the document it already had.
+    await seedOutput("report.md", "same-bytes");
+    await seedOutput("report..md", "same-bytes");
+    const keys = new Set<string>();
+    const events: unknown[] = [];
+
+    const result = await sweepOutputs({
+      uploader: makeUploader(keys),
+      workspace,
+      publishedKeys: keys,
+      maxFileBytes: 1024,
+      emit: (e) => {
+        events.push(e);
+      },
+    });
+
+    expect(config.received).toHaveLength(1);
+    expect(config.received[0]!.name).toBe("report.md");
+    expect(events).toHaveLength(1);
+    expect(result.published).toHaveLength(1);
+    expect(result.failed).toHaveLength(0);
+    expect(result.skipped.map((s) => s.reason)).toEqual(["already_published"]);
+    expect(keys).toEqual(
+      new Set([key(sha256Hex(new TextEncoder().encode("same-bytes")), "report.md")]),
+    );
+  });
+
+  it("publishes a NON-ASCII output file under its exact name", async () => {
+    await seedOutput("rapport-été.md", "# resultats");
+    const keys = new Set<string>();
+    const events: Array<Record<string, unknown>> = [];
+
+    const result = await sweepOutputs({
+      uploader: makeUploader(keys),
+      workspace,
+      publishedKeys: keys,
+      maxFileBytes: 1024,
+      emit: (e) => {
+        events.push(e);
+      },
+    });
+
+    expect(result.failed).toHaveLength(0);
+    expect(result.published).toHaveLength(1);
+    expect(config.received[0]!.name).toBe("rapport-été.md");
+    expect(events[0]!.name).toBe("rapport-été.md");
+  });
+
+  it("keeps a document published when emitting its event fails", async () => {
+    // The upload succeeded: the bytes are stored, hashed and counted against
+    // the org quota server-side. When the emit sat inside the upload's try, a
+    // failing sink rolled the dedup key back and recorded the file as `failed`,
+    // i.e. a false negative in the artifacts summary plus a re-upload of a
+    // document that is already durable.
+    await seedOutput("deliverable.md", "# done");
+    const keys = new Set<string>();
+    const warnings: string[] = [];
+
+    const result = await sweepOutputs({
+      uploader: makeUploader(keys),
+      workspace,
+      publishedKeys: keys,
+      maxFileBytes: 1024,
+      emit: () => {
+        throw new Error("sink unreachable");
+      },
+      logWarn: (m) => warnings.push(m),
+    });
+
+    expect(config.received).toHaveLength(1);
+    expect(result.published).toHaveLength(1);
+    expect(result.failed).toHaveLength(0);
+    expect(summarizeArtifacts(result).status).toBe("complete");
+    // The dedup key is RETAINED, so a later pass will not re-upload it.
+    expect(keys.size).toBe(1);
+    expect(warnings.some((w) => /could not emit/.test(w))).toBe(true);
   });
 });
 
