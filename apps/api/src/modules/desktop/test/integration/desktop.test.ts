@@ -399,7 +399,7 @@ describe("Desktop module — POST /internal/desktop-command", () => {
       params: { url: "https://somesite.example/b" },
     });
     expect(res.status).toBe(409);
-    expect((await res.json()).code).toBe("desktop_in_use");
+    expect(((await res.json()) as { code?: string }).code).toBe("desktop_in_use");
   });
 
   it("refuses to drive a tab owned by another run", async () => {
@@ -431,7 +431,7 @@ describe("Desktop module — POST /internal/desktop-command", () => {
     }
     const res = await post({ method: "browser.tabs.open" });
     expect(res.status).toBe(409);
-    expect((await res.json()).code).toBe("desktop_tab_quota");
+    expect(((await res.json()) as { code?: string }).code).toBe("desktop_tab_quota");
   });
 
   it("returns 503 when the owner has no desktop connected", async () => {

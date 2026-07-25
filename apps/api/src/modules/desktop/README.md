@@ -28,7 +28,7 @@ sidecar does not advertise `desktop_browser`, `desktop_download` or
 
 | Route                                | Auth           | Purpose                                          |
 | ------------------------------------ | -------------- | ------------------------------------------------ |
-| `GET /api/desktop/bridge?protocol=1` | session cookie | versioned WebSocket used by the native client    |
+| `GET /api/desktop/bridge?protocol=2` | session cookie | versioned WebSocket used by the native client    |
 | `GET /api/desktop/me/status`         | user auth      | report whether the caller's desktop is connected |
 | `POST /api/desktop/me/command`       | user auth      | direct smoke-test primitives only                |
 | `POST /internal/desktop-command`     | run token      | capability-gated agent path                      |
@@ -39,21 +39,35 @@ as credential capture, download status and batch execution.
 
 ## Security invariants
 
-- The webapp and agent browser use different persistent Electron partitions.
-  The agent browser cannot inherit the Better Auth session.
+- The webapp and the browser tabs use different Electron partitions. No tab
+  can inherit the Better Auth session.
+- Each agent gets its OWN browser profile by default (`desktop_browser.session`:
+  `agent`, or `isolated` per run, or `user` to opt into the human's profile).
+  A session one agent opens is therefore unreadable by another, whether they
+  run at the same time or one after the other.
 - Remote CDP is disabled unless a source build explicitly opts in.
 - Electron permission requests default to denied.
 - Remote Appstrate instances require HTTPS. Loopback development may use HTTP.
 - The WebSocket validates the origin, protocol version and frame size.
 - Pending commands are tied to the authenticated socket and fail immediately
   on disconnect.
-- One process-local lease lets only one run control a user's browser. Terminal
-  run events clear the lease, policy cache, secrets, ephemeral credentials and
-  downloads. A five-minute idle expiry is the crash fallback.
-- Every agent command carries its declared URI boundary. The desktop checks
-  the current page or target and blocks top-level navigation outside it.
-- Credential substitution is restricted to `browser.fill`. A run cannot mix
-  substituted credentials with arbitrary `browser.evaluate`, in either order.
+- Leases are per TAB: a run drives only the tabs it opened (409 otherwise),
+  the manual route drives only the user's own, and neither side can adopt the
+  other's. Terminal run events close the run's tabs and clear its leases,
+  policy cache, secrets, ephemeral credentials and downloads. A five-minute
+  idle expiry is the crash fallback. Quotas: 3 tabs per run, 8 per user.
+- Two runs that genuinely share a profile (same agent, or `session: "user"`)
+  are serialized per origin — they would otherwise read each other's cookies,
+  `localStorage`, `BroadcastChannel` and `SharedWorker` on that site.
+- A user takeover pauses the tab (409 until handed back); closing it gives 410.
+- Every tab carries its own URI boundary, frozen when it was opened. The
+  desktop checks the current page or target and blocks top-level navigation
+  outside it. A popup inherits its opener's owner and boundary.
+- A download is only ever matched inside the tab that ordered it.
+- Credential substitution is restricted to `browser.fill`. Substitution and
+  arbitrary `browser.evaluate` cannot coexist in one PARTITION, in either
+  order, whichever run asks — so two runs sharing a profile cannot split the
+  pair between them.
 - `browser.capture_credential` is declarative. It accepts cookie,
   `localStorage` or `sessionStorage` selectors, validates the exact auth and
   credential schema, applies field and byte limits, and returns field names

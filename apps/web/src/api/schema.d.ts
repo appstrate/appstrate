@@ -4971,10 +4971,10 @@ export interface components {
         /** @description Agent-path variant of DesktopCommandRequest: adds server-side credential substitution. With `integration_id` + `substitute_params`, `{{field}}` placeholders inside `params` strings are replaced by the run's connected credential fields for that integration before dispatch — the values never appear in the agent's context, and every reply for the run is scrubbed of them afterwards. */
         DesktopAgentCommandRequest: {
             /**
-             * @description Agent browser primitive. `browser.download` {url?|selector?, filename?, max_bytes?} downloads a direct URL or atomically clicks a page control and returns {download_id, state}; `browser.download_status` {download_id} reports started/downloading/uploaded/failed with pct — both are answered by the platform, the bytes travel desktop → storage over HTTPS, never over the control WebSocket. `browser.selectOption` {selector, value?|label?} sets a native <select> (custom div/listbox dropdowns are DOM — drive those with browser.click instead). `browser.batch` {steps: [{method, params}, …]} runs up to 40 desktop-executable steps in one round-trip with per-step credential substitution, stopping at the first failure.
+             * @description Agent browser primitive. `browser.tabs.open` {} opens a tab in the agent's own browser profile and returns {tab_id}; `browser.tabs.close` {tab_id} and `browser.tabs.list` {} manage them. Commands without `tab_id` act on the run's implicit tab, opened on first use — an agent that never mentions tabs behaves exactly as before. `browser.download` {url?|selector?, filename?, max_bytes?} downloads a direct URL or atomically clicks a page control and returns {download_id, state}; `browser.download_status` {download_id} reports started/downloading/uploaded/failed with pct — both are answered by the platform, the bytes travel desktop → storage over HTTPS, never over the control WebSocket. `browser.selectOption` {selector, value?|label?} sets a native <select> (custom div/listbox dropdowns are DOM — drive those with browser.click instead). `browser.batch` {steps: [{method, params}, …]} runs up to 40 desktop-executable steps in one round-trip with per-step credential substitution, stopping at the first failure.
              * @enum {string}
              */
-            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.selectOption" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status" | "browser.capture_credential" | "browser.batch";
+            method: "browser.navigate" | "browser.click" | "browser.fill" | "browser.selectOption" | "browser.evaluate" | "browser.screenshot" | "browser.waitForSelector" | "browser.download" | "browser.download_status" | "browser.capture_credential" | "browser.batch" | "browser.tabs.open" | "browser.tabs.close" | "browser.tabs.list";
             /** @description Method-specific arguments. Strings may contain `{{field}}` placeholders when substitution is enabled; unknown placeholders are left intact. */
             params?: Record<string, never>;
             /** @description Dispatch timeout in ms (1s-120s, default 30s). 504 when it elapses. */
@@ -4983,6 +4983,8 @@ export interface components {
             integration_id?: string;
             /** @description Enable `{{field}}` substitution from `integration_id`'s credentials. */
             substitute_params?: boolean;
+            /** @description Tab to drive, from `browser.tabs.open`. Omitted, the command uses the run's implicit tab. 409 when another run owns it or the user took it over, 410 once closed. */
+            tab_id?: string;
         };
         /** @description A browser primitive to execute on the user's local Appstrate Desktop client. */
         DesktopCommandRequest: {
