@@ -67,7 +67,8 @@ import {
 // by uploads AND agent-output ingestion). Do not re-implement here.
 export { normalizeMime, isTextShapedMime, sniffedMimeMatchesDeclared };
 
-const UPLOAD_BUCKET = "uploads";
+/** Bucket holding staged upload objects. Exported for storage reconciliation. */
+export const UPLOAD_BUCKET = "uploads";
 const DEFAULT_EXPIRY_SECONDS = 900; // 15 min
 
 /**

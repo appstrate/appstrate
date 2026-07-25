@@ -16,8 +16,14 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
+import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 
-const BUCKET = "agent-packages";
+// Bucket + key layout live in a LEAF module so the deletion outbox and the
+// orphan scanner can derive the exact same keys without importing this file's
+// AFPS bundle/catalog graph. Re-exported here for existing call sites.
+const BUCKET = AGENT_PACKAGES_BUCKET;
+export { AGENT_PACKAGES_BUCKET, versionZipKey };
+
 const ZIP_COMPRESSION_LEVEL = 6;
 
 /**
@@ -43,7 +49,7 @@ export async function downloadVersionZip(
   version: string,
   expectedIntegrity?: string | null,
 ): Promise<Buffer | null> {
-  const path = `${packageId}/${version}.afps`;
+  const path = versionZipKey(packageId, version);
   const data = await storage.downloadFile(BUCKET, path);
   if (!data) return null;
 
@@ -77,9 +83,20 @@ export async function downloadVersionZip(
   return Buffer.from(data);
 }
 
-/** Delete a versioned package ZIP from Storage. Swallows errors (best-effort cleanup). */
+/**
+ * Delete a versioned package ZIP from Storage. Swallows errors (best-effort).
+ *
+ * The row-delete path no longer uses this — `deletePackageVersion` enqueues the
+ * purge on the transactional outbox inside its own transaction. What remains is
+ * ROLLBACK cleanup in `createVersionAndUpload`: the version row was rolled back,
+ * so there is no committed transaction to hang an outbox row off, and inventing
+ * a standalone insert would not buy the atomicity the outbox exists for. If
+ * this best-effort delete fails, the bytes sit unreferenced until the
+ * reconciliation scanner (`scripts/storage-orphans.ts`, which now covers
+ * `agent-packages`) finds them.
+ */
 export async function deleteVersionZip(packageId: string, version: string): Promise<void> {
-  const path = `${packageId}/${version}.afps`;
+  const path = versionZipKey(packageId, version);
   try {
     await storage.deleteFile(BUCKET, path);
   } catch (error) {
@@ -97,7 +114,7 @@ export async function uploadPackageZip(
   version: string,
   zipBuffer: Buffer,
 ): Promise<void> {
-  const path = `${packageId}/${version}.afps`;
+  const path = versionZipKey(packageId, version);
   try {
     await storage.uploadFile(BUCKET, path, zipBuffer);
   } catch (error) {

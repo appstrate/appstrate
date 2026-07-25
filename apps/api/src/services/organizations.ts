@@ -24,6 +24,7 @@ import { orgRunConcurrencyLockKey } from "./state/runs.ts";
 import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
+import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -436,9 +437,9 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // Enumerate every storage object this org owns BEFORE the FK cascade drops
     // the rows, and enqueue its physical deletion into the transactional outbox
     // (same transaction). Without this the cascade would silently orphan the
-    // org's documents / uploads / run-workspace objects in S3/FS. The worker
-    // expands each run manifest into its document keys and deletes the manifest
-    // last, so this transaction does no storage I/O and cleanup remains
+    // org's documents / uploads / run-workspace / package objects in S3/FS. The
+    // worker expands each run manifest into its document keys and deletes the
+    // manifest last, so this transaction does no storage I/O and cleanup remains
     // replayable. (Queries are sequential — a Drizzle tx multiplexes one
     // connection, so concurrent queries on `tx` are unsafe.)
     const docRows = await tx
@@ -458,6 +459,12 @@ export async function deleteOrganization(orgId: string): Promise<void> {
         storageJobs.push({ bucket, storageKey: rest.join("/"), reason: "org_deleted" });
     }
     for (const r of runRows) storageJobs.push(...runWorkspaceDeletionJobs(r.id, "org_deleted"));
+    // `agent-packages` (published version ZIPs) + `library-packages` (draft
+    // item ZIPs) — enumerated from the rows `tx.delete(packages)` below is
+    // about to drop. Ownership comes from `packages.org_id`, which is why this
+    // cannot purge another org's or the system catalog's artifacts even though
+    // `agent-packages` keys are not org-prefixed (see the module doc).
+    storageJobs.push(...(await orgPackageStorageDeletionJobs(tx, orgId, "org_deleted")));
     await enqueueStorageDeletion(tx, storageJobs);
 
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)
