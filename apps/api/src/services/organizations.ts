@@ -334,13 +334,79 @@ export async function updateMemberRole(
   }
 }
 
+/**
+ * Run statuses that make an organization undeletable. Deleting the org
+ * cascade-drops `runs`/`run_logs`, so removing one while a run is live would
+ * rip the rows out from under an executing container.
+ */
+const IN_PROGRESS_RUN_STATUSES = ["pending", "running"] as const;
+
+/**
+ * Single definition of "this org has live runs", shared by the pre-flight
+ * assertion below and the in-transaction backstop in `deleteOrganization`.
+ * Both must agree exactly: if the pre-flight used a narrower status set the
+ * route would fire `onOrgDelete` for an org the transaction then refuses to
+ * delete — the precise failure the pre-flight exists to prevent.
+ *
+ * `handle` accepts the base client (pre-flight, own snapshot) or an open
+ * transaction (backstop, sees the transaction's locks).
+ */
+async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<number> {
+  const [row] = await handle
+    .select({ inProgressCount: count() })
+    .from(runs)
+    .where(
+      scopedWhere(runs, { orgId, extra: [inArray(runs.status, [...IN_PROGRESS_RUN_STATUSES])] }),
+    );
+  return row?.inProgressCount ?? 0;
+}
+
+/**
+ * Pre-flight: is this organization deletable at all?
+ *
+ * MUST be awaited by callers BEFORE anything observes the deletion —
+ * concretely, before the route emits `onOrgDelete`. The ordering is
+ * load-bearing and irreversible if inverted: module handlers on that event
+ * perform destructive, non-transactional work outside our database (the cloud
+ * module drains billing then CANCELS the Stripe subscription and drops the
+ * billing account; the mcp module drops the org from the RFC 8707 audience
+ * allowlist). If `deleteOrganization` then throws — which it does, from inside
+ * its transaction, when runs are in progress — the org row survives but comes
+ * back stripped of everything the handlers tore down, and no repair path can
+ * rebuild it (the debt is summed over rows that were just deleted, and a
+ * consumed free-tier claim does not come back). So: refuse first, notify
+ * second, delete third.
+ *
+ * This is a precondition, NOT the race guard. It reads outside any
+ * transaction, so a run admitted between here and the delete slips through;
+ * the in-transaction check in `deleteOrganization` (which holds the per-org
+ * run-admission advisory lock) is what closes that window. Keep both.
+ *
+ * Throws the same `Error` messages the transaction would, so the route maps
+ * either failure onto the same `400 delete_failed` response.
+ */
+export async function assertOrgDeletable(orgId: string): Promise<void> {
+  const [org] = await db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  if (!org) throw new Error("Failed to delete organization: not found");
+
+  if ((await countInProgressRuns(db, orgId)) > 0) {
+    throw new Error("Cannot delete organization: runs are in progress");
+  }
+}
+
 export async function deleteOrganization(orgId: string): Promise<void> {
   // Delete in FK-safe order within a transaction. The in-progress-runs check
   // lives INSIDE the transaction (was previously a separate read before it):
   // outside, a run could transition pending/running in the window between the
   // check and the delete (TOCTOU), so we'd cascade-delete a live run's rows.
   // Doing the count in the same transaction as the deletes — which take row
-  // locks on the runs being removed — closes that window.
+  // locks on the runs being removed — closes that window. `assertOrgDeletable`
+  // is the caller-facing precondition, not a replacement for this check: it
+  // reads without the lock, so only the count below is race-free.
   await db.transaction(async (tx) => {
     // Serialize against concurrent run admission. `createRun` acquires this
     // same per-org advisory lock before its count + INSERT. Taking it here
@@ -363,12 +429,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
       .for("update");
     if (!lockedOrg) throw new Error("Failed to delete organization: not found");
 
-    const runningResult = await tx
-      .select({ runningCount: count() })
-      .from(runs)
-      .where(scopedWhere(runs, { orgId, extra: [inArray(runs.status, ["pending", "running"])] }));
-
-    if ((runningResult[0]?.runningCount ?? 0) > 0) {
+    if ((await countInProgressRuns(tx, orgId)) > 0) {
       throw new Error("Cannot delete organization: runs are in progress");
     }
 
