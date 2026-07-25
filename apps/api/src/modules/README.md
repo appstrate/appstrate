@@ -246,6 +246,8 @@ The hook is dispatched for **every** run and **every** chat turn, not for a subs
 
 An operation the organization supplies entirely by itself — `credentialSource !== "system"` **and** `executionPlane !== "platform"`, i.e. a remote BYOK run — should be short-circuited with `null` before the handler reads any of its own state (no DB round-trip, no account lookup): there is nothing for the platform to account for.
 
+Three seams dispatch it: run preflight (once per run launch), the chat surface (once per turn, subscription turns included), and `/api/llm-proxy` (once per raw proxy call that carries a validated run context — BYOK calls included, carrying `credentialSource: "org"`). The one call that dispatches nothing is a raw BYOK proxy call with **no** run or chat context: `BeforeUsageParams` has no context-less shape to report, and requiring a context there would break headless BYOK API keys. A platform-supplied call with no context is refused outright (400 `usage_context_required`).
+
 ## Auth strategies
 
 Modules can contribute custom authentication strategies that run in the request pipeline **before** core auth (Bearer ask\_ API key → session cookie). This is how OIDC/JWT, mTLS, SAML, webhook-HMAC, and similar auth mechanisms plug in without touching `apps/api/src/index.ts`.

@@ -1364,11 +1364,11 @@ export interface PlatformServices {
   cleanupSessionDocuments(chatSessionId: string, tx?: unknown): Promise<void>;
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
-   * hook. The chat module calls this for its non-subscription (built-in /
-   * API-key) branch before starting a turn, and the platform dispatches the
-   * hook for EVERY such turn. Returns a {@link UsageRejection} to block the
-   * turn (the module surfaces it as an RFC 9457 problem response with the
-   * hook's status — 402 flows through), or null to allow.
+   * hook. The chat module calls this before starting ANY turn, and the platform
+   * dispatches the hook for every one of them. Returns a
+   * {@link UsageRejection} to block the turn (the module surfaces it as an RFC
+   * 9457 problem response with the hook's status — 402 flows through), or null
+   * to allow.
    *
    * The platform still resolves whether the chosen model is system-provided or
    * organization-owned — keeping that resolution server-side is what keeps the
@@ -1385,13 +1385,20 @@ export interface PlatformServices {
    * used to assume on the module's behalf, now decided by the module that owns
    * the policy.
    *
-   * Subscription turns never call this (they spend the user's own credential,
-   * `credentialSource` `org`).
+   * `subscription` is the one fact the caller owns and the platform cannot
+   * derive: the turn runs on a provider subscription the organization
+   * authorized over OAuth (claude-code, codex), driven in-process rather than
+   * through the inference gateway. Such a turn is `credentialSource: "org"`
+   * whatever its preset resolves to, and it is dispatched like any other — it
+   * still occupies the platform's own process. Splitting the responsibility
+   * this way keeps the seam DRY: the caller reports what it knows, the platform
+   * derives the rest from the model registry.
    */
   checkUsageAllowed(args: {
     orgId: string;
     presetId: string;
     sessionId: string | null;
+    subscription: boolean;
   }): Promise<UsageRejection | null>;
   /**
    * Set (or clear) an organization's per-org document storage limit — the

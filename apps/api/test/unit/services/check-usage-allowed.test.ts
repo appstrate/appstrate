@@ -2,10 +2,10 @@
 
 /**
  * `checkUsageAllowed` — the chat-surface entry into the unified `beforeUsage`
- * admission hook (`services/chat-subscription.ts`). The chat module calls it for
- * its non-subscription (built-in / API-key) branch before starting a turn. The
- * gate resolves system-provided vs. org-owned SERVER-SIDE so the chat module
- * stays dumb, but that resolution is REPORTED, not used to pre-filter:
+ * admission hook (`services/chat-subscription.ts`). The chat module calls it
+ * before starting ANY turn — built-in, API-key, or oauth-subscription. The gate
+ * resolves system-provided vs. org-owned SERVER-SIDE so the chat module stays
+ * dumb, but that resolution is REPORTED, not used to pre-filter:
  *
  *   - every turn dispatches the hook, carrying `credentialSource`
  *     (`"system"` | `"org"`) and `executionPlane: "platform"` (a chat turn
@@ -14,7 +14,10 @@
  *     declares it free, the module quotes it (typically at zero) and decides;
  *   - no metering module → null (OSS allows all);
  *   - a metering module's rejection flows straight back (a 402 the route turns
- *     into problem+json).
+ *     into problem+json);
+ *   - a subscription turn (`subscription: true`, the one fact the chat module
+ *     owns) is `"org"` whatever its preset resolves to, and is dispatched like
+ *     any other — it runs inline in the platform's own process.
  *
  * These are the exact facts a metering module (cloud) quotes against, so a
  * regression that stopped reporting one — or resurrected the old "skip the hook
@@ -96,6 +99,7 @@ describe("checkUsageAllowed", () => {
       orgId: "org_1",
       presetId: "org-preset-123",
       sessionId: "chs_1",
+      subscription: false,
     });
 
     // The platform no longer short-circuits an org-credential turn: it reports
@@ -127,6 +131,7 @@ describe("checkUsageAllowed", () => {
       orgId: "org_1",
       presetId: "org-preset-123",
       sessionId: "chs_1",
+      subscription: false,
     });
 
     expect(result).toEqual({ code: "over_cap", message: "blocked", status: 402 });
@@ -139,6 +144,7 @@ describe("checkUsageAllowed", () => {
       orgId: "org_1",
       presetId: SYSTEM_PRESET,
       sessionId: "chs_1",
+      subscription: false,
     });
     expect(result).toBeNull();
   });
@@ -154,6 +160,7 @@ describe("checkUsageAllowed", () => {
       orgId: "org_1",
       presetId: SYSTEM_PRESET,
       sessionId: "chs_42",
+      subscription: false,
     });
 
     expect(result).toEqual({ code: "over_cap", message: "Soft cap reached", status: 402 });
@@ -177,6 +184,7 @@ describe("checkUsageAllowed", () => {
       orgId: "org_1",
       presetId: SYSTEM_PRESET,
       sessionId: null,
+      subscription: false,
     });
 
     expect(result).toBeNull();
@@ -184,5 +192,54 @@ describe("checkUsageAllowed", () => {
     // An ephemeral (unpersisted) turn dispatches a null session id.
     expect(calls[0]!.context).toBe("chat");
     expect((calls[0] as { sessionId: string | null }).sessionId).toBeNull();
+  });
+
+  it("reports a subscription turn as credentialSource 'org' even on a system-registered preset", async () => {
+    // A subscription turn spends the org's OWN OAuth provider subscription, so
+    // the credential source is `org` whatever the preset resolves to — the
+    // registry lookup must not win over the fact the caller reported. Pinned on
+    // the SYSTEM preset precisely because that is where the two disagree.
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+
+    const result = await checkUsageAllowed({
+      orgId: "org_1",
+      presetId: SYSTEM_PRESET,
+      sessionId: "chs_sub",
+      subscription: true,
+    });
+
+    expect(result).toBeNull();
+    expect(calls).toEqual([
+      {
+        orgId: "org_1",
+        context: "chat",
+        sessionId: "chs_sub",
+        credentialSource: "org",
+        // The in-process Pi engine still runs inside the platform's process.
+        executionPlane: "platform",
+      },
+    ]);
+  });
+
+  it("lets a metering module reject a subscription turn (platform compute is platform-funded)", async () => {
+    // The reversal that closes the escape: a subscription turn used to skip
+    // admission entirely, so a suspended organization could keep driving the
+    // platform's own process indefinitely.
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances(
+      [gateModule({ code: "subscription_suspended", message: "Suspended", status: 402 }, calls)],
+      fakeInitCtx(),
+    );
+
+    const result = await checkUsageAllowed({
+      orgId: "org_1",
+      presetId: "org-preset-123",
+      sessionId: "chs_sub",
+      subscription: true,
+    });
+
+    expect(result).toEqual({ code: "subscription_suspended", message: "Suspended", status: 402 });
+    expect(calls).toHaveLength(1);
   });
 });

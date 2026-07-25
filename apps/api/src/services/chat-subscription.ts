@@ -190,8 +190,8 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
 /**
  * Chat admission gate — the chat-surface entry into the `beforeUsage` hook.
  *
- * The chat module calls this for its non-subscription (built-in / API-key)
- * branch before starting a turn. The gate resolves system-provided vs. org-owned
+ * The chat module calls this before starting ANY turn — built-in, API-key, or
+ * oauth-subscription. The gate resolves system-provided vs. org-owned
  * SERVER-SIDE (`isSystemModel` on the chosen preset) so the chat module stays
  * dumb — it has no model-registry access — but that resolution is REPORTED as
  * the `credentialSource` fact, not used to pre-filter:
@@ -205,6 +205,15 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  *     even when it funds no inference. A module that meters only
  *     platform-supplied inference quotes that turn at zero and admits it — same
  *     outcome as the old early return, but decided by the module.
+ *   - a SUBSCRIPTION turn (`args.subscription`) is `"org"` whatever its preset
+ *     resolves to: it spends the organization's own OAuth provider
+ *     subscription. That is the single fact the chat module reports here
+ *     (it owns the engine choice, the platform owns the registry), and it is
+ *     what stops the derivation below from mislabelling such a turn — a
+ *     subscription preset that happened to be registered system-side would
+ *     otherwise read as `"system"`. The turn dispatches like any other: it runs
+ *     inline in the platform's process, so the platform funds its compute and a
+ *     module gating on subscription status must be able to refuse it.
  *
  * Returns null when no module provides the hook (OSS mode allows everything).
  */
@@ -212,6 +221,7 @@ export async function checkUsageAllowed(args: {
   orgId: string;
   presetId: string;
   sessionId: string | null;
+  subscription: boolean;
 }): Promise<UsageRejection | null> {
   if (!hasHook("beforeUsage")) return null;
   const rejection = await callHook("beforeUsage", {
@@ -221,9 +231,9 @@ export async function checkUsageAllowed(args: {
     // A chat turn resolves its model on the platform before admission, so the
     // credential source is always determinable here (never `null`, unlike a
     // remote-origin run).
-    credentialSource: isSystemModel(args.presetId) ? "system" : "org",
+    credentialSource: args.subscription || !isSystemModel(args.presetId) ? "org" : "system",
     // A turn executes in the platform's own process — never on a
-    // caller-supplied host.
+    // caller-supplied host. True of the in-process subscription engine too.
     executionPlane: "platform",
   });
   return rejection ?? null;

@@ -76,18 +76,27 @@ export interface ChatPlatformDeps {
    */
   cleanupSessionDocuments(chatSessionId: string, tx?: ChatDbTx): Promise<void>;
   /**
-   * Admission gate for a non-subscription (built-in / API-key) turn. The
+   * Admission gate for a turn — EVERY turn, whichever engine serves it. The
    * platform resolves whether the chosen preset is system-provided and reports
-   * it as a fact to the `beforeUsage` hook, which it dispatches for every such
-   * turn — a metering module decides what an org-credential turn costs, the
-   * platform no longer decides it is free. Returns a {@link UsageRejection} to
-   * block the turn (surfaced as an RFC 9457 problem response with the hook's
-   * status — 402 flows through), or null to allow.
+   * it as a fact to the `beforeUsage` hook, which it dispatches unconditionally
+   * — a metering module decides what an org-credential turn costs, the platform
+   * no longer decides it is free. Returns a {@link UsageRejection} to block the
+   * turn (surfaced as an RFC 9457 problem response with the hook's status — 402
+   * flows through), or null to allow.
+   *
+   * `subscription` is the one fact THIS module owns: the turn is served by the
+   * in-process Pi engine on the org's own OAuth provider subscription, which
+   * makes it `credentialSource: "org"` whatever the preset resolves to. The
+   * module reports it rather than deriving the credential source itself — it
+   * has no model-registry access by design, so the platform keeps deriving the
+   * rest. A subscription turn is NOT exempt: it runs inside the platform's own
+   * process, so the platform funds its compute.
    */
   checkUsageAllowed(args: {
     orgId: string;
     presetId: string;
     sessionId: string | null;
+    subscription: boolean;
   }): Promise<UsageRejection | null>;
 }
 

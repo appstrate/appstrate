@@ -164,24 +164,37 @@ opts?)` returns a browser-usable GET URL (S3 presign with
   the set of dispatched operations GROWS, this is breaking behaviourally even
   for a module whose code still type-checks: deploy modules before the platform.
 
-- **`PlatformServices.checkUsageAllowed`** — same signature, no pre-filter. The
-  platform still resolves system-provided vs. organization-owned server-side
-  (that is what keeps the chat module dumb — it has no model-registry access),
-  but it now REPORTS the resolution as `credentialSource` instead of using it to
-  decide whether to dispatch. A turn on the organization's own credential is
-  dispatched all the same, because a chat turn always executes in the platform's
-  own process. Subscription turns still never call this.
+- **`PlatformServices.checkUsageAllowed`** — no pre-filter, and one new required
+  argument. The platform still resolves system-provided vs. organization-owned
+  server-side (that is what keeps the chat module dumb — it has no
+  model-registry access), but it now REPORTS the resolution as
+  `credentialSource` instead of using it to decide whether to dispatch. A turn
+  on the organization's own credential is dispatched all the same, because a
+  chat turn always executes in the platform's own process.
+  - **`subscription: boolean`** (BREAKING for callers) — the caller reports
+    whether the turn runs on an OAuth provider subscription the organization
+    authorized (claude-code, codex), driven by the in-process engine rather than
+    the inference gateway. Such a turn is `credentialSource: "org"` whatever its
+    preset resolves to. Subscription turns are no longer exempt: they DO call
+    this now, because the platform funds the compute of a turn running inside
+    its own process, and a module gating on subscription status must be able to
+    refuse one.
 
-- **The system-model proxy seam gates every run-context call.** `/api/llm-proxy`
-  no longer short-circuits admission for a platform-origin run that declared a
-  system credential. A preflight quote is issued ONCE per run launch while the
-  number of proxy calls attachable to that run id is unbounded, run attribution
-  binds an API-key principal only to org + application (so any key of the
-  application can stamp a live run's id onto its own calls), and once platform
-  compute is billed the organization's balance moves DURING the run. A module
-  therefore sees one dispatch per proxy call, carrying
-  `credentialSource: "system"`, the referenced run's `executionPlane`, and
-  `timeoutSeconds: null`.
+- **The proxy seam gates every call, BYOK included.** `/api/llm-proxy` no longer
+  short-circuits admission for a platform-origin run that declared a system
+  credential, nor for a call that resolved to an organization-owned preset. A
+  preflight quote is issued ONCE per run launch while the number of proxy calls
+  attachable to that run id is unbounded, run attribution binds an API-key
+  principal only to org + application (so any key of the application can stamp a
+  live run's id onto its own calls), and once platform compute is billed the
+  organization's balance moves DURING the run. A module therefore sees one
+  dispatch per proxy call, carrying the resolved preset's `credentialSource`
+  (`"system"` or `"org"`), the referenced run's `executionPlane`, and
+  `timeoutSeconds: null`. Unchanged: the `usage_context_required` 400 applies
+  only to platform-supplied calls, and a contextless BYOK call still succeeds —
+  it dispatches nothing, since `BeforeUsageParams` cannot be built without a run
+  or chat context. That gap is deliberate; closing it needs a context-less usage
+  surface, not a filter.
 
 - **`ModuleHooks` is split by dispatch mode.** `ModuleHooks` is now
   `FirstMatchHooks & BroadcastHooks`. Modules are unaffected (the declaration

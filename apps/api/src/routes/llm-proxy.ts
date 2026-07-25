@@ -153,8 +153,8 @@ export function createLlmProxyRouter() {
  * Because check 3 leaves an API key free to reference any live run of its own
  * application, this validation alone does NOT bound platform-paid spend — it
  * bounds cost *attribution*. Admission is enforced separately, per call, by
- * `enforceSystemProxyAdmission`, which gates every run-context system call
- * regardless of the referenced run's origin.
+ * `enforceSystemProxyAdmission`, which gates every run-context call —
+ * platform-supplied or BYOK — regardless of the referenced run's origin.
  */
 async function assertRunAttributable(
   c: Context<AppEnv>,
@@ -244,8 +244,7 @@ async function handleProxy(
       incomingHeaders: c.req.raw.headers,
       rawBody,
       maxRequestBytes: limits.max_request_bytes,
-      beforeSystemUpstream: (resolved) =>
-        enforceSystemProxyAdmission({ orgId, resolved, usageContext }),
+      beforeUpstream: (resolved) => enforceSystemProxyAdmission({ orgId, resolved, usageContext }),
     });
 
     const durationMs = Date.now() - started;
