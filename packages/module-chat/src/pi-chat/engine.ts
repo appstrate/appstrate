@@ -142,6 +142,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
             deadlineAt: turnDeadlineAt,
             stepCount: () => mapper.stepCount(),
             chatSessionId: input.chatSessionId,
+            orgId: input.orgId,
           },
         });
 

@@ -33,6 +33,7 @@ import {
   type RunAndWaitStep,
 } from "@appstrate/core/run-and-wait-client";
 import { logger } from "./logger.ts";
+import { stampChatSessionOnRun } from "./run-reconcile.ts";
 
 /** The turn's time budget, as seen by a tool call inside it. */
 export interface TurnBudgetContext {
@@ -40,8 +41,15 @@ export interface TurnBudgetContext {
   turnDeadlineAt: number;
   /** Which engine hosts the turn — trace attribution only. */
   engine: ChatTurnEngine;
-  /** Chat session the turn belongs to — trace attribution only. */
+  /**
+   * Chat session the turn belongs to. Trace attribution AND the orphan-run link
+   * (C3): every run launched here is stamped with it so a run that finishes after
+   * its turn can still announce its deliverables in the right conversation. Null
+   * on an ephemeral (unpersisted) turn — nothing to link to.
+   */
   chatSessionId?: string | null;
+  /** Owning organization — scopes the run link write. Required with `chatSessionId`. */
+  orgId?: string;
   /** Clock seam (tests inject a fixed now). */
   now?: () => number;
 }
@@ -110,15 +118,23 @@ export function decideRunAndWaitBudget(
 
 /**
  * {@link runAndWaitStepsWithDocuments}, bounded by the hosting turn's deadline.
- * Both engines call THIS — the gate and the `maxMs` derivation exist once.
+ * Both engines call THIS — the gate, the `maxMs` derivation and the
+ * launching-session link exist once.
  *
- * `steps` is injected (production default) so the budget can be asserted in a
- * unit test without stubbing modules.
+ * The link (C3) is written off the FIRST step carrying a run id, which is the
+ * preliminary step yielded the instant the launch POST returns — long before the
+ * run can reach a terminal status, so the reconciliation always finds it.
+ * Awaited rather than detached: it is one scoped UPDATE, and a detached promise
+ * could lose the race against a very short run's finalize.
+ *
+ * `steps` and `linkRun` are injected (production defaults) so both the budget
+ * and the link can be asserted in a unit test without stubbing modules.
  */
 export async function* runAndWaitStepsWithinTurnBudget(
   rawArgs: unknown,
   opts: Omit<RunAndWaitClientOptions, "maxMs"> & { budget: TurnBudgetContext },
   steps: typeof runAndWaitStepsWithDocuments = runAndWaitStepsWithDocuments,
+  linkRun: typeof stampChatSessionOnRun = stampChatSessionOnRun,
 ): AsyncGenerator<RunAndWaitStep> {
   const { budget, ...clientOpts } = opts;
   const decision = decideRunAndWaitBudget(budget);
@@ -127,5 +143,16 @@ export async function* runAndWaitStepsWithinTurnBudget(
     yield { payload: decision.payload };
     return;
   }
-  yield* steps(rawArgs, { ...clientOpts, maxMs: decision.maxMs });
+  const { chatSessionId, orgId } = budget;
+  let linked = false;
+  for await (const step of steps(rawArgs, { ...clientOpts, maxMs: decision.maxMs })) {
+    if (!linked && chatSessionId && orgId) {
+      const runId = step.payload.id;
+      if (typeof runId === "string" && runId.length > 0) {
+        linked = true;
+        await linkRun(runId, orgId, chatSessionId);
+      }
+    }
+    yield step;
+  }
 }

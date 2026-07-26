@@ -119,8 +119,13 @@ export interface PiTurnBudget {
   deadlineAt: number;
   /** Model calls completed so far in the turn (`PiChatUiStreamMapper.stepCount`). */
   stepCount: () => number;
-  /** Trace attribution only. */
+  /**
+   * Trace attribution, and the link stamped on every run this turn launches so
+   * an orphaned run can still report back (C3). Null on an ephemeral turn.
+   */
   chatSessionId?: string | null;
+  /** Owning organization — scopes the orphan-run link write. */
+  orgId?: string;
   /** Clock seam (tests inject a fixed now). */
   now?: () => number;
 }
@@ -278,6 +283,7 @@ function makeRunAndWaitExtension(
             turnDeadlineAt: ctx.turnBudget.deadlineAt,
             engine: "subscription",
             chatSessionId: ctx.turnBudget.chatSessionId,
+            ...(ctx.turnBudget.orgId ? { orgId: ctx.turnBudget.orgId } : {}),
             ...(ctx.turnBudget.now ? { now: ctx.turnBudget.now } : {}),
           },
         })) {

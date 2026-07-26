@@ -17,7 +17,7 @@
  * `message_id`), `format` = `"ai-sdk/v6"`, `parent_id` chains messages linearly.
  */
 
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { notFound } from "@appstrate/core/api-errors";
@@ -149,6 +149,48 @@ export async function persistAssistantMessage(
   const { messageId, seq } = await upsertMessage(sessionId, message, parentId);
   await touchSession(sessionId, "assistant", seq);
   return messageId;
+}
+
+/**
+ * Persist a SERVER-AUTHORED notice into a session, chained onto its last
+ * message — the only way anything other than a live turn writes into a
+ * conversation (C3: a run whose launching turn is already dead announcing its
+ * deliverables).
+ *
+ * Goes through the same single writer as every other message (`upsertMessage` →
+ * `touchSession`), so ordering, the `parent_id` chain, the title derivation and
+ * the unread watermark behave identically. Persisted with the ASSISTANT role
+ * (not `system`): a mid-transcript system message is not a shape the ai-sdk
+ * `convertToModelMessages` path accepts without the `allowSystemInMessages`
+ * compat flag, and the notice reads naturally as something the assistant says.
+ *
+ * `messageId` is CALLER-CHOSEN and must be derived from the event, not random:
+ * an already-present id makes this a no-op (returns false) so a replayed
+ * reconciliation cannot append a second copy. The early return — rather than
+ * relying on the `(session_id, message_id)` upsert — is what keeps the
+ * `parent_id` chain intact: on a replay the notice is itself the last message,
+ * so an upsert would re-parent it onto itself.
+ */
+export async function persistNotice(
+  sessionId: string,
+  messageId: string,
+  text: string,
+): Promise<boolean> {
+  const [existing] = await db
+    .select({ seq: chatMessages.seq })
+    .from(chatMessages)
+    .where(and(eq(chatMessages.sessionId, sessionId), eq(chatMessages.messageId, messageId)))
+    .limit(1);
+  if (existing) return false;
+  const message = {
+    id: messageId,
+    role: "assistant",
+    parts: [{ type: "text", text }],
+  } as UIMessage;
+  const parentId = await lastMessageId(sessionId);
+  const { seq } = await upsertMessage(sessionId, message, parentId);
+  await touchSession(sessionId, "assistant", seq);
+  return true;
 }
 
 /**

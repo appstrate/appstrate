@@ -59,7 +59,11 @@ export async function openPlatformMcp(args: {
    * started to be orphaned.
    */
   turnDeadlineAt: number;
-  /** Chat session the turn belongs to — trace attribution only. */
+  /**
+   * Chat session the turn belongs to — trace attribution, and the link stamped
+   * on every run this turn launches so an orphaned run can still report back
+   * (C3). Null on an ephemeral (unpersisted) turn.
+   */
   chatSessionId?: string | null;
 }): Promise<McpHandle> {
   const headers: Record<string, string> = { ...args.headers };
@@ -95,6 +99,7 @@ export async function openPlatformMcp(args: {
         turnDeadlineAt: args.turnDeadlineAt,
         engine: "ai-sdk",
         chatSessionId: args.chatSessionId,
+        orgId: args.orgId,
       },
     });
     tools = wrapToolModelOutputs(tools);

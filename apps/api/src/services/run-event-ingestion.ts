@@ -60,6 +60,8 @@ import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { runResultSchema } from "../lib/jsonb-schemas.ts";
+import { runResultExceedsInlineLimit } from "@appstrate/core/run-and-wait-client";
+import { spillRunResultDocument } from "./documents.ts";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { TokenUsage } from "@appstrate/shared-types";
 
@@ -698,6 +700,37 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // Post-CAS best-effort: the run is already terminal in `runs`. A
   // transient log INSERT failure here is logged and swallowed — the UI
   // shows the run as complete from the row-level state regardless.
+  // B5 — oversized structured result: spill the FULL payload into a durable
+  // `agent_output` document so a tool-result consumer (the chat's
+  // `run_and_wait`) can truncate its inline copy and still point at the whole
+  // thing (`document://…`). Written here, before the broadcast below, so the
+  // orphan reconciliation (C3) already sees it among the run's documents.
+  //
+  // Best-effort by contract: the run is already terminal, and a rejected spill
+  // (org quota, per-run cap) only means the tool result stays untruncated —
+  // `truncateRunAndWaitPayload` never truncates without a pointer.
+  if (resultToPersist && runResultExceedsInlineLimit(resultToPersist)) {
+    try {
+      const spilled = await spillRunResultDocument(
+        scope,
+        run.id,
+        { userId: actorRow?.userId ?? null, endUserId: actorRow?.endUserId ?? null },
+        run.packageId,
+        resultToPersist,
+      );
+      logger.info("finalize: spilled oversized run result to a document", {
+        runId: run.id,
+        documentId: spilled.id,
+        size: spilled.size,
+      });
+    } catch (err) {
+      logger.warn("finalize: run-result spill failed; result stays inline", {
+        runId: run.id,
+        err: getErrorMessage(err),
+      });
+    }
+  }
+
   try {
     if (status === "success" && resultToPersist) {
       await appendRunLog(scope, run.id, "result", "result", null, resultToPersist, "info");

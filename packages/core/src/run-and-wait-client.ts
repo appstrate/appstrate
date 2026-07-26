@@ -15,6 +15,39 @@ export const RUN_AND_WAIT_MAX_MS = 30 * 60_000;
 export const RUN_AND_WAIT_BACKOFF_MS = 500;
 const RUN_GET_WAIT_MAX_SECONDS = 55;
 
+/**
+ * Inline ceiling for a run's structured `result` inside a tool result (≈8k
+ * tokens of JSON). Above it the payload is TRUNCATED and paired with a
+ * `document://` pointer at the full copy ({@link truncateRunAndWaitPayload}).
+ *
+ * Sized as a CONTEXT SAFETY NET, not as the fan-in mechanism (that is the
+ * prompt's fan-out/fan-in rule). The 32 KB figure is the same order as the
+ * tool-result caps production agent harnesses apply, and it is deliberately NOT
+ * aggressive: a 4 KB threshold — the first proposal — would have forced a read
+ * round-trip on results the chat must read to answer at all, making the common
+ * single-run case strictly worse. The audited incident's results were 9–11.6 KB,
+ * i.e. comfortably under this bar: it would not have fired there, and it is not
+ * claimed to be that fix.
+ */
+export const RUN_RESULT_INLINE_MAX_BYTES = 32 * 1024;
+
+/**
+ * Name of the `agent_output` document the platform writes when a run's `result`
+ * overruns {@link RUN_RESULT_INLINE_MAX_BYTES} — the full payload, so the
+ * truncated tool result can point at it. Deliberately platform-namespaced: the
+ * match below is by name, and a generic `run-result.json` could collide with a
+ * file an agent published itself.
+ *
+ * Written by `apps/api/src/services/documents.ts` (`spillRunResultDocument`),
+ * read here. The constant lives in core because both sides must agree and core
+ * is the only package both import — core itself never touches storage.
+ */
+export const RUN_RESULT_SPILL_DOCUMENT_NAME = "appstrate-run-result.json";
+
+const TEXT_ENCODER = new TextEncoder();
+/** Non-fatal: a head cut mid-codepoint yields U+FFFD rather than throwing. */
+const TEXT_DECODER = new TextDecoder();
+
 export const RUN_AND_WAIT_TERMINAL_STATUSES = new Set([
   "success",
   "failed",
@@ -112,6 +145,79 @@ export function projectRunAndWaitPayload(
   const error = asString(run?.error);
   if (error) payload.error = error;
   return payload;
+}
+
+/**
+ * UTF-8 byte length of `value`'s JSON serialization, or null when it does not
+ * serialize (cycle, or a value `JSON.stringify` maps to `undefined`).
+ */
+function serializedResultBytes(value: unknown): Uint8Array | null {
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(value);
+  } catch {
+    return null;
+  }
+  return typeof json === "string" ? TEXT_ENCODER.encode(json) : null;
+}
+
+/**
+ * Does this run result overrun the inline tool-result ceiling? The WRITE side of
+ * the spill (the platform's finalize path) asks this so both sides use one
+ * threshold and one measurement.
+ *
+ * The two sides do not measure byte-identical inputs: the writer measures the
+ * in-process object, the reader measures the same value after a `jsonb`
+ * round-trip (which reorders keys but preserves length). A disagreement is
+ * therefore benign in both directions — an unused spill document, or an
+ * untruncated payload, never a truncation with no pointer.
+ */
+export function runResultExceedsInlineLimit(result: unknown): boolean {
+  const bytes = serializedResultBytes(result);
+  return bytes !== null && bytes.length > RUN_RESULT_INLINE_MAX_BYTES;
+}
+
+/**
+ * Truncate an oversized `result` on a terminal run_and_wait payload, replacing
+ * it with a usable HEAD plus a `document://` pointer at the full copy (D4).
+ *
+ * Truncate-AND-point, never truncate-or-drop: when no spill document is present
+ * (the platform's best-effort write failed, or the run predates it) the payload
+ * is returned UNCHANGED. A truncation with no way back to the rest would lose
+ * data silently, which is worse than a large tool result.
+ *
+ * `result` is removed rather than shortened in place: leaving the same key with
+ * a shortened value invites the model to treat it as complete. `result_head` is
+ * the first {@link RUN_RESULT_INLINE_MAX_BYTES} bytes of the JSON serialization
+ * — a prefix, not valid JSON — which in the median case already answers the
+ * question, so only a genuinely huge result costs a read round-trip.
+ */
+export function truncateRunAndWaitPayload(
+  payload: Record<string, unknown>,
+  documents: readonly RunAndWaitDocument[],
+): Record<string, unknown> {
+  if (payload.result === undefined || payload.result === null) return payload;
+  const bytes = serializedResultBytes(payload.result);
+  if (bytes === null || bytes.length <= RUN_RESULT_INLINE_MAX_BYTES) return payload;
+  const spill = documents.find((doc) => doc.name === RUN_RESULT_SPILL_DOCUMENT_NAME);
+  if (!spill) return payload;
+
+  const { result: _full, ...rest } = payload;
+  return {
+    ...rest,
+    truncated: true,
+    result_size_bytes: bytes.length,
+    result_head: TEXT_DECODER.decode(bytes.slice(0, RUN_RESULT_INLINE_MAX_BYTES)),
+    full_document_uri: spill.uri,
+    message:
+      `This run's result is ${bytes.length} bytes, over the ` +
+      `${RUN_RESULT_INLINE_MAX_BYTES}-byte inline limit for a tool result. ` +
+      `\`result_head\` holds its first ${RUN_RESULT_INLINE_MAX_BYTES} bytes as JSON text ` +
+      `(a prefix — not parseable on its own). The complete result is stored as the ` +
+      `document at \`full_document_uri\`; read it only if the head does not already ` +
+      `answer the question, and pass that URI (never a copy of the content) to any ` +
+      `follow-up run that needs the whole thing.`,
+  };
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -467,6 +573,10 @@ export async function fetchRunDocuments(
  * into a follow-up run (D6). The extra fetch runs only once the run is terminal
  * and only when a run id exists; a run that published nothing keeps the payload
  * document-free. Used by the chat run_and_wait paths (pi + ai-sdk).
+ *
+ * The same document list feeds the oversized-result truncation (B5/D4): the
+ * spill document the platform wrote for a >32 KB result is found in this list,
+ * so the pointer costs no extra request ({@link truncateRunAndWaitPayload}).
  */
 export async function* runAndWaitStepsWithDocuments(
   rawArgs: unknown,
@@ -477,7 +587,8 @@ export async function* runAndWaitStepsWithDocuments(
     if (step.payload.done === true && runId) {
       const documents = await fetchRunDocuments(runId, opts);
       if (documents.length > 0) {
-        yield { ...step, payload: { ...step.payload, documents } };
+        const payload = truncateRunAndWaitPayload(step.payload, documents);
+        yield { ...step, payload: { ...payload, documents } };
         continue;
       }
     }
