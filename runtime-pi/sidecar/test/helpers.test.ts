@@ -3,6 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   ABSOLUTE_BODY_CEILING,
+  concatAndRelease,
   isBlockedHost,
   isBlockedUrl,
   substituteVars,
@@ -601,5 +602,40 @@ describe("readRequestBodyBounded", () => {
     const result = await readRequestBodyBounded(req, 10);
     expect(result).toBe("exceeded");
     expect(cancelled).toBe(true);
+  });
+
+  it("preserves chunk order across many chunks", async () => {
+    // The concat releases chunks as it copies (pop off a reversed array), so
+    // ordering is the thing that could silently regress.
+    const chunkCount = 64;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < chunkCount; i++) controller.enqueue(new Uint8Array([i, i + 1, i + 2]));
+        controller.close();
+      },
+    });
+    const req = new Request("https://x/", { method: "POST", body, duplex: "half" } as RequestInit);
+    const result = await readRequestBodyBounded(req, 1024);
+    expect(result).toBeInstanceOf(Uint8Array);
+    const bytes = result as Uint8Array;
+    expect(bytes.byteLength).toBe(chunkCount * 3);
+    for (let i = 0; i < chunkCount; i++) {
+      expect(Array.from(bytes.subarray(i * 3, i * 3 + 3))).toEqual([i, i + 1, i + 2]);
+    }
+  });
+});
+
+describe("concatAndRelease", () => {
+  it("concatenates in order and empties the source array", () => {
+    const chunks = [new Uint8Array([1, 2]), new Uint8Array([3]), new Uint8Array([4, 5, 6])];
+    const merged = concatAndRelease(chunks, 6);
+    expect(Array.from(merged)).toEqual([1, 2, 3, 4, 5, 6]);
+    // The chunks are released as they are copied — that is the whole point:
+    // the source bytes must not stay pinned alongside the merged buffer.
+    expect(chunks.length).toBe(0);
+  });
+
+  it("returns an empty buffer for no chunks", () => {
+    expect(concatAndRelease([], 0).byteLength).toBe(0);
   });
 });
