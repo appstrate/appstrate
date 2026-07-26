@@ -181,9 +181,12 @@ COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runt
 
 # Workspace sources — `@appstrate/afps-runtime`, `@appstrate/mcp-transport`,
 # `@appstrate/runner-pi`, and `@appstrate/core` are source-only (Bun loads
-# .ts directly, no build step). `core` is consumed via `@appstrate/core/errors`
-# and `@appstrate/core/{form,naming,…}` by entrypoint.ts, extension-wrapper.ts,
-# env.ts, and the MCP upload helpers.
+# .ts directly, no build step). The `packages/core/src` COPY below is load
+# bearing: `entrypoint.ts`, `env.ts`, `provision.ts`, `publish.ts`, the
+# `mcp/` tool surface + upload adapters, and `sidecar/` all import core
+# subpaths at runtime — `sidecar-types`, `errors`, `runtime-tool-defs`,
+# `runtime-event-drain`, `ssrf`, `naming`, `integration`, `platform-types`,
+# `zip`, `token-budget`, `model-swap`, `oauth-bearer-swap`.
 COPY --chown=pi:pi packages/afps-runtime/src            ./packages/afps-runtime/src
 COPY --chown=pi:pi packages/afps-runtime/package.json   ./packages/afps-runtime/
 COPY --chown=pi:pi packages/mcp-transport/src           ./packages/mcp-transport/src

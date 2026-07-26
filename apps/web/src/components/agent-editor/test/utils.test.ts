@@ -604,22 +604,30 @@ describe("getRuntimeTools", () => {
 
 // ─── withNormalizedRuntimeTools ──────────────────
 
+// Delegates to `dropRetiredRuntimeTools` (`@appstrate/core`), which is gated on
+// `type: "agent"` — the fixtures carry it because the only call site
+// (`package-editor.tsx`) runs in the agent branch on a stored AFPS manifest,
+// where `type` is required by the schema.
 describe("withNormalizedRuntimeTools", () => {
   it("strips a retired id from the manifest loaded into the editor", () => {
-    const m = { name: "@o/a", runtime_tools: ["report", "log"] };
-    expect(withNormalizedRuntimeTools(m)).toEqual({ name: "@o/a", runtime_tools: ["log"] });
-  });
-
-  it("removes the field entirely when nothing valid remains", () => {
-    expect(withNormalizedRuntimeTools({ name: "@o/a", runtime_tools: ["report"] })).toEqual({
+    const m = { type: "agent", name: "@o/a", runtime_tools: ["report", "log"] };
+    expect(withNormalizedRuntimeTools(m)).toEqual({
+      type: "agent",
       name: "@o/a",
+      runtime_tools: ["log"],
     });
   });
 
+  it("removes the field entirely when nothing valid remains", () => {
+    expect(
+      withNormalizedRuntimeTools({ type: "agent", name: "@o/a", runtime_tools: ["report"] }),
+    ).toEqual({ type: "agent", name: "@o/a" });
+  });
+
   it("returns the same reference when there is nothing to drop", () => {
-    const m = { name: "@o/a", runtime_tools: ["output"] };
+    const m = { type: "agent", name: "@o/a", runtime_tools: ["output"] };
     expect(withNormalizedRuntimeTools(m)).toBe(m);
-    const noField = { name: "@o/a" };
+    const noField = { type: "agent", name: "@o/a" };
     expect(withNormalizedRuntimeTools(noField)).toBe(noField);
   });
 });

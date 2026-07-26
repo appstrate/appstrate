@@ -15,7 +15,6 @@ import type { Bundle, BundlePackage } from "../bundle/types.ts";
 
 export type {
   DependencyRef,
-  SkillRef,
   JSONSchema,
   Tool,
   ToolContext,

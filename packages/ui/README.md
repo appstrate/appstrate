@@ -11,11 +11,11 @@ Private workspace package — not published to npm. Consumed within the monorepo
 "dependencies": { "@appstrate/ui": "workspace:*" }
 ```
 
-Peer deps: `react` 19, `react-dom` 19, `@rjsf/core` ^6, `@rjsf/utils` ^6, `@rjsf/validator-ajv8` ^6, `lucide-react`, `react-select` ^5, `@appstrate/core` ^2.10, `typescript` ^5.
+Peer deps: `react` 19, `react-dom` 19, `@rjsf/core` ^6, `@rjsf/utils` ^6, `@rjsf/validator-ajv8` ^6, `lucide-react`, `react-select` ^5, `@appstrate/core` (workspace), `typescript` ^5.
 
 The package ships raw `.tsx`/`.ts` sources (no build step) — consumers transpile via their bundler (Vite, etc.). Same convention as `@appstrate/core`.
 
-Consumed by `apps/web`; any in-monorepo surface (module UIs, internal dashboards) can import it so components render identically everywhere. Components are locale-agnostic — user-facing copy is injected via `labels` props (see `Dropzone`/`SchemaForm`), never baked in.
+Consumed by `apps/web`; any in-monorepo surface (module UIs, internal dashboards) can import it so components render identically everywhere. Components are locale-agnostic — user-facing copy is injected via `labels` props (see `SchemaForm`), never baked in.
 
 ## Usage
 
@@ -36,23 +36,16 @@ The widget is i18n-agnostic — pass translated strings via `labels`. See `apps/
 
 ## Exports
 
-- `./components/*` — shadcn/Radix primitives, one per file (e.g. `@appstrate/ui/components/button`, `dialog`, `select`, `sidebar`, `sonner`, `dropzone`, …). CVA variants + `cn()` styling.
+- `./components/*` — shadcn/Radix primitives, one per file (e.g. `@appstrate/ui/components/button`, `dialog`, `select`, `sidebar`, `sonner`, …). CVA variants + `cn()` styling. `ls packages/ui/src/components/` is the authoritative list.
+- `./components/sidebar-context` — the `.ts`-only escape hatch for the sidebar context (the wildcard above resolves `.tsx`).
 - `./cn` — the canonical `cn(...)` class-merge helper (`clsx` + `tailwind-merge`). The single implementation used by every component and the web app.
 - `./use-mobile` — `useIsMobile()` hook (breakpoint-based).
 - `./schema-form` — `SchemaForm` component, `FileWidgetLabels` type, RJSF widgets/templates.
-- `./vite` — Vite preset that pre-bundles the schema-form dep graph (RJSF + ajv + transitive CJS). Use it via `mergeConfig`:
 
-  ```ts
-  import { defineConfig, mergeConfig } from "vite";
-  import { viteConfig as appstrateUi } from "@appstrate/ui/vite";
-
-  export default mergeConfig(
-    appstrateUi,
-    defineConfig({
-      /* app config */
-    }),
-  );
-  ```
+> The `./components/*` wildcard is unguarded: a subpath naming a file that does
+> not exist (e.g. a component that was removed) resolves to a missing path and
+> fails at bundle time rather than with Node's `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+> Check the directory listing, not this README, when an import 404s.
 
 ## License
 

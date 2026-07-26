@@ -14,12 +14,37 @@ the `report` runtime tool is retired in favour of published documents,
 that were optional-but-always-supplied become required, and a set of exports
 with no importer anywhere is deleted.
 
-> **Release ordering.** `@appstrate/afps-shared` stays at `^0.3.1` — already
-> published, nothing to release first. After tagging `core@6.0.0` and letting
-> CI publish, bump the `^` range in every external consumer
-> (`scripts/check-consumer-versions.ts` is the authoritative list:
-> registry, cloud, portal, connect-helper, module-claude-code). Workspace
-> packages inside this monorepo resolve `workspace:*` and need no bump.
+> **Release ordering — consumers FIRST, then the tag.** `@appstrate/afps-shared`
+> stays at `^0.3.1` (already published, nothing to release before this).
+>
+> 1. **Bump the five external consumers to `^6.0.0`** in their own repos and
+>    push to each repo's **default branch** —
+>    `scripts/check-consumer-versions.ts` is the authoritative list and reads
+>    each `package.json` off the default branch through the GitHub contents
+>    API: `registry` (root + `apps/api` + `apps/web`), `cloud`, `portal`,
+>    `connect-helper`, `module-claude-code`. Workspace packages inside this
+>    monorepo resolve `workspace:*` and need no bump.
+> 2. **Make sure the repository secret `CONSUMER_LOCKSTEP_TOKEN` exists**
+>    (PAT / GitHub App token with `contents:read` on those five repos).
+> 3. **Only then** tag `core@6.0.0` and push it.
+>
+> This order is not a preference, it is the only one that can execute:
+> `.github/workflows/publish-core.yml` runs the lockstep gate **before**
+> `npm publish`, and the gate hard-fails on a major mismatch
+> (`cMaj !== lMaj` → `failures++` → `exit 1`). A consumer still pinned to
+> `^5` therefore blocks the publish it was supposedly waiting on.
+>
+> The known cost of going first: each consumer's own CI stays red between
+> step 1 and step 3, because `^6.0.0` does not resolve until core is on npm.
+> That window is expected — do not "fix" it by publishing core first.
+>
+> **The gate only bites with a token that can read private repos.** All five
+> consumers are private; on a 404 the script logs `not present, skipping` and
+> counts nothing, so a missing/underscoped token makes it report
+> `0 failure(s), 0 warning(s)` having verified nothing. The workflow's
+> "Assert the lockstep gate can actually run" step exists precisely to turn
+> that silent pass into a loud failure — bypassing it is the deliberate act of
+> setting the repository variable `CONSUMER_DRIFT_POLICY` to `warn` or `off`.
 
 > **Deploy ordering — modules BEFORE the platform**, for the same reason as
 > `5.0.0`: a module implementing `beforeUsage` / `checkUsageAllowed` must be on
@@ -85,7 +110,12 @@ with no importer anywhere is deleted.
   byte-for-byte. That matters for the version-snapshot path, which serialises
   the result into an integrity-hashed artifact: a re-parse that reordered keys
   would silently defeat publish dedup. Non-agent manifests are returned
-  untouched.
+  untouched. When the filter empties the list, the `runtime_tools` **key is
+  removed** rather than left as `[]`: AFPS makes the field optional with no
+  default so both parse alike, but they are different bytes, and the agent
+  editor's own writer (`setRuntimeTools`) already drops the field on an empty
+  selection. Emitting `[]` would give one manifest two integrity hashes
+  depending on which path last wrote it.
 
 - **`ModuleInitContext.getOrgName` is required** (was `getOrgName?`). The
   platform has always supplied it (`buildModuleInitContext`), and the optional

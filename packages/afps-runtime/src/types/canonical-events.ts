@@ -19,8 +19,8 @@
  * envelope branch and stay typed as `RunEvent` so the sink chain can
  * still route them.
  *
- * Use {@link narrowCanonicalEvent} to project an open `RunEvent` into
- * the union; `null` means "no canonical match — handle via the open
+ * Use {@link isCanonicalRunEvent} to project an open `RunEvent` into
+ * the union; `false` means "no canonical match — handle via the open
  * envelope".
  */
 
@@ -205,15 +205,4 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
     default:
       return false;
   }
-}
-
-/**
- * Narrow an open `RunEvent` to the discriminated union, or `null` if
- * the event is third-party / unknown. Sinks should fold the canonical
- * branch via an exhaustive switch, then forward the original event to
- * downstream consumers regardless of canonicity (so third-party events
- * still flow through the pipeline).
- */
-export function narrowCanonicalEvent(event: RunEvent): CanonicalRunEvent | null {
-  return isCanonicalRunEvent(event) ? event : null;
 }

@@ -15,7 +15,7 @@ import {
   type UIHint,
   type SchemaWrapper,
 } from "@appstrate/core/form";
-import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
+import { AFPS_SCHEMA_URLS, dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import {
   isToolsWildcard,
@@ -151,22 +151,25 @@ export function getRuntimeTools(m: Record<string, unknown>): string[] {
  * next save instead of round-tripping forever — the user is never shown an
  * error for a field the editor cannot even display.
  *
+ * Delegates to `dropRetiredRuntimeTools` from `@appstrate/core` — the SAME
+ * function the publish path runs (`services/package-versions.ts`). The editor
+ * used to reimplement it and the two drifted on the empty case, so an agent
+ * whose only tool was retired serialised differently depending on which path
+ * saved it. One implementation, one byte sequence. Core is type-gated
+ * (`type: "agent"`), which is exactly this call site: `package-editor.tsx`
+ * invokes it only in the agent branch.
+ *
  * Returns the same reference when there is nothing to drop.
  */
 export function withNormalizedRuntimeTools(m: Record<string, unknown>): Record<string, unknown> {
-  const raw = m.runtime_tools;
-  if (!Array.isArray(raw)) return m;
-  const kept = raw.filter(isSelectableRuntimeTool);
-  if (kept.length === raw.length) return m;
-  const next = { ...m };
-  if (kept.length > 0) next.runtime_tools = kept;
-  else delete next.runtime_tools;
-  return next;
+  return dropRetiredRuntimeTools(m).manifest;
 }
 
 /**
  * Write the selected runtime tool ids back into the manifest. An empty
- * selection drops the field entirely so the manifest stays minimal.
+ * selection drops the field entirely so the manifest stays minimal — the same
+ * empty-case convention `dropRetiredRuntimeTools` follows, so a manifest is
+ * byte-identical whichever of the two last touched it.
  */
 export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
   if (tools.length > 0) {

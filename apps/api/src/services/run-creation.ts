@@ -53,12 +53,6 @@ export interface CreateRunInput {
   apiKeyId?: string;
   overrideVersionLabel?: string;
   /**
-   * Caller's per-(integration, authKey) connection picks for THIS run
-   * (#199). Flows into the resolver's mechanism #2 at kickoff and is
-   * persisted on `runs.connection_overrides` for audit + replay.
-   */
-  connectionOverrides?: Record<string, string> | null;
-  /**
    * Per-dependency version overrides for THIS run (#666/#686). `"draft"` opts a
    * declared skill/integration into its working copy; any other value replaces
    * the manifest pin. Persisted on `runs.dependency_overrides` and enforced by
@@ -108,14 +102,21 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   } = input;
 
   // Readiness (`validateAgentReadiness`) is NOT re-run here. The single
-  // caller — `POST /api/runs/remote` — already validates the very same
+  // caller — `POST /api/runs/remote` — already validates the
   // (agent, config, applicationId, actor) tuple before it gets here: the
   // `registry` branch calls `validateAgentReadiness` directly, the `inline`
-  // branch runs it inside `runInlinePreflight`. Both let the original
-  // `ApiError` escape, which preserves the 412 `missing_integration_connection`
-  // envelope (with its `errors[]` list driving the dashboard's
-  // MissingConnections modal). A second pass here could only ever flatten
-  // that into a 400 `agent_not_ready`, losing the structured payload.
+  // branch runs it inside `runInlinePreflight`. Neither passes
+  // `runOverrides`, and neither can: `CreateRemoteRunBodySchema` is
+  // `.strict()` and declares no `connection_overrides` field, so a remote run
+  // carries no per-run connection picks at all (mechanism #2 is a
+  // platform-run feature).
+  //
+  // Both call sites let the original `ApiError` escape to the route, which
+  // preserves the 412 `missing_integration_connection` envelope (with its
+  // `errors[]` list driving the dashboard's MissingConnections modal). This
+  // function reports failures as a flat `{ code, message, status }` result
+  // instead, so re-running readiness here would have to collapse that
+  // structured payload into a 400 `agent_not_ready`.
 
   // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.
@@ -173,10 +174,11 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   }
 
   // --- Snapshot the connection cascade (#199, remote-path mirror of
-  //     run-pipeline). Readiness above ran with the same overrides, so a
-  //     failure here is either the caller's pick pointing at an inaccessible
-  //     id or a between-readiness-and-now race (deleted connection, new admin
-  //     pin). Either way the runner gets a structured agent_not_ready it can
+  //     run-pipeline). `runOverrides` is null here and in the readiness pass
+  //     the route already ran — the remote body accepts no per-run connection
+  //     picks — so the two resolve the same cascade. A failure at this point is
+  //     therefore a between-readiness-and-now race (connection deleted, new
+  //     admin pin), and the runner gets a flat `agent_not_ready` it can
   //     surface verbatim.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
@@ -185,7 +187,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       packageId: agent.id,
       actor,
       scope: { orgId, applicationId },
-      runOverrides: input.connectionOverrides ?? null,
+      runOverrides: null,
       // Remote runs are never scheduled, so there is no frozen schedule
       // override on this path (mechanism #3 applies to platform runs only).
       scheduleOverrides: null,
@@ -250,7 +252,8 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       runOrigin: "remote",
       sinkSecretEncrypted: encrypt(credentials.secret),
       sinkExpiresAt: new Date(credentials.expiresAt),
-      connectionOverrides: input.connectionOverrides ?? null,
+      // Always null on this path — see the readiness comment above.
+      connectionOverrides: null,
       resolvedConnections,
       dependencyOverrides: input.dependencyOverrides ?? null,
       resolvedIntegrationVersions,

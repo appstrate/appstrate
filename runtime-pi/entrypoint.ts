@@ -680,7 +680,7 @@ if (sidecarUrl) {
 }
 
 // --- 2e. publish_document runtime tool (opt-in via manifest.runtime_tools) ---
-// Unlike the five pure event-emitter runtime tools (served by the sidecar over
+// Unlike the four pure event-emitter runtime tools (served by the sidecar over
 // MCP, or registered in-process on the no-sidecar path), `publish_document`
 // performs an HTTP upload back to the platform — so it is ALWAYS registered
 // in-process here (the sidecar has no path to the documents route), gated on

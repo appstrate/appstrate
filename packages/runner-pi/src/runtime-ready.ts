@@ -30,7 +30,12 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 export interface RuntimeReadyPayload {
   /** True when a concrete `.afps`/`.afps-bundle` was loaded from disk. */
   bundleLoaded: boolean;
-  /** Count of extension factories (bundle tools + runtime-shipped extensions + integration tools). */
+  /**
+   * Count of extension factories handed to the runner: the AFPS bundle's own
+   * tools, the integration / sidecar-backed MCP tools, and the runtime tools
+   * the agent selected in `manifest.runtime_tools`. Diagnostics only — a
+   * caller counts whatever it actually registered.
+   */
   extensions: number;
   /** Caller-computed elapsed ms since its own "boot start" (process entry for runtime-pi, command entry for the CLI). */
   bootDurationMs: number;

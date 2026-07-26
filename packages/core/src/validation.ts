@@ -372,6 +372,15 @@ function parseWithSchema(
  * re-parse that reordered keys would silently defeat publish dedup (#896).
  * Returns the input untouched (same reference) when nothing needs dropping.
  *
+ * **When nothing survives, the key is REMOVED, not left as `[]`.** AFPS makes
+ * `runtime_tools` optional with no default, so absent and `[]` parse to the
+ * same agent — but they are different bytes, and this helper is not the only
+ * writer: the agent editor's `setRuntimeTools` also drops the field on an empty
+ * selection. Emitting `[]` here would mean an agent whose only tool was retired
+ * serialises one way through the editor and another way through the publish
+ * path, i.e. two integrity hashes for one manifest. Deleting a key does not
+ * reorder the survivors, so the structural contract above still holds.
+ *
  * Only `type: "agent"` manifests carry `runtime_tools`; any other type is
  * returned as-is.
  */
@@ -389,7 +398,10 @@ export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
     else dropped.push(String(entry));
   }
   if (dropped.length === 0) return { manifest, dropped: [] };
-  return { manifest: { ...manifest, runtime_tools: kept }, dropped };
+  const next = { ...manifest };
+  if (kept.length > 0) next.runtime_tools = kept;
+  else delete next.runtime_tools;
+  return { manifest: next, dropped };
 }
 
 /**

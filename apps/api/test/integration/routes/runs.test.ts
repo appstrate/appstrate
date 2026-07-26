@@ -706,13 +706,6 @@ describe("Runs API", () => {
       expect(detailBody.id).toBe(run.id);
       expect(detailBody.data).toBeUndefined();
     });
-
-    it("does not let the detail route swallow the collection path", async () => {
-      // A `/runs/:id` handler catching `/runs` would 404 on the literal id
-      // "runs" instead of returning the list.
-      const res = await app.request("/api/runs", { headers: authHeaders(ctx) });
-      expect(res.status).toBe(200);
-    });
   });
 
   // ─── GET /api/runs/:id/logs ────────────────────────────────

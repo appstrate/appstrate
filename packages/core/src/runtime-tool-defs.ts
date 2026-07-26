@@ -3,8 +3,13 @@
 
 /**
  * Runtime tool definitions — the platform's first-party "runtime tools"
- * (`output` / `log` / `note` / `pin`, plus the deprecated `report`) expressed as
- * transport-neutral, Pi-agnostic MCP tool definitions.
+ * expressed as transport-neutral, Pi-agnostic MCP tool definitions.
+ *
+ * Two groups, both defined here: the four pure event emitters
+ * (`output` / `log` / `note` / `pin`), assembled together by
+ * {@link buildRuntimeToolDefs}; and `publish_document`, built on its own by
+ * {@link buildPublishDocumentDef} because it needs an injected HTTP uploader
+ * only the runtime entrypoint can supply.
  *
  * These were previously Pi-SDK extension factories baked into the runtime
  * image (`@appstrate/runner-pi/runtime-tools/builtin/*`). They are now plain

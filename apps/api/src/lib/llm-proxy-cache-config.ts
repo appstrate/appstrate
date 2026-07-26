@@ -12,7 +12,8 @@
 
 import { getEnv } from "@appstrate/env";
 
-export interface LlmProxyCacheConfig {
+/** Return shape of {@link getResponseCacheConfig}. Local — no importer outside this file. */
+interface LlmProxyCacheConfig {
   /** When false, the proxy skips the cache layer entirely. */
   enabled: boolean;
   /** TTL applied to fresh writes. Ignored when `enabled` is false. */

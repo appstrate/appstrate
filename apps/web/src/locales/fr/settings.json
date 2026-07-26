@@ -141,7 +141,6 @@
   "packages.deleteConfirmWithApps": "Supprimer définitivement {{type}} \"{{name}}\" ? Il est actuellement installé dans : {{apps}}. Il sera retiré de toutes les applications.",
   "packages.uninstall": "Désinstaller",
   "packages.uninstallConfirm": "Désinstaller \"{{name}}\" de cette application ? Vous pourrez le réinstaller depuis la bibliothèque.",
-  "packages.usedBy": "Utilisé par {{count}} agent(s)",
   "packages.detailNotFound": "Élément introuvable.",
   "schedules.title": "Planifications",
   "schedules.empty": "Aucune planification.",

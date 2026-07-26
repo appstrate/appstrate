@@ -141,7 +141,6 @@
   "packages.deleteConfirmWithApps": "Delete {{type}} \"{{name}}\"? It is currently installed in: {{apps}}. This will permanently remove it from all applications.",
   "packages.uninstall": "Uninstall",
   "packages.uninstallConfirm": "Uninstall \"{{name}}\" from this application? You can reinstall it later from the library.",
-  "packages.usedBy": "Used by {{count}} agent(s)",
   "packages.detailNotFound": "Item not found.",
   "schedules.title": "Schedules",
   "schedules.empty": "No schedules.",

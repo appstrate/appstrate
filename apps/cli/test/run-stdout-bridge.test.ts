@@ -151,7 +151,7 @@ function emitFromTool(stdout: FakeStdout, event: Record<string, unknown>): void 
 // body carries the merged aggregate.
 // ---------------------------------------------------------------------------
 
-describe("CLI wiring — online (HttpSink composed with ConsoleSink)", () => {
+describe("CLI wiring — online (HttpSink composed with the console sink)", () => {
   it("propagates output.emitted from stdout-JSONL to the HTTP sink", async () => {
     const wiring = buildCliWiring({ withReporting: true });
 

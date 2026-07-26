@@ -28,7 +28,6 @@ export type {
   Bundle,
   BundlePackage,
   DependencyRef,
-  SkillRef,
   JSONSchema,
   Tool,
   ToolContext,

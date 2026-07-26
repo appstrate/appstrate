@@ -5,7 +5,6 @@ import type { RunEvent } from "@afps-spec/types";
 import {
   CANONICAL_EVENT_TYPES,
   isCanonicalRunEvent,
-  narrowCanonicalEvent,
   type CanonicalRunEvent,
 } from "../../src/types/canonical-events.ts";
 
@@ -146,26 +145,16 @@ describe("isCanonicalRunEvent", () => {
   });
 });
 
-describe("narrowCanonicalEvent", () => {
-  it("returns the same event when canonical", () => {
-    const event: RunEvent = { ...baseEnvelope, type: "output.emitted", data: 42 };
-    const narrow = narrowCanonicalEvent(event);
-    // Identity comparison — narrow is a sub-type of RunEvent so cast for the matcher.
-    expect(narrow as unknown).toBe(event as unknown);
-  });
-
-  it("returns null when not canonical", () => {
-    const event: RunEvent = { ...baseEnvelope, type: "@third-party/x", v: 1 };
-    expect(narrowCanonicalEvent(event)).toBeNull();
-  });
-
+describe("isCanonicalRunEvent — type-guard narrowing", () => {
+  // The guard's declared predicate (`event is CanonicalRunEvent`) is what lets
+  // `foldEvent`'s switch be exhaustively typed. Assert it here so a widening of
+  // the return type is caught by this file and not only by the reducer.
   it("uses the discriminant for type narrowing in switch statements", () => {
     const event: RunEvent = { ...baseEnvelope, type: "log.written", level: "warn", message: "x" };
-    const narrow = narrowCanonicalEvent(event);
-    if (narrow !== null && narrow.type === "log.written") {
+    if (isCanonicalRunEvent(event) && event.type === "log.written") {
       // TypeScript narrowing — these accesses are typed.
-      expect(narrow.level).toBe("warn");
-      expect(narrow.message).toBe("x");
+      expect(event.level).toBe("warn");
+      expect(event.message).toBe("x");
     } else {
       throw new Error("expected canonical narrowing");
     }

@@ -524,7 +524,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     });
 
     // Emit the "runtime ready" heartbeat through the same sink that
-    // receives every downstream event — ConsoleSink renders it for the
+    // receives every downstream event — the console sink renders it for the
     // user, and when a reporting session is active HttpSink forwards
     // it to the platform, flipping the remote run from pending to
     // running on the first ingested sequence. Identical signal shape

@@ -184,12 +184,16 @@ describe("validateManifest", () => {
     expect(result.valid && result.droppedRuntimeTools).toEqual(["report"]);
   });
 
+  // The field is REMOVED, not emptied — the editor's `setRuntimeTools` drops it
+  // on an empty selection too, so both writers emit the same bytes for an agent
+  // left with no runtime tools.
   it("drops a retired runtime tool id even when it is the only one declared", () => {
     const result = validateManifest(validAgentManifest({ runtime_tools: ["report"] }), {
       retiredRuntimeTools: "drop",
     });
     expect(result.valid).toBe(true);
-    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual([]);
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toBeUndefined();
+    expect(result.valid && result.droppedRuntimeTools).toEqual(["report"]);
   });
 
   it("reports no dropped runtime tools when every id is known", () => {
@@ -216,6 +220,17 @@ describe("validateManifest", () => {
     expect(Object.keys(manifest)).toEqual(Object.keys(stored));
     expect(manifest.custom_field).toBe("must-survive");
     expect(manifest.runtime_tools).toEqual(["log"]);
+  });
+
+  // Absent and `[]` parse identically, but they are different bytes and the
+  // agent editor's writer also drops the field on an empty selection — so the
+  // two write paths must agree or one manifest gets two integrity hashes.
+  it("dropRetiredRuntimeTools removes the key when nothing survives", () => {
+    const stored = { type: "agent", name: "@test/a", runtime_tools: ["report"] };
+    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
+    expect(dropped).toEqual(["report"]);
+    expect("runtime_tools" in manifest).toBe(false);
+    expect(manifest).toEqual({ type: "agent", name: "@test/a" });
   });
 
   it("dropRetiredRuntimeTools returns the same reference when nothing is retired", () => {
