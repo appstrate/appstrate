@@ -18,7 +18,10 @@
  */
 import { z } from "zod";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
-import { runStatusEnum } from "@appstrate/db/schema";
+// Import-free literal tuple, NOT the Drizzle `pgEnum` — this schema module is
+// bundled into the SPA and a value import from `@appstrate/db/schema` drags
+// drizzle-orm + the whole table schema into the browser.
+import { runStatusValues } from "@appstrate/db/run-status";
 import type { RunWireDto } from "./index.ts";
 
 /** `run_update` — emitted by the `notify_run_change` trigger (13 fields). */
@@ -26,7 +29,7 @@ export const runUpdateEventSchema = z.object({
   operation: z.enum(["INSERT", "UPDATE"]),
   id: z.string(),
   packageId: z.string().nullable(),
-  status: z.enum(runStatusEnum.enumValues),
+  status: z.enum(runStatusValues),
   userId: z.string().nullable(),
   endUserId: z.string().nullable(),
   orgId: z.string(),

@@ -13,54 +13,32 @@
 
 import { z } from "zod";
 import { pgEnum } from "drizzle-orm/pg-core";
+import { runStatusValues } from "../run-status.ts";
 
 export const orgRoleValues = ["owner", "admin", "member", "viewer"] as const;
 export const orgRoleEnum = pgEnum("org_role", orgRoleValues);
 export const zOrgRoleEnum = z.enum(orgRoleValues);
 export type OrgRole = z.infer<typeof zOrgRoleEnum>;
 
-export const runStatusValues = [
-  "pending",
-  "running",
-  "success",
-  "failed",
-  "timeout",
-  "cancelled",
-] as const;
+/**
+ * Run statuses are the one enum whose literals live OUTSIDE this file, in the
+ * import-free `../run-status.ts`: the SPA needs the values (not the Drizzle
+ * object), and importing them from here would pull drizzle-orm + the whole
+ * schema barrel into the browser bundle. The `pgEnum` below derives from that
+ * tuple, so the DB enum can never drift from what the client ships.
+ */
+export {
+  runStatusValues,
+  terminalRunStatusValues,
+  TERMINAL_RUN_STATUSES,
+  activeRunStatusValues,
+  ACTIVE_RUN_STATUSES,
+  TERMINAL_RUN_EVENT_TYPES,
+} from "../run-status.ts";
+export type { RunStatus, TerminalRunStatus } from "../run-status.ts";
+
 export const runStatusEnum = pgEnum("run_status", runStatusValues);
 export const zRunStatusEnum = z.enum(runStatusValues);
-export type RunStatus = z.infer<typeof zRunStatusEnum>;
-
-/**
- * Terminal run statuses — runs in any of these states are no longer
- * progressing. Used by event-ingestion ordering, SSE invalidation,
- * and any caller that needs to short-circuit polling.
- */
-export const terminalRunStatusValues = ["success", "failed", "timeout", "cancelled"] as const;
-export const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(terminalRunStatusValues);
-export type TerminalRunStatus = (typeof terminalRunStatusValues)[number];
-
-/**
- * Active (non-terminal) run statuses — the run is still progressing.
- * Mirror of {@link TERMINAL_RUN_STATUSES} for callers that need to gate
- * UI on "in flight" rather than "done". Derived from the same const
- * tuple pattern so adding a new status to {@link runStatusValues} forces
- * an explicit decision about which set it belongs to.
- */
-export const activeRunStatusValues = ["pending", "running"] as const;
-export const ACTIVE_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(activeRunStatusValues);
-
-/**
- * RunEvent types that mark a run as terminal — `run.success`, `run.failed`,
- * `run.timeout`, `run.cancelled`. Mirrors `terminalRunStatusValues` but for
- * the event-stream side of the boundary.
- */
-export const TERMINAL_RUN_EVENT_TYPES: ReadonlySet<string> = new Set([
-  "run.success",
-  "run.failed",
-  "run.timeout",
-  "run.cancelled",
-]);
 
 export const invitationStatusValues = ["pending", "accepted", "expired", "cancelled"] as const;
 export const invitationStatusEnum = pgEnum("invitation_status", invitationStatusValues);

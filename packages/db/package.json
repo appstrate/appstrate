@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     "./schema": "./src/schema/index.ts",
+    "./run-status": "./src/run-status.ts",
     "./client": "./src/client.ts",
     "./auth": "./src/auth.ts",
     "./auth-policy": "./src/auth-policy.ts",
