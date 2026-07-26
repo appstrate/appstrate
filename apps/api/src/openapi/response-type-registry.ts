@@ -199,6 +199,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
+  AgentMap:
+    "agent visual-map envelope (read-only manifest×install projection); SPA uses the generated spec type",
+  AgentMapNode: "AgentMap.nodes[] item; node-type-dependent `data`, no shared-type twin",
+  AgentMapDiagnostic: "AgentMap.diagnostics[] item; SPA uses the generated spec type",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",
   OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
   OAuthTokenResponse: "internal credential-proxy wire; mirrors @appstrate/core/sidecar-types",

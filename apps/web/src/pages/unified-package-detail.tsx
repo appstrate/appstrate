@@ -45,6 +45,7 @@ import {
 } from "../components/package-detail/agent-tabs";
 import { AgentConnectionsSection } from "../components/package-detail/agent-connections-section";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
+import { AgentMapView } from "../components/agent-map/agent-map-view";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
@@ -53,6 +54,7 @@ import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
 type DetailTab =
+  | "map"
   | "connections"
   | "runs"
   | "configuration"
@@ -206,6 +208,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── State ──
   const allValidTabs: DetailTab[] = [
+    "map",
     "connections",
     "runs",
     "configuration",
@@ -307,6 +310,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "runs", label: t("detail.tabRuns") },
+    { id: "map", label: t("detail.tabMap") },
     { id: "connections", label: t("detail.tabConnections") },
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
@@ -480,6 +484,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
           isHistorical={isHistoricalVersion}
         />
+      )}
+      {type === "agent" && tab === "map" && (
+        // Historical versions map the published manifest they pin, so the
+        // drawing matches the definition being inspected.
+        <AgentMapView packageId={packageId} version={versionLabel} />
       )}
       {type === "agent" && tab === "connections" && agentDetail && (
         <AgentConnectionsSection packageId={packageId} detail={agentDetail} />

@@ -1410,6 +1410,84 @@ export const schemas = {
       },
     },
   },
+  AgentMapNode: {
+    type: "object",
+    description:
+      "One card of the visual map. `position` is computed server-side (three columns: triggers left, agent centre, capabilities right) so every client lays the map out identically. `data` is node-type dependent: list cards carry `items[]`, the `agent` card carries the definition fields.",
+    required: ["id", "type", "position", "data"],
+    properties: {
+      id: { type: "string", description: "Stable node id, also the edge endpoint." },
+      type: {
+        type: "string",
+        enum: ["triggers", "schedules", "agent", "toolbox", "skills", "mcp_servers"],
+      },
+      position: {
+        type: "object",
+        required: ["x", "y"],
+        properties: { x: { type: "number" }, y: { type: "number" } },
+      },
+      data: { type: "object", additionalProperties: true },
+    },
+  },
+  AgentMapDiagnostic: {
+    type: "object",
+    description:
+      "A readiness failure routed to the node (and row) it describes, so the renderer badges the exact item. Sourced from the same readiness gate and connection resolver the run-kickoff uses — the map can never disagree with the run. `node_id`/`item_id` are null for a field with no place on the map.",
+    required: ["field", "code", "title", "message", "node_id", "item_id"],
+    properties: {
+      field: {
+        type: "string",
+        description:
+          "Readiness field path: `prompt`, `config.<key>`, `dependencies.skills.<id>` or `integrations.<id>`.",
+      },
+      code: { type: "string" },
+      title: { type: ["string", "null"] },
+      message: { type: "string" },
+      node_id: { type: ["string", "null"] },
+      item_id: { type: ["string", "null"] },
+    },
+  },
+  AgentMap: {
+    type: "object",
+    description:
+      "Read-only visual map of an agent: its manifest projected as positioned nodes and edges, crossed with the installation state (resolved versions, connection status, admin pins, active schedules) and annotated with readiness diagnostics. Empty cards are omitted rather than rendered blank, so the node set varies per agent.",
+    required: ["agent", "nodes", "edges", "diagnostics"],
+    properties: {
+      agent: {
+        type: "object",
+        required: ["packageId", "display_name", "version", "version_ref", "source"],
+        properties: {
+          packageId: { type: "string" },
+          display_name: { type: "string" },
+          version: { type: ["string", "null"] },
+          version_ref: {
+            type: "string",
+            description: "Version selector this projection was built from (`draft` by default).",
+          },
+          source: { type: "string" },
+        },
+      },
+      nodes: { type: "array", items: { $ref: "#/components/schemas/AgentMapNode" } },
+      edges: {
+        type: "array",
+        description:
+          "Directed: input cards point at the agent, capability cards are pointed at by it.",
+        items: {
+          type: "object",
+          required: ["id", "source", "target"],
+          properties: {
+            id: { type: "string" },
+            source: { type: "string" },
+            target: { type: "string" },
+          },
+        },
+      },
+      diagnostics: {
+        type: "array",
+        items: { $ref: "#/components/schemas/AgentMapDiagnostic" },
+      },
+    },
+  },
   IntegrationPin: {
     type: "object",
     required: [

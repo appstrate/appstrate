@@ -279,6 +279,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{scope}/{name}/map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Visual map of an agent
+         * @description Projects the agent's manifest into positioned nodes and edges (triggers and schedules on the left, the agent in the middle, toolbox / skills / mcp servers on the right) crossed with the installation state: resolved versions against declared ranges, per-integration connection status, admin pins, active schedules. `diagnostics[]` carries the readiness failures routed to the node and row they belong to, sourced from the same readiness gate and connection resolver as the run-kickoff 412 — so the map cannot disagree with what a run would do. Read-only: it owns no data and computes no verdict of its own. Cards that would be empty are omitted, so the node set varies per agent.
+         */
+        get: operations["getAgentMap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{scope}/{name}/model": {
         parameters: {
             query?: never;
@@ -4866,6 +4886,49 @@ export interface components {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
             runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
         };
+        /** @description Read-only visual map of an agent: its manifest projected as positioned nodes and edges, crossed with the installation state (resolved versions, connection status, admin pins, active schedules) and annotated with readiness diagnostics. Empty cards are omitted rather than rendered blank, so the node set varies per agent. */
+        AgentMap: {
+            agent: {
+                packageId: string;
+                display_name: string;
+                version: string | null;
+                /** @description Version selector this projection was built from (`draft` by default). */
+                version_ref: string;
+                source: string;
+            };
+            nodes: components["schemas"]["AgentMapNode"][];
+            /** @description Directed: input cards point at the agent, capability cards are pointed at by it. */
+            edges: {
+                id: string;
+                source: string;
+                target: string;
+            }[];
+            diagnostics: components["schemas"]["AgentMapDiagnostic"][];
+        };
+        /** @description A readiness failure routed to the node (and row) it describes, so the renderer badges the exact item. Sourced from the same readiness gate and connection resolver the run-kickoff uses — the map can never disagree with the run. `node_id`/`item_id` are null for a field with no place on the map. */
+        AgentMapDiagnostic: {
+            /** @description Readiness field path: `prompt`, `config.<key>`, `dependencies.skills.<id>` or `integrations.<id>`. */
+            field: string;
+            code: string;
+            title: string | null;
+            message: string;
+            node_id: string | null;
+            item_id: string | null;
+        };
+        /** @description One card of the visual map. `position` is computed server-side (three columns: triggers left, agent centre, capabilities right) so every client lays the map out identically. `data` is node-type dependent: list cards carry `items[]`, the `agent` card carries the definition fields. */
+        AgentMapNode: {
+            /** @description Stable node id, also the edge endpoint. */
+            id: string;
+            /** @enum {string} */
+            type: "triggers" | "schedules" | "agent" | "toolbox" | "skills" | "mcp_servers";
+            position: {
+                x: number;
+                y: number;
+            };
+            data: {
+                [key: string]: unknown;
+            };
+        };
         AgentSkillRef: {
             id: string;
             version?: string;
@@ -6451,6 +6514,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentConnectionReadiness"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAgentMap: {
+        parameters: {
+            query?: {
+                /** @description Which agent definition to map: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`**, so a never-published agent still renders. Ignored for system agents. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent visual map */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMap"];
                 };
             };
             401: components["responses"]["Unauthorized"];
