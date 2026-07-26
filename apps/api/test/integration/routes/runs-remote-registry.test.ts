@@ -485,6 +485,86 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(res.status).toBe(201);
   });
 
+  // `source.modelId` / `source.proxyId` used to be accepted (and validated)
+  // on this route while `run-creation.ts` never read them — the pin the
+  // OpenAPI advertised was silently dropped and `runs.model_label` /
+  // `runs.model_source` stayed NULL. The fields are gone from the contract;
+  // both source variants are `.strict()` so a stale client fails loudly
+  // instead of believing its pin took effect.
+  it("rejects `source.modelId` on the registry shape with 400", async () => {
+    await seedPublishedAgent(ctx, "1.2.3");
+
+    const res = await post({
+      source: {
+        kind: "registry",
+        packageId: "@acme/briefing",
+        stage: "published",
+        spec: "1.2.3",
+        modelId: "gpt-4o",
+      },
+      applicationId: ctx.defaultAppId,
+      input: {},
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("validation_failed");
+    expect(body.detail).toContain("modelId");
+
+    // Nothing was created — the body never reached run creation.
+    const created = await db.select({ id: runs.id }).from(runs);
+    expect(created).toHaveLength(0);
+  });
+
+  it("rejects `source.proxyId` on the registry shape with 400", async () => {
+    await seedPublishedAgent(ctx, "1.2.3");
+
+    const res = await post({
+      source: {
+        kind: "registry",
+        packageId: "@acme/briefing",
+        stage: "published",
+        spec: "1.2.3",
+        proxyId: "none",
+      },
+      applicationId: ctx.defaultAppId,
+      input: {},
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("validation_failed");
+    expect(body.detail).toContain("proxyId");
+
+    const created = await db.select({ id: runs.id }).from(runs);
+    expect(created).toHaveLength(0);
+  });
+
+  it("rejects `source.modelId` on the inline shape with 400", async () => {
+    const res = await post({
+      source: {
+        kind: "inline",
+        manifest: publishedManifest("0.0.1"),
+        prompt: PROMPT,
+        modelId: "gpt-4o",
+      },
+      applicationId: ctx.defaultAppId,
+      input: {},
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("validation_failed");
+    expect(body.detail).toContain("modelId");
+
+    // No shadow package leaked either — the reject happens at body parsing.
+    const ephemerals = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.ephemeral, true));
+    expect(ephemerals).toHaveLength(0);
+  });
+
   it("accepts an integrity hint without rejecting on drift", async () => {
     await seedPublishedAgent(ctx, "1.2.3");
     const res = await post({

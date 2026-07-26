@@ -50,8 +50,6 @@ export interface CreateRunInput {
   agent: LoadedPackage;
   input?: Record<string, unknown> | null;
   config: Record<string, unknown>;
-  modelId?: string | null;
-  proxyId?: string | null;
   apiKeyId?: string;
   overrideVersionLabel?: string;
   /**

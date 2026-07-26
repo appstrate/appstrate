@@ -1059,8 +1059,6 @@ export const runsPaths = {
                         },
                         prompt: { type: "string", minLength: 1 },
                         config: { type: "object" },
-                        modelId: { type: ["string", "null"] },
-                        proxyId: { type: ["string", "null"] },
                       },
                     },
                     {
@@ -1091,8 +1089,6 @@ export const runsPaths = {
                             "Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal.",
                         },
                         config: { type: "object" },
-                        modelId: { type: ["string", "null"] },
-                        proxyId: { type: ["string", "null"] },
                       },
                     },
                   ],

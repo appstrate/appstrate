@@ -18394,8 +18394,6 @@ export interface operations {
                         manifest: Record<string, never>;
                         prompt: string;
                         config?: Record<string, never>;
-                        modelId?: string | null;
-                        proxyId?: string | null;
                     } | {
                         /** @constant */
                         kind: "registry";
@@ -18412,8 +18410,6 @@ export interface operations {
                         /** @description Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal. */
                         integrity?: string;
                         config?: Record<string, never>;
-                        modelId?: string | null;
-                        proxyId?: string | null;
                     };
                     applicationId: string;
                     /** @description Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions. */

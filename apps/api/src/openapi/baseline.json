@@ -2976,12 +2976,6 @@
                           },
                           "config": {
                             "type": "object"
-                          },
-                          "modelId": {
-                            "type": ["string", "null"]
-                          },
-                          "proxyId": {
-                            "type": ["string", "null"]
                           }
                         }
                       },
@@ -3013,12 +3007,6 @@
                           },
                           "config": {
                             "type": "object"
-                          },
-                          "modelId": {
-                            "type": ["string", "null"]
-                          },
-                          "proxyId": {
-                            "type": ["string", "null"]
                           }
                         }
                       }
