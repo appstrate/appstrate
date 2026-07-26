@@ -20,7 +20,12 @@ import {
   getVersionInfo,
   getLatestVersionCreatedAt,
 } from "../../../src/services/package-versions.ts";
-import { buildMinimalZip, downloadVersionZip } from "../../../src/services/package-storage.ts";
+import {
+  buildMinimalZip,
+  downloadVersionZip,
+  unzipAndNormalize,
+} from "../../../src/services/package-storage.ts";
+import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 describe("package-versions service", () => {
   let userId: string;
   let orgId: string;
@@ -452,6 +457,47 @@ describe("package-versions service", () => {
         .from(packageVersionDependencies)
         .where(eq(packageVersionDependencies.versionId, versionId));
       expect(rows.map((r) => r.depName)).toContain("fathom");
+    });
+
+    // Regression: the non-agent branch hand-rolled its storage folder with a
+    // `type === "integration" ? "integrations" : "skills"` ternary, so an
+    // `mcp-server` package read its files from `skills/` — the folder the
+    // upload path (`storageFolderForType`) never writes for that type. The
+    // decoy object below is written to the WRONG folder under the same item id
+    // so the assertion pins WHICH folder was read, not merely that some bytes
+    // were found.
+    it("reads an mcp-server package's files from the mcp-servers folder, not skills", async () => {
+      const id = `@${orgSlug}/mcpb-pkg`;
+      const pkg = await seedPackage({
+        orgId,
+        id,
+        type: "mcp-server",
+        draftManifest: { name: id, version: "1.0.0", type: "mcp-server" },
+        draftContent: "",
+      });
+
+      await uploadPackageFiles("mcp-servers", orgId, id, {
+        "server.js": new TextEncoder().encode("// real MCPB payload"),
+      });
+      await uploadPackageFiles("skills", orgId, id, {
+        "SKILL.md": new TextEncoder().encode("# decoy — must never be published"),
+      });
+
+      const result = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect("error" in result).toBe(false);
+
+      const [row] = await db
+        .select({ integrity: packageVersions.integrity })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, pkg.id), eq(packageVersions.version, "1.0.0")))
+        .limit(1);
+      const zip = await downloadVersionZip(pkg.id, "1.0.0", row!.integrity);
+      expect(zip).not.toBeNull();
+
+      const entries = unzipAndNormalize(zip!);
+      expect(Object.keys(entries)).toContain("server.js");
+      expect(Object.keys(entries)).not.toContain("SKILL.md");
+      expect(new TextDecoder().decode(entries["server.js"])).toBe("// real MCPB payload");
     });
   });
 

@@ -86,7 +86,7 @@ export function PackageCard({
           ))}
           {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
             <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
-              {t("list.used_by_agents", { count: usedByAgents, ns: "agents" })}
+              {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
             </span>
           )}
         </div>

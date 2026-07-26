@@ -26,7 +26,6 @@
  * catch-all user-profile endpoint; adding a capability means adding a
  * named route here):
  *   - GET    /orgs                      — orgs the caller belongs to
- *   - GET    /models                    — models available in the active org
  *   - GET    /connections               — the caller's integration connections
  *   - DELETE /connections/:connectionId — destructive global credential delete
  *   - GET    /integration-pins          — member-self pins for an agent
@@ -40,13 +39,11 @@ import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
-import { listOrgModels } from "../services/org-models.ts";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
 import { getActor } from "../lib/actor.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
 import { requireAppContext } from "../middleware/app-context.ts";
 import { getAppScope, type ActorScope, type AppScope } from "../lib/scope.ts";
 import {
@@ -152,25 +149,6 @@ router.get("/orgs", async (c) => {
       })),
     ),
   );
-});
-
-/**
- * GET /api/me/models — list models available in the active org.
- *
- * Requires `models:read`. Org context is set by:
- *   - cookie session: `X-Org-Id` header (resolved by `requireOrgContext`)
- *   - API key: bound org (resolved by the API-key auth branch)
- *   - OIDC dashboard JWT: `org_id` claim (set inline by the strategy)
- *   - OIDC end-user JWT: org owning the application (set inline by the strategy)
- *
- * Returns the same shape as `listOrgModels` — the catalog the SPA model
- * picker consumes. The route layer never exposes decrypted credentials;
- * `apiKey` is intentionally omitted from the catalog DTO.
- */
-router.get("/models", requirePermission("models", "read"), async (c) => {
-  const orgId = c.get("orgId");
-  const models = await listOrgModels(orgId);
-  return c.json(listResponse(models));
 });
 
 /**

@@ -464,6 +464,7 @@
   "proxies.modal.labelPlaceholder": "ex: Decodo Résidentiel",
   "proxies.modal.url": "URL du proxy",
   "proxies.modal.urlPlaceholder": "http://user:pass@host:port",
+  "proxies.modal.urlHint": "Laissez vide pour conserver l'URL actuelle.",
   "proxies.agent.label": "Proxy",
   "proxies.agent.inherit": "Par défaut ({{name}})",
   "proxies.agent.inheritNoDefault": "Par défaut",

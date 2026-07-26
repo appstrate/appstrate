@@ -28,6 +28,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
+import { storageFolderForType } from "./package-items/config.ts";
 import { toISO } from "../lib/date-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
@@ -625,7 +626,11 @@ export async function createVersionFromDraft(params: {
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
   if (pkg.type === "agent") {
-    const storedFiles = await downloadPackageFiles("agents", orgId, packageId);
+    const storedFiles = await downloadPackageFiles(
+      storageFolderForType(pkg.type),
+      orgId,
+      packageId,
+    );
     if (storedFiles) {
       const entries: Record<string, Uint8Array> = { ...storedFiles };
       entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
@@ -636,11 +641,14 @@ export async function createVersionFromDraft(params: {
       zipBuffer = buildMinimalZip(finalManifest, content);
     }
   } else {
-    // pkg.type === "skill" | "integration" — both bundle their stored files
-    // (skill content / integration entrypoint+bundle) plus the rewritten
-    // manifest, from their respective storage folder.
-    const folder = pkg.type === "integration" ? "integrations" : "skills";
-    const files = await downloadPackageFiles(folder, orgId, packageId);
+    // pkg.type === "skill" | "integration" | "mcp-server" — all three bundle
+    // their stored files (skill content / integration entrypoint+bundle /
+    // MCPB payload) plus the rewritten manifest, from their respective storage
+    // folder. The folder MUST come from `storageFolderForType` — the single
+    // mapping the upload path (`routes/packages.ts`), the deletion outbox and
+    // the orphan scanner all use. A hand-rolled ternary here silently sent
+    // `mcp-server` reads to `skills/`.
+    const files = await downloadPackageFiles(storageFolderForType(pkg.type), orgId, packageId);
     if (!files) {
       throw new Error(
         `Cannot create version for ${packageId}: package files not found in storage. Re-upload the package before creating a version.`,

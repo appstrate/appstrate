@@ -18,7 +18,6 @@ import {
   createTestContext,
   createTestOrg,
   authHeaders,
-  orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
@@ -293,80 +292,6 @@ describe("Me API (/api/me)", () => {
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/context");
       expect(res.status).toBe(401);
-    });
-  });
-
-  describe("GET /api/me/models", () => {
-    let ctx: TestContext;
-
-    beforeEach(async () => {
-      ctx = await createTestContext();
-    });
-
-    it("returns the model catalog for the active org (cookie session)", async () => {
-      // Org context IS required here — `/api/me/models` runs inside
-      // org context (unlike `/api/me/orgs` which precedes it).
-      const res = await app.request("/api/me/models", {
-        headers: orgOnlyHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[] };
-      expect(body.data).toBeArray();
-    });
-
-    it("works with API key auth (org pinned by the key)", async () => {
-      const apiKey = await seedApiKey({
-        createdBy: ctx.user.id,
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        scopes: ["models:read"],
-      });
-
-      const res = await app.request("/api/me/models", {
-        headers: { Authorization: `Bearer ${apiKey.rawKey}` },
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[] };
-      expect(body.data).toBeArray();
-    });
-
-    it("rejects API keys without `models:read` scope with 403", async () => {
-      const apiKey = await seedApiKey({
-        createdBy: ctx.user.id,
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        // Empty scopes — `models:read` is missing.
-        scopes: [],
-      });
-
-      const res = await app.request("/api/me/models", {
-        headers: { Authorization: `Bearer ${apiKey.rawKey}` },
-      });
-
-      expect(res.status).toBe(403);
-    });
-
-    it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/me/models");
-      expect(res.status).toBe(401);
-    });
-
-    it("does NOT return decrypted credentials in the catalog", async () => {
-      const res = await app.request("/api/me/models", {
-        headers: { ...authHeaders(ctx) },
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<Record<string, unknown>>;
-      };
-      // Catalog DTO must never include `apiKey` — that field is reserved
-      // for `models.load()` (single-model resolution from PlatformServices).
-      for (const m of body.data) {
-        expect(m.apiKey).toBeUndefined();
-      }
     });
   });
 

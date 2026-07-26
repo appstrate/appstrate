@@ -318,8 +318,8 @@ const schedulesRouter = createSchedulesRouter();
 app.route("/api/orgs", orgsRouter);
 
 // User-scoped identity routes — `/api/me/orgs` skips `requireOrgContext`
-// (it is the prerequisite to setting `X-Org-Id`); `/api/me/models` runs
-// inside org context.
+// (it is the prerequisite to setting `X-Org-Id`); the other routes run
+// inside org (or application) context.
 app.route("/api/me", meRouter);
 
 app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)

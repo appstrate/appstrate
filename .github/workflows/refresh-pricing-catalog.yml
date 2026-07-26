@@ -16,6 +16,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    # `bun install` below runs the root `prepare` script (`husky`), which points
+    # git's `core.hooksPath` at `.husky/`. The `pre-push` hook there runs
+    # `bun run check`, so when `create-pull-request` pushes the drift branch the
+    # whole quality gate fires inside this runner and the push dies on
+    # `Failed: //#detect:breaking` → `failed to push some refs`. That silently
+    # broke the weekly pricing refresh for a month. `HUSKY=0` is husky v9's
+    # documented opt-out: the hooks are never installed, so commit/push in this
+    # job are plain git operations. Nothing is lost — the Check workflow runs
+    # the same gate on the PR this job opens.
+    env:
+      HUSKY: "0"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
