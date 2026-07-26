@@ -11,7 +11,10 @@ import {
   type IntegrationManifest,
   type McpServerManifest,
 } from "./validation.ts";
-import { checkCompanionFiles, companionFilesFromRecord } from "./companion-files.ts";
+import {
+  checkCompanionFiles,
+  companionFilesFromRecord,
+} from "@appstrate/afps-shared/companion-files";
 import {
   unzipBounded,
   DecompressionLimitError,

@@ -53,6 +53,7 @@ function fakeInitCtx(): ModuleInitContext {
     appUrl: "http://localhost:3000",
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
+    getOrgName: async () => null,
     services: {} as ModuleInitContext["services"],
   };
 }

@@ -379,6 +379,7 @@ describe("oidcModule.init() — boot wiring", () => {
       // about the post-migration steps of `init()` here.
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
+      getOrgName: async () => null,
       services: {} as import("@appstrate/core/module").PlatformServices,
     };
 
@@ -416,6 +417,7 @@ describe("oidcModule.init() — boot wiring", () => {
       appUrl: process.env.APP_URL ?? "http://localhost:3000",
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
+      getOrgName: async () => null,
       services: {} as import("@appstrate/core/module").PlatformServices,
     };
 

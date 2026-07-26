@@ -459,7 +459,7 @@ export interface BroadcastHooks {
    * event because Better Auth creates the user BELOW the module layer, so
    * `packages/db` cannot import a module to ask.
    */
-  beforeSignup: (email: string, ctx?: BeforeSignupContext) => Promise<void>;
+  beforeSignup: (email: string, ctx: BeforeSignupContext) => Promise<void>;
   /**
    * Post-signup side effect — runs after the BA user row is committed with
    * the freshly minted `user.id`. Symmetric with `beforeSignup`: broadcast to
@@ -468,7 +468,7 @@ export interface BroadcastHooks {
    * redirect lands on the client's callback instead of the dashboard
    * onboarding flow.
    */
-  afterSignup: (user: { id: string; email: string }, ctx?: AfterSignupContext) => Promise<void>;
+  afterSignup: (user: { id: string; email: string }, ctx: AfterSignupContext) => Promise<void>;
 }
 
 /**
@@ -1124,10 +1124,9 @@ export interface ModuleInitContext {
   getOrgAdminEmails: (orgId: string) => Promise<string[]>;
   /**
    * Query helper: resolve an organization's display name, or null when the
-   * org no longer exists. Optional — older platforms don't provide it, so
-   * modules must degrade gracefully when absent.
+   * org no longer exists.
    */
-  getOrgName?: (orgId: string) => Promise<string | null>;
+  getOrgName: (orgId: string) => Promise<string | null>;
   /**
    * Typed platform capabilities injected at init. Modules capture this
    * reference and consume services through it without importing

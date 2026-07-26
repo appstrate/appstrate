@@ -68,6 +68,7 @@ describe("core-providers module", () => {
         appUrl: "http://localhost:3000",
         getSendMail: async () => () => {},
         getOrgAdminEmails: async () => [],
+        getOrgName: async () => null,
         services: {} as never,
       }),
     ).resolves.toBeUndefined();

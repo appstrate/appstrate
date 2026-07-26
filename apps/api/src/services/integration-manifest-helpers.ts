@@ -23,7 +23,7 @@
 
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
-import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/core/credential-template";
+import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
 
 /**
  * AFPS `delivery.http` block (snake_case). The sidecar's canonical
@@ -179,7 +179,7 @@ const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
  * skip env vars / files whose backing credential field is absent), mirroring
  * the old `delivery.env.from` "field missing → skip" behaviour.
  *
- * Thin wrapper over the shared `@appstrate/core/credential-template` renderer
+ * Thin wrapper over the shared `@appstrate/afps-shared/credential-template` renderer
  * (single implementation of the `{$credential.<field>}` syntax) pinned to the
  * `delivery.env` / `delivery.files` empty→null policy.
  */

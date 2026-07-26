@@ -1543,6 +1543,7 @@ describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", 
       appUrl: "http://localhost:3000",
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
+      getOrgName: async () => null,
       services: {} as never,
     });
     return { captured: () => last };
@@ -1752,6 +1753,7 @@ describe("remote run.started — emitted at first event, not at row insert", () 
       appUrl: "http://localhost:3000",
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
+      getOrgName: async () => null,
       services: {} as never,
     });
     return { started: () => seen };

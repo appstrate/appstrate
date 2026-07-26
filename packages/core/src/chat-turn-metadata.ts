@@ -8,8 +8,6 @@ export const CHAT_MAX_STEPS = 16;
 export const CHAT_TOOL_STEP_BUDGET = CHAT_MAX_STEPS - 1;
 export const CHAT_FINAL_STEP_SYSTEM_PROMPT =
   "You are on the final step budget for this turn. Do not call tools. Give the user a concise final answer from the evidence already gathered, explicitly mark any remaining checks as untested, and ask them to continue if more tool work is needed.";
-export const CHAT_TOOL_STEP_BUDGET_DENIAL =
-  "Tool step budget reached for this chat turn. Do not call tools again. Give the user a concise final answer from the evidence already gathered, explicitly mark any remaining checks as untested, and ask them to continue if more tool work is needed.";
 
 export interface AppstrateTurnMetadata {
   engine: ChatTurnEngine;

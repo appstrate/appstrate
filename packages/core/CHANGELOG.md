@@ -5,6 +5,149 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] — 2026-07-26
+
+Major release grouping every contract change the repository accumulated after
+`5.0.0` into ONE coordinated break, so consumers pay a single lockstep cycle:
+the `report` runtime tool is retired in favour of published documents,
+`checkUsageAllowed` gains a required argument, two module-contract signatures
+that were optional-but-always-supplied become required, and a set of exports
+with no importer anywhere is deleted.
+
+> **Release ordering.** `@appstrate/afps-shared` stays at `^0.3.1` — already
+> published, nothing to release first. After tagging `core@6.0.0` and letting
+> CI publish, bump the `^` range in every external consumer
+> (`scripts/check-consumer-versions.ts` is the authoritative list:
+> registry, cloud, portal, connect-helper, module-claude-code). Workspace
+> packages inside this monorepo resolve `workspace:*` and need no bump.
+
+> **Deploy ordering — modules BEFORE the platform**, for the same reason as
+> `5.0.0`: a module implementing `beforeUsage` / `checkUsageAllowed` must be on
+> this contract before the platform starts passing the new `subscription` fact.
+
+### Added
+
+- **`@appstrate/core/oauth-bearer-swap`** — `ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY`
+  (`"sk-ant-oat01-placeholder"`). The placeholder `apiKey` handed to pi-ai for
+  an Anthropic OAuth subscription binding on every path where the real token is
+  swapped in later (the run path's sidecar `/llm` branch, the CLI's llm-proxy
+  preset path). It lives beside the swap that consumes it so the producers and
+  the consumer agree on one literal: pi-ai's `anthropic-messages` provider
+  selects the OAuth request shape from `apiKey.includes("sk-ant-oat")` alone, so
+  a placeholder missing that marker silently emits the api-key shape and
+  upstream rejects it. Non-breaking; nothing existing changes meaning.
+
+### Changed (BREAKING)
+
+- **`PlatformServices.checkUsageAllowed` gains a required `subscription: boolean`.**
+  The full argument shape is now
+  `{ orgId, presetId, sessionId, subscription }`. It is the one fact the caller
+  owns and the platform cannot derive: the turn runs on a provider subscription
+  the organization authorized over OAuth (claude-code, codex), driven in-process
+  rather than through the inference gateway. Such a turn is
+  `credentialSource: "org"` whatever its preset resolves to, and it is now
+  dispatched like any other — it still occupies the platform's own process.
+  **Every implementer must widen its parameter type**; every caller must pass
+  the field. This is what forces the major.
+
+- **`validateManifest` DROPS unknown `runtime_tools` instead of rejecting.**
+  For `type: "agent"`, ids absent from `SELECTABLE_RUNTIME_TOOLS` are filtered
+  out of the parsed manifest before schema validation; the manifest stays valid.
+  A removal is not retroactive — manifests persisted before it (DB drafts, and
+  published ZIPs, which are immutable by construction) keep the retired id
+  forever, and the run path re-validates the stored manifest, so a hard enum
+  rejection would make every such agent permanently unrunnable. Validation now
+  mirrors what `buildRuntimeToolDefs` already did at runtime. **Behavioural
+  break for anything that relied on a rejection** (a consumer asserting that an
+  unknown tool id fails validation now gets `valid: true` with the id stripped),
+  and for anything that round-trips `result.manifest` expecting the input's
+  `runtime_tools` array back verbatim. The returned object is the same reference
+  when nothing needed dropping.
+
+- **`ModuleInitContext.getOrgName` is required** (was `getOrgName?`). The
+  platform has always supplied it (`buildModuleInitContext`), and the optional
+  marker only forced every consumer through a `?.` / `!` it could never
+  actually need. Modules can call it unconditionally; anything CONSTRUCTING a
+  `ModuleInitContext` (module test fakes, essentially) must now provide it.
+
+- **`ModuleHooks.beforeSignup` / `afterSignup` — the `ctx` argument is required**
+  (was `ctx?`). Signatures are now
+  `(email: string, ctx: BeforeSignupContext) => Promise<void>` and
+  `(user: { id, email }, ctx: AfterSignupContext) => Promise<void>`. Both hooks
+  have always been dispatched with a context (`ctx.headers` is `null`, not the
+  context itself, when Better Auth creates a user outside an HTTP request), and
+  the platform's own injection slots already typed it non-optional internally.
+  An implementer written against the old signature keeps compiling
+  (`ctx?: T` is assignable to `ctx: T`); what changes is that `ctx?.headers`
+  and `ctx | undefined` narrowings are now dead code, and any direct
+  `callAllHooks("beforeSignup", email)` call must pass the context.
+
+### Removed (BREAKING)
+
+- **The `report` runtime tool is gone.** It was a deprecated compatibility
+  shim whose replacement is a published document (`outputs/report.md`, or the
+  `publish_document` tool). Concretely:
+  - `EVENT_EMITTER_RUNTIME_TOOLS` no longer contains `"report"`, so
+    `EventEmitterRuntimeTool` and the derived `SELECTABLE_RUNTIME_TOOLS` /
+    `SelectableRuntimeTool` narrow accordingly.
+  - `CANONICAL_RUNTIME_TOOL_EVENT_TYPES` no longer contains `"report.appended"`.
+  - `agentManifestSchema`'s `runtime_tools` enum and the published
+    `schema/agent.schema.json` enum no longer accept `"report"`.
+
+  A stored manifest still naming `report` remains **runnable and valid** — the
+  id is dropped by `validateManifest` (above) and ignored by
+  `buildRuntimeToolDefs`. What breaks is code that references the literal:
+  a consumer typing a variable as `EventEmitterRuntimeTool = "report"`, a
+  handler switching exhaustively on `CANONICAL_RUNTIME_TOOL_EVENT_TYPES`, or a
+  validator asserting the old enum contents.
+
+- **`@appstrate/core/errors` — `AppError` and `createErrorStatusMap` removed.**
+  No importer anywhere in the platform; the RFC 9457 `ApiError` family in
+  `@appstrate/core/api-errors` is the error contract. `getErrorMessage` is
+  unaffected and stays.
+
+- **`@appstrate/core/api-errors` — `serviceUnavailable()` removed.** No caller
+  ever emitted a 503 through it. `badGateway()` (502) is live and stays.
+
+- **`@appstrate/core/platform-types` — the `Run` and `RunLog` interfaces
+  removed.** Public DTO shapes with no importer: every consumer of this subpath
+  imports orchestrator/workload/pub-sub types instead, and a module that reads
+  run rows does so through `PlatformServices`. Nothing else in the file
+  referenced them.
+
+- **`@appstrate/core/naming` — `TOOL_NAME_INNER_PATTERN` removed.** It was a
+  pure alias of `CREDENTIAL_KEY_RE`, kept for a consumer that no longer exists.
+  Use `CREDENTIAL_KEY_RE` — same regex, same alphabet.
+
+- **`@appstrate/core/chat-turn-metadata` — `CHAT_TOOL_STEP_BUDGET_DENIAL`
+  removed.** Unused prompt string. Its three siblings (`CHAT_MAX_STEPS`,
+  `CHAT_TOOL_STEP_BUDGET`, `CHAT_FINAL_STEP_SYSTEM_PROMPT`) are live and stay.
+
+- **`@appstrate/core/validation` — `PACKAGE_TYPES` removed.** It was
+  `packageTypeEnum.options` under another name. Use
+  `packageTypeEnum.options` (the enum itself is live and re-exported from
+  `@afps-spec/schema`).
+
+- **`@appstrate/core/semver` — `satisfiesRange()` removed.** No caller.
+  `matchVersion`, `isValidRange`, `normalizeVersion`, `compareVersionsDesc`,
+  `bumpVersion`, `bumpPatch` are unaffected.
+
+- **`@appstrate/core/companion-files` (whole subpath) removed.** It was a
+  100% re-export of `@appstrate/afps-shared/companion-files` with no importer.
+  Import from `@appstrate/afps-shared/companion-files` directly — identical
+  surface (`CompanionViolationReason`, `CompanionFileViolation`,
+  `CompanionFileSource`, `companionFilesFromMap`, `companionFilesFromRecord`,
+  `checkCompanionFiles`).
+
+- **`@appstrate/core/credential-template` (whole subpath) removed.** Same
+  profile — a pure re-export. Import from
+  `@appstrate/afps-shared/credential-template` (`CREDENTIAL_REF`,
+  `RenderCredentialTemplateOptions`, `renderCredentialTemplate`).
+
+  `@appstrate/core/ssrf` is the third file of this shape and is deliberately
+  **kept**: it has ~20 live importers on fail-closed SSRF paths, and churning
+  them buys nothing.
+
 ## [5.0.0] — 2026-07-25
 
 Major release: the durable **documents** surface (URIs, storage enumeration +

@@ -53,6 +53,7 @@ function mockCtx(): ModuleInitContext {
     appUrl: "http://localhost:3000",
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
+    getOrgName: async () => null,
     services: {} as ModuleInitContext["services"],
   };
 }
@@ -303,7 +304,7 @@ describe("module-loader", () => {
         mockCtx(),
       );
 
-      await callAllHooks("beforeSignup", "user@example.com");
+      await callAllHooks("beforeSignup", "user@example.com", { headers: null });
       expect(calls).toEqual(["a", "b"]);
     });
   });

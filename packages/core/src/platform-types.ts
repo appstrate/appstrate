@@ -3,7 +3,7 @@
 /**
  * Platform runtime capability types — structural contracts shared between
  * apps/api and the published @appstrate/core package (container orchestrator,
- * run/run-log DTOs, realtime event shape, inline-run body, pub/sub).
+ * realtime event shape, inline-run body, pub/sub).
  *
  * This file is type-only (no runtime code). The concrete implementations live
  * in apps/api; consumers reference these shapes without reaching into apps/api
@@ -26,57 +26,6 @@ export type { SidecarConfig, SidecarLaunchSpec, LlmProxyConfig } from "./sidecar
  * `@appstrate/connect`.
  */
 export type Actor = { type: "user"; id: string } | { type: "end_user"; id: string };
-
-// ---------------------------------------------------------------------------
-// Public DTO shapes — stable fields of platform entities
-//
-// These types expose the minimum fields external modules can rely on at the
-// package boundary. Concrete apps/api rows carry more fields; width
-// subtyping makes them assignable to these narrower shapes. `result` and
-// nested payloads are typed as `unknown` — modules cast at the call site
-// when they need the richer shape.
-// ---------------------------------------------------------------------------
-
-/**
- * Stable public fields of a run row. Narrower than the internal row —
- * exposes what external modules need to reason about a run lifecycle
- * without leaking scheduler/actor/api-key internals.
- *
- * `result` is `unknown` because the shape depends on the agent and is
- * application-defined; consumers cast at the call site.
- */
-export interface Run {
-  readonly id: string;
-  readonly status: string;
-  readonly orgId: string;
-  readonly applicationId: string;
-  /**
-   * Source agent. NULL when the source agent has been deleted — the run
-   * row survives via `runs.package_id ON DELETE SET NULL` (see migration
-   * 0017_decouple_runs_from_packages.sql). Modules reading `packageId` to
-   * route a run to a specific agent must handle null (e.g. skip, or read
-   * the denormalized snapshot exposed by callers when relevant).
-   */
-  readonly packageId: string | null;
-  readonly result: unknown;
-  readonly error: string | null;
-}
-
-/**
- * Stable public fields of a run log row. `data` is the free-form JSON
- * payload emitted alongside the line. Log-level literals are kept as
- * `string` (rather than a union) so future extensions are non-breaking.
- */
-export interface RunLog {
-  readonly id: number;
-  readonly runId: string;
-  readonly level: string;
-  readonly type: string;
-  readonly event: string | null;
-  readonly message: string | null;
-  readonly data: unknown;
-  readonly createdAt: Date;
-}
 
 // ---------------------------------------------------------------------------
 // Workload / orchestrator value types

@@ -25,8 +25,8 @@ export const SLUG_REGEX = new RegExp(`^${SLUG_PATTERN}$`);
  *  - **Credential / AFPS auth keys** — the sidecar substitution contract
  *    (`\w+`, hyphens disallowed); consumed by the web credentials editor and
  *    the API's system-integration `auth_key` gate (AFPS §7.2).
- *  - **MCP tool-name inner tokens** — each half of a `{ns}__{tool}` name
- *    (see {@link TOOL_NAME_INNER_PATTERN}, which aliases this).
+ *  - **MCP tool-name inner tokens** — the tool half of a `{ns}__{tool}` name
+ *    (`TOOL_NAME_PATTERN` below reuses this exact alphabet).
  */
 export const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
 
@@ -294,22 +294,10 @@ export function attachmentDisposition(name: string): string {
  * `mcp__plugin_<plugin>_<server>__<tool>` super-prefix).
  */
 export const TOOL_NAME_MAX_LEN = MCP_TOOL_NAME_MAX_LENGTH;
-/**
- * Inner-token snake_case pattern shared by both halves of the namespaced MCP
- * tool name. Exposed so consumers that validate a *single* tool name (e.g.
- * `agentManifestSchema`'s `integrations[id].tools[]` — the agent
- * picks bare tool names, not pre-namespaced ones) match the same alphabet as
- * `TOOL_NAME_PATTERN`. Forbids a leading underscore so validation.ts and
- * naming.ts agree: validation.ts used to accept `_internal` while
- * naming.ts rejected `_internal__foo`, leaving a manifest-vs-runtime drift.
- *
- * Same shape as {@link CREDENTIAL_KEY_RE} — aliased so the pattern lives once.
- */
-export const TOOL_NAME_INNER_PATTERN = CREDENTIAL_KEY_RE;
 // The namespace token derives from a package id whose scope may start with a
 // digit (`SLUG_PATTERN` and the AFPS name pattern both allow `@1password/…`),
 // so it admits a leading digit. The tool token keeps the stricter
-// letter-leading alphabet of {@link TOOL_NAME_INNER_PATTERN}.
+// letter-leading alphabet of {@link CREDENTIAL_KEY_RE}.
 const TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9_]*__[a-z][a-z0-9_]*$/;
 
 export function isValidToolName(name: string): boolean {

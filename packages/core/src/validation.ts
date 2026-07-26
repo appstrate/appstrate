@@ -67,8 +67,6 @@ export const scopedNameRegex: RegExp = (() => {
 export const packageTypeEnum = afpsPackageTypeEnum;
 /** Union type of supported package types. */
 export type PackageType = z.infer<typeof packageTypeEnum>;
-/** Array of all valid package type strings. */
-export const PACKAGE_TYPES = packageTypeEnum.options;
 
 /** AFPS JSON Schema URLs by package type — for the `$schema` field in manifest.json. */
 export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
