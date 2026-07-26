@@ -3,6 +3,8 @@ contact_links:
   - name: 💬 Discord Community
     url: https://discord.gg/5Js2CKWNnh
     about: Chat with the community, ask questions, and share what you're building.
-  - name: Questions & Discussions
-    url: https://github.com/appstrate/appstrate/discussions
-    about: Ask questions and discuss ideas in long-form.
+  # GitHub Discussions is NOT enabled on this repository — a link here would 404.
+  # Re-add this entry only together with flipping `has_discussions` on the repo.
+  - name: 📚 Documentation
+    url: https://github.com/appstrate/appstrate#readme
+    about: Setup, self-hosting, architecture, and the API reference.

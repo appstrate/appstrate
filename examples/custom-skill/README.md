@@ -24,11 +24,13 @@ custom-skill/
 
 ## Packaging
 
-To use this skill in Appstrate, package it as an AFPS ZIP file:
+To use this skill in Appstrate, package it as an AFPS archive. The canonical
+extension is `.afps` (that is what everything in `system-packages/` uses); the
+import routes also accept a plain `.zip` with identical contents.
 
 ```
-custom-skill-1.0.0.zip
-  manifest.json    # AFPS manifest (type: "skill", name, version, description)
+custom-skill-1.0.0.afps      # a ZIP archive under the hood
+  manifest.json              # AFPS manifest
   SKILL.md
   skill.ts
 ```
@@ -37,18 +39,43 @@ The `manifest.json` follows the AFPS (Agent Format Packaging Standard) format:
 
 ```json
 {
-  "name": "custom-skill",
+  "name": "@acme/custom-skill",
   "version": "1.0.0",
   "type": "skill",
+  "schema_version": "0.1",
+  "display_name": "Custom Skill",
   "description": "A minimal example skill",
-  "entrypoint": "skill.ts"
+  "license": "Apache-2.0"
 }
 ```
 
-Import the ZIP from the dashboard (Agents > Import Package) or via the API.
+Two things this example gets asked about a lot:
+
+- **`name` MUST be scoped** — `@scope/name`, matching
+  `/^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$/`. A bare
+  `"custom-skill"` is rejected at validation time with
+  `Must follow @scope/name format`. Use your own scope, not `@appstrate`
+  (reserved for system packages).
+- **There is no `entrypoint` field.** A skill's contract is `SKILL.md` plus the
+  files shipped alongside it; the manifest carries metadata only. Unknown keys
+  are tolerated by the loose AFPS object schema, so an `entrypoint` would be
+  silently ignored rather than honoured — which is worse than an error.
+
+`schema_version` is optional for skills in the AFPS schema, but every real
+package declares it and pinning it protects you from a future major bump —
+include it.
+
+Validate before publishing:
+
+```sh
+bunx afps inspect custom-skill-1.0.0.afps
+```
+
+Import from the dashboard (Agents > Import Package) or via the API.
 
 ## Further Reading
 
-- See `system-packages/` in the Appstrate repo for real-world skill examples
-- AFPS specification: `afps-spec/` in the workspace root
+- Real skill/mcp-server/integration manifests: `scripts/system-packages/*/manifest.json`
+- AFPS specification: <https://github.com/appstrate/afps-spec/blob/main/spec.md>
+- Manifest validation source of truth: `packages/core/src/validation.ts`
 - Pi Coding Agent SDK: `@mariozechner/pi-coding-agent`

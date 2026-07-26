@@ -3,9 +3,21 @@
 > [!NOTE]
 > Historical planning doc — uses pre-rename vocabulary. AFPS renamed "provider" → "integration"; "tool" → "mcp-server". The current implementation uses integration-aware terminology throughout (`integrationProfiles`, `--integration-profile`, `requiredIntegrations`, `user_agent_integration_profiles`, …). This file is preserved as the original planning record.
 
-**Status:** Shipped. Commits: P1 83a8ad9, P2 c31dddf, P3 519fa8a, P4 bb4b8e8a, P5 (this commit).
+> [!WARNING]
+> **The `[done]` markers below are NOT all accurate — verified 2026-07 against the
+> shipped CLI.** Phases 1 and 2 shipped. Phases 3-5 shipped only partially: the
+> platform-side endpoints exist, the CLI-side surface largely does not. Verify
+> against `apps/cli/src/cli.ts` before assuming a command or flag exists.
+>
+> | Phase                              | Real state        | Evidence                                                                                                                                         |
+> | ---------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+> | 1 — run by package id              | **Shipped**       | `apps/cli/src/commands/run/bundle-fetch.ts` (bundle download, integrity check, cache)                                                            |
+> | 2 — inherited app config           | **Shipped**       | `GET …/run-config` in `apps/api/src/routes/applications.ts`; `--no-inherit` in `apps/cli/src/cli.ts`                                             |
+> | 3 — connection profiles in the CLI | **NOT shipped**   | No `connections` command in `cli.ts`; no `--connection-profile` / `--integration-profile` / `--provider-profile` flag anywhere in `apps/cli/src` |
+> | 4 — preflight + browser handoff    | **Platform only** | `GET /api/agents/{scope}/{name}/connection-readiness` exists; the CLI has no readiness call, no `--no-preflight`, no browser handoff             |
+> | 5 — hardening + docs               | **Partial**       | `docs/cli/` exists; the `appstrate doctor` config-drift check and the CI migration guide were not written                                        |
 
-> Statut : draft. Brainstorming validé, à transformer en phases GSD avant exécution.
+**Status:** partially shipped. Commits: P1 83a8ad9, P2 c31dddf, P3 519fa8a, P4 bb4b8e8a.
 
 ## Objectif
 
@@ -89,7 +101,9 @@ La route `GET /api/agents/{scope}/{name}/bundle?version=<spec>` existe déjà �
 
 ---
 
-### [done] Phase 3 — Profils de connexion côté CLI
+### [NOT SHIPPED] Phase 3 — Profils de connexion côté CLI
+
+> Aucune de ces commandes/flags n'existe dans `apps/cli/src`. Le vocabulaire ci-dessous est en plus pré-renommage (provider → integration).
 
 **Goal** : aligner le CLI sur le modèle `connection_profiles` + `user_agent_provider_profiles` + `providerProfiles`.
 
@@ -123,7 +137,9 @@ appstrate connections profile create <name>
 
 ---
 
-### [done] Phase 4 — Preflight connexions manquantes + browser handoff
+### [PARTIAL] Phase 4 — Preflight connexions manquantes + browser handoff
+
+> Côté plateforme seulement : `GET /api/agents/{scope}/{name}/connection-readiness` existe. Côté CLI, rien : pas d'appel readiness, pas de `--no-preflight`, pas de handoff navigateur.
 
 **Goal** : si une connexion requise manque, ne pas crasher mais guider vers l'UI.
 
@@ -158,7 +174,7 @@ appstrate connections profile create <name>
 
 ---
 
-### [done] Phase 5 — Hardening + docs
+### [PARTIAL] Phase 5 — Hardening + docs
 
 1. Tests `bun:test` couvrant : résolution id, cache, héritage config, override per-provider, preflight (mock readiness).
 2. Mise à jour `apps/cli/README.md` + section dédiée dans `docs/cli/`.

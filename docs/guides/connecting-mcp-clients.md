@@ -131,14 +131,26 @@ What happens under the hood:
 
 ## The tool surface
 
-The server exposes three progressive-disclosure tools rather than ~250
-individual tools (which would blow past any client's tool budget):
+The server exposes six tools rather than one per REST operation (which would blow
+past any client's tool budget). Three of them are the progressive-disclosure
+triple over the whole API; the other three are shortcuts for the things clients
+otherwise get wrong.
 
-| Tool                 | Permission   | What it does                                            |
-| -------------------- | ------------ | ------------------------------------------------------- |
-| `search_operations`  | `mcp:read`   | Find operations by keyword/tag → operationIds.          |
-| `describe_operation` | `mcp:read`   | Full input schema for one operation.                    |
-| `invoke_operation`   | `mcp:invoke` | Execute one operation (validated + authorized as REST). |
+| Tool                 | Permission   | What it does                                                                                                                                        |
+| -------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_me`             | `mcp:read`   | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below.                                   |
+| `search_operations`  | `mcp:read`   | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                               |
+| `describe_operation` | `mcp:read`   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                |
+| `invoke_operation`   | `mcp:invoke` | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                 |
+| `run_and_wait`       | `mcp:invoke` | **The way to launch a run.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
+| `list_documents`     | `mcp:read`   | List documents visible to the caller (uploads + agent outputs), each with a `document://` URI.                                                      |
+
+**Do not launch runs through `invoke_operation`.** `runAgent` / `runInline` are
+fire-and-forget (`202 { runId }`) — a client that calls them then polls `getRun`
+is reimplementing, badly, what `run_and_wait` already does in one call, and it
+loses the in-chat progress surface and the `resource_link` deliverables that
+`run_and_wait` returns. Reach for the REST operations only when you deliberately
+want to start a run and _not_ wait for it.
 
 Streaming/SSE operations (live logs, realtime) cannot be called through
-`invoke_operation` — fetch logs or poll instead.
+`invoke_operation` — use `run_and_wait`, fetch logs, or poll instead.

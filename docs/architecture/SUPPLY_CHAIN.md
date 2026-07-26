@@ -53,8 +53,16 @@ from the SDK directly.
 
 ### Exact version pin (no caret)
 
-Both packages are pinned to an **exact** version (`0.70.6`, no `^`) in every
-`package.json` that declares them — `package.json` (root), `apps/api`,
+Both packages are pinned to an **exact** version (no `^`) in every
+`package.json` that declares them. **Never copy a version number out of this
+document** — read the live pin instead, or you will silently downgrade a
+single-vendor dependency:
+
+```sh
+grep -rn '"@mariozechner/pi-' --include=package.json . | grep -v node_modules
+```
+
+The manifests carrying the pin: `package.json` (root), `apps/api`,
 `apps/cli`, `runtime-pi`, `packages/runner-pi` (deps + peer + dev),
 `packages/afps-runtime` (peer + dev). Combined with the committed `bun.lock`
 (integrity hashes), this blocks **silent minor/patch bumps** of a single-author
@@ -129,14 +137,14 @@ transitively, so this is a single edit:
     // --- emergency Pi SDK substitution (pick ONE form per package) ---
 
     // a) npm alias to a published fork under our own scope:
-    "@mariozechner/pi-ai": "npm:@appstrate/pi-ai-fork@0.70.6",
-    "@mariozechner/pi-coding-agent": "npm:@appstrate/pi-coding-agent-fork@0.70.6",
+    "@mariozechner/pi-ai": "npm:@appstrate/pi-ai-fork@<pinned-version>",
+    "@mariozechner/pi-coding-agent": "npm:@appstrate/pi-coding-agent-fork@<pinned-version>",
 
     // b) pinned git fork (tag or commit SHA):
-    // "@mariozechner/pi-ai": "github:appstrate/pi-ai-fork#v0.70.6",
+    // "@mariozechner/pi-ai": "github:appstrate/pi-ai-fork#v<pinned-version>",
 
     // c) vendored tarball committed to the repo (fully offline):
-    // "@mariozechner/pi-ai": "file:./vendor/mariozechner-pi-ai-0.70.6.tgz"
+    // "@mariozechner/pi-ai": "file:./vendor/mariozechner-pi-ai-<pinned-version>.tgz"
   },
 }
 ```

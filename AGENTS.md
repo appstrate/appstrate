@@ -4,16 +4,16 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 
 ## Build & Development
 
-| Command                  | Description                                                         |
-| ------------------------ | ------------------------------------------------------------------- |
-| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                |
-| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                  |
-| `bun test`               | Run all tests (~4500, bun:test framework, requires Docker)          |
-| `bun run check`          | TypeScript + ESLint + Prettier + OpenAPI validation (258 endpoints) |
-| `bun run build`          | Build everything (turbo build)                                      |
-| `bun run db:generate`    | Generate Drizzle migrations from schema changes                     |
-| `bun run db:migrate`     | Apply migrations to PostgreSQL                                      |
-| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)        |
+| Command                  | Description                                                        |
+| ------------------------ | ------------------------------------------------------------------ |
+| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)               |
+| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                 |
+| `bun test`               | Run all tests (bun:test framework, requires Docker)                |
+| `bun run check`          | TypeScript + ESLint + Prettier + OpenAPI validation                |
+| `bun run build`          | Build everything (turbo build)                                     |
+| `bun run db:generate`    | Generate Drizzle migrations from schema changes                    |
+| `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start) |
+| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)       |
 
 **Runtime**: Bun everywhere -- NOT Node.js. Bun auto-loads `.env`.
 
@@ -29,10 +29,13 @@ Or manually:
 
 ```sh
 cp .env.example .env
-docker compose -f docker-compose.dev.yml up -d   # PostgreSQL, Redis, MinIO
-bun run db:migrate
+# Every service in docker-compose.dev.yml sits behind a `profiles:` gate, so a
+# bare `up -d` starts NOTHING. Use the tier scripts (or pass --profile yourself):
+bun run docker:dev            # Tier 3: PostgreSQL + Redis + MinIO (--profile full)
+# bun run docker:dev:minimal  # Tier 1: PostgreSQL only
+# bun run docker:dev:standard # Tier 2: PostgreSQL + Redis
 bun run build
-bun run dev
+bun run dev                   # migrations are applied automatically at boot
 ```
 
 ## Code Conventions
@@ -57,8 +60,8 @@ appstrate/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler
-│   │   ├── modules/          # Built-in modules (oidc, webhooks) -- owned schemas + routes + RBAC
-│   │   ├── openapi/          # OpenAPI 3.1 spec (source of truth, 258 endpoints)
+│   │   ├── modules/          # Built-in modules (core-providers, firecracker, mcp, oidc, webhooks) -- routes + RBAC, NO owned schemas
+│   │   ├── openapi/          # OpenAPI 3.1 spec (source of truth for every endpoint)
 │   │   └── middleware/       # Auth, rate-limit, guards
 │   ├── cli/                  # @appstrate/cli -- channel-aware install + self-update + doctor
 │   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
@@ -67,17 +70,20 @@ appstrate/
 │       ├── components/       # UI components
 │       └── stores/           # Zustand stores (auth, org, profile)
 ├── packages/
-│   ├── core/                 # @appstrate/core -- shared validation, storage, utilities
+│   ├── core/                 # @appstrate/core -- shared validation, storage, utilities (published on npm)
+│   ├── afps-shared/          # @appstrate/afps-shared -- zero-internal-dep leaf: bundle/SSRF/credential helpers (published on npm; must be released BEFORE any core release that bumps its range)
 │   ├── ui/                   # @appstrate/ui -- React design system (shadcn components, schema-form, widgets) -- private workspace pkg, consumed by web
 │   ├── afps-runtime/         # @appstrate/afps-runtime -- portable AFPS bundle runner + signing + conformance + `afps` CLI
+│   ├── runner-pi/            # @appstrate/runner-pi -- Pi run driver + container-env builder (SIDECAR_OPERATOR_ENV_KEYS lives here)
 │   ├── mcp-transport/        # @appstrate/mcp-transport -- MCP SDK adapter consumed by sidecar + runtime-pi
-│   ├── db/                   # @appstrate/db -- Drizzle ORM + Better Auth
+│   ├── db/                   # @appstrate/db -- Drizzle ORM + Better Auth (ALL tables, incl. the ones modules read/write)
 │   ├── env/                  # @appstrate/env -- Zod env validation (authoritative source)
 │   ├── emails/               # @appstrate/emails -- Email templates + rendering
 │   ├── shared-types/         # @appstrate/shared-types -- Drizzle InferSelectModel re-exports
+│   ├── module-*/             # @appstrate/module-{chat,claude-code,codex,observability} -- workspace npm modules (opt-in via MODULES)
 │   └── connect/              # @appstrate/connect -- OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
-├── runtime-pi/               # Docker image: Pi Coding Agent SDK + sidecar (MCP server) -- 313 MB slim
-└── system-packages/          # System package ZIPs (skills, mcp-servers, integrations, agents)
+├── runtime-pi/               # Docker image: Pi Coding Agent SDK + sidecar (MCP server) + per-runtime MCP runner images
+└── system-packages/          # System package `.afps` archives (skills, mcp-servers, integrations, agents)
 ```
 
 ### Stack
@@ -100,7 +106,7 @@ appstrate/
 
 ### API Routes
 
-- **OpenAPI specs** in `apps/api/src/openapi/` are the source of truth (258 endpoints — verified by `bun run verify:openapi`)
+- **OpenAPI specs** in `apps/api/src/openapi/` are the source of truth. Never quote an endpoint count from memory — `bun run verify:openapi` prints the live `Code ⊆ Spec` figure
 - New route: create route file in `routes/` + OpenAPI path in `openapi/paths/` + wire in `index.ts`
 - All route bodies validated with `parseBody(schema, body)` from `lib/errors.ts`
 - Error responses follow RFC 9457 `application/problem+json`
@@ -109,9 +115,10 @@ appstrate/
 ### Database
 
 - **No RLS** -- all queries filter by `orgId` at the application level (multi-tenant)
-- Schema: `packages/db/src/schema.ts` (31 tables, 5 enums)
-- Migrations: edit schema.ts -> `bun run db:generate` -> `bun run db:migrate`
-- Service layer: function-based (no classes), `state.ts` is central data-access layer
+- Schema: `packages/db/src/schema/` (barrel: `packages/db/src/schema.ts`). Counts drift — derive them, don't quote them: `grep -c "= pgTable(" packages/db/src/schema/*.ts`
+- Modules own **no** tables. Every table a module reads/writes lives in the core schema and migrates with it
+- Migrations: edit the schema -> `bun run db:generate`. **Applied automatically at boot** (PGlite + PostgreSQL); `bun run db:migrate` is a manual escape hatch, not part of the normal loop
+- Service layer: function-based (no classes), `apps/api/src/services/state/` (runs, notifications, package-persistence) is the central data-access layer
 
 ### Backend Patterns
 
@@ -120,15 +127,15 @@ appstrate/
 - Auth: Better Auth cookie sessions + `X-Org-Id` header for org context
 - API key auth (`ask_*` prefix) tried first, then cookie fallback
 - Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
-- Route guards: `requireAdmin()`, `requireOwner()`, `requireAgent()`, `requireMutableAgent()`
+- Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`apiKeyAppScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
 - Rate limiting: Redis-backed, keyed by `method:path:identity`
 
 ### Frontend Patterns
 
 - i18next: `fr` (default) + `en`, namespaces: `common`, `agents`, `settings`
-- API helpers in `api.ts`: `api<T>(path)` prepends `/api`, injects `X-Org-Id`, `credentials: "include"`
-- React Query keys: org-scoped `[entity, orgId, id?]`
-- Feature gating: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at boot)
+- **Typed API client only** — `apps/web/src/api/client.ts`: `$api.useQuery("get", "/api/end-users", { params })` / `$api.useMutation(...)` (openapi-react-query) and raw `client.GET(...)` (openapi-fetch), typed against `api/schema.d.ts` (regenerate with `bun run generate:api`). The legacy fetch barrel `api.ts` is **deleted** and its import specifiers are **banned by ESLint** (`eslint.config.mjs`) — code written against it will not lint
+- React Query keys: typed-client hooks use `[method, path, init]` (org/app scope rides in `init`). Run/schedule/package caches keep pinned legacy keys because the SSE patcher invalidates by those names
+- Feature gating: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at serve time)
 - Always use `<Modal>` from `components/modal.tsx` for dialogs
 
 ### Docker Integration
@@ -141,7 +148,7 @@ appstrate/
 ### Agent runtime — MCP-only
 
 - The sidecar exposes `/mcp` (Streamable HTTP, stateless JSON-RPC) as the agent's exclusive cross-boundary surface
-- AFPS tool surface (registered as Pi tools at container boot, `runtime-pi/extensions/mcp-direct.ts`):
+- AFPS tool surface (registered as Pi tools at container boot, `runtime-pi/mcp/direct.ts`):
   - Per spawned integration: `{ns}__api_call({ method, target, headers?, body?, responseMode? })` — credential-injecting outbound proxy. Credentials are injected server-side; URLs validated against `auths.{key}.authorized_uris`.
   - Per spawned integration (when an auth declares `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`): `{ns}__api_upload` — multipart/resumable upload tool.
   - First-party: `run_history({ limit?, fields? })` (past-run metadata via per-run signed token) and `recall_memory({ query?, limit? })` (search the unified `package_persistence` archive).
@@ -159,7 +166,7 @@ appstrate/
 
 ### AFPS bundle runtime — `@appstrate/afps-runtime`
 
-- Portable bundle runner (`packages/afps-runtime/`, 64 TS files) drives the platform's run pipeline and ships a standalone `afps` CLI: `run` / `test` / `sign` / `verify` / `keygen` / `inspect` / `render`
+- Portable bundle runner (`packages/afps-runtime/`) drives the platform's run pipeline and ships a standalone `afps` CLI: `run` / `test` / `sign` / `verify` / `keygen` / `inspect` / `render`
 - Multi-package `.afps-bundle` format with Merkle-root integrity (per-file RECORD SRI → per-package SRI → bundle-level SRI on canonical map)
 - Endpoints: `GET /api/agents/:scope/:name/bundle` (export) + `POST /api/packages/import-bundle` (accepts `.afps-bundle` and legacy `.afps`)
 - Signature policy via `AFPS_SIGNATURE_POLICY` env (`off` | `warn` | `required`) and `AFPS_TRUST_ROOT` allowlist
@@ -169,7 +176,7 @@ appstrate/
 ### Running Tests
 
 ```sh
-bun test                          # All ~4500 tests, requires Docker
+bun test                          # Full suite, requires Docker
 bun test apps/api/test/unit/      # API unit tests only (fast, no DB)
 bun test apps/api/test/           # API unit + integration
 bun test runtime-pi/              # Runtime + sidecar tests
@@ -243,7 +250,7 @@ describe("GET /api/my-resource", () => {
 Import from workspace packages using their published subpaths:
 
 - `@appstrate/core/*` -- validation, zip, naming, dependencies, integrity, semver, logger, storage, etc.
-- `@appstrate/db/schema` -- Drizzle schema (core tables; module-owned tables live in `apps/api/src/modules/<name>/schema.ts`)
+- `@appstrate/db/schema` -- Drizzle schema. **Every** table lives here, including the ones a module reads/writes (`schema/oidc.ts`, `schema/webhooks.ts`, …). Modules own no schema, no migrations, no `schema.ts` of their own
 - `@appstrate/db/client` -- `db` + `listenClient`
 - `@appstrate/env` -- `getEnv()` (Zod-validated, cached, fail-fast)
 - `@appstrate/connect` -- OAuth2/PKCE, credential encryption (v1 envelope + multi-key keyring)
@@ -252,28 +259,25 @@ Import from workspace packages using their published subpaths:
 - `@appstrate/shared-types` -- Drizzle InferSelectModel re-exports
 - `@appstrate/emails` -- Email template rendering
 
-## Key Environment Variables
+## Environment Variables
 
-| Variable                         | Required | Description                                                                              |
-| -------------------------------- | -------- | ---------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                   | No       | PostgreSQL connection. Absent = PGlite (embedded)                                        |
-| `BETTER_AUTH_SECRET`             | Yes      | Session signing secret                                                                   |
-| `UPLOAD_SIGNING_SECRET`          | Yes      | HMAC secret for FS upload-sink tokens (rotates independently of `BETTER_AUTH_SECRET`)    |
-| `RUN_TOKEN_SECRET`               | Yes      | HMAC secret for run bearer tokens (rotates independently)                                |
-| `CONNECT_SESSION_SECRET`         | Yes      | HMAC secret for hosted-connect-portal session tokens (issues #769/#905)                  |
-| `CONNECTION_ENCRYPTION_KEY`      | Yes      | 32 bytes base64, primary key for v1 credential envelope                                  |
-| `CONNECTION_ENCRYPTION_KEY_ID`   | No       | Active kid embedded in newly-encrypted blobs (default `k1`)                              |
-| `CONNECTION_ENCRYPTION_KEYS`     | No       | JSON map `{ kid: base64-32B-key }` of retired keys held for decrypt-only during rotation |
-| `REDIS_URL`                      | No       | Redis connection. Absent = in-memory adapters (single-instance)                          |
-| `S3_BUCKET`                      | No       | S3 bucket. Absent = filesystem storage (`FS_STORAGE_PATH`)                               |
-| `S3_REGION`                      | No       | S3 region. Required when `S3_BUCKET` is set                                              |
-| `APP_URL`                        | No       | Public URL (default: `http://localhost:3000`)                                            |
-| `PORT`                           | No       | Server port (default: `3000`)                                                            |
-| `LOG_LEVEL`                      | No       | `debug` / `info` / `warn` / `error`                                                      |
-| `MODULES`                        | No       | Comma-separated module specifiers (default: `oidc,webhooks`)                             |
-| `AUTH_DISABLE_SIGNUP`            | No       | Closed-mode lock; see `examples/self-hosting/AUTH_MODES.md` for the 6 `AUTH_*` vars      |
-| `SIDECAR_MAX_REQUEST_BODY_BYTES` | No       | Sidecar inbound POST size cap (default 10 MB; hard ceiling 100 MB)                       |
-| `SIDECAR_MAX_MCP_ENVELOPE_BYTES` | No       | MCP envelope cap, sized for base64 inflation (default 16 MB)                             |
-| `AFPS_SIGNATURE_POLICY`          | No       | `off` (default) / `warn` / `required` for `.afps-bundle` Ed25519 verification            |
+**Do not copy an env table into this file.** Every hand-maintained copy of the
+env contract in this repo has drifted from the schema; the generator is
+authoritative and cheap to read:
 
-Full list (~70 vars): `packages/env/src/index.ts` (authoritative Zod schema). See `README.md` and `CLAUDE.md` for the full table including remote runner protocol, watchdog, AFPS signing, OIDC instance clients, run limits, and SMTP.
+| Source                      | What it is                                                                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/env/src/index.ts` | **Authoritative** — the Zod schema. Names, defaults, refinements, required-ness. Wins on any conflict.                                            |
+| `docs/ENV.md`               | Prose reference — one row per var, plus the handful of sidecar/module vars read straight from `process.env` and therefore absent from the schema. |
+| `.env.example`              | Operator contract — dev-ready values, commented by default.                                                                                       |
+
+Boot fails without: `BETTER_AUTH_SECRET`, `CONNECTION_ENCRYPTION_KEY`,
+`UPLOAD_SIGNING_SECRET`, `RUN_TOKEN_SECRET`, `CONNECT_SESSION_SECRET`.
+Everything else has a schema default. To list the current key set:
+
+```sh
+grep -oE '^    [A-Z][A-Z0-9_]*:' packages/env/src/index.ts | tr -d ' :' | sort
+```
+
+`MODULES` is the var most often mis-quoted from memory — read its `.default(...)`
+in the schema rather than trusting any doc (including this one).

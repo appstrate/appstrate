@@ -191,7 +191,7 @@ Every document-row delete whose bytes live in storage enqueues a `storage_deleti
 
 Deletion is **replayable forever** — there is NO max-attempts abandon. Past `STORAGE_DELETION_DEAD_LETTER_THRESHOLD` (8) attempts a still-pending job surfaces as a **dead letter** (operator surface + metric) while it keeps retrying at the capped interval: a persistently-failing purge is a visibility problem, never a reason to drop the job. The admin surface (`routes/admin-storage-deletion.ts`) lists jobs by `pending | dead | completed` (keyset-paginated) and offers a "retry now" (`retryStorageDeletionJob`, resets `next_attempt_at`). The counter (`documents_bytes_used`) is decremented at ROW-delete time, not purge time, so the quota is exact regardless of purge lag.
 
-Parent teardowns use the same invariant: they lock the parent first (closing the concurrent-child TOCTOU), enumerate object keys, enqueue jobs, update any surviving org counter, then cascade rows in one transaction. Run manifests are deletion indexes expanded by the worker with the manifest deleted last. See also `_resetStoreForTesting` (`packages/db/storage.ts`) — the test seam that lets a suite flip the store's presigned posture.
+Parent teardowns use the same invariant: they lock the parent first (closing the concurrent-child TOCTOU), enumerate object keys, enqueue jobs, update any surviving org counter, then cascade rows in one transaction. Run manifests are deletion indexes expanded by the worker with the manifest deleted last. See also `_resetStoreForTesting` (`packages/db/src/storage.ts`) — the test seam that lets a suite flip the store's presigned posture.
 
 ### Capability matrix (D2 + upload privacy)
 
