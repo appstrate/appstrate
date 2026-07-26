@@ -6,7 +6,7 @@
  * test file reads the same way.
  */
 
-import type { BridgeableSession, InternalSink } from "../src/pi-runner.ts";
+import type { BridgeableSession, InternalSink, PromptableSession } from "../src/pi-runner.ts";
 import { PiRunner } from "../src/pi-runner.ts";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -23,23 +23,35 @@ import {
 } from "@appstrate/afps-runtime/bundle";
 
 /** Fake Pi SDK session with driver methods the tests can invoke directly. */
-export interface FakeSession extends BridgeableSession {
+export interface FakeSession extends BridgeableSession, PromptableSession {
   /** Drive a raw Pi SDK event onto the bridge. */
   emit(event: unknown): void;
   /** Append a message to `state.messages` (used by message_end handler). */
   pushMessage(msg: unknown): void;
   /** Clear all listeners — lets tests assert "no leaks after run". */
   reset(): void;
+  /** Every message passed to `prompt()`, in order. */
+  prompts: string[];
+  /** Times the bridge's early-stop `onTerminalTool` fired (stands in for `session.abort()`). */
+  aborts: number;
+  /** Test hook: drives what the session does during a `prompt()` turn. */
+  onPrompt?: (message: string) => void | Promise<void>;
 }
 
 export function createFakeSession(): FakeSession {
   const listeners: Array<(event: unknown) => void> = [];
   const messages: unknown[] = [];
-  return {
+  const session: FakeSession = {
     subscribe(cb) {
       listeners.push(cb);
     },
     state: { messages },
+    prompts: [],
+    aborts: 0,
+    async prompt(message: string) {
+      session.prompts.push(message);
+      await session.onPrompt?.(message);
+    },
     emit(event) {
       for (const cb of listeners) cb(event);
     },
@@ -51,6 +63,7 @@ export function createFakeSession(): FakeSession {
       messages.length = 0;
     },
   };
+  return session;
 }
 
 /**
@@ -155,6 +168,12 @@ export function makeTestBundle(root: BundlePackage, deps: BundlePackage[] = []):
  * `executeSession` with a scripted generator. Tests pass a function
  * that runs events against a {@link FakeSession} hooked up to the real
  * `installSessionBridge`, avoiding the Pi SDK entirely.
+ *
+ * The override mirrors the production tail of `executeSession`: the bridge is
+ * installed with the runner's `terminalTools` + early-stop callback, and the
+ * real `maybeRepromptForOutput` runs once the script's "agent loop" settles.
+ * A script that never emits a successful `output` therefore exercises the
+ * missing-`output` re-prompt end to end through `run()`.
  */
 export type SessionScript = (
   session: FakeSession,
@@ -192,8 +211,23 @@ export class ScriptedPiRunner extends PiRunner {
     onBridgeReady?: (handle: import("../src/pi-runner.ts").SessionBridgeHandle) => void,
   ): Promise<void> {
     const session = createFakeSession();
-    const { installSessionBridge } = await import("../src/pi-runner.ts");
-    onBridgeReady?.(installSessionBridge(session, internalSink, context.runId));
+    const { installSessionBridge, maybeRepromptForOutput } = await import("../src/pi-runner.ts");
+    const terminalTools = this.opts.terminalTools ?? [];
+    const bridge = installSessionBridge(session, internalSink, context.runId, {
+      terminalTools,
+      onTerminalTool: () => {
+        session.aborts += 1;
+      },
+    });
+    onBridgeReady?.(bridge);
     await this.script(session, context, signal);
+    await maybeRepromptForOutput({
+      session,
+      bridge,
+      terminalTools,
+      sink: internalSink,
+      runId: context.runId,
+      signal,
+    });
   }
 }

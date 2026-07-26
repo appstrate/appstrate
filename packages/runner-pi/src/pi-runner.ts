@@ -479,13 +479,25 @@ export class PiRunner implements Runner {
           else signal.addEventListener("abort", onAbort, { once: true });
         })
       : null;
+    const raceAbort = abortPromise
+      ? <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, abortPromise])
+      : <T>(promise: Promise<T>): Promise<T> => promise;
 
-    const promptPromise = session.prompt(startMessage ?? systemPrompt);
-    if (abortPromise) {
-      await Promise.race([promptPromise, abortPromise]);
-    } else {
-      await promptPromise;
-    }
+    await raceAbort(session.prompt(startMessage ?? systemPrompt));
+
+    // The agent loop settled on its own. When the agent owed a structured
+    // `output` and never delivered one, this is the LAST moment its context
+    // still exists — give it exactly one nudge before the platform's
+    // finalize-time validation turns a fully-paid run into a failure.
+    await maybeRepromptForOutput({
+      session,
+      bridge,
+      terminalTools,
+      sink: internalSink,
+      runId: context.runId,
+      signal,
+      race: raceAbort,
+    });
 
     // #464 — Pi SDK's auto-compaction recovery is fire-and-forget: an
     // `agent_end` event with overflow status triggers a background
@@ -496,6 +508,119 @@ export class PiRunner implements Runner {
     // `isCompacting` here lets that recovery actually drain.
     await waitForCompactionToSettle(session as unknown as { isCompacting?: boolean }, signal);
   }
+}
+
+// ─── Missing-`output` re-prompt ────────────────────────────────────
+
+/**
+ * The terminal tool whose absence is worth one extra turn. Only `output`
+ * qualifies: it is the ONLY tool whose omission makes the platform fail an
+ * otherwise-successful run at finalize (`services/run-event-ingestion.ts` —
+ * "Agent finished without calling the required `output` tool").
+ */
+const OUTPUT_TERMINAL_TOOL = "output";
+
+/**
+ * `run_logs` event name carried in the re-prompt breadcrumb's `data`, so
+ * operators can measure how often models drift off the output contract
+ * (`SELECT count(*) FROM run_logs WHERE data->>'event' = 'output_reprompt'`).
+ */
+const OUTPUT_REPROMPT_EVENT = "output_reprompt";
+
+/**
+ * The single corrective turn. Deliberately narrow: call `output` from what
+ * you already have — no new research, no other tool — so the extra turn costs
+ * one completion, not another research loop.
+ */
+const OUTPUT_REPROMPT_INSTRUCTION =
+  "You ended your turn without calling the `output` tool. This agent declares an " +
+  "output schema, so the run cannot be delivered until `output` is called exactly " +
+  "once with all required fields. Call `output` NOW, using only the work you have " +
+  "already done in this session. Do not run any further research, do not call any " +
+  "other tool, and do not reply with plain text.";
+
+/** Minimal Pi SDK session surface needed to issue the corrective turn. */
+export interface PromptableSession {
+  prompt(message: string): Promise<unknown>;
+}
+
+/**
+ * Issue AT MOST ONE corrective `output` turn when the agent loop settled
+ * without ever calling the terminal `output` tool.
+ *
+ * Why here and not at finalize: the platform only discovers the missing
+ * `output` when it validates the terminal `RunResult`
+ * (`services/run-event-ingestion.ts`), long after the container is gone and
+ * the agent's context has been destroyed — the answer existed in the model's
+ * head and was thrown away after being fully paid for. The runner is the only
+ * place where the session is still alive. The platform-side validation stays
+ * exactly as it is; it is now the safety net rather than the first line of
+ * defence.
+ *
+ * Exactly one attempt, never a loop: if the model ignores an explicit
+ * instruction to call `output` from work it has already done, another turn is
+ * spent without a hypothesis.
+ *
+ * Guards (all four must pass):
+ *  1. `output` is wired as a terminal tool — mirrors `runtime-pi/entrypoint.ts`,
+ *     which passes `terminalTools: ["output"]` only when the agent declared the
+ *     `output` runtime tool. Without it there is no output contract to enforce.
+ *  2. no terminal tool completed — a successful `output` means the run is
+ *     already semantically done (and the SDK loop was aborted early).
+ *  3. the run was not cancelled / timed out — `signal` here is the runner's
+ *     combined controller (user cancel + timeout watchdog). A dead run must not
+ *     be resurrected for one more LLM call.
+ *  4. the last assistant turn is not a terminal failure — a session that ended
+ *     on a provider error or a provider-side abort cannot answer, so the extra
+ *     round-trip would only add cost to an already-failed run.
+ *
+ * Emits an `appstrate.progress` breadcrumb at `warn` level carrying
+ * `data.event = "output_reprompt"` BEFORE the retry — the same event channel
+ * every other runner-side lifecycle signal uses (see `runtime-ready.ts`), so
+ * the drift is measurable in `run_logs` without a second reporting path. Sink
+ * failures are swallowed: losing the breadcrumb must never cost the run its
+ * corrective turn.
+ *
+ * Exported for unit testing — the production caller is
+ * `PiRunner.executeSession`.
+ *
+ * @returns `true` when the corrective turn was issued, `false` when a guard
+ *   declined it.
+ * @internal
+ */
+export async function maybeRepromptForOutput(opts: {
+  session: PromptableSession;
+  bridge: SessionBridgeHandle;
+  terminalTools: string[];
+  sink: InternalSink;
+  runId: string;
+  signal?: AbortSignal;
+  /** Races the corrective prompt against the run's abort signal. Identity by default. */
+  race?: <T>(promise: Promise<T>) => Promise<T>;
+  /** Clock override for tests. */
+  now?: () => number;
+}): Promise<boolean> {
+  const { session, bridge, terminalTools, sink, runId, signal } = opts;
+  if (!terminalTools.includes(OUTPUT_TERMINAL_TOOL)) return false;
+  if (bridge.terminalToolCompleted) return false;
+  if (signal?.aborted) return false;
+  if (bridge.getTerminalError() !== undefined) return false;
+
+  await sink
+    .emit({
+      type: "appstrate.progress",
+      timestamp: (opts.now ?? Date.now)(),
+      runId,
+      message:
+        "Agent finished without calling `output` — re-prompting once before the run is failed",
+      data: { event: OUTPUT_REPROMPT_EVENT },
+      level: "warn",
+    })
+    .catch(() => {});
+
+  const race = opts.race ?? (<T>(promise: Promise<T>): Promise<T> => promise);
+  await race(session.prompt(OUTPUT_REPROMPT_INSTRUCTION));
+  return true;
 }
 
 /**
@@ -570,6 +695,16 @@ export interface InternalSink {
  * landed yet.
  */
 export interface SessionBridgeHandle {
+  /**
+   * True once one of the configured {@link SessionBridgeOptions.terminalTools}
+   * has executed successfully — i.e. the run is semantically complete. Read-only
+   * live view (a getter, not a snapshot copied at handle-creation time).
+   *
+   * `PiRunner.executeSession` reads it after the agent loop settles to decide
+   * whether the agent still owes an `output` call
+   * ({@link maybeRepromptForOutput}).
+   */
+  readonly terminalToolCompleted: boolean;
   /** Snapshot of token usage accumulated across the session so far. */
   getUsage(): TokenUsage;
   /** Snapshot of total LLM cost in USD accumulated across the session so far. */
@@ -719,7 +854,9 @@ export function installSessionBridge(
   // Set once a terminal tool (e.g. `output`) has executed successfully.
   // From that point the run is semantically complete: the early-stop abort
   // the runner fires may surface as a trailing `stopReason: "aborted"`
-  // assistant turn, which must NOT be read as a terminal failure.
+  // assistant turn, which must NOT be read as a terminal failure. Exposed
+  // read-only on the handle so `executeSession` can tell "the agent still
+  // owes an `output`" from "the run already delivered".
   let terminalToolCompleted = false;
   // Token usage accumulator across all assistant turns (shared zero-shape).
   const totalUsage: TokenUsage = zeroTokenUsage();
@@ -894,6 +1031,9 @@ export function installSessionBridge(
   });
 
   return {
+    get terminalToolCompleted(): boolean {
+      return terminalToolCompleted;
+    },
     getUsage(): TokenUsage {
       return { ...totalUsage };
     },
