@@ -14,6 +14,7 @@
  */
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -23,8 +24,11 @@ import { AgentConnectionsSection } from "../package-detail/agent-connections-sec
 import { AgentSchedulesTab, AgentMemoryTab } from "../package-detail/agent-tabs";
 import { ModelSection } from "../package-detail/agent-configuration-tab";
 import { ModelFormModal } from "../model-form-modal";
+import { ScheduleForm } from "../schedule-form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
+import { useCreateSchedule, useScheduleFormDeps, useSchedules } from "../../hooks/use-schedules";
+import { agentMapQueryKeyPrefix } from "../../hooks/use-agent-map";
 
 /** Which existing panel to show. */
 export type MapPanelKind = "connections" | "schedules" | "memory" | "model";
@@ -35,6 +39,65 @@ const TITLE_KEY: Record<MapPanelKind, string> = {
   memory: "detail.tabMemory",
   model: "map.model",
 };
+
+/**
+ * The agent's schedules, and creating one WITHOUT leaving for `/schedules/new`.
+ *
+ * That page defaults its agent selector to the first agent in the list, which is
+ * almost never the one you were looking at — so creating a schedule from an
+ * agent's page meant re-picking the agent by hand. Here the agent is pinned: the
+ * selector is handed a single option, so `ScheduleForm` (unchanged) cannot offer
+ * anything else, and on success we return to the list instead of navigating away.
+ */
+function SchedulesPanel({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["agents", "common"]);
+  const [creating, setCreating] = useState(false);
+  const { data: detail } = usePackageDetail("agent", packageId);
+  const { data: schedules } = useSchedules(packageId);
+  const deps = useScheduleFormDeps(packageId);
+  const createSchedule = useCreateSchedule(packageId);
+
+  if (!creating) {
+    // The empty state already carries an "add" button (wired through
+    // `onCreate`), so only add ours when the list is non-empty — otherwise the
+    // panel shows two of them.
+    const hasSchedules = (schedules?.length ?? 0) > 0;
+    return (
+      <div className="space-y-3">
+        <AgentSchedulesTab packageId={packageId} onCreate={() => setCreating(true)} />
+        {hasSchedules && (
+          <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
+            <Plus className="mr-1.5 size-3.5" />
+            {t("common:btn.add")}
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <ScheduleForm
+      mode="create"
+      // One option only — this agent. The map is agent-scoped, so letting the
+      // form retarget another agent would be a trap, not a feature.
+      agents={[{ id: packageId, displayName: detail?.display_name ?? packageId }]}
+      selectedAgentId={packageId}
+      onAgentChange={() => undefined}
+      inputSchema={deps?.inputSchema}
+      configSchema={deps?.configSchema}
+      persistedConfig={deps?.persistedConfig ?? {}}
+      persistedModelId={deps?.persistedModelId ?? null}
+      persistedProxyId={deps?.persistedProxyId ?? null}
+      persistedVersion={deps?.persistedVersion ?? null}
+      packageId={packageId}
+      agentIntegrations={deps?.agentIntegrations ?? []}
+      blockedMessage={deps?.hasFileInputs ? t("agents:schedule.fileInputBlocked") : undefined}
+      isPending={createSchedule.isPending}
+      onSubmit={(data) => createSchedule.mutate(data, { onSuccess: () => setCreating(false) })}
+      onCancel={() => setCreating(false)}
+    />
+  );
+}
 
 /**
  * The model picker, plus a way out when there is nothing to pick.
@@ -83,16 +146,26 @@ export function MapPanelDialog({
   onClose: () => void;
 }) {
   const { t } = useTranslation("agents");
+  const qc = useQueryClient();
   // Only the connections panel needs the detail DTO; fetching it for every kind
   // costs nothing extra (the page already holds it in cache).
   const { data: detail } = usePackageDetail("agent", kind ? packageId : undefined);
 
   if (!kind) return null;
 
+  // Every panel here can change something the map projects — a model added or
+  // switched, a connection made, a schedule created, memory granted — and none of
+  // their mutations know about the map's query. Refreshing once on the way out
+  // covers all of them, instead of each panel remembering to.
+  const closeAndRefresh = () => {
+    void qc.invalidateQueries({ queryKey: agentMapQueryKeyPrefix });
+    onClose();
+  };
+
   return (
-    <Modal open onClose={onClose} title={t(TITLE_KEY[kind])} className="sm:max-w-3xl">
+    <Modal open onClose={closeAndRefresh} title={t(TITLE_KEY[kind])} className="sm:max-w-3xl">
       <div className="max-h-[70vh] overflow-y-auto">
-        {kind === "schedules" && <AgentSchedulesTab packageId={packageId} />}
+        {kind === "schedules" && <SchedulesPanel packageId={packageId} />}
         {kind === "memory" && <AgentMemoryTab packageId={packageId} />}
         {kind === "model" && <ModelPanel packageId={packageId} />}
         {kind === "connections" &&
