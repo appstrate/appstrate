@@ -31,6 +31,12 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toContain("run_and_wait");
     expect(SYSTEM_PROMPT).toContain("never fabricate it");
   });
+
+  it("keeps the assistant-skills load-before-acting posture", () => {
+    expect(SYSTEM_PROMPT).toContain("assistant skills");
+    expect(SYSTEM_PROMPT).toContain('`operation_id: "getSkill"`');
+    expect(SYSTEM_PROMPT).toContain("load it BEFORE acting");
+  });
 });
 
 describe("normalizeChatLocale", () => {
