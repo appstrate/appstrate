@@ -3,13 +3,19 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import resourcesToBackend from "i18next-resources-to-backend";
+import {
+  I18N_BOOT_NAMESPACES,
+  I18N_FALLBACK_LANGUAGE,
+  I18N_LANGUAGE_STORAGE_KEY,
+  I18N_SUPPORTED_LANGUAGES,
+} from "./i18n-config.ts";
 
 // Accessing localStorage throws when storage is blocked (sandboxed iframe,
 // Safari private mode, cookies-disabled). Guard it so a blocked store can
 // never crash the SPA bootstrap — we just fall back to the default language.
 function readSavedLng(): string | null {
   try {
-    return localStorage.getItem("i18nextLng");
+    return localStorage.getItem(I18N_LANGUAGE_STORAGE_KEY);
   } catch {
     return null;
   }
@@ -30,15 +36,13 @@ export const i18nReady = i18n
   .use(initReactI18next)
   .init({
     lng: savedLng || undefined,
-    fallbackLng: "fr",
-    supportedLngs: ["fr", "en"],
+    fallbackLng: I18N_FALLBACK_LANGUAGE,
+    supportedLngs: [...I18N_SUPPORTED_LANGUAGES],
     defaultNS: "common",
     fallbackNS: "common",
-    // Core namespaces, preloaded for every user. A MODULE's namespace is
-    // deliberately absent (e.g. `chat`): `useTranslation("chat")` loads it on
-    // demand inside the module route's Suspense boundary, so a disabled module
-    // costs nothing — same rule as its code chunk.
-    ns: ["common", "agents", "settings", "documents"],
+    // Shared with `vite.config.ts`, which preloads exactly these chunks — see
+    // `i18n-config.ts` for why the list lives there rather than inline.
+    ns: [...I18N_BOOT_NAMESPACES],
     interpolation: { escapeValue: false },
   });
 

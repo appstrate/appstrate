@@ -185,6 +185,23 @@ function LazyRoute({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
 }
 
+/**
+ * The one boot placeholder. Every gate below renders it, so a visitor sees a
+ * single uninterrupted spinner while the boot reads settle, never a sequence
+ * of visually identical ones handed off between gates.
+ *
+ * The boot reads themselves are started in `main.tsx`, in parallel: by the
+ * time `useAuth()` reports a user the org list is usually already cached, so
+ * `OrgGate` normally resolves without ever painting this.
+ */
+function BootScreen() {
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <Spinner />
+    </div>
+  );
+}
+
 function MainLayout() {
   const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
   useApplicationResolver();
@@ -261,11 +278,7 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Spinner />
-      </div>
-    );
+    return <BootScreen />;
   }
 
   // No orgs at all -- redirect to onboarding (or to "waiting for invitation"
@@ -281,11 +294,7 @@ function OrgGate({ children }: { children: React.ReactNode }) {
 
   // Orgs exist but none selected yet (auto-select happening)
   if (!currentOrg) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Spinner />
-      </div>
-    );
+    return <BootScreen />;
   }
 
   return <>{children}</>;
@@ -321,11 +330,7 @@ export function App() {
   useExternalRedirect(!!user);
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Spinner />
-      </div>
-    );
+    return <BootScreen />;
   }
 
   // Hosted connect portal (issue #769) — standalone, auth-agnostic. Rendered
@@ -409,13 +414,7 @@ export function App() {
             <Route
               path="/auth/callback"
               element={
-                <Suspense
-                  fallback={
-                    <div className="flex min-h-screen items-center justify-center">
-                      <Spinner />
-                    </div>
-                  }
-                >
+                <Suspense fallback={<BootScreen />}>
                   <AuthCallbackPage />
                 </Suspense>
               }
@@ -502,13 +501,7 @@ export function App() {
             <Route
               path="/auth/callback"
               element={
-                <Suspense
-                  fallback={
-                    <div className="flex min-h-screen items-center justify-center">
-                      <Spinner />
-                    </div>
-                  }
-                >
+                <Suspense fallback={<BootScreen />}>
                   <AuthCallbackPage />
                 </Suspense>
               }

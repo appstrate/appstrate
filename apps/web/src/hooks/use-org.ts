@@ -14,6 +14,45 @@ export function useCurrentOrgId(): string | null {
   return useStore(orgStore, (s) => s.id);
 }
 
+async function fetchOrgs() {
+  const { data } = await client.GET("/api/orgs");
+  return data?.data ?? [];
+}
+
+/**
+ * In-flight org list started by `primeOrgList()` at boot, waiting to be
+ * adopted by the first `useOrg()` that mounts. One-shot: it is handed over
+ * exactly once, and every later fetch goes through `fetchOrgs()` normally.
+ */
+let primedOrgs: ReturnType<typeof fetchOrgs> | null = null;
+
+/**
+ * Start the org list immediately, without waiting for React to mount the org
+ * gate. `GET /api/orgs` authenticates on the session cookie alone — it needs
+ * nothing from the session or profile reads — so at boot it belongs beside
+ * them rather than behind them (see `main.tsx`).
+ *
+ * The promise is handed to React Query as the query function's own result, so
+ * the query still owns the whole state machine (pending → success/error,
+ * retries, gate spinner). A failure is dropped instead of being cached: the
+ * common failure is "no session yet", and a poisoned `["orgs"]` entry would
+ * read as an *empty* org list to `OrgGate` and bounce a legitimate user into
+ * onboarding after they log in.
+ */
+export function primeOrgList(): void {
+  const request = fetchOrgs();
+  primedOrgs = request;
+  request.catch(() => {
+    if (primedOrgs === request) primedOrgs = null;
+  });
+}
+
+function orgListQueryFn() {
+  const primed = primedOrgs;
+  primedOrgs = null;
+  return primed ?? fetchOrgs();
+}
+
 export function useOrg() {
   const queryClient = useQueryClient();
   const currentOrgId = useStore(orgStore, (s) => s.id);
@@ -24,10 +63,7 @@ export function useOrg() {
     // (see the removeQueries predicate below) and other call sites invalidate
     // ["orgs"] directly. Only the fetch itself goes through the typed client.
     queryKey: orgKeys.all,
-    queryFn: async () => {
-      const { data } = await client.GET("/api/orgs");
-      return data?.data ?? [];
-    },
+    queryFn: orgListQueryFn,
   });
 
   const setOrgId = useCallback((id: string) => orgStore.getState().setId(id), []);
