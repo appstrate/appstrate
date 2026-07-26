@@ -24,10 +24,12 @@ import { Modal } from "../modal";
 import { Spinner } from "../spinner";
 import { ResourceSection } from "../agent-editor/resource-section";
 import { PromptEditor } from "../agent-editor/prompt-editor";
-import { getResourceEntries, setResourceEntries } from "../agent-editor/utils";
+import { caretRange, getResourceEntries, setResourceEntries } from "../agent-editor/utils";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useUpdatePackage } from "../../hooks/use-mutations";
+import { useActivateIntegration } from "../../hooks/use-integrations";
 import { agentMapQueryKeyPrefix } from "../../hooks/use-agent-map";
+import { LibraryPicker, type LibraryCandidate } from "./library-picker";
 
 /** Which manifest section the dialog edits. */
 export type MapEditKind = "prompt" | "skills" | "integrations";
@@ -95,16 +97,28 @@ function MapEditForm({
   const { t } = useTranslation(["agents", "common"]);
   const qc = useQueryClient();
   const update = useUpdatePackage("agent", packageId, { redirect: false });
+  const activate = useActivateIntegration();
   const [draftPrompt, setDraftPrompt] = useState(prompt);
   const [entries, setEntries] = useState<ResourceEntry[]>(() =>
     kind === "prompt" ? [] : getResourceEntries(manifest, kind),
   );
+  // Catalogue integrations staged for activation-then-declaration on save.
+  const [staged, setStaged] = useState<LibraryCandidate[]>([]);
+  const [activating, setActivating] = useState(false);
 
-  function save() {
+  function toggleStaged(candidate: LibraryCandidate) {
+    setStaged((prev) =>
+      prev.some((c) => c.id === candidate.id)
+        ? prev.filter((c) => c.id !== candidate.id)
+        : [...prev, candidate],
+    );
+  }
+
+  function writeManifest(declared: ResourceEntry[]) {
     // Clone before mutating: `setResourceEntries` writes in place, and the
     // manifest here is the React Query cache's object.
     const next = structuredClone(manifest);
-    if (kind !== "prompt") setResourceEntries(next, kind, entries);
+    if (kind !== "prompt") setResourceEntries(next, kind, declared);
     update.mutate(
       {
         manifest: next,
@@ -120,6 +134,31 @@ function MapEditForm({
         },
       },
     );
+  }
+
+  const busy = update.isPending || activating;
+
+  async function save() {
+    if (staged.length === 0) {
+      writeManifest(entries);
+      return;
+    }
+    // Activate first, sequentially, and declare only what actually activated: a
+    // dependency on an integration that failed to activate would put the agent
+    // straight into `integration_not_active`. The hook surfaces its own error
+    // toast per failure.
+    setActivating(true);
+    const activated: ResourceEntry[] = [];
+    for (const candidate of staged) {
+      try {
+        await activate.mutateAsync({ params: { path: { packageId: candidate.id } } });
+        activated.push({ id: candidate.id, version: caretRange(candidate.version) });
+      } catch {
+        /* toast already shown; keep going so one failure doesn't sink the rest */
+      }
+    }
+    setActivating(false);
+    writeManifest([...entries, ...activated]);
   }
 
   return (
@@ -138,13 +177,22 @@ function MapEditForm({
             }
           />
         )}
+        {kind === "integrations" && (
+          <LibraryPicker
+            // Anything already declared is offered by `ResourceSection` above;
+            // listing it twice would let the two lists disagree.
+            activeIds={new Set(entries.map((e) => e.id))}
+            selected={staged}
+            onToggle={toggleStaged}
+          />
+        )}
       </div>
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onClose} disabled={update.isPending}>
+        <Button variant="outline" onClick={onClose} disabled={busy}>
           {t("common:btn.cancel")}
         </Button>
-        <Button onClick={save} disabled={update.isPending}>
-          {update.isPending ? <Spinner /> : t("common:btn.save")}
+        <Button onClick={() => void save()} disabled={busy}>
+          {busy ? <Spinner /> : t("common:btn.save")}
         </Button>
       </div>
     </>
