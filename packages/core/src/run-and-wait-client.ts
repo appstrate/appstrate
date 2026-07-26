@@ -2,6 +2,15 @@
 
 import { encodePackageIdPath } from "./naming.ts";
 
+/**
+ * Fallback wait ceiling for a caller that has no deadline of its own.
+ *
+ * A caller that DOES have one (a chat turn, whose ceiling is
+ * `CHAT_TURN_DEADLINE_MS` = 10 min) must pass `maxMs` derived from it — this
+ * default is three times longer than such a turn, so relying on it means waiting
+ * for a result the caller will not be alive to read. See
+ * `module-chat/src/run-budget.ts`.
+ */
 export const RUN_AND_WAIT_MAX_MS = 30 * 60_000;
 export const RUN_AND_WAIT_BACKOFF_MS = 500;
 const RUN_GET_WAIT_MAX_SECONDS = 55;

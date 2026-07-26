@@ -5,7 +5,12 @@ import {
   appendFinalStepSystemPrompt,
   CHAT_FINAL_STEP_SYSTEM_PROMPT,
   CHAT_MAX_STEPS,
+  CHAT_MIN_RUN_BUDGET_MS,
   CHAT_TOOL_STEP_BUDGET,
+  CHAT_TURN_DEADLINE_MS,
+  CHAT_TURN_SAFETY_MARGIN_MS,
+  computeTurnRunBudget,
+  formatBudgetDuration,
   isFinalChatStep,
   mergeTurnMetadata,
   turnLimitReached,
@@ -94,6 +99,25 @@ describe("chat turn metadata", () => {
 
   it("appends the final-step instruction to the existing system prompt", () => {
     expect(appendFinalStepSystemPrompt("Base")).toBe(`Base\n\n${CHAT_FINAL_STEP_SYSTEM_PROMPT}`);
+  });
+
+  it("keeps a child call's budget strictly inside the turn that hosts it", () => {
+    // The defect: RUN_AND_WAIT_MAX_MS (30 min) was three times the turn ceiling.
+    expect(CHAT_TURN_DEADLINE_MS).toBe(10 * 60_000);
+    const now = 1_800_000_000_000;
+    const budget = computeTurnRunBudget(now + CHAT_TURN_DEADLINE_MS, now);
+    expect(budget.maxMs).toBeLessThan(CHAT_TURN_DEADLINE_MS);
+    expect(budget.maxMs).toBe(CHAT_TURN_DEADLINE_MS - CHAT_TURN_SAFETY_MARGIN_MS);
+    // A launch is refused once the derived budget drops under the floor.
+    expect(computeTurnRunBudget(now + CHAT_MIN_RUN_BUDGET_MS, now).launchable).toBe(false);
+  });
+
+  it("formats budget durations compactly", () => {
+    expect(formatBudgetDuration(0)).toBe("0s");
+    expect(formatBudgetDuration(-5_000)).toBe("0s");
+    expect(formatBudgetDuration(22_400)).toBe("22s");
+    expect(formatBudgetDuration(60_000)).toBe("1m00s");
+    expect(formatBudgetDuration(4 * 60_000 + 12_000)).toBe("4m12s");
   });
 
   it("ignores malformed metadata", () => {

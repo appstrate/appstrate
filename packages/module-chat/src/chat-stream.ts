@@ -47,9 +47,11 @@ import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 import type { UsageRejection } from "@appstrate/core/module";
 import {
-  appendFinalStepSystemPrompt,
+  CHAT_FINAL_STEP_SYSTEM_PROMPT,
   CHAT_MAX_STEPS,
   CHAT_TOOL_STEP_BUDGET,
+  CHAT_TURN_DEADLINE_MS,
+  formatTurnBudgetNote,
   isFinalChatStep,
   mergeTurnMetadata,
   type AppstrateTurnMetadata,
@@ -122,29 +124,66 @@ export function aiSdkCachedSystemMessage(content: string) {
   };
 }
 
+/**
+ * Per-step system trailer: everything that VARIES between steps, kept in its own
+ * system block so it can never invalidate the cached prefix.
+ *
+ * ai@7 accepts `instructions` as an ARRAY of system messages and prepends them
+ * in order, and the Anthropic provider maps them to consecutive `system` text
+ * blocks carrying each message's own `cache_control`. So `[cached(system),
+ * trailer]` puts the varying text strictly AFTER the breakpoint: the cached
+ * prefix (the several-KB operation index) is byte-identical every step and still
+ * hits, while the trailer is re-read uncached for a few dozen tokens.
+ */
+function aiSdkStepTrailerMessage(content: string) {
+  return { role: "system" as const, content };
+}
+
 export function prepareAiSdkChatStep({
   stepNumber,
   system,
   modelMessages,
   markToolStepBudgetReached,
+  turnDeadlineAt,
+  now = Date.now(),
 }: {
   stepNumber: number;
   system: string;
   modelMessages: ConvertedModelMessages;
   markToolStepBudgetReached: () => void;
+  /** Absolute instant the turn ends — the model is shown what is left of it. */
+  turnDeadlineAt: number;
+  /** Clock seam (tests pin it). */
+  now?: number;
 }) {
-  if (!isFinalChatStep(stepNumber, CHAT_MAX_STEPS)) return undefined;
+  // A5: the model sees its own budget on EVERY step. Without it, it cannot
+  // arbitrate — the audited turn launched a ~2-minute compilation with 22 s
+  // left.
+  const budgetNote = formatTurnBudgetNote({
+    remainingMs: turnDeadlineAt - now,
+    stepsUsed: stepNumber,
+    maxSteps: CHAT_MAX_STEPS,
+  });
+
+  if (!isFinalChatStep(stepNumber, CHAT_MAX_STEPS)) {
+    return {
+      instructions: [aiSdkCachedSystemMessage(system), aiSdkStepTrailerMessage(budgetNote)],
+    };
+  }
+
   markToolStepBudgetReached();
-  // Final step: swap the base instructions for the appended final-step directive
-  // (still cache-controlled). ai@7 re-standardizes every step and prepends the
-  // per-step `instructions` as the system message, so the cacheControl breakpoint
-  // rides along without needing `allowSystemInMessages`. `messages` is reset to
-  // the original history (as before), and instructions supplies the system —
-  // yielding the same model input the old head-of-`messages` pattern did.
+  // Final step: the tool-less closing call. The final-step directive joins the
+  // budget note in the trailer block rather than being concatenated into the
+  // cached base — same model input, but the cache breakpoint now sits on the
+  // unchanged base prompt instead of a per-step variant. `messages` is reset to
+  // the original history (as before).
   return {
     activeTools: [],
     toolChoice: "none" as const,
-    instructions: aiSdkCachedSystemMessage(appendFinalStepSystemPrompt(system)),
+    instructions: [
+      aiSdkCachedSystemMessage(system),
+      aiSdkStepTrailerMessage(`${budgetNote}\n\n${CHAT_FINAL_STEP_SYSTEM_PROMPT}`),
+    ],
     messages: modelMessages,
   };
 }
@@ -258,6 +297,11 @@ export async function handleChatStream(
   // only under CHAT_DEBUG — they may carry PII/customer content.
   const debug = Boolean(process.env.CHAT_DEBUG);
   const turnStart = Date.now();
+  // The turn's TIME budget, as an absolute instant. Both engines share the
+  // ceiling (`CHAT_TURN_DEADLINE_MS`): the Pi engine also enforces it as a hard
+  // abort, and on both paths every `run_and_wait` derives its wait budget from
+  // it instead of silently taking the 30-minute client default.
+  const turnDeadlineAt = turnStart + CHAT_TURN_DEADLINE_MS;
   let completedSteps = 0;
   let stepStart = turnStart;
   let firstChunkAt = 0;
@@ -414,7 +458,15 @@ export async function handleChatStream(
     // let it propagate to a 5xx rather than silently degrading to a no-tools
     // chat.
     const [openedMcp, block] = await Promise.all([
-      openPlatformMcp({ origin, headers, orgId, applicationId, fetch: platformFetch }),
+      openPlatformMcp({
+        origin,
+        headers,
+        orgId,
+        applicationId,
+        fetch: platformFetch,
+        turnDeadlineAt,
+        chatSessionId: meteringSessionId,
+      }),
       contextPromise,
     ]);
     mcp = openedMcp;
@@ -607,6 +659,7 @@ export async function handleChatStream(
           markToolStepBudgetReached: () => {
             toolStepBudgetReached = true;
           },
+          turnDeadlineAt,
         }),
       // Decoupled from the request connection (see `generation` above): a client
       // disconnect must not cancel generation; only an explicit stop does.

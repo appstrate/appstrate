@@ -45,7 +45,10 @@ describe("prepareAiSdkChatStep", () => {
     typeof prepareAiSdkChatStep
   >[0]["modelMessages"];
 
-  it("keeps ordinary steps unchanged", () => {
+  const NOW = 1_800_000_000_000;
+  const DEADLINE = NOW + 4 * 60_000 + 12_000; // 4m12s left
+
+  it("keeps ordinary steps on the base instructions, with the budget in a trailing block", () => {
     let reached = false;
     const step = prepareAiSdkChatStep({
       stepNumber: 14,
@@ -54,13 +57,25 @@ describe("prepareAiSdkChatStep", () => {
       markToolStepBudgetReached: () => {
         reached = true;
       },
+      turnDeadlineAt: DEADLINE,
+      now: NOW,
     });
 
-    expect(step).toBeUndefined();
     expect(reached).toBe(false);
+    // No tool restriction, no messages override — only the instructions gain the
+    // per-step budget block.
+    expect(Object.keys(step)).toEqual(["instructions"]);
+    // Block 0 is the UNCHANGED cached base prompt: the Anthropic cache
+    // breakpoint rides it, so the prefix stays byte-identical every step.
+    expect(step.instructions[0]).toEqual(aiSdkCachedSystemMessage(BASE));
+    // Block 1 is the varying part, deliberately WITHOUT cacheControl — it sits
+    // after the breakpoint and cannot invalidate the cached prefix.
+    expect(step.instructions[1]?.providerOptions).toBeUndefined();
+    expect(step.instructions[1]?.content).toContain("4m12s");
+    expect(step.instructions[1]?.content).toContain("step 14/16");
   });
 
-  it("disables tools and overrides instructions on the reserved final step", () => {
+  it("disables tools and moves the final-step directive into the trailing block", () => {
     let reached = false;
     const step = prepareAiSdkChatStep({
       stepNumber: 15,
@@ -69,17 +84,24 @@ describe("prepareAiSdkChatStep", () => {
       markToolStepBudgetReached: () => {
         reached = true;
       },
+      turnDeadlineAt: DEADLINE,
+      now: NOW,
     });
 
     expect(reached).toBe(true);
-    // The final step swaps the base instructions for the appended final-step
-    // directive (cache-controlled) and resets `messages` to the original history
-    // — no system message rides inside `messages` any more (instructions carries
-    // it, prepended by ai@7 as a system message).
+    // The final step disables tools and resets `messages` to the original
+    // history — no system message rides inside `messages` (instructions carries
+    // it, prepended by ai@7 as system messages).
     expect(step).toEqual({
       activeTools: [],
       toolChoice: "none",
-      instructions: aiSdkCachedSystemMessage(`${BASE}\n\n${CHAT_FINAL_STEP_SYSTEM_PROMPT}`),
+      instructions: [
+        aiSdkCachedSystemMessage(BASE),
+        {
+          role: "system",
+          content: expect.stringContaining(CHAT_FINAL_STEP_SYSTEM_PROMPT) as unknown as string,
+        },
+      ],
       messages: [...modelMessages],
     });
   });

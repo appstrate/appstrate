@@ -35,6 +35,7 @@ import {
   mergeTurnMetadata,
   CHAT_MAX_STEPS,
   CHAT_TOOL_STEP_BUDGET,
+  CHAT_TURN_DEADLINE_MS,
 } from "@appstrate/core/chat-turn-metadata";
 import type { SubscriptionChatModel, ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
@@ -57,8 +58,12 @@ import {
  * CHAT_MAX_STEPS steps (each possibly long-polling a run for ~55 s), so the
  * budget is generous; it exists to stop a wedged upstream stream from holding a
  * concurrency slot forever.
+ *
+ * It now lives in `@appstrate/core/chat-turn-metadata` next to the step budget:
+ * both engines derive their child-call budgets from the SAME ceiling, and a
+ * `run_and_wait` can no longer be granted more time than the turn hosting it.
  */
-const TURN_DEADLINE_MS = 10 * 60_000;
+const TURN_DEADLINE_MS = CHAT_TURN_DEADLINE_MS;
 
 export interface PiSubscriptionChatInput {
   /** Resolved subscription model + fresh real access token. */
@@ -109,9 +114,13 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
       const forwardAbort = (): void => turnAbort.abort(abortSignal.reason);
       if (abortSignal.aborted) turnAbort.abort(abortSignal.reason);
       else abortSignal.addEventListener("abort", forwardAbort, { once: true });
+      // The ABSOLUTE instant this turn dies. The timer below is just its local
+      // expression; the timestamp itself is what descends into every child call
+      // (run_and_wait) so the whole subtree ends at the same instant.
+      const turnDeadlineAt = startedAt + TURN_DEADLINE_MS;
       const deadline = setTimeout(
         () => turnAbort.abort(new ChatTurnDeadlineError(TURN_DEADLINE_MS)),
-        TURN_DEADLINE_MS,
+        Math.max(0, turnDeadlineAt - Date.now()),
       );
 
       // Inside the try so the deadline timer + abort listener above are torn
@@ -127,6 +136,13 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           headers: platformMcp.headers,
           writeChunk: write,
           signal: turnAbort.signal,
+          // Budget seam: the turn deadline bounds every run_and_wait, and the
+          // live step count feeds the per-step budget note the model reads.
+          turnBudget: {
+            deadlineAt: turnDeadlineAt,
+            stepCount: () => mapper.stepCount(),
+            chatSessionId: input.chatSessionId,
+          },
         });
 
         const {
