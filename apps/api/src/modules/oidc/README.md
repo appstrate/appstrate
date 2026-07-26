@@ -59,7 +59,7 @@ Thrown in step 3 when the client's `allowSignup` is `false` and no existing `end
 
 Appstrate shares a single Better Auth `user` table across audiences — platform operators (dashboard signup, org invitations, `level: "instance"` + `level: "org"` clients) AND end-users of third-party applications (`level: "application"` clients). Without a discriminator, a BA cookie session minted via the OIDC end-user flow would be indistinguishable from a platform session at the middleware layer — one logged-in end-user of app A would also have access to `/api/orgs`, `/api/agents`, etc. on the Appstrate platform itself.
 
-The `user.realm` column (added in `packages/db/drizzle/0001_add_user_realm.sql`) tags every BA row with its intended audience:
+The `user.realm` column (declared in `packages/db/src/schema/auth.ts`, created by `packages/db/drizzle/0000_init.sql`) tags every BA row with its intended audience:
 
 - `"platform"` — dashboard users, org members, instance/org-level OIDC clients. Default for any signup that does not carry an `oidc_pending_client` cookie pointing at an `application`-level client.
 - `"end_user:<applicationId>"` — end-user of the named application. Assigned by the OIDC module's realm resolver (`services/oidc-realm-resolver.ts`) during `user.create.before` when the in-flight signup's pending-client cookie resolves to an `application`-level client.
