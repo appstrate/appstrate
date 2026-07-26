@@ -256,7 +256,7 @@ interface ModelData {
   inherited: boolean;
   proxyId: string | null;
 }
-interface MemoryItem {
+interface SystemToolItem {
   id: string;
   always: boolean;
 }
@@ -265,8 +265,6 @@ interface AgentData {
   description: string | null;
   prompt: string | null;
   timeout: number | null;
-  runtime_tools: string[];
-  modelId: string | null;
   has_input_schema: boolean;
   has_output_schema: boolean;
 }
@@ -349,11 +347,9 @@ export function AgentNode({ data }: NodeProps) {
   const d = data as unknown as AgentData & { diagnostics?: AgentMapDiagnostic[] };
   const diags = diagnostics(data);
   const facts = [
-    d.modelId,
     d.timeout ? `${d.timeout}s` : null,
     d.has_input_schema ? t("map.hasInput") : null,
     d.has_output_schema ? t("map.hasOutput") : null,
-    d.runtime_tools.length > 0 ? d.runtime_tools.join(", ") : null,
   ].filter(Boolean);
 
   return (
@@ -513,25 +509,27 @@ export function ModelNode({ data }: NodeProps) {
   );
 }
 
-export function MemoryNode({ data }: NodeProps) {
+export function SystemToolsNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
-  const list = items<MemoryItem>(data);
+  const list = items<SystemToolItem>(data);
   const browse = cardAction(data, "onPanel", "memory", t("map.openMemory"));
   return (
     <Card
-      title={t("map.memory")}
+      title={t("map.systemTools")}
+      count={list.length}
       hasIncoming
-      // `pin`/`note` are platform runtime tools granted in the manifest, so the
-      // affordance GRANTS them (system-tools checklist) instead of merely linking
-      // to the archive. Browsing what is remembered stays a row action below.
-      action={cardAction(data, "onEdit", "runtime_tools", t("map.grantMemory"))}
+      isEmpty={list.length === 0}
+      emptyLabel={t("map.emptySystemTools")}
+      // These are granted in the manifest (`runtime_tools`), so the affordance
+      // opens the same checklist the editor uses.
+      action={cardAction(data, "onEdit", "runtime_tools", t("map.grantSystemTools"))}
     >
       {list.map((item) => (
         <Row
           key={item.id}
           icon={<Brain className="size-3.5" />}
-          label={t(`map.memoryTool.${item.id}`, { defaultValue: item.id })}
-          sublabel={item.always ? t("map.memoryAlways") : t("map.memoryGranted")}
+          label={t(`map.systemTool.${item.id}`, { defaultValue: item.id })}
+          sublabel={item.always ? t("map.toolAlways") : t("map.toolGranted")}
         />
       ))}
       {/* What the agent actually remembers is data, not definition — so it is a

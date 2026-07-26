@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { SectionCard } from "../section-card";
+import { packageListPath } from "../../lib/package-paths";
 import {
   usePackageList,
   useUploadPackage,
@@ -189,7 +190,7 @@ export function ResourceSection({
         <>
           <p className="text-muted-foreground text-xs">{emptyLabel}</p>
           <p className="text-muted-foreground text-xs">
-            <Link to="/skills">{t("editor.goToPackages")}</Link>
+            <Link to={packageListPath(type)}>{t("editor.goToPackages")}</Link>
           </p>
         </>
       ) : (

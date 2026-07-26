@@ -39,6 +39,7 @@ import { getPackageConfig } from "../services/application-packages.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import { collectAgentReadinessErrors } from "../services/agent-readiness.ts";
 import { listOrgModels } from "../services/org-models.ts";
+import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
@@ -49,7 +50,7 @@ import { getActor } from "../lib/actor.ts";
 // ---------------------------------------------------------------------------
 
 export type AgentMapNodeType =
-  "schedules" | "agent" | "model" | "toolbox" | "skills" | "mcp_servers" | "memory";
+  "schedules" | "agent" | "model" | "toolbox" | "skills" | "mcp_servers" | "system_tools";
 
 export interface AgentMapNode {
   id: string;
@@ -343,7 +344,6 @@ export async function buildAgentMap(
           description: agent.manifest.description ?? null,
           prompt: agent.prompt ?? null,
           timeout: agent.manifest.timeout ?? null,
-          runtime_tools: agent.manifest.runtime_tools ?? [],
           modelId: packageConfig.modelId,
           proxyId: packageConfig.proxyId,
           has_input_schema: !!agent.manifest.input?.schema,
@@ -383,22 +383,22 @@ export async function buildAgentMap(
     };
   });
 
-  // Memory is a declared capability, not stored state. Only what the agent
-  // ACTUALLY has is listed: `note`/`pin` when the manifest grants them, plus
-  // `recall_memory`, which the sidecar serves on every run regardless. Rows for
-  // ungranted tools are deliberately absent — an empty card already says "you
-  // could add this here"; listing the possibilities inside it would describe the
-  // platform instead of this agent.
+  // Platform runtime tools the manifest GRANTS (`output`, `log`, `note`, `pin`,
+  // `publish_document`), plus `recall_memory`, which the sidecar serves on every
+  // run regardless. Ungranted tools are deliberately absent: an empty card already
+  // says "you could add this here", so listing the possibilities inside it would
+  // describe the platform instead of this agent.
   //
-  // Also deliberately no counts of pinned blocks or archived notes: those are
-  // per-actor execution state, and the map projects the definition.
+  // Ordered by the catalog rather than a local list, so a runtime tool added there
+  // shows up here untouched. And deliberately no counts of pinned blocks or
+  // archived notes — that is per-actor execution state, while the map projects the
+  // definition.
   const declaredRuntimeTools = agent.manifest.runtime_tools ?? [];
-  const memoryItems = [
-    ...(declaredRuntimeTools.includes("pin") ? [{ id: "pin", declared: true, always: false }] : []),
-    ...(declaredRuntimeTools.includes("note")
-      ? [{ id: "note", declared: true, always: false }]
-      : []),
-    { id: "recall_memory", declared: true, always: true },
+  const systemToolItems = [
+    ...RUNTIME_TOOL_CATALOG.filter((tool) => declaredRuntimeTools.includes(tool.id)).map(
+      (tool) => ({ id: tool.id, always: false }),
+    ),
+    { id: "recall_memory", always: true },
   ];
 
   const rightCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
@@ -431,8 +431,8 @@ export async function buildAgentMap(
       itemCount: declaredMcpServers.length,
     },
     {
-      node: { id: "memory", type: "memory", data: { items: memoryItems } },
-      itemCount: memoryItems.length,
+      node: { id: "system_tools", type: "system_tools", data: { items: systemToolItems } },
+      itemCount: systemToolItems.length,
     },
   ];
 

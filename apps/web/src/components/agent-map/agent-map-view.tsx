@@ -35,8 +35,8 @@ import { MapPanelDialog, type MapPanelKind } from "./map-panel-dialog";
 import {
   AgentNode,
   McpServersNode,
-  MemoryNode,
   ModelNode,
+  SystemToolsNode,
   SchedulesNode,
   SkillsNode,
   ToolboxNode,
@@ -91,7 +91,7 @@ const NODE_TYPES = {
   toolbox: ToolboxNode,
   skills: SkillsNode,
   mcp_servers: McpServersNode,
-  memory: MemoryNode,
+  system_tools: SystemToolsNode,
 } as const;
 
 export function AgentMapView({

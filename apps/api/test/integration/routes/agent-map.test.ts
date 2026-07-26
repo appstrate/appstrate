@@ -135,10 +135,10 @@ describe("GET /api/agents/:scope/:name/map", () => {
     expect(nodeIds(body).sort()).toEqual([
       "agent",
       "mcp_servers",
-      "memory",
       "model",
       "schedules",
       "skills",
+      "system_tools",
       "toolbox",
     ]);
     for (const id of ["schedules", "toolbox", "skills", "mcp_servers"]) {
@@ -146,8 +146,8 @@ describe("GET /api/agents/:scope/:name/map", () => {
     }
     expect(body.edges.map((e) => e.id).sort()).toEqual([
       "agent->mcp_servers",
-      "agent->memory",
       "agent->skills",
+      "agent->system_tools",
       "agent->toolbox",
       // The model is an input: it feeds the agent.
       "model->agent",
@@ -283,12 +283,12 @@ describe("GET /api/agents/:scope/:name/map", () => {
     expect(body.diagnostics.some((d) => d.node_id === "model")).toBe(false);
   });
 
-  it("memory card lists ONLY what the agent actually has", async () => {
+  it("system tools card lists ONLY what the agent actually has", async () => {
     await seedAgentWith(agentManifest({ runtime_tools: ["note"] }));
 
     const body = (await (await getMap()).json()) as MapBody;
 
-    const items = body.nodes.find((n) => n.id === "memory")!.data.items as Array<
+    const items = body.nodes.find((n) => n.id === "system_tools")!.data.items as Array<
       Record<string, unknown>
     >;
     const ids = items.map((i) => i.id);
@@ -299,12 +299,12 @@ describe("GET /api/agents/:scope/:name/map", () => {
     expect(items.find((i) => i.id === "recall_memory")!.always).toBe(true);
   });
 
-  it("no memory runtime tool granted → only the always-on recall row", async () => {
-    await seedAgentWith(agentManifest({ runtime_tools: ["output"] }));
+  it("no runtime tool granted → only the always-on recall row", async () => {
+    await seedAgentWith(agentManifest({}));
 
     const body = (await (await getMap()).json()) as MapBody;
 
-    const items = body.nodes.find((n) => n.id === "memory")!.data.items as Array<
+    const items = body.nodes.find((n) => n.id === "system_tools")!.data.items as Array<
       Record<string, unknown>
     >;
     expect(items.map((i) => i.id)).toEqual(["recall_memory"]);
