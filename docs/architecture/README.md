@@ -27,4 +27,4 @@ duplicating the detail.
 
 ---
 
-Env vars → [`../ENV.md`](../ENV.md) · Casing policy → [`../CASING_CONVENTIONS.md`](../CASING_CONVENTIONS.md)
+All docs → [`../README.md`](../README.md) · Env vars → [`../ENV.md`](../ENV.md) · Casing policy → [`../CASING_CONVENTIONS.md`](../CASING_CONVENTIONS.md)

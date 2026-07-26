@@ -1,0 +1,48 @@
+# `@appstrate/runner-pi`
+
+`PiRunner` — an AFPS Runner implementation backed by the
+[Pi Coding Agent SDK](https://github.com/badlogic/pi-mono). It executes an AFPS
+agent bundle against an LLM and streams the resulting events to a sink.
+
+This is the runner [Appstrate](https://github.com/appstrate/appstrate) itself
+uses inside its sandboxes, extracted so the same execution semantics are
+available in any Bun environment with an LLM API key — no platform, no database,
+no containers required.
+
+> **Status: not yet published.** The package is staged for release
+> (`version: 0.0.0`) but still resolves `@appstrate/mcp-transport` as a workspace
+> dependency, and that package is private. Consume it from the monorepo for now.
+
+**Requires Bun ≥ 1.3.9.** Ships raw TypeScript sources; Node cannot import it
+directly.
+
+## Peer dependencies
+
+The Pi SDK is a peer, pinned exactly — the runner tracks its event and session
+shapes closely enough that a floating range would break silently:
+
+```json
+"@mariozechner/pi-coding-agent": "0.73.1",
+"@mariozechner/pi-ai": "0.73.1"
+```
+
+## Exports
+
+| Subpath           | Contents                                                                                                                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.`               | `PiRunner`, `installSessionBridge`, `derivePiCompactionSettings`, `deriveProviderFromApi`, `PROVIDER_BY_API`, and the accompanying types (`PiRunnerOptions`, `PiModelConfig`, `BridgeableSession`, `InternalSink`). |
+| `./runtime-tools` | The built-in runtime tools the agent can call during a run.                                                                                                                                                         |
+
+## What it handles
+
+- **Run execution** — drives a Pi session over an AFPS bundle and emits AFPS
+  runtime events to the configured sink.
+- **Provider mapping** — resolves an API shape to its Pi provider
+  (`deriveProviderFromApi`).
+- **Compaction** — derives the Pi context-compaction settings for a run.
+- **Session bridging** — `installSessionBridge` attaches an existing session so a
+  host application can observe or extend it.
+
+## License
+
+Apache-2.0 — see [LICENSE](./LICENSE).
