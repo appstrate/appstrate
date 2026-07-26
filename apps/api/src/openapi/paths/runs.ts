@@ -1041,6 +1041,9 @@ export const runsPaths = {
           "application/json": {
             schema: {
               type: "object",
+              // Mirrors the `.strict()` envelope in `routes/runs-remote.ts` —
+              // an unknown key at the body root is a 400, not a silent strip.
+              additionalProperties: false,
               required: ["source", "applicationId"],
               properties: {
                 source: {
@@ -1049,6 +1052,13 @@ export const runsPaths = {
                   oneOf: [
                     {
                       type: "object",
+                      // Mirrors the `.strict()` Zod variant in
+                      // `routes/runs-remote.ts` — an unknown key inside
+                      // `source` is a 400, not a silent drop. In particular
+                      // `modelId`/`proxyId` are NOT accepted here (a remote
+                      // run resolves no platform model); they remain valid on
+                      // the classic agent-run endpoint only.
+                      additionalProperties: false,
                       required: ["kind", "manifest", "prompt"],
                       properties: {
                         kind: { const: "inline" },
@@ -1063,6 +1073,8 @@ export const runsPaths = {
                     },
                     {
                       type: "object",
+                      // Same `.strict()` mirror as the `inline` variant above.
+                      additionalProperties: false,
                       required: ["kind", "packageId"],
                       properties: {
                         kind: { const: "registry" },

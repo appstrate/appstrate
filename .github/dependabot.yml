@@ -1,0 +1,23 @@
+# Kept on purpose despite `renovate.json` being present: the Renovate GitHub App
+# is configured but NOT installed (zero renovate/* branches, zero Renovate PRs,
+# no "Dependency Dashboard" issue). Dependabot is the bot actually opening PRs.
+# Do not delete this file until Renovate is installed and has opened a PR.
+version: 2
+updates:
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      better-auth:
+        patterns:
+          - "better-auth"
+          - "@better-auth/*"
+      production-dependencies:
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

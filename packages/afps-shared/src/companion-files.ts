@@ -7,9 +7,14 @@
  * (`@appstrate/afps-runtime/bundle/build:extractRootFromAfps`).
  *
  * This is the SINGLE source of truth for the §3.3 / §3.4 companion-file
- * invariants. Both `@appstrate/core/companion-files` and
- * `@appstrate/afps-runtime/bundle/companion-files` re-export from here, so
- * the two call sites can never drift.
+ * invariants. Both call sites import THIS module directly — there is no
+ * intermediate re-export to drift against:
+ *   - `packages/core/src/zip.ts` calls `checkCompanionFiles` +
+ *     `companionFilesFromRecord` inline (core no longer publishes a
+ *     `./companion-files` subpath — removed in core 6.0.0).
+ *   - `packages/afps-runtime/src/bundle/companion-files.ts` is a thin
+ *     internal adapter (Map-accepting, throws `BundleError`) consumed by
+ *     `bundle/validate-bundle.ts`; it is not a package subpath either.
  */
 
 /**
