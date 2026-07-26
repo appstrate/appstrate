@@ -24,6 +24,7 @@ import { Modal } from "../modal";
 import { Spinner } from "../spinner";
 import { ResourceSection } from "../agent-editor/resource-section";
 import { PromptEditor } from "../agent-editor/prompt-editor";
+import { RuntimeToolsGroup } from "../agent-editor/runtime-tools-group";
 import { caretRange, getResourceEntries, setResourceEntries } from "../agent-editor/utils";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useUpdatePackage } from "../../hooks/use-mutations";
@@ -31,8 +32,16 @@ import { useActivateIntegration } from "../../hooks/use-integrations";
 import { agentMapQueryKeyPrefix } from "../../hooks/use-agent-map";
 import { LibraryPicker, type LibraryCandidate } from "./library-picker";
 
-/** Which manifest section the dialog edits. */
-export type MapEditKind = "prompt" | "skills" | "integrations";
+/**
+ * Which manifest section the dialog edits.
+ *
+ * `runtime_tools` is what the memory card acts on: `note` and `pin` are platform
+ * runtime tools granted per agent in the manifest (`manifest.runtime_tools`), not
+ * installable dependencies — so the memory card's affordance opens the same
+ * system-tools checklist the editor uses, which also covers `output` / `log` /
+ * `publish_document`.
+ */
+export type MapEditKind = "prompt" | "skills" | "integrations" | "runtime_tools";
 
 interface MapEditDialogProps {
   kind: MapEditKind | null;
@@ -53,7 +62,9 @@ export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) 
       ? t("map.editPrompt")
       : kind === "skills"
         ? t("map.addSkill")
-        : t("map.addIntegration");
+        : kind === "runtime_tools"
+          ? t("map.systemTools")
+          : t("map.addIntegration");
 
   return (
     <Modal open onClose={onClose} title={title} className="sm:max-w-2xl">
@@ -100,7 +111,10 @@ function MapEditForm({
   const activate = useActivateIntegration();
   const [draftPrompt, setDraftPrompt] = useState(prompt);
   const [entries, setEntries] = useState<ResourceEntry[]>(() =>
-    kind === "prompt" ? [] : getResourceEntries(manifest, kind),
+    kind === "skills" || kind === "integrations" ? getResourceEntries(manifest, kind) : [],
+  );
+  const [runtimeTools, setRuntimeTools] = useState<string[]>(() =>
+    Array.isArray(manifest.runtime_tools) ? (manifest.runtime_tools as string[]) : [],
   );
   // Catalogue integrations staged for activation-then-declaration on save.
   const [staged, setStaged] = useState<LibraryCandidate[]>([]);
@@ -118,7 +132,13 @@ function MapEditForm({
     // Clone before mutating: `setResourceEntries` writes in place, and the
     // manifest here is the React Query cache's object.
     const next = structuredClone(manifest);
-    if (kind !== "prompt") setResourceEntries(next, kind, declared);
+    if (kind === "skills" || kind === "integrations") setResourceEntries(next, kind, declared);
+    // `runtime_tools` is a flat top-level array (AFPS), not a dependency group —
+    // dropped entirely when empty rather than written as `[]`.
+    if (kind === "runtime_tools") {
+      if (runtimeTools.length > 0) next.runtime_tools = runtimeTools;
+      else delete next.runtime_tools;
+    }
     update.mutate(
       {
         manifest: next,
@@ -166,6 +186,8 @@ function MapEditForm({
       <div className="max-h-[60vh] overflow-y-auto">
         {kind === "prompt" ? (
           <PromptEditor value={draftPrompt} onChange={setDraftPrompt} />
+        ) : kind === "runtime_tools" ? (
+          <RuntimeToolsGroup selected={runtimeTools} onChange={setRuntimeTools} />
         ) : (
           <ResourceSection
             type={kind === "skills" ? "skill" : "integration"}

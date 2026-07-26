@@ -27,12 +27,11 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
 import { useAgentMap } from "../../hooks/use-agent-map";
-import { packageDetailPath } from "../../lib/package-paths";
 import { ErrorState, LoadingState } from "../page-states";
 import { MapEditDialog, type MapEditKind } from "./map-edit-dialog";
+import { MapPanelDialog, type MapPanelKind } from "./map-panel-dialog";
 import {
   AgentNode,
   McpServersNode,
@@ -105,6 +104,7 @@ export function AgentMapView({
   const { t } = useTranslation("agents");
   const { data, isLoading, error } = useAgentMap(packageId, version);
   const [editKind, setEditKind] = useState<MapEditKind | null>(null);
+  const [panelKind, setPanelKind] = useState<MapPanelKind | null>(null);
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);
   useEscape(expanded, collapse);
@@ -112,6 +112,7 @@ export function AgentMapView({
   // Stable identity: it rides in every node's `data`, which React Flow compares
   // to decide what to re-render.
   const onEdit = useCallback((kind: MapEditKind) => setEditKind(kind), []);
+  const onPanel = useCallback((kind: MapPanelKind) => setPanelKind(kind), []);
 
   // A system agent's definition ships with the platform and the API refuses the
   // write, and a pinned version is a frozen snapshot — neither is editable, so
@@ -135,13 +136,13 @@ export function AgentMapView({
         id: n.id,
         type: n.type,
         position: n.position,
-        // `agentPackageId` lets a card build its own links without the server
-        // knowing anything about the SPA's routes; `onEdit` is what turns a card
-        // header into an in-place edit affordance (absent ⇒ no affordance).
+        // `onEdit`/`onPanel` are what turn a card header into an affordance;
+        // absent ⇒ no affordance, which is how a system package or a pinned
+        // version ends up read-only without the cards knowing why.
         data: {
           ...n.data,
           diagnostics: byNode.get(n.id) ?? [],
-          agentPackageId: data.agent.packageId,
+          onPanel,
           ...(editable ? { onEdit } : {}),
         },
         draggable: false,
@@ -160,7 +161,7 @@ export function AgentMapView({
         style: { strokeDasharray: "4 4" },
       })),
     };
-  }, [data, editable, onEdit]);
+  }, [data, editable, onEdit, onPanel]);
 
   if (isLoading) return <LoadingState />;
   if (error || !data) return <ErrorState message={t("map.loadError")} />;
@@ -191,13 +192,14 @@ export function AgentMapView({
         </span>
         {data.diagnostics.length > 0 &&
           (connectionIssues > 0 ? (
-            <Link
-              to={`${packageDetailPath("agent", packageId)}#connections`}
+            <button
+              type="button"
+              onClick={() => setPanelKind("connections")}
               className="text-warning hover:text-warning/80 flex items-center gap-1 underline-offset-2 hover:underline"
             >
               <AlertTriangle className="size-3.5" />
               {t("map.issueCount", { count: data.diagnostics.length })}
-            </Link>
+            </button>
           ) : (
             <span className="text-warning flex items-center gap-1">
               <AlertTriangle className="size-3.5" />
@@ -252,6 +254,7 @@ export function AgentMapView({
         </ReactFlow>
       </div>
       <MapEditDialog kind={editKind} packageId={packageId} onClose={() => setEditKind(null)} />
+      <MapPanelDialog kind={panelKind} packageId={packageId} onClose={() => setPanelKind(null)} />
     </div>
   );
 }

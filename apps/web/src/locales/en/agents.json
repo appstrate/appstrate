@@ -57,6 +57,8 @@
   "map.libraryNoMatch": "No integration matches",
   "map.expand": "Full screen",
   "map.collapse": "Collapse",
+  "map.systemTools": "System tools",
+  "map.grantMemory": "Grant in the system tools",
   "map.loadError": "Could not load this agent's map",
   "map.draftDefinition": "Working copy",
   "map.pinnedDefinition": "Version {{version}}",

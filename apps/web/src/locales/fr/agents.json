@@ -57,6 +57,8 @@
   "map.libraryNoMatch": "Aucune intégration ne correspond",
   "map.expand": "Plein écran",
   "map.collapse": "Réduire",
+  "map.systemTools": "Outils système",
+  "map.grantMemory": "Autoriser dans les outils système",
   "map.loadError": "Impossible de charger la carte de cet agent",
   "map.draftDefinition": "Copie de travail",
   "map.pinnedDefinition": "Version {{version}}",

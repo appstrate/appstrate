@@ -70,7 +70,8 @@ function ConfigSection({
 
 // ─── Model Section ──────────────────────────────────────────────────
 
-function ModelSection({ packageId }: { packageId: string }) {
+/** Exported so the visual map can mount the same picker in a dialog. */
+export function ModelSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings"]);
   const { data: orgModels } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
