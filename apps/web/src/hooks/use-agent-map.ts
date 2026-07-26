@@ -7,6 +7,18 @@ import { isVersioned } from "../lib/version-selector";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 
+const MAP_PATH = "/api/agents/{scope}/{name}/map" as const;
+
+/**
+ * Query-key prefix for every version of every agent's map.
+ *
+ * Exported so a writer that changes an agent's definition can invalidate the
+ * map it is displayed next to. `useUpdatePackage` cannot do it: its invalidation
+ * list is about packages, and the typed client keys queries by
+ * `[method, path, init]` — a path this prefix matches partially.
+ */
+export const agentMapQueryKeyPrefix = ["get", MAP_PATH] as const;
+
 export type AgentMap =
   paths["/api/agents/{scope}/{name}/map"]["get"]["responses"]["200"]["content"]["application/json"];
 export type AgentMapNode = AgentMap["nodes"][number];
@@ -31,7 +43,7 @@ export function useAgentMap(agentPackageId: string | undefined, version?: string
   return useQuery(
     $api.queryOptions(
       "get",
-      "/api/agents/{scope}/{name}/map",
+      MAP_PATH,
       {
         params: {
           path: { scope, name },

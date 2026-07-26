@@ -9,11 +9,13 @@
  * the graph. The only client-side work is attaching each diagnostic to the node
  * that owns it, which the server already addressed by `node_id`.
  *
- * Read-only by design: the prompt stays the single source of truth, so there is
- * no editing affordance here.
+ * What IS shown is read-only; what it shows can be edited. Card headers open the
+ * agent editor's own widgets in a dialog (see `map-edit-dialog.tsx`), which edit
+ * the definition itself — the prompt as text, declared dependencies. The drawing
+ * is never a source the definition gets generated from.
  */
 
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -28,6 +30,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { useAgentMap } from "../../hooks/use-agent-map";
 import { ErrorState, LoadingState } from "../page-states";
+import { MapEditDialog, type MapEditKind } from "./map-edit-dialog";
 import {
   AgentNode,
   McpServersNode,
@@ -78,6 +81,17 @@ export function AgentMapView({
 }) {
   const { t } = useTranslation("agents");
   const { data, isLoading, error } = useAgentMap(packageId, version);
+  const [editKind, setEditKind] = useState<MapEditKind | null>(null);
+
+  // Stable identity: it rides in every node's `data`, which React Flow compares
+  // to decide what to re-render.
+  const onEdit = useCallback((kind: MapEditKind) => setEditKind(kind), []);
+
+  // A system agent's definition ships with the platform and the API refuses the
+  // write, and a pinned version is a frozen snapshot — neither is editable, so
+  // no card offers an action it cannot deliver.
+  const editable =
+    data?.agent.source !== "system" && (data?.agent.version_ref ?? "draft") === "draft";
 
   const { nodes, edges } = useMemo(() => {
     if (!data) return { nodes: [] as Node[], edges: [] as Edge[] };
@@ -95,12 +109,14 @@ export function AgentMapView({
         id: n.id,
         type: n.type,
         position: n.position,
-        // `agentPackageId` lets a card build its own editor link without the
-        // server knowing anything about the SPA's routes.
+        // `agentPackageId` lets a card build its own links without the server
+        // knowing anything about the SPA's routes; `onEdit` is what turns a card
+        // header into an in-place edit affordance (absent ⇒ no affordance).
         data: {
           ...n.data,
           diagnostics: byNode.get(n.id) ?? [],
           agentPackageId: data.agent.packageId,
+          ...(editable ? { onEdit } : {}),
         },
         draggable: false,
         selectable: false,
@@ -113,7 +129,7 @@ export function AgentMapView({
         style: { strokeDasharray: "4 4" },
       })),
     };
-  }, [data]);
+  }, [data, editable, onEdit]);
 
   if (isLoading) return <LoadingState />;
   if (error || !data) return <ErrorState message={t("map.loadError")} />;
@@ -173,6 +189,7 @@ export function AgentMapView({
           <FitWhenMeasured signature={`${data.agent.packageId}@${data.agent.version_ref}`} />
         </ReactFlow>
       </div>
+      <MapEditDialog kind={editKind} packageId={packageId} onClose={() => setEditKind(null)} />
     </div>
   );
 }

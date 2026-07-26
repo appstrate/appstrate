@@ -29,7 +29,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { AgentMapDiagnostic } from "../../hooks/use-agent-map";
-import { packageDetailPath, packageEditPath } from "../../lib/package-paths";
+import { packageDetailPath } from "../../lib/package-paths";
+import type { MapEditKind } from "./map-edit-dialog";
 
 // ---------------------------------------------------------------------------
 // Shared shell
@@ -61,9 +62,44 @@ function DiagnosticBadge({ diagnostics }: { diagnostics: AgentMapDiagnostic[] })
 }
 
 /**
- * Card shell. `action` is the card's entry point into the existing editor: every
- * card is always drawn, even empty, so the set of cards reads as the inventory
- * of what an agent manifest can hold and an empty one says "you'd add it here".
+ * A card's entry point for changing what it shows: either edited in place
+ * (`onClick`, opening the shared editor widgets in a dialog) or handed off to
+ * the page that owns it (`href`, e.g. schedules).
+ */
+type CardAction = { label: string; onClick: () => void } | { label: string; href: string };
+
+const ACTION_CLASS = "text-muted-foreground hover:text-foreground nopan transition-colors";
+
+function CardActionButton({ action }: { action: CardAction }) {
+  if ("href" in action) {
+    return (
+      <Link
+        to={action.href}
+        title={action.label}
+        aria-label={action.label}
+        className={ACTION_CLASS}
+      >
+        <Plus className="size-3.5" />
+      </Link>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={action.onClick}
+      title={action.label}
+      aria-label={action.label}
+      className={ACTION_CLASS}
+    >
+      <Plus className="size-3.5" />
+    </button>
+  );
+}
+
+/**
+ * Card shell. Every card is always drawn, even empty, so the set of cards reads
+ * as the inventory of what an agent manifest can hold and an empty one says
+ * "you'd add it here".
  */
 function Card({
   title,
@@ -82,7 +118,7 @@ function Card({
   hasIncoming?: boolean;
   hasOutgoing?: boolean;
   wide?: boolean;
-  action?: { href: string; label: string } | undefined;
+  action?: CardAction | undefined;
   emptyLabel?: string;
   isEmpty?: boolean;
 }) {
@@ -100,16 +136,7 @@ function Card({
           {count !== undefined && (
             <span className="text-muted-foreground text-[11px]">{count}</span>
           )}
-          {action && (
-            <Link
-              to={action.href}
-              title={action.label}
-              aria-label={action.label}
-              className="text-muted-foreground hover:text-foreground nopan transition-colors"
-            >
-              <Plus className="size-3.5" />
-            </Link>
-          )}
+          {action && <CardActionButton action={action} />}
         </span>
       </div>
       <div className={`${MAX_LIST_HEIGHT} overflow-y-auto p-2`}>
@@ -235,10 +262,19 @@ function agentId(data: Record<string, unknown>): string {
   return typeof data.agentPackageId === "string" ? data.agentPackageId : "";
 }
 
-/** Where a manifest section is edited today: the agent editor. */
-function editorAction(data: Record<string, unknown>, label: string) {
-  const id = agentId(data);
-  return id ? { href: packageEditPath("agent", id), label } : undefined;
+/**
+ * In-place edit action, injected by the view alongside the diagnostics. Absent
+ * for a system package (its definition ships with the platform and the API
+ * refuses the write), so the card offers nothing it cannot deliver.
+ */
+function editAction(
+  data: Record<string, unknown>,
+  kind: MapEditKind,
+  label: string,
+): CardAction | undefined {
+  const onEdit = data.onEdit;
+  if (typeof onEdit !== "function") return undefined;
+  return { label, onClick: () => (onEdit as (k: MapEditKind) => void)(kind) };
 }
 
 const TRIGGER_ICONS: Record<string, React.ReactNode> = {
@@ -335,7 +371,7 @@ export function AgentNode({ data }: NodeProps) {
       hasIncoming
       hasOutgoing
       wide
-      action={editorAction(data, t("map.editPrompt"))}
+      action={editAction(data, "prompt", t("map.editPrompt"))}
     >
       <div className="space-y-2 px-1 py-0.5">
         <div className="flex items-start gap-2">
@@ -380,7 +416,7 @@ export function ToolboxNode({ data }: NodeProps) {
       hasIncoming
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptyToolbox")}
-      action={editorAction(data, t("map.addIntegration"))}
+      action={editAction(data, "integrations", t("map.addIntegration"))}
     >
       {list.map((item) => {
         const toolLabel =
@@ -425,7 +461,7 @@ export function SkillsNode({ data }: NodeProps) {
       hasIncoming
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptySkills")}
-      action={editorAction(data, t("map.addSkill"))}
+      action={editAction(data, "skills", t("map.addSkill"))}
     >
       {list.map((item) => (
         <Row
@@ -454,7 +490,6 @@ export function McpServersNode({ data }: NodeProps) {
       hasIncoming
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptyMcpServers")}
-      action={editorAction(data, t("map.addMcpServer"))}
     >
       {list.map((item) => (
         <Row
