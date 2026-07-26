@@ -68,7 +68,11 @@ function DiagnosticBadge({ diagnostics }: { diagnostics: AgentMapDiagnostic[] })
  */
 type CardAction = { label: string; onClick: () => void } | { label: string; href: string };
 
-const ACTION_CLASS = "text-muted-foreground hover:text-foreground nopan transition-colors";
+// `nodrag nopan` stops a press on a control from panning the canvas or starting
+// a node drag. It is NOT what makes the control clickable — that requires the
+// node to stay `selectable` (see agent-map-view.tsx), without which React Flow
+// sets `pointer-events: none` on the whole node.
+const ACTION_CLASS = "text-muted-foreground hover:text-foreground nodrag nopan transition-colors";
 
 function CardActionButton({ action }: { action: CardAction }) {
   if ("href" in action) {
@@ -184,8 +188,8 @@ function Row({
   const className = `flex items-center gap-2 rounded-md px-2 py-1.5 ${dimmed ? "opacity-50" : ""}`;
   if (!href) return <div className={className}>{body}</div>;
   return (
-    // `nopan` keeps the canvas still while the pointer is on a link.
-    <Link to={href} className={`${className} hover:bg-muted/60 nopan transition-colors`}>
+    // `nodrag nopan`: see ACTION_CLASS.
+    <Link to={href} className={`${className} hover:bg-muted/60 nodrag nopan transition-colors`}>
       {body}
     </Link>
   );

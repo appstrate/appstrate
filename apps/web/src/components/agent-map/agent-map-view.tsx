@@ -119,7 +119,12 @@ export function AgentMapView({
           ...(editable ? { onEdit } : {}),
         },
         draggable: false,
-        selectable: false,
+        // MUST stay selectable: React Flow gives a node `pointer-events: none`
+        // unless it is selectable, draggable or connectable, which makes every
+        // link and button inside it dead to a real click (a programmatic
+        // `.click()` still fires, which is how this hid). Fleet's own nodes carry
+        // `nopan selectable` for the same reason. Dragging stays off.
+        selectable: true,
       })),
       edges: data.edges.map<Edge>((e) => ({
         id: e.id,
