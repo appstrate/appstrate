@@ -20,15 +20,17 @@ import {
   ReactFlow,
   Background,
   Controls,
-  useNodesInitialized,
   useReactFlow,
+  useStore,
   type Edge,
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
 import { useAgentMap } from "../../hooks/use-agent-map";
+import { packageDetailPath } from "../../lib/package-paths";
 import { ErrorState, LoadingState } from "../page-states";
 import { MapEditDialog, type MapEditKind } from "./map-edit-dialog";
 import {
@@ -39,7 +41,6 @@ import {
   SchedulesNode,
   SkillsNode,
   ToolboxNode,
-  TriggersNode,
 } from "./map-nodes";
 
 /**
@@ -49,24 +50,42 @@ import {
 const FIT_VIEW_OPTIONS = { padding: 0.12 } as const;
 
 /**
- * Frames the whole graph once React Flow has measured the custom nodes.
+ * Re-frames the graph whenever the canvas changes size: expanding to full
+ * screen, resizing the window, collapsing the sidebar.
  *
- * The `fitView` prop (and an `onInit` call) both run before measurement, so a
- * tall column overflows the canvas. Card heights are content-driven — the agent
- * card's instructions block especially — so the server cannot supply exact
- * dimensions either; waiting for `useNodesInitialized` is the supported way.
+ * Keyed on the STORE's width/height, not on the expand flag nor a DOM
+ * ResizeObserver, because `fitView` frames against those store values and React
+ * Flow only writes them after its own measurement pass — reacting any earlier
+ * fits against stale numbers and silently leaves the zoom untouched.
+ *
+ * Note it does NOT gate on `useNodesInitialized()`: with these nodes that hook
+ * stays false indefinitely, so gating on it means never fitting at all (measured
+ * — an earlier version of this component did exactly that and did nothing).
+ * The FIRST frame is handled by React Flow's own `fitView` prop.
  */
-function FitWhenMeasured({ signature }: { signature: string }) {
-  const initialized = useNodesInitialized();
+function FitOnCanvasResize() {
+  const canvasSize = useStore((s) => `${Math.round(s.width)}x${Math.round(s.height)}`);
   const { fitView } = useReactFlow();
   useEffect(() => {
-    if (initialized) void fitView(FIT_VIEW_OPTIONS);
-  }, [initialized, fitView, signature]);
+    if (canvasSize === "0x0") return; // bootstrap frame, nothing measured yet
+    void fitView(FIT_VIEW_OPTIONS);
+  }, [fitView, canvasSize]);
   return null;
 }
 
+/** Escape leaves the expanded canvas — the same reflex as any overlay. */
+function useEscape(active: boolean, onEscape: () => void) {
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onEscape();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, onEscape]);
+}
+
 const NODE_TYPES = {
-  triggers: TriggersNode,
   schedules: SchedulesNode,
   agent: AgentNode,
   model: ModelNode,
@@ -86,6 +105,9 @@ export function AgentMapView({
   const { t } = useTranslation("agents");
   const { data, isLoading, error } = useAgentMap(packageId, version);
   const [editKind, setEditKind] = useState<MapEditKind | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const collapse = useCallback(() => setExpanded(false), []);
+  useEscape(expanded, collapse);
 
   // Stable identity: it rides in every node's `data`, which React Flow compares
   // to decide what to re-render.
@@ -147,22 +169,49 @@ export function AgentMapView({
   // vanish from the UI — surface them above the canvas instead of dropping them.
   const orphanDiagnostics = data.diagnostics.filter((d) => !d.node_id);
 
+  // Most diagnostics are missing/insufficient connections, and those are fixed on
+  // the Connections tab — so the counter becomes the way there instead of being
+  // a dead label (Fleet's "1 need connection" plays the same role).
+  const connectionIssues = data.diagnostics.filter((d) => d.node_id === "toolbox").length;
+
   return (
-    <div className="space-y-3">
-      {/* Which definition is drawn, and how much of it is broken. Without this
-          the reader cannot tell a draft map from an archived version's. */}
+    <div
+      className={
+        expanded ? "bg-background fixed inset-0 z-50 flex flex-col gap-3 p-4" : "space-y-3"
+      }
+    >
+      {/* Which definition is drawn, how much of it is broken, and the way out of
+          the expanded canvas. Without the first the reader cannot tell a draft
+          map from an archived version's. */}
       <div className="text-muted-foreground flex items-center gap-3 text-xs">
         <span>
           {data.agent.version_ref === "draft"
             ? t("map.draftDefinition")
             : t("map.pinnedDefinition", { version: data.agent.version_ref })}
         </span>
-        {data.diagnostics.length > 0 && (
-          <span className="text-warning flex items-center gap-1">
-            <AlertTriangle className="size-3.5" />
-            {t("map.issueCount", { count: data.diagnostics.length })}
-          </span>
-        )}
+        {data.diagnostics.length > 0 &&
+          (connectionIssues > 0 ? (
+            <Link
+              to={`${packageDetailPath("agent", packageId)}#connections`}
+              className="text-warning hover:text-warning/80 flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              <AlertTriangle className="size-3.5" />
+              {t("map.issueCount", { count: data.diagnostics.length })}
+            </Link>
+          ) : (
+            <span className="text-warning flex items-center gap-1">
+              <AlertTriangle className="size-3.5" />
+              {t("map.issueCount", { count: data.diagnostics.length })}
+            </span>
+          ))}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="hover:text-foreground ml-auto flex items-center gap-1 transition-colors"
+        >
+          {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+          {expanded ? t("map.collapse") : t("map.expand")}
+        </button>
       </div>
       {orphanDiagnostics.length > 0 && (
         <div className="border-warning/40 bg-warning/10 flex flex-col gap-1 rounded-lg border p-3">
@@ -174,10 +223,14 @@ export function AgentMapView({
           ))}
         </div>
       )}
-      {/* Viewport-relative rather than `100vh - header`: the page header varies
-          (readiness alerts appear and disappear), and overshooting it pushes the
-          canvas below the fold. */}
-      <div className="border-border bg-muted/20 h-[60vh] min-h-[420px] rounded-lg border">
+      {/* Expanded: fill what is left of the overlay. Otherwise viewport-relative
+          rather than `100vh - header` — the page header varies (readiness alerts
+          appear and disappear) and overshooting pushes the canvas below the fold. */}
+      <div
+        className={`border-border bg-muted/20 rounded-lg border ${
+          expanded ? "min-h-0 flex-1" : "h-[60vh] min-h-[420px]"
+        }`}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -195,7 +248,7 @@ export function AgentMapView({
         >
           <Background gap={24} size={1} />
           <Controls showInteractive={false} />
-          <FitWhenMeasured signature={`${data.agent.packageId}@${data.agent.version_ref}`} />
+          <FitOnCanvasResize />
         </ReactFlow>
       </div>
       <MapEditDialog kind={editKind} packageId={packageId} onClose={() => setEditKind(null)} />

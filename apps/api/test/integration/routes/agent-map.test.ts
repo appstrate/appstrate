@@ -140,7 +140,6 @@ describe("GET /api/agents/:scope/:name/map", () => {
       "schedules",
       "skills",
       "toolbox",
-      "triggers",
     ]);
     for (const id of ["schedules", "toolbox", "skills", "mcp_servers"]) {
       expect(body.nodes.find((n) => n.id === id)!.data.items).toEqual([]);
@@ -153,7 +152,6 @@ describe("GET /api/agents/:scope/:name/map", () => {
       // The model is an input: it feeds the agent.
       "model->agent",
       "schedules->agent",
-      "triggers->agent",
     ]);
     expect(body.diagnostics).toHaveLength(0);
   });
@@ -173,11 +171,13 @@ describe("GET /api/agents/:scope/:name/map", () => {
       expect(edge.source === "agent" || edge.target === "agent").toBe(true);
     }
     const byId = new Map(body.nodes.map((n) => [n.id, n]));
-    const triggersX = byId.get("triggers")!.position.x;
+    const inputX = byId.get("schedules")!.position.x;
     const agentX = byId.get("agent")!.position.x;
     const toolboxX = byId.get("toolbox")!.position.x;
-    expect(triggersX).toBeLessThan(agentX);
+    expect(inputX).toBeLessThan(agentX);
     expect(agentX).toBeLessThan(toolboxX);
+    // Inputs share one column.
+    expect(byId.get("model")!.position.x).toBe(inputX);
   });
 
   it("declared integration with no connection → not connected, run-blocking, diagnostic routed to its row", async () => {
@@ -236,7 +236,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
     expect(diag!.item_id).toBeNull();
   });
 
-  it("a schedule adds the schedules card and marks the schedule trigger configured", async () => {
+  it("a schedule shows up on the schedules card", async () => {
     await seedAgentWith(agentManifest());
     await seedSchedule({
       packageId: AGENT,
@@ -255,12 +255,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
     const items = schedules!.data.items as Array<Record<string, unknown>>;
     expect(items[0]!.cron_expression).toBe("0 21 * * *");
     expect(items[0]!.timezone).toBe("America/Montreal");
-
-    const triggers = body.nodes.find((n) => n.id === "triggers")!;
-    const trigger = (triggers.data.items as Array<Record<string, unknown>>).find(
-      (t) => t.kind === "schedule",
-    );
-    expect(trigger!.configured).toBe(true);
+    expect(items[0]!.enabled).toBe(true);
   });
 
   it("declared mcp servers get their own card (the manifest group Fleet has no equivalent for)", async () => {

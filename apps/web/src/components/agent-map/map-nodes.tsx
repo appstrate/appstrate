@@ -21,13 +21,10 @@ import {
   Cpu,
   Globe,
   Lock,
-  MessageSquare,
-  Play,
   Plug,
   Plus,
   Puzzle,
   Server,
-  Terminal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -206,11 +203,6 @@ function Row({
 // single author of these objects — see `services/agent-map.ts`.
 // ---------------------------------------------------------------------------
 
-interface TriggerItem {
-  kind: string;
-  configured: boolean;
-  accepts_input?: boolean;
-}
 interface ScheduleItem {
   id: string;
   name: string | null;
@@ -298,38 +290,9 @@ function editAction(
   return { label, onClick: () => (onEdit as (k: MapEditKind) => void)(kind) };
 }
 
-const TRIGGER_ICONS: Record<string, React.ReactNode> = {
-  manual: <Play className="size-3.5" />,
-  schedule: <Clock className="size-3.5" />,
-  api: <Terminal className="size-3.5" />,
-  chat: <MessageSquare className="size-3.5" />,
-};
-
 // ---------------------------------------------------------------------------
 // Node renderers
 // ---------------------------------------------------------------------------
-
-export function TriggersNode({ data }: NodeProps) {
-  const { t } = useTranslation("agents");
-  const list = items<TriggerItem>(data);
-  return (
-    <Card title={t("map.triggers")} hasOutgoing>
-      {list.map((item) => (
-        <Row
-          key={item.kind}
-          icon={TRIGGER_ICONS[item.kind]}
-          label={t(`map.trigger.${item.kind}`, { defaultValue: item.kind })}
-          sublabel={
-            item.configured
-              ? t(`map.triggerHint.${item.kind}`, { defaultValue: null })
-              : t("map.notConfigured")
-          }
-          dimmed={!item.configured}
-        />
-      ))}
-    </Card>
-  );
-}
 
 export function SchedulesNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");

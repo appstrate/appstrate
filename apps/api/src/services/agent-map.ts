@@ -49,7 +49,7 @@ import { getActor } from "../lib/actor.ts";
 // ---------------------------------------------------------------------------
 
 export type AgentMapNodeType =
-  "triggers" | "schedules" | "agent" | "model" | "toolbox" | "skills" | "mcp_servers" | "memory";
+  "schedules" | "agent" | "model" | "toolbox" | "skills" | "mcp_servers" | "memory";
 
 export interface AgentMapNode {
   id: string;
@@ -180,28 +180,17 @@ function toDiagnostic(e: ValidationFieldError): AgentMapDiagnostic {
 }
 
 // ---------------------------------------------------------------------------
-// Trigger inventory
-// ---------------------------------------------------------------------------
-
-/**
- * The ways a run can start. Unlike Fleet's "channels" card (which lists
- * connectable inbound providers), our entry points are platform-level and
- * always available, so this card documents them rather than offering setup.
- * `configured` marks the ones this agent actually has wired.
- */
-function buildTriggers(scheduleCount: number, hasInputSchema: boolean) {
-  return [
-    { kind: "manual", configured: true },
-    { kind: "schedule", configured: scheduleCount > 0 },
-    { kind: "api", configured: true },
-    // Input-schema-driven: an agent with no declared input can still be
-    // launched from chat, but cannot be handed structured arguments.
-    { kind: "chat", configured: true, accepts_input: hasInputSchema },
-  ];
-}
-
-// ---------------------------------------------------------------------------
 // Projection
+//
+// There is deliberately NO "triggers" card, and no equivalent of Fleet's
+// "channels". Fleet's channels are INBOUND (a Slack bot, a mailbox that fires the
+// agent); our integrations are outbound (the agent calls the API) and our
+// webhooks are outbound too (they notify, they do not fire). The remaining entry
+// points — manual, API key, chat — are platform-level and identical for every
+// agent, so listing them said nothing about the agent being looked at while
+// taking the most readable slot on the canvas. The only variable one, a
+// schedule, has its own card. When an event-driven trigger exists (inbound mail,
+// inbound webhook), a trigger card can come back with real content.
 // ---------------------------------------------------------------------------
 
 function scheduleCard(schedules: EnrichedSchedule[]) {
@@ -312,12 +301,7 @@ export async function buildAgentMap(
   const resolvedModelLabel =
     orgModelList.find((m) => m.id === resolvedModelId)?.label ?? resolvedModelId;
 
-  const triggers = buildTriggers(schedules.length, !!agent.manifest.input?.schema);
   const leftCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
-    {
-      node: { id: "triggers", type: "triggers", data: { items: triggers } },
-      itemCount: triggers.length,
-    },
     {
       node: {
         id: "schedules",
