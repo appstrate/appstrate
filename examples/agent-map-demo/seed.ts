@@ -14,11 +14,17 @@
  * Idempotent enough to re-run: an existing account signs in instead of signing
  * up, an existing org is reused, and an already-created agent simply reports the
  * conflict rather than aborting the rest.
+ *
+ * Overridable: `BASE`, `DEMO_EMAIL`, `DEMO_PASSWORD`, `DEMO_ORG_NAME`,
+ * `DEMO_ORG_SLUG` — the org pair matters because a slug is unique per instance,
+ * so a second account needs its own.
  */
 
 const BASE = process.env.BASE ?? "http://localhost:3000";
 const EMAIL = process.env.DEMO_EMAIL ?? "map@local.test";
 const PASSWORD = process.env.DEMO_PASSWORD ?? "mapdemo12345";
+const ORG_NAME = process.env.DEMO_ORG_NAME ?? "Map Demo";
+const ORG_SLUG = process.env.DEMO_ORG_SLUG ?? "mapdemo";
 const HERE = new URL(".", import.meta.url).pathname;
 
 let cookie = "";
@@ -37,8 +43,17 @@ async function call(path: string, init: RequestInit = {}, headers: Record<string
   return { status: res.status, body: (await res.json().catch(() => null)) as unknown };
 }
 
+/**
+ * Reads an agent and re-scopes it to this run's organization.
+ *
+ * A package id is unique per INSTANCE, not per organization, so seeding a second
+ * account with the committed `@mapdemo/...` ids collides with the first (the API
+ * answers 500 on the constraint). Rewriting the scope to the org slug keeps the
+ * script usable for any account, and keeps the demo's own ids coherent.
+ */
 async function readAgent(dir: string) {
-  const manifest = JSON.parse(await Bun.file(`${HERE}${dir}/manifest.json`).text()) as Record<
+  const raw = await Bun.file(`${HERE}${dir}/manifest.json`).text();
+  const manifest = JSON.parse(raw.replaceAll("@mapdemo/", `@${ORG_SLUG}/`)) as Record<
     string,
     unknown
   >;
@@ -65,13 +80,13 @@ if (r.status >= 400) {
 // ── Organization + application ─────────────────────────────────────────────
 await call("/api/orgs", {
   method: "POST",
-  body: JSON.stringify({ name: "Map Demo", slug: "mapdemo" }),
+  body: JSON.stringify({ name: ORG_NAME, slug: ORG_SLUG }),
 });
 const orgs = await call("/api/orgs");
 const orgId = ((orgs.body as { data?: Array<{ id: string; slug: string }> }).data ?? []).find(
-  (o) => o.slug === "mapdemo",
+  (o) => o.slug === ORG_SLUG,
 )?.id;
-if (!orgId) throw new Error("organization 'mapdemo' not found after create");
+if (!orgId) throw new Error(`organization '${ORG_SLUG}' not found after create`);
 
 const appsRes = await call("/api/applications", {}, { "X-Org-Id": orgId });
 const apps = (appsRes.body as { data?: Array<{ id: string; isDefault?: boolean }> }).data ?? [];
@@ -98,13 +113,13 @@ for (const dir of ["rapport-hebdo", "agent-nu"]) {
 // ── One schedule, so the Schedules card has content ────────────────────────
 // Checked first: unlike an agent, a schedule has no unique name, so re-running
 // would happily stack duplicates.
-const existing = await call("/api/agents/@mapdemo/rapport-hebdo/schedules", {}, scope);
+const existing = await call(`/api/agents/@${ORG_SLUG}/rapport-hebdo/schedules`, {}, scope);
 const alreadyScheduled = ((existing.body as { data?: unknown[] }).data ?? []).length > 0;
 if (alreadyScheduled) {
   console.log("schedule: already present, skipped");
 } else {
   const sched = await call(
-    "/api/agents/@mapdemo/rapport-hebdo/schedules",
+    `/api/agents/@${ORG_SLUG}/rapport-hebdo/schedules`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -124,4 +139,4 @@ if (alreadyScheduled) {
 }
 
 console.log(`\nDone. Sign in at ${BASE} with ${EMAIL} / ${PASSWORD}`);
-console.log("Then open @mapdemo/rapport-hebdo → Carte tab.");
+console.log(`Then open @${ORG_SLUG}/rapport-hebdo → Carte tab.`);
