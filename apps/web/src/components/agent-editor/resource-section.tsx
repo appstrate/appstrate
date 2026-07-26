@@ -112,15 +112,18 @@ export function ResourceSection({
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
-  // An agent may still declare an integration that's no longer active here
-  // (uninstalled/disabled since). Those won't come back in the active list, so
-  // surface them in a flagged section — never silently drop a declared
-  // dependency (the run-time gate would reject it with `integration_not_active`).
+  // A declared dependency the catalog does not return: an integration that is no
+  // longer active here (uninstalled/disabled since), or a skill that is simply
+  // not installed. Either way it must stay VISIBLE — it is in the manifest and
+  // the run-time gate will reject it (`integration_not_active` /
+  // `missing_skill`), so hiding it makes the editor claim the agent declares
+  // less than it does. This used to be integration-only, which is how a declared
+  // skill missing from the catalogue rendered as "no skill at all".
   const inactiveDeclaredIds = useMemo(() => {
-    if (type !== "integration" || !items) return [];
+    if (!items) return [];
     const present = new Set(items.map((i) => i.id));
     return selectedEntries.filter((e) => !present.has(e.id)).map((e) => e.id);
-  }, [items, type, selectedEntries]);
+  }, [items, selectedEntries]);
 
   const toggle = (id: string) => {
     onChange((prev) => {
@@ -261,7 +264,9 @@ export function ResourceSection({
                     {id}
                     <span className="text-destructive inline-flex items-center gap-1 text-xs font-normal">
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      {t("editor.integrationInactive")}
+                      {type === "integration"
+                        ? t("editor.integrationInactive")
+                        : t("editor.dependencyMissing")}
                     </span>
                   </span>
                 </div>

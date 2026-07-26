@@ -411,6 +411,7 @@ export function ToolboxNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const list = items<ToolboxItem>(data);
   const diags = diagnostics(data);
+  const connect = panelAction(data, "connections", t("detail.tabConnections"));
   return (
     <Card
       title={t("map.toolbox")}
@@ -434,7 +435,11 @@ export function ToolboxNode({ data }: NodeProps) {
             label={item.id}
             sublabel={`${item.declared_version} · ${toolLabel}`}
             dimmed={item.connected === false}
-            href={packageDetailPath("integration", item.id)}
+            // Connecting is what a flagged row asks for, and that panel exists —
+            // so the row opens it rather than navigating to the integration page.
+            {...(connect && "onClick" in connect
+              ? { onClick: connect.onClick }
+              : { href: packageDetailPath("integration", item.id) })}
             right={
               <span className="flex items-center gap-1">
                 {item.locked && (
@@ -541,14 +546,7 @@ export function MemoryNode({ data }: NodeProps) {
           key={item.id}
           icon={<Brain className="size-3.5" />}
           label={t(`map.memoryTool.${item.id}`, { defaultValue: item.id })}
-          sublabel={
-            item.always
-              ? t("map.memoryAlways")
-              : item.declared
-                ? t("map.memoryGranted")
-                : t("map.memoryNotGranted")
-          }
-          dimmed={!item.declared}
+          sublabel={item.always ? t("map.memoryAlways") : t("map.memoryGranted")}
         />
       ))}
       {/* What the agent actually remembers is data, not definition — so it is a

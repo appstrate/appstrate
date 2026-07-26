@@ -383,14 +383,21 @@ export async function buildAgentMap(
     };
   });
 
-  // Memory is a declared capability, not stored state: `note` and `pin` are
-  // opt-in runtime tools, while `recall_memory` is served unconditionally by the
-  // sidecar. Deliberately no counts of pinned blocks or archived notes — those
-  // are per-actor execution state, and the map projects the definition.
+  // Memory is a declared capability, not stored state. Only what the agent
+  // ACTUALLY has is listed: `note`/`pin` when the manifest grants them, plus
+  // `recall_memory`, which the sidecar serves on every run regardless. Rows for
+  // ungranted tools are deliberately absent — an empty card already says "you
+  // could add this here"; listing the possibilities inside it would describe the
+  // platform instead of this agent.
+  //
+  // Also deliberately no counts of pinned blocks or archived notes: those are
+  // per-actor execution state, and the map projects the definition.
   const declaredRuntimeTools = agent.manifest.runtime_tools ?? [];
   const memoryItems = [
-    { id: "pin", declared: declaredRuntimeTools.includes("pin"), always: false },
-    { id: "note", declared: declaredRuntimeTools.includes("note"), always: false },
+    ...(declaredRuntimeTools.includes("pin") ? [{ id: "pin", declared: true, always: false }] : []),
+    ...(declaredRuntimeTools.includes("note")
+      ? [{ id: "note", declared: true, always: false }]
+      : []),
     { id: "recall_memory", declared: true, always: true },
   ];
 

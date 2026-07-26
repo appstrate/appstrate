@@ -13,13 +13,18 @@
  * the manifest. These panels save themselves.
  */
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Plus } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "../modal";
 import { Spinner } from "../spinner";
 import { AgentConnectionsSection } from "../package-detail/agent-connections-section";
 import { AgentSchedulesTab, AgentMemoryTab } from "../package-detail/agent-tabs";
 import { ModelSection } from "../package-detail/agent-configuration-tab";
+import { ModelFormModal } from "../model-form-modal";
 import { usePackageDetail } from "../../hooks/use-packages";
+import { useModels, useModelFormHandler } from "../../hooks/use-models";
 
 /** Which existing panel to show. */
 export type MapPanelKind = "connections" | "schedules" | "memory" | "model";
@@ -30,6 +35,43 @@ const TITLE_KEY: Record<MapPanelKind, string> = {
   memory: "detail.tabMemory",
   model: "map.model",
 };
+
+/**
+ * The model picker, plus a way out when there is nothing to pick.
+ *
+ * `ModelSection` renders `null` when the organization has no model at all — which
+ * is precisely the case the map's model card flags — so on its own the dialog came
+ * up EMPTY. Pairing it with the existing `ModelFormModal` turns the dead end into
+ * the fix: add a model here, and the card resolves without leaving the map.
+ */
+function ModelPanel({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["agents", "settings"]);
+  const { data: orgModels } = useModels();
+  const [adding, setAdding] = useState(false);
+  const { isPending, onSubmit } = useModelFormHandler({ onSuccess: () => setAdding(false) });
+  const hasModels = (orgModels?.length ?? 0) > 0;
+
+  return (
+    <div className="space-y-3">
+      {hasModels ? (
+        <ModelSection packageId={packageId} />
+      ) : (
+        <p className="text-muted-foreground text-sm">{t("settings:models.empty")}</p>
+      )}
+      <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+        <Plus className="mr-1.5 size-3.5" />
+        {t("settings:models.add")}
+      </Button>
+      <ModelFormModal
+        open={adding}
+        onClose={() => setAdding(false)}
+        model={null}
+        isPending={isPending}
+        onSubmit={onSubmit}
+      />
+    </div>
+  );
+}
 
 export function MapPanelDialog({
   kind,
@@ -52,7 +94,7 @@ export function MapPanelDialog({
       <div className="max-h-[70vh] overflow-y-auto">
         {kind === "schedules" && <AgentSchedulesTab packageId={packageId} />}
         {kind === "memory" && <AgentMemoryTab packageId={packageId} />}
-        {kind === "model" && <ModelSection packageId={packageId} />}
+        {kind === "model" && <ModelPanel packageId={packageId} />}
         {kind === "connections" &&
           (detail ? (
             <AgentConnectionsSection packageId={packageId} detail={detail} />

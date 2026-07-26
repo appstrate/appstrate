@@ -283,7 +283,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
     expect(body.diagnostics.some((d) => d.node_id === "model")).toBe(false);
   });
 
-  it("memory card reflects declared runtime tools, and recall is always available", async () => {
+  it("memory card lists ONLY what the agent actually has", async () => {
     await seedAgentWith(agentManifest({ runtime_tools: ["note"] }));
 
     const body = (await (await getMap()).json()) as MapBody;
@@ -291,12 +291,23 @@ describe("GET /api/agents/:scope/:name/map", () => {
     const items = body.nodes.find((n) => n.id === "memory")!.data.items as Array<
       Record<string, unknown>
     >;
-    const byId = new Map(items.map((i) => [i.id, i]));
-    expect(byId.get("note")!.declared).toBe(true);
-    expect(byId.get("pin")!.declared).toBe(false);
-    // Served by the sidecar for every run, independently of `runtime_tools`.
-    expect(byId.get("recall_memory")!.declared).toBe(true);
-    expect(byId.get("recall_memory")!.always).toBe(true);
+    const ids = items.map((i) => i.id);
+    // `note` is granted; `pin` is NOT, so it is absent rather than listed as a
+    // greyed-out possibility — the card describes this agent, not the platform.
+    expect(ids).toEqual(["note", "recall_memory"]);
+    // Served by the sidecar on every run, independently of `runtime_tools`.
+    expect(items.find((i) => i.id === "recall_memory")!.always).toBe(true);
+  });
+
+  it("no memory runtime tool granted → only the always-on recall row", async () => {
+    await seedAgentWith(agentManifest({ runtime_tools: ["output"] }));
+
+    const body = (await (await getMap()).json()) as MapBody;
+
+    const items = body.nodes.find((n) => n.id === "memory")!.data.items as Array<
+      Record<string, unknown>
+    >;
+    expect(items.map((i) => i.id)).toEqual(["recall_memory"]);
   });
 
   it("unknown agent → 404", async () => {
