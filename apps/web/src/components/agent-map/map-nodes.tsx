@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Play,
   Plug,
+  Plus,
   Puzzle,
   Server,
   Terminal,
@@ -28,7 +29,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { AgentMapDiagnostic } from "../../hooks/use-agent-map";
-import { packageDetailPath } from "../../lib/package-paths";
+import { packageDetailPath, packageEditPath } from "../../lib/package-paths";
 
 // ---------------------------------------------------------------------------
 // Shared shell
@@ -59,6 +60,11 @@ function DiagnosticBadge({ diagnostics }: { diagnostics: AgentMapDiagnostic[] })
   );
 }
 
+/**
+ * Card shell. `action` is the card's entry point into the existing editor: every
+ * card is always drawn, even empty, so the set of cards reads as the inventory
+ * of what an agent manifest can hold and an empty one says "you'd add it here".
+ */
 function Card({
   title,
   count,
@@ -66,6 +72,9 @@ function Card({
   hasIncoming,
   hasOutgoing,
   wide,
+  action,
+  emptyLabel,
+  isEmpty,
 }: {
   title: string;
   count?: number;
@@ -73,6 +82,9 @@ function Card({
   hasIncoming?: boolean;
   hasOutgoing?: boolean;
   wide?: boolean;
+  action?: { href: string; label: string } | undefined;
+  emptyLabel?: string;
+  isEmpty?: boolean;
 }) {
   return (
     <div
@@ -80,13 +92,33 @@ function Card({
     >
       {hasIncoming && <Handle type="target" position={Position.Left} className="!bg-border" />}
       {hasOutgoing && <Handle type="source" position={Position.Right} className="!bg-border" />}
-      <div className="border-border flex items-center justify-between border-b px-3 py-2">
+      <div className="border-border flex items-center justify-between gap-2 border-b px-3 py-2">
         <span className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
           {title}
         </span>
-        {count !== undefined && <span className="text-muted-foreground text-[11px]">{count}</span>}
+        <span className="flex items-center gap-2">
+          {count !== undefined && (
+            <span className="text-muted-foreground text-[11px]">{count}</span>
+          )}
+          {action && (
+            <Link
+              to={action.href}
+              title={action.label}
+              aria-label={action.label}
+              className="text-muted-foreground hover:text-foreground nopan transition-colors"
+            >
+              <Plus className="size-3.5" />
+            </Link>
+          )}
+        </span>
       </div>
-      <div className={`${MAX_LIST_HEIGHT} overflow-y-auto p-2`}>{children}</div>
+      <div className={`${MAX_LIST_HEIGHT} overflow-y-auto p-2`}>
+        {isEmpty && emptyLabel ? (
+          <div className="text-muted-foreground px-2 py-1.5 text-[11px] italic">{emptyLabel}</div>
+        ) : (
+          children
+        )}
+      </div>
     </div>
   );
 }
@@ -194,6 +226,21 @@ function diagnostics(data: Record<string, unknown>): AgentMapDiagnostic[] {
   return Array.isArray(data.diagnostics) ? (data.diagnostics as AgentMapDiagnostic[]) : [];
 }
 
+/**
+ * The agent this card belongs to, injected client-side alongside the
+ * diagnostics. Cards need it to build editor links; the server stays unaware of
+ * the SPA's routes.
+ */
+function agentId(data: Record<string, unknown>): string {
+  return typeof data.agentPackageId === "string" ? data.agentPackageId : "";
+}
+
+/** Where a manifest section is edited today: the agent editor. */
+function editorAction(data: Record<string, unknown>, label: string) {
+  const id = agentId(data);
+  return id ? { href: packageEditPath("agent", id), label } : undefined;
+}
+
 const TRIGGER_ICONS: Record<string, React.ReactNode> = {
   manual: <Play className="size-3.5" />,
   schedule: <Clock className="size-3.5" />,
@@ -230,8 +277,21 @@ export function TriggersNode({ data }: NodeProps) {
 export function SchedulesNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const list = items<ScheduleItem>(data);
+  const id = agentId(data);
   return (
-    <Card title={t("map.schedules")} count={list.length} hasOutgoing>
+    <Card
+      title={t("map.schedules")}
+      count={list.length}
+      hasOutgoing
+      isEmpty={list.length === 0}
+      emptyLabel={t("map.emptySchedules")}
+      // Schedules are created from the agent's own Planifications tab.
+      action={
+        id
+          ? { href: `${packageDetailPath("agent", id)}#schedules`, label: t("map.addSchedule") }
+          : undefined
+      }
+    >
       {list.map((item) => (
         <Row
           key={item.id}
@@ -270,7 +330,13 @@ export function AgentNode({ data }: NodeProps) {
   ].filter(Boolean);
 
   return (
-    <Card title={t("map.agent")} hasIncoming hasOutgoing wide>
+    <Card
+      title={t("map.agent")}
+      hasIncoming
+      hasOutgoing
+      wide
+      action={editorAction(data, t("map.editPrompt"))}
+    >
       <div className="space-y-2 px-1 py-0.5">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
@@ -308,7 +374,14 @@ export function ToolboxNode({ data }: NodeProps) {
   const list = items<ToolboxItem>(data);
   const diags = diagnostics(data);
   return (
-    <Card title={t("map.toolbox")} count={list.length} hasIncoming>
+    <Card
+      title={t("map.toolbox")}
+      count={list.length}
+      hasIncoming
+      isEmpty={list.length === 0}
+      emptyLabel={t("map.emptyToolbox")}
+      action={editorAction(data, t("map.addIntegration"))}
+    >
       {list.map((item) => {
         const toolLabel =
           item.tools === "*"
@@ -346,7 +419,14 @@ export function SkillsNode({ data }: NodeProps) {
   const list = items<SkillItem>(data);
   const diags = diagnostics(data);
   return (
-    <Card title={t("map.skills")} count={list.length} hasIncoming>
+    <Card
+      title={t("map.skills")}
+      count={list.length}
+      hasIncoming
+      isEmpty={list.length === 0}
+      emptyLabel={t("map.emptySkills")}
+      action={editorAction(data, t("map.addSkill"))}
+    >
       {list.map((item) => (
         <Row
           key={item.id}
@@ -368,7 +448,14 @@ export function McpServersNode({ data }: NodeProps) {
   const list = items<McpServerItem>(data);
   const diags = diagnostics(data);
   return (
-    <Card title={t("map.mcpServers")} count={list.length} hasIncoming>
+    <Card
+      title={t("map.mcpServers")}
+      count={list.length}
+      hasIncoming
+      isEmpty={list.length === 0}
+      emptyLabel={t("map.emptyMcpServers")}
+      action={editorAction(data, t("map.addMcpServer"))}
+    >
       {list.map((item) => (
         <Row
           key={item.id}

@@ -6,7 +6,8 @@
  * The map is a projection, so the invariants worth asserting are about
  * faithfulness, not about verdicts of its own:
  *
- *   - a card with nothing to show is OMITTED (never an empty box),
+ *   - the card set is the FULL manifest inventory, empty cards included (they
+ *     are where the renderer offers to add the missing thing),
  *   - every edge connects a card to `agent` (three-column topology),
  *   - `diagnostics[]` carries the SAME failures the readiness gate raises, each
  *     routed to the node and row it belongs to,
@@ -118,7 +119,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
     return body.nodes.map((n) => n.id);
   }
 
-  it("bare agent → only the cards that have content, defaulting to the draft", async () => {
+  it("bare agent → the full card inventory, empty ones included, defaulting to the draft", async () => {
     await seedAgentWith(agentManifest());
 
     const res = await getMap();
@@ -128,10 +129,27 @@ describe("GET /api/agents/:scope/:name/map", () => {
     expect(body.agent.packageId).toBe(AGENT);
     expect(body.agent.version_ref).toBe("draft");
 
-    // No integration, skill, mcp server or schedule declared → those cards are
-    // absent rather than rendered empty.
-    expect(nodeIds(body).sort()).toEqual(["agent", "triggers"]);
-    expect(body.edges).toEqual([{ id: "triggers->agent", source: "triggers", target: "agent" }]);
+    // Nothing is declared, yet every card is present: the set of cards is the
+    // inventory of what a manifest can hold, and an empty one is where the UI
+    // offers to add the missing piece.
+    expect(nodeIds(body).sort()).toEqual([
+      "agent",
+      "mcp_servers",
+      "schedules",
+      "skills",
+      "toolbox",
+      "triggers",
+    ]);
+    for (const id of ["schedules", "toolbox", "skills", "mcp_servers"]) {
+      expect(body.nodes.find((n) => n.id === id)!.data.items).toEqual([]);
+    }
+    expect(body.edges.map((e) => e.id).sort()).toEqual([
+      "agent->mcp_servers",
+      "agent->skills",
+      "agent->toolbox",
+      "schedules->agent",
+      "triggers->agent",
+    ]);
     expect(body.diagnostics).toHaveLength(0);
   });
 

@@ -14,9 +14,14 @@
  *
  * Layout is computed server-side (like LangSmith Fleet's, which hardcodes it):
  * three columns — what triggers the agent on the left, the agent in the middle,
- * what it can do on the right. Nodes that would be empty are omitted rather
- * than rendered as an empty box, so the column stack is variable-height and
- * positions are derived instead of literal.
+ * what it can do on the right.
+ *
+ * EVERY node is always emitted, including the empty ones: the card set is the
+ * inventory of what an AFPS agent manifest can hold, so an absent skill section
+ * is itself information ("this agent has none, and here is where you'd add
+ * one"). The renderer turns each empty card into an entry point to the existing
+ * editor. Positions are still derived rather than literal, because card heights
+ * vary with their contents.
  */
 
 import type { Context } from "hono";
@@ -296,17 +301,15 @@ export async function buildAgentMap(
       node: { id: "triggers", type: "triggers", data: { items: triggers } },
       itemCount: triggers.length,
     },
-  ];
-  if (schedules.length > 0) {
-    leftCards.push({
+    {
       node: {
         id: "schedules",
         type: "schedules",
         data: { items: scheduleCard(schedules) },
       },
       itemCount: schedules.length,
-    });
-  }
+    },
+  ];
 
   // --- Centre column: the agent itself ------------------------------------
 
@@ -360,15 +363,12 @@ export async function buildAgentMap(
     };
   });
 
-  const rightCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [];
-  if (toolboxItems.length > 0) {
-    rightCards.push({
+  const rightCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
+    {
       node: { id: "toolbox", type: "toolbox", data: { items: toolboxItems } },
       itemCount: toolboxItems.length,
-    });
-  }
-  if (declaredSkills.length > 0) {
-    rightCards.push({
+    },
+    {
       node: {
         id: "skills",
         type: "skills",
@@ -383,18 +383,16 @@ export async function buildAgentMap(
         },
       },
       itemCount: declaredSkills.length,
-    });
-  }
-  if (declaredMcpServers.length > 0) {
-    rightCards.push({
+    },
+    {
       node: {
         id: "mcp_servers",
         type: "mcp_servers",
         data: { items: declaredMcpServers },
       },
       itemCount: declaredMcpServers.length,
-    });
-  }
+    },
+  ];
 
   const nodes = [
     ...stackColumn(COLUMN_X.input, leftCards),

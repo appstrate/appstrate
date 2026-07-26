@@ -95,7 +95,13 @@ export function AgentMapView({
         id: n.id,
         type: n.type,
         position: n.position,
-        data: { ...n.data, diagnostics: byNode.get(n.id) ?? [] },
+        // `agentPackageId` lets a card build its own editor link without the
+        // server knowing anything about the SPA's routes.
+        data: {
+          ...n.data,
+          diagnostics: byNode.get(n.id) ?? [],
+          agentPackageId: data.agent.packageId,
+        },
         draggable: false,
         selectable: false,
       })),
