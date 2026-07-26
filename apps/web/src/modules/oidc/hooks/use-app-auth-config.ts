@@ -21,7 +21,7 @@ export type SmtpConfigView = components["schemas"]["SmtpConfigView"];
 export type SocialProviderView = components["schemas"]["SocialProviderView"];
 export type SocialProviderId = SocialProviderView["provider"];
 
-export const upsertSmtpSchema = z.object({
+const upsertSmtpSchema = z.object({
   host: z.string().min(1, "Host is required"),
   port: z.number().int().min(1).max(65535),
   username: z.string().min(1, "Username is required"),
@@ -33,7 +33,7 @@ export const upsertSmtpSchema = z.object({
 
 export type UpsertSmtpInput = z.infer<typeof upsertSmtpSchema>;
 
-export const upsertSocialSchema = z.object({
+const upsertSocialSchema = z.object({
   clientId: z.string().min(1, "Client ID is required"),
   clientSecret: z.string().min(1, "Client secret is required"),
   scopes: z.array(z.string()).nullable().optional(),

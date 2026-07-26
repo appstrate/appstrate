@@ -398,7 +398,7 @@ async function getEndUserCursor(
   return row ?? null;
 }
 
-export async function findByExternalId(
+async function findByExternalId(
   applicationId: string,
   externalId: string,
 ): Promise<{ id: string } | null> {

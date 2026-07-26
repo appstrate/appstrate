@@ -15,6 +15,13 @@ import { forbidden } from "./errors.ts";
 /**
  * Auth methods accepted by the bearer-only proxy surfaces. The value is the
  * `c.get("authMethod")` string set by the auth pipeline.
+ *
+ * This IS a hard-coded allowlist, and two of its entries (`oauth2-instance`,
+ * `oauth2-dashboard`) are strategy ids owned by the `oidc` module — core names
+ * them explicitly because an allowlist that any loaded module could widen would
+ * not be a security boundary. Adding a bearer strategy here is therefore a
+ * deliberate core change, not a module capability. (The one *declared*
+ * capability that bypasses the list is `firstPartyLoopback` — see below.)
  */
 const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
   "api_key",
@@ -28,8 +35,10 @@ const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
  * {@link AuthResolution.firstPartyLoopback} when it is a server-minted,
  * process-local loopback bearer (the chat module's inference path is the only
  * one today): a request the server constructed for itself, never reachable from
- * a browser. Core gates on this declared property so no specific module id is
- * special-cased here — any future first-party loopback strategy works unchanged.
+ * a browser. Core gates on this declared property, so the *loopback* bypass
+ * names no module id — any future first-party loopback strategy works
+ * unchanged. (The bearer allowlist above is the opposite by design: an
+ * explicit, core-owned set of strategy ids.)
  */
 export interface BearerCallerCapabilities {
   /** Strategy declared itself a first-party, server-minted loopback caller. */

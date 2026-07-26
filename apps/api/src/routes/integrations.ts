@@ -144,20 +144,20 @@ export const connectOAuthSchema = z.object({
 // Mint a hosted-connect-portal session — auth-type-agnostic (issue #769). The
 // caller scopes the connect (optional OAuth scopes + reconnect target); the
 // server dispatches OAuth vs credential-form when the URL is opened.
-export const connectSessionSchema = z.object({
+const connectSessionSchema = z.object({
   scopes: z.array(z.string()).optional(),
   force_account_select: z.boolean().optional(),
   connection_id: z.uuid().optional(),
 });
 
 // Hosted-form submit — credentials only; all context comes from the page cookie.
-export const connectSubmitSchema = z.object({
+const connectSubmitSchema = z.object({
   credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
     message: "credentials must contain at least one field",
   }),
 });
 
-export const setDefaultClientSchema = z.object({
+const setDefaultClientSchema = z.object({
   // The client to make default — a flat client id (system env id or custom
   // `integration_oauth_clients.id`) from `GET .../auths/:authKey/clients`.
   client_ref: z.string().regex(/^[\w.-]+$/, "client_ref must be a client id"),

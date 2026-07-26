@@ -553,7 +553,7 @@ export async function getLatestVersionCreatedAt(packageId: string): Promise<Date
 }
 
 /** Get the integrity hash of the latest version. Returns null if no versions exist. */
-export async function getLatestVersionIntegrity(packageId: string): Promise<string | null> {
+async function getLatestVersionIntegrity(packageId: string): Promise<string | null> {
   const [row] = await db
     .select({ integrity: packageVersions.integrity })
     .from(packageVersions)

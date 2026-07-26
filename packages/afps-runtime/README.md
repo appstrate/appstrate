@@ -13,9 +13,10 @@ locally.
 - **Zero coupling.** The runtime has no knowledge of Appstrate. Appstrate
   ships its own sink (`AppstrateEventSink`) and resolvers against the
   runtime's open surface.
-- **Reproducible.** A run can be recorded (file sink → `.jsonl`) and
-  replayed via the library API (`reduceEvents` + `EventSink.handle`)
-  for deterministic regression fixtures.
+- **Reproducible.** A run's event stream can be captured to `.jsonl` by any
+  `EventSink` you supply, then replayed via the library API
+  (`reduceEvents` + `EventSink.handle`) for deterministic regression
+  fixtures.
 - **Apache-2.0.** Toolbox, not a platform — build whatever you want on top.
 
 ## Install
@@ -80,13 +81,14 @@ file when you need fixture-based regression:
 
 ```ts
 import { readFile } from "node:fs/promises";
-import { reduceEvents, ConsoleSink, type RunEvent } from "@appstrate/afps-runtime";
+import { reduceEvents, createReducerSink, type RunEvent } from "@appstrate/afps-runtime";
 
 const events: RunEvent[] = JSON.parse(await readFile("events.json", "utf-8"));
-const sink = new ConsoleSink();
+const { sink, snapshot } = createReducerSink();
 for (const ev of events) await sink.handle(ev);
 const result = reduceEvents(events);
 await sink.finalize(result);
+console.log(snapshot());
 ```
 
 ## Library
@@ -100,7 +102,7 @@ import {
   verifyBundleSignature,
   renderPrompt,
   reduceEvents,
-  ConsoleSink,
+  createReducerSink,
   type RunEvent,
 } from "@appstrate/afps-runtime";
 
@@ -133,7 +135,7 @@ const prompt = await renderPrompt({
 // Consume an event stream through a sink (produced by a runner you wire
 // up externally — e.g. the spec-aligned `Runner` interface from
 // `@appstrate/afps-runtime/runner`) and fold it into a RunResult.
-const sink = new ConsoleSink();
+const { sink, snapshot } = createReducerSink();
 const events: RunEvent[] = [
   { type: "log.written", timestamp: Date.now(), runId: "run_1", level: "info", message: "hello" },
   { type: "memory.added", timestamp: Date.now(), runId: "run_1", content: "learned something" },
@@ -142,22 +144,23 @@ const events: RunEvent[] = [
 for (const ev of events) await sink.handle(ev);
 const result = reduceEvents(events);
 await sink.finalize(result);
+console.log(snapshot().output); // { done: true }
 ```
 
 ### Package subpath exports
 
-| Subpath                               | What                                                                                                            |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `@appstrate/afps-runtime`             | Everything — re-exports all modules                                                                             |
-| `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                                                              |
-| `@appstrate/afps-runtime/runner`      | `Runner`, `RunOptions`, `reduceEvents`, `RunResult`                                                             |
-| `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                                                                            |
-| `@appstrate/afps-runtime/sinks`       | `ConsoleSink`, `FileSink`, `HttpSink`, `CompositeSink`                                                          |
-| `@appstrate/afps-runtime/resolvers`   | `SkillResolver`, `LocalIntegrationResolver`, `RemoteAppstrateIntegrationResolver`, `IntegrationApiCallResolver` |
-| `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                                                                |
-| `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                                                                      |
-| `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner                                                              |
-| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `LogLevel`, …                                                      |
+| Subpath                               | What                                                                                                              |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `@appstrate/afps-runtime`             | Everything — re-exports all modules                                                                               |
+| `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                                                                |
+| `@appstrate/afps-runtime/runner`      | `Runner`, `RunOptions`, `reduceEvents`, `RunResult`                                                               |
+| `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                                                                              |
+| `@appstrate/afps-runtime/sinks`       | `HttpSink`, `CompositeSink`, `createReducerSink`, `attachStdoutBridge`                                            |
+| `@appstrate/afps-runtime/resolvers`   | `LocalIntegrationResolver`, `RemoteAppstrateIntegrationResolver`, `IntegrationApiCallResolver`, `makeApiCallTool` |
+| `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                                                                  |
+| `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                                                                        |
+| `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner                                                                |
+| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `LogLevel`, …                                                        |
 
 ## Conformance
 

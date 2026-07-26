@@ -77,10 +77,15 @@ const CONTEXT_ORG_MARKER = "ChatHandlerTestOrg";
 const APP_ID = "app_chat_handler_test";
 const MODEL_PRESET_ID = "model_chat_handler_test";
 
-/** One scripted openai-completions model row, as `/api/models` returns it. */
+/**
+ * One scripted openai-completions model row, in the list envelope
+ * `/api/models` actually returns (`{ object: "list", data, hasMore }`).
+ */
 function modelsResponse(): Response {
   return Response.json({
-    models: [
+    object: "list",
+    hasMore: false,
+    data: [
       {
         id: MODEL_PRESET_ID,
         modelId: "gpt-4o-mini",

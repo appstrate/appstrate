@@ -76,7 +76,7 @@ export function invalidateOrgStorage(qc: ReturnType<typeof useQueryClient>) {
  * write (they live under different path strings), plus the org detail that
  * carries the storage total.
  */
-export function invalidateDocuments(qc: ReturnType<typeof useQueryClient>) {
+function invalidateDocuments(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
   void qc.invalidateQueries({ queryKey: ["get", "/api/documents/{id}"] });
   invalidateOrgStorage(qc);

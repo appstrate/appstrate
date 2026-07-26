@@ -48,7 +48,6 @@ export {
 export {
   emitRuntimeReady,
   emitBootProgress,
-  CURRENT_RUNTIME_PROTOCOL_VERSION,
   type RuntimeReadyPayload,
   type BootProgressOptions,
 } from "./runtime-ready.ts";
@@ -58,8 +57,6 @@ export {
   type StartSinkHeartbeatOptions,
   type SinkHeartbeatHandle,
 } from "./sink-heartbeat.ts";
-
-export type { AppstrateToolCtx, AppstrateCtxProvider } from "./tool-context.ts";
 
 export {
   RUN_HISTORY_INJECTED_TOOL,

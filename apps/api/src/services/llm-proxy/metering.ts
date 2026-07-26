@@ -38,7 +38,7 @@ import { storeResponse } from "./response-cache.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
 
 /** Clone upstream response headers, dropping hop-by-hop + stale content encoding/length. */
-export const cloneResponseHeaders = stripUpstreamResponseHeaders;
+const cloneResponseHeaders = stripUpstreamResponseHeaders;
 
 /**
  * Client-facing response headers for one upstream reply.

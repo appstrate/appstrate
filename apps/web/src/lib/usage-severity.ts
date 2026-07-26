@@ -10,7 +10,7 @@
 /** At/above this percent the gauge is a warning (yellow). */
 export const USAGE_WARN = 70;
 /** At/above this percent the gauge is critical (destructive/red). */
-export const USAGE_CRITICAL = 90;
+const USAGE_CRITICAL = 90;
 
 export function getUsageBarColor(usagePercent: number): string {
   if (usagePercent >= USAGE_CRITICAL) return "bg-destructive";

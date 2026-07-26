@@ -12,6 +12,7 @@ import {
   ModelResolutionError,
 } from "../src/commands/run/model.ts";
 import { parseModelSource } from "../src/commands/run.ts";
+import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 import type { ModelPreset } from "../src/lib/models.ts";
 
 /** Snapshot + wipe env vars touched by the resolver. */
@@ -290,7 +291,10 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
         }),
       ],
     });
-    expect(apiKey).toBe("sk-ant-oat-placeholder");
+    expect(apiKey).toBe(ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY);
+    // The marker pi-ai actually keys the OAuth reshape on — asserted
+    // independently of the constant's exact value.
+    expect(apiKey).toContain("sk-ant-oat");
     expect(model.headers?.["Authorization"]).toBe("Bearer ask_test_oauth");
     expect(model.headers?.["X-Org-Id"]).toBe("org_1");
   });

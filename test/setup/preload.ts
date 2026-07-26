@@ -175,7 +175,7 @@ if (TIER0) {
   // instance that the test helpers + app code also use. Importing the client
   // by relative path here would create a SECOND module instance (symlinked
   // workspace) with its own uninitialized db — so we don't.
-  const { applyCorePGliteMigrations } = await import("../../apps/api/src/lib/modules/migrate.ts");
+  const { applyCorePGliteMigrations } = await import("../../apps/api/src/lib/pglite-migrate.ts");
   await applyCorePGliteMigrations(resolve(import.meta.dir, "../../packages/db/drizzle"));
   // Close the embedded PGlite client after the whole suite. Its open handle
   // keeps the event loop alive, so bun force-terminates with a non-zero exit

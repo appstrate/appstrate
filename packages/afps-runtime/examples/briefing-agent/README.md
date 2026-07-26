@@ -56,18 +56,13 @@ from a 10-line bun script instead:
 ```ts
 // replay.ts
 import { readFile } from "node:fs/promises";
-import {
-  reduceEvents,
-  ConsoleSink,
-  FileSink,
-  CompositeSink,
-  type RunEvent,
-} from "@appstrate/afps-runtime";
+import { reduceEvents, createReducerSink, type RunEvent } from "@appstrate/afps-runtime";
 
 const events: RunEvent[] = JSON.parse(await readFile("events.json", "utf-8"));
-const sink = new CompositeSink([new ConsoleSink(), new FileSink({ path: "/tmp/brief.jsonl" })]);
+const { sink, snapshot } = createReducerSink();
 for (const ev of events) await sink.handle(ev);
 await sink.finalize(reduceEvents(events));
+console.log(JSON.stringify(snapshot(), null, 2));
 ```
 
 Run with `bun replay.ts`.

@@ -324,7 +324,7 @@ app.route("/api/me", meRouter);
 
 app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
 app.route("/api/agents", agentsRouter);
-app.route("/api", createNotificationsRouter()); // Must be before runsRouter (GET /api/runs vs /api/runs/:id)
+app.route("/api", createNotificationsRouter());
 // Unified-runner event ingestion — HMAC-authenticated, no user principal.
 // Mounted BEFORE runsRouter so the more-specific `/runs/:runId/events` path
 // matches without falling through to `GET /runs/:id`. Path-pattern `skipAuth`

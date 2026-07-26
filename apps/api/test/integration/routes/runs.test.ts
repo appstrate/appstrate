@@ -674,6 +674,47 @@ describe("Runs API", () => {
     });
   });
 
+  // ─── Route resolution: /api/runs collection vs /api/runs/:id detail ──
+
+  // `GET /api/runs` (collection) and `GET /api/runs/:id` (detail) live in the
+  // same router. Hono matches on the registered pattern, not on declaration
+  // order, but this pair is the exact shape a bad mount would break — the
+  // collection silently swallowed by `:id`, or the detail 404ing — so pin both
+  // resolutions here.
+  describe("GET /api/runs — collection vs detail resolution", () => {
+    it("resolves the collection and the detail route to their own handlers", async () => {
+      await seedAgent({ id: "@runorg/resolve-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/resolve-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      // Collection — a paginated envelope, never a single run object.
+      const list = await app.request("/api/runs", { headers: authHeaders(ctx) });
+      expect(list.status).toBe(200);
+      const listBody = (await list.json()) as { data: Array<{ id: string }>; total: number };
+      expect(Array.isArray(listBody.data)).toBe(true);
+      expect(listBody.data.map((r) => r.id)).toContain(run.id);
+
+      // Detail — the run object itself, not an envelope.
+      const detail = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+      expect(detail.status).toBe(200);
+      const detailBody = (await detail.json()) as { id: string; data?: unknown };
+      expect(detailBody.id).toBe(run.id);
+      expect(detailBody.data).toBeUndefined();
+    });
+
+    it("does not let the detail route swallow the collection path", async () => {
+      // A `/runs/:id` handler catching `/runs` would 404 on the literal id
+      // "runs" instead of returning the list.
+      const res = await app.request("/api/runs", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+    });
+  });
+
   // ─── GET /api/runs/:id/logs ────────────────────────────────
 
   describe("GET /api/runs/:id/logs", () => {

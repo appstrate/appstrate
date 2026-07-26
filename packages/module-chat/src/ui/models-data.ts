@@ -59,12 +59,12 @@ export async function fetchModels(
       headers: { ...getHeaders?.() },
     });
     if (!res.ok) return [];
-    const body = (await res.json()) as { models?: unknown; data?: unknown };
-    const rawList = Array.isArray(body.models)
-      ? body.models
-      : Array.isArray(body.data)
-        ? body.data
-        : [];
+    // Stripe-canonical list envelope `{ object: "list", data, hasMore }` — the
+    // single shape `/api/models` returns (apps/api `listResponse`; `data` is
+    // required by the OpenAPI schema). Same read as the server-side
+    // `listModels` in `../llm.ts`.
+    const body = (await res.json()) as { data?: unknown };
+    const rawList = Array.isArray(body.data) ? body.data : [];
     // Narrow each row through Zod, dropping any that don't match — never trust
     // the wire shape with a blind cast.
     const models: OrgModelOption[] = rawList.flatMap((row) => {

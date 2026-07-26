@@ -35,12 +35,12 @@ function useInvalidateModels() {
   };
 }
 
-export function useCreateModel() {
+function useCreateModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("post", "/api/models", { onSuccess: invalidate });
 }
 
-export function useUpdateModel() {
+function useUpdateModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("put", "/api/models/{id}", { onSuccess: invalidate });
 }

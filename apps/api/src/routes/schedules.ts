@@ -95,7 +95,7 @@ async function resolveScheduleActor(
   return { type: "end_user", id: selected.end_user_id! };
 }
 
-export const createScheduleSchema = z.object({
+const createScheduleSchema = z.object({
   name: z.string().optional(),
   cron_expression: z.string().min(1, "cron_expression is required"),
   timezone: z.string().default("UTC"),
@@ -113,7 +113,7 @@ export const createScheduleSchema = z.object({
   actor: actorSchema.optional(),
 });
 
-export const updateScheduleSchema = z.object({
+const updateScheduleSchema = z.object({
   name: z.string().optional(),
   cron_expression: z.string().optional(),
   timezone: z.string().optional(),

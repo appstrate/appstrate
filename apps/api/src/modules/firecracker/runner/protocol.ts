@@ -60,7 +60,7 @@ export const workloadHandleSchema = z.object({
   role: z.string().min(1),
 });
 
-export const workloadResourcesSchema = z.looseObject({
+const workloadResourcesSchema = z.looseObject({
   // The daemon sizes the microVM straight from these (vm-config.ts derives
   // guest MiB / vCPU) — a missing field would size the VM as NaN. Pin them;
   // additive fields (pidsLimit, …) still pass through.
@@ -81,12 +81,12 @@ export const workloadSpecSchema = z.looseObject({
   maxLifetimeSeconds: z.number().int().positive().optional(),
 }) as unknown as z.ZodType<WorkloadSpec>;
 
-export const workspaceHandleSchema = z.looseObject({
+const workspaceHandleSchema = z.looseObject({
   // Consumers branch on `kind` (docker volume vs guest directory) — pin it.
   kind: z.string().min(1),
 }) as unknown as z.ZodType<WorkspaceHandle>;
 
-export const sidecarEndpointsSchema = z.looseObject({
+const sidecarEndpointsSchema = z.looseObject({
   // The run-launcher (pi.ts) dereferences these to wire the agent's proxy +
   // sink routing; the firecracker orchestrator always populates all four
   // (even on skipSidecar runs — that flag gates createSidecar, not the
@@ -114,7 +114,7 @@ export const isolationBoundarySchema = z.looseObject({
  * only needs to pin the field it inspects (`runToken`) and forwards the
  * rest untouched.
  */
-export const sidecarLaunchSpecSchema = z.looseObject({
+const sidecarLaunchSpecSchema = z.looseObject({
   runToken: z.string().min(1),
 });
 

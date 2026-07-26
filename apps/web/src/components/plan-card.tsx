@@ -13,7 +13,7 @@ interface PlanCardProps {
   onSelect?: (planId: string) => void;
 }
 
-export function PlanCard({
+function PlanCard({
   plan,
   isCurrent = false,
   isUpgrade = false,

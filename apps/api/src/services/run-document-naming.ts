@@ -32,7 +32,7 @@ import { sanitizeFilename } from "@appstrate/core/naming";
  * Typed code `duplicate_document_name` so a client can act on it without
  * parsing the human message.
  */
-export function duplicateDocumentName(name: string): ApiError {
+function duplicateDocumentName(name: string): ApiError {
   return new ApiError({
     status: 400,
     code: "duplicate_document_name",

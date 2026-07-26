@@ -69,7 +69,7 @@ export function getProviderById(
  * this to seed the model-form fields (label, context window, …) from the
  * curated catalog.
  */
-export function findRegistryModel(
+function findRegistryModel(
   apiShape: string | null,
   modelId: string | null,
   registry: readonly ProviderRegistryEntry[],

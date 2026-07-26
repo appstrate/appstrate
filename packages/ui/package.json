@@ -37,8 +37,7 @@
     "./components/sidebar-context": "./src/components/sidebar-context.ts",
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
-    "./use-mobile": "./src/use-mobile.ts",
-    "./vite": "./src/vite.js"
+    "./use-mobile": "./src/use-mobile.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.2",

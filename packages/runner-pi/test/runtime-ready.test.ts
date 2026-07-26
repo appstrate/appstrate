@@ -9,11 +9,7 @@
 import { describe, it, expect } from "bun:test";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import {
-  CURRENT_RUNTIME_PROTOCOL_VERSION,
-  emitRuntimeReady,
-  emitBootProgress,
-} from "../src/runtime-ready.ts";
+import { emitRuntimeReady, emitBootProgress } from "../src/runtime-ready.ts";
 
 function collectingSink(): { sink: EventSink; events: RunEvent[] } {
   const events: RunEvent[] = [];
@@ -47,7 +43,6 @@ describe("emitRuntimeReady", () => {
     expect(raw.data).toEqual({
       bundleLoaded: true,
       extensions: 4,
-      runtimeProtocolVersion: CURRENT_RUNTIME_PROTOCOL_VERSION,
       totalToReadyMs: 1234,
     });
   });
@@ -69,34 +64,10 @@ describe("emitRuntimeReady", () => {
     expect(raw.data).toEqual({
       bundleLoaded: false,
       extensions: 2,
-      runtimeProtocolVersion: CURRENT_RUNTIME_PROTOCOL_VERSION,
       totalToReadyMs: 500,
       provisioningMs: 120,
       sdkImportMs: 200,
     });
-  });
-
-  it("defaults runtimeProtocolVersion to the current constant when caller omits it", async () => {
-    const { sink, events } = collectingSink();
-    await emitRuntimeReady(sink, "run_default", {
-      bundleLoaded: true,
-      extensions: 0,
-      bootDurationMs: 1,
-    });
-    const raw = events[0]! as unknown as { data: { runtimeProtocolVersion: string } };
-    expect(raw.data.runtimeProtocolVersion).toBe(CURRENT_RUNTIME_PROTOCOL_VERSION);
-  });
-
-  it("respects an explicit runtimeProtocolVersion override (forward-compat)", async () => {
-    const { sink, events } = collectingSink();
-    await emitRuntimeReady(sink, "run_override", {
-      bundleLoaded: true,
-      extensions: 0,
-      bootDurationMs: 1,
-      runtimeProtocolVersion: "1.0",
-    });
-    const raw = events[0]! as unknown as { data: { runtimeProtocolVersion: string } };
-    expect(raw.data.runtimeProtocolVersion).toBe("1.0");
   });
 
   it("rounds fractional boot durations so the message stays integer-millisecond", async () => {

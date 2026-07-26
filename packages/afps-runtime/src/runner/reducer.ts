@@ -91,15 +91,10 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
     case "appstrate.progress":
     case "appstrate.error":
     case "appstrate.metric":
-    case "run.started":
-    case "run.success":
-    case "run.failed":
-    case "run.timeout":
-    case "run.cancelled":
-      // Runner-internal lifecycle / canonical run events — do not
-      // contribute to the aggregated result. Terminal status comes from
-      // `RunResult.status` set on `EventSink.finalize`. Listed here so
-      // adding a new variant is caught by the exhaustiveness check below.
+      // Runner-internal lifecycle events — do not contribute to the
+      // aggregated result. Terminal status comes from `RunResult.status`
+      // set on `EventSink.finalize`. Listed here so adding a new variant
+      // is caught by the exhaustiveness check below.
       return;
     default: {
       const _exhaustive: never = canonical;

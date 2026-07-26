@@ -90,11 +90,13 @@ export function RunDetailPage() {
     return { historicalLogs: entries, structuredOutput: output, structuredReport: report };
   }, [logs]);
 
-  const execResult = run?.result as {
-    output?: Record<string, unknown>;
-    text?: string;
-  } | null;
-  const finalOutput = structuredOutput || execResult?.output || null;
+  // `EnrichedRun.result` mirrors the jsonb column as `unknown`; the generated
+  // OpenAPI schema is the authority on its shape, so narrow to that rather
+  // than re-declaring the fields here. `output` is deliberately `unknown` in
+  // the spec (agent-declared), so it still needs a local narrowing.
+  const execResult = run?.result as components["schemas"]["Run"]["result"];
+  const finalOutput =
+    structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const finalReport = structuredReport || execResult?.text || null;
   const hasReport = !!finalReport;

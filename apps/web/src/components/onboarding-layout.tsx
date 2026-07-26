@@ -30,8 +30,7 @@ const ALL_STEPS: (StepDef & { showWhen?: "billing" })[] = [
  * OSS: create → model → members → complete
  * Cloud: create → plan → members → complete
  */
-// eslint-disable-next-line react-refresh/only-export-components
-export function useOnboardingSteps(): StepDef[] {
+function useOnboardingSteps(): StepDef[] {
   const { features } = useAppConfig();
   return useMemo(
     () =>

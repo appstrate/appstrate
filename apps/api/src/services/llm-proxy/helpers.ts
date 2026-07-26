@@ -94,7 +94,7 @@ export function extractUsageObject(body: unknown): Record<string, unknown> | nul
 }
 
 /** Coerce an unknown value into a finite number, or undefined. */
-export function numberOrUndefined(v: unknown): number | undefined {
+function numberOrUndefined(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 

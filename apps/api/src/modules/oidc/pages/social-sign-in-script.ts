@@ -87,7 +87,7 @@ export function renderSocialButtons(opts: SocialButtonsOptions): RawHtml | null 
 }
 
 /** Public URL for the externalized sign-in helper script. */
-export const SOCIAL_SIGN_IN_SCRIPT_PATH = "/api/oauth/assets/social-sign-in.js";
+const SOCIAL_SIGN_IN_SCRIPT_PATH = "/api/oauth/assets/social-sign-in.js";
 
 /**
  * Source of the externalized social sign-in helper, served verbatim by

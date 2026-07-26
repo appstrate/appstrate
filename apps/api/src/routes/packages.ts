@@ -125,13 +125,13 @@ export const forkSchema = z.object({
  * `source_code` (e.g. `content: 1`) are now rejected as a 400 instead of
  * blowing up downstream as a 500.
  */
-export const packageJsonCreateSchema = z.object({
+const packageJsonCreateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()),
   content: z.string().optional(),
   source_code: z.string().optional(),
 });
 
-export const packageJsonUpdateSchema = z.object({
+const packageJsonUpdateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
   source_code: z.string().optional(),

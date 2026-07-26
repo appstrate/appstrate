@@ -159,7 +159,13 @@ describe("PiChatUiStreamMapper", () => {
     const meta = mapper.result();
     expect(meta.usage.input).toBe(100);
     expect(meta.usage.output).toBe(50);
-    expect(meta.costUsd).toBeCloseTo(0.3, 6);
+    expect(meta.usage.cacheRead).toBe(10);
+    expect(meta.usage.cacheWrite).toBe(5);
+    // pi-ai's own per-bucket cost rides through on `usage.cost` (informational).
+    // The terminal meta exposes NO `costUsd`: billing is computed by the ledger
+    // writer from these token counts + the model's catalog rates.
+    expect(meta.usage.cost.total).toBeCloseTo(0.3, 6);
+    expect(meta).not.toHaveProperty("costUsd");
     expect(meta.finishReason).toBe("tool-calls");
   });
 

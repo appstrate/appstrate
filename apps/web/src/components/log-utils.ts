@@ -19,7 +19,7 @@ export interface RawLog {
   createdAt?: Date | string | null;
 }
 
-export function formatToolArgs(args: Record<string, unknown>): string {
+function formatToolArgs(args: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(args)) {
     if (value === undefined || value === null) continue;

@@ -93,7 +93,7 @@ export function documentRunHref(doc: DocumentLike): string | undefined {
 }
 
 /** Documents inside this window (or already past) get the amber "expiring" state. */
-export const DOCUMENT_EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1000;
+const DOCUMENT_EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Derived, i18n-free view of a document's retention deadline (see `documentExpiryInfo`). */
 export interface DocumentExpiryInfo {

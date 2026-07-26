@@ -210,7 +210,7 @@ export function metadataToManifestPatch(m: MetadataState): Record<string, unknow
   };
 }
 
-export function getDeps(m: Record<string, unknown>): Record<string, unknown> {
+function getDeps(m: Record<string, unknown>): Record<string, unknown> {
   return (m.dependencies ?? {}) as Record<string, unknown>;
 }
 

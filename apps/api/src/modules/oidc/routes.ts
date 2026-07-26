@@ -186,11 +186,11 @@ export const smtpConfigUpsertSchema = z.object({
   secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
 });
 
-export const smtpConfigTestSchema = z.object({
+const smtpConfigTestSchema = z.object({
   to: z.email(),
 });
 
-export const socialProviderIdSchema = z.enum(SOCIAL_PROVIDER_IDS);
+const socialProviderIdSchema = z.enum(SOCIAL_PROVIDER_IDS);
 
 export const socialProviderUpsertSchema = z.object({
   clientId: z.string().min(1).max(512),

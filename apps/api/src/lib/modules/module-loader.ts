@@ -300,11 +300,6 @@ function validateContribution(
   }
 }
 
-/** Get a loaded module by ID, or null if not loaded. */
-export function getModule(id: string): AppstrateModule | null {
-  return _modules.get(id) ?? null;
-}
-
 /** Get all loaded modules (iteration order = init order). */
 export function getModules(): ReadonlyMap<string, AppstrateModule> {
   return _modules;
@@ -423,32 +418,30 @@ export function getModuleAuthStrategies(): AuthStrategy[] {
 }
 
 /**
- * Shape of the aggregated auth contributions that need to reach Better Auth
- * at `createAuth()` time: plugins merged with `basePlugins`. Module tables
- * live in the core schema, so the Drizzle adapter resolves them from the
- * barrel directly — no per-module table map is passed.
+ * Shape of the aggregated auth contributions that need to reach Better Auth at
+ * `createAuth()` time. Plugins are the only contribution: a module owns no
+ * tables, so the Drizzle adapter resolves every table from the core barrel and
+ * no per-module schema map is passed.
  *
  * `betterAuthPlugins` is erased to `unknown` at this layer — the boot
  * integration site in `packages/db/src/auth.ts` narrows to
  * `BetterAuthPluginList` before calling `createAuth(plugins)`. Keeps Better
  * Auth types out of core.
  */
-export interface ModuleContributions {
+interface ModuleContributions {
   betterAuthPlugins: unknown[];
 }
 
 /**
- * Aggregate Better Auth plugins from a list of modules. The input is explicit
- * so the production registry path and the test preload path share one
- * implementation:
+ * Aggregate Better Auth plugins from an explicit list of modules. The input is
+ * a parameter (rather than the singleton registry) so the production path and
+ * the test preload path share one implementation:
  *
- * - Production: `boot.ts` calls `collectModuleContributions(Array.from(getModules().values()))`
- *   after `loadModules()` has populated the singleton registry.
- * - Tests: `test/setup/preload.ts` imports modules off disk into a local
- *   array and calls this helper directly.
- *
- * Module tables now live in the core schema barrel, so the Better Auth adapter
- * resolves them directly — modules no longer contribute Drizzle schemas.
+ * - Production: `boot.ts` calls the {@link getModuleContributions} wrapper,
+ *   which feeds this function from the singleton registry populated by
+ *   `loadModules()`.
+ * - Tests: `test/setup/preload.ts` imports modules off disk into a local array
+ *   and calls this function directly.
  *
  * OSS invariant: returns `{ betterAuthPlugins: [] }` when no module contributes.
  */

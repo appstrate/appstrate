@@ -16,7 +16,7 @@
 
 import type { ExecutionContext } from "../types/execution-context.ts";
 import { isFileField } from "@appstrate/afps-shared/file-field";
-import type { PromptView, PromptViewUpload } from "./prompt-renderer.ts";
+import type { PromptViewUpload } from "./prompt-renderer.ts";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -107,9 +107,6 @@ export interface PlatformPromptOptions {
    * as a platform-managed section BEFORE the raw prompt.
    */
   deliverables?: boolean;
-
-  /** Optional pre-built PromptView; skip if you want to let the helper build one. */
-  promptView?: PromptView;
 }
 
 export function renderPlatformPrompt(opts: PlatformPromptOptions): string {

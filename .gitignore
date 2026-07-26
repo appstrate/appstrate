@@ -2,8 +2,8 @@
 node_modules
 
 # Local-only test system-packages + the e2e tests that depend on them.
-# Kept on disk for local runs, deliberately out of the repo/PR (the shipped
-# tree only carries production packages like integration-kijiji-1.2.0).
+# Kept on disk for local runs, deliberately out of the repo/PR — the shipped
+# tree carries only the released `system-packages/*.afps` bundles.
 local-test-packages/
 apps/api/test/integration/services/connect-e2e.test.ts
 runtime-pi/sidecar/test/integrations-boot-connect-tool-e2e.test.ts
@@ -44,6 +44,16 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
+# Python runner artifacts (runtime-pi/runners/* build their venv in-tree)
+.venv/
+__pycache__/
+
+# Local scratch dirs (never part of the repo)
+scratch/
+scratchpad/
+# Guards against `mkdir -p "$UNSET_VAR/..."` writing a literal `undefined/`
+undefined/
+
 # Runtime storage (user uploads, execution files)
 data/
 storage/
@@ -52,8 +62,6 @@ storage/
 # such directory globally; whitelist the paths we ship in the repo.
 !apps/api/src/data/
 !apps/api/src/data/**
-
-flows/*
 
 claudedocs/
 

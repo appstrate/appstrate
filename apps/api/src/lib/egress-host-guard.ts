@@ -25,7 +25,7 @@ import { isAllowedInternalIdpHost } from "@appstrate/connect";
  * layers URL parse + scheme floor on top so the whole egress decision lives in
  * one place.
  */
-export async function checkEgressHost(hostname: string): Promise<ResolvedHostCheck> {
+async function checkEgressHost(hostname: string): Promise<ResolvedHostCheck> {
   if (isAllowedInternalIdpHost(hostname)) {
     return { blocked: false, pinnedAddress: hostname };
   }

@@ -3,7 +3,7 @@
 /**
  * Remote run creation — entry point for the remote-runner route
  * (`POST /api/runs/remote`). The caller (CLI, GitHub Action, ...) is the
- * runner: we run readiness + preflight, mint sink credentials, create the
+ * runner: we run the preflight gates, mint sink credentials, create the
  * `runs` row in `pending`, and return the credentials. Status transitions
  * flow back through the HMAC-signed event route (§run-event-ingestion).
  *
@@ -23,7 +23,6 @@ import { mintSinkCredentials, type SinkCredentials } from "../lib/mint-sink-cred
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { extractRunAgentDenorm, freezeRunSpawnDependencies } from "./run-pipeline.ts";
-import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
 import {
   type IntegrationManifestCache,
@@ -33,7 +32,6 @@ import { ApiError } from "../lib/errors.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,7 +92,7 @@ export type CreateRunResult =
 // ---------------------------------------------------------------------------
 
 /**
- * Create a remote run: run readiness + preflight gates, mint sink
+ * Create a remote run: run the preflight gates, mint sink
  * credentials, insert the `runs` row in `pending`, and return — the CLI
  * executes on its own host and posts signed events back.
  */
@@ -111,30 +109,15 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
     overrideVersionLabel,
   } = input;
 
-  // --- Provider readiness — runs first so remote callers get a readable
-  //     400 before we spend any rate-limit / concurrency budget on them.
-  try {
-    await validateAgentReadiness({
-      agent: input.agent,
-      orgId,
-      config,
-      applicationId,
-      actor,
-      // Forward overrides so a remote retry with `connection_overrides`
-      // exits the must_choose loop instead of re-firing 412 on the same
-      // candidate set.
-      ...(input.connectionOverrides ? { runOverrides: input.connectionOverrides } : {}),
-    });
-  } catch (err) {
-    return {
-      ok: false,
-      error: {
-        code: "agent_not_ready",
-        message: getErrorMessage(err),
-        status: 400,
-      },
-    };
-  }
+  // Readiness (`validateAgentReadiness`) is NOT re-run here. The single
+  // caller — `POST /api/runs/remote` — already validates the very same
+  // (agent, config, applicationId, actor) tuple before it gets here: the
+  // `registry` branch calls `validateAgentReadiness` directly, the `inline`
+  // branch runs it inside `runInlinePreflight`. Both let the original
+  // `ApiError` escape, which preserves the 412 `missing_integration_connection`
+  // envelope (with its `errors[]` list driving the dashboard's
+  // MissingConnections modal). A second pass here could only ever flatten
+  // that into a 400 `agent_not_ready`, losing the structured payload.
 
   // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.

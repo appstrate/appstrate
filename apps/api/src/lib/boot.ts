@@ -430,7 +430,7 @@ async function reconcileOAuthResourceColumns(): Promise<void> {
  */
 async function applyEmbeddedMigrations(): Promise<void> {
   const { resolve } = await import("node:path");
-  const { applyCorePGliteMigrations } = await import("./modules/migrate.ts");
+  const { applyCorePGliteMigrations } = await import("./pglite-migrate.ts");
   await applyCorePGliteMigrations(resolve(import.meta.dir, "../../../../packages/db/drizzle"));
 }
 

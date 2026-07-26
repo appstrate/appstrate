@@ -59,11 +59,6 @@ export interface RuntimeEnv {
    */
   timeoutSeconds?: number;
   /**
-   * Optional output JSON schema (raw string) — becomes the `output` runtime
-   * tool's `data` argument schema, AJV-validated at call time.
-   */
-  outputSchemaRaw?: string;
-  /**
    * W3C `traceparent` value (header wire format). When the platform
    * spawned the run inside an existing trace, this is forwarded so the
    * container's outbound HTTP traffic — events, finalize, sidecar
@@ -350,7 +345,6 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
     mcpConnectDeadlineMs,
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
-    outputSchemaRaw: source.OUTPUT_SCHEMA || undefined,
     traceparent: source.TRACEPARENT || undefined,
   };
 }

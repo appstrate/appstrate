@@ -58,7 +58,7 @@ let cachedTrustRoot: TrustRoot | null = null;
  * fail-fast at first access — malformed trust config is a security
  * issue we do not want to silently absorb.
  */
-export function getTrustRoot(): TrustRoot {
+function getTrustRoot(): TrustRoot {
   if (cachedTrustRoot) return cachedTrustRoot;
   const raw = getEnv().AFPS_TRUST_ROOT;
   if (!Array.isArray(raw)) {

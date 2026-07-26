@@ -15,9 +15,8 @@
  *     tools. The schemas there are pinned to the sidecar's
  *     `mountMcp(...)` advertisement so a divergence between Pi tools and
  *     MCP tools is a one-line fix here, not silent re-validation drift.
- *   - Build the system prompt. We ship a 3-line capability prompt
- *     fragment via {@link DIRECT_TOOL_PROMPT}; the bundle owner
- *     decides whether to splice it in.
+ *   - Build the system prompt. Tool-usage prose lives in each tool's MCP
+ *     `description` (surfaced via `tools/list`), never here.
  *
  * The per-tool wiring (event emit → `mcp.callTool` → result-shape
  * adapter) for the runtime-injected tools lives in
@@ -44,17 +43,6 @@ import { drainAndEmitInto, type RuntimeEventDrainer } from "@appstrate/core/runt
 import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
 import { resolveApiCallBody, ApiCallBodyResolveError } from "./api-call-body-resolver.ts";
 import { shapeApiCallResponse } from "./api-call-response-resolver.ts";
-
-/**
- * 3-line capability prompt (D5.1). Spliceable into a bundle's system
- * prompt — Sonnet 4+ tier models infer the rest from `tools/list`
- * natively.
- */
-export const DIRECT_TOOL_PROMPT = [
-  "## Capabilities",
-  "You have access to MCP tools through the standard MCP protocol.",
-  "Discover them via `tools/list`. Each tool's input schema is self-documenting.",
-].join("\n");
 
 interface BuildMcpDirectFactoriesOptions {
   mcp: AppstrateMcpClient;

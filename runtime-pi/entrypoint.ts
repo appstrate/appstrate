@@ -46,8 +46,6 @@ import {
   emitBootProgress,
   startSinkHeartbeat,
   loadPiCodingAgentSdk,
-  type AppstrateToolCtx,
-  type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
@@ -66,7 +64,6 @@ import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
-import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "./env.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import {
@@ -194,13 +191,14 @@ const sink = new HttpSink({
   maxBackoffMs: 2000,
 });
 
-// --- 0a. Stdout-JSONL bridge ---
+// --- 0a. Result-aggregating sink wrapper ---
 // See `@appstrate/afps-runtime/sinks/stdout-bridge` for the full design
-// rationale. In short: system tools still emit canonical events via
-// `process.stdout.write`; we intercept those lines, fold them into an
-// aggregator together with PiRunner's session events, and merge the
-// aggregate into the finalize POST so `result.output`, `result.pinned`,
-// and `result.memories` are complete when the platform ingests the run.
+// rationale. What matters here: the wrapper folds every event PiRunner
+// hands the sink into an in-memory `RunResult` aggregate, then merges that
+// aggregate into the finalize POST — this is how `result.output`,
+// `result.pinned`, and `result.memories` reach the platform at all. (The
+// module also intercepts `process.stdout.write` for out-of-process runners;
+// inside this container nothing writes canonical events that way.)
 const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
 const bridgedSink = bridge.sink;
 
@@ -352,64 +350,6 @@ async function initGitWorkspace(): Promise<void> {
 
 const extensionFactories: ExtensionFactory[] = [];
 
-// Runtime context exposed to custom tools as the 4th `execute` argument.
-// Assigned once tool wiring runs (the sidecar Phase-C block or the no-sidecar
-// `else` branch); the closure provider is read at every `execute` invocation,
-// so factories registered earlier still see the wired ctx by the time a tool
-// actually runs.
-//
-// NOT a definite-assignment (`!`) binding: a `!` would let a stray read
-// BEFORE wiring completes hand out `undefined` typed as a live ctx (silent
-// null-deref); the guarded provider throws a clear error instead.
-let appstrateRuntimeCtx: AppstrateToolCtx | undefined;
-const appstrateCtxProvider: AppstrateCtxProvider = () => {
-  if (!appstrateRuntimeCtx) {
-    throw new Error(
-      "appstrate runtime tool context is not wired yet " +
-        "(tool executed before tool wiring completed). This is a runtime wiring bug.",
-    );
-  }
-  return appstrateRuntimeCtx;
-};
-const loadedRuntimeIds = new Set<string>();
-
-/**
- * Load platform-shipped extensions from the container's `/runtime/extensions/`
- * directory. These are Pi-bundled tools (e.g. built-in primitives) that do
- * not travel inside the AFPS bundle — kept here because the shared
- * `prepareBundleForPi` intentionally only handles bundle-scoped tools.
- */
-async function loadExtensionsFromDir(dir: string, label: string) {
-  if (!(await exists(dir))) return;
-  const entries = (await fs.readdir(dir)).filter((e) => e.endsWith(".ts"));
-
-  const results = await Promise.allSettled(
-    entries
-      .filter((e) => !loadedRuntimeIds.has(e.replace(/\.ts$/, "")))
-      .map(async (entry) => {
-        const id = entry.replace(/\.ts$/, "");
-        const mod = await import(path.join(dir, entry));
-        const factory = mod.default;
-        if (typeof factory !== "function") {
-          await emitError(
-            `Extension '${id}' (${label}): default export is not a function (got ${typeof factory})`,
-          );
-          return;
-        }
-        extensionFactories.push(
-          wrapExtensionFactory(factory as ExtensionFactory, id, appstrateCtxProvider),
-        );
-        loadedRuntimeIds.add(id);
-      }),
-  );
-
-  for (const result of results) {
-    if (result.status === "rejected") {
-      await emitError(`Failed to load extension (${label}): ${result.reason}`);
-    }
-  }
-}
-
 // --- 2a. Phase A: git init + load AFPS bundle in parallel ---
 
 // Earliest possible event: the sink is live and the heavy ESM imports + Bun
@@ -530,8 +470,6 @@ if (bundle) {
     await emitError(`Failed to prepare agent package: ${getErrorMessage(err)}`);
   }
 }
-
-await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
 phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart);
 await progress(
@@ -674,19 +612,6 @@ if (sidecarUrl) {
         },
       });
       extensionFactories.push(...factories);
-
-      // Wire the tool-side runtime context (4th `execute` arg). Integrations
-      // expose their own namespaced tools (including the generic
-      // `{ns}__api_call`) directly to the LLM, so the only capability the ctx
-      // carries is `readResource` — it resolves any MCP `resource_link` an
-      // integration tool may return for spilled blobs.
-      const mcp = mcpClient;
-      appstrateRuntimeCtx = {
-        readResource: async (uri) => {
-          const result = await mcp.readResource({ uri });
-          return result as Awaited<ReturnType<AppstrateToolCtx["readResource"]>>;
-        },
-      };
     } catch (err) {
       await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
       process.exit(1);
@@ -752,18 +677,6 @@ if (sidecarUrl) {
       },
     }),
   );
-
-  // No sidecar attached — wire a stub tool ctx whose only capability
-  // (`readResource`) rejects. Integrations expose their own {ns}__api_call
-  // MCP tools when a sidecar is present; without one a misconfigured bundle
-  // still gets a clear error rather than a null-deref.
-  appstrateRuntimeCtx = {
-    readResource: async (uri) => {
-      throw new Error(
-        `Tool tried to read MCP resource '${uri}' but this run was launched without a sidecar.`,
-      );
-    },
-  };
 }
 
 // --- 2e. publish_document runtime tool (opt-in via manifest.runtime_tools) ---

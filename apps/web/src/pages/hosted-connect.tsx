@@ -5,6 +5,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
 import { IntegrationIcon } from "../components/integration-icon";
+import { client, type paths } from "../api/client";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
 
 /**
@@ -17,23 +18,28 @@ import type { IntegrationManifestAuth } from "../hooks/use-integrations";
  * end-users), outside the authenticated app shell. Context comes from
  * `GET /connect/context`; the secret is entered here and POSTed directly to
  * `/connect/submit` (never through the model or the chat bundle).
+ *
+ * Both calls go through the typed client. That is safe despite the page's
+ * non-session auth: `/api/integrations/connect/*` short-circuits the whole
+ * auth pipeline server-side (`skipAuth` in `lib/auth-pipeline.ts`) and both
+ * handlers derive scope + actor from the page-cookie claims alone, so the
+ * `X-Org-Id` / `X-Application-Id` the client middleware may inject from a
+ * leftover localStorage selection is never read.
  */
 
 // Must match `apps/api/src/lib/oauth-popup-html.ts` so the chat ConnectCard
 // (postMessage / BroadcastChannel listener) auto-resumes on success.
 const INTEGRATION_BROADCAST_CHANNEL = "appstrate_integration";
 const INTEGRATION_MESSAGE_TYPE = "appstrate:integration_connection";
-const CSRF_HEADER = "x-connect-csrf";
 
-interface ConnectContext {
-  package_id: string;
-  auth_key: string;
-  display_name: string;
-  icon: string | null;
-  auth: IntegrationManifestAuth;
-  connection_id: string | null;
-  csrf: string | null;
-}
+/**
+ * The spec leaves the manifest `auth` block open (`additionalProperties`), so
+ * the generated type is a bare record — narrow it for `<CredentialFields>`.
+ */
+type ConnectContext = Omit<
+  paths["/api/integrations/connect/context"]["get"]["responses"][200]["content"]["application/json"],
+  "auth"
+> & { auth: IntegrationManifestAuth };
 
 type Phase = "loading" | "form" | "submitting" | "done" | "error";
 
@@ -75,13 +81,10 @@ export function HostedConnectPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/integrations/connect/context", {
-          credentials: "include",
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const ctx = (await res.json()) as ConnectContext;
+        // Non-2xx throws via the client middleware, so `data` is defined here.
+        const { data } = await client.GET("/api/integrations/connect/context");
         if (cancelled) return;
-        setContext(ctx);
+        setContext(data as ConnectContext);
         setPhase("form");
       } catch (err) {
         if (cancelled) return;
@@ -105,19 +108,11 @@ export function HostedConnectPage() {
     setPhase("submitting");
     setError(null);
     try {
-      const res = await fetch("/api/integrations/connect/submit", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          [CSRF_HEADER]: context.csrf,
-        },
-        body: JSON.stringify({ credentials: values }),
+      // Non-2xx throws `ApiError` (RFC 9457 `detail`) via the client middleware.
+      await client.POST("/api/integrations/connect/submit", {
+        params: { header: { "x-connect-csrf": context.csrf } },
+        body: { credentials: values },
       });
-      if (!res.ok) {
-        const problem = (await res.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(problem?.detail ?? `submit ${res.status}`);
-      }
       signalSuccess(context.package_id);
       setPhase("done");
       // Close the popup/tab after a short confirmation, mirroring the OAuth page.

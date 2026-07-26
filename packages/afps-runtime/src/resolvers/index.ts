@@ -4,11 +4,16 @@
 /**
  * AFPS runtime resolvers.
  *
- * Interfaces for loading in-bundle `dependencies.skills[]` content plus the
- * integration `api_call` surface. The runtime supplies a default "bundled"
- * skill implementation that reads content shipped inside the `.afps` file;
- * runners supply external implementations (notably the integration credential
- * resolvers) for anything that lives outside the bundle.
+ * The integration `api_call` surface: credential-injecting HTTP call core,
+ * `delivery.http` rendering, the outbound-HTTP engine, and the local /
+ * remote integration resolvers.
+ *
+ * Skills are NOT resolved here. A skill package ships `SKILL.md` inside the
+ * bundle and the runner materialises it on disk (`prepareBundleForPi` writes
+ * `.pi/skills/{id}/SKILL.md`) — there is no resolution step, and the AFPS
+ * spec defines none. The third-party extension seam for an alternative
+ * runtime is {@link import("../conformance/adapter.ts").ConformanceAdapter},
+ * not a resolver interface.
  *
  * NOTE: the `Tool` types here are the generic MCP Tool protocol from
  * `@afps-spec/types` — they describe the shape of a tool surfaced to the LLM
@@ -28,15 +33,12 @@ export type {
   Tool,
   ToolContext,
   ToolResult,
-  ResolvedSkill,
-  SkillResolver,
 } from "./types.ts";
 
 // RunEvent lives in src/types/ — re-exported here for convenience so
 // resolver authors can import all the types they need from one place.
 export type { RunEvent } from "@afps-spec/types";
 
-export { BundledSkillResolver, BundledSkillResolutionError } from "./bundled-skill-resolver.ts";
 export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-adapter.ts";
 
 // Canonical `delivery.http` credential-injection resolver (shared with
