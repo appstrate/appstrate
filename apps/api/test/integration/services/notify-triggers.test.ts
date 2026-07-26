@@ -115,8 +115,20 @@ describe("NOTIFY triggers (regression)", () => {
     const received: Array<{ id: string; status: string }> = [];
     await listenClient.listen("run_update", (raw) => {
       try {
-        const payload = JSON.parse(raw) as { id: string; status: string };
+        const payload = JSON.parse(raw) as {
+          id: string;
+          status: string;
+          operation: "INSERT" | "UPDATE";
+        };
         if (payload.id !== run.id) return;
+        // This test is about the UPDATE trigger's WHEN clause. The INSERT
+        // trigger is unconditional, and `listenClient` is shared: once any
+        // other test file has registered `run_update`, the connection is
+        // already LISTENing, so the notification `seedRun` above emitted can
+        // be delivered AFTER this handler attaches and be miscounted. Run
+        // alone the channel is fresh and it never arrives — which is exactly
+        // the kind of green that hides an order-dependent test.
+        if (payload.operation === "INSERT") return;
         received.push({ id: payload.id, status: payload.status });
       } catch {
         /* ignore */
