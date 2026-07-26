@@ -6,7 +6,7 @@ import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
-import { boot } from "./lib/boot.ts";
+import { bootCritical, bootBackground } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
 import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
@@ -34,7 +34,7 @@ import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
 import { createDocumentsRouter, createDocumentPreviewRouter } from "./routes/documents.ts";
 import { createAdminStorageDeletionRouter } from "./routes/admin-storage-deletion.ts";
-import healthRouter from "./routes/health.ts";
+import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
@@ -106,6 +106,12 @@ app.use("*", async (c, next) => {
   if (c.req.method === "POST" && RUN_DOCUMENT_UPLOAD_PATH.test(c.req.path)) return next();
   return globalBodyLimit(c, next);
 });
+
+// Boot gate — 503 on every route until `bootBackground()` (kicked off after
+// the export at the bottom of this file) resolves. Registered BEFORE
+// `healthRouter` so the probe is answered by the gate while starting.
+// Definition + rationale: `routes/health.ts`.
+app.use("*", bootGate());
 
 // Health check — before auth middleware (no auth required)
 app.route("/", healthRouter);
@@ -239,8 +245,10 @@ app.use("*", async (c, next) => {
   return apiVersionMiddleware(c, next);
 });
 
-// Boot: load system resources, init services, clean up orphans
-await boot();
+// Boot phase 1 — migrations, modules, auth, fail-fast config validation.
+// Everything the route table's shape depends on. Phase 2 is kicked off after
+// the export below, so the port binds without waiting for it.
+await bootCritical();
 
 // Initialize app config (async — modules may contribute structured data like OIDC client ID)
 await initAppConfig();
@@ -406,7 +414,30 @@ export default {
   idleTimeout: 255,
 };
 
-logger.info("Server started", { port: env.PORT });
+logger.info("Server listening (starting up)", { port: env.PORT });
+
+// Boot phase 2 — orphan cleanup, system-package DB sync, workers. Deliberately
+// NOT awaited: Bun binds the port once this module finishes evaluating, so
+// awaiting here would keep the socket closed for the whole of it (worst case
+// the per-orphan container stops, which is exactly the restart-after-incident
+// path where the API should come back fastest). Until it resolves, the boot
+// gate above answers 503 on every route.
+//
+// A rejection is fatal, matching the previous blocking `await boot()`: the
+// metering retry worker's init is deliberately uncaught upstream because a
+// missing durable recovery channel can lose billable spend permanently.
+const bootStartedAt = Date.now();
+void bootBackground()
+  .then(() => {
+    markServerReady();
+    logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
+  })
+  .catch((err: unknown) => {
+    logger.error("Boot failed — exiting", {
+      error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+    });
+    process.exit(1);
+  });
 
 // Proxy-upload diagnosability (issue #829): with S3 storage and no
 // S3_PUBLIC_ENDPOINT, upload URLs are signed against APP_URL and the browser

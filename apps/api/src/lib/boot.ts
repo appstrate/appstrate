@@ -49,7 +49,48 @@ import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
 
-export async function boot(): Promise<void> {
+/**
+ * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
+ * well under the postgres.js pool (`max: 20`).
+ */
+const ORPHAN_CLEANUP_CONCURRENCY = 6;
+
+/**
+ * `Promise.all`-shaped map with a bounded worker pool. Local by design: this
+ * file and `services/system-packages.ts` each keep their own tiny pool rather
+ * than sharing a new util module.
+ */
+async function mapBounded<T>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const item = items[cursor++]!;
+      await fn(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+/**
+ * Phase 1 — everything the HTTP surface's *shape* depends on, plus every
+ * fail-fast validation. Must finish before the port is bound.
+ *
+ * Hono throws `Can not add a route since the matcher is already built` the
+ * moment a route is registered after the first request has been matched, so
+ * module routes (`registerModuleRoutes`) can never be deferred past the bind —
+ * which makes module loading, and the core migrations it sits on, strictly
+ * pre-bind work. The cheap synchronous validators (`initRunLimits`,
+ * `initProxyLimits`, …) stay here too: they exist to abort boot on a bad
+ * config, and aborting is only meaningful before anything is listening.
+ *
+ * Everything that is merely *state the handlers read* moves to
+ * {@link bootBackground}, behind the readiness gate in `index.ts`.
+ */
+export async function bootCritical(): Promise<void> {
   // Register RBAC denial audit handler BEFORE modules load. Every guard
   // created from this point on — core routes via `requirePermission`,
   // module routes via `requireModulePermission`/`requireCorePermission` —
@@ -173,9 +214,31 @@ export async function boot(): Promise<void> {
   // the SYSTEM_INTEGRATIONS env var
   initSystemIntegrations();
 
-  // Load system packages from ZIPs, sync to DB + S3
-  await loadAndSyncSystemPackages().catch((err) => {
-    logger.warn("Could not load/sync system packages", {
+  // Read the `.afps` archives off disk into the in-memory registry. Cheap
+  // (~45 ms) and consulted by request-path helpers (`isSystemPackage`), so it
+  // stays pre-bind; the DB + S3 reconciliation it used to be bundled with is
+  // the slow half and runs in `bootBackground`.
+  await initSystemPackages().catch((err) => {
+    logger.warn("Could not load system packages", {
+      error: getErrorMessage(err),
+    });
+  });
+}
+
+/**
+ * Phase 2 — state, workers and cleanup. Runs AFTER the port is bound, behind
+ * the readiness gate in `index.ts`, which answers 503 on every route until
+ * this resolves. Nothing here changes the route table.
+ *
+ * A rejection here is fatal exactly as it was when this code lived in a
+ * blocking `await boot()`: the caller in `index.ts` exits the process.
+ */
+export async function bootBackground(): Promise<void> {
+  const env = (await import("@appstrate/env")).getEnv();
+
+  // Reconcile the loaded system packages into the DB + S3.
+  await syncSystemPackagesToDb().catch((err) => {
+    logger.warn("Could not sync system packages", {
       error: getErrorMessage(err),
     });
   });
@@ -209,7 +272,17 @@ export async function boot(): Promise<void> {
     const orphanIds = await listOrphanRunIds();
     if (orphanIds.length > 0) {
       let finalized = 0;
-      for (const runId of orphanIds) {
+      // Bounded parallelism, NOT a serial loop. Each orphan costs a Docker
+      // `POST /containers/{id}/stop?t=5`, which blocks for up to the full
+      // grace period when the container ignores SIGTERM — serially that is
+      // 5 s × orphan count added to boot, at exactly the moment (restart
+      // after an incident) the API should come back fastest. The grace
+      // period itself is deliberately left alone: it is what lets a still
+      // running sidecar flush its final events before the SIGKILL.
+      //
+      // Concurrency is capped well under the postgres.js pool (`max: 20`)
+      // because `synthesiseFinalize` writes.
+      await mapBounded(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
         try {
           // An orphaned run may still have a live remote workload — a
           // firecracker microVM on the runner host keeps executing (and
@@ -238,7 +311,7 @@ export async function boot(): Promise<void> {
             error: getErrorMessage(err),
           });
         }
-      }
+      });
       logger.info("Finalized orphaned runs", { count: finalized, runIds: orphanIds });
     }
   } catch (err) {
@@ -360,16 +433,6 @@ export async function boot(): Promise<void> {
   // immediately, then polls for due jobs. Purges S3/FS objects whose DB rows
   // were deleted (documents, uploads, run workspaces, org/app/end-user cascades).
   startStorageDeletionWorker();
-}
-
-/**
- * Load system packages from ZIPs on disk, then sync to DB + S3.
- * Upserts packages rows (source: "system"), uploads files to global _system/ namespace,
- * and creates packageVersions with SHA256 SRI integrity.
- */
-async function loadAndSyncSystemPackages(): Promise<void> {
-  await initSystemPackages();
-  await syncSystemPackagesToDb();
 }
 
 /**

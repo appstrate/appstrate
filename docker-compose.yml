@@ -249,6 +249,12 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     restart: unless-stopped
+    # Docker's default stop grace is 10s — SHORTER than the platform's 30s
+    # in-flight run drain, so SIGKILL landed mid-drain and the teardown that
+    # follows it (BullMQ/worker close, telemetry flush, DB + Redis close,
+    # exit 0) never ran. 45s covers the drain plus the 40s hard deadline in
+    # `apps/api/src/lib/shutdown.ts`. Keep the two aligned if either moves.
+    stop_grace_period: 45s
     mem_limit: 8g
     environment:
       # ── Core ──
