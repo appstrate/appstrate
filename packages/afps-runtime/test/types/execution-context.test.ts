@@ -19,6 +19,7 @@ describe("executionContextSchema", () => {
       input: { topic: "climate" },
       memories: [{ content: "user speaks French", createdAt: 1714000000000 }],
       checkpoint: { cursor: "xyz" },
+      pinnedSlots: { plan: { step: 2 } },
       history: [
         {
           runId: "run_previous",
@@ -26,18 +27,7 @@ describe("executionContextSchema", () => {
           output: { items: [] },
         },
       ],
-      sink: { type: "http", url: "https://appstrate.example/events" },
-      credentials: {
-        type: "appstrate",
-        endpoint: "https://appstrate.example/credentials",
-      },
-      context: { type: "appstrate", endpoint: "https://appstrate.example/context" },
-      model: {
-        provider: "anthropic",
-        modelId: "claude-opus-4-7",
-        apiKeyRef: "env:ANTHROPIC_API_KEY",
-      },
-      dryRun: false,
+      config: { locale: "fr" },
       traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
       timeoutSeconds: 1.5,
     });
@@ -68,22 +58,13 @@ describe("executionContextSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("accepts sink config without any auth field (by design)", () => {
-    const result = executionContextSchema.safeParse({
-      runId: "run_x",
-      input: {},
-      sink: { type: "http", url: "https://example.com/events" },
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("strips unexpected auth property on http sink (Zod default strip)", () => {
-    // The schema does not define an `auth` field — Zod's default object
-    // behaviour is to strip unknown keys rather than fail. We document
-    // this here so the constraint (§3 / §7: no HMAC in context.json) is
-    // visible in code form: even if someone puts a secret in, it does
-    // not round-trip through the parsed object.
-    const raw = {
+  it("strips infrastructure wiring and auth material (§3 / §7)", () => {
+    // The context carries run STATE only — never sink URLs, credential
+    // endpoints, or secrets. The schema declares no such fields, and Zod's
+    // default object behaviour strips unknown keys rather than failing. This
+    // documents the constraint in code form: even if a caller stuffs a secret
+    // into a `context.json`, it does not round-trip through the parsed object.
+    const parsed = executionContextSchema.parse({
       runId: "run_x",
       input: {},
       sink: {
@@ -91,45 +72,13 @@ describe("executionContextSchema", () => {
         url: "https://example.com/events",
         auth: { runSecret: "SHOULD_NOT_PERSIST" },
       },
-    };
-    const parsed = executionContextSchema.parse(raw);
-    expect((parsed.sink as Record<string, unknown> | undefined)?.auth).toBeUndefined();
-  });
-
-  it("rejects http sink with invalid URL", () => {
-    const result = executionContextSchema.safeParse({
-      runId: "run_x",
-      input: {},
-      sink: { type: "http", url: "not-a-url" },
+      credentials: { type: "appstrate", endpoint: "https://example.com/credentials" },
+      model: { provider: "anthropic", modelId: "claude-opus-4-7" },
     });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects file sink without path", () => {
-    const result = executionContextSchema.safeParse({
-      runId: "run_x",
-      input: {},
-      sink: { type: "file" },
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects unknown sink type", () => {
-    const result = executionContextSchema.safeParse({
-      runId: "run_x",
-      input: {},
-      sink: { type: "slack", url: "https://slack.com" },
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects unknown credentials type", () => {
-    const result = executionContextSchema.safeParse({
-      runId: "run_x",
-      input: {},
-      credentials: { type: "wizard" },
-    });
-    expect(result.success).toBe(false);
+    const raw = parsed as Record<string, unknown>;
+    expect(raw.sink).toBeUndefined();
+    expect(raw.credentials).toBeUndefined();
+    expect(raw.model).toBeUndefined();
   });
 
   it("accepts memories with createdAt timestamps", () => {

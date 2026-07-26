@@ -227,6 +227,75 @@ describe("parsePackageZip", () => {
     // Custom field preserved
     expect(agentManifest.customField).toBe("must-survive");
   });
+
+  // ── retired `runtime_tools` policy ──
+  //
+  // `report` was a selectable runtime tool until it was removed from the enum.
+  // ZIPs published before the removal are immutable, so the parse boundary has
+  // to be directional: the default REJECTS (author input), and read paths opt
+  // into "drop" explicitly.
+
+  function legacyAgentZip(): Uint8Array {
+    return makeZip({
+      "manifest.json": JSON.stringify({
+        name: "@test/legacy-agent",
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Legacy Agent",
+        author: "test",
+        runtime_tools: ["output", "report"],
+      }),
+      "prompt.md": "# Legacy prompt",
+    });
+  }
+
+  it("rejects a retired runtime_tools id by default (author input)", () => {
+    expect(() => parsePackageZip(legacyAgentZip())).toThrow(PackageZipError);
+    try {
+      parsePackageZip(legacyAgentZip());
+      expect.unreachable();
+    } catch (e) {
+      expect((e as PackageZipError).code).toBe("INVALID_MANIFEST");
+      expect((e as PackageZipError).message).toContain("runtime_tools");
+    }
+  });
+
+  it("rejects a retired runtime_tools id under an explicit reject policy", () => {
+    expect(() => parsePackageZip(legacyAgentZip(), { retiredRuntimeTools: "reject" })).toThrow(
+      PackageZipError,
+    );
+  });
+
+  it("drops a retired runtime_tools id and reports it when the caller opts in", () => {
+    const result = parsePackageZip(legacyAgentZip(), { retiredRuntimeTools: "drop" });
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["output"]);
+    expect(result.droppedRuntimeTools).toEqual(["report"]);
+  });
+
+  it("reports no dropped runtime tools for a manifest with none retired", () => {
+    const zip = makeZip({
+      "manifest.json": validAgentManifest(),
+      "prompt.md": "# Test prompt",
+    });
+    expect(parsePackageZip(zip, { retiredRuntimeTools: "drop" }).droppedRuntimeTools).toEqual([]);
+    expect(parsePackageZip(zip).droppedRuntimeTools).toEqual([]);
+  });
+
+  // The second positional parameter used to be a bare `maxSize: number`, and
+  // `@appstrate/core` is published — the number form must keep working
+  // alongside the options object.
+  it("still honours the legacy bare-number maxSize argument", () => {
+    const zip = makeZip({
+      "manifest.json": validAgentManifest(),
+      "prompt.md": "# Test prompt",
+    });
+    expect(() => parsePackageZip(zip, 1)).toThrow(PackageZipError);
+    expect(parsePackageZip(zip, 10 * 1024 * 1024).packageId).toBe("@test/my-agent");
+    // …and the object form expresses the same limit.
+    expect(() => parsePackageZip(zip, { maxSize: 1 })).toThrow(PackageZipError);
+    expect(parsePackageZip(zip, { maxSize: 10 * 1024 * 1024 }).packageId).toBe("@test/my-agent");
+  });
 });
 
 // ─────────────────────────────────────────────

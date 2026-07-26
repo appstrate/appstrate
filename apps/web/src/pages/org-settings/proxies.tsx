@@ -177,8 +177,15 @@ export function OrgSettingsProxiesPage() {
         isPending={createMutation.isPending || updateMutation.isPending}
         onSubmit={(data) => {
           if (editProxy) {
+            // The credential-bearing URL is never returned to the client, so the
+            // edit form starts blank. An empty field means "keep the current
+            // URL" — omit it entirely (`url` is optional on PUT); sending `""`
+            // fails the server's `z.url()` and 400s a label-only edit.
             updateMutation.mutate(
-              { params: { path: { id: editProxy.id } }, body: data },
+              {
+                params: { path: { id: editProxy.id } },
+                body: data.url ? data : { label: data.label },
+              },
               { onSuccess: () => setProxyModalOpen(false) },
             );
           } else {

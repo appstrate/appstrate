@@ -56,7 +56,7 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 /** Keyword selecting the live draft definition. */
 export const VERSION_SELECTOR_DRAFT = "draft";
 /** Keyword selecting the latest published version. */
-export const VERSION_SELECTOR_PUBLISHED = "published";
+const VERSION_SELECTOR_PUBLISHED = "published";
 
 export interface ResolvedRunAgent {
   /** The agent definition the run will execute (draft or version snapshot). */

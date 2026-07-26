@@ -3,7 +3,7 @@
 /**
  * Remote run creation — entry point for the remote-runner route
  * (`POST /api/runs/remote`). The caller (CLI, GitHub Action, ...) is the
- * runner: we run readiness + preflight, mint sink credentials, create the
+ * runner: we run the preflight gates, mint sink credentials, create the
  * `runs` row in `pending`, and return the credentials. Status transitions
  * flow back through the HMAC-signed event route (§run-event-ingestion).
  *
@@ -23,7 +23,6 @@ import { mintSinkCredentials, type SinkCredentials } from "../lib/mint-sink-cred
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { extractRunAgentDenorm, freezeRunSpawnDependencies } from "./run-pipeline.ts";
-import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
 import {
   type IntegrationManifestCache,
@@ -33,7 +32,6 @@ import { ApiError } from "../lib/errors.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,16 +50,8 @@ export interface CreateRunInput {
   agent: LoadedPackage;
   input?: Record<string, unknown> | null;
   config: Record<string, unknown>;
-  modelId?: string | null;
-  proxyId?: string | null;
   apiKeyId?: string;
   overrideVersionLabel?: string;
-  /**
-   * Caller's per-(integration, authKey) connection picks for THIS run
-   * (#199). Flows into the resolver's mechanism #2 at kickoff and is
-   * persisted on `runs.connection_overrides` for audit + replay.
-   */
-  connectionOverrides?: Record<string, string> | null;
   /**
    * Per-dependency version overrides for THIS run (#666/#686). `"draft"` opts a
    * declared skill/integration into its working copy; any other value replaces
@@ -94,7 +84,7 @@ export type CreateRunResult =
 // ---------------------------------------------------------------------------
 
 /**
- * Create a remote run: run readiness + preflight gates, mint sink
+ * Create a remote run: run the preflight gates, mint sink
  * credentials, insert the `runs` row in `pending`, and return — the CLI
  * executes on its own host and posts signed events back.
  */
@@ -111,30 +101,22 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
     overrideVersionLabel,
   } = input;
 
-  // --- Provider readiness — runs first so remote callers get a readable
-  //     400 before we spend any rate-limit / concurrency budget on them.
-  try {
-    await validateAgentReadiness({
-      agent: input.agent,
-      orgId,
-      config,
-      applicationId,
-      actor,
-      // Forward overrides so a remote retry with `connection_overrides`
-      // exits the must_choose loop instead of re-firing 412 on the same
-      // candidate set.
-      ...(input.connectionOverrides ? { runOverrides: input.connectionOverrides } : {}),
-    });
-  } catch (err) {
-    return {
-      ok: false,
-      error: {
-        code: "agent_not_ready",
-        message: getErrorMessage(err),
-        status: 400,
-      },
-    };
-  }
+  // Readiness (`validateAgentReadiness`) is NOT re-run here. The single
+  // caller — `POST /api/runs/remote` — already validates the
+  // (agent, config, applicationId, actor) tuple before it gets here: the
+  // `registry` branch calls `validateAgentReadiness` directly, the `inline`
+  // branch runs it inside `runInlinePreflight`. Neither passes
+  // `runOverrides`, and neither can: `CreateRemoteRunBodySchema` is
+  // `.strict()` and declares no `connection_overrides` field, so a remote run
+  // carries no per-run connection picks at all (mechanism #2 is a
+  // platform-run feature).
+  //
+  // Both call sites let the original `ApiError` escape to the route, which
+  // preserves the 412 `missing_integration_connection` envelope (with its
+  // `errors[]` list driving the dashboard's MissingConnections modal). This
+  // function reports failures as a flat `{ code, message, status }` result
+  // instead, so re-running readiness here would have to collapse that
+  // structured payload into a 400 `agent_not_ready`.
 
   // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.
@@ -192,10 +174,11 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   }
 
   // --- Snapshot the connection cascade (#199, remote-path mirror of
-  //     run-pipeline). Readiness above ran with the same overrides, so a
-  //     failure here is either the caller's pick pointing at an inaccessible
-  //     id or a between-readiness-and-now race (deleted connection, new admin
-  //     pin). Either way the runner gets a structured agent_not_ready it can
+  //     run-pipeline). `runOverrides` is null here and in the readiness pass
+  //     the route already ran — the remote body accepts no per-run connection
+  //     picks — so the two resolve the same cascade. A failure at this point is
+  //     therefore a between-readiness-and-now race (connection deleted, new
+  //     admin pin), and the runner gets a flat `agent_not_ready` it can
   //     surface verbatim.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
@@ -204,7 +187,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       packageId: agent.id,
       actor,
       scope: { orgId, applicationId },
-      runOverrides: input.connectionOverrides ?? null,
+      runOverrides: null,
       // Remote runs are never scheduled, so there is no frozen schedule
       // override on this path (mechanism #3 applies to platform runs only).
       scheduleOverrides: null,
@@ -269,7 +252,8 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       runOrigin: "remote",
       sinkSecretEncrypted: encrypt(credentials.secret),
       sinkExpiresAt: new Date(credentials.expiresAt),
-      connectionOverrides: input.connectionOverrides ?? null,
+      // Always null on this path — see the readiness comment above.
+      connectionOverrides: null,
       resolvedConnections,
       dependencyOverrides: input.dependencyOverrides ?? null,
       resolvedIntegrationVersions,

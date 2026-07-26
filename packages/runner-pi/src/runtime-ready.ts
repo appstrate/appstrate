@@ -30,18 +30,15 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 export interface RuntimeReadyPayload {
   /** True when a concrete `.afps`/`.afps-bundle` was loaded from disk. */
   bundleLoaded: boolean;
-  /** Count of extension factories (bundle tools + runtime-shipped extensions + integration tools). */
+  /**
+   * Count of extension factories handed to the runner: the AFPS bundle's own
+   * tools, the integration / sidecar-backed MCP tools, and the runtime tools
+   * the agent selected in `manifest.runtime_tools`. Diagnostics only — a
+   * caller counts whatever it actually registered.
+   */
   extensions: number;
   /** Caller-computed elapsed ms since its own "boot start" (process entry for runtime-pi, command entry for the CLI). */
   bootDurationMs: number;
-  /**
-   * Runtime ↔ platform wire protocol version. MAJOR.MINOR — runners on
-   * `2.0` advertise MCP-native tool surfaces (`{ns}__api_call`,
-   * `run_history`, `recall_memory`) and resource URIs. Old consumers
-   * that don't read the field are unaffected (additive on the event
-   * envelope).
-   */
-  runtimeProtocolVersion?: string;
   /**
    * Per-phase cold-start durations (ms), merged into the event `data` so the
    * dashboard can see *where* the boot time went (provisioning, bundle
@@ -50,12 +47,6 @@ export interface RuntimeReadyPayload {
    */
   phaseTimings?: Record<string, number>;
 }
-
-/**
- * Current runtime ↔ platform protocol version. `2.0` marks the
- * MCP-native tool surface — there is no `1.x` interop on this branch.
- */
-export const CURRENT_RUNTIME_PROTOCOL_VERSION = "2.0" as const;
 
 /**
  * Emit the "runtime ready" progress event. Awaits the sink's POST —
@@ -69,7 +60,6 @@ export async function emitRuntimeReady(
   payload: RuntimeReadyPayload,
   now: () => number = Date.now,
 ): Promise<void> {
-  const protocolVersion = payload.runtimeProtocolVersion ?? CURRENT_RUNTIME_PROTOCOL_VERSION;
   await sink.handle({
     type: "appstrate.progress",
     timestamp: now(),
@@ -78,7 +68,6 @@ export async function emitRuntimeReady(
     data: {
       bundleLoaded: payload.bundleLoaded,
       extensions: payload.extensions,
-      runtimeProtocolVersion: protocolVersion,
       totalToReadyMs: Math.round(payload.bootDurationMs),
       ...(payload.phaseTimings ?? {}),
     },

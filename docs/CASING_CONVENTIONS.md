@@ -125,7 +125,7 @@ The exceptions to "wire = snake_case". Each has explicit documented reason.
 
 - `packages/db/src/auth.ts` (Better Auth config)
 - `packages/db/src/schema/auth.ts` (BA core tables)
-- `apps/api/src/modules/oidc/schema.ts` (BA plugin tables)
+- `packages/db/src/schema/oidc.ts` (BA plugin tables — they live in the CORE schema; modules own no `schema.ts`)
 
 **Tables**: `user`, `session`, `account`, `verification`, plus OIDC plugin tables (`jwks`, `oauthClient`, `oauthAccessToken`, `oauthRefreshToken`, `oauthConsent`, `deviceCode`, `cliRefreshToken`).
 
@@ -176,8 +176,8 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 **Files**:
 
 - `apps/api/src/modules/core-providers/index.ts`
-- `module-claude-code/src/index.ts`
-- `module-codex/src/index.ts`
+- `packages/module-claude-code/src/index.ts`
+- `packages/module-codex/src/index.ts`
 - `packages/shared-types/src/index.ts` (ProviderRegistryEntry, CatalogModelEntry, etc.)
 
 **Rule**: `providerId`, `displayName`, `iconUrl`, `apiShape`, `defaultBaseUrl`, `baseUrlOverridable`, `authMode`, `featured`, `contextWindow`, `maxTokens`, `capabilities`, `cost` — all camelCase.

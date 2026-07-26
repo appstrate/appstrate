@@ -43,7 +43,6 @@ import {
   finalizeRun,
   getRunSinkContext,
   synthesiseFinalize,
-  capUtf8Text,
 } from "../../../src/services/run-event-ingestion.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { getRunFull } from "../../../src/services/state/runs.ts";
@@ -178,7 +177,10 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(logs.length).toBeGreaterThan(0);
   });
 
-  it("persists a deprecated report.appended envelope for older runners", async () => {
+  // Retired event type from the removed `report` runtime tool: ingestion still
+  // accepts and sequences the envelope (a stale runner must not stall on a
+  // rejected POST) but the sink's `default:` branch drops it — no run_logs row.
+  it("accepts but drops a retired report.appended envelope", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
     const envelope = buildEnvelope(runId, "report.appended", { content: "legacy report body" }, 1);
@@ -191,9 +193,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(body.sequence).toBe(1);
 
     const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
-    expect(logs).toHaveLength(1);
-    expect(logs[0]!.event).toBe("report");
-    expect(logs[0]!.data).toEqual({ content: "legacy report body" });
+    expect(logs).toHaveLength(0);
   });
 
   it("dedupes replayed webhook-ids — a second POST with the same id returns replay", async () => {
@@ -778,7 +778,10 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(persisted?.failed.every((f) => f.name.length <= 512 && f.code.length <= 64)).toBe(true);
   });
 
-  it("persists the deprecated report aggregate for compatibility", async () => {
+  // The `report` channel is gone: a runner older than the platform may still
+  // send the field, and it must be ignored without costing the run its
+  // finalize (no 400, no `runs.result` row invented from it).
+  it("ignores a retired report field on the finalize body", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
     const res = await postFinalize(runId, {
       memories: [],
@@ -791,12 +794,8 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(res.status).toBe(200);
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.result).toEqual({ text: "# Legacy report" });
-  });
-
-  it("caps deprecated report text on a UTF-8 boundary", () => {
-    expect(capUtf8Text("éé", 3)).toEqual({ text: "é", truncated: true });
-    expect(capUtf8Text("éé", 4)).toEqual({ text: "éé", truncated: false });
+    expect(row?.status).toBe("success");
+    expect(row?.result).toBeNull();
   });
 
   // Regression (#run_300c5118): a cosmetic/non-essential field in the finalize
@@ -972,23 +971,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.status).toBe("success");
     expect(row?.sinkClosedAt).not.toBeNull();
     expect(row?.result).toBeNull();
-  });
-
-  it("does not let a compatibility report evict an otherwise valid structured output", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/final-agent");
-    const output = { blob: "x".repeat(300 * 1024) };
-
-    const res = await postFinalize(runId, {
-      status: "success",
-      output,
-      report: "r".repeat(256 * 1024),
-      durationMs: 5,
-      usage: { input_tokens: 10, output_tokens: 5 },
-    });
-    expect(res.status).toBe(200);
-
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.result).toEqual({ output });
   });
 
   it("idempotent — once the sink is closed, further finalize POSTs reject with 410", async () => {
@@ -1561,6 +1543,7 @@ describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", 
       appUrl: "http://localhost:3000",
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
+      getOrgName: async () => null,
       services: {} as never,
     });
     return { captured: () => last };
@@ -1770,6 +1753,7 @@ describe("remote run.started — emitted at first event, not at row insert", () 
       appUrl: "http://localhost:3000",
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
+      getOrgName: async () => null,
       services: {} as never,
     });
     return { started: () => seen };
@@ -2003,14 +1987,13 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         name: "@test/schema-agent",
         version: "1.0.0",
         type: "agent",
-        runtime_tools: ["report"],
+        runtime_tools: ["log"],
       },
     });
     const runId = await seedRunWithSink(ctx, "@test/schema-agent", { versionRef: "1.0.0" });
 
     const res = await postFinalize(runId, {
       status: "success",
-      report: "No structured output — the pinned version declares no schema.",
       durationMs: 100,
       usage: { input_tokens: 100, output_tokens: 50 },
     });
@@ -2032,7 +2015,7 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         name: "@test/schema-agent",
         version: "2.0.0",
         type: "agent",
-        runtime_tools: ["output", "report"],
+        runtime_tools: ["output", "log"],
         output: {
           schema: {
             type: "object",
@@ -2050,7 +2033,7 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
           name: "@test/schema-agent",
           version: "2.0.1",
           type: "agent",
-          runtime_tools: ["report"],
+          runtime_tools: ["log"],
         },
       })
       .where(eq(packages.id, "@test/schema-agent"));
@@ -2058,7 +2041,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
 
     const res = await postFinalize(runId, {
       status: "success",
-      report: "Forgot to call output.",
       durationMs: 100,
       usage: { input_tokens: 100, output_tokens: 50 },
     });
@@ -2077,7 +2059,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
 
     const res = await postFinalize(runId, {
       status: "success",
-      report: "No output.",
       durationMs: 100,
       usage: { input_tokens: 100, output_tokens: 50 },
     });

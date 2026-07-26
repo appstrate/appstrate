@@ -7,8 +7,9 @@
  * The same class runs inside an Appstrate agent container (via
  * `runtime-pi/entrypoint.ts`) and on any developer laptop / server
  * with an LLM API key. Parity is structural: the code path is
- * identical, only the {@link EventSink} differs (stdout JSONL in the
- * container, HTTP / memory / console elsewhere).
+ * identical, only the {@link EventSink} differs (an HMAC-signed HTTP
+ * sink POSTing to the platform in the container, a console / in-memory
+ * sink elsewhere).
  *
  * Responsibilities:
  *   1. Subscribe to Pi SDK session events.

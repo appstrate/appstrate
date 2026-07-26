@@ -27,7 +27,7 @@ export function setPlatformApp(app: Hono<AppEnv>): void {
  * `setPlatformApp()` — a programming error (dispatch can only happen after
  * routes are mounted, which is when the app is registered).
  */
-export function getPlatformApp(): Hono<AppEnv> {
+function getPlatformApp(): Hono<AppEnv> {
   if (!platformApp) {
     throw new Error(
       "Platform app not initialized — setPlatformApp() must run before in-process dispatch",

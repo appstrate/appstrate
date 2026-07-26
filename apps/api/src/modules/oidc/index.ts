@@ -294,17 +294,15 @@ const oidcModule: AppstrateModule = {
     // `BeforeSignupContext.headers`; narrow to read them.
     // Pass-through on every signup that is not gated by an org-level client.
     beforeSignup: async (email, ctx) => {
-      const tx = ctx as
-        | (BeforeSignupContext & {
-            path?: string | null;
-            query?: Record<string, unknown> | null;
-          })
-        | undefined;
+      const tx = ctx as BeforeSignupContext & {
+        path?: string | null;
+        query?: Record<string, unknown> | null;
+      };
       await oidcBeforeSignupGuard({
         user: { email },
-        headers: ctx?.headers ?? null,
-        path: tx?.path ?? null,
-        query: tx?.query ?? null,
+        headers: ctx.headers,
+        path: tx.path ?? null,
+        query: tx.query ?? null,
       });
     },
     // Symmetric post-signup: on a BA user freshly created through an
@@ -313,17 +311,15 @@ const oidcModule: AppstrateModule = {
     // `oidcAfterSignupHandler` docstring for why `buildOrgLevelClaims` alone
     // isn't enough for the social code path.
     afterSignup: async (user, ctx) => {
-      const tx = ctx as
-        | (AfterSignupContext & {
-            path?: string | null;
-            query?: Record<string, unknown> | null;
-          })
-        | undefined;
+      const tx = ctx as AfterSignupContext & {
+        path?: string | null;
+        query?: Record<string, unknown> | null;
+      };
       await oidcAfterSignupHandler({
         user,
-        headers: ctx?.headers ?? null,
-        path: tx?.path ?? null,
-        query: tx?.query ?? null,
+        headers: ctx.headers,
+        path: tx.path ?? null,
+        query: tx.query ?? null,
       });
     },
   },

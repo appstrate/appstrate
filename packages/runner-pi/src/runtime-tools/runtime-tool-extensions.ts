@@ -3,7 +3,7 @@
 
 /**
  * Pi-extension wrapper for the platform runtime tools
- * (`output` / `log` / `note` / `pin` / `report`).
+ * (`output` / `log` / `note` / `pin`).
  *
  * The tools' logic (input schema + validation + the canonical run events
  * each call produces) lives transport-neutrally in

@@ -2,37 +2,31 @@
 // Copyright 2026 Appstrate
 
 /**
- * Stdout-JSONL → EventSink bridge.
+ * Result-aggregating sink wrapper, plus a stdout-JSONL → EventSink bridge.
  *
- * Two separate event streams feed an in-process AFPS runner:
+ * {@link attachStdoutBridge} does two things, and the FIRST one is the
+ * load-bearing one for every caller:
  *
- *   1. Runner-emitted events (e.g. PiRunner's session bridge — tool
- *      starts, assistant messages, metrics) handed straight to the
- *      configured {@link EventSink}.
- *   2. System tools (`@appstrate/note`, `@appstrate/output`,
- *      `@appstrate/pin`, `@appstrate/log`)
- *      emit canonical domain events via `process.stdout.write(JSON+\n)`
- *      — the legacy stdout-JSONL protocol baked into every system tool
- *      ZIP. Without a bridge, those events never reach the configured
- *      sink: they only show up as raw JSON noise on stdout.
- *
- * This module:
- *
- *   - Wraps the underlying sink into a forwarder that folds every event
- *     into an in-memory {@link RunResult} aggregate while still
- *     delivering the event downstream.
- *   - Installs a stdout interceptor that parses JSON lines, validates
- *     them against the canonical event vocabulary, feeds matches through
- *     the forwarder, and passes everything else (logs, raw text, foreign
- *     JSON from subprocesses) through to the original stream so
- *     `console.log` debug output keeps reaching the terminal.
- *   - On `finalize(result)`, merges runner-side terminal metadata
- *     (`status` / `error` / `durationMs` / `usage` / `cost`) with the
- *     bridge's aggregate so the single finalize call carries the
- *     complete shape — `result.output`, `result.pinned`, and
- *     `result.memories` would otherwise be empty for any runner whose
- *     internal reducer only sees session events (PiRunner is the
- *     canonical case).
+ *   1. **Sink wrapping (always active).** The returned
+ *      {@link StdoutBridgeHandle.sink} folds every event the runner hands
+ *      it into an in-memory {@link RunResult} aggregate (`foldEvent`)
+ *      before forwarding downstream, and on `finalize(result)` merges
+ *      that aggregate with the runner's terminal metadata
+ *      (`mergeTerminalResult`). Without this wrapper `result.output`,
+ *      `result.pinned`, `result.memories`, and `result.logs` are empty
+ *      for any runner whose internal reducer only sees session events —
+ *      PiRunner is exactly that case. Removing the wrapper silently
+ *      drops the output of every run.
+ *   2. **Stdout interception (only fires for out-of-process emitters).**
+ *      `process.stdout.write` is monkey-patched to parse JSON lines,
+ *      validate them against the canonical event vocabulary, dispatch
+ *      matches through the same wrapped sink, and pass everything else
+ *      (logs, raw text, foreign JSON from subprocesses) through to the
+ *      original stream so `console.log` debug output still reaches the
+ *      terminal. Nothing inside the `runtime-pi` container writes
+ *      canonical events this way any more — tools go through MCP — so
+ *      there the interceptor is inert. It stays live for the `appstrate
+ *      run` CLI, whose child processes do print JSONL on real stdout.
  *
  * Two correctness properties to keep in mind:
  *
@@ -123,7 +117,7 @@ export function isStdoutEventLine(value: unknown): value is RunEvent {
  * Merge runner-emitted terminal metadata with a separately-aggregated
  * {@link RunResult}.
  *
- *   - Per-event aggregates (memories / pinned / output / logs / report) take the
+ *   - Per-event aggregates (memories / pinned / output / logs) take the
  *     bridge's value when non-empty, otherwise fall back to the
  *     runner's. Lets a runner that already produced a complete result
  *     (anything that doesn't go through stdout-JSONL tools) pass through
@@ -143,11 +137,6 @@ export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResul
     ...(pinned !== undefined ? { pinned } : {}),
     output: aggregate.output ?? runnerResult.output,
     logs: aggregate.logs.length > 0 ? aggregate.logs : runnerResult.logs,
-    ...(aggregate.report !== undefined
-      ? { report: aggregate.report }
-      : runnerResult.report !== undefined
-        ? { report: runnerResult.report }
-        : {}),
     ...(runnerResult.status !== undefined ? { status: runnerResult.status } : {}),
     ...(runnerResult.error !== undefined ? { error: runnerResult.error } : {}),
     ...(runnerResult.durationMs !== undefined ? { durationMs: runnerResult.durationMs } : {}),

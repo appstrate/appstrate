@@ -22,7 +22,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/appstrate
 
 permissions:
   contents: write
@@ -39,6 +38,14 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
+        # ⚠️  DUPLICATED MATRIX — keep in lockstep with the identical `include:`
+        # block in .github/workflows/preview.yml. GitHub Actions has no
+        # first-class way to share a matrix across workflows (a reusable
+        # workflow would have to absorb release.yml's extra steps: the
+        # Firecracker pubkey bake, multi-arch buildx, and SLSA attestation), so
+        # this stays a deliberate copy. Adding or renaming an image here means
+        # editing preview.yml too — otherwise preview deploys silently lack the
+        # image and the runner that needs it fails at integration boot.
         include:
           - name: appstrate
             context: .
@@ -127,7 +134,8 @@ jobs:
           # leaving `get.appstrate.dev` bootstrap users pulling `:latest`
           # against an image that was never tagged. The CLI now pins
           # `APPSTRATE_VERSION` in the generated `.env` for a belt-and-
-          # braces guarantee (ADR-006 lockstep), so `latest` is the
+          # braces guarantee (ADR-006 lockstep — the ADR itself lives in the
+          # private docs repo, there is no docs/adr/ here), so `latest` is the
           # compat fallback for consumers that skip the CLI.
           flavor: |
             latest=auto
@@ -184,7 +192,7 @@ jobs:
           # `macos-15-intel` is GitHub's last Intel-mac runner (macos-13
           # retired 2025-12). When it follows, drop the darwin-x64 row
           # and ship only darwin-arm64 — Intel Macs are a rounding error
-          # on the CLI install curve by then. Tracked in ADR-006.
+          # on the CLI install curve by then. Tracked in ADR-006 (private docs repo).
           - runner: macos-15-intel
             target: bun-darwin-x64
             asset: appstrate-darwin-x64
@@ -376,7 +384,10 @@ jobs:
           # signatures, which defeats the whole verification flow.
           if [ -z "${MINISIGN_SECRET_KEY:-}" ] || [ -z "${MINISIGN_PASSWORD:-}" ]; then
             echo "::error::MINISIGN_SECRET_KEY + MINISIGN_PASSWORD secrets must be set."
-            echo "::error::Rotation SOP: docs/adr/ADR-006-cli-device-flow-monorepo.md"
+            echo "::error::Generate a keypair with 'minisign -G -p appstrate.pub -s appstrate.key',"
+            echo "::error::store the private key + password as the two repo secrets above, and"
+            echo "::error::commit the new public key to scripts/appstrate.pub in the SAME release."
+            echo "::error::Rotating without shipping the matching pubkey breaks bootstrap.sh verification."
             exit 1
           fi
           sudo apt-get update -qq && sudo apt-get install -y -qq minisign

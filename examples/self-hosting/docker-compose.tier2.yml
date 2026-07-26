@@ -55,8 +55,27 @@ services:
       retries: 5
 
   # ── Database migrations ─────────────────────────────────────
+  #
+  # NOTE — this is deliberately a SECOND writer to `__drizzle_migrations`: the
+  # platform also migrates at boot (`apps/api/src/lib/boot.ts`). It is safe
+  # because the two are SEQUENCED, never concurrent — `appstrate` declares
+  # `migrate: { condition: service_completed_successfully }`, so the boot pass
+  # always finds an already-migrated schema and is a no-op. Keeping this service
+  # buys a clean failure mode: a bad migration fails `docker compose up` before
+  # the platform ever binds a port, with an isolated exit code and log.
+  #
+  # Two invariants, both load-bearing:
+  #   1. It MUST use the same image tag as `appstrate` (same ${APPSTRATE_VERSION})
+  #      — a mismatched pair applies a migration set the running code does not
+  #      expect.
+  #   2. It must keep the `depends_on` gate. Drop it and you get two concurrent
+  #      migrators racing the same journal.
+  #
+  # It does NOT run the boot-time `reconcileOAuthResourceColumns()` self-heal;
+  # that only happens in the platform's own boot pass, which is another reason
+  # not to "optimise" the platform's migration step away.
   migrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.41}
     networks:
       - appstrate-data
     restart: "no"
@@ -69,18 +88,46 @@ services:
 
   # ── Pre-pull runtime images ─────────────────────────────────
   pi-pull:
-    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.41}
     entrypoint: ["true"]
     restart: "no"
 
   sidecar-pull:
-    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.41}
+    entrypoint: ["true"]
+    restart: "no"
+
+  # Per-integration MCP runner images. Pre-pulled because the SIDECAR (not the
+  # platform) `docker create`s these, and it never issues an image pull — an
+  # absent image is a hard failure at integration boot, not a slow first run.
+  mcp-runner-node-pull:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.41}
+    entrypoint: ["true"]
+    restart: "no"
+
+  mcp-runner-python-pull:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.41}
+    entrypoint: ["true"]
+    restart: "no"
+
+  mcp-runner-bun-pull:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.41}
+    entrypoint: ["true"]
+    restart: "no"
+
+  mcp-runner-uv-pull:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.41}
+    entrypoint: ["true"]
+    restart: "no"
+
+  mcp-runner-binary-pull:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.41}
     entrypoint: ["true"]
     restart: "no"
 
   # ── Appstrate platform ─────────────────────────────────────
   appstrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.41}
     networks:
       - appstrate-data
       - appstrate-public
@@ -118,8 +165,19 @@ services:
       # default which points at Docker Hub).
       - PORT=3000
       - DOCKER_SOCKET=/var/run/docker.sock
-      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
-      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
+      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.41}
+      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.41}
+      # Per-integration MCP runner images. The sidecar `docker create`s one of
+      # these per LOCAL AFPS integration; the refs are forwarded into the
+      # sidecar via SIDECAR_OPERATOR_ENV_KEYS. Without them the sidecar falls
+      # back to bare `appstrate-mcp-runner-*:latest` tags, which the daemon
+      # tries — and fails — to pull from Docker Hub, so every local
+      # integration dies at boot. Same APPSTRATE_VERSION coupling as above.
+      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.41}
+      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.41}
+      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.41}
+      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.41}
+      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.41}
       # ── Intentional overrides (YAML default ≠ code default) ──────
       # RUN_ADAPTER: code default is `process` for OSS dev — a
       # containerized self-host must run agents in Docker.
@@ -155,6 +213,15 @@ services:
       - FIRECRACKER_RUNNER_URL
       - FIRECRACKER_RUNNER_TOKEN
       - SYSTEM_PROVIDER_KEYS
+      # System integrations offered out of the box (shared OAuth clients, or a
+      # client-less entry for DCR-based remote MCP integrations).
+      - SYSTEM_INTEGRATIONS
+      # Separate origin for agent-generated HTML previews. Unset => previews are
+      # served same-origin on APP_URL (hardened, but a weaker XSS posture). When
+      # set, boot FAILS unless its host differs from APP_URL's — the platform
+      # treats a configured value as proof of isolation and serves agent HTML as
+      # ACTIVE content. Point it at a second domain resolving to this server.
+      - USERCONTENT_URL
       - AUTH_DISABLE_SIGNUP
       - AUTH_DISABLE_ORG_CREATION
       - AUTH_PLATFORM_ADMIN_EMAILS
@@ -209,6 +276,16 @@ services:
       pi-pull:
         condition: service_completed_successfully
       sidecar-pull:
+        condition: service_completed_successfully
+      mcp-runner-node-pull:
+        condition: service_completed_successfully
+      mcp-runner-python-pull:
+        condition: service_completed_successfully
+      mcp-runner-bun-pull:
+        condition: service_completed_successfully
+      mcp-runner-uv-pull:
+        condition: service_completed_successfully
+      mcp-runner-binary-pull:
         condition: service_completed_successfully
 
 volumes:

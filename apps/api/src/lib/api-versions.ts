@@ -11,7 +11,7 @@
 export const CURRENT_API_VERSION = "2026-03-21";
 
 /** All versions the server can serve. Oldest first. */
-export const SUPPORTED_VERSIONS = new Set(["2026-03-21"]);
+const SUPPORTED_VERSIONS = new Set(["2026-03-21"]);
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 

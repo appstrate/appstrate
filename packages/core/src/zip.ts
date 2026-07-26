@@ -10,8 +10,12 @@ import {
   type PackageType,
   type IntegrationManifest,
   type McpServerManifest,
+  type RetiredRuntimeToolsPolicy,
 } from "./validation.ts";
-import { checkCompanionFiles, companionFilesFromRecord } from "./companion-files.ts";
+import {
+  checkCompanionFiles,
+  companionFilesFromRecord,
+} from "@appstrate/afps-shared/companion-files";
 import {
   unzipBounded,
   DecompressionLimitError,
@@ -217,6 +221,14 @@ export interface ParsedPackageZip {
    * previous `_meta["dev.afps/mcp-server"].name` indirection.
    */
   packageId: string;
+  /**
+   * `runtime_tools` ids the platform retired, stripped from {@link manifest}
+   * while parsing. Always `[]` unless the caller passed
+   * `retiredRuntimeTools: "drop"` — the drop is silent by construction, so a
+   * caller that opted into it MUST surface this (install warning, log) rather
+   * than let the capability loss disappear.
+   */
+  droppedRuntimeTools: string[];
 }
 
 /** Error thrown during package ZIP parsing with a machine-readable error code. */
@@ -238,21 +250,50 @@ export class PackageZipError extends Error {
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
+/** Options for {@link parsePackageZip}. */
+export interface ParsePackageZipOptions {
+  /** Maximum compressed size in bytes. Defaults to 10 MB. */
+  maxSize?: number;
+  /**
+   * How the embedded manifest's retired `runtime_tools` ids are treated —
+   * forwarded verbatim to `validateManifest`. Defaults to `"reject"`, because
+   * a ZIP is author input unless the caller knows otherwise.
+   *
+   * Pass `"drop"` ONLY when the archive is content the platform already holds
+   * and cannot repair in place (a re-import of a published, integrity-checked
+   * artifact). See the doctrine on
+   * {@link import("./validation.ts").RetiredRuntimeToolsPolicy}.
+   */
+  retiredRuntimeTools?: RetiredRuntimeToolsPolicy;
+}
+
 /**
  * Parse and validate an AFPS package ZIP file.
  * Decompresses the ZIP, validates the manifest, and extracts the primary content
  * based on package type (prompt.md for agents, SKILL.md for skills, entrypoint for tools).
  * Includes zip bomb protection and wrapper folder stripping.
  * @param zipBuffer - The raw ZIP file as a Uint8Array
- * @param maxSize - Maximum compressed size in bytes (defaults to 10 MB)
- * @returns Parsed package with manifest, content, files, and type
+ * @param options - {@link ParsePackageZipOptions}, or a bare `number` read as
+ *   `maxSize`. The bare-number form is the original signature and stays
+ *   supported for published consumers of `@appstrate/core`; new call sites
+ *   should use the object form.
+ * @returns Parsed package with manifest, content, files, type, and any dropped runtime-tool ids
  * @throws PackageZipError for size limits, invalid ZIP, missing/invalid manifest, or missing content
  * @example
  * const zip = await readFile("my-agent.afps");
  * const { manifest, content, type } = parsePackageZip(new Uint8Array(zip));
  */
-export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): ParsedPackageZip {
-  const limit = maxSize ?? DEFAULT_MAX_SIZE;
+export function parsePackageZip(
+  zipBuffer: Uint8Array,
+  options?: number | ParsePackageZipOptions,
+): ParsedPackageZip {
+  // `maxSize` is a TypeScript function option, not an AFPS manifest key — it
+  // is the original published positional parameter, kept for npm consumers.
+  const opts: ParsePackageZipOptions =
+    typeof options === "number"
+      ? { maxSize: options } // canonical-casing-exempt
+      : (options ?? {});
+  const limit = opts.maxSize ?? DEFAULT_MAX_SIZE;
   if (zipBuffer.length > limit) {
     throw new PackageZipError(
       "FILE_TOO_LARGE",
@@ -294,7 +335,9 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
     throw new PackageZipError("INVALID_MANIFEST", "manifest.json is not valid JSON");
   }
 
-  const validation = validateManifest(manifestRaw);
+  const validation = validateManifest(manifestRaw, {
+    retiredRuntimeTools: opts.retiredRuntimeTools ?? "reject",
+  });
   if (!validation.valid) {
     const detail = validation.errors.join("; ");
     throw new PackageZipError(
@@ -365,5 +408,12 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
   // `_meta["dev.afps/mcp-server"].name` fallback is gone.
   const packageId = (manifest as { name: string }).name;
 
-  return { manifest, content, files, type: type as PackageType, packageId };
+  return {
+    manifest,
+    content,
+    files,
+    type: type as PackageType,
+    packageId,
+    droppedRuntimeTools: validation.droppedRuntimeTools,
+  };
 }

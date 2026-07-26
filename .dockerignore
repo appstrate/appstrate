@@ -1,15 +1,22 @@
-node_modules
+# Dependencies. `**/` is required: .dockerignore patterns are anchored at the
+# context root and are NOT recursive (unlike .gitignore), so a bare
+# `node_modules` would leave every workspace member's nested tree in the
+# context — and the root Dockerfile's `COPY . .` would then overwrite the
+# node_modules the deps stage just built.
+**/node_modules
 .git
 .turbo
 .bun
 .DS_Store
 .eslintcache
 
+# Agent worktrees (each is a full repo checkout — gigabytes of build context)
+.claude/
+.worktrees/
+
 # Markdown (except important ones)
 *.md
-!flows/**/*.md
 !apps/api/src/**/*.md
-!system-packages/**/*.md
 
 # Environment
 .env
@@ -45,7 +52,14 @@ eslint.config.mjs
 .editorconfig
 .prettierrc
 .gitattributes
+
+# Local runtime + scratch state. Root-anchored (see the `**/` note above), so
+# these never shadow vendored source dirs like apps/api/src/data/.
+data/
 storage/
+local-test-packages/
+scratch/
+undefined/
 
 # Docker files (not needed inside images)
 Dockerfile*

@@ -53,10 +53,19 @@ interface OpenBlock {
   toolName?: string;
 }
 
-/** Terminal metadata accumulated across the turn. */
+/**
+ * Terminal metadata accumulated across the turn.
+ *
+ * Deliberately carries NO dollar figure. Metering is the ledger writer's job:
+ * the engine hands the platform seam the raw token counts + the model's catalog
+ * rates and lets it apply the shared `computeTokenCost` formula, so the chat,
+ * proxy, and runner producers can't drift (see `ChatUsageRecord.cost` in
+ * `@appstrate/core/chat-contract` and `engine.ts`'s `recordUsage` call).
+ * `usage.cost` still carries pi-ai's own per-bucket figures verbatim — they are
+ * informational and are never billed.
+ */
 export interface PiChatResultMeta {
   usage: PiUsage;
-  costUsd: number;
   finishReason: PiFinishReason;
   errorText?: string;
 }
@@ -94,7 +103,6 @@ export class PiChatUiStreamMapper {
   private step = 0;
   private readonly open = new Map<number, OpenBlock>();
   private accUsage: PiUsage = { ...ZERO_USAGE, cost: { ...ZERO_USAGE.cost } };
-  private accCost = 0;
   private finishReason: PiFinishReason = "stop";
   private lastError: string | undefined;
   private lastTool: string | undefined;
@@ -276,7 +284,6 @@ export class PiChatUiStreamMapper {
         total: this.accUsage.cost.total + (u.cost?.total ?? 0),
       },
     };
-    this.accCost += u.cost?.total ?? 0;
   }
 
   stepCount(): number {
@@ -291,7 +298,6 @@ export class PiChatUiStreamMapper {
   result(): PiChatResultMeta {
     return {
       usage: this.accUsage,
-      costUsd: this.accCost,
       finishReason: this.finishReason,
       ...(this.lastError ? { errorText: this.lastError } : {}),
     };

@@ -267,8 +267,8 @@ export interface ResolvedDocument {
 // ---------------------------------------------------------------------------
 
 /** Generic name/mime a document degrades to when `metadata` is not granted. */
-export const GENERIC_DOCUMENT_NAME = "document";
-export const GENERIC_DOCUMENT_MIME = "application/octet-stream";
+const GENERIC_DOCUMENT_NAME = "document";
+const GENERIC_DOCUMENT_MIME = "application/octet-stream";
 
 /**
  * The one access-capability computation (D2 / Anthropic rule + the locked

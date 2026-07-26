@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -53,7 +53,6 @@
     "./mcp-server": "./src/mcp-server.ts",
     "./mcp-server-bundle": "./src/mcp-server-bundle/index.ts",
     "./zip": "./src/zip.ts",
-    "./companion-files": "./src/companion-files.ts",
     "./naming": "./src/naming.ts",
     "./dependencies": "./src/dependencies.ts",
     "./integrity": "./src/integrity.ts",
@@ -81,7 +80,6 @@
     "./model-swap": "./src/model-swap.ts",
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
-    "./credential-template": "./src/credential-template.ts",
     "./dedupe-label": "./src/dedupe-label.ts",
     "./chat-contract": "./src/chat-contract.ts",
     "./document-uri": "./src/document-uri.ts",

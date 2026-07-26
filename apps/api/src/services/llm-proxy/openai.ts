@@ -53,7 +53,7 @@ interface AdapterOptions {
  * neither `prompt_tokens` nor `completion_tokens` is present — the caller
  * treats that as "no usage on this frame".
  */
-export function parseOpenAICompatibleUsage(u: Record<string, unknown>): UpstreamUsage | null {
+function parseOpenAICompatibleUsage(u: Record<string, unknown>): UpstreamUsage | null {
   const prompt = tokenCount(u["prompt_tokens"]);
   const completion = tokenCount(u["completion_tokens"]);
   if (prompt === undefined && completion === undefined) return null;

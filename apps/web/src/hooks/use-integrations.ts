@@ -159,7 +159,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
  * silent cache split where the badge and the Connexions tab fetch the same
  * verdict twice and disagree.
  */
-export function agentConnectionReadinessQueryOptions(
+function agentConnectionReadinessQueryOptions(
   orgId: string | null | undefined,
   applicationId: string | null | undefined,
   agentPackageId: string | undefined,

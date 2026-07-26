@@ -799,7 +799,8 @@ const L4_RUN_EVENT_ENVELOPE: ConformanceCase = {
 // ─── L1 — §3.3 / §3.4 companion-file invariants ────────────────────
 //
 // These exercise the runtime bundle loader's companion-file checks (now
-// unified with the platform's ZIP-import path via `@appstrate/core/companion-files`):
+// unified with the platform's ZIP-import path via
+// `@appstrate/afps-shared/companion-files`):
 //
 //   - agent     → prompt.md present + non-empty at archive root (§3.2/§3.4)
 //   - skill     → SKILL.md present + YAML frontmatter `name` (§3.3)

@@ -57,7 +57,7 @@ export function renderExpiryWarning(refreshUrl: string): RawHtml {
 }
 
 /** Public URL for the externalized expiry-detection script. */
-export const LOGIN_EXPIRY_SCRIPT_PATH = "/api/oauth/assets/login-expiry.js";
+const LOGIN_EXPIRY_SCRIPT_PATH = "/api/oauth/assets/login-expiry.js";
 
 /**
  * Source of the externalized expiry-detection helper, served verbatim by

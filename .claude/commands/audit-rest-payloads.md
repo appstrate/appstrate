@@ -1,10 +1,10 @@
 ---
-description: Exhaustive REST payload audit — dispatches an agent that authors and runs an Opus multi-agent workflow to find every mutating endpoint that doesn't return its full resource, plus every legacy/backward-compat shim that must be removed
+description: Exhaustive REST payload audit — dispatches an agent that authors and runs an Opus multi-agent workflow to find every mutating endpoint that doesn't return its full resource, plus every legacy/backward-compat shim to queue for deprecation
 ---
 
 # /audit-rest-payloads — REST mutation-response audit
 
-100%-coverage audit of the API's mutating endpoints against one rule: **every mutation returns the full resource payload, with zero legacy/backward-compat cruft.** It delegates to a single orchestrator agent whose job is to author and run an **Opus multi-agent `Workflow`** that parses the entire codebase exhaustively — no router, module, or path skipped — then synthesizes a tracked report.
+100%-coverage audit of the API's mutating endpoints against one target: **every mutation returns the full resource payload, with zero legacy/backward-compat cruft.** The audit is read-only and reports the gap — it never authorises deleting a field that ships in production (see the deprecation path below). It delegates to a single orchestrator agent whose job is to author and run an **Opus multi-agent `Workflow`** that parses the entire codebase exhaustively — no router, module, or path skipped — then synthesizes a tracked report.
 
 ## When to use
 
@@ -13,18 +13,20 @@ description: Exhaustive REST payload audit — dispatches an agent that authors 
 - Whenever a new router/module is added and you want to check it conforms
 - Periodic health-check on REST consistency
 
-## The convention (authoritative — stricter than #646)
+## The convention (authoritative — the target shape)
 
-There is **no production data**, so backward compatibility is **not a constraint**. The rule is absolute:
+> ⚠️ **Production exists and holds real data.** Backward compatibility **IS** a constraint. Removing or renaming a field that already ships on the wire is a **breaking change** for live consumers — the SPA, the CLI, API-key integrations, webhook receivers, published agents pinned to a version — and must be treated as one. This audit identifies the **target** shape and the gap to it. It does **not** authorise in-place deletions: schema changes go **forward and additive**, and every field removal needs the deprecation path described below.
+
+The target shape:
 
 1. **Create (`POST`)** → `201` + the created resource, serialized by the **same serializer as its `GET` detail** (`$ref` the resource component schema directly — NOT `allOf: [Resource, {…}]`).
 2. **Update (`PUT`/`PATCH`)** → `200` + the updated resource, same serializer as `GET` detail.
 3. **Delete (`DELETE`)** → `204` empty.
-4. **No legacy aliases, no compat envelopes.** The resource is returned **bare**. Specifically, these must be **removed** wherever they exist:
+4. **No legacy aliases, no compat envelopes** — in the target shape. A **new** endpoint must ship bare from day one. On an **existing** endpoint the items below are **cleanup targets to report**, not fields to delete on sight:
    - duplicated id aliases next to the canonical `id` (`runId`, `packageId`, `proxyId`, `modelId`, …)
    - `{ success: true }` / `{ ok: true }` booleans
-   - operation-status scraps stapled onto a resource (`active`, `activated_at`, `lock_version`, `message`, `warnings`, `restored_version`, `deleted`, `updated`, …) **unless** they carry information that is genuinely NOT part of the resource AND a consumer needs it — in which case they belong in a documented, named envelope, not sprinkled at the top level. Default verdict: **remove**.
-   - any `allOf: [ { $ref: Resource }, { …compat } ]` response schema introduced for backward compatibility — collapse to the bare `$ref`.
+   - operation-status scraps stapled onto a resource (`active`, `activated_at`, `lock_version`, `message`, `warnings`, `restored_version`, `deleted`, `updated`, …) **unless** they carry information that is genuinely NOT part of the resource AND a consumer needs it — in which case they belong in a documented, named envelope, not sprinkled at the top level. Default verdict: **flag for deprecation**.
+   - any `allOf: [ { $ref: Resource }, { …compat } ]` response schema introduced for backward compatibility — the target is the bare `$ref`.
 5. **Legitimate action endpoints** keep their operation-result shape and are NOT targets (flag them so they're not false-positives):
    - one-time secret reveal (`POST /api-keys` raw key, webhook `rotate`)
    - flow initiation (`connect/oauth2` → `auth_url`/`state`)
@@ -35,7 +37,18 @@ There is **no production data**, so backward compatibility is **not a constraint
    - **bulk mutations** (`DELETE /runs`, `DELETE …/persistence`, `PUT /notifications/read-all`) — a mass delete/update is an action over a set, not a single resource. These keep a **documented operation result** (`{ deleted_count }` / `{ updated_count }`), NOT a 204 and NOT a resource. (Decision: 2026-06.)
      These return an operation result, not a single resource — that's correct.
 
-> Note: PRs #645–#651 deliberately KEPT compat fields (`runId`, `success`, `lock_version`, `active`, `packageId`, …) because the convention issue #646 assumed backward-compat mattered. Under THIS stricter rule they are now **cleanup targets** — the audit must surface every one of them for removal.
+> Note: PRs #645–#651 deliberately KEPT compat fields (`runId`, `success`, `lock_version`, `active`, `packageId`, …) because the convention issue #646 assumed backward-compat mattered. **That assumption still holds** — production is live. They remain **cleanup targets**: the audit must surface every one of them so each gets a deprecation plan, not a deletion commit.
+
+## Removing a field safely (the only sanctioned path)
+
+Production is live, so a wire-level removal is a **breaking change** and follows the platform's date-based API versioning (`Appstrate-Version`, `middleware/api-version.ts`) rather than a straight delete:
+
+1. **Add the canonical shape first** (additive, non-breaking): the resource is returned in full alongside whatever legacy field already exists.
+2. **Migrate every in-repo consumer** (`apps/web`, `apps/cli`, e2e, tests, docs, system packages) to read the canonical field.
+3. **Mark the legacy field deprecated** in OpenAPI (`deprecated: true` + a description naming its replacement and the removal version). Announce it in `CHANGELOG.md`.
+4. **Only then** remove it, in a release explicitly documented as breaking — after checking who still depends on it (webhook receivers and API-key integrations are outside this repo and cannot be grepped).
+
+`bun run detect:breaking` is the guard rail for steps 1–3: **a red `detect:breaking` is a stop sign, not a formality to acknowledge in the PR body.** It may only go red in a deliberate step-4 release.
 
 ## Behavior
 
@@ -61,7 +74,7 @@ Coverage guarantees:
 - Every file in `apps/api/src/routes/` and every `modules/**/routes.ts` is assigned to exactly one Phase-1 agent (log the assignment; assert none dropped).
 - Handler reality wins over OpenAPI claims.
 - Distinguish the legitimate action exceptions (one-time secret, OAuth/flow init, presign envelope, multi-entity import report, synthetic test, transport passthroughs, browser auth flows) from real defects.
-- Report the existing compat shims from #645–#651 (`runId`, `success`, `lock_version`, `active`, `packageId`, version aliases, …) as removal targets — NOT conformant under the no-backward-compat rule.
+- Report the existing compat shims from #645–#651 (`runId`, `success`, `lock_version`, `active`, `packageId`, version aliases, …) as **deprecation targets** — they do not match the target shape, but they ship in production today and cannot simply be dropped.
 
 Return this report (and nothing extraneous):
 
@@ -80,8 +93,8 @@ Return this report (and nothing extraneous):
 > ## Legitimate action exceptions (not faults)
 > - … (the ~5 + any others, with why)
 >
-> ## Compat shims to remove (from #645–#651)
-> - … (field-level: where each legacy alias / allOf lives)
+> ## Compat shims to deprecate (from #645–#651)
+> - … (field-level: where each legacy alias / allOf lives, + known consumers)
 >
 > ## Summary
 > - Conformant: X | Stub: Y | Partial: Z | Compat-shim: W | Legit-action: A
@@ -92,8 +105,8 @@ Return this report (and nothing extraneous):
 ## After the audit completes
 
 1. Relay the consolidated report.
-2. If defects exist, propose the fix plan: **one PR per family**, each PR (a) aligns stubs/partials to return the bare resource and (b) **strips** the compat shims. Because there's no prod data, fixes are NOT additive — old fields are deleted, OpenAPI `allOf` collapses to a bare `$ref`, and consumers (`apps/web`, CLI) are updated to read the resource (`id` not `runId`, the object not `{success}`).
-3. Each fix agent: branch from `origin/main`, worktree, `bun run check` (verify-openapi + `detect:breaking` — note breaking changes ARE expected here since we remove fields; that's acceptable with no prod data, but call them out explicitly in the PR), tests updated to the new shape, PR `Refs #646` (or a fresh tracking issue), worktree cleaned up.
+2. If defects exist, propose the fix plan: **one PR per family**. Because production is live, each PR is **additive** — it (a) aligns stubs/partials so the endpoint also returns the full resource, (b) migrates in-repo consumers (`apps/web`, CLI, tests, e2e) to the canonical field (`id` not `runId`, the object not `{success}`), and (c) marks the legacy alias / `allOf` branch `deprecated: true` in OpenAPI. The actual field deletion is a **separate, later, explicitly-breaking release** — see "Removing a field safely" above. Never bundle a removal into the alignment PR.
+3. Each fix agent: branch from `origin/main`, worktree, `bun run check` (verify-openapi + `detect:breaking` — this must stay **green**; a breaking diff means the PR crossed from "additive alignment" into "removal" and has to be split), tests updated to assert the new shape **without dropping assertions on the still-shipped legacy field**, PR `Refs #646` (or a fresh tracking issue), worktree cleaned up.
 4. Ask the user before dispatching fix agents — don't auto-fix.
 
 ## Notes for the executing assistant
@@ -101,4 +114,4 @@ Return this report (and nothing extraneous):
 - **The main thread owns the orchestration.** `Workflow` and `Agent` exist only on the main thread — a spawned sub-agent cannot fan out further. Do NOT delegate the whole audit to one agent expecting it to run a Workflow; it will fail and fall back to a slow inline scan. Call `Workflow` yourself, or dispatch the Phase-1/2 Opus agents yourself in parallel.
 - Opus on every audit agent — the classification is judgment-heavy (handler-vs-spec reconciliation, action-vs-defect calls).
 - Read-only audit. No file is modified during the audit phase.
-- This command supersedes the additive posture of #646: the goal is now **bare resources everywhere, no legacy**.
+- **Production is live.** The target is bare resources everywhere, but reaching it is an additive, deprecation-gated migration — never a purge. An audit finding is a plan input, not permission to delete a field.

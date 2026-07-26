@@ -161,7 +161,7 @@ Each run creates an isolated, ephemeral environment with two containers and a de
 
 ## Layer 1 — Network Isolation
 
-**Files:** `apps/api/src/services/adapters/pi.ts`, `apps/api/src/services/docker.ts`
+**Files:** `apps/api/src/services/run-launcher/pi.ts`, `apps/api/src/services/orchestrator/docker-orchestrator.ts`, `apps/api/src/services/docker.ts`
 
 Each run creates a dedicated Docker bridge network (`appstrate-exec-{runId}`). Two containers are placed on this network:
 
@@ -192,12 +192,13 @@ Credentials are **never** passed to the agent container — not as environment v
 
 ### How the agent makes authenticated API calls
 
-The agent talks to the sidecar exclusively over the **Model Context Protocol** (Streamable HTTP, stateless JSON-RPC) at `POST /mcp`. Three canonical tools are registered as Pi tools at container boot (`runtime-pi/extensions/mcp-direct.ts`): `provider_call`, `run_history`, `recall_memory`. The agent has no bash-level visibility into the sidecar URL — `SIDECAR_URL` is deleted from `process.env` immediately after the MCP client connects.
+The agent talks to the sidecar exclusively over the **Model Context Protocol** (Streamable HTTP, stateless JSON-RPC) at `POST /mcp`. The tool surface is registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`). The agent has no bash-level visibility into the sidecar URL — `SIDECAR_URL` is deleted from `process.env` immediately after the MCP client connects.
+
+The outbound-call tool is **namespaced per integration**: an integration with namespace `gmail` exposes `gmail__api_call` (and `gmail__api_upload` when its auth declares `upload_protocols`). There is no global call tool — the namespace is what binds a call to one integration's credentials and one authorization allowlist. (The pre-AFPS `provider_call` tool was removed; two prompt tests assert the name never reappears in an agent prompt.) Alongside them the sidecar registers the first-party `run_history` and `recall_memory` tools.
 
 ```ts
 // What the agent actually calls (not curl, not bash)
-provider_call({
-  providerId: "@appstrate/gmail",
+gmail__api_call({
   method: "GET",
   target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
 });
@@ -205,11 +206,11 @@ provider_call({
 run_history({ limit: 5, fields: ["state"] });
 ```
 
-Inside the sidecar, the MCP `tools/call` handler delegates to the pure `executeProviderCall` helper in `runtime-pi/sidecar/credential-proxy.ts`, which:
+Inside the sidecar, the MCP `tools/call` handler delegates to the pure `executeApiCall` helper in `runtime-pi/sidecar/credential-proxy.ts`, which:
 
-1. **Fetches credentials** from the platform API (`GET /internal/credentials/:scope/:name`) using its `RUN_TOKEN`
+1. **Fetches credentials** from the platform API (`GET /internal/integration-credentials/:scope/:name`) using its `RUN_TOKEN`
 2. **Substitutes** `{{token}}` placeholders with the real OAuth access token in headers and URL
-3. **Validates** the resolved URL against `authorizedUris` (see [Layer 3](#layer-3--url-authorization))
+3. **Validates** the resolved URL against `authorized_uris` (see [Layer 3](#layer-3--url-authorization))
 4. **Forwards** the request to the target API with real credentials
 5. **Returns** the response as a structured MCP result — body inline (text under 32 KB) or as a `resource_link` block backed by the run-scoped blob cache
 
@@ -217,7 +218,7 @@ Inside the sidecar, the MCP `tools/call` handler delegates to the pure `executeP
 
 | Component   | Agent sees                                                           | Wire (to target API)                   |
 | ----------- | -------------------------------------------------------------------- | -------------------------------------- |
-| Tool call   | `provider_call({ providerId, method, target })`                      | `POST http://sidecar:8080/mcp`         |
+| Tool call   | `{ns}__api_call({ method, target })`                                 | `POST http://sidecar:8080/mcp`         |
 | URL         | `https://gmail.googleapis.com/...`                                   | `https://gmail.googleapis.com/...`     |
 | Auth header | (not supplied — injected server-side)                                | `Bearer ya29.a0AfH6SM...` (real token) |
 | Response    | MCP `CallToolResult` — text body or `resource_link` for binary/large | —                                      |
@@ -226,11 +227,11 @@ Inside the sidecar, the MCP `tools/call` handler delegates to the pure `executeP
 
 ### Credential access is scoped and audited
 
-The platform API (`/internal/credentials/:providerId`) enforces additional controls:
+The platform API (`/internal/integration-credentials/{scope}/{name}`) enforces additional controls:
 
 - **Run must be active** — tokens for completed/failed runs are rejected (`internal.ts`)
-- **Provider must be declared** — the requested `providerId` must appear as a key in the agent's `manifest.requires.providers` object. An agent cannot request credentials for providers it hasn't declared.
-- **Access is logged** — every credential fetch is recorded with run ID, provider ID, and agent ID
+- **Integration must be declared and installed** — `assertAgentDeclaresIntegration` rejects any integration absent from the running agent's `dependencies.integrations`, and a second check rejects one that is not active in the run's application. An agent cannot reach credentials it did not declare.
+- **Access is logged** — every credential fetch is recorded with run ID, integration package ID, and the resolved auth/delivery-plan counts
 
 ### Credential encryption at rest
 
@@ -264,13 +265,13 @@ The sidecar pattern ensures credentials exist only in the sidecar's memory, for 
 
 ## Layer 3 — URL Authorization
 
-**Files:** `runtime-pi/sidecar/server.ts`, `apps/api/src/services/adapters/provider-urls.ts`
+**Files:** `runtime-pi/sidecar/api-call-credentials.ts`, `runtime-pi/sidecar/mcp.ts`, `apps/api/src/services/integration-credentials-resolver.ts`
 
 Every outbound request through the sidecar is validated against an allowlist of authorized URL patterns. This prevents an agent from using valid credentials to call unintended endpoints.
 
 ### How it works
 
-Each provider declares `authorized_uris` — either explicitly in the agent manifest or derived from provider defaults:
+Each integration auth declares `authorized_uris` — either explicitly in the agent manifest or derived from the integration manifest's defaults:
 
 ```json
 {
@@ -428,22 +429,46 @@ if (!rows[0] || rows[0].status !== "running") {
 }
 ```
 
-### Admin guards
+### Permission guards (RBAC)
 
-Privileged operations (agent import, configuration, deletion) require admin role within the organization:
+Privileged operations (package import, configuration, deletion, …) are gated on a
+**permission**, not on a role name. There is no `requireAdmin()` / `requireOwner()`
+middleware: role → permission expansion happens once, in the org-context stage of
+the request pipeline, and every route asserts the concrete permission it needs.
+The single runtime path is `makePermissionGuard` in
+`packages/core/src/permissions.ts`, wrapped by three typed façades —
+`requirePermission` (`apps/api/src/middleware/require-permission.ts`, core +
+module resources), `requireCorePermission`, and `requireModulePermission`:
 
 ```typescript
-// guards.ts
-export function requireAdmin() {
-  return async (c: Context, next: Next) => {
-    const orgRole = c.get("orgRole");
-    if (orgRole !== "admin" && orgRole !== "owner") {
-      return c.json({ error: "FORBIDDEN" }, 403);
+// packages/core/src/permissions.ts — the one guard everything delegates to
+export function makePermissionGuard(required: string) {
+  return async (c, next) => {
+    const perms = c.get("permissions") as ReadonlySet<string> | undefined;
+    // Fail-closed: missing Set, non-Set value, or missing entry all deny.
+    if (!perms || typeof perms.has !== "function" || !perms.has(required)) {
+      _denialHandler?.({ required, c }); // best-effort audit, never escalates to 500
+      throw forbidden(`Insufficient permissions: ${required} required`);
     }
-    await next();
+    return next();
   };
 }
+
+// Call site — apps/api/src/routes/*.ts
+router.post("/path", requirePermission("agents", "write"), handler);
 ```
+
+Three properties matter for the threat model:
+
+- **Fail-closed.** An absent or malformed permission set denies; it never falls
+  through to a role comparison.
+- **Denials are audited exactly once.** The handler is registered at boot
+  (`installPermissionAuditLogger`), and a throwing audit handler is swallowed so
+  an authz denial can never be converted into a 500 that masks the 403.
+- **Modules cannot widen core.** A module gates on core resources through
+  `requireCorePermission` (typechecked against the core catalog) and on its own
+  through `requireModulePermission`; the role→permission matrix lives in
+  `apps/api/src/lib/permissions.ts`.
 
 ### Orphaned run recovery
 
@@ -466,7 +491,7 @@ for (const runId of orphanIds) {
 
 ## Layer 6 — Data Isolation (Two-Tier Scoping)
 
-**Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/middleware/app-context.ts`, `apps/api/src/services/state.ts`, all route handlers
+**Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/middleware/app-context.ts`, `apps/api/src/services/state/`, all route handlers
 
 Data access uses a **two-tier isolation model**: all resources are scoped by `orgId`, and app-scoped resources are additionally scoped by `applicationId`. The org-context middleware (`X-Org-Id`) validates organization membership, and the app-context middleware (`X-Application-Id`) validates the application belongs to the org.
 
@@ -513,19 +538,19 @@ const rows = await db
 
 ## Layer 7 — Input Validation
 
-**Files:** `apps/api/src/services/schema.ts`, `apps/api/src/services/agent-import.ts`
+**Files:** `apps/api/src/services/schema.ts`, `apps/api/src/services/bundle-import.ts`
 
 All external inputs are validated using Zod schemas before processing:
 
-| Input               | Validation                                                | Location                         |
-| ------------------- | --------------------------------------------------------- | -------------------------------- |
-| Agent manifests     | Zod schema with slug regex, typed enums, required fields  | `schema.ts:validateManifest()`   |
-| Agent configuration | AJV against manifest config schema                        | `schema.ts:validateConfig()`     |
-| Run input           | AJV against manifest input schema                         | `schema.ts:validateInput()`      |
-| File uploads        | Extension allowlist, size limit, count limit              | `schema.ts:validateFileInputs()` |
-| Agent output        | Schema-typed `output` tool + AJV validation at ingestion  | `schema.ts:validateOutput()`     |
-| ZIP imports         | 10 MB size limit, manifest validation, content validation | `agent-import.ts`                |
-| Agent IDs           | Slug regex at DB level and Zod level                      | `schema.ts`, `001_initial.sql`   |
+| Input               | Validation                                               | Location                         |
+| ------------------- | -------------------------------------------------------- | -------------------------------- |
+| Agent manifests     | Zod schema with slug regex, typed enums, required fields | `schema.ts:validateManifest()`   |
+| Agent configuration | AJV against manifest config schema                       | `schema.ts:validateConfig()`     |
+| Run input           | AJV against manifest input schema                        | `schema.ts:validateInput()`      |
+| File uploads        | Extension allowlist, size limit, count limit             | `schema.ts:validateFileInputs()` |
+| Agent output        | Schema-typed `output` tool + AJV validation at ingestion | `schema.ts:validateOutput()`     |
+| Package imports     | Size limit, manifest validation, content validation      | `bundle-import.ts`               |
+| Agent IDs           | Slug regex at DB level and Zod level                     | `schema.ts`, `001_initial.sql`   |
 
 **Output validation:** When an agent defines `output.schema`, the schema becomes the input schema of the `output` runtime tool (`packages/core/src/runtime-tool-defs.ts`) — the model sees the exact JSON Schema in the tool definition and the tool call is AJV-validated in-container. At ingestion, the platform re-validates the result against the schema (`run-event-ingestion.ts`); on mismatch — or when the agent never called `output` despite required fields — the run is marked **failed**. This dual-layer approach (tool-level + platform-level) prevents malformed output from being persisted as a successful run.
 
@@ -691,7 +716,7 @@ This paper demonstrates that alignment training alone is insufficient to secure 
 
 ### "Securing AI Agent Execution" (Buhler, Biagiola et al., 2025)
 
-Introduces **AgentBound**, the first access control framework for MCP servers. Combines a declarative policy mechanism (AgentManifest) with a sandbox enforcement engine (AgentBox). Appstrate's agent manifest (`requires.providers` object with `authorized_uris` in provider definitions) is architecturally analogous to AgentManifest — a declarative specification of what the agent is allowed to access.
+Introduces **AgentBound**, the first access control framework for MCP servers. Combines a declarative policy mechanism (AgentManifest) with a sandbox enforcement engine (AgentBox). Appstrate's agent manifest (`dependencies.integrations` + `integrations_configuration`, with `authorized_uris` declared per integration auth) is architecturally analogous to AgentManifest — a declarative specification of what the agent is allowed to access.
 
 **Reference:** arXiv:2510.21236
 

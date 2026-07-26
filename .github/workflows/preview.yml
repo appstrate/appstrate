@@ -75,6 +75,10 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
+        # ⚠️  DUPLICATED MATRIX — keep in lockstep with the identical `include:`
+        # block in .github/workflows/release.yml (which additionally bakes the
+        # Firecracker pubkey, builds multi-arch, and attests provenance).
+        # Adding or renaming an image here means editing release.yml too.
         include:
           - name: appstrate
             context: .

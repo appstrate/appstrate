@@ -612,7 +612,7 @@ export const schemas = {
       result: {
         type: ["object", "null"],
         description:
-          "What the run produced. Structured output is primary; deprecated report-tool runs may also carry markdown in `text`. `null` while the run is in flight or when no result was emitted.",
+          "What the run produced: the structured output, and nothing else. Human-facing deliverables are documents (see the run's documents), not fields here. `null` while the run is in flight or when no output was emitted.",
         properties: {
           output: {
             description:
@@ -622,13 +622,13 @@ export const schemas = {
             type: "string",
             deprecated: true,
             description:
-              "Compatibility field for markdown emitted by the deprecated `report` runtime tool. New agents should publish a markdown document.",
+              "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are markdown documents now (`outputs/report.md`).",
           },
           text_truncated: {
             type: "boolean",
             deprecated: true,
             description:
-              "Present and true when deprecated report text exceeded the 256 KiB storage cap.",
+              "HISTORICAL ONLY. Present and true when a pre-removal `text` exceeded the 256 KiB storage cap.",
           },
         },
       },
@@ -1536,7 +1536,7 @@ export const schemas = {
             type: "array",
             items: {
               type: "string",
-              enum: ["output", "log", "note", "pin", "report", "publish_document"],
+              enum: ["output", "log", "note", "pin", "publish_document"],
             },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional.",

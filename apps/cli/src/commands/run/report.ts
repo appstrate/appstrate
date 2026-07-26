@@ -5,7 +5,8 @@
  *
  * Creates a run on the configured Appstrate instance via
  * `POST /api/runs/remote`, then returns an {@link HttpSink} the caller
- * composes with their `ConsoleSink` via `CompositeSink`. Every event the
+ * composes with their console sink (`createConsoleSink`, `./sink.ts`) via
+ * `CompositeSink`. Every event the
  * bundle emits is streamed back to the platform in real time (HMAC-signed
  * Standard Webhooks) and becomes visible in the dashboard with a
  * "Remote runner" badge.
@@ -127,7 +128,7 @@ export type ReportSource =
 
 /**
  * Register a remote run against the instance and return a configured
- * HttpSink. The caller composes it with its local ConsoleSink. On
+ * HttpSink. The caller composes it with its local console sink. On
  * registration failure, the caller's fallback policy decides whether
  * to abort the run or continue console-only (see {@link ReportOptions}).
  */

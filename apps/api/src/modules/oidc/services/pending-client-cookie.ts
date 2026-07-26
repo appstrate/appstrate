@@ -107,7 +107,7 @@ export function clearPendingClientCookie(c: Context<AppEnv>): void {
  * Better-Auth call (see `headersWithAuthoritativePendingClient`) instead of
  * trusting the browser-supplied cookie.
  */
-export function buildSignedPendingClientValue(clientId: string): string {
+function buildSignedPendingClientValue(clientId: string): string {
   const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
   const payload = `${clientId}.${exp}`;
   const sig = signAuthHmac(payload);

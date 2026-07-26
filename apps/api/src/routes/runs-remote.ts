@@ -40,7 +40,6 @@ import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateConfig, validateInput } from "../services/schema.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
-import { assertExplicitModelExists } from "../services/org-models.ts";
 import { assertApplicationInScope } from "../services/applications.ts";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
@@ -68,37 +67,45 @@ const CreateRemoteRunBodySchema = z
     //                  by id; the server reads the manifest from its own
     //                  catalog. Deterministic attribution, no fingerprint
     //                  reconciliation, no spoof surface.
+    //
+    // Neither shape accepts `modelId` / `proxyId`. A remote run resolves no
+    // platform model at creation — the runner executes on its own host with
+    // its own model + credentials, so `runs.model_label` / `runs.model_source`
+    // stay NULL and inference routed through `/api/llm-proxy` is resolved from
+    // each call's own body. Both variants are `.strict()` (like the envelope),
+    // so a client that still sends them gets an explicit 400 instead of the
+    // silent drop the fields used to get.
     source: z.discriminatedUnion("kind", [
-      z.object({
-        kind: z.literal("inline"),
-        manifest: z.record(z.string(), z.unknown()),
-        prompt: z.string().min(1),
-        config: z.record(z.string(), z.unknown()).optional(),
-        modelId: z.string().nullable().optional(),
-        proxyId: z.string().nullable().optional(),
-      }),
-      z.object({
-        kind: z.literal("registry"),
-        packageId: z.string().min(1),
-        // `stage` discriminates draft vs published — kept distinct from
-        // the parent `source` discriminator (which selects inline vs
-        // registry) to avoid the `source.source` collision.
-        stage: z.enum(["draft", "published"]).default("published"),
-        spec: z.string().optional(),
-        /**
-         * SRI digest the runner received with the bundle download
-         * (`X-Bundle-Integrity`). Optional: when present, the server
-         * logs a warning if the version it just resolved produces a
-         * different artifact (drift between bundle download and run
-         * creation). The bundle is already on the runner's host, so
-         * we don't reject — refusing the run wastes the runner's work
-         * for no security gain (no untrusted bytes are loaded server-side).
-         */
-        integrity: z.string().optional(),
-        config: z.record(z.string(), z.unknown()).optional(),
-        modelId: z.string().nullable().optional(),
-        proxyId: z.string().nullable().optional(),
-      }),
+      z
+        .object({
+          kind: z.literal("inline"),
+          manifest: z.record(z.string(), z.unknown()),
+          prompt: z.string().min(1),
+          config: z.record(z.string(), z.unknown()).optional(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("registry"),
+          packageId: z.string().min(1),
+          // `stage` discriminates draft vs published — kept distinct from
+          // the parent `source` discriminator (which selects inline vs
+          // registry) to avoid the `source.source` collision.
+          stage: z.enum(["draft", "published"]).default("published"),
+          spec: z.string().optional(),
+          /**
+           * SRI digest the runner received with the bundle download
+           * (`X-Bundle-Integrity`). Optional: when present, the server
+           * logs a warning if the version it just resolved produces a
+           * different artifact (drift between bundle download and run
+           * creation). The bundle is already on the runner's host, so
+           * we don't reject — refusing the run wastes the runner's work
+           * for no security gain (no untrusted bytes are loaded server-side).
+           */
+          integrity: z.string().optional(),
+          config: z.record(z.string(), z.unknown()).optional(),
+        })
+        .strict(),
     ]),
     applicationId: z.string().min(1),
     input: z.record(z.string(), z.unknown()).optional().default({}),
@@ -205,8 +212,6 @@ export function createRunsRemoteRouter() {
       let overrideVersionLabel: string | undefined;
       let effectiveInput: Record<string, unknown> | null;
       let effectiveConfig: Record<string, unknown>;
-      let modelIdOverride: string | null;
-      let proxyIdOverride: string | null;
       // Attribution path counter — emitted once per request so we can
       // track the inline-vs-registry split over time.
       let attributionPath: "registry" | "inline_shadow";
@@ -226,9 +231,6 @@ export function createRunsRemoteRouter() {
         agentForRun = resolved.agent;
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
-
-        modelIdOverride = src.modelId ?? null;
-        proxyIdOverride = src.proxyId ?? null;
 
         effectiveConfig =
           src.config && typeof src.config === "object" && !Array.isArray(src.config)
@@ -291,8 +293,6 @@ export function createRunsRemoteRouter() {
             prompt: src.prompt,
             input: body.input,
             config: src.config,
-            modelId: src.modelId,
-            proxyId: src.proxyId,
           },
         });
 
@@ -301,8 +301,6 @@ export function createRunsRemoteRouter() {
 
         effectiveInput = preflight.effectiveInput;
         effectiveConfig = preflight.effectiveConfig;
-        modelIdOverride = preflight.modelIdOverride;
-        proxyIdOverride = preflight.proxyIdOverride;
       }
 
       async function createShadowAgent(
@@ -326,11 +324,6 @@ export function createRunsRemoteRouter() {
         assertNoPlatformFileRefs(asJSONSchemaObject(fileInputSchema), effectiveInput ?? {});
       }
 
-      // Reject an explicit `modelId` override that references no real model
-      // (system key or org-model UUID) with a clean 404 — both the registry
-      // and inline branches forward the caller's value verbatim.
-      await assertExplicitModelExists(orgId, modelIdOverride);
-
       const runId = `run_${crypto.randomUUID()}`;
       const runner = await resolveRunnerContext(c);
       const result = await createRun({
@@ -342,8 +335,6 @@ export function createRunsRemoteRouter() {
         ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
         input: effectiveInput,
         config: effectiveConfig,
-        modelId: modelIdOverride,
-        proxyId: proxyIdOverride,
         // Normalize an empty map to null (mirrors the platform run route): a
         // non-null map on the row means the run carried explicit overrides.
         dependencyOverrides:

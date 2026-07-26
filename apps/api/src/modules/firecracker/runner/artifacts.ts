@@ -80,7 +80,7 @@ export const GUEST_PROTOCOL_VERSION = 2;
 export const DEFAULT_ARTIFACTS_BASE_URL = "https://github.com/appstrate/appstrate/releases";
 
 /** Combined manifest asset name (one per release, all arches). */
-export const MANIFEST_ASSET_NAME = "firecracker-artifacts-manifest.json";
+const MANIFEST_ASSET_NAME = "firecracker-artifacts-manifest.json";
 
 /**
  * Detached signature asset for the manifest (base64 raw Ed25519 signature,
@@ -89,7 +89,7 @@ export const MANIFEST_ASSET_NAME = "firecracker-artifacts-manifest.json";
  * BEFORE any hash inside the manifest is trusted (see the trust note in
  * {@link downloadAndInstall}).
  */
-export const MANIFEST_SIGNATURE_ASSET_NAME = "firecracker-artifacts-manifest.json.sig";
+const MANIFEST_SIGNATURE_ASSET_NAME = "firecracker-artifacts-manifest.json.sig";
 
 /**
  * Pinned Ed25519 public key (base64 raw 32 bytes) the manifest signature is
@@ -154,7 +154,7 @@ const archArtifactsSchema = z.object({
   rootfs: rootfsFileSchema,
 });
 
-export const artifactsManifestSchema = z.object({
+const artifactsManifestSchema = z.object({
   version: z.string().min(1),
   guest_protocol: z.number().int().positive(),
   artifacts: z.record(z.string(), archArtifactsSchema),

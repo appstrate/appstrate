@@ -20,8 +20,13 @@ jobs:
         with:
           days-before-stale: 60
           days-before-close: 14
-          exempt-issue-labels: "pinned,security,roadmap,work-in-progress"
-          exempt-pr-labels: "pinned,security,roadmap,work-in-progress"
+          # Only labels that actually EXIST on the repo can exempt anything —
+          # `gh label list` is the source of truth. The previous value listed
+          # `pinned`, `roadmap` and `work-in-progress`, none of which exist, so
+          # three quarters of the exemption policy was inert. Create the label
+          # first, then add it here.
+          exempt-issue-labels: "security,conformance,help wanted,good first issue"
+          exempt-pr-labels: "security,conformance,dependencies,automated"
           stale-issue-label: "stale"
           stale-pr-label: "stale"
           stale-issue-message: >

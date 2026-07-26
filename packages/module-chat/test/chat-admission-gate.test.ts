@@ -42,9 +42,14 @@ import type { UIMessage } from "ai";
 // invoked directly, but createTestContext needs the initialized platform.
 getTestApp();
 
-/** One enabled, chat-usable built-in model — the ai-sdk (non-subscription) path. */
+/**
+ * One enabled, chat-usable built-in model — the ai-sdk (non-subscription) path.
+ * Shaped as the real `/api/models` list envelope (`listResponse`).
+ */
 const MODELS_PAYLOAD = {
-  models: [
+  object: "list",
+  hasMore: false,
+  data: [
     {
       id: "sysmodel",
       modelId: "gpt-4o-2024-08-06",

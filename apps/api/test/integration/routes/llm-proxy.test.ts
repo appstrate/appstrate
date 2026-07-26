@@ -44,10 +44,26 @@ import {
   seedRun,
   seedApplication,
 } from "../../helpers/seed.ts";
-import {
-  resetResponseCacheConfigForTesting,
-  setResponseCacheConfig,
-} from "../../../src/lib/llm-proxy-cache-config.ts";
+import { _resetCacheForTesting } from "@appstrate/env";
+
+/**
+ * Drive the response cache through its ONLY input — the env. There is no
+ * runtime setter on `lib/llm-proxy-cache-config.ts` (a mutable process-wide
+ * override would be reachable in production), so a test that needs another
+ * mode rewrites the vars and drops the cached `getEnv()` snapshot.
+ */
+function setCacheEnv(mode: "off" | "simple", maxAge: number): void {
+  process.env.LLM_PROXY_CACHE_MODE = mode;
+  process.env.LLM_PROXY_CACHE_MAX_AGE = String(maxAge);
+  _resetCacheForTesting();
+}
+
+/** Restore the suite-wide default (cache off — the env schema default). */
+function restoreCacheEnv(): void {
+  delete process.env.LLM_PROXY_CACHE_MODE;
+  delete process.env.LLM_PROXY_CACHE_MAX_AGE;
+  _resetCacheForTesting();
+}
 
 const app = getTestApp();
 
@@ -575,12 +591,12 @@ describe("POST /api/llm-proxy/* — response cache", () => {
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
-    setResponseCacheConfig({ enabled: true, ttlSeconds: 120 });
+    setCacheEnv("simple", 120);
   });
 
   afterEach(() => {
     restoreFetch();
-    resetResponseCacheConfigForTesting();
+    restoreCacheEnv();
   });
 
   it("returns x-llm-proxy-cache-status: MISS on first call and HIT on identical second call", async () => {
@@ -747,8 +763,8 @@ describe("POST /api/llm-proxy/* — response cache", () => {
     expect(upstreamCalls).toBe(2);
   });
 
-  it("is fully disabled when setResponseCacheConfig({ enabled: false }) — no header, no replay", async () => {
-    setResponseCacheConfig({ enabled: false, ttlSeconds: 0 });
+  it('is fully disabled when LLM_PROXY_CACHE_MODE="off" — no header, no replay', async () => {
+    setCacheEnv("off", 0);
     const h = await buildHarness();
     let upstreamCalls = 0;
 

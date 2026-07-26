@@ -8,8 +8,7 @@
  * session, API key, OAuth2 instance/dashboard/end-user JWTs) is accepted,
  * and the route does NOT require `X-Org-Id` itself.
  *
- * `/api/me/models` runs inside org context and returns the catalog the SPA
- * model picker consumes.
+ * The other routes in this namespace run inside org (or application) context.
  */
 
 export const mePaths = {
@@ -349,45 +348,6 @@ export const mePaths = {
       responses: {
         "204": { description: "Connection deleted (or never existed)" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-      },
-    },
-  },
-  "/api/me/models": {
-    get: {
-      operationId: "listMyModels",
-      tags: ["Profile"],
-      summary: "List models available in the active org",
-      description:
-        "Returns the model catalog for the active org (built-in + custom). Same shape as " +
-        "`GET /api/models`. Org context is set by the `X-Org-Id` header (cookie session) " +
-        "or pinned by the strategy (API key, OIDC). Requires `models:read`.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
-      responses: {
-        "200": {
-          description: "Model catalog",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/OrgModel" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },

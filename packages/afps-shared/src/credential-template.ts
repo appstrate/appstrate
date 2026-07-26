@@ -3,7 +3,11 @@
 
 /**
  * Canonical `{$credential.<field>}` value-template renderer — the SINGLE
- * source of truth, re-exported by `@appstrate/core/credential-template`.
+ * source of truth. Consumers import this module directly; core no longer
+ * publishes a `./credential-template` subpath (removed in core 6.0.0). The
+ * only importer today is `apps/api/src/services/integration-manifest-helpers.ts`,
+ * which re-exports it pre-bound to `emptyAs: "null"` for
+ * `integration-spawn-resolver.ts`.
  *
  * AFPS `delivery.http` / `delivery.env` / `delivery.files` value templates
  * reference an auth's decrypted credential bag via the `{$credential.<field>}`

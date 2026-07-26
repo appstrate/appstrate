@@ -62,7 +62,7 @@ export function invalidateNotificationQueries(qc: ReturnType<typeof useQueryClie
   qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-counts-by-agent"] });
 }
 
-export function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
+function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
   invalidateNotificationQueries(qc);
   // Legacy keys — the run hooks are not migrated to the typed client yet.
   qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });

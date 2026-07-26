@@ -15,15 +15,12 @@ import type { Bundle, BundlePackage } from "../bundle/types.ts";
 
 export type {
   DependencyRef,
-  SkillRef,
   JSONSchema,
   Tool,
   ToolContext,
   ToolResult,
   RunEvent,
 } from "@afps-spec/types";
-
-import type { SkillRef } from "@afps-spec/types";
 
 // ─────────────────────────────────────────────
 // Bundle surface passed to resolvers — the spec {@link Bundle} is the
@@ -32,22 +29,3 @@ import type { SkillRef } from "@afps-spec/types";
 // ─────────────────────────────────────────────
 
 export type { Bundle, BundlePackage };
-
-// ─────────────────────────────────────────────
-// Resolver outputs (runtime-internal)
-// ─────────────────────────────────────────────
-
-export interface ResolvedSkill {
-  name: string;
-  version: string;
-  content: string;
-  frontmatter?: Record<string, unknown>;
-}
-
-// ─────────────────────────────────────────────
-// Resolvers (runtime-internal)
-// ─────────────────────────────────────────────
-
-export interface SkillResolver {
-  resolve(refs: SkillRef[], bundle: Bundle): Promise<ResolvedSkill[]>;
-}

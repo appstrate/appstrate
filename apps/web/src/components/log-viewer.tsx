@@ -23,7 +23,7 @@ const levelConfig: Record<string, { icon: typeof Info; className: string; label:
   error: { icon: XCircle, className: "text-destructive bg-destructive/10", label: "ERROR" },
 };
 
-export function LevelBadge({ level }: { level?: string }) {
+function LevelBadge({ level }: { level?: string }) {
   if (!level || level === "debug") return null;
   const config = levelConfig[level];
   if (!config) return null;
@@ -40,8 +40,6 @@ export function LevelBadge({ level }: { level?: string }) {
     </span>
   );
 }
-
-// --- LogViewer (admin/developer view) ---
 
 interface LogViewerProps {
   entries: LogEntry[];
@@ -198,44 +196,6 @@ export function LogViewer({ entries }: LogViewerProps) {
           })}
         </div>
       </div>
-    </div>
-  );
-}
-
-// --- RunTimeline (public/user view) ---
-
-interface RunTimelineProps {
-  entries: LogEntry[];
-  isRunning?: boolean;
-}
-
-export function RunTimeline({ entries, isRunning }: RunTimelineProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll on new entries or when loader appears
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [entries.length, isRunning]);
-
-  return (
-    <div className="space-y-1">
-      {entries.map((entry, i) => (
-        <div
-          key={i}
-          className={cn(
-            "flex items-start gap-2 text-sm",
-            (entry.level && levelColors[entry.level]) || "text-foreground",
-          )}
-        >
-          <span className="leading-6">{entry.message}</span>
-        </div>
-      ))}
-      {isRunning && (
-        <div className="text-muted-foreground flex items-center gap-2 py-1 text-sm">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-        </div>
-      )}
-      <div ref={bottomRef} />
     </div>
   );
 }

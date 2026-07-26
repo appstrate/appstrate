@@ -16,7 +16,7 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
-import { narrowCanonicalEvent } from "../types/canonical-events.ts";
+import { isCanonicalRunEvent } from "../types/canonical-events.ts";
 import type { RunError, RunResult, TokenUsage } from "../types/run-result.ts";
 
 export interface ReduceOptions {
@@ -47,16 +47,16 @@ export function zeroTokenUsage(): TokenUsage {
  * Fold a single event into a mutable result accumulator. Consumers that
  * want an immutable pipeline can seed a fresh accumulator per call.
  *
- * Open-envelope `RunEvent`s flow in; the canonical narrower projects
- * the four reserved namespaces (memory / pinned / output / log)
- * + the runner-internal `appstrate.*` namespace into a discriminated
- * union, so the switch is exhaustively typed. Third-party / unknown
- * events are silently passed through — the sink still sees them, they
- * just do not contribute to the aggregated result.
+ * Open-envelope `RunEvent`s flow in; `isCanonicalRunEvent` narrows the
+ * four reserved namespaces (memory / pinned / output / log) + the
+ * runner-internal `appstrate.*` namespace to a discriminated union, so the
+ * switch is exhaustively typed. Third-party / unknown events are silently
+ * passed through — the sink still sees them, they just do not contribute
+ * to the aggregated result.
  */
 export function foldEvent(result: RunResult, event: RunEvent): void {
-  const canonical = narrowCanonicalEvent(event);
-  if (canonical === null) return;
+  if (!isCanonicalRunEvent(event)) return;
+  const canonical = event;
 
   switch (canonical.type) {
     case "memory.added":
@@ -84,22 +84,13 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
         timestamp: canonical.timestamp,
       });
       return;
-    case "report.appended":
-      result.report =
-        result.report === undefined ? canonical.content : `${result.report}\n${canonical.content}`;
-      return;
     case "appstrate.progress":
     case "appstrate.error":
     case "appstrate.metric":
-    case "run.started":
-    case "run.success":
-    case "run.failed":
-    case "run.timeout":
-    case "run.cancelled":
-      // Runner-internal lifecycle / canonical run events — do not
-      // contribute to the aggregated result. Terminal status comes from
-      // `RunResult.status` set on `EventSink.finalize`. Listed here so
-      // adding a new variant is caught by the exhaustiveness check below.
+      // Runner-internal lifecycle events — do not contribute to the
+      // aggregated result. Terminal status comes from `RunResult.status`
+      // set on `EventSink.finalize`. Listed here so adding a new variant
+      // is caught by the exhaustiveness check below.
       return;
     default: {
       const _exhaustive: never = canonical;

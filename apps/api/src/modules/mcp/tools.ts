@@ -274,7 +274,7 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
  * `describe_operation` returns, and it is also embedded as `search_operations`'
  * `best_match` so a clear single-hit search needs no follow-up describe call.
  */
-export function describePayload(
+function describePayload(
   op: CatalogOperation,
   componentSchemas: Record<string, unknown>,
 ): Record<string, unknown> {

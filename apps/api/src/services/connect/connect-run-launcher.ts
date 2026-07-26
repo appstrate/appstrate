@@ -89,7 +89,7 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 60_000;
  * workload). Thrown BEFORE any boundary is created so the caller gets a
  * clear diagnosis instead of "sidecar exited without emitting a result".
  */
-export class ConnectNotSupportedError extends Error {
+class ConnectNotSupportedError extends Error {
   constructor(mode: string) {
     super(
       `connect-runs are not supported with RUN_ADAPTER="${mode}" — this backend cannot ` +

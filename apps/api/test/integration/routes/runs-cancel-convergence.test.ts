@@ -108,6 +108,7 @@ async function installTerminalSpy(): Promise<TerminalSpy> {
     appUrl: "http://localhost:3000",
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
+    getOrgName: async () => null,
     services: {} as never,
   });
   return {

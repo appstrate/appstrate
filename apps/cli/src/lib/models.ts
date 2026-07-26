@@ -60,6 +60,22 @@ export async function listModelPresets(profileName: string): Promise<ModelPreset
  * `/v1/chat/completions` endpoint — NOT the Beta `/v1/conversations`
  * agentic API. Auth is `Authorization: Bearer` for OpenAI and Mistral.
  *
+ * NOT a shared constant, and deliberately so. This set is
+ * `platform-routed ∩ pi-ai-supported` — the CLI's client SDK is pi-ai. Two
+ * sibling lists answer neighbouring but different questions, against different
+ * owners, and merging them would couple capability sets that can legitimately
+ * diverge:
+ *   - `apps/api/src/routes/llm-proxy.ts` `routes[]` — the AUTHORITATIVE route
+ *     table. Deliberately concrete per the spec ("resists premature
+ *     abstraction"), and it carries per-family upstream paths a membership set
+ *     can't. Anything here must exist there; widen that table first.
+ *   - `packages/module-chat/src/llm.ts` `proxyTarget()` —
+ *     `platform-routed ∩ AI-SDK-supported`, plus each family's AI SDK provider
+ *     kind and baseURL suffix. Same three families today by coincidence of
+ *     support, not by shared definition: pi-ai already knows shapes the AI SDK
+ *     binding doesn't (`openai-responses`, `google-generative-ai`, …), so
+ *     adding one here need not add one there.
+ *
  * The Anthropic case takes a side-channel: pi-ai's Anthropic SDK sends
  * `x-api-key` natively, but the platform's auth pipeline reads
  * `Authorization: Bearer` — so the CLI's preset path injects the bearer

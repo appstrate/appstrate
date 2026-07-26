@@ -45,6 +45,7 @@ import type {
   ModelProviderHooks,
 } from "@appstrate/core/module";
 import { validateOfflineExpiry } from "@appstrate/core/module";
+import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 
 const claudeCodeHooks: ModelProviderHooks = {
   /**
@@ -58,7 +59,7 @@ const claudeCodeHooks: ModelProviderHooks = {
    * token is intentionally ignored — the shape must not depend on it).
    */
   buildApiKeyPlaceholder(): string {
-    return "sk-ant-oat01-placeholder";
+    return ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY;
   },
   /**
    * Validate a Claude subscription credential OFFLINE — NO request to

@@ -13,6 +13,7 @@ import {
   manifestToMetadata,
   metadataToManifestPatch,
   getRuntimeTools,
+  withNormalizedRuntimeTools,
   setRuntimeTools,
 } from "../utils";
 import type { SchemaField } from "../schema-section";
@@ -589,12 +590,57 @@ describe("getRuntimeTools", () => {
     expect(getRuntimeTools({ runtime_tools: "not-an-array" })).toEqual([]);
   });
 
-  it("preserves the deprecated `report` tool for backwards compatibility", () => {
+  // Non-regression: `report` was a real runtime tool until it was replaced by
+  // durable `outputs/` documents. Agents saved back then still carry the id;
+  // the editor must ignore it, never render a phantom checkbox for it, and
+  // never surface a validation error to the user because of it.
+  it("drops a retired tool id (`report`) it can no longer render", () => {
     expect(getRuntimeTools({ runtime_tools: ["output", "report", "log"] })).toEqual([
       "output",
-      "report",
       "log",
     ]);
+  });
+});
+
+// ─── withNormalizedRuntimeTools ──────────────────
+
+// Delegates to `dropRetiredRuntimeTools` (`@appstrate/core`), which is gated on
+// `type: "agent"` — the fixtures carry it because the only call site
+// (`package-editor.tsx`) runs in the agent branch on a stored AFPS manifest,
+// where `type` is required by the schema.
+describe("withNormalizedRuntimeTools", () => {
+  it("strips a retired id from the manifest loaded into the editor", () => {
+    const m = { type: "agent", name: "@o/a", runtime_tools: ["report", "log"] };
+    expect(withNormalizedRuntimeTools(m)).toEqual({
+      type: "agent",
+      name: "@o/a",
+      runtime_tools: ["log"],
+    });
+  });
+
+  it("removes the field entirely when nothing valid remains", () => {
+    expect(
+      withNormalizedRuntimeTools({ type: "agent", name: "@o/a", runtime_tools: ["report"] }),
+    ).toEqual({ type: "agent", name: "@o/a" });
+  });
+
+  it("returns the same reference when there is nothing to drop", () => {
+    const m = { type: "agent", name: "@o/a", runtime_tools: ["output"] };
+    expect(withNormalizedRuntimeTools(m)).toBe(m);
+    const noField = { type: "agent", name: "@o/a" };
+    expect(withNormalizedRuntimeTools(noField)).toBe(noField);
+  });
+
+  // Settled empty-array representation, checked on the editor side of the
+  // shared helper: loading an agent whose author wrote `runtime_tools: []`
+  // must NOT rewrite the manifest. The key is deleted only when a DROP empties
+  // the list — core is a dropper, not a canonicaliser. Mirrors
+  // `packages/core/test/validation.test.ts`; both sides are pinned so the
+  // editor and core cannot drift on the empty case again.
+  it("leaves an author-written empty runtime_tools untouched on load", () => {
+    const m = { type: "agent", name: "@o/a", runtime_tools: [] };
+    expect(withNormalizedRuntimeTools(m)).toBe(m);
+    expect(withNormalizedRuntimeTools(m)).toHaveProperty("runtime_tools");
   });
 });
 

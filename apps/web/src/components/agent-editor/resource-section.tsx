@@ -44,7 +44,7 @@ interface ResourceSectionProps {
   leadingItems?: ReactNode;
 }
 
-export function VersionSelect({
+function VersionSelect({
   type,
   packageId,
   value,

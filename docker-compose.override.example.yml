@@ -6,21 +6,33 @@
 # Usage:
 #   cp docker-compose.override.example.yml docker-compose.override.yml
 #   docker compose up -d        # starts postgres + redis + minio + builds runtime images
-#   bun run db:migrate           # run migrations manually
-#   bun run dev                  # start API + frontend on :3000
+#   bun run dev                  # start API + frontend on :3000 (migrates at boot)
+#
+# This file is what puts the `appstrate` service behind the `prod` profile, which
+# is why `bun run docker:prod` passes `--profile prod`. Without this override,
+# `docker-compose.yml` declares no profiles and `docker compose up -d` starts the
+# full stack (the self-hosting path).
 
 services:
   # ── Build runtime images locally ────────────────────────────────
+  # Both Dockerfiles are written to build FROM THE REPO ROOT: they `COPY` the
+  # root `package.json` + `bun.lock` so the `@appstrate/*` workspace graph
+  # resolves the same way it does for a local `bun install`. There is no
+  # `runtime-pi/bun.lock`, so `context: ./runtime-pi` cannot build — the context
+  # must be `.` with an explicit `dockerfile:`. This mirrors what CI does
+  # (.github/workflows/release.yml + preview.yml) and `bun run docker:build:*`.
   appstrate-pi:
     build:
-      context: ./runtime-pi
+      context: .
+      dockerfile: ./runtime-pi/Dockerfile
     image: appstrate-pi:latest
     restart: "no"
     entrypoint: ["/bin/sh", "-c", "echo 'runtime image built'"]
 
   appstrate-sidecar:
     build:
-      context: ./runtime-pi/sidecar
+      context: .
+      dockerfile: ./runtime-pi/sidecar/Dockerfile
     image: appstrate-sidecar:latest
     restart: "no"
     entrypoint: ["/bin/sh", "-c", "echo 'sidecar image built'"]
@@ -78,13 +90,14 @@ services:
       - "6379:6379"
 
   # ── Disable services handled manually in dev ────────────────────
-  # Migrations: bun run db:migrate
-  appstrate-migrate:
-    profiles: [prod]
-    build:
-      context: .
-
-  # Platform: bun run dev
+  # There is deliberately NO `appstrate-migrate` override here: `docker-compose.yml`
+  # declares no such service, and the platform applies migrations itself at boot
+  # (`apps/api/src/lib/boot.ts`). An override-only entry would have created a
+  # second, misnamed copy of the platform container.
+  #
+  # Platform: run it with `bun run dev` instead. The `prod` profile keeps the
+  # containerized platform out of `docker compose up -d` so it doesn't fight the
+  # dev server for :3000; `bun run docker:prod` opts back in.
   appstrate:
     profiles: [prod]
     build:

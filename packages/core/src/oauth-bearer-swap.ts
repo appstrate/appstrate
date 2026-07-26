@@ -18,7 +18,34 @@
  * Pure: no credential lookup, no I/O. The caller owns SSRF checks, credential
  * resolution, and the surrounding header stripping
  * (host/content-length/hop-by-hop).
+ *
+ * The placeholder side of that swap lives here too
+ * ({@link ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY}) so the producers that mint it
+ * and the swap that consumes it agree on one literal.
  */
+
+/**
+ * The placeholder `apiKey` handed to pi-ai for an **Anthropic OAuth
+ * subscription** binding, on every path where the real token is swapped in
+ * later (the run path's sidecar `/llm` branch, and the CLI's llm-proxy preset
+ * path).
+ *
+ * Why the exact string matters: pi-ai's `anthropic-messages` provider selects
+ * the OAuth request shape from the key alone —
+ * `apiKey.includes("sk-ant-oat")`
+ * (`@mariozechner/pi-ai` `dist/providers/anthropic.js`). Anthropic gates OAuth
+ * tokens to that body shape upstream, so the reshape has to happen client-side,
+ * before the placeholder is swapped for the real bearer. A placeholder missing
+ * the marker silently drops the request onto the api-key shape and the upstream
+ * rejects it.
+ *
+ * The value mirrors the real token prefix (`sk-ant-oat01-…`) so shape detection
+ * is byte-for-byte what a genuine subscription token would trigger, and it is
+ * deliberately fixed — never derived from the real token — so the emitted shape
+ * can't become token-dependent. It is a placeholder, not a credential: it is
+ * never spendable and never leaves the platform.
+ */
+export const ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY = "sk-ant-oat01-placeholder";
 
 /**
  * Apply the bearer-swap policy to a {@link Headers} in place and return it:

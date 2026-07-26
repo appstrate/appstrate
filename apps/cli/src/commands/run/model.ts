@@ -23,6 +23,7 @@
 
 import type { Api, Model } from "../../lib/pi-sdk.ts";
 import { deriveProviderFromApi, PROVIDER_BY_API } from "@appstrate/runner-pi";
+import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
 
 export type ModelSource = "env" | "preset";
@@ -202,13 +203,14 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     headers,
   };
   // Placeholder for anthropic — never reaches upstream (see comment above).
-  // For OAuth-keyed presets the placeholder must mirror the `sk-ant-oat-`
-  // prefix so pi-ai's local detection picks it up; for plain API-key
-  // presets any non-OAuth string is fine. For other APIs, pi-ai's SDK
-  // sends `Authorization: Bearer <apiKey>` natively.
+  // For OAuth-keyed presets the placeholder must carry the `sk-ant-oat`
+  // marker so pi-ai's local detection picks it up — shared with the run
+  // path's provider module through core so the two can't drift; for plain
+  // API-key presets any non-OAuth string is fine. For other APIs, pi-ai's
+  // SDK sends `Authorization: Bearer <apiKey>` natively.
   let apiKey: string;
   if (isAnthropicOAuth) {
-    apiKey = "sk-ant-oat-placeholder";
+    apiKey = ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY;
   } else if (isAnthropic) {
     apiKey = "x-platform-bearer-injected-via-headers";
   } else {

@@ -82,7 +82,7 @@ export interface SidecarLaunchSpec {
   integrations?: ReadonlyArray<IntegrationSpawnSpec>;
   /**
    * Platform runtime tools the agent selected (`manifest.runtime_tools`):
-   * any of `output` / `log` / `note` / `pin` / `report`. The sidecar hosts
+   * any of `output` / `log` / `note` / `pin`. The sidecar hosts
    * the selected ones as in-process MCP tools on the agent-facing `/mcp`
    * surface (`@appstrate/core/runtime-tool-defs`), so they are unified with
    * the integration tools instead of being Pi-SDK-specific extensions.

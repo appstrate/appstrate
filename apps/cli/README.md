@@ -375,7 +375,7 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ### `appstrate openapi`
 
-Explore the active profile's OpenAPI 3.1 schema without dumping the whole spec to stdout. The platform exposes ~258 endpoints — `list`, `show`, and `export` subcommands make that corpus explorable at human scale (and agent-ingestable with `--json`).
+Explore the active profile's OpenAPI 3.1 schema without dumping the whole spec to stdout. The platform exposes a few hundred endpoints — `list`, `show`, and `export` subcommands make that corpus explorable at human scale (and agent-ingestable with `--json`).
 
 The schema is fetched once per profile and cached under `~/.cache/appstrate/openapi-<profile>.json` (or `$XDG_CACHE_HOME/appstrate/…`). Each cached copy pairs with an ETag sibling — subsequent invocations send `If-None-Match` and short-circuit on a `304` response, so re-running `list` / `show` during exploration costs one conditional round-trip instead of re-downloading the full spec.
 

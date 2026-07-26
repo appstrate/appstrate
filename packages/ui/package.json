@@ -37,8 +37,7 @@
     "./components/sidebar-context": "./src/components/sidebar-context.ts",
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
-    "./use-mobile": "./src/use-mobile.ts",
-    "./vite": "./src/vite.js"
+    "./use-mobile": "./src/use-mobile.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.2",
@@ -70,13 +69,7 @@
     "react": "^19",
     "react-dom": "^19",
     "react-select": "^5",
-    "typescript": "^5",
-    "vite": "^5 || ^6 || ^7"
-  },
-  "peerDependenciesMeta": {
-    "vite": {
-      "optional": true
-    }
+    "typescript": "^5"
   },
   "devDependencies": {
     "@appstrate/core": "workspace:*",
@@ -90,8 +83,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-select": "^5.10.2",
-    "typescript": "^6.0.3",
-    "vite": "^8.1.5"
+    "typescript": "^6.0.3"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -28,7 +28,7 @@ import type { AppScope } from "../../lib/scope.ts";
 import type { Actor } from "../../lib/actor.ts";
 
 /** Cookie carrying the page-scoped session token across the hosted form. */
-export const CONNECT_PAGE_COOKIE = "appstrate_connect";
+const CONNECT_PAGE_COOKIE = "appstrate_connect";
 /** Path the page cookie is scoped to — the hosted connect endpoints only. */
 const CONNECT_COOKIE_PATH = "/api/integrations/connect";
 /** Header the hosted form echoes the CSRF nonce back in on submit. */
@@ -41,7 +41,7 @@ const JTI_PREFIX = "connect-jti:";
  * required env var (boot fails without it — issue #905), so the hosted connect
  * surface is always available once the platform is up.
  */
-export function connectSessionSecret(): string {
+function connectSessionSecret(): string {
   return getEnv().CONNECT_SESSION_SECRET;
 }
 

@@ -1041,6 +1041,9 @@ export const runsPaths = {
           "application/json": {
             schema: {
               type: "object",
+              // Mirrors the `.strict()` envelope in `routes/runs-remote.ts` —
+              // an unknown key at the body root is a 400, not a silent strip.
+              additionalProperties: false,
               required: ["source", "applicationId"],
               properties: {
                 source: {
@@ -1049,6 +1052,13 @@ export const runsPaths = {
                   oneOf: [
                     {
                       type: "object",
+                      // Mirrors the `.strict()` Zod variant in
+                      // `routes/runs-remote.ts` — an unknown key inside
+                      // `source` is a 400, not a silent drop. In particular
+                      // `modelId`/`proxyId` are NOT accepted here (a remote
+                      // run resolves no platform model); they remain valid on
+                      // the classic agent-run endpoint only.
+                      additionalProperties: false,
                       required: ["kind", "manifest", "prompt"],
                       properties: {
                         kind: { const: "inline" },
@@ -1059,12 +1069,12 @@ export const runsPaths = {
                         },
                         prompt: { type: "string", minLength: 1 },
                         config: { type: "object" },
-                        modelId: { type: ["string", "null"] },
-                        proxyId: { type: ["string", "null"] },
                       },
                     },
                     {
                       type: "object",
+                      // Same `.strict()` mirror as the `inline` variant above.
+                      additionalProperties: false,
                       required: ["kind", "packageId"],
                       properties: {
                         kind: { const: "registry" },
@@ -1091,8 +1101,6 @@ export const runsPaths = {
                             "Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal.",
                         },
                         config: { type: "object" },
-                        modelId: { type: ["string", "null"] },
-                        proxyId: { type: ["string", "null"] },
                       },
                     },
                   ],
@@ -1317,18 +1325,12 @@ export const runsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Older runners may also send the deprecated markdown `report` aggregate.",
+                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Unknown keys are ignored, so a runner older than the platform still finalizes cleanly.",
               properties: {
                 memories: { type: "array" },
                 pinned: { type: "object" },
                 output: {},
                 logs: { type: "array" },
-                report: {
-                  type: "string",
-                  deprecated: true,
-                  description:
-                    "Deprecated report-tool markdown aggregate. New agents publish markdown documents.",
-                },
                 error: {
                   type: "object",
                   properties: {

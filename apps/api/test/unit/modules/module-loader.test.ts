@@ -3,7 +3,6 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import {
   loadModulesFromInstances,
-  getModule,
   getModules,
   getModulePublicPaths,
   registerModuleRoutes,
@@ -54,6 +53,7 @@ function mockCtx(): ModuleInitContext {
     appUrl: "http://localhost:3000",
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
+    getOrgName: async () => null,
     services: {} as ModuleInitContext["services"],
   };
 }
@@ -83,13 +83,13 @@ describe("module-loader", () => {
       const mod = mockModule("alpha", { init: initFn });
       const ctx = mockCtx();
       await loadModulesFromInstances([mod], ctx);
-      expect(getModule("alpha")).toBe(mod);
+      expect(getModules().get("alpha")).toBe(mod);
       expect(initFn).toHaveBeenCalledWith(ctx);
     });
 
     it("returns null for unknown module IDs", async () => {
       await loadModulesFromInstances([], mockCtx());
-      expect(getModule("nonexistent")).toBeNull();
+      expect(getModules().get("nonexistent")).toBeUndefined();
     });
 
     it("exposes loaded modules in init order", async () => {
@@ -304,7 +304,7 @@ describe("module-loader", () => {
         mockCtx(),
       );
 
-      await callAllHooks("beforeSignup", "user@example.com");
+      await callAllHooks("beforeSignup", "user@example.com", { headers: null });
       expect(calls).toEqual(["a", "b"]);
     });
   });
@@ -354,7 +354,7 @@ describe("module-loader", () => {
 
       await shutdownModules();
       expect(order).toEqual(["b", "a"]);
-      expect(getModule("a")).toBeNull();
+      expect(getModules().get("a")).toBeUndefined();
       expect(getModulePublicPaths()).toEqual(new Set());
     });
 

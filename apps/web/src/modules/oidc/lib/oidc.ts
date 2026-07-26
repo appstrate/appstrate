@@ -19,7 +19,7 @@ interface OidcConfig {
   callbackUrl: string;
 }
 
-export function getOidcConfig(): OidcConfig | undefined {
+function getOidcConfig(): OidcConfig | undefined {
   return (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc as
     OidcConfig | undefined;
 }
@@ -30,11 +30,11 @@ function base64url(bytes: Uint8Array): string {
   return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-export function generateCodeVerifier(): string {
+function generateCodeVerifier(): string {
   return base64url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
-export async function calculateCodeChallenge(verifier: string): Promise<string> {
+async function calculateCodeChallenge(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   return base64url(new Uint8Array(digest));
 }

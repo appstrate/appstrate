@@ -19,11 +19,11 @@ describe("ModuleInitContext.getOrgName", () => {
     const { orgId } = await createTestContext({ orgName: "Acme Corp" });
 
     const ctx = buildModuleInitContext();
-    expect(await ctx.getOrgName!(orgId)).toBe("Acme Corp");
+    expect(await ctx.getOrgName(orgId)).toBe("Acme Corp");
   });
 
   it("returns null for an unknown org id", async () => {
     const ctx = buildModuleInitContext();
-    expect(await ctx.getOrgName!(crypto.randomUUID())).toBeNull();
+    expect(await ctx.getOrgName(crypto.randomUUID())).toBeNull();
   });
 });

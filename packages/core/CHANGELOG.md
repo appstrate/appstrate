@@ -5,6 +5,244 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] — 2026-07-26
+
+Major release grouping every contract change the repository accumulated after
+`5.0.0` into ONE coordinated break, so consumers pay a single lockstep cycle:
+the `report` runtime tool is retired in favour of published documents,
+`checkUsageAllowed` gains a required argument, two module-contract signatures
+that were optional-but-always-supplied become required, and a set of exports
+with no importer anywhere is deleted.
+
+> **Release ordering — consumers FIRST, then the tag.** `@appstrate/afps-shared`
+> stays at `^0.3.1` (already published, nothing to release before this).
+>
+> 1. **Bump the five external consumers to `^6.0.0`** in their own repos and
+>    push to each repo's **default branch** —
+>    `scripts/check-consumer-versions.ts` is the authoritative list and reads
+>    each `package.json` off the default branch through the GitHub contents
+>    API: `registry` (root + `apps/api` + `apps/web`), `cloud`, `portal`,
+>    `connect-helper`, `module-claude-code`. Workspace packages inside this
+>    monorepo resolve `workspace:*` and need no bump.
+>
+>    **Measure this before scheduling the release — for four of the five it is
+>    not a version edit.** Actual pins as of 2026-07-26, read off each default
+>    branch: `cloud` `^5.0.0`, but `registry` `^2.13.0` (root) / `^2.12.0`
+>    (`apps/api`, `apps/web`), `portal` `^2.10.8`, `connect-helper` `^2.19.0`,
+>    `module-claude-code` `^2.19.0`. Going to `^6.0.0` means absorbing **four
+>    majors** of breaking changes in each of those repos.
+>
+>    That drift is not new and this release does not cause it — it was simply
+>    invisible while the gate fell back to a `GITHUB_TOKEN` that 404'd on every
+>    private consumer. Note also that publishing `6.0.0` breaks none of them:
+>    a `^2` range keeps resolving 2.x. The gate is a _drift alarm_, not a
+>    compatibility guard. So the honest choice at release time is one of:
+>    migrate the four repos, publish with an auditable
+>    `CONSUMER_DRIFT_POLICY=warn`, or narrow the consumer list in
+>    `scripts/check-consumer-versions.ts` to the repos actually kept in
+>    lockstep. Decide deliberately; do not discover it when the gate fires.
+>
+> 2. **Make sure the repository secret `CONSUMER_LOCKSTEP_TOKEN` exists**
+>    (PAT / GitHub App token with `contents:read` on those five repos).
+> 3. **Only then** tag `core@6.0.0` and push it.
+>
+> This order is not a preference, it is the only one that can execute:
+> `.github/workflows/publish-core.yml` runs the lockstep gate **before**
+> `npm publish`, and the gate hard-fails on a major mismatch
+> (`cMaj !== lMaj` → `failures++` → `exit 1`). A consumer still pinned to
+> `^5` therefore blocks the publish it was supposedly waiting on.
+>
+> The known cost of going first: each consumer's own CI stays red between
+> step 1 and step 3, because `^6.0.0` does not resolve until core is on npm.
+> That window is expected — do not "fix" it by publishing core first.
+>
+> **The gate only bites with a token that can read private repos.** All five
+> consumers are private; on a 404 the script logs `not present, skipping` and
+> counts nothing, so a missing/underscoped token makes it report
+> `0 failure(s), 0 warning(s)` having verified nothing. The workflow's
+> "Assert the lockstep gate can actually run" step exists precisely to turn
+> that silent pass into a loud failure — bypassing it is the deliberate act of
+> setting the repository variable `CONSUMER_DRIFT_POLICY` to `warn` or `off`.
+
+> **Deploy ordering — modules BEFORE the platform**, for the same reason as
+> `5.0.0`: a module implementing `beforeUsage` / `checkUsageAllowed` must be on
+> this contract before the platform starts passing the new `subscription` fact.
+
+### Added
+
+- **`@appstrate/core/oauth-bearer-swap`** — `ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY`
+  (`"sk-ant-oat01-placeholder"`). The placeholder `apiKey` handed to pi-ai for
+  an Anthropic OAuth subscription binding on every path where the real token is
+  swapped in later (the run path's sidecar `/llm` branch, the CLI's llm-proxy
+  preset path). It lives beside the swap that consumes it so the producers and
+  the consumer agree on one literal: pi-ai's `anthropic-messages` provider
+  selects the OAuth request shape from `apiKey.includes("sk-ant-oat")` alone, so
+  a placeholder missing that marker silently emits the api-key shape and
+  upstream rejects it. Non-breaking; nothing existing changes meaning.
+
+### Changed (BREAKING)
+
+- **`PlatformServices.checkUsageAllowed` gains a required `subscription: boolean`.**
+  The full argument shape is now
+  `{ orgId, presetId, sessionId, subscription }`. It is the one fact the caller
+  owns and the platform cannot derive: the turn runs on a provider subscription
+  the organization authorized over OAuth (claude-code, codex), driven in-process
+  rather than through the inference gateway. Such a turn is
+  `credentialSource: "org"` whatever its preset resolves to, and it is now
+  dispatched like any other — it still occupies the platform's own process.
+  **Every implementer must widen its parameter type**; every caller must pass
+  the field. This is what forces the major.
+
+- **`validateManifest(raw, options?)` — unknown `runtime_tools` handling is now
+  DIRECTIONAL, and the default still rejects.** For `type: "agent"`, ids absent
+  from `SELECTABLE_RUNTIME_TOOLS` fail validation as before **unless** the
+  caller passes `{ retiredRuntimeTools: "drop" }`, in which case they are
+  filtered out of the parsed manifest and it stays valid.
+
+  Both behaviours are needed, and which one is correct depends entirely on
+  where the manifest came from. **Author input** (create, update, import, an
+  inline manifest from an API client) must reject: `runtime_tools: ["lgo"]` is
+  a typo, and silently dropping it ships an agent missing its tool with no
+  signal to anyone. **Already-persisted manifests** (a stored draft, a
+  published version snapshot) must drop: a removal is not retroactive, a
+  published ZIP is immutable by construction, and a hard enum rejection on the
+  run path would make every such agent permanently unrunnable — the runtime
+  itself already ignores ids it cannot build (`buildRuntimeToolDefs`).
+
+  On the `valid: true` branch the result now carries
+  **`droppedRuntimeTools: string[]`** (always `[]` under the default policy) so
+  the drop is observable instead of silent.
+
+  Migration: a consumer that validates author input needs no change. A consumer
+  that re-validates something it stored must pass
+  `{ retiredRuntimeTools: "drop" }` or it will start rejecting its own
+  historical rows. The returned manifest object is the same reference when
+  nothing needed dropping.
+
+- **`dropRetiredRuntimeTools(manifest)` is exported** from
+  `@appstrate/core/validation`:
+  `(manifest: Record<string, unknown>) => { manifest, dropped: string[] }`.
+  The same filter `validateManifest`'s `"drop"` policy applies, usable without
+  a full validation pass — deliberately structural, with **no Zod round-trip**,
+  so key order, unknown fields and the absence of schema defaults survive
+  byte-for-byte. That matters for the version-snapshot path, which serialises
+  the result into an integrity-hashed artifact: a re-parse that reordered keys
+  would silently defeat publish dedup. Non-agent manifests are returned
+  untouched. When the filter empties the list, the `runtime_tools` **key is
+  removed** rather than left as `[]`: AFPS makes the field optional with no
+  default so both parse alike, but they are different bytes, and the agent
+  editor's own writer (`setRuntimeTools`) already drops the field on an empty
+  selection. Emitting `[]` would give one manifest two integrity hashes
+  depending on which path last wrote it.
+
+- **`ModuleInitContext.getOrgName` is required** (was `getOrgName?`). The
+  platform has always supplied it (`buildModuleInitContext`), and the optional
+  marker only forced every consumer through a `?.` / `!` it could never
+  actually need. Modules can call it unconditionally; anything CONSTRUCTING a
+  `ModuleInitContext` (module test fakes, essentially) must now provide it.
+
+- **`ModuleHooks.beforeSignup` / `afterSignup` — the `ctx` argument is required**
+  (was `ctx?`). Signatures are now
+  `(email: string, ctx: BeforeSignupContext) => Promise<void>` and
+  `(user: { id, email }, ctx: AfterSignupContext) => Promise<void>`. Both hooks
+  have always been dispatched with a context (`ctx.headers` is `null`, not the
+  context itself, when Better Auth creates a user outside an HTTP request), and
+  the platform's own injection slots already typed it non-optional internally.
+  An implementer written against the old signature keeps compiling
+  (`ctx?: T` is assignable to `ctx: T`); what changes is that `ctx?.headers`
+  and `ctx | undefined` narrowings are now dead code, and any direct
+  `callAllHooks("beforeSignup", email)` call must pass the context.
+
+- **`@appstrate/core/zip` — `parsePackageZip` takes an options object, and
+  `ParsedPackageZip` gains a required `droppedRuntimeTools: string[]`.** The
+  second parameter is now `number | ParsePackageZipOptions`: the bare-number
+  form is the original published signature and still reads as `maxSize`, so
+  existing calls keep working. The new object form adds `retiredRuntimeTools`,
+  which is forwarded verbatim to `validateManifest` and **defaults to
+  `"reject"`** — a ZIP is author input unless the caller knows otherwise.
+
+  Pass `"drop"` only for an archive the platform already holds and cannot
+  repair in place. In this repo exactly one call site qualifies: the bundle
+  installer, which re-ingests what `GET /api/agents/:scope/:name/bundle`
+  produced. Without it, an agent published while `report` was still selectable
+  could not be re-imported — the artifact is immutable by construction, so the
+  400 had no remedy. `POST /api/packages/import` deliberately stays on
+  `"reject"`: it shares its parser with `/import-github`, which fetches
+  hand-written source, and the policy cannot tell a retired id from a typo.
+
+  What breaks is only the output type. Reading `ParsedPackageZip` is
+  unaffected; **constructing one as a literal now needs the new field**
+  (`droppedRuntimeTools: []` for a synthesised manifest). It is required rather
+  than optional so readers never need a `?? []`.
+
+### Removed (BREAKING)
+
+- **The `report` runtime tool is gone.** It was a deprecated compatibility
+  shim whose replacement is a published document (`outputs/report.md`, or the
+  `publish_document` tool). Concretely:
+  - `EVENT_EMITTER_RUNTIME_TOOLS` no longer contains `"report"`, so
+    `EventEmitterRuntimeTool` and the derived `SELECTABLE_RUNTIME_TOOLS` /
+    `SelectableRuntimeTool` narrow accordingly.
+  - `CANONICAL_RUNTIME_TOOL_EVENT_TYPES` no longer contains `"report.appended"`.
+  - `agentManifestSchema`'s `runtime_tools` enum and the published
+    `schema/agent.schema.json` enum no longer accept `"report"`.
+
+  A stored manifest still naming `report` remains **runnable** — read paths
+  validate with `{ retiredRuntimeTools: "drop" }` (above) and
+  `buildRuntimeToolDefs` ignores the id. A manifest _submitted_ naming
+  `report` is rejected, like any other unknown tool id. What breaks is code
+  that references the literal:
+  a consumer typing a variable as `EventEmitterRuntimeTool = "report"`, a
+  handler switching exhaustively on `CANONICAL_RUNTIME_TOOL_EVENT_TYPES`, or a
+  validator asserting the old enum contents.
+
+- **`@appstrate/core/errors` — `AppError` and `createErrorStatusMap` removed.**
+  No importer anywhere in the platform; the RFC 9457 `ApiError` family in
+  `@appstrate/core/api-errors` is the error contract. `getErrorMessage` is
+  unaffected and stays.
+
+- **`@appstrate/core/api-errors` — `serviceUnavailable()` removed.** No caller
+  ever emitted a 503 through it. `badGateway()` (502) is live and stays.
+
+- **`@appstrate/core/platform-types` — the `Run` and `RunLog` interfaces
+  removed.** Public DTO shapes with no importer: every consumer of this subpath
+  imports orchestrator/workload/pub-sub types instead, and a module that reads
+  run rows does so through `PlatformServices`. Nothing else in the file
+  referenced them.
+
+- **`@appstrate/core/naming` — `TOOL_NAME_INNER_PATTERN` removed.** It was a
+  pure alias of `CREDENTIAL_KEY_RE`, kept for a consumer that no longer exists.
+  Use `CREDENTIAL_KEY_RE` — same regex, same alphabet.
+
+- **`@appstrate/core/chat-turn-metadata` — `CHAT_TOOL_STEP_BUDGET_DENIAL`
+  removed.** Unused prompt string. Its three siblings (`CHAT_MAX_STEPS`,
+  `CHAT_TOOL_STEP_BUDGET`, `CHAT_FINAL_STEP_SYSTEM_PROMPT`) are live and stay.
+
+- **`@appstrate/core/validation` — `PACKAGE_TYPES` removed.** It was
+  `packageTypeEnum.options` under another name. Use
+  `packageTypeEnum.options` (the enum itself is live and re-exported from
+  `@afps-spec/schema`).
+
+- **`@appstrate/core/semver` — `satisfiesRange()` removed.** No caller.
+  `matchVersion`, `isValidRange`, `normalizeVersion`, `compareVersionsDesc`,
+  `bumpVersion`, `bumpPatch` are unaffected.
+
+- **`@appstrate/core/companion-files` (whole subpath) removed.** It was a
+  100% re-export of `@appstrate/afps-shared/companion-files` with no importer.
+  Import from `@appstrate/afps-shared/companion-files` directly — identical
+  surface (`CompanionViolationReason`, `CompanionFileViolation`,
+  `CompanionFileSource`, `companionFilesFromMap`, `companionFilesFromRecord`,
+  `checkCompanionFiles`).
+
+- **`@appstrate/core/credential-template` (whole subpath) removed.** Same
+  profile — a pure re-export. Import from
+  `@appstrate/afps-shared/credential-template` (`CREDENTIAL_REF`,
+  `RenderCredentialTemplateOptions`, `renderCredentialTemplate`).
+
+  `@appstrate/core/ssrf` is the third file of this shape and is deliberately
+  **kept**: it has ~20 live importers on fail-closed SSRF paths, and churning
+  them buys nothing.
+
 ## [5.0.0] — 2026-07-25
 
 Major release: the durable **documents** surface (URIs, storage enumeration +

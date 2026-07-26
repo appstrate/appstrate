@@ -221,7 +221,7 @@ export async function resolveProxy(
   return envUrl ? { url: envUrl, label: "Proxy" } : null;
 }
 
-export async function loadProxy(
+async function loadProxy(
   orgId: string,
   proxyId: string,
 ): Promise<{ url: string; label: string } | null> {

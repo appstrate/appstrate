@@ -67,15 +67,16 @@ export const scheduleInputSchema = z
 
 /**
  * `runs.result` — terminal payload persisted by `finalizeRun`. Closed shape:
- * `output` (runner-produced structured output), plus the deprecated report
- * compatibility fields `text` and `text_truncated`. Unknown keys are stripped
- * and the byte cap bounds the row-sized JSONB column.
+ * `output` (runner-produced structured output) and nothing else. Unknown keys
+ * are stripped and the byte cap bounds the row-sized JSONB column.
+ *
+ * Rows written before the `report` runtime tool was retired may still carry
+ * `text` / `text_truncated`; those are read back verbatim from the column and
+ * never re-validated — this is the WRITE boundary only.
  */
 export const runResultSchema = z
   .object({
     output: jsonValueSchema.optional(),
-    text: z.string().optional(),
-    text_truncated: z.literal(true).optional(),
   })
   .superRefine(withByteCap(512 * KB));
 

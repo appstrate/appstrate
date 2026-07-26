@@ -191,7 +191,7 @@ function getArrayItems(prop: JSONSchema7): JSONSchema7 | undefined {
 }
 
 /** Is this value an inline RFC 2397 data URI? */
-export function isDataUri(value: unknown): value is string {
+function isDataUri(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("data:");
 }
 

@@ -19,7 +19,7 @@ export interface RawLog {
   createdAt?: Date | string | null;
 }
 
-export function formatToolArgs(args: Record<string, unknown>): string {
+function formatToolArgs(args: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(args)) {
     if (value === undefined || value === null) continue;
@@ -32,17 +32,14 @@ export function formatToolArgs(args: Record<string, unknown>): string {
 
 /**
  * Transform raw run logs into LogEntry[], merging consecutive text-only
- * progress entries and extracting structured output plus deprecated report
- * chunks retained for backwards compatibility.
+ * progress entries and extracting the structured output.
  */
 export function buildLogEntries(rawLogs: RawLog[]): {
   entries: LogEntry[];
   output: Record<string, unknown> | null;
-  report: string | null;
 } {
   const entries: LogEntry[] = [];
   let output: Record<string, unknown> | null = null;
-  const reportChunks: string[] = [];
   let lastWasPlainText = false;
 
   for (const log of rawLogs) {
@@ -51,8 +48,10 @@ export function buildLogEntries(rawLogs: RawLog[]): {
       Object.assign(output, log.data);
       lastWasPlainText = false;
     } else if (log.event === "report" && log.type === "result") {
-      const content = log.data?.content;
-      if (typeof content === "string") reportChunks.push(content);
+      // Dead channel: the `report` runtime tool was replaced by durable
+      // `outputs/` documents. Rows written before the removal stay in the DB
+      // but are skipped here — falling through to the generic branch would
+      // render them as a truncated, contextless log line.
       lastWasPlainText = false;
     } else if (log.event === "run_completed") {
       lastWasPlainText = false;
@@ -80,11 +79,7 @@ export function buildLogEntries(rawLogs: RawLog[]): {
     }
   }
 
-  return {
-    entries,
-    output,
-    report: reportChunks.length > 0 ? reportChunks.join("\n") : null,
-  };
+  return { entries, output };
 }
 
 export function formatTimestamp(d: Date | string | null | undefined, lang: string): string {

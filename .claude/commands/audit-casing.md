@@ -40,7 +40,7 @@ The audit references `docs/CASING_CONVENTIONS.md` as authoritative. It verifies:
 
 When invoked, this skill:
 
-1. Reads `/Users/pierrecabriere/Dev/appstrate/appstrate/docs/CASING_CONVENTIONS.md` to confirm the current authoritative rules
+1. Reads `docs/CASING_CONVENTIONS.md` (repo-relative) to confirm the current authoritative rules
 2. Verifies the working tree is clean and reports current HEAD
 3. Dispatches **6 opus sub-agents in parallel**, each scanning a specific surface:
    - **Agent A — Schema layer**: AFPS Zod + JSON Schema + appstrate validation/integration/mcp-server. Confirms canonical snake_case is intact.

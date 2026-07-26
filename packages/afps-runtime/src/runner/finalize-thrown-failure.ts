@@ -29,8 +29,6 @@
  * - **setFailedStatus** controls the explicit `status = "failed"` stamp.
  *   Pi leaves `status` unset in its thrown path (preserved verbatim — this
  *   helper does not "fix" that).
- * - **transform** post-processes BOTH the emitted error event and the
- *   terminal result before finalize. The default is identity.
  *
  * The abort-rethrow MUST stay first, and the drain MUST be best-effort
  * (a dead drain cannot be allowed to mask the failure), so this helper
@@ -87,8 +85,6 @@ export interface FinalizeThrownFailureOptions {
   terminalStatus?: NonNullable<RunResult["status"]>;
   /** Extra terminal stamping (cost / durationMs) applied after `usage`. */
   stamp?: (result: RunResult, usage: TokenUsage) => void;
-  /** Transform applied to the emitted error event AND the terminal result. Defaults to identity. */
-  transform?: <T>(value: T) => T;
 }
 
 /** Same extraction as `@appstrate/core/errors`' `getErrorMessage`, inlined to keep this package dep-free. */
@@ -104,7 +100,6 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
   //    spurious `failed` finalize.
   if (signal?.aborted) throw err;
 
-  const transform = opts.transform ?? (<T>(value: T): T => value);
   const message = errorMessage(err);
   const buildError =
     opts.buildError ??
@@ -114,15 +109,14 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
     }));
   const resultError = buildError(message, err);
 
-  // 2. Surface the failure as a live event (transformed first so a
-  //    redaction transform scrubs it before it reaches the sink).
+  // 2. Surface the failure as a live event.
   const errorEvent: RunEvent = {
     type: "appstrate.error",
     timestamp: now(),
     runId,
     message: resultError.message,
   };
-  await emit(transform(errorEvent));
+  await emit(errorEvent);
 
   // 3. Best-effort final drain: capture any runtime events journaled before
   //    the session threw. A dead drain must NOT mask the failure.
@@ -138,5 +132,5 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
   if (opts.setFailedStatus !== false) result.status = opts.terminalStatus ?? "failed";
   result.usage = usage;
   opts.stamp?.(result, usage);
-  await eventSink.finalize(transform(result));
+  await eventSink.finalize(result);
 }

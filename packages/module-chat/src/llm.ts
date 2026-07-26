@@ -51,13 +51,15 @@ export async function listModels(
     : `${origin}/api/models`;
   const res = await platformFetch(url, { headers });
   if (!res.ok) throw badGateway(`/api/models returned ${res.status}`);
-  const body = (await res.json()) as { models?: OrgModel[]; data?: OrgModel[] };
-  const models = body.models ?? body.data;
-  if (!models) {
-    logger.warn("/api/models returned an unexpected shape (no models/data)");
+  // `/api/models` answers with the Stripe-canonical list envelope
+  // `{ object: "list", data, hasMore }` (apps/api `listResponse`, and the
+  // OpenAPI schema declares `data` required) — `data` is the only shape.
+  const body = (await res.json()) as { data?: OrgModel[] };
+  if (!Array.isArray(body.data)) {
+    logger.warn("/api/models returned an unexpected shape (no data array)");
     return [];
   }
-  return models;
+  return body.data;
 }
 
 export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
@@ -90,6 +92,16 @@ type ProxyKind = "anthropic" | "openai-compatible";
  *   - Anthropic SDK appends `/v1/messages`         → suffix carries `/v1`.
  *   - OpenAI-compatible appends `/chat/completions` → suffix carries `/v1`.
  * Returns `null` for an unknown family rather than guessing a route.
+ *
+ * The keys are `platform-routed ∩ AI-SDK-supported`. Two sibling lists are
+ * NOT the same policy and must not be merged into this one:
+ *   - `apps/api/src/routes/llm-proxy.ts` `routes[]` — the AUTHORITATIVE route
+ *     table (deliberately concrete per spec). A family added HERE without a
+ *     route THERE 404s; widen the route table first.
+ *   - `apps/cli/src/lib/models.ts` `PROXY_SUPPORTED_APIS` —
+ *     `platform-routed ∩ pi-ai-supported`. Same three today by coincidence of
+ *     SDK support, not by shared definition; the two clients can diverge.
+ * {@link CHAT_USABLE_FAMILIES} is a superset on purpose — see below.
  */
 function proxyTarget(family: string): { kind: ProxyKind; suffix: string } | null {
   switch (family) {

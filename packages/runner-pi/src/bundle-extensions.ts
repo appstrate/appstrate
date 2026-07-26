@@ -4,7 +4,7 @@
  * prepareBundleForPi — takes a {@link Bundle} and materialises the on-disk
  * layout the Pi SDK expects (`.pi/skills/`).
  *
- * The platform runtime tools (`output` / `log` / `note` / `pin` / `report`)
+ * The platform runtime tools (`output` / `log` / `note` / `pin`)
  * are NO LONGER registered here. They are transport-neutral MCP tool
  * definitions (`@appstrate/core/runtime-tool-defs`) hosted either by the
  * sidecar (served over `/mcp`) or — on the no-sidecar path — registered as

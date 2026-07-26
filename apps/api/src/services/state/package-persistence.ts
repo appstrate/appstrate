@@ -46,14 +46,14 @@ function assertValidContent(value: unknown, label: string): void {
 // design — at most one checkpoint, and pinned memories are written by
 // admins or future tooling, not by agent loops).
 export const MAX_MEMORY_CONTENT = 2000;
-export const MAX_MEMORIES_PER_SCOPE = 100;
+const MAX_MEMORIES_PER_SCOPE = 100;
 
 /** Reserved storage key for the carry-over slot (`pin({ key: "checkpoint" })`). */
 export const CHECKPOINT_KEY = "checkpoint";
 
 /** Pattern enforced on agent-supplied pinned slot keys — must match the AFPS `pin` tool schema. */
-export const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
-export const MAX_PINNED_KEY_LENGTH = 64;
+const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
+const MAX_PINNED_KEY_LENGTH = 64;
 
 /**
  * Persistence scope. Narrower than `Actor` by one case: a storage scope may

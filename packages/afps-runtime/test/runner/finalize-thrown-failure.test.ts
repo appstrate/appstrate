@@ -138,35 +138,6 @@ describe("finalizeThrownFailure", () => {
     expect(h.finalized?.status).toBe("failed");
   });
 
-  it("applies the transform to BOTH the emitted error event and the terminal result", async () => {
-    const h = harness();
-    const SECRET = "sk-super-secret-token";
-    const redact = <T>(value: T): T =>
-      JSON.parse(JSON.stringify(value).split(SECRET).join("[REDACTED]")) as T;
-
-    await finalizeThrownFailure({
-      events: [],
-      err: new Error(`failed using ${SECRET} upstream`),
-      signal: undefined,
-      runId: "run_4",
-      now: () => 1,
-      emit: h.emit,
-      drainAndEmit: h.drainAndEmit,
-      eventSink: h.eventSink,
-      usage: USAGE,
-      buildError: (message) => ({ code: "adapter_error", message }),
-      transform: redact,
-    });
-
-    const event = h.emitted[0] as unknown as { message: string };
-    expect(event.message).not.toContain(SECRET);
-    expect(event.message).toContain("[REDACTED]");
-
-    expect(h.finalized?.error?.code).toBe("adapter_error");
-    expect(h.finalized?.error?.message).not.toContain(SECRET);
-    expect(h.finalized?.error?.message).toContain("[REDACTED]");
-  });
-
   it("stamps cost / durationMs via the stamp hook and honours setFailedStatus:false", async () => {
     const h = harness();
     await finalizeThrownFailure({

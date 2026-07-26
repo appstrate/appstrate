@@ -6,9 +6,9 @@
  * the tool's LLM-facing contract (name + description + parameter JSON
  * Schema).
  *
- * Searches the agent's archive memory store. Companion to `note` (the
- * `@appstrate/note` bundle tool), which writes archive entries — both
- * back the same `package_persistence` archive surface in the platform.
+ * Searches the agent's archive memory store. Companion to the `note`
+ * runtime tool, which writes archive entries — both back the same
+ * `package_persistence` archive surface in the platform.
  * The handler-side implementation lives in the sidecar
  * (`runtime-pi/sidecar/mcp.ts`), but the sidecar mirrors this
  * descriptor's `description` + `parameters` (as its MCP `inputSchema`)

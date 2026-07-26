@@ -125,13 +125,13 @@ export const forkSchema = z.object({
  * `source_code` (e.g. `content: 1`) are now rejected as a 400 instead of
  * blowing up downstream as a 500.
  */
-export const packageJsonCreateSchema = z.object({
+const packageJsonCreateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()),
   content: z.string().optional(),
   source_code: z.string().optional(),
 });
 
-export const packageJsonUpdateSchema = z.object({
+const packageJsonUpdateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
   source_code: z.string().optional(),
@@ -837,23 +837,41 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("lock_version (integer) is required for updates", "lock_version");
     }
 
+    // A PUT that omits `manifest` is a content-only edit: the stored draft is
+    // carried forward untouched. That makes this handler directional per
+    // request, and the direction decides how a retired `runtime_tools` id is
+    // treated (see `validateManifest`'s `retiredRuntimeTools`):
+    //   - manifest SUPPLIED → author input → reject, so a typo or an id the
+    //     platform removed is reported instead of silently stripped;
+    //   - manifest OMITTED → the already-stored draft → drop, so a legacy
+    //     agent naming a since-retired tool stays editable (a content-only
+    //     save must not 400 on a field the request never mentioned).
+    const authoredManifest = body.manifest;
     const manifest =
-      body.manifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
+      authoredManifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
     const sourceCode = body.source_code;
 
-    // Validate manifest
-    const manifestResult = validateManifest(manifest);
+    const manifestResult = validateManifest(
+      manifest,
+      authoredManifest ? undefined : { retiredRuntimeTools: "drop" },
+    );
     if (!manifestResult.valid) {
       throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
     }
-    await assertAgentIntegrationScopesValid(
-      manifestResult.manifest as Record<string, unknown>,
-      orgId,
-    );
+    // Everything downstream — the persisted row, the after-update hook, the
+    // id-immutability check — reads the VALIDATED manifest, never the raw one.
+    // The create path already did (`validatedManifest` in the create handler);
+    // this one persisted the raw shape, so the normalisation validation had
+    // just performed was thrown away on every save. That is what made the
+    // carry-forward case above a permanent no-op instead of a self-healing
+    // write, and let a non-SPA client (CLI, MCP, curl) keep a retired id alive
+    // in the draft indefinitely.
+    const validatedManifest = manifestResult.manifest as Record<string, unknown>;
+    await assertAgentIntegrationScopesValid(validatedManifest, orgId);
 
     // Ensure ID immutability (all types)
-    const newScopedName = (manifest as { name?: string }).name;
+    const newScopedName = (validatedManifest as { name?: string }).name;
     if (newScopedName && newScopedName !== itemId) {
       throw invalidRequest("name cannot change", "name");
     }
@@ -901,7 +919,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const updated = await updateOrgItem(
       orgId,
       itemId,
-      { manifest: manifest as Record<string, unknown>, content },
+      { manifest: validatedManifest, content },
       body.lock_version,
     );
 
@@ -925,7 +943,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       await rcfg.afterUpdate({
         packageId: itemId,
         orgId,
-        manifest: manifest as Record<string, unknown>,
+        manifest: validatedManifest,
       });
     }
 
@@ -1122,7 +1140,11 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // draft that became invalid by any path — this rejects e.g. an
     // `integrations_configuration` entry without a matching declared
     // dependency before it is frozen into an immutable version.
-    const manifestResult = validateManifest(item.manifest);
+    // READ direction: the draft is already stored, and a draft written before
+    // a runtime tool was retired must stay publishable. `createVersionFromDraft`
+    // applies the same drop before freezing the snapshot, so the retired id
+    // never reaches the immutable artifact.
+    const manifestResult = validateManifest(item.manifest, { retiredRuntimeTools: "drop" });
     if (!manifestResult.valid) {
       throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
     }
@@ -1452,12 +1474,39 @@ export function createPackagesRouter() {
 
   // --- Shared import logic (used by /import and /import-github) ---
 
+  /**
+   * Shared ZIP parse for `POST /import` (operator uploads a file) and
+   * `POST /import-github` (fetch a repo directory).
+   *
+   * WRITE direction — retired/unknown `runtime_tools` ids REJECT. Both routes
+   * are author input, not content the platform already holds:
+   *
+   *   - `/import-github` fetches a directory of hand-written source files from
+   *     a repository. That is authored material by definition, and the two
+   *     routes share this helper, so consistency pins `/import` to the same
+   *     policy.
+   *   - The counter-argument for `/import` — the ZIP may be one this platform
+   *     produced via `GET /:version/download`, so rejecting makes export→import
+   *     one-way — is real but narrow. Unlike a bundle (machine-assembled, N
+   *     packages, aborts wholesale) a single uploaded file is locally
+   *     repairable: the error names the offending field and value, and the
+   *     operator can unzip, edit one line, re-zip. `POST /import-bundle` is the
+   *     sanctioned read path for re-ingesting platform-produced artifacts and
+   *     it DOES drop.
+   *   - The policy is binary: it cannot distinguish a retired id from a typo.
+   *     Choosing `"drop"` here would silently swallow `"lgo"` on the primary
+   *     hand-authoring inbound route, shipping an agent missing a tool with no
+   *     signal — the exact failure the reject default exists to prevent.
+   *
+   * Passed explicitly rather than left to the default so the choice reads as
+   * deliberate at the call site.
+   */
   async function parseZipWithSkillFallback(
     zipBytes: Uint8Array,
     orgSlug: string,
   ): Promise<ReturnType<typeof parsePackageZip>> {
     try {
-      return parsePackageZip(zipBytes);
+      return parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
     } catch (err) {
       if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {
         const result = await tryParseSkillOnlyZip(zipBytes, orgSlug);

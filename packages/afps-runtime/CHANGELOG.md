@@ -33,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pin({ key, content })`. The `## Checkpoint` section instructs agents
   to update via `pin({ key: "checkpoint", content })`.
 
+### Removed — two exports with no consumer (BREAKING)
+
+- `narrowCanonicalEvent` (`@appstrate/afps-runtime/types`) — a one-line
+  `isCanonicalRunEvent(e) ? e : null` wrapper whose only remaining caller was
+  the reducer's `foldEvent`, which now calls the guard directly. The guard
+  already declares `event is CanonicalRunEvent`, so switch exhaustiveness is
+  unchanged; callers replace `narrowCanonicalEvent(e) !== null` with
+  `isCanonicalRunEvent(e)`.
+- `SkillRef` re-export (`@appstrate/afps-runtime/resolvers`, and the internal
+  `resolvers/types.ts`) — its three usages lived in the deleted
+  `bundled-skill-resolver.ts`. Import it from `@afps-spec/types` directly.
+
 ### Removed — `add_memory` / `set_checkpoint` tools (BREAKING)
 
 - `memoryTool` / `add_memory` and `checkpointTool` / `set_checkpoint`

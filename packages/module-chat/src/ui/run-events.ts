@@ -298,7 +298,7 @@ export interface VisibleLogEntry {
  * card tickers through one entry at a time. ONLY `event === "log"` rows qualify:
  * those come from the agent's explicit `log` runtime tool (sink tags them so),
  * never the auto-emitted runtime lifecycle / tool-call breadcrumbs (which share
- * `type='progress'` but keep `event='progress'`), nor `output`/`report`/system
+ * `type='progress'` but keep `event='progress'`), nor `output`/`document`/system
  * rows. Keeps ascending `id` order (same as `mergeLogs`), so the last element is
  * the most recent line; `id` doubles as the React key the line animates on.
  */

@@ -8,10 +8,8 @@
  * `consumed` (= the helper completed the OAuth dance and POSTed the
  * credentials back).
  *
- * The dashboard no longer cancels a pairing when its modal closes (that
- * dropped in-flight connections); abandoned tokens are reaped by their TTL
- * (5 min). `useCancelModelProviderPairing` remains as the binding for the
- * DELETE endpoint but is not used by the modal-close path.
+ * The dashboard never cancels a pairing when its modal closes (that dropped
+ * in-flight connections); abandoned tokens are reaped by their TTL (5 min).
  */
 
 import { $api, type paths } from "../api/client";
@@ -64,8 +62,4 @@ export function useModelProviderPairingStatus(id: string | null, options: { enab
       gcTime: 0,
     },
   );
-}
-
-export function useCancelModelProviderPairing() {
-  return $api.useMutation("delete", "/api/model-providers-oauth/pairing/{id}");
 }

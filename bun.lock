@@ -251,7 +251,7 @@
     },
     "packages/core": {
       "name": "@appstrate/core",
-      "version": "5.0.0",
+      "version": "6.0.0",
       "dependencies": {
         "@afps-spec/schema": "^0.6.1",
         "@appstrate/afps-shared": "^0.3.1",
@@ -458,7 +458,6 @@
         "react-dom": "^19.2.7",
         "react-select": "^5.10.2",
         "typescript": "^6.0.3",
-        "vite": "^8.1.5",
       },
       "peerDependencies": {
         "@appstrate/core": "workspace:*",
@@ -470,11 +469,7 @@
         "react-dom": "^19",
         "react-select": "^5",
         "typescript": "^5",
-        "vite": "^5 || ^6 || ^7",
       },
-      "optionalPeers": [
-        "vite",
-      ],
     },
     "runtime-pi": {
       "name": "appstrate-pi-runtime",

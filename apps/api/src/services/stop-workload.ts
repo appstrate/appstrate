@@ -22,7 +22,7 @@ import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /** Default bound on how long finalize waits for the workload stop to ack. */
-export const STOP_ACK_TIMEOUT_MS = 10_000;
+const STOP_ACK_TIMEOUT_MS = 10_000;
 
 /**
  * Stop the run's workload and wait (bounded) for the stop to complete.

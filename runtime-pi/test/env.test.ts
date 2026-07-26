@@ -34,7 +34,6 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.agentInput).toEqual({});
     expect(env.sidecarUrl).toBeUndefined();
     expect(env.modelApiKey).toBeUndefined();
-    expect(env.outputSchemaRaw).toBeUndefined();
     expect(env.timeoutSeconds).toBeUndefined();
     expect(env.mcpToolTimeoutMs).toBeUndefined();
   });
@@ -78,7 +77,6 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.sidecarUrl).toBe("http://sidecar:8080");
     expect(env.heartbeatIntervalMs).toBe(10_000);
     expect(env.mcpConnectDeadlineMs).toBe(90_000);
-    expect(env.outputSchemaRaw).toBe('{"type":"object"}');
   });
 
   it("forwards a TRACEPARENT env var through to env.traceparent", () => {

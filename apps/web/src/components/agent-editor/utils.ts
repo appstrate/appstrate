@@ -15,7 +15,7 @@ import {
   type UIHint,
   type SchemaWrapper,
 } from "@appstrate/core/form";
-import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
+import { AFPS_SCHEMA_URLS, dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import {
   isToolsWildcard,
@@ -135,9 +135,9 @@ export function defaultIntegrationManifest(
  * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS) —
  * the built-in runtime tools the agent author opted into (all opt-in,
  * `output` included). Tolerates a missing or malformed field by returning an
- * empty array. The deprecated `report` id remains valid and is preserved for
- * older manifests even though it is hidden from the editor catalog; genuinely
- * unknown entries are dropped so they cannot block a later save.
+ * empty array. Ids the platform no longer offers (a retired tool such as the
+ * removed `report`, or a hand-typed mistake in the raw-JSON tab) are dropped
+ * so they can never render as a phantom checkbox nor block a later save.
  */
 export function getRuntimeTools(m: Record<string, unknown>): string[] {
   const raw = m.runtime_tools;
@@ -145,8 +145,33 @@ export function getRuntimeTools(m: Record<string, unknown>): string[] {
 }
 
 /**
+ * Return the manifest with `runtime_tools` reduced to the ids the platform
+ * still offers. Applied when an existing agent is loaded into the editor, so
+ * a retired id persisted long ago (e.g. `report`) silently disappears on the
+ * next save instead of round-tripping forever — the user is never shown an
+ * error for a field the editor cannot even display.
+ *
+ * Delegates to `dropRetiredRuntimeTools` from `@appstrate/core` — the SAME
+ * function the publish path runs (`services/package-versions.ts`). The editor
+ * used to reimplement it and the two drifted on the empty case, so an agent
+ * whose only tool was retired serialised differently depending on which path
+ * saved it. One implementation, one byte sequence. Core is type-gated
+ * (`type: "agent"`), which is exactly this call site: `package-editor.tsx`
+ * invokes it only in the agent branch.
+ *
+ * Returns the same reference when there is nothing to drop.
+ */
+export function withNormalizedRuntimeTools(m: Record<string, unknown>): Record<string, unknown> {
+  return dropRetiredRuntimeTools(m).manifest;
+}
+
+/**
  * Write the selected runtime tool ids back into the manifest. An empty
- * selection drops the field entirely so the manifest stays minimal.
+ * selection drops the field entirely so the manifest stays minimal — the same
+ * empty-case convention `dropRetiredRuntimeTools` follows, so a manifest is
+ * byte-identical whichever of the two last touched it. Neither writer ever
+ * mints `runtime_tools: []`; core deliberately preserves that spelling when an
+ * author supplied it, but no platform path produces it.
  */
 export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
   if (tools.length > 0) {
@@ -210,7 +235,7 @@ export function metadataToManifestPatch(m: MetadataState): Record<string, unknow
   };
 }
 
-export function getDeps(m: Record<string, unknown>): Record<string, unknown> {
+function getDeps(m: Record<string, unknown>): Record<string, unknown> {
   return (m.dependencies ?? {}) as Record<string, unknown>;
 }
 

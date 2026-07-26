@@ -3,8 +3,13 @@
 
 /**
  * Runtime tool definitions — the platform's first-party "runtime tools"
- * (`output` / `log` / `note` / `pin`, plus the deprecated `report`) expressed as
- * transport-neutral, Pi-agnostic MCP tool definitions.
+ * expressed as transport-neutral, Pi-agnostic MCP tool definitions.
+ *
+ * Two groups, both defined here: the four pure event emitters
+ * (`output` / `log` / `note` / `pin`), assembled together by
+ * {@link buildRuntimeToolDefs}; and `publish_document`, built on its own by
+ * {@link buildPublishDocumentDef} because it needs an injected HTTP uploader
+ * only the runtime entrypoint can supply.
  *
  * These were previously Pi-SDK extension factories baked into the runtime
  * image (`@appstrate/runner-pi/runtime-tools/builtin/*`). They are now plain
@@ -67,7 +72,6 @@ export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
   "log.written",
   "memory.added",
   "pinned.set",
-  "report.appended",
   // Emitted by the `publish_document` tool (and the entrypoint outputs sweep)
   // once a run document has been stored on the platform. Carries the durable
   // document metadata so ingestion persists a run_log the UI/chat can render.
@@ -310,29 +314,6 @@ function buildPinDef(): RuntimeToolDef {
   };
 }
 
-function buildReportDef(): RuntimeToolDef {
-  return {
-    descriptor: {
-      name: "report",
-      description:
-        "Deprecated compatibility tool for existing agents. Appends markdown to the run report. " +
-        "For new agents, write report.md under outputs/ or call publish_document instead.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["content"],
-        properties: {
-          content: { type: "string", description: "Markdown content to append to the report" },
-        },
-      },
-    },
-    handler: async (rawArgs) => {
-      const { content } = (rawArgs ?? {}) as { content: string };
-      return withEvents("Report content recorded", [{ type: "report.appended", content }]);
-    },
-  };
-}
-
 const RUNTIME_TOOL_BUILDERS: Record<
   EventEmitterRuntimeTool,
   (outputSchema: Record<string, unknown> | null) => RuntimeToolDef
@@ -341,15 +322,16 @@ const RUNTIME_TOOL_BUILDERS: Record<
   log: () => buildLogDef(),
   note: () => buildNoteDef(),
   pin: () => buildPinDef(),
-  report: () => buildReportDef(),
 };
 
 /**
  * Build the {@link RuntimeToolDef}s for an agent's selected runtime tools.
  * Only the pure event-emitter tools are built here — `publish_document` is
  * excluded (it needs an injected uploader; the entrypoint builds it). Unknown
- * entries are ignored (install-time validation rejects them). Order follows
- * the agent's selection, de-duplicated.
+ * entries are ignored — that is the contract that keeps a manifest naming a
+ * retired tool (e.g. the removed `report`) runnable; `validateManifest` drops
+ * the same ids rather than rejecting the manifest. Order follows the agent's
+ * selection, de-duplicated.
  */
 export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): RuntimeToolDef[] {
   const outputSchema = opts.outputSchema ?? null;

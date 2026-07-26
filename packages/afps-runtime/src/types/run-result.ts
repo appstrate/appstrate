@@ -68,11 +68,6 @@ export interface RunResult {
    */
   cost?: number;
   /**
-   * Concatenated markdown emitted by the deprecated `report` runtime tool.
-   * Retained for compatibility; new agents should publish durable documents.
-   */
-  report?: string;
-  /**
    * Terminal summary of the end-of-run `outputs/` sweep — how many deliverables
    * the container published and which were LOST (upload abandoned after retries,
    * or dropped for exceeding the per-file cap). Stamped by the runtime onto the

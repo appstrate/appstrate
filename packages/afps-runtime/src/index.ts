@@ -13,8 +13,8 @@
  * runtime representation — every resolver, runner, and tool consumes
  * Bundle directly via `Bundle.packages.get(identity)`.
  *
- * Skill resolution (SkillResolver) and the integration `api_call`
- * surface live under `@appstrate/afps-runtime/resolvers`.
+ * The integration `api_call` surface lives under
+ * `@appstrate/afps-runtime/resolvers`.
  */
 
 export const VERSION = "0.0.0";

@@ -66,7 +66,7 @@ import {
 } from "./package-items/config.ts";
 
 /** Reason recorded on every job this reconciliation enqueues. */
-export const ORPHAN_RECONCILIATION_REASON = "orphan_reconciliation";
+const ORPHAN_RECONCILIATION_REASON = "orphan_reconciliation";
 
 /** One bucket the scanner knows how to reconcile against the database. */
 export interface OrphanScanBucket {

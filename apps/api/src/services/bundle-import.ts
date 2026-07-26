@@ -300,9 +300,26 @@ export async function importBundle(
     // separation, and per-type validation in one place.
     let parsedZip: ReturnType<typeof parsePackageZip>;
     try {
-      parsedZip = parsePackageZip(reconstructed);
+      // READ direction. A bundle is assembled by the platform from its OWN
+      // published versions (`GET /api/agents/:scope/:name/bundle`), and a
+      // published artifact is immutable by construction. A `runtime_tools` id
+      // retired after publication therefore cannot be repaired at the source —
+      // rejecting here would abort the ENTIRE bundle (every co-packaged skill
+      // and integration with it) on a legacy agent, with no recourse for the
+      // operator. Drop the retired ids and surface them as install warnings
+      // below.
+      parsedZip = parsePackageZip(reconstructed, { retiredRuntimeTools: "drop" });
     } catch (err) {
       throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
+    }
+
+    // A drop keeps the import alive but is a silent capability loss — lift it
+    // into the same non-blocking warning channel the AFPS §7.7 / §10.1
+    // soft-fails use, so the operator learns which package needs a republish.
+    if (parsedZip.droppedRuntimeTools.length > 0) {
+      warnings.push(
+        `${identity}: dropped retired runtime tools (${parsedZip.droppedRuntimeTools.join(", ")}) — republish this package to remove them from its manifest`,
+      );
     }
 
     // Surface engine-subset limitations for integration manifests as

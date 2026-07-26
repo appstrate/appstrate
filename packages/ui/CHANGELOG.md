@@ -5,6 +5,18 @@ All notable changes to `@appstrate/ui` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- `./vite` export and its `src/vite.js` implementation — the preset had no
+  consumer (`apps/web` maintains its own `optimizeDeps` include list), and the
+  subpath was already absent from `exports`, so the snippet documented in the
+  README threw `ERR_PACKAGE_PATH_NOT_EXPORTED`. `vite` is dropped from
+  `peerDependencies` / `peerDependenciesMeta` / `devDependencies` with it.
+- `Dropzone` component (`./components/dropzone`) — file input is handled inside
+  `SchemaForm`'s `FileWidget`.
+
 ## [1.0.1] — 2026-04-15
 
 ### Added

@@ -39,8 +39,8 @@ bun run dev
   - `bun run docker:dev:minimal` — Tier 1: PostgreSQL only
   - `bun run docker:dev:standard` — Tier 2: PostgreSQL + Redis
   - `bun run docker:dev` — Tier 3: PostgreSQL + Redis + MinIO
-- **`docker-compose.yml`** — Self-hosting / production (images from GHCR)
-- **`docker:prod`** script — `docker compose --profile prod up -d` (full stack)
+- **`docker-compose.yml`** — Self-hosting / production (images from GHCR). Declares **no** `profiles:` — `docker compose up -d` starts the whole stack.
+- **`docker:prod`** script — `docker compose --profile prod up -d`. The `prod` profile is contributed by `docker-compose.override.example.yml` (copy it to `docker-compose.override.yml`), which puts the `appstrate` service behind it so a plain `docker compose up -d` in dev brings up infra only and leaves :3000 to `bun run dev`. On a checkout without the override the flag is a harmless no-op. **Do not add `profiles:` to `docker-compose.yml`** — self-hosters run a bare `docker compose up -d`.
 
 ## Stack — Critical Constraints
 
@@ -84,17 +84,21 @@ appstrate/
 ├── packages/emails/src/      # @appstrate/emails — template registry + rendering (cloud override)
 ├── packages/core/            # @appstrate/core — shared validation, storage, utilities (published on npm)
 ├── packages/ui/              # @appstrate/ui — React components (private workspace pkg, consumed by web)
+├── packages/afps-shared/     # @appstrate/afps-shared — zero-internal-dep leaf (bundle/SSRF/credential helpers) — PUBLISHED on npm, release BEFORE any core bump that moves its range
 ├── packages/afps-runtime/    # @appstrate/afps-runtime — portable AFPS bundle runner + standalone `afps` CLI
+├── packages/runner-pi/       # @appstrate/runner-pi — Pi run driver + container/sidecar env construction (SIDECAR_OPERATOR_ENV_KEYS)
+├── packages/module-*/        # @appstrate/module-{chat,claude-code,codex,observability} — opt-in workspace modules
 ├── packages/mcp-transport/   # @appstrate/mcp-transport — MCP SDK adapter (sidecar + runtime-pi)
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
 ├── apps/cli/                 # @appstrate/cli — channel-aware install, self-update, doctor
-├── system-packages/          # System package ZIPs (skills, mcp-servers, integrations, agents — loaded at boot)
+├── system-packages/          # System package `.afps` archives (skills, mcp-servers, integrations, agents — loaded at boot)
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK + entrypoint
 │   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents → POST /api/runs/:runId/events
 │   ├── sidecar/              # Credential-isolating MCP server + integrations boot (see docs/architecture/SIDECAR.md)
-│   └── runners/{node,python,binary}/  # Per-language MCP runner images
+│   ├── mcp/direct.ts         # AFPS tool surface registered as Pi tools at container boot
+│   └── runners/{node,bun,python,uv,binary}/  # Per-runtime MCP runner images (one Dockerfile each)
 └── scripts/verify-openapi.ts # bun run verify:openapi
 ```
 
@@ -155,7 +159,7 @@ Essentials:
 - **Discovery**: loader resolves each `MODULES` specifier against `apps/api/src/modules/<id>/index.ts` first, then npm import. No registration table — drop a directory + add id to `MODULES`.
 - **Lifecycle**: core migrations (incl. all module tables) → discover built-ins → topological sort by `manifest.dependencies` → aggregate permissions → `init()` (workers only — no migrations) → `createRouter()` → running → `shutdown()`. All declared modules required; any failure is fatal.
 - **Modules own no tables** (core 2.23.0+): a module is pure behavior. All OSS tables — including those a module reads/writes — live in the **core schema** (`packages/db/src/schema/`) and are created by the system migration pipeline at boot. No module `schema.ts` / `drizzle/migrations/` / `__drizzle_migrations_<id>`, no `drizzleSchemas()` / `ctx.applyMigrations` (removed). A module imports its tables from `@appstrate/db/schema`; Better Auth resolves them from the core barrel directly. Cross-module data access goes via API/events, never a SQL join. A separate-tenant module (`@appstrate/cloud`) runs its **own DB** + migrations and reads platform data through the `services.usage` cursor (`list` / `settledFrontier`).
-- **Built-in dirs** (`apps/api/src/modules/`): `webhooks` (clean `onRunStatusChange` boundary; tables `webhooks`/`webhook_deliveries` in core schema), `oidc` (end-user OAuth 2.1 IdP — reference consumer of `authStrategies()` / `betterAuthPlugins()`; its 10 OAuth/jwks tables live in core schema `schema/oidc.ts`), `core-providers` (openai/anthropic/openai-compatible model providers via `modelProviders()`, owns no tables), `firecracker` (OPT-IN — NOT in the `MODULES` default; contributes a single `firecracker` execution backend via `orchestrators()` — an HTTP client to the `appstrate-runner` host daemon (`bun run firecracker:runner`) which embeds the in-process `FirecrackerOrchestrator` engine; platform reads only `FIRECRACKER_RUNNER_URL`/`_TOKEN`, the host-side `FIRECRACKER_*` vars are daemon-only, no tables/routes; see `docs/architecture/FIRECRACKER.md`). `@appstrate/module-codex` + `@appstrate/module-claude-code` (OPT-IN — NOT in the `MODULES` default; subscription grey-zone — both are agent-run **executable** on the single Pi engine via a provider-neutral sidecar bearer-swap, see `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`) and `@appstrate/module-observability` (OPT-IN — OpenTelemetry provider for the core telemetry façade `@appstrate/core/telemetry`; see `docs/architecture/OBSERVABILITY.md`) are workspace **npm** modules under `packages/module-*`, not built-in dirs.
+- **Built-in dirs** (`apps/api/src/modules/`) — five of them: `webhooks` (clean `onRunStatusChange` boundary; tables `webhooks`/`webhook_deliveries` in core schema), `mcp` (progressive-disclosure MCP server at `/api/mcp/o/{orgId}` — six tools, `mcp:read`/`mcp:invoke` RBAC; in the `MODULES` default), `oidc` (end-user OAuth 2.1 IdP — reference consumer of `authStrategies()` / `betterAuthPlugins()`; its 10 OAuth/jwks tables live in core schema `schema/oidc.ts`), `core-providers` (openai/anthropic/openai-compatible model providers via `modelProviders()`, owns no tables), `firecracker` (OPT-IN — NOT in the `MODULES` default; contributes a single `firecracker` execution backend via `orchestrators()` — an HTTP client to the `appstrate-runner` host daemon (`bun run firecracker:runner`) which embeds the in-process `FirecrackerOrchestrator` engine; platform reads only `FIRECRACKER_RUNNER_URL`/`_TOKEN`, the host-side `FIRECRACKER_*` vars are daemon-only, no tables/routes; see `docs/architecture/FIRECRACKER.md`). `@appstrate/module-codex` + `@appstrate/module-claude-code` (OPT-IN — NOT in the `MODULES` default; subscription grey-zone — both are agent-run **executable** on the single Pi engine via a provider-neutral sidecar bearer-swap, see `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`) and `@appstrate/module-observability` (OPT-IN — OpenTelemetry provider for the core telemetry façade `@appstrate/core/telemetry`; see `docs/architecture/OBSERVABILITY.md`) are workspace **npm** modules under `packages/module-*`, not built-in dirs.
 
 - **Hooks vs Events**: Hooks (`callHook`) — `beforeUsage` is a first-match-wins gate; `beforeSignup`/`afterSignup` are broadcast to all. Events (`emitEvent`) broadcast, side-effect only (`onRunStatusChange`/`onOrgCreate`/`onOrgDelete`), errors isolated. Platform calls by name, never by module ID.
 - **Permissions**: RBAC co-owned by core + modules. Core catalog in `@appstrate/core/permissions`; role-grant matrix in `apps/api/src/lib/permissions.ts`. Modules extend via declaration merging on `AppstrateModuleResources` + `permissionsContribution()`. All three guards (`requirePermission`, `requireCorePermission`, `requireModulePermission`) delegate to `makePermissionGuard` in core.
@@ -211,7 +215,7 @@ Tier 0 (zero-install) requires only Bun.
 - **Package types**: `agent`, `skill`, `mcp-server`, `integration`. System tools (`output`/`log`/`note`/`pin`/`publish_document`) are transport-neutral MCP definitions in `packages/core/src/runtime-tool-defs.ts` (served sidecar-side), opt-in per agent via manifest `runtime_tools: string[]` (catalog `@appstrate/core/runtime-tools-catalog`). `output` required only when agent declares `output.schema` (enforced by `agentManifestSchema` superRefine). Outbound third-party API access flows exclusively through **integrations**.
 - **System agents**: all agents (system + local) live in DB. System agents loaded from `system-packages/` ZIPs at boot and synced with `orgId: null` (`lib/boot.ts` `syncSystemPackagesToDb()`).
 - **Graceful shutdown**: `run-tracker.ts` — stop scheduler → reject new POST → wait in-flight (max 30s) → exit.
-- **Validation (Zod)**: all route bodies validated with `parseBody(schema, body)` from `lib/errors.ts` (`.safeParse()` → throws `invalidRequest()`). Naming `{concept}Schema` / `{Concept}` (`z.infer`). JSONB reads use safe narrowing (null/typeof/Array.isArray), not raw `as`. Query params: `z.coerce.number().int().min().max().catch(default).parse()`. **Zod 4** — `z.url()` NOT `z.string().url()`, `z.uuid()`. Reference: `routes/models.ts`, `routes/webhooks.ts`, `routes/organizations.ts`.
+- **Validation (Zod)**: all route bodies validated with `parseBody(schema, body)` from `lib/errors.ts` (`.safeParse()` → throws `invalidRequest()`). Naming `{concept}Schema` / `{Concept}` (`z.infer`). JSONB reads use safe narrowing (null/typeof/Array.isArray), not raw `as`. Query params: `z.coerce.number().int().min().max().catch(default).parse()`. **Zod 4** — `z.url()` NOT `z.string().url()`, `z.uuid()`. Reference: `routes/models.ts`, `routes/organizations.ts`, `modules/webhooks/routes.ts`.
 - **Validation (AJV)**: `validateConfig()`/`validateInput()`/`validateOutput()` for **dynamic** manifest schemas only. One AJV instance, `coerceTypes: true`, extra fields allowed.
 
 ### Headless Developer Platform
@@ -320,7 +324,7 @@ To write a new test, copy the nearest existing one in the matching directory (un
 - **Live spec**: `GET /api/openapi.json` (public). **Docs**: `GET /api/docs` (Swagger UI, public).
 - **Validation**: `bun run verify:openapi` — coverage, structural, lint, Zod↔spec bodies, Code ⊆ Spec static analysis (ADR-004).
 
-When working on routes, consult the corresponding `apps/api/src/openapi/paths/` file. Domains: health, auth, agents, runs, realtime, schedules, integrations, proxies, api-keys, packages, library, uploads, me, notifications, organizations, profile, invitations, internal, welcome, meta, models, model-provider-credentials, model-providers-oauth, applications, end-users, webhooks, credential-proxy, llm-proxy + OIDC module's oauth-clients & cli-sessions.
+When working on routes, consult the corresponding `apps/api/src/openapi/paths/` file — `ls apps/api/src/openapi/paths/` is the authoritative domain list (core), plus each module's own `modules/<id>/openapi/` (webhooks; OIDC's oauth-clients & cli-sessions; mcp). Core domains today: admin-storage-deletion, agents, api-keys, applications, auth, credential-proxy, documents, end-users, health, integrations, internal, invitations, library, llm-proxy, me, meta, model-provider-credentials, model-providers-oauth, models, notifications, organizations, packages, profile, proxies, realtime, runs, schedules, uploads, welcome.
 
 ## Database
 
@@ -340,7 +344,7 @@ Required vars (boot fails without them):
 | `RUN_TOKEN_SECRET`          | HMAC secret for run bearer tokens (≥16 chars), rotates independently            |
 | `CONNECT_SESSION_SECRET`    | HMAC secret for hosted-connect-portal tokens (≥16 chars), rotates independently |
 
-Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers,@appstrate/module-chat` — subscription modules `@appstrate/module-codex` + `@appstrate/module-claude-code` are opt-in), `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET`, `RUN_ADAPTER` (default `process`; `docker` for containers), `APP_URL`, `TRUSTED_ORIGINS`, `TRUST_PROXY`. See `docs/ENV.md` for all ~75 vars with defaults and full notes.
+Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers,@appstrate/module-chat` — subscription modules `@appstrate/module-codex` + `@appstrate/module-claude-code` are opt-in), `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET`, `RUN_ADAPTER` (default `process`; `docker` for containers), `APP_URL`, `TRUSTED_ORIGINS`, `TRUST_PROXY`. See `docs/ENV.md` for every var with defaults and full notes; the Zod schema is the count of record (`grep -oE '^    [A-Z][A-Z0-9_]*:' packages/env/src/index.ts | wc -l`).
 
 ## Agent & Extension Gotchas
 

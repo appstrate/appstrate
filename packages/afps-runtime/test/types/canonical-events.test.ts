@@ -4,9 +4,7 @@ import { describe, it, expect } from "bun:test";
 import type { RunEvent } from "@afps-spec/types";
 import {
   CANONICAL_EVENT_TYPES,
-  assertExhaustive,
   isCanonicalRunEvent,
-  narrowCanonicalEvent,
   type CanonicalRunEvent,
 } from "../../src/types/canonical-events.ts";
 
@@ -22,7 +20,6 @@ describe("isCanonicalRunEvent", () => {
       { ...baseEnvelope, type: "pinned.set", key: "persona", content: "agent A" },
       { ...baseEnvelope, type: "output.emitted", data: { ok: true } },
       { ...baseEnvelope, type: "log.written", level: "info", message: "x" },
-      { ...baseEnvelope, type: "report.appended", content: "# Report" },
       { ...baseEnvelope, type: "appstrate.progress", message: "running" },
       { ...baseEnvelope, type: "appstrate.error", message: "boom" },
       {
@@ -43,9 +40,6 @@ describe("isCanonicalRunEvent", () => {
         content: "x",
         scope: "global",
       } as RunEvent),
-    ).toBe(false);
-    expect(
-      isCanonicalRunEvent({ ...baseEnvelope, type: "report.appended", content: 42 } as RunEvent),
     ).toBe(false);
     expect(
       isCanonicalRunEvent({
@@ -81,6 +75,12 @@ describe("isCanonicalRunEvent", () => {
     expect(isCanonicalRunEvent({ ...baseEnvelope, type: "api_call.called", method: "GET" })).toBe(
       false,
     );
+    // `report.appended` was canonical until the report tool was retired in
+    // favour of durable `outputs/` documents — a stale emitter is now
+    // third-party as far as the runtime is concerned.
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "report.appended", content: "# Report" }),
+    ).toBe(false);
   });
 
   it("rejects malformed canonical events (tampered payloads)", () => {
@@ -143,130 +143,18 @@ describe("isCanonicalRunEvent", () => {
       } as RunEvent),
     ).toBe(true);
   });
-
-  it("accepts run lifecycle events (#278 item I)", () => {
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.started" })).toBe(true);
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "run.started",
-        runnerKind: "platform",
-        runnerName: "appstrate-pi@1.0.0",
-      }),
-    ).toBe(true);
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.success", durationMs: 4200 })).toBe(
-      true,
-    );
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.timeout" })).toBe(true);
-    expect(
-      isCanonicalRunEvent({ ...baseEnvelope, type: "run.cancelled", reason: "user_cancelled" }),
-    ).toBe(true);
-  });
-
-  it("accepts run.failed with structured error", () => {
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "run.failed",
-        error: { code: "manifest_invalid", message: "missing scope" },
-      }),
-    ).toBe(true);
-    // Error is optional.
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "run.failed" })).toBe(true);
-  });
-
-  it("rejects run.failed with malformed error (no message)", () => {
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "run.failed",
-        error: { code: "x" },
-      } as RunEvent),
-    ).toBe(false);
-    expect(
-      isCanonicalRunEvent({ ...baseEnvelope, type: "run.failed", error: 42 } as RunEvent),
-    ).toBe(false);
-  });
-
-  it("rejects run.failed with malformed structured error fields", () => {
-    // code must be string when present
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "run.failed",
-        error: { message: "boom", code: 42 },
-      } as RunEvent),
-    ).toBe(false);
-    // stack must be string when present
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "run.failed",
-        error: { message: "boom", stack: 123 },
-      } as RunEvent),
-    ).toBe(false);
-    // timestamp must be string (RFC 3339) when present
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "run.failed",
-        error: { message: "boom", timestamp: 1700000000 },
-      } as RunEvent),
-    ).toBe(false);
-    // context must be plain object when present
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "run.failed",
-        error: { message: "boom", context: "oops" },
-      } as RunEvent),
-    ).toBe(false);
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "run.failed",
-        error: { message: "boom", context: ["arr"] },
-      } as RunEvent),
-    ).toBe(false);
-  });
-
-  it("accepts run.failed with all structured fields well-formed", () => {
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "run.failed",
-        error: {
-          code: "manifest_invalid",
-          message: "missing scope",
-          stack: "Error: …",
-          timestamp: "2026-04-25T10:00:00.000Z",
-          context: { providerId: "@appstrate/gmail", retries: 2 },
-        },
-      }),
-    ).toBe(true);
-  });
 });
 
-describe("narrowCanonicalEvent", () => {
-  it("returns the same event when canonical", () => {
-    const event: RunEvent = { ...baseEnvelope, type: "output.emitted", data: 42 };
-    const narrow = narrowCanonicalEvent(event);
-    // Identity comparison — narrow is a sub-type of RunEvent so cast for the matcher.
-    expect(narrow as unknown).toBe(event as unknown);
-  });
-
-  it("returns null when not canonical", () => {
-    const event: RunEvent = { ...baseEnvelope, type: "@third-party/x", v: 1 };
-    expect(narrowCanonicalEvent(event)).toBeNull();
-  });
-
+describe("isCanonicalRunEvent — type-guard narrowing", () => {
+  // The guard's declared predicate (`event is CanonicalRunEvent`) is what lets
+  // `foldEvent`'s switch be exhaustively typed. Assert it here so a widening of
+  // the return type is caught by this file and not only by the reducer.
   it("uses the discriminant for type narrowing in switch statements", () => {
     const event: RunEvent = { ...baseEnvelope, type: "log.written", level: "warn", message: "x" };
-    const narrow = narrowCanonicalEvent(event);
-    if (narrow !== null && narrow.type === "log.written") {
+    if (isCanonicalRunEvent(event) && event.type === "log.written") {
       // TypeScript narrowing — these accesses are typed.
-      expect(narrow.level).toBe("warn");
-      expect(narrow.message).toBe("x");
+      expect(event.level).toBe("warn");
+      expect(event.message).toBe("x");
     } else {
       throw new Error("expected canonical narrowing");
     }
@@ -277,16 +165,9 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    // 8 reserved namespaces (memory/pinned/output/log/report + appstrate.*)
-    // + 5 run lifecycle events (run.{started,success,failed,timeout,cancelled}, #278 item I).
-    expect(arr.length).toBe(13);
+    // 4 reserved AFPS namespaces (memory/pinned/output/log)
+    // + 3 appstrate.* platform-internal events (progress/error/metric).
+    expect(arr.length).toBe(7);
     expect(new Set(arr).size).toBe(arr.length);
-  });
-});
-
-describe("assertExhaustive", () => {
-  it("throws when called (used as a compile-time guard)", () => {
-    // Cast through unknown to simulate the runtime "shouldn't happen" path.
-    expect(() => assertExhaustive("forbidden" as unknown as never)).toThrow(/Unhandled canonical/);
   });
 });

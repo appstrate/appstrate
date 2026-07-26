@@ -11,6 +11,10 @@ duplicating the detail.
 - [**INTEGRATIONS_RUNTIME.md**](./INTEGRATIONS_RUNTIME.md) — AFPS integrations runtime: per-integration runner containers, MITM credential proxy, remote HTTP/SSE MCP transport.
 - [**RUN_COST.md**](./RUN_COST.md) — Run cost tracking. The `llm_usage` ledger and single `computeRunCost` read path.
 
+## Data & documents
+
+- [**DOCUMENTS.md**](./DOCUMENTS.md) — Documents platform: staged uploads, agent outputs, `document://` refs, durable storage quotas, and the untrusted-HTML preview origin.
+
 ## Models & providers
 
 - [**MODEL_ALIASES.md**](./MODEL_ALIASES.md) — LLM-gateway model-alias pattern (masking real model ids across the two inference paths).

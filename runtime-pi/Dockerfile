@@ -70,15 +70,14 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #
 # Workspace sources for `@appstrate/*` packages are bundled inline,
 # which is why those symlinks become optional below (we keep them for
-# safety since other scripts under /runtime/{extensions,mcp}/ still
-# import via the symlinked paths).
+# safety since other scripts under /runtime/mcp/ still import via the
+# symlinked paths).
 COPY packages/afps-runtime/src    packages/afps-runtime/src
 COPY packages/afps-shared/src     packages/afps-shared/src
 COPY packages/connect/src         packages/connect/src
 COPY packages/core/src            packages/core/src
 COPY packages/mcp-transport/src   packages/mcp-transport/src
 COPY packages/runner-pi/src       packages/runner-pi/src
-COPY runtime-pi/extensions/       runtime-pi/extensions/
 COPY runtime-pi/mcp/              runtime-pi/mcp/
 COPY runtime-pi/*.ts              runtime-pi/
 
@@ -182,9 +181,12 @@ COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runt
 
 # Workspace sources — `@appstrate/afps-runtime`, `@appstrate/mcp-transport`,
 # `@appstrate/runner-pi`, and `@appstrate/core` are source-only (Bun loads
-# .ts directly, no build step). `core` is consumed via `@appstrate/core/errors`
-# and `@appstrate/core/{form,naming,…}` by entrypoint.ts, extension-wrapper.ts,
-# env.ts, and the MCP upload helpers.
+# .ts directly, no build step). The `packages/core/src` COPY below is load
+# bearing: `entrypoint.ts`, `env.ts`, `provision.ts`, `publish.ts`, the
+# `mcp/` tool surface + upload adapters, and `sidecar/` all import core
+# subpaths at runtime — `sidecar-types`, `errors`, `runtime-tool-defs`,
+# `runtime-event-drain`, `ssrf`, `naming`, `integration`, `platform-types`,
+# `zip`, `token-budget`, `model-swap`, `oauth-bearer-swap`.
 COPY --chown=pi:pi packages/afps-runtime/src            ./packages/afps-runtime/src
 COPY --chown=pi:pi packages/afps-runtime/package.json   ./packages/afps-runtime/
 COPY --chown=pi:pi packages/mcp-transport/src           ./packages/mcp-transport/src
@@ -214,10 +216,9 @@ RUN mkdir -p node_modules/@appstrate \
         node_modules/@appstrate/core
 
 # Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
-# in runtime-pi/node_modules per bun's hoisting decisions. Extension
-# and MCP utility scripts under /runtime/{extensions,mcp}/ resolve from
-# /runtime/node_modules, so symlink the SDK pair to make import
-# resolution work.
+# in runtime-pi/node_modules per bun's hoisting decisions. MCP utility
+# scripts under /runtime/mcp/ resolve from /runtime/node_modules, so
+# symlink the SDK pair to make import resolution work.
 RUN mkdir -p node_modules/@mariozechner \
  && ln -s /runtime/runtime-pi/node_modules/@mariozechner/pi-ai           node_modules/@mariozechner/pi-ai \
  && ln -s /runtime/runtime-pi/node_modules/@mariozechner/pi-coding-agent node_modules/@mariozechner/pi-coding-agent \
@@ -232,10 +233,8 @@ RUN mkdir -p node_modules/@mariozechner \
 #
 # Both the original `.ts` sources and the pre-bundled `dist/entrypoint.js`
 # are copied — the bundle is the production entrypoint, while the `.ts`
-# sources remain on disk so the MCP / extensions glob imports
-# (`./extensions/*.ts`, `./mcp/*.ts`) still resolve when the bundle
-# delegates to them at runtime.
-COPY --chown=pi:pi runtime-pi/extensions/ ./extensions/
+# sources remain on disk so the MCP glob imports (`./mcp/*.ts`) still
+# resolve when the bundle delegates to them at runtime.
 COPY --chown=pi:pi runtime-pi/mcp/        ./mcp/
 COPY --chown=pi:pi runtime-pi/*.ts        ./
 COPY --from=deps --chown=pi:pi /build/runtime-pi/dist/entrypoint.js ./dist/entrypoint.js

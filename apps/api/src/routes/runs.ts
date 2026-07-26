@@ -10,9 +10,12 @@ import {
   getRunningRunsForPackage,
   deletePackageRuns,
   listPackageRuns,
+  listGlobalRuns,
   listRunLogs,
   RUN_LOG_LEVELS,
+  type GlobalRunKind,
 } from "../services/state/runs.ts";
+import { listUserRuns } from "../services/state/notifications.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
@@ -281,9 +284,64 @@ export function createRunsRouter() {
     return c.json(result);
   });
 
-  // GET /api/runs — served by the notifications router (registered first
-  // in index.ts so `/runs` matches the collection, not the {id} detail).
-  // See apps/api/src/routes/notifications.ts.
+  // GET /api/runs — global paginated run list across the application.
+  // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
+  // for inline-run filtering, ?status, ?start_date/?end_date.
+  router.get("/runs", async (c) => {
+    const actor = getActor(c);
+    const scope = getAppScope(c);
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .catch(20)
+      .parse(c.req.query("limit") ?? 20);
+    const offset = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .catch(0)
+      .parse(c.req.query("offset") ?? 0);
+    const userFilter = c.req.query("user");
+    const endUser = c.get("endUser");
+
+    // End-users always see only their own runs — same semantic as before.
+    if (userFilter === "me" || endUser) {
+      const result = await listUserRuns(scope, actor, { limit, offset });
+      setOffsetLinkHeader({ c, limit, offset, total: result.total });
+      return c.json(result);
+    }
+
+    const rawKind = c.req.query("kind");
+    const kind: GlobalRunKind | undefined =
+      rawKind === "inline" || rawKind === "package" || rawKind === "all"
+        ? (rawKind as GlobalRunKind)
+        : undefined;
+    const status = c.req.query("status");
+    const startDateRaw = c.req.query("start_date");
+    const endDateRaw = c.req.query("end_date");
+    const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
+    const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
+    if (startDate && Number.isNaN(startDate.getTime())) {
+      throw invalidRequest("start_date is not a valid ISO date", "start_date");
+    }
+    if (endDate && Number.isNaN(endDate.getTime())) {
+      throw invalidRequest("end_date is not a valid ISO date", "end_date");
+    }
+
+    const result = await listGlobalRuns(scope, {
+      limit,
+      offset,
+      kind,
+      status,
+      startDate,
+      endDate,
+      actor,
+    });
+    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    return c.json(result);
+  });
 
   // GET /api/runs/:id — get a single run
   //

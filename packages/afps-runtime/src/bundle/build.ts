@@ -356,7 +356,7 @@ export function extractRootFromAfps(
 
   // §3.3 / §3.4 companion-file enforcement — single source of truth shared
   // with the platform's ZIP-import path (`@appstrate/core/zip:parsePackageZip`
-  // via `@appstrate/core/companion-files`). Both paths reject the same
+  // via `@appstrate/afps-shared/companion-files`). Both paths reject the same
   // inputs: agent prompt.md non-empty, skill SKILL.md + frontmatter name,
   // mcp-server server.entry_point payload present.
   assertCompanionFiles(

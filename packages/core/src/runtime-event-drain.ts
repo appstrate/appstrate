@@ -16,7 +16,7 @@
  * is retried on the next drain; an unreachable journal at finalize is logged
  * loud (`runtime_events_incomplete`) and tolerated. The structured `output` is
  * re-validated at finalize (a lost `output` therefore fails the run there, not
- * silently); `log`/`report` are cosmetic. `note`/`pin` (`memory.added`/
+ * silently); `log` is cosmetic. `note`/`pin` (`memory.added`/
  * `pinned.set`) persist across runs and are NOT re-derivable, so the final
  * drain's bounded retry is their compensating control — but still best-effort:
  * dropping a whole run over one undrained event would be disproportionate.

@@ -8,12 +8,12 @@
  * `drizzle-orm/postgres-js` migrator in `boot.ts`; this raw-SQL replay exists
  * because drizzle-kit's migrator does not target PGlite.
  *
- * Module-owned migrations no longer exist — modules' tables are centralized in
- * the core schema, so there is a single journal to apply here.
+ * There is exactly one journal to apply: modules own no tables (their tables
+ * live in the core schema), so nothing else contributes migrations.
  */
 
 import type { PGlite } from "@electric-sql/pglite";
-import { logger } from "../logger.ts";
+import { logger } from "./logger.ts";
 
 export async function applyCorePGliteMigrations(
   migrationsDir: string,

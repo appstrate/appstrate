@@ -2045,26 +2045,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/me/models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List models available in the active org
-         * @description Returns the model catalog for the active org (built-in + custom). Same shape as `GET /api/models`. Org context is set by the `X-Org-Id` header (cookie session) or pinned by the strategy (API key, OIDC). Requires `models:read`.
-         */
-        get: operations["listMyModels"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/me/orgs": {
         parameters: {
             query?: never;
@@ -4878,7 +4858,7 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "report" | "publish_document")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5437,18 +5417,18 @@ export interface components {
             input: {
                 [key: string]: unknown;
             } | null;
-            /** @description What the run produced. Structured output is primary; deprecated report-tool runs may also carry markdown in `text`. `null` while the run is in flight or when no result was emitted. */
+            /** @description What the run produced: the structured output, and nothing else. Human-facing deliverables are documents (see the run's documents), not fields here. `null` while the run is in flight or when no output was emitted. */
             result: {
                 /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
                 /**
                  * @deprecated
-                 * @description Compatibility field for markdown emitted by the deprecated `report` runtime tool. New agents should publish a markdown document.
+                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are markdown documents now (`outputs/report.md`).
                  */
                 text?: string;
                 /**
                  * @deprecated
-                 * @description Present and true when deprecated report text exceeded the 256 KiB storage cap.
+                 * @description HISTORICAL ONLY. Present and true when a pre-removal `text` exceeded the 256 KiB storage cap.
                  */
                 text_truncated?: boolean;
             } | null;
@@ -12631,38 +12611,6 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    listMyModels: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Model catalog */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["OrgModel"][];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
     listMyOrgs: {
         parameters: {
             query?: never;
@@ -18446,8 +18394,6 @@ export interface operations {
                         manifest: Record<string, never>;
                         prompt: string;
                         config?: Record<string, never>;
-                        modelId?: string | null;
-                        proxyId?: string | null;
                     } | {
                         /** @constant */
                         kind: "registry";
@@ -18464,8 +18410,6 @@ export interface operations {
                         /** @description Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal. */
                         integrity?: string;
                         config?: Record<string, never>;
-                        modelId?: string | null;
-                        proxyId?: string | null;
                     };
                     applicationId: string;
                     /** @description Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions. */
@@ -19140,11 +19084,6 @@ export interface operations {
                     pinned?: Record<string, never>;
                     output?: unknown;
                     logs?: unknown[];
-                    /**
-                     * @deprecated
-                     * @description Deprecated report-tool markdown aggregate. New agents publish markdown documents.
-                     */
-                    report?: string;
                     error?: {
                         message?: string;
                         stack?: string;

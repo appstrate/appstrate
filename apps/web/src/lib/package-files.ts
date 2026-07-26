@@ -29,7 +29,7 @@ export interface DisplayFile {
  * Non-empty tuple type so `DISPLAY_FILES[type][0]` is known-defined under
  * `noUncheckedIndexedAccess`.
  */
-export const DISPLAY_FILES: Record<PackageType, [DisplayFile, ...DisplayFile[]]> = {
+const DISPLAY_FILES: Record<PackageType, [DisplayFile, ...DisplayFile[]]> = {
   agent: [{ name: "prompt.md", source: "content" }],
   skill: [{ name: "SKILL.md", source: "content" }],
   "mcp-server": [{ name: "manifest.json", source: "manifest" }],

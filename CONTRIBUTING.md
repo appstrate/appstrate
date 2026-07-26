@@ -5,8 +5,7 @@ Thank you for your interest in contributing to Appstrate! This guide covers ever
 ## Getting Help
 
 - 💬 [Discord](https://discord.gg/5Js2CKWNnh) — quick questions, real-time chat with maintainers and the community
-- 💡 [GitHub Discussions](https://github.com/appstrate/appstrate/discussions) — long-form questions, proposals, show-and-tell
-- 🐛 [GitHub Issues](https://github.com/appstrate/appstrate/issues) — bug reports and feature requests only
+- 🐛 [GitHub Issues](https://github.com/appstrate/appstrate/issues) — bug reports, feature requests, and long-form proposals
 
 ## Code of Conduct
 
@@ -20,7 +19,7 @@ There are many ways to contribute beyond writing code:
 - **Documentation improvements** — Fix typos, clarify guides, add examples
 - **Translations** — Help translate the UI between French and English (i18next, `apps/web/src/locales/`)
 - **Bug triage and issue labeling** — Help categorize and reproduce reported issues
-- **Community support** — Answer questions on [Discord](https://discord.gg/5Js2CKWNnh) or in [GitHub Discussions](https://github.com/appstrate/appstrate/discussions)
+- **Community support** — Answer questions on [Discord](https://discord.gg/5Js2CKWNnh)
 - **Design feedback and UI/UX improvements** — Suggest usability improvements, report confusing workflows, propose UI enhancements
 - **Feature requests** — Describe problems and propose solutions (see below)
 - **Code contributions** — Bug fixes, new features, refactoring, tests

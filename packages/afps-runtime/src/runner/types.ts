@@ -4,8 +4,7 @@
 /**
  * AFPS Runner surface.
  *
- * A {@link Runner} takes a loaded bundle + execution context, wires the
- * spec resolvers ({@link SkillResolver} and the bundled context source),
+ * A {@link Runner} takes a loaded bundle + execution context,
  * dispatches tool invocations to the LLM, and emits the resulting
  * {@link RunEvent}s to the caller's {@link EventSink}. Tools come from
  * spawned `mcp-server` packages and integrations; credentialled HTTP
@@ -22,7 +21,6 @@
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { Bundle } from "../bundle/types.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
-import type { SkillResolver } from "../resolvers/types.ts";
 
 export interface RunOptions {
   /** Already-loaded {@link Bundle} (root package + transitively resolved deps). */
@@ -32,13 +30,6 @@ export interface RunOptions {
 
   /** Business terminus — receives every RunEvent the tools emit. */
   eventSink: EventSink;
-
-  /**
-   * Internal resolvers — defaulted by the runner to the Bundled*
-   * implementations. Override only for advanced cases (custom resolution
-   * of skills from an external registry, etc.).
-   */
-  skillResolver?: SkillResolver;
 
   /** Cancellation token. Runner MUST stop emitting and reject if aborted. */
   signal?: AbortSignal;
