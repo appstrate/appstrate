@@ -1420,6 +1420,77 @@ describe("Packages API", () => {
       expect(body.type).toBe("skill");
     });
 
+    // ── retired `runtime_tools` policy: /import is the WRITE direction ──
+    //
+    // `/import` (and `/import-github`, which shares the same parse helper) is
+    // author input, NOT content the platform already holds — so a retired id
+    // and a typo both reject, with a field-precise error the operator can fix
+    // by editing one line of manifest.json. Contrast
+    // `POST /api/packages/import-bundle`, which drops (see
+    // packages-import-bundle.test.ts). If this pair ever starts returning 201,
+    // the policy has silently flipped and typos are being swallowed.
+    async function importAgentWithRuntimeTools(tools: string[]): Promise<Response> {
+      const enc = (s: string) => new TextEncoder().encode(s);
+      const afps = zipSync({
+        "manifest.json": enc(
+          JSON.stringify({
+            name: "@pkgorg/rt-policy-agent",
+            version: "1.0.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Runtime Tools Policy Agent",
+            runtime_tools: tools,
+          }),
+        ),
+        "prompt.md": enc("You are an agent."),
+      });
+      const formData = new FormData();
+      formData.append("file", new File([new Uint8Array(afps)], "agent.afps"));
+      return app.request("/api/packages/import", {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: formData,
+      });
+    }
+
+    it("returns 400 for a RETIRED runtime_tools id (author input rejects)", async () => {
+      const res = await importAgentWithRuntimeTools(["output", "report"]);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(JSON.stringify(body)).toContain("runtime_tools");
+
+      // Nothing was persisted — the reject is not a partial write.
+      const [row] = await db
+        .select({ id: packages.id })
+        .from(packages)
+        .where(eq(packages.id, "@pkgorg/rt-policy-agent"))
+        .limit(1);
+      expect(row).toBeUndefined();
+    });
+
+    it("returns 400 for a MISSPELLED runtime_tools id (author input rejects)", async () => {
+      const res = await importAgentWithRuntimeTools(["lgo"]);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(JSON.stringify(body)).toContain("runtime_tools");
+    });
+
+    it("imports an agent whose runtime_tools are all still selectable", async () => {
+      // Control: the reject above must be caused by the id, not by the mere
+      // presence of `runtime_tools`.
+      const res = await importAgentWithRuntimeTools(["output", "log"]);
+      expect(res.status).toBe(201);
+      const [row] = await db
+        .select({ draftManifest: packages.draftManifest })
+        .from(packages)
+        .where(eq(packages.id, "@pkgorg/rt-policy-agent"))
+        .limit(1);
+      expect((row!.draftManifest as Record<string, unknown>).runtime_tools).toEqual([
+        "output",
+        "log",
+      ]);
+    });
+
     it("returns 400 when no file is provided", async () => {
       const formData = new FormData();
 

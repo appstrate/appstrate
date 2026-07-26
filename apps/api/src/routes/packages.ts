@@ -1474,12 +1474,39 @@ export function createPackagesRouter() {
 
   // --- Shared import logic (used by /import and /import-github) ---
 
+  /**
+   * Shared ZIP parse for `POST /import` (operator uploads a file) and
+   * `POST /import-github` (fetch a repo directory).
+   *
+   * WRITE direction — retired/unknown `runtime_tools` ids REJECT. Both routes
+   * are author input, not content the platform already holds:
+   *
+   *   - `/import-github` fetches a directory of hand-written source files from
+   *     a repository. That is authored material by definition, and the two
+   *     routes share this helper, so consistency pins `/import` to the same
+   *     policy.
+   *   - The counter-argument for `/import` — the ZIP may be one this platform
+   *     produced via `GET /:version/download`, so rejecting makes export→import
+   *     one-way — is real but narrow. Unlike a bundle (machine-assembled, N
+   *     packages, aborts wholesale) a single uploaded file is locally
+   *     repairable: the error names the offending field and value, and the
+   *     operator can unzip, edit one line, re-zip. `POST /import-bundle` is the
+   *     sanctioned read path for re-ingesting platform-produced artifacts and
+   *     it DOES drop.
+   *   - The policy is binary: it cannot distinguish a retired id from a typo.
+   *     Choosing `"drop"` here would silently swallow `"lgo"` on the primary
+   *     hand-authoring inbound route, shipping an agent missing a tool with no
+   *     signal — the exact failure the reject default exists to prevent.
+   *
+   * Passed explicitly rather than left to the default so the choice reads as
+   * deliberate at the call site.
+   */
   async function parseZipWithSkillFallback(
     zipBytes: Uint8Array,
     orgSlug: string,
   ): Promise<ReturnType<typeof parsePackageZip>> {
     try {
-      return parsePackageZip(zipBytes);
+      return parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
     } catch (err) {
       if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {
         const result = await tryParseSkillOnlyZip(zipBytes, orgSlug);

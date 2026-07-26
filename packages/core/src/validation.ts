@@ -372,14 +372,27 @@ function parseWithSchema(
  * re-parse that reordered keys would silently defeat publish dedup (#896).
  * Returns the input untouched (same reference) when nothing needs dropping.
  *
- * **When nothing survives, the key is REMOVED, not left as `[]`.** AFPS makes
- * `runtime_tools` optional with no default, so absent and `[]` parse to the
- * same agent — but they are different bytes, and this helper is not the only
- * writer: the agent editor's `setRuntimeTools` also drops the field on an empty
- * selection. Emitting `[]` here would mean an agent whose only tool was retired
- * serialises one way through the editor and another way through the publish
- * path, i.e. two integrity hashes for one manifest. Deleting a key does not
- * reorder the survivors, so the structural contract above still holds.
+ * **When a drop empties the list, the key is REMOVED, not left as `[]`.** AFPS
+ * makes `runtime_tools` optional with no default, so absent and `[]` parse to
+ * the same agent — but they are different bytes, and this helper is not the
+ * only writer: the agent editor's `setRuntimeTools` also drops the field on an
+ * empty selection. Emitting `[]` here would mean an agent whose only tool was
+ * retired serialises one way through the editor and another way through the
+ * publish path, i.e. two integrity hashes for one manifest. Deleting a key does
+ * not reorder the survivors, so the structural contract above still holds.
+ *
+ * That rule is scoped to the drop, and deliberately so: this is a DROPPER, not
+ * a canonicaliser. A manifest that *already* declares `runtime_tools: []` — a
+ * shape no platform writer emits (the editor deletes on an empty selection, the
+ * schema has no `.default([])`, and the publish path only rewrites what it
+ * dropped) but which AFPS permits and a CLI/curl/hand-written manifest.json can
+ * author — is returned UNTOUCHED, key and all. Canonicalising it would mean
+ * rewriting the bytes of a manifest with nothing wrong in it, purely as a side
+ * effect of asking "are any ids retired?" — which is precisely the blast-radius
+ * widening the structural contract exists to prevent, and it would cost the
+ * same-reference identity above. Absent and `[]` therefore remain two accepted
+ * spellings of "no runtime tools" for an author who insists on the latter; what
+ * this helper guarantees is only that IT never mints the second one.
  *
  * Only `type: "agent"` manifests carry `runtime_tools`; any other type is
  * returned as-is.

@@ -169,7 +169,9 @@ export function withNormalizedRuntimeTools(m: Record<string, unknown>): Record<s
  * Write the selected runtime tool ids back into the manifest. An empty
  * selection drops the field entirely so the manifest stays minimal — the same
  * empty-case convention `dropRetiredRuntimeTools` follows, so a manifest is
- * byte-identical whichever of the two last touched it.
+ * byte-identical whichever of the two last touched it. Neither writer ever
+ * mints `runtime_tools: []`; core deliberately preserves that spelling when an
+ * author supplied it, but no platform path produces it.
  */
 export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
   if (tools.length > 0) {

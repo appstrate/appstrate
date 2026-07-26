@@ -62,6 +62,15 @@ export async function tryParseSkillOnlyZip(
 
   return {
     ok: true,
-    parsed: { manifest: validatedManifest, content: skillMd, files, type: "skill", packageId },
+    parsed: {
+      manifest: validatedManifest,
+      content: skillMd,
+      files,
+      type: "skill",
+      packageId,
+      // The manifest is synthesised here from SKILL.md frontmatter, and only
+      // agents carry `runtime_tools` — nothing can have been dropped.
+      droppedRuntimeTools: [],
+    },
   };
 }

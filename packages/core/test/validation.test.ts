@@ -238,6 +238,24 @@ describe("validateManifest", () => {
     expect(dropRetiredRuntimeTools(stored).manifest).toBe(stored);
   });
 
+  // Settled empty-array representation. The helper deletes the key when a DROP
+  // empties the list (test above), but an author-written `runtime_tools: []` is
+  // left ALONE — it is a dropper, not a canonicaliser, and rewriting the bytes
+  // of a manifest with nothing retired in it is exactly the blast-radius
+  // widening the structural contract forbids (the result is serialised into an
+  // integrity-hashed artifact by the publish path). Absent and `[]` stay two
+  // accepted spellings; the guarantee is only that no platform writer mints the
+  // second. Pinned here so neither direction can drift silently.
+  it("dropRetiredRuntimeTools leaves an author-written empty runtime_tools untouched", () => {
+    const stored = { type: "agent", name: "@test/a", runtime_tools: [] };
+    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
+    expect(dropped).toEqual([]);
+    // Same reference — no copy, no key deletion.
+    expect(manifest).toBe(stored);
+    expect("runtime_tools" in manifest).toBe(true);
+    expect(manifest.runtime_tools).toEqual([]);
+  });
+
   it("dropRetiredRuntimeTools leaves non-agent manifests untouched", () => {
     const stored = { type: "skill", runtime_tools: ["report"] };
     const { manifest, dropped } = dropRetiredRuntimeTools(stored);

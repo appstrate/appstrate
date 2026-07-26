@@ -351,6 +351,70 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(body.imported).toHaveLength(1);
   });
 
+  // ── retired `runtime_tools` policy: import-bundle is the READ direction ──
+  //
+  // `report` was a selectable runtime tool until it was removed from the enum.
+  // A bundle is assembled by the platform from its OWN published versions, and
+  // a published artifact is immutable by construction — so an agent published
+  // before the removal can never be repaired at the source. Rejecting here
+  // would 400 the WHOLE bundle (every co-packaged skill and integration with
+  // it) with no recourse for the operator, so this path drops instead.
+  //
+  // Kills the mutation "`parsePackageZip(reconstructed, { retiredRuntimeTools:
+  // "drop" })` → `parsePackageZip(reconstructed)`" (back to the reject default,
+  // which makes the request a 400) and the mutation "stop pushing the
+  // droppedRuntimeTools warning" (the drop becomes silent).
+  it("drops a retired runtime_tools id from a legacy package instead of aborting the bundle", async () => {
+    const agentId = "@importorg/legacy-runtime-tools" as const;
+    const afps = buildAfps({
+      manifest: {
+        name: agentId,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Legacy Runtime Tools",
+        author: "tester",
+        // `output` is still selectable; `report` was retired.
+        runtime_tools: ["output", "report"],
+      },
+      content: "Legacy prompt.",
+      type: "agent",
+    });
+
+    const form = new FormData();
+    form.append("file", new Blob([afps]), "legacy.afps");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+    if (res.status !== 201) {
+      throw new Error(`unexpected ${res.status}: ${await res.text()}`);
+    }
+    const body = (await res.json()) as {
+      imported: Array<{ identity: string; status: string }>;
+      warnings: string[];
+    };
+    expect(body.imported).toHaveLength(1);
+    expect(body.imported[0]!.status).toBe("inserted");
+
+    // The drop is surfaced, not silent.
+    const warning = body.warnings.find((w) => w.includes("report"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain(agentId);
+
+    // The assertion that matters: the STORED draft lost exactly the retired id
+    // and kept the rest. A 201 alone would also pass if the field had been
+    // wiped wholesale or left with `report` still in it.
+    const [row] = await db
+      .select({ draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(eq(packages.id, agentId))
+      .limit(1);
+    expect(row).toBeDefined();
+    expect((row!.draftManifest as Record<string, unknown>).runtime_tools).toEqual(["output"]);
+  });
+
   it("returns status=reused on a second import of the same bundle", async () => {
     const sourceCtx = await createTestContext({ orgSlug: "srcidem" });
     const { bytes } = await seedAndExportBundle({

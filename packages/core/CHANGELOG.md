@@ -24,6 +24,24 @@ with no importer anywhere is deleted.
 >    API: `registry` (root + `apps/api` + `apps/web`), `cloud`, `portal`,
 >    `connect-helper`, `module-claude-code`. Workspace packages inside this
 >    monorepo resolve `workspace:*` and need no bump.
+>
+>    **Measure this before scheduling the release — for four of the five it is
+>    not a version edit.** Actual pins as of 2026-07-26, read off each default
+>    branch: `cloud` `^5.0.0`, but `registry` `^2.13.0` (root) / `^2.12.0`
+>    (`apps/api`, `apps/web`), `portal` `^2.10.8`, `connect-helper` `^2.19.0`,
+>    `module-claude-code` `^2.19.0`. Going to `^6.0.0` means absorbing **four
+>    majors** of breaking changes in each of those repos.
+>
+>    That drift is not new and this release does not cause it — it was simply
+>    invisible while the gate fell back to a `GITHUB_TOKEN` that 404'd on every
+>    private consumer. Note also that publishing `6.0.0` breaks none of them:
+>    a `^2` range keeps resolving 2.x. The gate is a _drift alarm_, not a
+>    compatibility guard. So the honest choice at release time is one of:
+>    migrate the four repos, publish with an auditable
+>    `CONSUMER_DRIFT_POLICY=warn`, or narrow the consumer list in
+>    `scripts/check-consumer-versions.ts` to the repos actually kept in
+>    lockstep. Decide deliberately; do not discover it when the gate fires.
+>
 > 2. **Make sure the repository secret `CONSUMER_LOCKSTEP_TOKEN` exists**
 >    (PAT / GitHub App token with `contents:read` on those five repos).
 > 3. **Only then** tag `core@6.0.0` and push it.
@@ -134,6 +152,28 @@ with no importer anywhere is deleted.
   (`ctx?: T` is assignable to `ctx: T`); what changes is that `ctx?.headers`
   and `ctx | undefined` narrowings are now dead code, and any direct
   `callAllHooks("beforeSignup", email)` call must pass the context.
+
+- **`@appstrate/core/zip` — `parsePackageZip` takes an options object, and
+  `ParsedPackageZip` gains a required `droppedRuntimeTools: string[]`.** The
+  second parameter is now `number | ParsePackageZipOptions`: the bare-number
+  form is the original published signature and still reads as `maxSize`, so
+  existing calls keep working. The new object form adds `retiredRuntimeTools`,
+  which is forwarded verbatim to `validateManifest` and **defaults to
+  `"reject"`** — a ZIP is author input unless the caller knows otherwise.
+
+  Pass `"drop"` only for an archive the platform already holds and cannot
+  repair in place. In this repo exactly one call site qualifies: the bundle
+  installer, which re-ingests what `GET /api/agents/:scope/:name/bundle`
+  produced. Without it, an agent published while `report` was still selectable
+  could not be re-imported — the artifact is immutable by construction, so the
+  400 had no remedy. `POST /api/packages/import` deliberately stays on
+  `"reject"`: it shares its parser with `/import-github`, which fetches
+  hand-written source, and the policy cannot tell a retired id from a typo.
+
+  What breaks is only the output type. Reading `ParsedPackageZip` is
+  unaffected; **constructing one as a literal now needs the new field**
+  (`droppedRuntimeTools: []` for a synthesised manifest). It is required rather
+  than optional so readers never need a `?? []`.
 
 ### Removed (BREAKING)
 

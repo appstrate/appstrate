@@ -630,6 +630,18 @@ describe("withNormalizedRuntimeTools", () => {
     const noField = { type: "agent", name: "@o/a" };
     expect(withNormalizedRuntimeTools(noField)).toBe(noField);
   });
+
+  // Settled empty-array representation, checked on the editor side of the
+  // shared helper: loading an agent whose author wrote `runtime_tools: []`
+  // must NOT rewrite the manifest. The key is deleted only when a DROP empties
+  // the list — core is a dropper, not a canonicaliser. Mirrors
+  // `packages/core/test/validation.test.ts`; both sides are pinned so the
+  // editor and core cannot drift on the empty case again.
+  it("leaves an author-written empty runtime_tools untouched on load", () => {
+    const m = { type: "agent", name: "@o/a", runtime_tools: [] };
+    expect(withNormalizedRuntimeTools(m)).toBe(m);
+    expect(withNormalizedRuntimeTools(m)).toHaveProperty("runtime_tools");
+  });
 });
 
 // ─── Writers emit canonical AFPS keys only ──

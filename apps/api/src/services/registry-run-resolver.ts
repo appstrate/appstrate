@@ -109,6 +109,17 @@ export async function resolveRegistryAgent(
         detail: `Draft for '${pkg.id}' is invalid: ${draftValidation.errors.slice(0, 3).join("; ")}`,
       });
     }
+    if (draftValidation.droppedRuntimeTools.length > 0) {
+      // Same signal as the published branch below: the drop kept the run alive
+      // but silently removed a capability. A draft IS repairable (open it in
+      // the editor and save — the editor normalises on load), so this is the
+      // milder of the two cases, but it must not be silent either.
+      logger.warn("draft manifest names retired runtime tools (dropped for this run)", {
+        packageId: pkg.id,
+        versionLabel: "draft",
+        dropped: draftValidation.droppedRuntimeTools,
+      });
+    }
 
     if (integrityHint) {
       // Drafts mutate freely — any hint the runner saw on download is
