@@ -1419,7 +1419,16 @@ export const schemas = {
       id: { type: "string", description: "Stable node id, also the edge endpoint." },
       type: {
         type: "string",
-        enum: ["triggers", "schedules", "agent", "toolbox", "skills", "mcp_servers"],
+        enum: [
+          "triggers",
+          "schedules",
+          "agent",
+          "model",
+          "toolbox",
+          "skills",
+          "mcp_servers",
+          "memory",
+        ],
       },
       position: {
         type: "object",

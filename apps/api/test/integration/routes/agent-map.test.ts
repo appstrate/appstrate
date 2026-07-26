@@ -135,6 +135,8 @@ describe("GET /api/agents/:scope/:name/map", () => {
     expect(nodeIds(body).sort()).toEqual([
       "agent",
       "mcp_servers",
+      "memory",
+      "model",
       "schedules",
       "skills",
       "toolbox",
@@ -145,8 +147,11 @@ describe("GET /api/agents/:scope/:name/map", () => {
     }
     expect(body.edges.map((e) => e.id).sort()).toEqual([
       "agent->mcp_servers",
+      "agent->memory",
       "agent->skills",
       "agent->toolbox",
+      // The model is an input: it feeds the agent.
+      "model->agent",
       "schedules->agent",
       "triggers->agent",
     ]);
@@ -268,6 +273,35 @@ describe("GET /api/agents/:scope/:name/map", () => {
     const mcp = body.nodes.find((n) => n.id === "mcp_servers");
     expect(mcp).toBeDefined();
     expect(mcp!.data.items).toEqual([{ id: MCP_SERVER, version: "^2.0.0" }]);
+  });
+
+  it("no org model → the model card says nothing is resolved, WITHOUT faking a diagnostic", async () => {
+    await seedAgentWith(agentManifest());
+
+    const body = (await (await getMap()).json()) as MapBody;
+
+    const model = body.nodes.find((n) => n.id === "model")!;
+    expect(model.data.resolved).toBe(false);
+    expect(model.data.resolved_model_id).toBeNull();
+    // The readiness gate does not check the model, so the map must not pretend
+    // otherwise — the missing model is a card state, not a diagnostic.
+    expect(body.diagnostics.some((d) => d.node_id === "model")).toBe(false);
+  });
+
+  it("memory card reflects declared runtime tools, and recall is always available", async () => {
+    await seedAgentWith(agentManifest({ runtime_tools: ["note"] }));
+
+    const body = (await (await getMap()).json()) as MapBody;
+
+    const items = body.nodes.find((n) => n.id === "memory")!.data.items as Array<
+      Record<string, unknown>
+    >;
+    const byId = new Map(items.map((i) => [i.id, i]));
+    expect(byId.get("note")!.declared).toBe(true);
+    expect(byId.get("pin")!.declared).toBe(false);
+    // Served by the sidecar for every run, independently of `runtime_tools`.
+    expect(byId.get("recall_memory")!.declared).toBe(true);
+    expect(byId.get("recall_memory")!.always).toBe(true);
   });
 
   it("unknown agent → 404", async () => {

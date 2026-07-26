@@ -38,6 +38,7 @@ import { listPackageSchedules } from "../services/scheduler.ts";
 import { getPackageConfig } from "../services/application-packages.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import { collectAgentReadinessErrors } from "../services/agent-readiness.ts";
+import { listOrgModels } from "../services/org-models.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
@@ -48,7 +49,7 @@ import { getActor } from "../lib/actor.ts";
 // ---------------------------------------------------------------------------
 
 export type AgentMapNodeType =
-  "triggers" | "schedules" | "agent" | "toolbox" | "skills" | "mcp_servers";
+  "triggers" | "schedules" | "agent" | "model" | "toolbox" | "skills" | "mcp_servers" | "memory";
 
 export interface AgentMapNode {
   id: string;
@@ -250,22 +251,26 @@ export async function buildAgentMap(
       ?.mcp_servers ?? {},
   ).map(([id, version]) => ({ id, version }));
 
-  const [schedules, declaredSkills, packageConfig, connectionReadiness] = await Promise.all([
-    listPackageSchedules(scope, agent.id),
-    resolveDeclaredSkills(agent.manifest, orgId),
-    getPackageConfig(applicationId, agent.id),
-    // Skipped entirely when nothing is declared — the resolver would fan out
-    // per integration for an empty answer.
-    declaredIntegrations.length > 0
-      ? resolveAgentConnectionReadiness({
-          scope,
-          agentPackageId: agent.id,
-          actor: getActor(c),
-          isAdmin,
-          version: versionRef,
-        })
-      : Promise.resolve(null),
-  ]);
+  const [schedules, declaredSkills, packageConfig, connectionReadiness, orgModelList] =
+    await Promise.all([
+      listPackageSchedules(scope, agent.id),
+      resolveDeclaredSkills(agent.manifest, orgId),
+      getPackageConfig(applicationId, agent.id),
+      // Skipped entirely when nothing is declared — the resolver would fan out
+      // per integration for an empty answer.
+      declaredIntegrations.length > 0
+        ? resolveAgentConnectionReadiness({
+            scope,
+            agentPackageId: agent.id,
+            actor: getActor(c),
+            isAdmin,
+            version: versionRef,
+          })
+        : Promise.resolve(null),
+      // `metadataOnly` resolves each model's provider from the registry without
+      // decrypting its credential — the map only needs ids and the default flag.
+      listOrgModels(orgId, { metadataOnly: true }),
+    ]);
 
   const configSchema = agent.manifest.config?.schema
     ? asJSONSchemaObject(agent.manifest.config.schema)
@@ -295,6 +300,18 @@ export async function buildAgentMap(
 
   // --- Left column: what starts a run -------------------------------------
 
+  // The model an agent thinks with: its own override when set, otherwise the
+  // org's default. `resolved: false` is a fact (no model would be available at
+  // run time), NOT a readiness diagnostic — the gate does not check the model,
+  // so inventing one here would make the map claim more than the run does.
+  const orgDefaultModel = orgModelList.find((m) => m.is_default && m.enabled);
+  const resolvedModelId = packageConfig.modelId ?? orgDefaultModel?.id ?? null;
+  // Model ids are opaque row ids; the card needs the human label the model
+  // pickers show. Unknown id (deleted model still pinned on the install) keeps
+  // the id as its own label rather than rendering blank.
+  const resolvedModelLabel =
+    orgModelList.find((m) => m.id === resolvedModelId)?.label ?? resolvedModelId;
+
   const triggers = buildTriggers(schedules.length, !!agent.manifest.input?.schema);
   const leftCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
     {
@@ -308,6 +325,25 @@ export async function buildAgentMap(
         data: { items: scheduleCard(schedules) },
       },
       itemCount: schedules.length,
+    },
+    // The model feeds the agent, like a trigger fires it — an input, not a
+    // capability the agent reaches out to. Putting it here also keeps the two
+    // columns from growing lopsided.
+    {
+      node: {
+        id: "model",
+        type: "model",
+        data: {
+          agent_model_id: packageConfig.modelId,
+          org_default_model_id: orgDefaultModel?.id ?? null,
+          resolved_model_id: resolvedModelId,
+          resolved_model_label: resolvedModelLabel,
+          resolved: resolvedModelId !== null,
+          inherited: packageConfig.modelId === null && resolvedModelId !== null,
+          proxyId: packageConfig.proxyId,
+        },
+      },
+      itemCount: 1,
     },
   ];
 
@@ -363,6 +399,17 @@ export async function buildAgentMap(
     };
   });
 
+  // Memory is a declared capability, not stored state: `note` and `pin` are
+  // opt-in runtime tools, while `recall_memory` is served unconditionally by the
+  // sidecar. Deliberately no counts of pinned blocks or archived notes — those
+  // are per-actor execution state, and the map projects the definition.
+  const declaredRuntimeTools = agent.manifest.runtime_tools ?? [];
+  const memoryItems = [
+    { id: "pin", declared: declaredRuntimeTools.includes("pin"), always: false },
+    { id: "note", declared: declaredRuntimeTools.includes("note"), always: false },
+    { id: "recall_memory", declared: true, always: true },
+  ];
+
   const rightCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
     {
       node: { id: "toolbox", type: "toolbox", data: { items: toolboxItems } },
@@ -391,6 +438,10 @@ export async function buildAgentMap(
         data: { items: declaredMcpServers },
       },
       itemCount: declaredMcpServers.length,
+    },
+    {
+      node: { id: "memory", type: "memory", data: { items: memoryItems } },
+      itemCount: memoryItems.length,
     },
   ];
 

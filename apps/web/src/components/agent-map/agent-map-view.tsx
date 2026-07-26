@@ -34,6 +34,8 @@ import { MapEditDialog, type MapEditKind } from "./map-edit-dialog";
 import {
   AgentNode,
   McpServersNode,
+  MemoryNode,
+  ModelNode,
   SchedulesNode,
   SkillsNode,
   ToolboxNode,
@@ -67,9 +69,11 @@ const NODE_TYPES = {
   triggers: TriggersNode,
   schedules: SchedulesNode,
   agent: AgentNode,
+  model: ModelNode,
   toolbox: ToolboxNode,
   skills: SkillsNode,
   mcp_servers: McpServersNode,
+  memory: MemoryNode,
 } as const;
 
 export function AgentMapView({
@@ -173,7 +177,7 @@ export function AgentMapView({
       {/* Viewport-relative rather than `100vh - header`: the page header varies
           (readiness alerts appear and disappear), and overshooting it pushes the
           canvas below the fold. */}
-      <div className="border-border bg-muted/20 h-[55vh] min-h-[380px] rounded-lg border">
+      <div className="border-border bg-muted/20 h-[60vh] min-h-[420px] rounded-lg border">
         <ReactFlow
           nodes={nodes}
           edges={edges}

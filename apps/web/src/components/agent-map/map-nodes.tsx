@@ -16,7 +16,10 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import {
   AlertTriangle,
+  Brain,
   Clock,
+  Cpu,
+  Globe,
   Lock,
   MessageSquare,
   Play,
@@ -237,6 +240,20 @@ interface SkillItem {
 interface McpServerItem {
   id: string;
   version: string;
+}
+interface ModelData {
+  agent_model_id: string | null;
+  org_default_model_id: string | null;
+  resolved_model_id: string | null;
+  resolved_model_label: string | null;
+  resolved: boolean;
+  inherited: boolean;
+  proxyId: string | null;
+}
+interface MemoryItem {
+  id: string;
+  declared: boolean;
+  always: boolean;
 }
 interface AgentData {
   display_name: string;
@@ -477,6 +494,90 @@ export function SkillsNode({ data }: NodeProps) {
           // A declared-but-missing skill has no detail page to link to.
           {...(item.resolved ? { href: packageDetailPath("skill", item.id) } : {})}
           right={<DiagnosticBadge diagnostics={diagnosticsFor(diags, item.id)} />}
+        />
+      ))}
+    </Card>
+  );
+}
+
+export function ModelNode({ data }: NodeProps) {
+  const { t } = useTranslation("agents");
+  const d = data as unknown as ModelData;
+  const id = agentId(data);
+  return (
+    <Card
+      title={t("map.model")}
+      // An input card: the model feeds the agent (edge `model->agent`).
+      hasOutgoing
+      // Model and proxy are per-application settings, not manifest fields, so
+      // this hands off to the page that owns them rather than editing in place.
+      {...(id
+        ? {
+            action: {
+              href: `${packageDetailPath("agent", id)}#configuration`,
+              label: t("map.chooseModel"),
+            },
+          }
+        : {})}
+    >
+      <Row
+        icon={<Cpu className="size-3.5" />}
+        label={d.resolved_model_label ?? t("map.noModel")}
+        sublabel={
+          d.resolved
+            ? d.inherited
+              ? t("map.modelInherited")
+              : t("map.modelPinned")
+            : t("map.noModelHint")
+        }
+        dimmed={!d.resolved}
+        right={
+          d.resolved ? undefined : (
+            <span className="text-warning shrink-0" title={t("map.noModelHint")}>
+              <AlertTriangle className="size-3.5" />
+            </span>
+          )
+        }
+      />
+      {d.proxyId && d.proxyId !== "none" && (
+        <Row icon={<Globe className="size-3.5" />} label={d.proxyId} sublabel={t("map.proxy")} />
+      )}
+    </Card>
+  );
+}
+
+export function MemoryNode({ data }: NodeProps) {
+  const { t } = useTranslation("agents");
+  const list = items<MemoryItem>(data);
+  const id = agentId(data);
+  return (
+    <Card
+      title={t("map.memory")}
+      hasIncoming
+      // Browsing what the agent actually remembers lives in its Memory tab; this
+      // card only shows which memory capabilities the definition grants.
+      {...(id
+        ? {
+            action: {
+              href: `${packageDetailPath("agent", id)}#memory`,
+              label: t("map.openMemory"),
+            },
+          }
+        : {})}
+    >
+      {list.map((item) => (
+        <Row
+          key={item.id}
+          icon={<Brain className="size-3.5" />}
+          label={t(`map.memoryTool.${item.id}`, { defaultValue: item.id })}
+          sublabel={
+            item.always
+              ? t("map.memoryAlways")
+              : item.declared
+                ? t("map.memoryGranted")
+                : t("map.memoryNotGranted")
+          }
+          dimmed={!item.declared}
         />
       ))}
     </Card>
