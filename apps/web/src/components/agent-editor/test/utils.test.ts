@@ -13,6 +13,7 @@ import {
   manifestToMetadata,
   metadataToManifestPatch,
   getRuntimeTools,
+  withNormalizedRuntimeTools,
   setRuntimeTools,
 } from "../utils";
 import type { SchemaField } from "../schema-section";
@@ -589,12 +590,37 @@ describe("getRuntimeTools", () => {
     expect(getRuntimeTools({ runtime_tools: "not-an-array" })).toEqual([]);
   });
 
-  it("preserves the deprecated `report` tool for backwards compatibility", () => {
+  // Non-regression: `report` was a real runtime tool until it was replaced by
+  // durable `outputs/` documents. Agents saved back then still carry the id;
+  // the editor must ignore it, never render a phantom checkbox for it, and
+  // never surface a validation error to the user because of it.
+  it("drops a retired tool id (`report`) it can no longer render", () => {
     expect(getRuntimeTools({ runtime_tools: ["output", "report", "log"] })).toEqual([
       "output",
-      "report",
       "log",
     ]);
+  });
+});
+
+// ─── withNormalizedRuntimeTools ──────────────────
+
+describe("withNormalizedRuntimeTools", () => {
+  it("strips a retired id from the manifest loaded into the editor", () => {
+    const m = { name: "@o/a", runtime_tools: ["report", "log"] };
+    expect(withNormalizedRuntimeTools(m)).toEqual({ name: "@o/a", runtime_tools: ["log"] });
+  });
+
+  it("removes the field entirely when nothing valid remains", () => {
+    expect(withNormalizedRuntimeTools({ name: "@o/a", runtime_tools: ["report"] })).toEqual({
+      name: "@o/a",
+    });
+  });
+
+  it("returns the same reference when there is nothing to drop", () => {
+    const m = { name: "@o/a", runtime_tools: ["output"] };
+    expect(withNormalizedRuntimeTools(m)).toBe(m);
+    const noField = { name: "@o/a" };
+    expect(withNormalizedRuntimeTools(noField)).toBe(noField);
   });
 });
 

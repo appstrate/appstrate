@@ -30,7 +30,6 @@ import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
-import { Markdown } from "../components/markdown";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys } from "../lib/query-keys";
 import { MemoryPanel } from "../components/persistence/memory-panel";
@@ -82,12 +81,12 @@ export function RunDetailPage() {
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
-  const { historicalLogs, structuredOutput, structuredReport } = useMemo(() => {
+  const { historicalLogs, structuredOutput } = useMemo(() => {
     if (!logs) {
-      return { historicalLogs: [], structuredOutput: null, structuredReport: null };
+      return { historicalLogs: [], structuredOutput: null };
     }
-    const { entries, output, report } = buildLogEntries(logs);
-    return { historicalLogs: entries, structuredOutput: output, structuredReport: report };
+    const { entries, output } = buildLogEntries(logs);
+    return { historicalLogs: entries, structuredOutput: output };
   }, [logs]);
 
   // `EnrichedRun.result` mirrors the jsonb column as `unknown`; the generated
@@ -98,9 +97,6 @@ export function RunDetailPage() {
   const finalOutput =
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
-  const finalReport = structuredReport || execResult?.text || null;
-  const hasReport = !!finalReport;
-  const hasResult = hasOutput || hasReport;
   const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
@@ -115,22 +111,19 @@ export function RunDetailPage() {
   // page size; the list query now runs only when the tab is actually opened.
   const documentCount = (run?.document_counts.input ?? 0) + (run?.document_counts.output ?? 0);
 
-  // Default tab: "result" if the run produced output or a legacy report.
+  // Default tab: "result" if the run emitted a structured output. Anything
+  // meant for a human is a document, surfaced by the Documents tab.
   // useTabWithHash respects the URL hash if present.
-  const defaultTab = hasResult ? "result" : "logs";
+  const defaultTab = hasOutput ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
     ["result", "logs", "memory", "documents", "info"] as const,
     defaultTab,
   );
-  // A bookmarked `#result` on a run with no result selects a tab
+  // A bookmarked `#result` on a run with no output selects a tab
   // whose trigger/content are gated off — render "logs" instead of a blank
   // pane. Clamp at render only (the hash stays "result"), so if late SSE flips
-  // `hasResult` true the Result tab reappears and the user's choice is honored.
-  const effectiveTab = activeTab === "result" && !hasResult ? "logs" : activeTab;
-
-  const autoSubTab: "report" | "data" = hasReport ? "report" : "data";
-  const [userSubTab, setUserSubTab] = useState<"report" | "data" | null>(null);
-  const resultSubTab = userSubTab ?? autoSubTab;
+  // `hasOutput` true the Result tab reappears and the user's choice is honored.
+  const effectiveTab = activeTab === "result" && !hasOutput ? "logs" : activeTab;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -267,7 +260,7 @@ export function RunDetailPage() {
           }
         >
           <TabsList>
-            {hasResult && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
+            {hasOutput && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
             <TabsTrigger value="logs">
               {t("run.tabLogs")}
               {allLogs.length > 0 && (
@@ -341,24 +334,7 @@ export function RunDetailPage() {
         </div>
       </div>
 
-      {effectiveTab === "result" && hasResult && (
-        <div className="space-y-4">
-          {hasReport && hasOutput && (
-            <Tabs value={resultSubTab} onValueChange={(v) => setUserSubTab(v as "report" | "data")}>
-              <TabsList>
-                <TabsTrigger value="report">{t("run.tabReport")}</TabsTrigger>
-                <TabsTrigger value="data">{t("run.tabResult")}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-          {resultSubTab === "report" && hasReport && (
-            <div className="border-border bg-muted/30 overflow-auto rounded-lg border p-4">
-              <Markdown>{finalReport}</Markdown>
-            </div>
-          )}
-          {resultSubTab === "data" && hasOutput && <JsonView data={finalOutput} />}
-        </div>
-      )}
+      {effectiveTab === "result" && hasOutput && <JsonView data={finalOutput} />}
 
       {effectiveTab === "logs" && <LogViewer entries={allLogs} />}
 

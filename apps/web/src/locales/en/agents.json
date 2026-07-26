@@ -107,8 +107,6 @@
   "run.artifacts.code.unknown": "Not saved",
   "run.tabLogs": "Logs",
   "run.tabResultGroup": "Result",
-  "run.tabResult": "Data",
-  "run.tabReport": "Report",
   "run.tabMemory": "Memory",
   "run.memoryEmpty": "No memory was written or updated during this run",
   "run.breadcrumb": "Run #{{number}}",

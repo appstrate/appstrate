@@ -14,7 +14,7 @@ import {
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
-import { SELECTABLE_RUNTIME_TOOLS } from "./runtime-tools-catalog.ts";
+import { SELECTABLE_RUNTIME_TOOLS, isSelectableRuntimeTool } from "./runtime-tools-catalog.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
 export { mcpServerManifestSchema, type McpServerManifest };
@@ -348,6 +348,30 @@ function parseWithSchema(
 }
 
 /**
+ * Drop `runtime_tools` entries the platform no longer knows how to build.
+ *
+ * The runtime-tool set evolves, and a removal is not retroactive: manifests
+ * persisted before it (DB drafts, and published ZIPs which are immutable by
+ * construction) keep the retired id forever. The run path re-validates the
+ * stored manifest, so a hard enum rejection would make every such agent
+ * permanently unrunnable. The runner already ignores ids it cannot build
+ * ({@link buildRuntimeToolDefs} in `runtime-tool-defs.ts`), so validation
+ * mirrors that contract: unknown ids are dropped from the parsed manifest,
+ * never fatal. Save paths that persist `result.manifest` therefore normalise
+ * the field on the next write.
+ *
+ * Returns the input untouched (same reference) when nothing needs dropping —
+ * the copy is only made when the field actually carries a stale id.
+ */
+function dropRetiredRuntimeTools(obj: Record<string, unknown>): Record<string, unknown> {
+  const raw = obj.runtime_tools;
+  if (!Array.isArray(raw)) return obj;
+  const kept = raw.filter(isSelectableRuntimeTool);
+  if (kept.length === raw.length) return obj;
+  return { ...obj, runtime_tools: kept };
+}
+
+/**
  * Validate a raw manifest object by dispatching to the appropriate type-specific schema.
  * Determines the schema from the `type` field (agent, skill, integration) and validates accordingly.
  * @param raw - The raw manifest object to validate (typically parsed from JSON)
@@ -375,7 +399,7 @@ export function validateManifest(raw: unknown): ValidateManifestResult {
   // `type: "mcp-server"`, `name`, `schema_version`, and `dependencies` are
   // all root fields. Dispatch purely on the root `type` discriminator.
   if (type === "mcp-server") return parseWithSchema(mcpServerManifestSchema, raw);
-  if (type === "agent") return parseWithSchema(agentManifestSchema, raw);
+  if (type === "agent") return parseWithSchema(agentManifestSchema, dropRetiredRuntimeTools(obj));
   if (type === "skill") return parseWithSchema(skillManifestSchema, raw);
   if (type === "integration") return parseWithSchema(integrationManifestSchema, raw);
 

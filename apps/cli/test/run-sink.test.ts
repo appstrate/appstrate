@@ -118,7 +118,9 @@ describe("createConsoleSink — human mode", () => {
     expect(streams.stdout).toContain("doing stuff");
   });
 
-  it("renders deprecated report markdown in human mode", async () => {
+  // The `report` runtime tool is gone; a stale emitter's event falls into the
+  // sink's quiet default branch instead of printing anything.
+  it("prints nothing for the retired report.appended event", async () => {
     const sink = createConsoleSink({});
     await sink.handle({
       type: "report.appended",
@@ -126,7 +128,7 @@ describe("createConsoleSink — human mode", () => {
       runId: RUN_ID,
       content: "# Legacy report",
     } as RunEvent);
-    expect(streams.stdout).toBe("# Legacy report\n");
+    expect(streams.stdout).toBe("");
   });
 
   it("writes tool progress with tool name on stdout", async () => {

@@ -135,13 +135,33 @@ export function defaultIntegrationManifest(
  * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS) —
  * the built-in runtime tools the agent author opted into (all opt-in,
  * `output` included). Tolerates a missing or malformed field by returning an
- * empty array. The deprecated `report` id remains valid and is preserved for
- * older manifests even though it is hidden from the editor catalog; genuinely
- * unknown entries are dropped so they cannot block a later save.
+ * empty array. Ids the platform no longer offers (a retired tool such as the
+ * removed `report`, or a hand-typed mistake in the raw-JSON tab) are dropped
+ * so they can never render as a phantom checkbox nor block a later save.
  */
 export function getRuntimeTools(m: Record<string, unknown>): string[] {
   const raw = m.runtime_tools;
   return Array.isArray(raw) ? raw.filter(isSelectableRuntimeTool) : [];
+}
+
+/**
+ * Return the manifest with `runtime_tools` reduced to the ids the platform
+ * still offers. Applied when an existing agent is loaded into the editor, so
+ * a retired id persisted long ago (e.g. `report`) silently disappears on the
+ * next save instead of round-tripping forever — the user is never shown an
+ * error for a field the editor cannot even display.
+ *
+ * Returns the same reference when there is nothing to drop.
+ */
+export function withNormalizedRuntimeTools(m: Record<string, unknown>): Record<string, unknown> {
+  const raw = m.runtime_tools;
+  if (!Array.isArray(raw)) return m;
+  const kept = raw.filter(isSelectableRuntimeTool);
+  if (kept.length === raw.length) return m;
+  const next = { ...m };
+  if (kept.length > 0) next.runtime_tools = kept;
+  else delete next.runtime_tools;
+  return next;
 }
 
 /**

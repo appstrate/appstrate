@@ -107,8 +107,6 @@
   "run.artifacts.code.unknown": "Non enregistré",
   "run.tabLogs": "Logs",
   "run.tabResultGroup": "Résultat",
-  "run.tabResult": "Data",
-  "run.tabReport": "Rapport",
   "run.tabMemory": "Mémoire",
   "run.memoryEmpty": "Aucune mémoire écrite ou modifiée pendant ce run",
   "run.breadcrumb": "Run #{{number}}",

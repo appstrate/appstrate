@@ -150,6 +150,25 @@ describe("validateManifest", () => {
     expect(m.runtime_tools).toEqual(["log", "note"]);
   });
 
+  // Non-regression: `report` was a selectable runtime tool until it was
+  // replaced by durable `outputs/` documents. Manifests persisted before the
+  // removal (DB drafts and — immutably — published ZIPs) still name it, and
+  // the run path re-validates the stored manifest. Rejecting them here would
+  // make every legacy agent permanently unrunnable.
+  it("drops a retired runtime tool id instead of rejecting the manifest", () => {
+    const result = validateManifest(
+      validAgentManifest({ runtime_tools: ["report", "log", "output"] }),
+    );
+    expect(result.valid).toBe(true);
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log", "output"]);
+  });
+
+  it("drops a retired runtime tool id even when it is the only one declared", () => {
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["report"] }));
+    expect(result.valid).toBe(true);
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual([]);
+  });
+
   it("agent with no output schema is valid without the `output` runtime tool", () => {
     // Side-effect-only run: do a task and finish, no result to return.
     const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }));

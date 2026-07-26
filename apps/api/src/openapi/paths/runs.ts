@@ -1313,18 +1313,12 @@ export const runsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Older runners may also send the deprecated markdown `report` aggregate.",
+                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Unknown keys are ignored, so a runner older than the platform still finalizes cleanly.",
               properties: {
                 memories: { type: "array" },
                 pinned: { type: "object" },
                 output: {},
                 logs: { type: "array" },
-                report: {
-                  type: "string",
-                  deprecated: true,
-                  description:
-                    "Deprecated report-tool markdown aggregate. New agents publish markdown documents.",
-                },
                 error: {
                   type: "object",
                   properties: {

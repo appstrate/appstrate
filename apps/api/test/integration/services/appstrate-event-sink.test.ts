@@ -104,16 +104,14 @@ describe("AggregatingEventSink", () => {
     expect(outputLogs[0]!.data).toEqual({ a: 1, b: 2 });
   });
 
-  it("keeps deprecated report events in the reducer and run log", async () => {
+  // The `report` runtime tool was removed in favour of durable `outputs/`
+  // documents. A stale runner still emitting its event must be dropped by the
+  // sink's `default:` branch — no run_logs row, no reducer state, no throw.
+  it("drops the retired report.appended event entirely", async () => {
     const sink = newSink();
     await sink.handle(event("report.appended", { content: "# First" }));
-    await sink.handle(event("report.appended", { content: "Second" }));
 
-    expect(sink.snapshot().report).toBe("# First\nSecond");
-    const reportLogs = (await loadLogs()).filter((l) => l.event === "report");
-    expect(reportLogs).toHaveLength(2);
-    expect(reportLogs[0]!.type).toBe("result");
-    expect(reportLogs[0]!.data).toEqual({ content: "# First" });
+    expect(await loadLogs()).toHaveLength(0);
   });
 
   it("stores output.emitted raw payload — runtime keeps the last emit verbatim", async () => {

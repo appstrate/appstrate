@@ -4858,7 +4858,7 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "report" | "publish_document")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5417,18 +5417,18 @@ export interface components {
             input: {
                 [key: string]: unknown;
             } | null;
-            /** @description What the run produced. Structured output is primary; deprecated report-tool runs may also carry markdown in `text`. `null` while the run is in flight or when no result was emitted. */
+            /** @description What the run produced: the structured output, and nothing else. Human-facing deliverables are documents (see the run's documents), not fields here. `null` while the run is in flight or when no output was emitted. */
             result: {
                 /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
                 /**
                  * @deprecated
-                 * @description Compatibility field for markdown emitted by the deprecated `report` runtime tool. New agents should publish a markdown document.
+                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are markdown documents now (`outputs/report.md`).
                  */
                 text?: string;
                 /**
                  * @deprecated
-                 * @description Present and true when deprecated report text exceeded the 256 KiB storage cap.
+                 * @description HISTORICAL ONLY. Present and true when a pre-removal `text` exceeded the 256 KiB storage cap.
                  */
                 text_truncated?: boolean;
             } | null;
@@ -19084,11 +19084,6 @@ export interface operations {
                     pinned?: Record<string, never>;
                     output?: unknown;
                     logs?: unknown[];
-                    /**
-                     * @deprecated
-                     * @description Deprecated report-tool markdown aggregate. New agents publish markdown documents.
-                     */
-                    report?: string;
                     error?: {
                         message?: string;
                         stack?: string;

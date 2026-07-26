@@ -21,7 +21,6 @@ describe("isCanonicalRunEvent", () => {
       { ...baseEnvelope, type: "pinned.set", key: "persona", content: "agent A" },
       { ...baseEnvelope, type: "output.emitted", data: { ok: true } },
       { ...baseEnvelope, type: "log.written", level: "info", message: "x" },
-      { ...baseEnvelope, type: "report.appended", content: "# Report" },
       { ...baseEnvelope, type: "appstrate.progress", message: "running" },
       { ...baseEnvelope, type: "appstrate.error", message: "boom" },
       {
@@ -42,9 +41,6 @@ describe("isCanonicalRunEvent", () => {
         content: "x",
         scope: "global",
       } as RunEvent),
-    ).toBe(false);
-    expect(
-      isCanonicalRunEvent({ ...baseEnvelope, type: "report.appended", content: 42 } as RunEvent),
     ).toBe(false);
     expect(
       isCanonicalRunEvent({
@@ -80,6 +76,12 @@ describe("isCanonicalRunEvent", () => {
     expect(isCanonicalRunEvent({ ...baseEnvelope, type: "api_call.called", method: "GET" })).toBe(
       false,
     );
+    // `report.appended` was canonical until the report tool was retired in
+    // favour of durable `outputs/` documents — a stale emitter is now
+    // third-party as far as the runtime is concerned.
+    expect(
+      isCanonicalRunEvent({ ...baseEnvelope, type: "report.appended", content: "# Report" }),
+    ).toBe(false);
   });
 
   it("rejects malformed canonical events (tampered payloads)", () => {
@@ -174,9 +176,9 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    // 5 reserved AFPS namespaces (memory/pinned/output/log/report)
+    // 4 reserved AFPS namespaces (memory/pinned/output/log)
     // + 3 appstrate.* platform-internal events (progress/error/metric).
-    expect(arr.length).toBe(8);
+    expect(arr.length).toBe(7);
     expect(new Set(arr).size).toBe(arr.length);
   });
 });

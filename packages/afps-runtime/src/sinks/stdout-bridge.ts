@@ -13,10 +13,10 @@
  *      before forwarding downstream, and on `finalize(result)` merges
  *      that aggregate with the runner's terminal metadata
  *      (`mergeTerminalResult`). Without this wrapper `result.output`,
- *      `result.pinned`, `result.memories`, `result.logs`, and
- *      `result.report` are empty for any runner whose internal reducer
- *      only sees session events — PiRunner is exactly that case. Removing
- *      the wrapper silently drops the output of every run.
+ *      `result.pinned`, `result.memories`, and `result.logs` are empty
+ *      for any runner whose internal reducer only sees session events —
+ *      PiRunner is exactly that case. Removing the wrapper silently
+ *      drops the output of every run.
  *   2. **Stdout interception (only fires for out-of-process emitters).**
  *      `process.stdout.write` is monkey-patched to parse JSON lines,
  *      validate them against the canonical event vocabulary, dispatch
@@ -117,7 +117,7 @@ export function isStdoutEventLine(value: unknown): value is RunEvent {
  * Merge runner-emitted terminal metadata with a separately-aggregated
  * {@link RunResult}.
  *
- *   - Per-event aggregates (memories / pinned / output / logs / report) take the
+ *   - Per-event aggregates (memories / pinned / output / logs) take the
  *     bridge's value when non-empty, otherwise fall back to the
  *     runner's. Lets a runner that already produced a complete result
  *     (anything that doesn't go through stdout-JSONL tools) pass through
@@ -137,11 +137,6 @@ export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResul
     ...(pinned !== undefined ? { pinned } : {}),
     output: aggregate.output ?? runnerResult.output,
     logs: aggregate.logs.length > 0 ? aggregate.logs : runnerResult.logs,
-    ...(aggregate.report !== undefined
-      ? { report: aggregate.report }
-      : runnerResult.report !== undefined
-        ? { report: runnerResult.report }
-        : {}),
     ...(runnerResult.status !== undefined ? { status: runnerResult.status } : {}),
     ...(runnerResult.error !== undefined ? { error: runnerResult.error } : {}),
     ...(runnerResult.durationMs !== undefined ? { durationMs: runnerResult.durationMs } : {}),

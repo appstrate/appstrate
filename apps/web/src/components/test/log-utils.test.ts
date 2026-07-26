@@ -21,7 +21,11 @@ describe("buildLogEntries — output extraction", () => {
 });
 
 describe("buildLogEntries — historical report rows", () => {
-  it("extracts and concatenates report markdown without generic log entries", () => {
+  // The `report` runtime tool is gone; rows written before the removal stay in
+  // `run_logs` forever. They must be skipped outright — without the explicit
+  // exclusion they fall through to the generic branch and surface as
+  // contextless lines in the viewer of every old run.
+  it("excludes dead report rows from the viewer entirely", () => {
     const logs: RawLog[] = [
       {
         type: "result",
@@ -33,12 +37,24 @@ describe("buildLogEntries — historical report rows", () => {
         type: "result",
         level: "info",
         event: "report",
-        data: { content: "Second chunk" },
+        data: { content: "Second chunk", message: "Tool: report" },
       },
     ];
-    const { entries, report } = buildLogEntries(logs);
+    const { entries, output } = buildLogEntries(logs);
     expect(entries).toEqual([]);
-    expect(report).toBe("# Hello\n\nWorld\nSecond chunk");
+    expect(output).toBeNull();
+  });
+
+  it("keeps surrounding progress rows intact around an excluded report row", () => {
+    const logs: RawLog[] = [
+      { type: "progress", level: "debug", message: "before" },
+      { type: "result", level: "info", event: "report", data: { content: "# md" } },
+      { type: "progress", level: "debug", message: "after" },
+    ];
+    const { entries } = buildLogEntries(logs);
+    // The report row also breaks the plain-text coalescing run, so `before`
+    // and `after` stay two distinct entries rather than being merged.
+    expect(entries.map((e) => e.message)).toEqual(["before", "after"]);
   });
 });
 

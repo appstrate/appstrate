@@ -515,15 +515,6 @@ describe("runRemote — happy path", () => {
                 data: { greeting: "hi" },
                 level: "info",
               },
-              {
-                id: 3,
-                runId: "run_5",
-                type: "result",
-                event: "report",
-                message: null,
-                data: { content: "# Legacy report" },
-                level: "info",
-              },
             ] satisfies RemoteRunLog[],
             hasMore: false,
           },
@@ -534,10 +525,7 @@ describe("runRemote — happy path", () => {
             id: "run_5",
             status: "success",
             tokenUsage: { input_tokens: 10, output_tokens: 20 },
-            result: {
-              output: { greeting: "hi" },
-              text: "# Legacy report",
-            },
+            result: { output: { greeting: "hi" } },
           }),
         },
       },
@@ -552,13 +540,12 @@ describe("runRemote — happy path", () => {
 
     // The remote runner emits the same canonical event vocabulary as
     // the local path — `appstrate.progress`, `output.emitted`,
-    // `report.appended`, `appstrate.metric`, `appstrate.finalize` — plus its own
+    // `appstrate.metric`, `appstrate.finalize` — plus its own
     // `appstrate.remote.triggered` envelope as the very first line so
     // jq pipelines can pick the run id without parsing logs.
     expect(types[0]).toBe("appstrate.remote.triggered");
     expect(types).toContain("appstrate.progress");
     expect(types).toContain("output.emitted");
-    expect(types).toContain("report.appended");
     expect(types).toContain("appstrate.metric");
     expect(types).toContain("appstrate.finalize");
 
@@ -567,7 +554,7 @@ describe("runRemote — happy path", () => {
     expect(metric.usage).toEqual({ input_tokens: 10, output_tokens: 20 });
     expect(metric.cost).toBe(0.0123);
     const finalized = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.finalize");
-    expect(finalized.result.report).toBe("# Legacy report");
+    expect(finalized.result.output).toEqual({ greeting: "hi" });
   });
 });
 
