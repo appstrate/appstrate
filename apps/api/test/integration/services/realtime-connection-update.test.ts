@@ -98,7 +98,11 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
   // their `toHaveBeenCalledTimes(N)` assertions by one. Mirrors the teardown in
   // `notify-triggers.test.ts` (see its comment for the CI-flake history).
   afterAll(async () => {
-    await db.execute(sql`DROP TRIGGER IF EXISTS runs_notify_trigger ON runs`);
+    // The runs trigger is split in two — INSERT (unconditional) and UPDATE
+    // (guarded by a WHEN clause). `createNotifyTriggers` already dropped the
+    // pre-split `runs_notify_trigger` name when it installed these.
+    await db.execute(sql`DROP TRIGGER IF EXISTS runs_notify_insert_trigger ON runs`);
+    await db.execute(sql`DROP TRIGGER IF EXISTS runs_notify_update_trigger ON runs`);
     await db.execute(sql`DROP TRIGGER IF EXISTS run_logs_notify_trigger ON run_logs`);
     await db.execute(
       sql`DROP TRIGGER IF EXISTS integration_connections_notify_trigger ON integration_connections`,

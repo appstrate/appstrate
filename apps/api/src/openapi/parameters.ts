@@ -27,6 +27,16 @@ export const parameters = {
       "When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents.",
     schema: { type: "boolean", default: false },
   },
+  SseChannels: {
+    name: "channels",
+    in: "query" as const,
+    required: false,
+    description:
+      "Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). " +
+      "Omit to receive every channel (default, unchanged behaviour). Unknown names are ignored; if nothing is recognised the stream falls back to every channel. " +
+      "Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it.",
+    schema: { type: "string", example: "run_update,connection_update" },
+  },
   AppstrateUser: {
     name: "Appstrate-User",
     in: "header" as const,

@@ -16,6 +16,18 @@ const SSE_ID_FIELD_DESCRIPTION =
   "Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — " +
   "reconnect lands on the live tail; missed events are not replayed.";
 
+/**
+ * Shared documentation snippet for the optional `channels` subscription
+ * filter. Server-side filtering: a stream that does not declare a channel
+ * never has those frames serialized for it. Omitting the parameter keeps the
+ * historical "everything" behaviour so existing clients are unaffected.
+ */
+const SSE_CHANNELS_DESCRIPTION =
+  "\n\nChannel selection: pass `channels=` with a comma-separated subset " +
+  "(e.g. `channels=run_update,connection_update`) to receive only those frames. " +
+  "The filter is applied server-side before serialization. Omit it to receive every channel. " +
+  "Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.";
+
 export const realtimePaths = {
   "/api/realtime/runs": {
     get: {
@@ -24,12 +36,14 @@ export const realtimePaths = {
       summary: "SSE: all run status changes",
       description:
         'Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {"id":"run_...","status":"running","packageId":"@scope/name",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller\'s own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n' +
-        SSE_ID_FIELD_DESCRIPTION,
+        SSE_ID_FIELD_DESCRIPTION +
+        SSE_CHANNELS_DESCRIPTION,
       parameters: [
         { $ref: "#/components/parameters/SseOrgId" },
         { $ref: "#/components/parameters/SseAppId" },
         { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
+        { $ref: "#/components/parameters/SseChannels" },
       ],
       responses: {
         "200": {
@@ -48,13 +62,15 @@ export const realtimePaths = {
       summary: "SSE: single run events",
       description:
         "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n" +
-        SSE_ID_FIELD_DESCRIPTION,
+        SSE_ID_FIELD_DESCRIPTION +
+        SSE_CHANNELS_DESCRIPTION,
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/SseOrgId" },
         { $ref: "#/components/parameters/SseAppId" },
         { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
+        { $ref: "#/components/parameters/SseChannels" },
       ],
       responses: {
         "200": {
@@ -73,7 +89,8 @@ export const realtimePaths = {
       summary: "SSE: agent run changes",
       description:
         "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n" +
-        SSE_ID_FIELD_DESCRIPTION,
+        SSE_ID_FIELD_DESCRIPTION +
+        SSE_CHANNELS_DESCRIPTION,
       parameters: [
         {
           name: "packageId",
@@ -86,6 +103,7 @@ export const realtimePaths = {
         { $ref: "#/components/parameters/SseAppId" },
         { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
+        { $ref: "#/components/parameters/SseChannels" },
       ],
       responses: {
         "200": {

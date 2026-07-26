@@ -7,14 +7,31 @@ import { db } from "@appstrate/db/client";
 import { getAuth } from "@appstrate/db/auth";
 import { organizationMembers, runs } from "@appstrate/db/schema";
 import { scopedWhere } from "../lib/db-helpers.ts";
-import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
-import type { RealtimeEvent } from "../services/realtime.ts";
+import { addSubscriber, removeSubscriber, REALTIME_CHANNELS } from "../services/realtime.ts";
+import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
 import { resolveApiKeyPermissions } from "../lib/permissions.ts";
 import { validateApplicationInOrg } from "../middleware/app-context.ts";
 import { logger } from "../lib/logger.ts";
 import type { OrgRole } from "../types/index.ts";
+
+/**
+ * Hard cap on frames queued for one subscriber before we give up on it.
+ *
+ * Sized well above any legitimate burst: the loudest producer is `run_log`
+ * on a verbose single-run stream, and a run that emits 2 000 unread log
+ * frames faster than the socket accepts them is a consumer that has stopped
+ * reading, not a fast run.
+ */
+const MAX_PENDING_EVENTS = 2_000;
+
+/**
+ * How long a single frame write may stay unsettled before the connection is
+ * treated as dead. Generous on purpose — frames are small and the keep-alive
+ * period is 30 s, so exceeding this means the peer is not draining at all.
+ */
+const WRITE_DEADLINE_MS = 60_000;
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
@@ -26,6 +43,31 @@ function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
   // `result`); `run_metric` is bounded numerics + four ids; `connection_update`
   // is identifiers + flags — all pass through unmodified.
   return evt.data;
+}
+
+/**
+ * Parse the optional `?channels=` subscription filter.
+ *
+ * Contract (deliberately fail-open):
+ *   • parameter absent            → `undefined` = subscribe to every channel.
+ *     This is what every pre-existing client (CLI, SDKs, integrators) sends,
+ *     so their stream is byte-identical to before.
+ *   • parameter present           → the intersection with the known channel
+ *     names. Unknown tokens are ignored rather than rejected so adding a
+ *     channel later can't 400 an older client that hardcoded a list.
+ *   • nothing recognised          → `undefined` (every channel) rather than an
+ *     empty subscription. A typo must degrade to "too much data", never to a
+ *     silently dead stream.
+ */
+function parseChannels(raw: string | undefined): ReadonlySet<RealtimeChannel> | undefined {
+  if (raw === undefined) return undefined;
+  const requested = new Set<RealtimeChannel>();
+  for (const token of raw.split(",")) {
+    const name = token.trim();
+    const known = REALTIME_CHANNELS.find((c) => c === name);
+    if (known) requested.add(known);
+  }
+  return requested.size > 0 ? requested : undefined;
 }
 
 interface SSEAuthResult {
@@ -147,6 +189,7 @@ function openRealtimeStream(
      */
     userId?: string;
     endUserId?: string;
+    channels?: ReadonlySet<RealtimeChannel>;
   },
   verbose: boolean,
   onSubscribe?: (send: (evt: RealtimeEvent) => void) => void | Promise<void>,
@@ -156,8 +199,40 @@ function openRealtimeStream(
     // immediately via the stream's own async context (avoids Bun buffering).
     const pending: { event: string; data: string }[] = [];
     let wake: (() => void) | null = null;
+    /** Set when this subscriber was dropped for being unable to keep up. */
+    let droppedForBackpressure = false;
 
     const send = (evt: RealtimeEvent) => {
+      if (droppedForBackpressure) return;
+      // Backpressure policy — DROP THE SUBSCRIBER, don't grow the server.
+      //
+      // `pending` is filled synchronously from PG LISTEN callbacks and drained
+      // by the stream's own async loop. A consumer that stops reading (dead
+      // TCP peer, suspended tab, a client whose socket has a full send buffer)
+      // stalls the drain while the producer keeps pushing, so an unbounded
+      // queue turns one wedged client into unbounded API-process memory —
+      // multiplied by every open stream.
+      //
+      // Trade-off, stated plainly: a dropped subscriber LOSES EVENTS. There is
+      // no `Last-Event-ID` replay (see the resume note below), so the client's
+      // reconnect lands on the live tail and the gap is permanent. That is
+      // accepted deliberately: a client this far behind is already showing
+      // stale state, the browser hooks reconnect automatically, and the
+      // alternative (unbounded growth) degrades every other tenant on the
+      // process. The cap is sized so only a genuinely stuck consumer trips it.
+      if (pending.length >= MAX_PENDING_EVENTS) {
+        droppedForBackpressure = true;
+        pending.length = 0;
+        removeSubscriber(subId);
+        logger.warn("SSE subscriber dropped — outbound queue overflowed", {
+          subId,
+          cap: MAX_PENDING_EVENTS,
+          runId: filter.runId,
+          packageId: filter.packageId,
+        });
+        wake?.();
+        return;
+      }
       const payload = verbose ? evt.data : stripPayload(evt);
       pending.push({ event: evt.event, data: JSON.stringify(payload) });
       wake?.();
@@ -168,6 +243,14 @@ function openRealtimeStream(
       removeSubscriber(subId);
       wake?.();
     });
+    // Belt-and-braces teardown for half-open connections. Hono only wires its
+    // `c.req.raw.signal` listener on Bun < 1.2 (`isOldBunVersion` in
+    // hono/helper/streaming/sse), so on current Bun the ONLY abort path is
+    // `responseReadable.cancel()` — which covers a clean disconnect but not a
+    // peer that vanished without a FIN. When the runtime does abort the
+    // request signal we tear down immediately instead of waiting for the
+    // write deadline below. `stream.abort()` is idempotent.
+    c.req.raw.signal.addEventListener("abort", () => stream.abort(), { once: true });
     void Promise.resolve(onSubscribe?.(send)).catch((err: unknown) => {
       logger.warn("SSE initial snapshot failed", {
         subId,
@@ -202,38 +285,87 @@ function openRealtimeStream(
     let nextEventId = 0;
     const allocateId = (): string => `${subId}:${++nextEventId}`;
 
-    // Immediate ping confirms the connection is alive.
-    await stream.writeSSE({ event: "ping", data: "", id: allocateId() });
-
-    const PING_INTERVAL = 30_000;
-    let lastWrite = Date.now();
-
-    while (!stream.aborted) {
-      // Drain any queued events
-      while (pending.length > 0) {
-        const msg = pending.shift()!;
-        await stream.writeSSE({ ...msg, id: allocateId() });
-        lastWrite = Date.now();
-      }
-
-      // Wait for next event or ping timeout, whichever comes first
-      const elapsed = Date.now() - lastWrite;
-      const timeout = Math.max(0, PING_INTERVAL - elapsed);
-
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, timeout);
-        wake = () => {
-          clearTimeout(timer);
-          resolve();
-        };
+    /**
+     * Write one frame with a deadline.
+     *
+     * Hono's `StreamingApi.write` swallows writer errors and never flips
+     * `stream.aborted`, so a half-open peer surfaces here as a write that
+     * simply never settles (the TransformStream stops being pulled once the
+     * runtime's socket buffer fills). Racing a timer converts that silent
+     * wedge into a normal teardown. Returns false when the deadline expired.
+     */
+    const writeFrame = async (msg: {
+      event: string;
+      data: string;
+      id: string;
+    }): Promise<boolean> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), WRITE_DEADLINE_MS);
       });
-      wake = null;
-
-      // If no events were queued during the wait, send a keep-alive ping
-      if (pending.length === 0) {
-        await stream.writeSSE({ event: "ping", data: "", id: allocateId() });
-        lastWrite = Date.now();
+      try {
+        return await Promise.race([stream.writeSSE(msg).then(() => true), deadline]);
+      } finally {
+        clearTimeout(timer);
       }
+    };
+
+    try {
+      // Immediate ping confirms the connection is alive.
+      await writeFrame({ event: "ping", data: "", id: allocateId() });
+
+      const PING_INTERVAL = 30_000;
+      let lastWrite = Date.now();
+
+      while (!stream.aborted && !droppedForBackpressure) {
+        // Drain any queued events
+        while (pending.length > 0) {
+          const msg = pending.shift()!;
+          if (!(await writeFrame({ ...msg, id: allocateId() }))) {
+            logger.warn("SSE write deadline exceeded — closing stalled stream", {
+              subId,
+              deadlineMs: WRITE_DEADLINE_MS,
+            });
+            stream.abort();
+            return;
+          }
+          lastWrite = Date.now();
+        }
+        if (droppedForBackpressure) break;
+
+        // Wait for next event or ping timeout, whichever comes first
+        const elapsed = Date.now() - lastWrite;
+        const timeout = Math.max(0, PING_INTERVAL - elapsed);
+
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, timeout);
+          wake = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+        wake = null;
+
+        // If no events were queued during the wait, send a keep-alive ping
+        if (pending.length === 0 && !droppedForBackpressure) {
+          if (!(await writeFrame({ event: "ping", data: "", id: allocateId() }))) {
+            logger.warn("SSE keep-alive deadline exceeded — closing stalled stream", {
+              subId,
+              deadlineMs: WRITE_DEADLINE_MS,
+            });
+            stream.abort();
+            return;
+          }
+          lastWrite = Date.now();
+        }
+      }
+    } finally {
+      // Single guaranteed unsubscribe point. `onAbort` covers clean
+      // disconnects, but the loop can also exit via the backpressure drop or
+      // the write deadline — leaving the subscriber registered would keep the
+      // fan-out pushing into a queue nobody drains. `removeSubscriber` is a
+      // `Map.delete`, so calling it twice is harmless.
+      removeSubscriber(subId);
     }
   });
 }
@@ -310,6 +442,7 @@ export function createRealtimeRouter() {
         applicationId: validated.applicationId,
         isAdmin: validated.isAdmin,
         userId: validated.userId,
+        channels: parseChannels(c.req.query("channels")),
       },
       verbose,
       (send) =>
@@ -339,6 +472,7 @@ export function createRealtimeRouter() {
         applicationId: validated.applicationId,
         isAdmin: validated.isAdmin,
         userId: validated.userId,
+        channels: parseChannels(c.req.query("channels")),
       },
       verbose,
     );
@@ -360,6 +494,7 @@ export function createRealtimeRouter() {
         applicationId: validated.applicationId,
         isAdmin: validated.isAdmin,
         userId: validated.userId,
+        channels: parseChannels(c.req.query("channels")),
       },
       verbose,
     );

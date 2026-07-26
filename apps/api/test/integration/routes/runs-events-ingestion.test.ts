@@ -45,6 +45,10 @@ import {
   synthesiseFinalize,
 } from "../../../src/services/run-event-ingestion.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import {
+  scheduleRunMetricBroadcast,
+  activeRunMetricThrottleCount,
+} from "../../../src/services/run-metric-broadcaster.ts";
 import { getRunFull } from "../../../src/services/state/runs.ts";
 import type { RunArtifactsSummary } from "@appstrate/db/schema";
 import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
@@ -851,6 +855,35 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.status).toBe("failed");
     expect(row?.error).toMatch(/could not reach the LLM API/);
     expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
+  });
+
+  // The metric broadcaster keeps a per-run throttle entry in module memory.
+  // It used to be released from inside `finalizeRunImpl`, so any throw in the
+  // post-CAS side effects leaked the entry for the lifetime of the process.
+  // The release now lives in `finalizeRun`'s `finally`, which covers every
+  // exit — including the idempotent "sink already closed" early return.
+  it("releases the metric throttle entry on every finalize exit", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 10, output_tokens: 5 },
+    });
+    const baseline = activeRunMetricThrottleCount();
+
+    scheduleRunMetricBroadcast(runId);
+    expect(activeRunMetricThrottleCount()).toBe(baseline + 1);
+
+    const run = await getRunSinkContext(runId);
+    const result = emptyRunResult();
+    result.status = "success";
+    await finalizeRun({ run: run!, result });
+    expect(activeRunMetricThrottleCount()).toBe(baseline);
+
+    // Second finalize takes the idempotent branch (sink already closed) and
+    // must still release an entry created in between.
+    scheduleRunMetricBroadcast(runId);
+    expect(activeRunMetricThrottleCount()).toBe(baseline + 1);
+    const reread = await getRunSinkContext(runId);
+    await finalizeRun({ run: reread!, result });
+    expect(activeRunMetricThrottleCount()).toBe(baseline);
   });
 
   it("strips unknown keys from finalize usage before the runs.tokenUsage write", async () => {

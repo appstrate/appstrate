@@ -14,6 +14,17 @@ import {
 
 export type { RealtimeEvent };
 
+/** Every channel name the fan-out can emit (`ping` is transport-level, not a channel). */
+export type RealtimeChannel = RealtimeEvent["event"];
+
+export const REALTIME_CHANNELS: readonly RealtimeChannel[] = [
+  "run_update",
+  "run_log",
+  "run_metric",
+  "connection_update",
+  "chat_session_update",
+];
+
 type Subscriber = {
   id: string;
   filter: {
@@ -22,6 +33,15 @@ type Subscriber = {
     orgId: string;
     applicationId: string;
     isAdmin?: boolean;
+    /**
+     * Channels the subscriber declared interest in. `undefined` means "every
+     * channel" — the historical behaviour, preserved so an existing client
+     * (CLI, SDK, integrator) that never learned about the parameter keeps
+     * receiving the full stream. A declared set only ever REMOVES frames the
+     * subscriber would have thrown away client-side, so no consumer can lose
+     * data it was actually reading.
+     */
+    channels?: ReadonlySet<RealtimeChannel>;
     /**
      * Actor identity for the `connection_update` channel. The trigger
      * fires for every connection on the application; the subscriber
@@ -38,6 +58,36 @@ type Subscriber = {
 
 const subscribers = new Map<string, Subscriber>();
 let initialized = false;
+
+/**
+ * Channel gate — the cheapest possible check, so it runs FIRST in every
+ * fan-out loop (before the org/app/run comparisons and, critically, before
+ * `JSON.stringify` in the subscriber's `send`).
+ *
+ * A subscriber with no declared channel set accepts everything.
+ */
+function accepts(sub: Subscriber, channel: RealtimeChannel): boolean {
+  return sub.filter.channels === undefined || sub.filter.channels.has(channel);
+}
+
+/**
+ * Cheap pre-gate: is ANY connected subscriber interested in this channel?
+ *
+ * When nobody is, we skip `JSON.parse` + Zod validation of the payload
+ * entirely — which is the whole point for `run_log`, whose NOTIFY payload
+ * carries up to 6 KB of log `data` per row and used to be parsed and
+ * validated on every insert even when every open stream discarded it.
+ *
+ * This can only skip work that would have produced zero `send()` calls:
+ * the per-subscriber loop below re-checks `accepts()` for each subscriber,
+ * so a `true` here never widens fan-out.
+ */
+function anyAccepts(channel: RealtimeChannel): boolean {
+  for (const sub of subscribers.values()) {
+    if (accepts(sub, channel)) return true;
+  }
+  return false;
+}
 
 /** Convert snake_case keys from PG NOTIFY to camelCase for API consistency. */
 function snakeToCamel(obj: Record<string, unknown>): Record<string, unknown> {
@@ -59,6 +109,7 @@ export async function initRealtime(): Promise<void> {
 
   await listenClient.listen("run_update", (payload) => {
     try {
+      if (!anyAccepts("run_update")) return;
       const raw = JSON.parse(payload) as Record<string, unknown>;
       const parsed = runUpdateEventSchema.safeParse(snakeToCamel(raw));
       if (!parsed.success) {
@@ -68,6 +119,7 @@ export async function initRealtime(): Promise<void> {
         return;
       }
       for (const sub of subscribers.values()) {
+        if (!accepts(sub, "run_update")) continue;
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.id) continue;
@@ -93,6 +145,9 @@ export async function initRealtime(): Promise<void> {
 
   await listenClient.listen("run_log_insert", (payload) => {
     try {
+      // The firehose. Every `run_logs` INSERT lands here; when no open stream
+      // declared the `run_log` channel we drop it before paying for the parse.
+      if (!anyAccepts("run_log")) return;
       const raw = JSON.parse(payload) as Record<string, unknown>;
       const parsed = runLogEventSchema.safeParse(snakeToCamel(raw));
       if (!parsed.success) {
@@ -102,6 +157,7 @@ export async function initRealtime(): Promise<void> {
         return;
       }
       for (const sub of subscribers.values()) {
+        if (!accepts(sub, "run_log")) continue;
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
@@ -133,6 +189,7 @@ export async function initRealtime(): Promise<void> {
   // broadcaster payload contract.
   await listenClient.listen("run_metric", (payload) => {
     try {
+      if (!anyAccepts("run_metric")) return;
       const raw = JSON.parse(payload) as Record<string, unknown>;
       const parsed = runMetricEventSchema.safeParse(snakeToCamel(raw));
       if (!parsed.success) {
@@ -142,6 +199,7 @@ export async function initRealtime(): Promise<void> {
         return;
       }
       for (const sub of subscribers.values()) {
+        if (!accepts(sub, "run_metric")) continue;
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
@@ -176,6 +234,7 @@ export async function initRealtime(): Promise<void> {
   // `applicationId ∈ orgId`.
   await listenClient.listen("connection_update", (payload) => {
     try {
+      if (!anyAccepts("connection_update")) return;
       const raw = JSON.parse(payload) as Record<string, unknown>;
       const parsed = connectionUpdateEventSchema.safeParse(snakeToCamel(raw));
       if (!parsed.success) {
@@ -186,6 +245,7 @@ export async function initRealtime(): Promise<void> {
       }
       const data = parsed.data;
       for (const sub of subscribers.values()) {
+        if (!accepts(sub, "connection_update")) continue;
         if (sub.filter.applicationId !== raw.application_id) continue;
         // Actor filter: only fan out rows the subscriber owns. Without
         // this, every member of an app would receive every other
@@ -216,6 +276,7 @@ export async function initRealtime(): Promise<void> {
   // subscriptions without an actor are skipped rather than leaked to.
   await listenClient.listen("chat_session_update", (payload) => {
     try {
+      if (!anyAccepts("chat_session_update")) return;
       const raw = JSON.parse(payload) as Record<string, unknown>;
       const parsed = chatSessionUpdateEventSchema.safeParse(snakeToCamel(raw));
       if (!parsed.success) {
@@ -226,6 +287,7 @@ export async function initRealtime(): Promise<void> {
         return;
       }
       for (const sub of subscribers.values()) {
+        if (!accepts(sub, "chat_session_update")) continue;
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.userId === undefined || sub.filter.userId !== raw.user_id) continue;
         sub.send({ event: "chat_session_update", data: parsed.data });
@@ -246,4 +308,16 @@ export function addSubscriber(sub: Subscriber): void {
 
 export function removeSubscriber(id: string): void {
   subscribers.delete(id);
+}
+
+/**
+ * Test-only introspection — number of registered subscribers.
+ *
+ * Used to assert that a stream dropped for backpressure actually
+ * unregisters (the drop happens inside the route's stream closure, whose
+ * subscriber id is generated internally). Compare a delta, not an absolute:
+ * the whole test process shares this map.
+ */
+export function activeSubscriberCount(): number {
+  return subscribers.size;
 }
