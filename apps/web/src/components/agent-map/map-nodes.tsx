@@ -26,7 +26,9 @@ import {
   Terminal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import type { AgentMapDiagnostic } from "../../hooks/use-agent-map";
+import { packageDetailPath } from "../../lib/package-paths";
 
 // ---------------------------------------------------------------------------
 // Shared shell
@@ -89,28 +91,44 @@ function Card({
   );
 }
 
+/**
+ * One list line. With `href` it becomes a link to the resource it describes, so
+ * a flagged row is also the way to go fix it — the map is read-only about the
+ * agent's definition, not a dead end. Routes are built client-side from the
+ * package id: the server has no business knowing the SPA's URLs.
+ */
 function Row({
   icon,
   label,
   sublabel,
   right,
   dimmed,
+  href,
 }: {
   icon?: React.ReactNode;
   label: string;
   sublabel?: string | null;
   right?: React.ReactNode;
   dimmed?: boolean;
+  href?: string | undefined;
 }) {
-  return (
-    <div className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${dimmed ? "opacity-50" : ""}`}>
+  const body = (
+    <>
       {icon && <span className="text-muted-foreground shrink-0">{icon}</span>}
       <div className="min-w-0 flex-1">
         <div className="truncate text-xs font-medium">{label}</div>
         {sublabel && <div className="text-muted-foreground truncate text-[11px]">{sublabel}</div>}
       </div>
       {right}
-    </div>
+    </>
+  );
+  const className = `flex items-center gap-2 rounded-md px-2 py-1.5 ${dimmed ? "opacity-50" : ""}`;
+  if (!href) return <div className={className}>{body}</div>;
+  return (
+    // `nopan` keeps the canvas still while the pointer is on a link.
+    <Link to={href} className={`${className} hover:bg-muted/60 nopan transition-colors`}>
+      {body}
+    </Link>
   );
 }
 
@@ -227,6 +245,7 @@ export function SchedulesNode({ data }: NodeProps) {
             .filter(Boolean)
             .join(" · ")}
           dimmed={!item.enabled}
+          href={`/schedules/${item.id}`}
           right={
             !item.enabled ? (
               <span className="text-muted-foreground text-[10px]">{t("map.disabled")}</span>
@@ -304,6 +323,7 @@ export function ToolboxNode({ data }: NodeProps) {
             label={item.id}
             sublabel={`${item.declared_version} · ${toolLabel}`}
             dimmed={item.connected === false}
+            href={packageDetailPath("integration", item.id)}
             right={
               <span className="flex items-center gap-1">
                 {item.locked && (
@@ -334,6 +354,8 @@ export function SkillsNode({ data }: NodeProps) {
           label={item.name ?? item.id}
           sublabel={item.declared_version}
           dimmed={!item.resolved}
+          // A declared-but-missing skill has no detail page to link to.
+          {...(item.resolved ? { href: packageDetailPath("skill", item.id) } : {})}
           right={<DiagnosticBadge diagnostics={diagnosticsFor(diags, item.id)} />}
         />
       ))}
@@ -353,6 +375,7 @@ export function McpServersNode({ data }: NodeProps) {
           icon={<Server className="size-3.5" />}
           label={item.id}
           sublabel={item.version}
+          href={packageDetailPath("mcp-server", item.id)}
           right={<DiagnosticBadge diagnostics={diagnosticsFor(diags, item.id)} />}
         />
       ))}

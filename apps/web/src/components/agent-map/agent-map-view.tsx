@@ -118,6 +118,21 @@ export function AgentMapView({
 
   return (
     <div className="space-y-3">
+      {/* Which definition is drawn, and how much of it is broken. Without this
+          the reader cannot tell a draft map from an archived version's. */}
+      <div className="text-muted-foreground flex items-center gap-3 text-xs">
+        <span>
+          {data.agent.version_ref === "draft"
+            ? t("map.draftDefinition")
+            : t("map.pinnedDefinition", { version: data.agent.version_ref })}
+        </span>
+        {data.diagnostics.length > 0 && (
+          <span className="text-warning flex items-center gap-1">
+            <AlertTriangle className="size-3.5" />
+            {t("map.issueCount", { count: data.diagnostics.length })}
+          </span>
+        )}
+      </div>
       {orphanDiagnostics.length > 0 && (
         <div className="border-warning/40 bg-warning/10 flex flex-col gap-1 rounded-lg border p-3">
           {orphanDiagnostics.map((d) => (
