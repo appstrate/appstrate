@@ -31,13 +31,26 @@ import {
   type Api,
   type Model,
 } from "@appstrate/runner-pi";
-import { mergeTurnMetadata, CHAT_MAX_STEPS } from "@appstrate/core/chat-turn-metadata";
+import {
+  mergeTurnMetadata,
+  CHAT_MAX_STEPS,
+  CHAT_TOOL_STEP_BUDGET,
+} from "@appstrate/core/chat-turn-metadata";
 import type { SubscriptionChatModel, ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
+import { logger } from "../logger.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
 import { acquirePiChatSlot, chatCapacityResponse, releaseOnClose } from "./concurrency.ts";
+import {
+  ChatTurnDeadlineError,
+  createStepCapController,
+  resolveTurnClosure,
+  turnDeadlineNoticeText,
+  turnNoticeChunks,
+  type PiChatSession,
+} from "./turn-control.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -88,12 +101,16 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
       const write = (chunk: UIMessageChunk): void => writer.write(chunk);
 
       // Deadline + explicit-stop → one combined abort threaded into the prompt.
+      // The two causes are NOT interchangeable at the finish line (an explicit
+      // stop is a normal ending; a deadline is a truncation the user must be
+      // told about), so the deadline tags its abort reason — see
+      // `resolveTurnClosure`.
       const turnAbort = new AbortController();
       const forwardAbort = (): void => turnAbort.abort(abortSignal.reason);
       if (abortSignal.aborted) turnAbort.abort(abortSignal.reason);
       else abortSignal.addEventListener("abort", forwardAbort, { once: true });
       const deadline = setTimeout(
-        () => turnAbort.abort(new Error("chat turn deadline")),
+        () => turnAbort.abort(new ChatTurnDeadlineError(TURN_DEADLINE_MS)),
         TURN_DEADLINE_MS,
       );
 
@@ -186,11 +203,16 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
 
         write(mapper.startChunk(crypto.randomUUID()));
 
-        const typedSession = session as unknown as {
-          subscribe(cb: (event: unknown) => void): void;
-          prompt(message: string): Promise<void>;
-          abort?(): Promise<void>;
-        };
+        const typedSession = session as unknown as PiChatSession;
+
+        // Enforce CHAT_MAX_STEPS on this engine too (it used to be reported and
+        // never applied). The cap cuts the TOOL loop one step early and the
+        // closing tool-less call below spends the last step on an answer.
+        const stepCap = createStepCapController({
+          modelCallCount: () => mapper.stepCount(),
+        });
+        stepCap.attach(typedSession);
+
         typedSession.subscribe((raw) => {
           for (const chunk of mapper.map(raw as AgentSessionEvent)) write(chunk);
         });
@@ -203,6 +225,19 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
 
         try {
           await Promise.race([typedSession.prompt(input.prompt), abortPromise]);
+          // Early-stopping generate: the tool loop was cut at
+          // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model
+          // call — the user gets a synthesis of the work already done instead of
+          // a truncated tool call. Same contract as the ai-sdk engine's final
+          // step (`prepareAiSdkChatStep`).
+          if (stepCap.fired()) {
+            logger.info("chat turn step cap reached", {
+              chatSessionId: input.chatSessionId,
+              stepCount: mapper.stepCount(),
+              toolStepBudget: CHAT_TOOL_STEP_BUDGET,
+            });
+            await Promise.race([stepCap.runFinalStep(typedSession), abortPromise]);
+          }
         } catch (err) {
           // An explicit stop / deadline surfaces as an abort — end the turn
           // gracefully (the partial stream is already delivered) rather than
@@ -231,15 +266,42 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         if (errorText) write({ type: "error", errorText });
 
         const stepCount = mapper.stepCount();
+        const closure = resolveTurnClosure({
+          aborted: turnAbort.signal.aborted,
+          abortReason: turnAbort.signal.reason,
+          finishReason: meta.finishReason,
+        });
+        // Same invariant, second failure mode: a turn killed by the deadline
+        // used to end in complete silence (the abort was swallowed and no
+        // `errorText` existed). It gets a REAL text part — an `error` chunk is
+        // transient and never becomes a persisted message part.
+        if (closure.deadlineReached) {
+          logger.warn("chat turn deadline reached", {
+            chatSessionId: input.chatSessionId,
+            stepCount,
+            deadlineMs: TURN_DEADLINE_MS,
+          });
+          const notice = turnNoticeChunks(
+            crypto.randomUUID(),
+            turnDeadlineNoticeText(TURN_DEADLINE_MS),
+          );
+          for (const chunk of notice) write(chunk);
+        }
+
         write({
           type: "finish",
           messageMetadata: mergeTurnMetadata(undefined, {
             engine: "subscription",
-            finishReason: meta.finishReason,
+            finishReason: closure.finishReason,
             ...(errorText ? { errorText } : {}),
             stepCount,
             maxSteps: CHAT_MAX_STEPS,
-            maxStepsReached: stepCount >= CHAT_MAX_STEPS,
+            toolStepBudget: CHAT_TOOL_STEP_BUDGET,
+            // Both flags report the CAP, not arithmetic: a turn that never hit
+            // the budget must not claim it did just because a retry pushed the
+            // model-call count to the ceiling.
+            toolStepBudgetReached: stepCap.fired(),
+            maxStepsReached: stepCap.fired(),
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
           }),
         });

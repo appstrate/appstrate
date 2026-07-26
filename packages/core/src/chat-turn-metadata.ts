@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export type ChatTurnEngine = "ai-sdk" | "subscription";
+/**
+ * `deadline` is Appstrate's own reason (no provider emits it): the turn was cut
+ * by the engine's wall-clock ceiling. It exists so a timed-out turn stops being
+ * disguised as the provider reason of its last completed step (typically
+ * `tool-calls`), which made a silent truncation indistinguishable from a normal
+ * tool step.
+ */
 export type ChatTurnFinishReason =
-  "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" | "unknown";
+  "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" | "deadline" | "unknown";
 
 export const CHAT_MAX_STEPS = 16;
 export const CHAT_TOOL_STEP_BUDGET = CHAT_MAX_STEPS - 1;
