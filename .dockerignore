@@ -27,6 +27,19 @@
 **/test/
 **/tests/
 **/coverage/
+**/test-results/
+**/playwright-report/
+.playwright/
+conformance-snapshot/
+
+# Build/tool scratch state. `**/` because .dockerignore patterns are anchored
+# at the context root (see the note at the top of this file): the Python
+# runners under runtime-pi/runners/* build their venv IN-TREE, so a
+# root-anchored `.venv` would miss every one of them.
+**/.venv/
+**/__pycache__/
+**/*.tsbuildinfo
+**/.cache/
 
 # Logs
 *.log
