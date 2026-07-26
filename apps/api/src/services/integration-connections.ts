@@ -70,6 +70,8 @@ import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration } from "./integration-service.ts";
 import { assertApplicationInScope } from "./applications.ts";
+import { activatePackageOnFirstConnection } from "./application-packages.ts";
+import { recordAudit } from "./audit.ts";
 
 // ─────────────────────────────────────────────
 // Types
@@ -1627,6 +1629,12 @@ export interface StoreConnectionInput {
    * connect; absent for non-oauth2 auths (persists NULL — no OAuth client).
    */
   clientRef?: string | null;
+  /**
+   * Does the acting identity hold `integrations:install`? Forwarded verbatim to
+   * the {@link PersistTarget} — see {@link ActivationCapability}. Absent =
+   * `false` (a caller that forgets it does not activate).
+   */
+  mayActivate?: boolean;
 }
 
 /**
@@ -1644,10 +1652,14 @@ export interface StoreConnectionInput {
  *                      id only — the id came from an already-authorized
  *                      resolution — and silently no-ops when the row is gone
  *                      (matches the pre-convergence refresh behaviour).
+ *
+ * The two user-initiated shapes carry {@link ActivationCapability}; the
+ * machine write-back deliberately does not — a background token refresh has no
+ * acting identity and must never change what is installed in an application.
  */
 export type PersistTarget =
-  | { kind: "insert"; scope: AppScope; actor: Actor }
-  | {
+  | ({ kind: "insert"; scope: AppScope; actor: Actor } & ActivationCapability)
+  | ({
       kind: "update-owned";
       scope: AppScope;
       actor: Actor;
@@ -1656,8 +1668,83 @@ export type PersistTarget =
        * the WHERE so a mismatched `connectionId` matches zero rows. */
       packageId: string;
       authKey: string;
-    }
+    } & ActivationCapability)
   | { kind: "update-by-id"; connectionId: string };
+
+/**
+ * The caller's authority to ACTIVATE an integration application-wide, resolved
+ * by the route from the authenticated request context and threaded down here.
+ *
+ * Two different permissions are at play. `integrations:connect` (granted to
+ * plain members, and to end-users through the hosted portal) authorizes a
+ * PERSONAL act: storing one's own credential. `integrations:install` — admin
+ * only — authorizes a TENANT-WIDE one: making the integration usable by every
+ * actor and every agent in the application. Auto-activation on connect is only
+ * a shortcut for someone who could have clicked "Activate" themselves; it must
+ * never GRANT the second capability to someone holding only the first.
+ *
+ * Optional and defaulting to `false`: a call site that forgets to pass it does
+ * not activate. The service never resolves permissions itself — it obeys the
+ * decision it is handed.
+ */
+interface ActivationCapability {
+  /** `true` only when the acting identity holds `integrations:install`. */
+  mayActivate?: boolean;
+}
+
+/**
+ * Connecting a credential must also make the integration USABLE. Without an
+ * `application_packages` row the integration stays inactive and every run that
+ * declares it dies on `integration_not_active` (412) — the user connected and
+ * nothing worked. Applied on both user-initiated write paths:
+ *
+ *   - `insert`       — the first connection, the common case.
+ *   - `update-owned` — a reconnect. Not redundant: a connection can outlive its
+ *                      `application_packages` row (an uninstall deletes the row
+ *                      but keeps connections), and reconnecting is the remedy
+ *                      users reach for. Without this the 412 would be permanent.
+ *
+ * Two gates, both of which must pass:
+ *   1. `mayActivate` — the acting identity holds `integrations:install`
+ *      ({@link ActivationCapability}). Never inferred here.
+ *   2. `activatePackageOnFirstConnection` only ever CREATES a row, so an
+ *      explicit `enabled = false` (deliberate, sticky opt-out) survives.
+ *
+ * Runs on the caller's transaction so a rolled-back connection never leaves a
+ * half-activated integration. Returns whether a row was created (the audit
+ * signal — emitted after commit by {@link auditAutoActivation}).
+ */
+async function activateOnConnect(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  target: { scope: AppScope; mayActivate?: boolean },
+  packageId: string,
+): Promise<boolean> {
+  if (target.mayActivate !== true) return false;
+  return activatePackageOnFirstConnection(tx, target.scope, packageId);
+}
+
+/**
+ * Record the auto-activation in the audit trail. Called AFTER the transaction
+ * commits: the audit log is best-effort by design (see `services/audit.ts`) and
+ * must never roll back a committed activation. `reason` distinguishes this from
+ * a manual `POST /integrations/:id/activate`.
+ */
+async function auditAutoActivation(
+  scope: AppScope,
+  actor: Actor,
+  packageId: string,
+): Promise<void> {
+  await recordAudit({
+    orgId: scope.orgId,
+    applicationId: scope.applicationId,
+    actorType: actor.type,
+    actorId: actor.id,
+    action: "integration.activated",
+    resourceType: "integration",
+    resourceId: packageId,
+    after: { enabled: true, reason: "auto_on_connect" },
+  });
+}
 
 /**
  * Persist input for the credential columns.
@@ -1779,7 +1866,7 @@ export async function persistCredentialBundle(
     // labels don't need it but the lock is cheap and keeps one code path.
     const ownerKey = userId ?? endUserId ?? "";
     const labelLockKey = `ic_label:${target.scope.applicationId}:${insertPackageId}:${ownerKey}`;
-    const row = await db.transaction(async (tx) => {
+    const { row, activated } = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${labelLockKey})::bigint)`);
       const inserted = await tx
         .insert(integrationConnections)
@@ -1801,11 +1888,13 @@ export async function persistCredentialBundle(
           updatedAt: now,
         })
         .returning();
-      return inserted[0];
+      const didActivate = await activateOnConnect(tx, target, insertPackageId);
+      return { row: inserted[0], activated: didActivate };
     });
     if (!row) {
       throw new Error("persistCredentialBundle: insert returned no row");
     }
+    if (activated) await auditAutoActivation(target.scope, target.actor, insertPackageId);
     return serializeIntegrationConnection(row);
   }
 
@@ -1859,7 +1948,7 @@ export async function persistCredentialBundle(
     // them and slip a different-account clobber past the guard. Do both in one
     // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
     // is pinned for the duration.
-    const row = await db.transaction(async (tx) => {
+    const { row, activated } = await db.transaction(async (tx) => {
       if (input.accountId !== undefined && input.accountId !== "default") {
         const [existing] = await tx
           .select({ accountId: integrationConnections.accountId })
@@ -1883,11 +1972,17 @@ export async function persistCredentialBundle(
         .set(set)
         .where(ownerScope)
         .returning();
-      return updated[0];
+      // Only when the reconnect actually landed on a row — a miss throws
+      // `notFound` below, and a failed reconnect must not activate anything.
+      const didActivate = updated[0]
+        ? await activateOnConnect(tx, target, target.packageId)
+        : false;
+      return { row: updated[0], activated: didActivate };
     });
     if (!row) {
       throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);
     }
+    if (activated) await auditAutoActivation(target.scope, target.actor, target.packageId);
     return serializeIntegrationConnection(row);
   }
 
@@ -2001,6 +2096,7 @@ export async function saveIntegrationConnection(
     ...(input.labelHint ? { labelHint: input.labelHint } : {}),
     ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),
   };
+  const mayActivate = input.mayActivate === true;
   const summary = input.connectionId
     ? await persistCredentialBundle(
         {
@@ -2010,11 +2106,12 @@ export async function saveIntegrationConnection(
           connectionId: input.connectionId,
           packageId: input.packageId,
           authKey: input.authKey,
+          mayActivate,
         },
         persistInput,
       )
     : await persistCredentialBundle(
-        { kind: "insert", scope, actor: input.actor },
+        { kind: "insert", scope, actor: input.actor, mayActivate },
         { ...persistInput, packageId: input.packageId, authKey: input.authKey },
       );
   // INSERT and update-owned always return a summary (or throw).

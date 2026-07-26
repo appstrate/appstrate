@@ -14,6 +14,7 @@ import {
   packageDistTags,
 } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
+import { logger } from "../lib/logger.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
@@ -22,6 +23,9 @@ import type { AppScope } from "../lib/scope.ts";
 import { assertApplicationInScope } from "./applications.ts";
 
 export type { ResolvedRunConfig };
+
+/** The Drizzle client or a transaction handle — lets a writer join a caller's tx. */
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 // ---------------------------------------------------------------------------
 // Install / Uninstall
@@ -572,4 +576,68 @@ export async function updateInstalledPackage(
         set,
       });
   });
+}
+
+/**
+ * Activate a package in the application on FIRST connection — insert an
+ * `application_packages` row with `enabled = true` if and only if no row exists
+ * for `(applicationId, packageId)`.
+ *
+ * Why this is not {@link updateInstalledPackage}: that helper upserts with
+ * `ON CONFLICT DO UPDATE`, which would flip an existing `enabled = false` back
+ * to `true`. Deactivation is a deliberate, STICKY opt-out (see the comment block
+ * above the activate/deactivate routes in `routes/integrations.ts`) — it is the
+ * mechanism that turns off a system integration that is auto-active by default.
+ * Resurrecting it because someone reconnected a credential would be a security
+ * regression, so this writer uses `ON CONFLICT DO NOTHING`: it can only ever
+ * create a row, never mutate one.
+ *
+ * Outcomes (mirroring `resolveIntegrationActivations` rules):
+ *   - no row              → INSERT `enabled = true`  → returns `true`
+ *   - row `enabled=true`  → nothing                  → returns `false`
+ *   - row `enabled=false` → nothing (sticky opt-out) → returns `false`
+ *
+ * Runs on the caller's transaction (`tx`) so the activation commits with the
+ * connection insert, or not at all.
+ *
+ * The org-visibility check is the same tenant boundary as
+ * {@link updateInstalledPackage} and runs on the same transaction, so the row
+ * can never be grafted onto a package the org cannot see. Unlike that helper it
+ * does not throw when the check fails: the caller has already resolved the
+ * package org-scoped, so a miss here is a should-never-happen — worth a log, not
+ * worth rolling back a credential the user just successfully authorized.
+ */
+export async function activatePackageOnFirstConnection(
+  tx: DbOrTx,
+  scope: AppScope,
+  packageId: string,
+): Promise<boolean> {
+  const [pkg] = await tx
+    .select({ id: packages.id })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
+    .limit(1);
+  if (!pkg) {
+    logger.warn("auto-activation skipped: package not visible in org catalog", {
+      packageId,
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
+    });
+    return false;
+  }
+
+  const inserted = await tx
+    .insert(applicationPackages)
+    .values({
+      applicationId: scope.applicationId,
+      packageId,
+      enabled: true,
+      updatedAt: new Date(),
+    })
+    .onConflictDoNothing({
+      target: [applicationPackages.applicationId, applicationPackages.packageId],
+    })
+    .returning({ packageId: applicationPackages.packageId });
+
+  return inserted.length > 0;
 }

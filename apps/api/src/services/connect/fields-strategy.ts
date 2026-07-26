@@ -67,6 +67,7 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
       credentials,
       identityClaims,
       actor: ctx.actor,
+      mayActivate: ctx.mayActivate === true,
       ...(labelHint ? { labelHint } : {}),
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
     });

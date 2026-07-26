@@ -57,6 +57,17 @@ export interface ConnectSessionClaims {
   scopes?: string[];
   /** Force the provider's account picker on the OAuth screen (oauth2 only). */
   force_account_select?: boolean;
+  /**
+   * Did the caller who MINTED this token hold `integrations:install`?
+   *
+   * The hosted surface is unauthenticated — the token is its only context — so
+   * the capability decision is taken when the session is minted (where the
+   * authenticated context exists) and carried here. HMAC-signed, so it cannot
+   * be forged by whoever opens the link. Consumed by the connection writer to
+   * decide whether connecting may also ACTIVATE the integration
+   * application-wide (an admin-only operation). Absent = no, always.
+   */
+  may_activate?: boolean;
   /** Single-use replay-guard id (consumed server-side, e.g. via Redis). */
   jti: string;
   /**
