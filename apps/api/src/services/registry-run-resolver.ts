@@ -97,7 +97,10 @@ export async function resolveRegistryAgent(
     // type-dispatched so an agent with a corrupt `dependencies` shape,
     // missing `schemaVersion`, etc. fails cleanly here instead of
     // crashing deeper in the run pipeline with a less actionable error.
-    const draftValidation = validateManifest(pkg.manifest);
+    // READ direction: the draft is already persisted, so a `runtime_tools` id
+    // retired after it was written must not make it unrunnable. Save paths
+    // reject the same id, so the drop here only ever covers pre-existing rows.
+    const draftValidation = validateManifest(pkg.manifest, { retiredRuntimeTools: "drop" });
     if (!draftValidation.valid) {
       throw new ApiError({
         status: 400,
@@ -149,7 +152,11 @@ export async function resolveRegistryAgent(
   // malformed here is a service invariant violation (bad publish, manual
   // SQL edit) — surface as 500 rather than letting an unchecked cast
   // through to the run pipeline.
-  const manifestValidation = validateManifest(detail.manifest);
+  // READ direction, and the strictest case for it: a published version is
+  // immutable by construction (integrity-checked ZIP), so a `runtime_tools` id
+  // retired after publication can never be repaired in place. Dropping it is
+  // what keeps such an agent runnable — the reason the policy exists at all.
+  const manifestValidation = validateManifest(detail.manifest, { retiredRuntimeTools: "drop" });
   if (!manifestValidation.valid) {
     logger.error("stored published manifest failed AFPS validation", {
       packageId,
@@ -169,6 +176,15 @@ export async function resolveRegistryAgent(
       code: "not_an_agent",
       title: "Not An Agent",
       detail: `Package '${packageId}' is a ${manifestValidation.manifest.type}, not an agent`,
+    });
+  }
+  if (manifestValidation.droppedRuntimeTools.length > 0) {
+    // The drop above kept the run alive, but it is a silent capability loss —
+    // surface it so ops can tell which published versions need a republish.
+    logger.warn("published manifest names retired runtime tools (dropped for this run)", {
+      packageId,
+      version: detail.version,
+      dropped: manifestValidation.droppedRuntimeTools,
     });
   }
   const manifest = manifestValidation.manifest as AgentManifest;

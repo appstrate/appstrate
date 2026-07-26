@@ -3,6 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   validateManifest,
+  dropRetiredRuntimeTools,
   extractSkillMeta,
   agentManifestSchema,
   SUPPORTED_SCHEMA_VERSION_MAJOR,
@@ -150,23 +151,83 @@ describe("validateManifest", () => {
     expect(m.runtime_tools).toEqual(["log", "note"]);
   });
 
-  // Non-regression: `report` was a selectable runtime tool until it was
-  // replaced by durable `outputs/` documents. Manifests persisted before the
-  // removal (DB drafts and — immutably — published ZIPs) still name it, and
-  // the run path re-validates the stored manifest. Rejecting them here would
-  // make every legacy agent permanently unrunnable.
-  it("drops a retired runtime tool id instead of rejecting the manifest", () => {
+  // `report` was a selectable runtime tool until it was replaced by durable
+  // `outputs/` documents. How an unknown id is treated depends on the
+  // DIRECTION of the call, and both halves matter:
+  //
+  //   - author input (default) MUST reject — `["lgo"]` is a typo, and
+  //     dropping it silently ships an agent missing its tool with no signal;
+  //   - reading something already persisted MUST drop — a published ZIP is
+  //     immutable, so rejecting would make a legacy agent unrunnable forever.
+  it("rejects a retired runtime tool id on the author path (default policy)", () => {
     const result = validateManifest(
       validAgentManifest({ runtime_tools: ["report", "log", "output"] }),
     );
+    expect(result.valid).toBe(false);
+    // Surfaced on the runtime_tools field so the editor can render it.
+    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
+  });
+
+  it("rejects a misspelled runtime tool id on the author path", () => {
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["lgo", "log"] }));
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
+  });
+
+  it("drops a retired runtime tool id on the read path and reports what went", () => {
+    const result = validateManifest(
+      validAgentManifest({ runtime_tools: ["report", "log", "output"] }),
+      { retiredRuntimeTools: "drop" },
+    );
     expect(result.valid).toBe(true);
     expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log", "output"]);
+    expect(result.valid && result.droppedRuntimeTools).toEqual(["report"]);
   });
 
   it("drops a retired runtime tool id even when it is the only one declared", () => {
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["report"] }));
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["report"] }), {
+      retiredRuntimeTools: "drop",
+    });
     expect(result.valid).toBe(true);
     expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual([]);
+  });
+
+  it("reports no dropped runtime tools when every id is known", () => {
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }), {
+      retiredRuntimeTools: "drop",
+    });
+    expect(result.valid).toBe(true);
+    expect(result.valid && result.droppedRuntimeTools).toEqual([]);
+  });
+
+  // The version-snapshot path serialises the result of this helper into an
+  // integrity-hashed ZIP, so it must be structural: no Zod re-parse, no key
+  // reordering, no injected defaults — otherwise publish dedup (#896) breaks.
+  it("dropRetiredRuntimeTools preserves key order and unknown fields", () => {
+    const stored = {
+      name: "@test/my-agent",
+      runtime_tools: ["report", "log"],
+      custom_field: "must-survive",
+      version: "1.0.0",
+      type: "agent",
+    };
+    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
+    expect(dropped).toEqual(["report"]);
+    expect(Object.keys(manifest)).toEqual(Object.keys(stored));
+    expect(manifest.custom_field).toBe("must-survive");
+    expect(manifest.runtime_tools).toEqual(["log"]);
+  });
+
+  it("dropRetiredRuntimeTools returns the same reference when nothing is retired", () => {
+    const stored = { type: "agent", runtime_tools: ["log"] };
+    expect(dropRetiredRuntimeTools(stored).manifest).toBe(stored);
+  });
+
+  it("dropRetiredRuntimeTools leaves non-agent manifests untouched", () => {
+    const stored = { type: "skill", runtime_tools: ["report"] };
+    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
+    expect(manifest).toBe(stored);
+    expect(dropped).toEqual([]);
   });
 
   it("agent with no output schema is valid without the `output` runtime tool", () => {

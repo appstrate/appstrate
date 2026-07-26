@@ -50,19 +50,42 @@ with no importer anywhere is deleted.
   **Every implementer must widen its parameter type**; every caller must pass
   the field. This is what forces the major.
 
-- **`validateManifest` DROPS unknown `runtime_tools` instead of rejecting.**
-  For `type: "agent"`, ids absent from `SELECTABLE_RUNTIME_TOOLS` are filtered
-  out of the parsed manifest before schema validation; the manifest stays valid.
-  A removal is not retroactive — manifests persisted before it (DB drafts, and
-  published ZIPs, which are immutable by construction) keep the retired id
-  forever, and the run path re-validates the stored manifest, so a hard enum
-  rejection would make every such agent permanently unrunnable. Validation now
-  mirrors what `buildRuntimeToolDefs` already did at runtime. **Behavioural
-  break for anything that relied on a rejection** (a consumer asserting that an
-  unknown tool id fails validation now gets `valid: true` with the id stripped),
-  and for anything that round-trips `result.manifest` expecting the input's
-  `runtime_tools` array back verbatim. The returned object is the same reference
-  when nothing needed dropping.
+- **`validateManifest(raw, options?)` — unknown `runtime_tools` handling is now
+  DIRECTIONAL, and the default still rejects.** For `type: "agent"`, ids absent
+  from `SELECTABLE_RUNTIME_TOOLS` fail validation as before **unless** the
+  caller passes `{ retiredRuntimeTools: "drop" }`, in which case they are
+  filtered out of the parsed manifest and it stays valid.
+
+  Both behaviours are needed, and which one is correct depends entirely on
+  where the manifest came from. **Author input** (create, update, import, an
+  inline manifest from an API client) must reject: `runtime_tools: ["lgo"]` is
+  a typo, and silently dropping it ships an agent missing its tool with no
+  signal to anyone. **Already-persisted manifests** (a stored draft, a
+  published version snapshot) must drop: a removal is not retroactive, a
+  published ZIP is immutable by construction, and a hard enum rejection on the
+  run path would make every such agent permanently unrunnable — the runtime
+  itself already ignores ids it cannot build (`buildRuntimeToolDefs`).
+
+  On the `valid: true` branch the result now carries
+  **`droppedRuntimeTools: string[]`** (always `[]` under the default policy) so
+  the drop is observable instead of silent.
+
+  Migration: a consumer that validates author input needs no change. A consumer
+  that re-validates something it stored must pass
+  `{ retiredRuntimeTools: "drop" }` or it will start rejecting its own
+  historical rows. The returned manifest object is the same reference when
+  nothing needed dropping.
+
+- **`dropRetiredRuntimeTools(manifest)` is exported** from
+  `@appstrate/core/validation`:
+  `(manifest: Record<string, unknown>) => { manifest, dropped: string[] }`.
+  The same filter `validateManifest`'s `"drop"` policy applies, usable without
+  a full validation pass — deliberately structural, with **no Zod round-trip**,
+  so key order, unknown fields and the absence of schema defaults survive
+  byte-for-byte. That matters for the version-snapshot path, which serialises
+  the result into an integrity-hashed artifact: a re-parse that reordered keys
+  would silently defeat publish dedup. Non-agent manifests are returned
+  untouched.
 
 - **`ModuleInitContext.getOrgName` is required** (was `getOrgName?`). The
   platform has always supplied it (`buildModuleInitContext`), and the optional
@@ -94,9 +117,11 @@ with no importer anywhere is deleted.
   - `agentManifestSchema`'s `runtime_tools` enum and the published
     `schema/agent.schema.json` enum no longer accept `"report"`.
 
-  A stored manifest still naming `report` remains **runnable and valid** — the
-  id is dropped by `validateManifest` (above) and ignored by
-  `buildRuntimeToolDefs`. What breaks is code that references the literal:
+  A stored manifest still naming `report` remains **runnable** — read paths
+  validate with `{ retiredRuntimeTools: "drop" }` (above) and
+  `buildRuntimeToolDefs` ignores the id. A manifest _submitted_ naming
+  `report` is rejected, like any other unknown tool id. What breaks is code
+  that references the literal:
   a consumer typing a variable as `EventEmitterRuntimeTool = "report"`, a
   handler switching exhaustively on `CANONICAL_RUNTIME_TOOL_EVENT_TYPES`, or a
   validator asserting the old enum contents.

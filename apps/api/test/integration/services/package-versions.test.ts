@@ -431,6 +431,49 @@ describe("package-versions service", () => {
       });
     });
 
+    // A version freezes its manifest twice — the `package_versions.manifest`
+    // row and the integrity-checked ZIP — and both are immutable afterwards.
+    // Publishing the draft verbatim minted a NEW artifact carrying a
+    // `runtime_tools` id the platform had already retired, i.e. manufactured
+    // the very legacy the read paths then have to tolerate forever. The
+    // snapshot must be normalised first, in BOTH places.
+    it("normalises retired runtime_tools out of the version manifest and its ZIP", async () => {
+      const id = `@${orgSlug}/retired-tool`;
+      const pkg = await seedPackage({
+        orgId,
+        id,
+        draftManifest: {
+          name: id,
+          version: "1.0.0",
+          type: "agent",
+          runtime_tools: ["report", "log"],
+        },
+        draftContent: "Prompt.",
+      });
+
+      const result = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect("error" in result).toBe(false);
+
+      const [row] = await db
+        .select({ manifest: packageVersions.manifest, integrity: packageVersions.integrity })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, pkg.id), eq(packageVersions.version, "1.0.0")))
+        .limit(1);
+
+      // 1. the catalog row
+      expect((row!.manifest as { runtime_tools?: string[] }).runtime_tools).toEqual(["log"]);
+
+      // 2. the immutable artifact — a normalised row over a stale ZIP would
+      //    still ship the retired id to every runner that downloads the bundle.
+      const zip = await downloadVersionZip(pkg.id, "1.0.0", row!.integrity);
+      expect(zip).not.toBeNull();
+      const entries = unzipAndNormalize(zip!);
+      const zipped = JSON.parse(new TextDecoder().decode(entries["manifest.json"]!)) as {
+        runtime_tools?: string[];
+      };
+      expect(zipped.runtime_tools).toEqual(["log"]);
+    });
+
     // Atomicity: the derived dependency index is written in the same
     // transaction as the version row (no committed version with a missing index).
     it("populates the dependency index in the same step as the version row", async () => {

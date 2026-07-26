@@ -58,6 +58,8 @@ describe("listModels", () => {
   it("throws on a non-ok response rather than reporting an empty catalog", async () => {
     // An empty list and a broken endpoint must not look alike — the caller
     // surfaces a 502, it does not tell the user they have no models.
-    expect(listModels(ORIGIN, {}, fetchReturning({}, 500))).rejects.toThrow();
+    // `await` is load-bearing: an un-awaited `.rejects` assertion is never
+    // evaluated and the test passes whatever the promise does.
+    await expect(listModels(ORIGIN, {}, fetchReturning({}, 500))).rejects.toThrow();
   });
 });

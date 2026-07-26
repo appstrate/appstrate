@@ -812,6 +812,87 @@ describe("Packages API", () => {
       expect(body.lock_version).toBeGreaterThan(agent.lockVersion!);
     });
 
+    // ── retired `runtime_tools` ids: direction decides ──────────
+    //
+    // Read the PERSISTED draft, not the response DTO: the defect is that the
+    // handler validated one object and wrote another, so only the stored row
+    // can prove which one landed.
+    async function readDraftRuntimeTools(packageId: string): Promise<string[] | undefined> {
+      const [row] = await db
+        .select({ draftManifest: packages.draftManifest })
+        .from(packages)
+        .where(eq(packages.id, packageId))
+        .limit(1);
+      return (row!.draftManifest as { runtime_tools?: string[] }).runtime_tools;
+    }
+    //
+    // The same handler serves two directions. A SUPPLIED manifest is author
+    // input — an id the platform does not know is a mistake the author must
+    // see. An OMITTED manifest carries the stored draft forward — a read, so a
+    // legacy id is dropped rather than 400-ing a content-only save, and the
+    // normalised shape is what gets written back.
+
+    it("rejects an update whose manifest names a retired runtime tool", async () => {
+      const agent = await seedAgent({
+        id: "@pkgorg/retired-tool-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/packages/agents/@pkgorg/retired-tool-agent", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/retired-tool-agent",
+            version: "0.2.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Retired Tool Agent",
+            runtime_tools: ["report", "log"],
+          },
+          content: "Updated prompt.",
+          lock_version: agent.lockVersion,
+        }),
+      });
+
+      expect(res.status).toBe(400);
+
+      // Nothing was persisted — the draft is exactly as seeded.
+      expect(await readDraftRuntimeTools("@pkgorg/retired-tool-agent")).toBeUndefined();
+    });
+
+    it("normalises a carried-forward draft that names a retired runtime tool", async () => {
+      const id = "@pkgorg/legacy-tool-agent";
+      const agent = await seedAgent({
+        id,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: id,
+          version: "0.1.0",
+          type: "agent",
+          schema_version: "0.1",
+          display_name: "Legacy Tool Agent",
+          runtime_tools: ["report", "log"],
+        },
+      });
+
+      // Content-only save: no `manifest` in the body, so the stored draft is
+      // carried forward. It must be written back VALIDATED, not raw.
+      const res = await app.request(`/api/packages/agents/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          content: "Only the prompt changed.",
+          lock_version: agent.lockVersion,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await readDraftRuntimeTools(id)).toEqual(["log"]);
+    });
+
     it("deletes a package the org owns even when its scope differs from the org slug", async () => {
       await seedAgent({
         id: "@otherscope/deletable-agent",

@@ -22,6 +22,7 @@ import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { runs, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
+import { validateManifest } from "@appstrate/core/validation";
 import { and } from "drizzle-orm";
 
 const app = getTestApp();
@@ -181,6 +182,102 @@ describe("POST /api/runs/remote — kind: registry", () => {
     const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
     expect(run!.versionLabel).toBe("1.0.0");
     expect(run!.versionRef).toBe("1.0.0");
+  });
+
+  it("still runs a published version whose manifest names a retired runtime tool", async () => {
+    // The whole reason the read direction DROPS instead of rejecting: a
+    // published version is an immutable, integrity-checked artifact. Once the
+    // platform retires a `runtime_tools` id, every already-published manifest
+    // naming it would 500 on `invalid_stored_manifest` forever — unfixable
+    // without republishing, which the org may not even be able to do.
+    // Author input still rejects the same id (write direction); only this
+    // persisted-read path drops it.
+    const version = "2.0.0";
+    const manifest = {
+      ...publishedManifest(version),
+      // `log` is live, `report` was retired — only the retired one may go.
+      runtime_tools: ["log", "report"],
+    } as unknown as Record<string, unknown>;
+
+    // Non-vacuity guard: if `report` were ever re-admitted to the catalog this
+    // test would pass while exercising nothing. Assert it is genuinely retired
+    // by checking the WRITE direction still refuses the same manifest.
+    const asAuthorInput = validateManifest(manifest);
+    expect(asAuthorInput.valid).toBe(false);
+
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@acme/briefing",
+      type: "agent",
+      draftManifest: manifest,
+      draftContent: PROMPT,
+    });
+    const versionRow = await seedPackageVersion({
+      packageId: "@acme/briefing",
+      version,
+      integrity: "sha256-test",
+      artifactSize: 1024,
+      manifest,
+    });
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
+    await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+
+    const res = await post({
+      source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
+      applicationId: ctx.defaultAppId,
+      input: {},
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+    const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
+    expect(run!.packageId).toBe("@acme/briefing");
+    expect(run!.versionRef).toBe(version);
+  });
+
+  it("rejects a published version whose stored manifest is malformed with 500", async () => {
+    // The counterpart of the test above, and what makes it mean something: a
+    // stored manifest the validator refuses DOES fail the run. So the 201
+    // there is not the route being lenient — it is the retired-id drop, and
+    // the day the read path stops dropping, that test lands on this 500.
+    const version = "2.1.0";
+    const { display_name: _omitted, ...withoutDisplayName } = publishedManifest(version);
+    const manifest = withoutDisplayName as unknown as Record<string, unknown>;
+
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@acme/briefing",
+      type: "agent",
+      // The draft column keeps a valid manifest: only the published snapshot
+      // is malformed, so the failure can only come from the published path.
+      draftManifest: publishedManifest(version) as unknown as Record<string, unknown>,
+      draftContent: PROMPT,
+    });
+    const versionRow = await seedPackageVersion({
+      packageId: "@acme/briefing",
+      version,
+      integrity: "sha256-test",
+      artifactSize: 1024,
+      manifest,
+    });
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
+    await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+
+    const res = await post({
+      source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
+      applicationId: ctx.defaultAppId,
+      input: {},
+    });
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("invalid_stored_manifest");
   });
 
   it("creates a draft run with versionLabel `draft`", async () => {

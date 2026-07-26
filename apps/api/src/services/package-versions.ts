@@ -25,6 +25,7 @@ import {
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 
 import { parseScopedName } from "@appstrate/core/naming";
+import { dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
@@ -619,9 +620,28 @@ export async function createVersionFromDraft(params: {
   // (`buildBundleFromCatalog`), and the derived per-version dependency index
   // is rebuilt downstream from this manifest via `extractDependencies`.
   const parsed = typeof baseManifest.name === "string" ? parseScopedName(baseManifest.name) : null;
-  const finalManifest: Record<string, unknown> = parsed
+  const rawManifest: Record<string, unknown> = parsed
     ? { ...manifest, name: `@${parsed.scope}/${parsed.name}`, version }
     : manifest;
+
+  // Normalise BEFORE the snapshot. A version freezes its manifest twice — the
+  // `package_versions.manifest` row and the integrity-checked ZIP — and both
+  // are immutable afterwards. Freezing the draft verbatim would mint a brand
+  // new artifact carrying a `runtime_tools` id the platform retired *before*
+  // this publish, i.e. create the very legacy the read paths then have to
+  // tolerate forever. The drop is structural (no Zod re-parse): key order and
+  // unknown fields survive byte-for-byte, so a draft with nothing to drop
+  // yields the exact same bytes as before and publish dedup (#896) is
+  // unaffected.
+  const { manifest: finalManifest, dropped: droppedRuntimeTools } =
+    dropRetiredRuntimeTools(rawManifest);
+  if (droppedRuntimeTools.length > 0) {
+    logger.info("dropped retired runtime tools from published manifest", {
+      packageId,
+      version,
+      dropped: droppedRuntimeTools,
+    });
+  }
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
