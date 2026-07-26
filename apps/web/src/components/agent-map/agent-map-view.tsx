@@ -191,21 +191,27 @@ export function AgentMapView({
             : t("map.pinnedDefinition", { version: data.agent.version_ref })}
         </span>
         {data.diagnostics.length > 0 &&
-          (connectionIssues > 0 ? (
-            <button
-              type="button"
-              onClick={() => setPanelKind("connections")}
-              className="text-warning hover:text-warning/80 flex items-center gap-1 underline-offset-2 hover:underline"
-            >
-              <AlertTriangle className="size-3.5" />
-              {t("map.issueCount", { count: data.diagnostics.length })}
-            </button>
-          ) : (
-            <span className="text-warning flex items-center gap-1">
-              <AlertTriangle className="size-3.5" />
-              {t("map.issueCount", { count: data.diagnostics.length })}
-            </span>
-          ))}
+          (() => {
+            const counter = (
+              <>
+                <AlertTriangle className="size-3.5" />
+                {t("map.issueCount", { count: data.diagnostics.length })}
+              </>
+            );
+            // Clickable only when a connection is involved — that is the panel it
+            // would open.
+            return connectionIssues > 0 ? (
+              <button
+                type="button"
+                onClick={() => setPanelKind("connections")}
+                className="text-warning hover:text-warning/80 flex items-center gap-1 underline-offset-2 hover:underline"
+              >
+                {counter}
+              </button>
+            ) : (
+              <span className="text-warning flex items-center gap-1">{counter}</span>
+            );
+          })()}
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}

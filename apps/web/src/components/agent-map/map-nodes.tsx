@@ -42,10 +42,9 @@ import type { MapPanelKind } from "./map-panel-dialog";
 const MAX_LIST_HEIGHT = "max-h-[352px]";
 
 function diagnosticsFor(
-  diagnostics: AgentMapDiagnostic[] | undefined,
+  diagnostics: AgentMapDiagnostic[],
   itemId: string | null,
 ): AgentMapDiagnostic[] {
-  if (!diagnostics) return [];
   return diagnostics.filter((d) => d.item_id === itemId);
 }
 
@@ -259,7 +258,6 @@ interface ModelData {
 }
 interface MemoryItem {
   id: string;
-  declared: boolean;
   always: boolean;
 }
 interface AgentData {
@@ -282,34 +280,25 @@ function diagnostics(data: Record<string, unknown>): AgentMapDiagnostic[] {
 }
 
 /**
- * In-place edit action, injected by the view alongside the diagnostics. Absent
- * for a system package (its definition ships with the platform and the API
- * refuses the write), so the card offers nothing it cannot deliver.
+ * Builds a card action from a handler the view injected into `data`.
+ *
+ * `onEdit` opens the manifest editor widgets in a dialog; `onPanel` opens one of
+ * the agent's existing panels (schedules, model, memory archive, connections)
+ * rather than navigating to its tab — the reader is on the map, and being sent to
+ * another tab to flip one switch is the wrong trade.
+ *
+ * Absent handler ⇒ no action, which is how a system package or a pinned version
+ * ends up read-only without any card knowing why.
  */
-function editAction(
+function cardAction<K extends MapEditKind | MapPanelKind>(
   data: Record<string, unknown>,
-  kind: MapEditKind,
+  slot: "onEdit" | "onPanel",
+  kind: K,
   label: string,
-): CardAction | undefined {
-  const onEdit = data.onEdit;
-  if (typeof onEdit !== "function") return undefined;
-  return { label, onClick: () => (onEdit as (k: MapEditKind) => void)(kind) };
-}
-
-/**
- * Opens one of the agent's existing panels (schedules, model, memory archive,
- * connections) in a dialog rather than navigating to its tab: the reader is on
- * the map, and being sent to another tab to flip one switch — then having to come
- * back — is the wrong trade. Injected by the view, like `onEdit`.
- */
-function panelAction(
-  data: Record<string, unknown>,
-  kind: MapPanelKind,
-  label: string,
-): CardAction | undefined {
-  const onPanel = data.onPanel;
-  if (typeof onPanel !== "function") return undefined;
-  return { label, onClick: () => (onPanel as (k: MapPanelKind) => void)(kind) };
+): { label: string; onClick: () => void } | undefined {
+  const handler = data[slot];
+  if (typeof handler !== "function") return undefined;
+  return { label, onClick: () => (handler as (k: K) => void)(kind) };
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +317,7 @@ export function SchedulesNode({ data }: NodeProps) {
       emptyLabel={t("map.emptySchedules")}
       // The Schedules panel opens right here rather than throwing the reader
       // onto another tab and back.
-      action={panelAction(data, "schedules", t("map.addSchedule"))}
+      action={cardAction(data, "onPanel", "schedules", t("map.addSchedule"))}
     >
       {list.map((item) => (
         <Row
@@ -373,7 +362,7 @@ export function AgentNode({ data }: NodeProps) {
       hasIncoming
       hasOutgoing
       wide
-      action={editAction(data, "prompt", t("map.editPrompt"))}
+      action={cardAction(data, "onEdit", "prompt", t("map.editPrompt"))}
     >
       <div className="space-y-2 px-1 py-0.5">
         <div className="flex items-start gap-2">
@@ -411,7 +400,7 @@ export function ToolboxNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const list = items<ToolboxItem>(data);
   const diags = diagnostics(data);
-  const connect = panelAction(data, "connections", t("detail.tabConnections"));
+  const connect = cardAction(data, "onPanel", "connections", t("detail.tabConnections"));
   return (
     <Card
       title={t("map.toolbox")}
@@ -419,7 +408,7 @@ export function ToolboxNode({ data }: NodeProps) {
       hasIncoming
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptyToolbox")}
-      action={editAction(data, "integrations", t("map.addIntegration"))}
+      action={cardAction(data, "onEdit", "integrations", t("map.addIntegration"))}
     >
       {list.map((item) => {
         const toolLabel =
@@ -437,7 +426,7 @@ export function ToolboxNode({ data }: NodeProps) {
             dimmed={item.connected === false}
             // Connecting is what a flagged row asks for, and that panel exists —
             // so the row opens it rather than navigating to the integration page.
-            {...(connect && "onClick" in connect
+            {...(connect
               ? { onClick: connect.onClick }
               : { href: packageDetailPath("integration", item.id) })}
             right={
@@ -468,7 +457,7 @@ export function SkillsNode({ data }: NodeProps) {
       hasIncoming
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptySkills")}
-      action={editAction(data, "skills", t("map.addSkill"))}
+      action={cardAction(data, "onEdit", "skills", t("map.addSkill"))}
     >
       {list.map((item) => (
         <Row
@@ -496,9 +485,7 @@ export function ModelNode({ data }: NodeProps) {
       hasOutgoing
       // Model and proxy are per-application settings rather than manifest
       // fields, so this mounts the configuration tab's own picker in a dialog.
-      {...(panelAction(data, "model", t("map.chooseModel"))
-        ? { action: panelAction(data, "model", t("map.chooseModel"))! }
-        : {})}
+      action={cardAction(data, "onPanel", "model", t("map.chooseModel"))}
     >
       <Row
         icon={<Cpu className="size-3.5" />}
@@ -529,7 +516,7 @@ export function ModelNode({ data }: NodeProps) {
 export function MemoryNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const list = items<MemoryItem>(data);
-  const browse = panelAction(data, "memory", t("map.openMemory"));
+  const browse = cardAction(data, "onPanel", "memory", t("map.openMemory"));
   return (
     <Card
       title={t("map.memory")}
@@ -537,9 +524,7 @@ export function MemoryNode({ data }: NodeProps) {
       // `pin`/`note` are platform runtime tools granted in the manifest, so the
       // affordance GRANTS them (system-tools checklist) instead of merely linking
       // to the archive. Browsing what is remembered stays a row action below.
-      {...(editAction(data, "runtime_tools", t("map.grantMemory"))
-        ? { action: editAction(data, "runtime_tools", t("map.grantMemory"))! }
-        : {})}
+      action={cardAction(data, "onEdit", "runtime_tools", t("map.grantMemory"))}
     >
       {list.map((item) => (
         <Row
@@ -551,7 +536,7 @@ export function MemoryNode({ data }: NodeProps) {
       ))}
       {/* What the agent actually remembers is data, not definition — so it is a
           row that opens the archive panel, not part of the capability list. */}
-      {browse && "onClick" in browse && (
+      {browse && (
         <Row
           icon={<Archive className="size-3.5" />}
           label={t("map.openMemory")}
