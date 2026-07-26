@@ -547,6 +547,19 @@ export async function parseRequestInput(
      * ownership).
      */
     agentPackageId?: string;
+    /**
+     * Server-synthesized input fields merged into the request's `input` before
+     * any file ref is collected. The ONLY sanctioned way to add an input field
+     * the caller did not send: the merged values then travel the normal
+     * `collectFileRefs` path (ACL, caps, streaming, `document_links`) and are
+     * announced to the agent by the platform prompt like any other input
+     * document — nothing is mounted by a side path.
+     *
+     * Used by `POST /runs/inline` for the reserved `_context_documents` field
+     * (see `services/inline-run.ts`); the field must already be declared on the
+     * `inputSchema` passed here, or it is inert.
+     */
+    injectedInput?: Record<string, unknown>;
   },
 ): Promise<ParsedInput> {
   let body: RunRequestBody = {};
@@ -567,6 +580,12 @@ export async function parseRequestInput(
       );
     }
     input = await resolveRerunInput(c, body.rerun_from, opts?.agentPackageId);
+  }
+  // Server-synthesized fields last: they are platform-owned reserved names the
+  // caller cannot legitimately hold (the route 400s on a collision before we
+  // get here), and a fresh object keeps the request body untouched.
+  if (opts?.injectedInput && Object.keys(opts.injectedInput).length > 0) {
+    input = { ...input, ...opts.injectedInput };
   }
   let uploadedFiles: FileReference[] = [];
   let pendingDocuments: PendingUploadMaterialization[] = [];

@@ -18183,6 +18183,8 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description Per-run config overrides validated against manifest.config.schema (AJV). */
                     config?: Record<string, never>;
+                    /** @description `document://doc_xxx` URIs to mount read-only into the run's `documents/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_documents` input field for them, so they go through the same ACL, byte/count caps and `document_links` chaining as any other document input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_documents` is rejected with a `400` — the name is reserved. */
+                    context_documents?: string[];
                     modelId?: string | null;
                     proxyId?: string | null;
                 };
@@ -18352,6 +18354,8 @@ export interface operations {
                     prompt: string;
                     input?: Record<string, never>;
                     config?: Record<string, never>;
+                    /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_documents` name collision, never mounted. */
+                    context_documents?: string[];
                     modelId?: string | null;
                     proxyId?: string | null;
                 };

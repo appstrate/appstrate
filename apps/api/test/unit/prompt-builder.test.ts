@@ -515,10 +515,35 @@ describe("buildEnrichedPrompt — documents", () => {
 
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Documents");
+    // Neutral wording: an input document can be a sibling run's deliverable
+    // mounted by reference, not only a human upload.
+    expect(prompt).toContain("The following documents are available on the local filesystem:");
+    expect(prompt).not.toContain("have been uploaded");
     expect(prompt).toContain("report.pdf");
     // The colliding display names resolve to distinct on-disk paths.
     expect(prompt).toContain("./documents/report.pdf");
     expect(prompt).toContain("./documents/report-2.pdf");
+  });
+
+  // Fan-in by reference: a document mounted through the reserved
+  // `_context_documents` field is announced exactly like any other input
+  // document. A file mounted but not announced is a file never read.
+  it("announces context documents mounted through the reserved field", async () => {
+    const ctx = baseContext({
+      files: [
+        {
+          fieldName: "_context_documents",
+          name: "research.json",
+          workspaceName: "research.json",
+          type: "application/json",
+          size: 9100,
+        },
+      ],
+    });
+
+    const prompt = await buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("## Documents");
+    expect(prompt).toContain("./documents/research.json");
   });
 
   it("omits documents section when no files", async () => {

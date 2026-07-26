@@ -67,6 +67,15 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+/**
+ * The tool's `context_documents` argument, when the model actually supplied
+ * entries. Shape/scheme validation stays server-side (the inline route answers
+ * with a field-precise 400) — here we only decide whether to forward it.
+ */
+function asNonEmptyArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) && value.length > 0 ? value : undefined;
+}
+
 export function isRunAndWaitTerminalStatus(status: unknown): boolean {
   return typeof status === "string" && RUN_AND_WAIT_TERMINAL_STATUSES.has(status);
 }
@@ -189,7 +198,28 @@ export async function launchRunAndWait(
 
   let launchPath: string;
   let launchBody: Record<string, unknown> | undefined;
+  const contextDocuments = asNonEmptyArray(args.context_documents);
   if (kind === "agent") {
+    // `context_documents` works by synthesizing an input field on the manifest,
+    // which only an inline run owns. A published agent's `input.schema` is a
+    // versioned contract the platform must not rewrite — reject explicitly
+    // rather than dropping the argument, which would mount nothing and leave
+    // the model believing the documents were delivered.
+    if (contextDocuments) {
+      return {
+        ok: false,
+        step: {
+          payload: {
+            error:
+              "`context_documents` is only supported for kind:'inline'. To give a published " +
+              "agent a document, pass its document:// URI through one of the file fields " +
+              'declared in the agent\'s own input schema (`format:"uri"` + `contentMediaType`), ' +
+              "via the `input` argument.",
+          },
+          isError: true,
+        },
+      };
+    }
     const scope = asString(args.scope);
     const name = asString(args.name);
     if (!scope || !name) {
@@ -256,6 +286,9 @@ export async function launchRunAndWait(
     launchBody = { manifest, prompt };
     if (asRecord(args.input)) launchBody.input = args.input;
     if (asRecord(args.config)) launchBody.config = args.config;
+    // Fan-in by reference: forwarded verbatim; the route resolves each URI
+    // through the document ACL and declares the reserved input field itself.
+    if (contextDocuments) launchBody.context_documents = contextDocuments;
   } else {
     return {
       ok: false,

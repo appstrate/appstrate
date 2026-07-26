@@ -421,6 +421,18 @@ export const runsPaths = {
                   description:
                     "Per-run config overrides validated against manifest.config.schema (AJV).",
                 },
+                context_documents: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "`document://doc_xxx` URIs to mount read-only into the run's `documents/` " +
+                    "directory — fan-in by reference, without declaring a file field in the " +
+                    "manifest. The platform declares a reserved `_context_documents` input field " +
+                    "for them, so they go through the same ACL, byte/count caps and " +
+                    "`document_links` chaining as any other document input, and are announced to " +
+                    "the agent in its prompt. A manifest (or `input`) that already declares " +
+                    "`_context_documents` is rejected with a `400` — the name is reserved.",
+                },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
               },
@@ -616,6 +628,13 @@ export const runsPaths = {
                 prompt: { type: "string" },
                 input: { type: "object" },
                 config: { type: "object" },
+                context_documents: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "Same field as `POST /api/runs/inline` — validated here for shape and for the " +
+                    "reserved `_context_documents` name collision, never mounted.",
+                },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
               },

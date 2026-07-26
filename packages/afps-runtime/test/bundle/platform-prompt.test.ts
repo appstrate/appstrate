@@ -183,6 +183,10 @@ describe("renderPlatformPrompt", () => {
     });
     expect(out).toContain("## Documents");
     expect(out).toContain("**report.pdf** (application/pdf, 2.0 KB) → `./documents/report.pdf`");
+    // Neutral wording — an input document may come from a sibling run
+    // (`context_documents`), not only from a human upload.
+    expect(out).toContain("The following documents are available on the local filesystem:");
+    expect(out).not.toContain("have been uploaded");
   });
 
   it("mentions `./documents/` in the Workspace bullet when uploads are wired", () => {

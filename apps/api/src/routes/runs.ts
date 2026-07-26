@@ -38,7 +38,14 @@ import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
-import { triggerInlineRun } from "../services/inline-run.ts";
+import {
+  assertContextDocumentsFieldAvailable,
+  injectContextDocuments,
+  normalizeContextDocumentUris,
+  resolvePromptDocumentsForContext,
+  triggerInlineRun,
+} from "../services/inline-run.ts";
+import { getDocumentForActor } from "../services/documents.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -63,6 +70,13 @@ const inlineRunBodySchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
   modelId: z.string().nullable().optional(),
   proxyId: z.string().nullable().optional(),
+  /**
+   * `document://` URIs to mount read-only into the run's `documents/` directory
+   * without declaring a file field in the manifest (fan-in by reference). Entry
+   * shape is checked downstream by `normalizeContextDocumentUris` so the error
+   * names the offending URI rather than a Zod path.
+   */
+  context_documents: z.array(z.unknown()).optional(),
 });
 
 /**
@@ -583,6 +597,42 @@ export function createRunsRouter() {
       // / readiness problem 4xxes without touching storage.
       const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
 
+      // ----- Context documents (fan-in by reference) -----
+      // Both entry paths land on ONE synthesized reserved input field, and the
+      // synthesis must happen HERE: `parseRequestInput` below reads the input
+      // schema off `preflight.manifest`, so the field has to be declared before
+      // it walks the input. Everything after this block is the ordinary file
+      // path — ACL (`getDocumentForActor`), byte + count caps, streaming into
+      // `documents/`, `document_links` — and the platform prompt announces the
+      // mounted documents exactly as it does for an uploaded file.
+      assertContextDocumentsFieldAvailable(preflight.manifest, body.input);
+      // B2 — the explicit argument. Shape-checked first: a malformed URI 400s
+      // without spending a document lookup.
+      const explicitDocumentUris = normalizeContextDocumentUris(body.context_documents);
+      const preflightInputSchema = preflight.manifest.input?.schema
+        ? asJSONSchemaObject(preflight.manifest.input.schema)
+        : undefined;
+      // B3 — repair instead of refuse: `document://` URIs the model pasted into
+      // the prompt text are inert there. Mount the ones this actor may read;
+      // keep the recoverable 400 for the ones it may not.
+      const repairedDocumentUris = await resolvePromptDocumentsForContext({
+        prompt: preflight.prompt,
+        input: body.input ?? null,
+        inputSchema: preflightInputSchema,
+        canRead: async (documentId) => {
+          const doc = await getDocumentForActor({ orgId, applicationId }, actor, documentId);
+          return doc !== null && doc.capabilities.download;
+        },
+      });
+      // ONE synthesis point for both entry paths.
+      const { manifest: effectiveManifest, inputPatch } = injectContextDocuments(
+        preflight.manifest,
+        [...explicitDocumentUris, ...repairedDocumentUris],
+      );
+      const effectivePreflight = inputPatch
+        ? { ...preflight, manifest: effectiveManifest }
+        : preflight;
+
       // Same input machinery as POST /agents/:scope/:name/run: file fields
       // (`format: uri` + `contentMediaType`) resolve `upload://` /
       // `document://` / inline `data:` URIs through the container ACL + caps
@@ -598,9 +648,10 @@ export function createRunsRouter() {
         const parsed = await parseRequestInput(
           c,
           runId,
-          preflight.manifest.input?.schema
-            ? asJSONSchemaObject(preflight.manifest.input.schema)
+          effectiveManifest.input?.schema
+            ? asJSONSchemaObject(effectiveManifest.input.schema)
             : undefined,
+          { injectedInput: inputPatch },
         );
 
         const { packageId } = await triggerInlineRun({
@@ -608,10 +659,11 @@ export function createRunsRouter() {
           applicationId,
           actor,
           runId,
-          preflight,
+          preflight: effectivePreflight,
           parsed,
           apiKeyId: c.get("apiKeyId") ?? undefined,
           traceparent: runTraceparent(c),
+          repairedPromptDocumentUris: repairedDocumentUris,
         });
         // Pipeline launched — the run now owns its workspace teardown.
         launched = true;
@@ -673,6 +725,10 @@ export function createRunsRouter() {
       const body = await readJsonBody(c, inlineRunBodySchema);
 
       await runInlinePreflight({ orgId, applicationId, actor, body, mode: "accumulate" });
+      // Same reserved-name rule as the run endpoint — a manifest that validates
+      // here must be runnable there.
+      assertContextDocumentsFieldAvailable(body.manifest, body.input);
+      normalizeContextDocumentUris(body.context_documents);
 
       // Structured validation result. Failures never reach this line — the
       // preflight throws problem+json ApiErrors (accumulated) — so a 200

@@ -396,6 +396,59 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
+  // Fan-in by reference: the tool argument has to survive body construction,
+  // otherwise the model is told the documents were delivered and nothing is
+  // mounted — the silent failure this feature exists to remove.
+  it("kind:inline forwards context_documents", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        context_documents: ["document://doc_abc12345", "document://doc_def67890"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()?.body).toMatchObject({
+      context_documents: ["document://doc_abc12345", "document://doc_def67890"],
+    });
+  });
+
+  it("kind:inline omits an empty context_documents", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it", context_documents: [] },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()?.body).toEqual({ manifest: { name: "tmp" }, prompt: "do it" });
+  });
+
+  it("kind:agent rejects context_documents before dispatch (never silently drops it)", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "agent",
+        scope: "@acme",
+        name: "writer",
+        context_documents: ["document://doc_abc12345"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/only supported for kind:'inline'/);
+    // No run was launched.
+    expect(captured()).toBeUndefined();
+  });
+
   it("exposes the launch HTTP status on success", async () => {
     const fetchImpl = fakeFetch(async () => jsonResponse({ id: "run_1", status: "pending" }, 201));
 
