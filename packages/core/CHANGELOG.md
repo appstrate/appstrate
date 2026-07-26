@@ -1035,4 +1035,7 @@ Module-contract cleanup + table-centralization (PR #586, supersedes #577/#583).
 
 ### Migration
 
-See [Migration from v1](README.md#migration-from-v1) for import path changes.
+Imports move from the two predecessor packages onto `@appstrate/core` subpaths:
+`@appstrate/validation` → `@appstrate/core/validation`, and `@appstrate/packages`
+→ the matching subpath (`naming`, `dependencies`, `integrity`, `semver`,
+`dist-tags`, `version-policy`, `system-packages`). There is no barrel export.
