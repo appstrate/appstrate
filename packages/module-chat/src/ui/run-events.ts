@@ -12,15 +12,14 @@
  * `chat-run-progress-card.tsx`) stays a thin shell.
  *
  * The schemas here are deliberately a MINIMAL local subset of the canonical
- * `@appstrate/shared-types` realtime schemas: depending on shared-types would
- * pull `@appstrate/db` (it imports `runStatusEnum`/`tokenUsage`) into the chat
- * module, coupling the UI to the database package. We only need a handful of
- * fields, so we redeclare them and stay decoupled. Field names match the wire
- * shape (post-camelize) exactly so a server payload validates unchanged.
+ * `@appstrate/shared-types` realtime schemas: we only need a handful of
+ * fields, so we redeclare them and stay decoupled from the API wire module.
+ * Field names match the wire shape (post-camelize) exactly so a server
+ * payload validates unchanged.
  */
 
 import { z } from "zod";
-import type { RunStatus as DbRunStatus, TerminalRunStatus } from "@appstrate/db/schema";
+import { runStatusValues, TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import { documentUri, parseDocumentUri } from "@appstrate/core/document-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
@@ -29,43 +28,15 @@ export const RUN_LAUNCH_OPS = ["runAgent", "runInline", "run_and_wait"] as const
 export type RunLaunchOp = (typeof RUN_LAUNCH_OPS)[number];
 
 /**
- * All run statuses. Kept as a local literal so this browser-bundled UI
- * module never pulls `@appstrate/db` values (drizzle) into the web build —
- * the type-only parity assertions below fail compilation if either side
- * drifts from the canonical enums in `packages/db/src/schema/enums.ts`.
+ * All run statuses — re-exported from the canonical, import-free tuple in
+ * `@appstrate/db/run-status` (which the `run_status` `pgEnum` itself derives
+ * from). That module pulls neither drizzle-orm nor the table schema, so this
+ * browser-bundled UI module stays free of DB code while the list can no
+ * longer drift from the database.
  */
-export const RUN_STATUSES = [
-  "pending",
-  "running",
-  "success",
-  "failed",
-  "timeout",
-  "cancelled",
-] as const;
-export type RunStatus = (typeof RUN_STATUSES)[number];
-
-/** Statuses past which a run never changes again. */
-const terminalRunStatuses = ["success", "failed", "timeout", "cancelled"] as const;
-export const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(
-  terminalRunStatuses,
-);
-
-// Compile-time parity checks — fail to compile if either literal drifts
-// from the canonical @appstrate/db enums (type-only import, erased at build).
-type _RunStatusParity = [DbRunStatus] extends [RunStatus]
-  ? [RunStatus] extends [DbRunStatus]
-    ? true
-    : never
-  : never;
-type _TerminalParity = [TerminalRunStatus] extends [(typeof terminalRunStatuses)[number]]
-  ? [(typeof terminalRunStatuses)[number]] extends [TerminalRunStatus]
-    ? true
-    : never
-  : never;
-const _runStatusParity: _RunStatusParity = true;
-const _terminalParity: _TerminalParity = true;
-void _runStatusParity;
-void _terminalParity;
+export { TERMINAL_RUN_STATUSES };
+export const RUN_STATUSES = runStatusValues;
+export type RunStatus = (typeof runStatusValues)[number];
 
 export function isTerminalStatus(status: string | null | undefined): status is RunStatus {
   return typeof status === "string" && TERMINAL_RUN_STATUSES.has(status as RunStatus);

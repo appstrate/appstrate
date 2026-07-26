@@ -2,12 +2,8 @@
 # Requires BuildKit (Docker 23+, or DOCKER_BUILDKIT=1). The `COPY --parents`
 # directives below are BuildKit-only — the classic builder (DOCKER_BUILDKIT=0)
 # cannot build this image.
-# ── Stage 1: Install dependencies ──────────────────────────────────
-FROM oven/bun:1.3.14-alpine AS deps
-
-LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
-LABEL org.opencontainers.image.description="Appstrate — Open-source platform for running autonomous AI agents in sandboxed Docker containers"
-LABEL org.opencontainers.image.licenses="Apache-2.0"
+# ── Stage 1: Workspace manifests (shared by both install stages) ───
+FROM oven/bun:1.3.14-alpine AS manifests
 
 WORKDIR /app
 
@@ -27,10 +23,40 @@ COPY package.json bun.lock turbo.json ./
 COPY --parents */package.json */*/package.json ./
 COPY patches/ patches/
 
-# rationale: see .github/actions/bun-setup/action.yml
-RUN bun install
+# ── Stage 2a: Full install (build toolchain) ──────────────────────
+# Everything the BUILD needs: Vite/Rolldown, TypeScript, Turbo, the SPA's
+# dependency tree. This tree is ~1.0 GB and never reaches the final image.
+FROM manifests AS deps
 
-# ── Stage 2: Build ────────────────────────────────────────────────
+# rationale: see .github/actions/bun-setup/action.yml
+RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
+    bun install
+
+# ── Stage 2b: Runtime install (shipped workspace members only) ────
+# The final image ships exactly three node_modules trees — root (the shared
+# `.bun` store), apps/api, and packages/* — so the runtime install is filtered
+# to that subgraph. This drops apps/web (monaco-editor, react-icons,
+# lucide-react …), apps/cli, e2e (playwright) and the root dev toolchain
+# (turbo, typescript, prettier, eslint, redocly) from the store the final
+# stage copies: measured 1.0 GB → 642 MB.
+#
+# NOT `--production`: several packages value-import at runtime a dependency
+# that is declared as a `devDependency` — most importantly
+# `packages/core/src/storage-s3.ts` imports `@aws-sdk/client-s3`, which core
+# does not declare and apps/api declares as a devDependency. `--production`
+# therefore deletes the S3 storage backend from the image, and because the
+# backend is source-only (Bun executes `.ts` directly, no build step) the
+# build stays GREEN and the failure only appears at runtime. Fix the manifests
+# first if `--production` is ever wanted; it is worth only ~26 MB more.
+#
+# `--filter` is safe against that class of bug: it selects whole workspace
+# members and keeps each selected member's devDependencies intact.
+FROM manifests AS deps-runtime
+
+RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
+    bun install --filter '@appstrate/api' --filter './packages/*'
+
+# ── Stage 3: Build ────────────────────────────────────────────────
 FROM oven/bun:1.3.14-alpine AS build
 
 WORKDIR /app
@@ -53,13 +79,22 @@ RUN bun install
 
 RUN bun run build
 
-# ── Stage 3: Production image ─────────────────────────────────────
+# ── Stage 4: Production image ─────────────────────────────────────
 FROM oven/bun:1.3.14-alpine
+
+# On the FINAL stage on purpose: a LABEL set on an intermediate stage never
+# reaches the published image (it was on `deps` before, so the image shipped
+# only Bun's upstream OCI labels).
+LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
+LABEL org.opencontainers.image.description="Appstrate — Open-source platform for running autonomous AI agents in sandboxed Docker containers"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /app
 
-# Runtime dependencies (root hoisted + every workspace member's isolated
-# node_modules), graph-derived via `COPY --parents` like the build stage.
+# Runtime dependencies (root `.bun` store + every workspace member's isolated
+# node_modules), graph-derived via `COPY --parents` like the build stage —
+# but from `deps-runtime`, NOT `deps`: the build tree carries the SPA and dev
+# toolchain the runtime never loads.
 # Bun isolated installs keep each package's deps OUT of the root hoist
 # (e.g. zod under module-chat) as symlink farms into the root .bun store
 # — cheap to ship,
@@ -67,8 +102,8 @@ WORKDIR /app
 # caused exactly that three times (afps-shared/semver, module-claude-code,
 # module-chat); the glob can't miss a member and skips absent dirs instead
 # of failing the build.
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps --parents /app/./apps/api/node_modules /app/./packages/*/node_modules ./
+COPY --from=deps-runtime /app/node_modules ./node_modules
+COPY --from=deps-runtime --parents /app/./apps/api/node_modules /app/./packages/*/node_modules ./
 
 # ── Workspace package sources (Bun runs TypeScript directly — no build step) ──
 # Graph-derived via `COPY --parents`: apps/api source + every packages/*/src

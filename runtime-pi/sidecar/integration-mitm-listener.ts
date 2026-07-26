@@ -56,6 +56,7 @@ import { createServer as netCreateServer, connect as netConnect, type Socket } f
 import {
   isBlockedHost,
   isBlockedUrl,
+  readRequestBodyBounded,
   resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
   type HostResolver,
@@ -224,6 +225,7 @@ export function createIntegrationMitmListener(
             serve: (opts: {
               port: number;
               hostname: string;
+              maxRequestBodySize: number;
               tls: { cert: string; key: string };
               fetch: (req: Request) => Promise<Response>;
             }) => BunServerHandle;
@@ -236,6 +238,12 @@ export function createIntegrationMitmListener(
       return bun.serve({
         port: 0,
         hostname: "127.0.0.1",
+        // Bun defaults to 128 MiB, an order of magnitude above the cap this
+        // listener actually enforces — and the sidecar's whole cgroup is
+        // 256 MiB. Pinning it to the business cap makes the runtime itself
+        // drop an over-sized body at the socket, before any of it reaches
+        // `handleInnerRequest`.
+        maxRequestBodySize: maxRequestBytes,
         tls: { cert: leaf.certPem, key: leaf.keyPem },
         fetch: (req) =>
           handleInnerRequest(req, sniHost, options.credentials, fetchFn, maxRequestBytes, emit),
@@ -619,8 +627,7 @@ export function extractSni(buf: Buffer): string | null {
  * placeholder name.
  */
 export type ConnectInputSubstitutionResult =
-  | { url: string; bodyText: string | null; headers: Record<string, string> }
-  | { failed: string };
+  { url: string; bodyText: string | null; headers: Record<string, string> } | { failed: string };
 
 /**
  * Pure, unit-testable helper for connect-login transient-input
@@ -693,7 +700,12 @@ function targetWithinAuthorizedUris(url: string, authorizedUris: readonly string
 // Inner-request handler — Bun.serve fetch callback
 // ─────────────────────────────────────────────
 
-async function handleInnerRequest(
+/**
+ * The per-SNI `Bun.serve` fetch callback. Exported (like {@link extractSni})
+ * so the body-cap and strip/inject behaviour can be exercised directly,
+ * without standing up TLS.
+ */
+export async function handleInnerRequest(
   req: Request,
   sniHost: string,
   credentials: MitmCredentialSource,
@@ -712,13 +724,24 @@ async function handleInnerRequest(
   // so the body read can no longer be deferred past it.
   let body: Buffer = Buffer.alloc(0);
   if (req.body) {
+    // Refuse on the DECLARED length first: the previous `await req.arrayBuffer()`
+    // materialised the entire body and only then compared it to the cap, so a
+    // multi-hundred-MiB POST was fully resident in a 256 MiB cgroup just to be
+    // rejected. A lying/absent Content-Length is caught by the bounded read below,
+    // which cancels the stream the moment the cap is crossed.
+    const declared = Number(req.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > maxRequestBytes) {
+      emit({ kind: "request-refused", url: targetUrl, reason: "body too large" });
+      return new Response("MITM listener: request body exceeds limit", { status: 413 });
+    }
     try {
-      const ab = await req.arrayBuffer();
-      if (ab.byteLength > maxRequestBytes) {
+      const bytes = await readRequestBodyBounded(req, maxRequestBytes);
+      if (bytes === "exceeded") {
         emit({ kind: "request-refused", url: targetUrl, reason: "body too large" });
         return new Response("MITM listener: request body exceeds limit", { status: 413 });
       }
-      body = Buffer.from(ab);
+      // View over the exact-size buffer — no second copy of the body.
+      body = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     } catch (err) {
       emit({
         kind: "request-refused",

@@ -37,6 +37,22 @@ import { logger } from "./logger.ts";
 
 let context: ResumableStreamContext | null = null;
 
+/**
+ * Retention for a turn's recorded bytes (both stores default to 24h).
+ *
+ * A day of retention buys nothing: the only window in which anything reads a
+ * recording back is "while the turn is live", and `clearActiveStream` drops the
+ * pointer to it the moment the turn finalizes — nothing can resume a finished
+ * turn. Everything past that point is a day of raw SSE bytes per chat turn held
+ * in Redis (or in the in-memory map on the single-replica tier).
+ *
+ * The TTL is refreshed on every append, so this is an inactivity budget measured
+ * from the last chunk, sized off the same 30min ceiling a turn's engine loopback
+ * token gets (`chat-stream.ts` ENGINE_LOOPBACK_TTL_MS). A turn silent for longer
+ * than that is dead and its bytes are garbage.
+ */
+const STREAM_TTL_MS = 30 * 60_000;
+
 /** Build the store once: Redis if reachable, else in-memory (single replica). */
 function buildStore(): ResumableStreamStore {
   const url = process.env.REDIS_URL;
@@ -69,7 +85,8 @@ function buildStore(): ResumableStreamStore {
 
 /** Lazily-created singleton resumable-stream context. */
 export function getResumableContext(): ResumableStreamContext {
-  if (!context) context = createResumableStreamContext({ store: buildStore() });
+  if (!context)
+    context = createResumableStreamContext({ store: buildStore(), ttlMs: STREAM_TTL_MS });
   return context;
 }
 

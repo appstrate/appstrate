@@ -70,6 +70,7 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
+  concatAndRelease,
   readRequestBodyBounded,
   substituteVars,
 } from "./helpers.ts";
@@ -1615,6 +1616,11 @@ async function responseToToolResult(
  * is breached. Returns `"exceeded"` on overflow — for binary spills we
  * never want a partial body that the agent might mistake for the full
  * content.
+ *
+ * The concat releases each chunk as it is copied ({@link concatAndRelease}),
+ * so a body near {@link ABSOLUTE_MAX_RESPONSE_SIZE} does not pin 2× its size
+ * at once — the sidecar's cgroup is 256 MiB and up to
+ * `DEFAULT_API_CALL_CONCURRENCY` of these run in parallel.
  */
 async function readBodyToBuffer(res: Response, maxBytes: number): Promise<Uint8Array | "exceeded"> {
   if (!res.body) return new Uint8Array(0);
@@ -1636,13 +1642,7 @@ async function readBodyToBuffer(res: Response, maxBytes: number): Promise<Uint8A
   } finally {
     reader.releaseLock();
   }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    merged.set(c, offset);
-    offset += c.byteLength;
-  }
-  return merged;
+  return concatAndRelease(chunks, total);
 }
 
 /**
@@ -1650,11 +1650,19 @@ async function readBodyToBuffer(res: Response, maxBytes: number): Promise<Uint8A
  * append a single `[truncated]` marker so the agent can tell the read
  * was bounded — silent truncation would let a bad upstream poison the
  * agent's reasoning with a short-but-wrong prefix.
+ *
+ * Decoding is incremental: buffering the raw chunks, merging them, and only
+ * then decoding held the bytes twice plus the decoded string. `{ stream: true }`
+ * carries a multi-byte sequence split across a chunk boundary into the next
+ * call, so byte-level truncation stays UTF-8-correct; the final flush emits the
+ * replacement char for a sequence cut by the cap, exactly as the non-fatal
+ * whole-buffer decode did.
  */
 async function readBodyBounded(res: Response, maxBytes: number): Promise<string> {
   if (!res.body) return "";
   const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  let text = "";
   let total = 0;
   let truncated = false;
   try {
@@ -1664,25 +1672,19 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
       if (!value) continue;
       if (total + value.byteLength > maxBytes) {
         const remaining = maxBytes - total;
-        if (remaining > 0) chunks.push(value.subarray(0, remaining));
+        if (remaining > 0) text += decoder.decode(value.subarray(0, remaining), { stream: true });
         total = maxBytes;
         truncated = true;
         await reader.cancel();
         break;
       }
-      chunks.push(value);
+      text += decoder.decode(value, { stream: true });
       total += value.byteLength;
     }
   } finally {
     reader.releaseLock();
   }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    merged.set(c, offset);
-    offset += c.byteLength;
-  }
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(merged);
+  text += decoder.decode(); // flush a trailing partial sequence
   return truncated ? `${text}\n[truncated: response exceeded ${maxBytes} bytes]` : text;
 }
 

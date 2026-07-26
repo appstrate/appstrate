@@ -142,6 +142,29 @@ export const STREAMING_THRESHOLD = 1 * 1024 * 1024; // 1 MB
 export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
 
 /**
+ * Concatenate read chunks into one buffer, dropping each source
+ * reference as it is copied.
+ *
+ * The naive `for (const c of chunks) merged.set(c, …)` keeps the whole
+ * `chunks` array reachable for the entire copy, so peak residency is
+ * 2× the body. Releasing each chunk right after it is copied makes the
+ * already-copied prefix collectable, so the peak trends towards 1×.
+ * `chunks` is consumed (emptied) — callers must not reuse it.
+ */
+export function concatAndRelease(chunks: Uint8Array[], total: number): Uint8Array {
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  // Reverse once so `pop()` yields the chunks in their original order while
+  // shrinking the array — O(1) per chunk, and the reference is gone immediately.
+  chunks.reverse();
+  for (let chunk = chunks.pop(); chunk !== undefined; chunk = chunks.pop()) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+
+/**
  * Stream-read a Request body into a Uint8Array, refusing the read if
  * the cumulative size crosses `maxBytes`. Returns `"exceeded"` if the
  * cap was hit, the bytes otherwise. We never materialise an
@@ -174,13 +197,7 @@ export async function readRequestBodyBounded(
   } finally {
     reader.releaseLock();
   }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return merged;
+  return concatAndRelease(chunks, total);
 }
 
 export type {

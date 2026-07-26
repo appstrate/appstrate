@@ -23,7 +23,7 @@ import {
 } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedApplication, seedApiKey } from "../../helpers/seed.ts";
 import { sql } from "drizzle-orm";
-import { initRealtime } from "../../../src/services/realtime.ts";
+import { initRealtime, activeSubscriberCount } from "../../../src/services/realtime.ts";
 import { collectSSEEvents } from "../../helpers/sse.ts";
 
 const app = getTestApp();
@@ -773,6 +773,198 @@ describe("realtime SSE routes (integration)", () => {
       expect(events).toHaveLength(1);
       expect(events[0]!.event).toBe("run_log");
       expect(JSON.parse(events[0]!.data).message).toBe("debug-for-admin");
+    });
+  });
+
+  // ── ?channels= subscription filter ──────────────────────────
+
+  describe("?channels= subscription filter", () => {
+    it("a stream declaring only run_update never receives run_log", async () => {
+      const res = await sseRequest("/api/realtime/runs?channels=run_update", ctx);
+      expect(res.status).toBe(200);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      // Fire the undeclared channel FIRST: if it were delivered it would be
+      // the first collected frame and the assertion below would catch it.
+      await pgNotify("run_log_insert", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        run_id: run.id,
+        level: "info",
+        message: "filtered-out",
+      });
+      await wait();
+      await pgNotify("run_update", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        id: run.id,
+        status: "success",
+        package_id: agentPkg.id,
+      });
+
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0]!.event).toBe("run_update");
+    });
+
+    it("declaring no channels still delivers every channel (backward compatible)", async () => {
+      // The existing CLI/SDK/integrator clients send no `channels` param —
+      // their stream must be unchanged.
+      const res = await sseRequest("/api/realtime/runs", ctx);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      await pgNotify("run_log_insert", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        run_id: run.id,
+        level: "info",
+        message: "still-delivered",
+      });
+
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0]!.event).toBe("run_log");
+    });
+
+    it("an unrecognised channel name falls back to every channel (never a dead stream)", async () => {
+      const res = await sseRequest("/api/realtime/runs?channels=not_a_channel", ctx);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      await pgNotify("run_log_insert", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        run_id: run.id,
+        level: "info",
+        message: "fallback-delivered",
+      });
+
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0]!.event).toBe("run_log");
+    });
+
+    it("a multi-channel declaration keeps every declared channel", async () => {
+      const res = await sseRequest(
+        `/api/realtime/runs/${run.id}?verbose=true&channels=run_update,run_log`,
+        ctx,
+      );
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      await pgNotify("run_log_insert", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        run_id: run.id,
+        level: "info",
+        message: "declared",
+      });
+
+      // Frame 1 is the initial run_update snapshot, frame 2 the run_log.
+      const events = await collectSSEEvents(res.body!, 2, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      const names = events.map((e) => e.event);
+      expect(names).toContain("run_update");
+      expect(names).toContain("run_log");
+    });
+  });
+
+  // ── Backpressure ────────────────────────────────────────────
+
+  describe("outbound queue backpressure", () => {
+    it("drops (unsubscribes) a stream whose consumer stopped reading", async () => {
+      // Open a stream and NEVER read its body: hono's TransformStream stops
+      // being pulled after the first chunk, so the drain loop wedges on its
+      // first write while PG NOTIFY keeps filling `pending`. Before the cap,
+      // that queue grew without bound — one stuck client could exhaust the
+      // API process's memory.
+      const before = activeSubscriberCount();
+      const res = await sseRequest("/api/realtime/runs", ctx);
+      expect(res.status).toBe(200);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      expect(activeSubscriberCount()).toBe(before + 1);
+
+      // 3 000 distinct notifications in one statement. Distinct `id` values
+      // are load-bearing: Postgres collapses byte-identical NOTIFYs issued in
+      // the same transaction into a single delivery.
+      await db.execute(sql`
+        SELECT pg_notify('run_update', json_build_object(
+          'operation', 'UPDATE',
+          'id', 'ovf-' || g,
+          'package_id', ${agentPkg.id}::text,
+          'status', 'running',
+          'user_id', NULL,
+          'end_user_id', NULL,
+          'org_id', ${ctx.orgId}::text,
+          'application_id', ${ctx.defaultAppId}::text,
+          'schedule_id', NULL,
+          'error', NULL,
+          'started_at', NULL,
+          'completed_at', NULL,
+          'duration', NULL
+        )::text)
+        FROM generate_series(1, 3000) g
+      `);
+
+      // Poll rather than sleep a fixed amount — delivery of 3 000 NOTIFYs
+      // through the LISTEN connection is not instantaneous.
+      for (let i = 0; i < 60 && activeSubscriberCount() > before; i++) {
+        await wait(100);
+      }
+      expect(activeSubscriberCount()).toBe(before);
+
+      // Release the wedged writer so the stream's loop can exit (otherwise it
+      // sits on the 60 s write deadline for the rest of the file).
+      await res.body!.cancel();
+    });
+
+    it("keeps a stream whose backlog stays under the cap", async () => {
+      // Same wedged-consumer setup, two orders of magnitude below the cap.
+      // Proves the drop above is the cap firing, not merely "an unread stream
+      // gets torn down" — a slow-but-recoverable consumer keeps its stream
+      // (and its queued events) instead of losing them.
+      const before = activeSubscriberCount();
+      const res = await sseRequest("/api/realtime/runs", ctx);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      await db.execute(sql`
+        SELECT pg_notify('run_update', json_build_object(
+          'operation', 'UPDATE',
+          'id', 'small-' || g,
+          'package_id', ${agentPkg.id}::text,
+          'status', 'running',
+          'user_id', NULL,
+          'end_user_id', NULL,
+          'org_id', ${ctx.orgId}::text,
+          'application_id', ${ctx.defaultAppId}::text,
+          'schedule_id', NULL,
+          'error', NULL,
+          'started_at', NULL,
+          'completed_at', NULL,
+          'duration', NULL
+        )::text)
+        FROM generate_series(1, 50) g
+      `);
+      await wait(500);
+
+      expect(activeSubscriberCount()).toBe(before + 1);
+      await res.body!.cancel();
     });
   });
 

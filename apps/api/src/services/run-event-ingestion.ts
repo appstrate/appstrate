@@ -296,11 +296,26 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // Finalize span — the single CAS-guarded convergence for every run
   // termination path. Nests under the active request/run span when present.
   // A true no-op when observability is disabled.
-  await runWithSpan(
-    "appstrate.run.finalize",
-    { attributes: { "appstrate.run.id": input.run.id } },
-    () => finalizeRunImpl(input),
-  );
+  try {
+    await runWithSpan(
+      "appstrate.run.finalize",
+      { attributes: { "appstrate.run.id": input.run.id } },
+      () => finalizeRunImpl(input),
+    );
+  } finally {
+    // Single, unconditional release point for the run's in-memory metric
+    // throttle entry. `finalizeRunImpl` has many exits (idempotent no-op when
+    // the sink is already closed, the CAS-winner path, and any throw from the
+    // post-CAS side effects); dropping the entry here covers all of them,
+    // including the throwing ones that previously leaked it for the lifetime
+    // of the process. Also runs AFTER the post-CAS side effects, so a metric
+    // event racing them cannot re-create an entry that nothing then clears.
+    //
+    // Local-only by construction: the entry lives on whichever replica
+    // ingested the metric event, which is not necessarily the one handling
+    // `/finalize`. The broadcaster's own idle sweep is what bounds that case.
+    clearRunMetricBroadcastState(input.run.id);
+  }
 }
 
 async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
@@ -553,16 +568,11 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
 
   if (rowsAffected.length === 0) {
     logger.debug("finalizeRun idempotent — sink already closed", { runId: run.id });
-    // Even on the no-op branch, clear any lingering throttle state so
-    // a long-running API process doesn't leak entries for retry-storm
-    // runs that all collapse onto the same id.
-    clearRunMetricBroadcastState(run.id);
     return;
   }
 
-  // Drop the per-run throttle state — the run is terminal, no further
-  // metric events will arrive. Bounds the broadcaster's in-memory map.
-  clearRunMetricBroadcastState(run.id);
+  // NOTE: the per-run metric throttle entry is released in `finalizeRun`'s
+  // `finally` — one release point covering every exit of this function.
 
   // SLI emission — exactly-once on the CAS winner. Run-duration histogram +
   // terminal-status counter (the failure-rate source). No-op when disabled.

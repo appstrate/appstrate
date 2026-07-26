@@ -202,13 +202,16 @@ async function resolvePublishedManifest(
   if (!pkgRow) return { ok: false, reason: "not_found" };
   if (pkgRow.type !== expectedType) return { ok: false, reason: "wrong_type" };
 
+  // Projection is deliberately metadata-only: `pickVersion` reads nothing but
+  // (version, integrity, yanked), and this list is UNBOUNDED — a package with
+  // N published versions would otherwise pull N manifest jsonb blobs to keep
+  // exactly one. The winner's manifest is fetched by itself below.
   const [versionRows, tagRows] = await Promise.all([
     db
       .select({
         version: packageVersions.version,
         integrity: packageVersions.integrity,
         yanked: packageVersions.yanked,
-        manifest: packageVersions.manifest,
       })
       .from(packageVersions)
       // Same tenant boundary on the version lookup itself (not just the
@@ -233,15 +236,27 @@ async function resolvePublishedManifest(
   // exact → dist-tag → range resolution and the yanked-visibility rule shared
   // with `DbPackageCatalog`.
   const spec = pin && pin.trim().length > 0 ? pin.trim() : "latest";
-  const picked = pickVersion(
-    spec,
-    versionRows.map((v) => ({ version: v.version, integrity: v.integrity, yanked: v.yanked })),
-    tagRows,
-  );
+  const picked = pickVersion(spec, versionRows, tagRows);
   if (!picked) return { ok: false, reason: "unsatisfiable_pin" };
 
-  const row = versionRows.find((v) => v.version === picked.version);
-  return { ok: true, rawManifest: row?.manifest, version: picked.version, source: "version" };
+  // Manifest of the WINNING version only — same tenant boundary as the list
+  // read above, so the two reads cannot skew across a concurrent
+  // delete/recreate of the package id.
+  const [manifestRow] = await db
+    .select({ manifest: packageVersions.manifest })
+    .from(packageVersions)
+    .innerJoin(packages, and(eq(packages.id, packageVersions.packageId), orgOrSystemFilter(orgId)))
+    .where(
+      and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, picked.version)),
+    )
+    .limit(1);
+
+  return {
+    ok: true,
+    rawManifest: manifestRow?.manifest,
+    version: picked.version,
+    source: "version",
+  };
 }
 
 /**

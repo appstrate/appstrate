@@ -1,21 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { Modal } from "./modal";
+import { LoadingState } from "./page-states";
 import { RunModal } from "./run-modal";
-import {
-  MissingConnectionsModal,
-  type MissingIntegrationFieldError,
-} from "./missing-connections-modal";
+import type { MissingIntegrationFieldError } from "./missing-connections-modal";
 import { useRunAgent } from "../hooks/use-mutations";
 import { usePackageDetail } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { ApiError } from "../api/errors";
 import type { AgentDetail } from "@appstrate/shared-types";
+
+/**
+ * 412 recovery surface — lazy because it is a modal that only ever opens on a
+ * failed run kickoff, while this button sits in the eager entry graph (agent
+ * list → card → button). Its subtree reaches `IntegrationConnectionPicker` →
+ * `@appstrate/core/integration` → `@afps-spec/schema`, which instantiates AJV
+ * at module scope; a static edge shipped AJV + semver (~144 kB raw) to every
+ * visitor. Keep this import dynamic.
+ */
+const MissingConnectionsModal = lazy(() =>
+  import("./missing-connections-modal").then((m) => ({ default: m.MissingConnectionsModal })),
+);
 
 interface RunAgentButtonProps {
   packageId: string;
@@ -130,6 +141,11 @@ export function RunAgentButton({
     });
   };
 
+  const closeMissingModal = () => {
+    setMissingErrors(null);
+    runAgent.reset();
+  };
+
   const isPending = isFetching || runAgent.isPending;
   const isDisabled = disabled || isPending;
 
@@ -186,31 +202,41 @@ export function RunAgentButton({
         />
       )}
 
-      <MissingConnectionsModal
-        open={missingErrors !== null}
-        onClose={() => {
-          setMissingErrors(null);
-          runAgent.reset();
-        }}
-        errors={missingErrors ?? []}
-        agentPackageId={packageId}
-        {...(detail?.dependencies.integrations
-          ? { integrationEntries: detail.dependencies.integrations }
-          : {})}
-        retrying={runAgent.isPending}
-        onRetryWithOverrides={(overrides) => {
-          // Re-fire the run with the user's picks. Keep the modal open
-          // until the response lands so the picker stays visible if the
-          // server returns a fresh 412 (e.g. picks disappeared mid-flight).
-          runAgent.mutate(
-            { version: runVersion, connectionOverrides: overrides },
-            {
-              onSuccess: () => setMissingErrors(null),
-              onError: onRunError,
-            },
-          );
-        }}
-      />
+      {missingErrors !== null && (
+        // Mounted only while the 412 modal is open — that mount is what
+        // triggers the dynamic import. The fallback keeps the same modal
+        // frame so the dialog appears immediately and only its body swaps.
+        <Suspense
+          fallback={
+            <Modal open onClose={closeMissingModal} title={t("missingConnections.title")}>
+              <LoadingState />
+            </Modal>
+          }
+        >
+          <MissingConnectionsModal
+            open
+            onClose={closeMissingModal}
+            errors={missingErrors}
+            agentPackageId={packageId}
+            {...(detail?.dependencies.integrations
+              ? { integrationEntries: detail.dependencies.integrations }
+              : {})}
+            retrying={runAgent.isPending}
+            onRetryWithOverrides={(overrides) => {
+              // Re-fire the run with the user's picks. Keep the modal open
+              // until the response lands so the picker stays visible if the
+              // server returns a fresh 412 (e.g. picks disappeared mid-flight).
+              runAgent.mutate(
+                { version: runVersion, connectionOverrides: overrides },
+                {
+                  onSuccess: () => setMissingErrors(null),
+                  onError: onRunError,
+                },
+              );
+            }}
+          />
+        </Suspense>
+      )}
     </>
   );
 }

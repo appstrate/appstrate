@@ -24,6 +24,24 @@ import { shutdownTelemetry } from "@appstrate/core/telemetry";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
+/**
+ * Hard ceiling on the WHOLE shutdown sequence, not just the in-flight drain.
+ *
+ * Every step below is an unbounded `await` (BullMQ `close()` without `force`
+ * waits for the job it is processing; `shutdownModules()` runs third-party
+ * code; `shutdownTelemetry()` flushes over the network). Without a deadline a
+ * single hung step means the connection teardown and `process.exit(0)` never
+ * run, and the supervisor's SIGKILL is what actually ends the process.
+ *
+ * Must stay BELOW the supervisor's stop grace period, otherwise it can never
+ * fire. `docker-compose.yml` sets `stop_grace_period: 45s` on the `appstrate`
+ * service for exactly this reason — Docker's default is 10s, which is shorter
+ * than the drain above and is what made the teardown unreachable. Operators
+ * running outside that compose file (k8s `terminationGracePeriodSeconds`,
+ * systemd `TimeoutStopSec`) need the same alignment.
+ */
+const SHUTDOWN_DEADLINE_MS = 40_000;
+
 export function createShutdownHandler(setShuttingDown: () => void): () => Promise<void> {
   let called = false;
 
@@ -31,6 +49,19 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     if (called) return;
     called = true;
     setShuttingDown();
+
+    const deadline = setTimeout(() => {
+      logger.error("Shutdown deadline exceeded — forcing exit", {
+        deadlineMs: SHUTDOWN_DEADLINE_MS,
+        inFlight: getInFlightCount(),
+      });
+      process.exit(1);
+    }, SHUTDOWN_DEADLINE_MS);
+    // Never hold the event loop open on the timer itself: if every step
+    // completes the process exits below anyway. `unref` only stops the timer
+    // from KEEPING an idle loop alive — a loop hung on a pending await is not
+    // idle, so the deadline still fires in the case it exists to cover.
+    deadline.unref();
 
     logger.info("Shutdown initiated, stopping container orchestrator...");
     stopUploadGc();
@@ -96,6 +127,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     }
     await Promise.all(closeOps);
 
+    clearTimeout(deadline);
     logger.info("Shutdown complete");
     process.exit(0);
   };

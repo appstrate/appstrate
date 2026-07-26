@@ -12,8 +12,10 @@
  *
  * Wakeup mechanism (in priority order):
  *
- *  1. **PG NOTIFY** — the `runs_notify_trigger` fires `run_update` on every
- *     `runs` UPDATE; `services/realtime.ts` LISTENs once per process and
+ *  1. **PG NOTIFY** — `runs_notify_update_trigger` fires `run_update` on any
+ *     `runs` UPDATE that changes a payload-visible column (`status` among
+ *     them, which is all this module reads); `services/realtime.ts` LISTENs
+ *     once per process and
  *     fans out to in-process subscribers. This works across multi-instance
  *     deployments (each instance holds its own LISTEN connection to the
  *     shared PostgreSQL) AND in Tier-0 (PGlite implements LISTEN/NOTIFY
@@ -284,6 +286,10 @@ export async function waitForRunTerminal(opts: {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
         isAdmin: true,
+        // This in-process subscriber only ever acts on `run_update` (see the
+        // `send` handler below); declaring it keeps the run's log and metric
+        // frames from being serialized for a consumer that discards them.
+        channels: new Set(["run_update"]),
       },
       send: (evt) => {
         if (evt.event !== "run_update") return;

@@ -70,7 +70,11 @@ function watchConnectionSse(
       // `/api/realtime/runs` (the org-wide stream, which also carries
       // `connection_update`) — NOT bare `/api/realtime`, which is not a route
       // (it 404s and isn't auth-skipped), so this backstop never fired.
-      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(appId)}`,
+      //
+      // `channels` is declared because this opens one org-wide stream PER
+      // rendered card, and the listener below reads `connection_update` only.
+      // Without it each card would also carry the org's whole run_log traffic.
+      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(appId)}&channels=connection_update`,
       { withCredentials: true },
     );
     es.addEventListener("connection_update", (ev) => {

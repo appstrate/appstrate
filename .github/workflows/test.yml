@@ -26,6 +26,16 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/bun-setup
 
+      # Bun's global download cache, keyed on the lockfile. Kept out of the
+      # shared bun-setup composite action on purpose: release/publish workflows
+      # must keep installing from a cold, unmediated registry.
+      - name: Cache Bun download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+
       - name: Install dependencies
         run: bun install
 
@@ -124,6 +134,16 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/bun-setup
 
+      # Bun's global download cache, keyed on the lockfile. Kept out of the
+      # shared bun-setup composite action on purpose: release/publish workflows
+      # must keep installing from a cold, unmediated registry.
+      - name: Cache Bun download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+
       - name: Install dependencies
         run: bun install
 
@@ -164,6 +184,16 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/bun-setup
 
+      # Bun's global download cache, keyed on the lockfile. Kept out of the
+      # shared bun-setup composite action on purpose: release/publish workflows
+      # must keep installing from a cold, unmediated registry.
+      - name: Cache Bun download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+
       - name: Install dependencies
         run: bun install
 
@@ -193,6 +223,16 @@ jobs:
 
       - name: Setup Bun
         uses: ./.github/actions/bun-setup
+
+      # Bun's global download cache, keyed on the lockfile. Kept out of the
+      # shared bun-setup composite action on purpose: release/publish workflows
+      # must keep installing from a cold, unmediated registry.
+      - name: Cache Bun download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
         run: bun install

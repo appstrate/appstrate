@@ -51,8 +51,7 @@ export interface ListEnvelope<T> {
   limit?: number;
 }
 
-import { runStatusEnum as _runStatusEnum } from "@appstrate/db/schema";
-type _RunStatus = (typeof _runStatusEnum.enumValues)[number];
+import type { RunStatus as _RunStatus } from "@appstrate/db/run-status";
 
 /**
  * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
@@ -272,15 +271,20 @@ export interface ResourceEntry {
 
 // --- Run Types ---
 
-import { runStatusEnum } from "@appstrate/db/schema";
-export type RunStatus = (typeof runStatusEnum.enumValues)[number];
+// Value re-exports come from `@appstrate/db/run-status`, NOT the schema
+// barrel: this module is consumed by the SPA, and a value import from
+// `@appstrate/db/schema` cannot be elided by the bundler — it shipped
+// drizzle-orm plus all 18 schema files (table + column names included) to
+// the browser. `run-status.ts` is import-free and is what `runStatusEnum`
+// itself derives from, so there is still exactly one list of statuses.
 export {
   TERMINAL_RUN_STATUSES,
   TERMINAL_RUN_EVENT_TYPES,
   terminalRunStatusValues,
   ACTIVE_RUN_STATUSES,
-} from "@appstrate/db/schema";
-export type { TerminalRunStatus } from "@appstrate/db/schema";
+  runStatusValues,
+} from "@appstrate/db/run-status";
+export type { RunStatus, TerminalRunStatus } from "@appstrate/db/run-status";
 
 // --- Schedule Types ---
 

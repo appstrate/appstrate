@@ -2634,7 +2634,7 @@ export interface paths {
         };
         /**
          * OpenAPI specification
-         * @description Returns the OpenAPI 3.1 specification as JSON.
+         * @description Returns the OpenAPI 3.1 specification as JSON. The response carries a strong `ETag` that is stable for the lifetime of the deployment — send it back as `If-None-Match` to revalidate a cached copy and get a `304 Not Modified` instead of the full document.
          */
         get: operations["getOpenApiSpec"];
         put?: never;
@@ -3769,6 +3769,8 @@ export interface paths {
          *     Event types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.
          *
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
+         *
+         *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
          */
         get: operations["streamAgentRuns"];
         put?: never;
@@ -3795,6 +3797,8 @@ export interface paths {
          *     Event types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.
          *
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
+         *
+         *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
          */
         get: operations["streamAllRuns"];
         put?: never;
@@ -3819,6 +3823,8 @@ export interface paths {
          *     Event types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.
          *
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
+         *
+         *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
          */
         get: operations["streamRun"];
         put?: never;
@@ -5864,6 +5870,8 @@ export interface components {
         SseOrgId: string;
         /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
         Verbose: boolean;
+        /** @description Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). Omit to receive every channel (default, unchanged behaviour). Unknown names are ignored; if nothing is recognised the stream falls back to every channel. Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it. */
+        SseChannels: string;
         /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
         AppstrateUser: string;
         /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
@@ -14299,7 +14307,10 @@ export interface operations {
     getOpenApiSpec: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Entity-tag of a cached copy. A match yields `304 Not Modified`. */
+                "If-None-Match"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14308,6 +14319,8 @@ export interface operations {
             /** @description OpenAPI spec */
             200: {
                 headers: {
+                    /** @description Strong entity-tag of the served specification. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -14322,6 +14335,15 @@ export interface operations {
                      */
                     "application/json": Record<string, never>;
                 };
+            };
+            /** @description Cached copy is still current (`If-None-Match` matched). No body. */
+            304: {
+                headers: {
+                    /** @description Strong entity-tag of the served specification. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -17967,6 +17989,8 @@ export interface operations {
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
                 verbose?: components["parameters"]["Verbose"];
+                /** @description Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). Omit to receive every channel (default, unchanged behaviour). Unknown names are ignored; if nothing is recognised the stream falls back to every channel. Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it. */
+                channels?: components["parameters"]["SseChannels"];
             };
             header?: never;
             path: {
@@ -18001,6 +18025,8 @@ export interface operations {
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
                 verbose?: components["parameters"]["Verbose"];
+                /** @description Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). Omit to receive every channel (default, unchanged behaviour). Unknown names are ignored; if nothing is recognised the stream falls back to every channel. Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it. */
+                channels?: components["parameters"]["SseChannels"];
             };
             header?: never;
             path?: never;
@@ -18032,6 +18058,8 @@ export interface operations {
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
                 verbose?: components["parameters"]["Verbose"];
+                /** @description Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). Omit to receive every channel (default, unchanged behaviour). Unknown names are ignored; if nothing is recognised the stream falls back to every channel. Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it. */
+                channels?: components["parameters"]["SseChannels"];
             };
             header?: never;
             path: {

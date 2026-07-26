@@ -62,12 +62,59 @@ interface ThrottleState {
 const throttleByRunId = new Map<string, ThrottleState>();
 
 /**
+ * Idle age after which an entry is swept even though no `finalizeRun` ever
+ * cleared it. Comfortably above the longest plausible gap between two metric
+ * events of a live run, so a sweep never resets the throttle of a run that is
+ * actually streaming (and if it did, the only consequence is one extra
+ * leading-edge broadcast).
+ */
+const ENTRY_MAX_IDLE_MS = 15 * 60_000;
+
+/** Minimum interval between sweeps — the sweep is O(map size), so rate-limit it. */
+const SWEEP_INTERVAL_MS = 60_000;
+
+let lastSweptAt = 0;
+
+/**
+ * Drop entries whose last broadcast is older than {@link ENTRY_MAX_IDLE_MS}.
+ *
+ * Why a time-based sweep exists at all: the entry is created on the replica
+ * that INGESTS the metric event, and only `finalizeRun` removes it — on the
+ * replica that receives `/finalize`. Single-container today, so the two are
+ * the same process and the explicit clear always lands; the sweep is what
+ * keeps that from silently becoming an unbounded map the day the API runs
+ * more than one replica. Deliberately piggy-backed on `scheduleRunMetricBroadcast`
+ * rather than a `setInterval` — no timer to own, unref, or tear down in tests.
+ *
+ * Cannot lose a broadcast: an entry with a pending trailing timer is never
+ * swept, and sweeping an idle entry only means the run's next metric event
+ * fires on the leading edge instead of being coalesced.
+ */
+function sweepIdleEntries(now: number): void {
+  if (now - lastSweptAt < SWEEP_INTERVAL_MS) return;
+  lastSweptAt = now;
+  for (const [runId, state] of throttleByRunId) {
+    if (state.trailingTimer !== null) continue;
+    if (now - state.lastFiredAt < ENTRY_MAX_IDLE_MS) continue;
+    throttleByRunId.delete(runId);
+  }
+}
+
+/** Test-only introspection — number of live throttle entries. */
+export function activeRunMetricThrottleCount(): number {
+  return throttleByRunId.size;
+}
+
+/**
  * Schedule a `run_metric` broadcast for the given run. Safe to call on
  * every metric event — the per-run throttle handles coalescing.
  */
 export function scheduleRunMetricBroadcast(runId: string): void {
-  const state = throttleByRunId.get(runId);
   const now = Date.now();
+  // Sweep BEFORE reading the entry, so we never mutate a state object the
+  // sweep just detached from the map.
+  sweepIdleEntries(now);
+  const state = throttleByRunId.get(runId);
 
   if (!state) {
     // First emit ever for this run — fire on the leading edge so the
@@ -121,6 +168,7 @@ export function _resetRunMetricBroadcasterForTests(): void {
     if (state.trailingTimer) clearTimeout(state.trailingTimer);
   }
   throttleByRunId.clear();
+  lastSweptAt = 0;
 }
 
 async function fireBroadcast(runId: string): Promise<void> {

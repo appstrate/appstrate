@@ -192,6 +192,99 @@ describe("syncSystemPackagesToDb", () => {
     expect(versionRows).toHaveLength(1);
   });
 
+  it("second boot over an unchanged set performs ZERO writes", async () => {
+    // `.afps` archives are content-addressed by `integrity` (SHA-256 over the
+    // archive bytes), so a boot that loads the same bytes it already persisted
+    // has nothing to do. Before the skip guards, every boot re-ran an UPSERT
+    // per canonical package AND opened one advisory-locked transaction per
+    // version just to rediscover that the version existed — ~594 round trips
+    // and 66 "Version already exists" log lines on a no-op boot.
+    const a = makeFixtureEntry({ id: "@sys-test/skip-a", version: "1.0.0" });
+    const b = makeFixtureEntry({ id: "@sys-test/skip-b", version: "2.3.4", type: "integration" });
+    const { canonical, versions } = buildRegistry([a, b]);
+
+    const first = await syncSystemPackagesToDb(canonical, versions);
+    expect(first).toEqual({
+      syncedPackages: 2,
+      syncedVersions: 2,
+      unchangedPackages: 0,
+      unchangedVersions: 0,
+    });
+
+    // Same registry, same bytes — the second pass must write nothing at all.
+    const second = await syncSystemPackagesToDb(canonical, versions);
+    expect(second).toEqual({
+      syncedPackages: 0,
+      syncedVersions: 0,
+      unchangedPackages: 2,
+      unchangedVersions: 2,
+    });
+
+    // ...and the persisted state is intact, not merely untouched-because-broken.
+    const rows = await db
+      .select({ id: packages.id, source: packages.source, type: packages.type })
+      .from(packages)
+      .where(eq(packages.source, "system"));
+    expect(rows.map((r) => r.id).sort()).toEqual(["@sys-test/skip-a", "@sys-test/skip-b"]);
+    expect(rows.find((r) => r.id === "@sys-test/skip-b")!.type).toBe("integration");
+  });
+
+  it("still heals a `packages` row whose type drifted, even at unchanged bytes", async () => {
+    // The skip guard keys on integrity AND the row's identity columns, so a
+    // packageId that changed type across versions (or a row corrupted out of
+    // band) is not skipped into staying wrong.
+    const entry = makeFixtureEntry({
+      id: "@sys-test/heal-type",
+      version: "1.0.0",
+      type: "skill",
+    });
+    const { canonical, versions } = buildRegistry([entry]);
+    await syncSystemPackagesToDb(canonical, versions);
+
+    await db.update(packages).set({ type: "agent" }).where(eq(packages.id, "@sys-test/heal-type"));
+
+    const report = await syncSystemPackagesToDb(canonical, versions);
+
+    // The canonical pass ran (did not skip); the version pass still skipped.
+    expect(report.syncedPackages).toBe(1);
+    expect(report.unchangedPackages).toBe(0);
+    expect(report.unchangedVersions).toBe(1);
+
+    const [healed] = await db
+      .select({ type: packages.type })
+      .from(packages)
+      .where(eq(packages.id, "@sys-test/heal-type"))
+      .limit(1);
+    expect(healed!.type).toBe("skill");
+  });
+
+  it("fully re-creates a package deleted between boots", async () => {
+    // `package_versions.package_id` is ON DELETE CASCADE, so a dropped
+    // `packages` row takes its versions with it — the skip guard's INNER JOIN
+    // can never match a half-present package, and the next sync rebuilds both.
+    const entry = makeFixtureEntry({ id: "@sys-test/resurrect", version: "1.0.0" });
+    const { canonical, versions } = buildRegistry([entry]);
+    await syncSystemPackagesToDb(canonical, versions);
+
+    await db.delete(packages).where(eq(packages.id, "@sys-test/resurrect"));
+
+    const report = await syncSystemPackagesToDb(canonical, versions);
+    expect(report).toEqual({
+      syncedPackages: 1,
+      syncedVersions: 1,
+      unchangedPackages: 0,
+      unchangedVersions: 0,
+    });
+
+    const [row] = await db
+      .select({ id: packages.id, source: packages.source })
+      .from(packages)
+      .where(eq(packages.id, "@sys-test/resurrect"))
+      .limit(1);
+    expect(row).toBeDefined();
+    expect(row!.source).toBe("system");
+  });
+
   // ─── Integrity drift safety gate ───────────────────────
 
   it("REFUSES to overwrite a published version whose bytes changed without a version bump", async () => {

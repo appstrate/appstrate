@@ -40,12 +40,38 @@ export class RedisEventBuffer implements EventBuffer {
     // already unique by construction, so prefix the JSON with it (and a
     // separator that JSON can't produce at column 0) to make the member
     // identity sequence-keyed regardless of payload content.
-    await redis.zadd(key, sequence, `${sequence}|${JSON.stringify(event)}`);
-    // Trim from the lowest-scored end if we overflow MAX_BUFFER_ENTRIES.
-    // `0` is the lowest rank; `-(MAX_BUFFER_ENTRIES + 1)` keeps the
-    // top-N most recent. Returns the number of removed members — non-zero
-    // means we dropped events, which is a real anomaly worth surfacing.
-    const trimmed = await redis.zremrangebyrank(key, 0, -(MAX_BUFFER_ENTRIES + 1));
+    //
+    // The three commands are ONE round trip via MULTI. They were three
+    // sequential awaits, so every ingested event of every remote run paid
+    // three network RTTs where one suffices — and the window between the
+    // ZADD and the EXPIRE meant a crash in between left a key with no TTL.
+    // MULTI also makes the trim atomic with the insert, so a concurrent
+    // reader can never observe the set above its cap.
+    //
+    // ZREMRANGEBYRANK trims from the lowest-scored end on overflow: `0` is
+    // the lowest rank, `-(MAX_BUFFER_ENTRIES + 1)` keeps the top-N most
+    // recent. Its reply is the number of removed members — non-zero means we
+    // dropped events, which is a real anomaly worth surfacing.
+    const replies = await redis
+      .multi()
+      .zadd(key, sequence, `${sequence}|${JSON.stringify(event)}`)
+      .zremrangebyrank(key, 0, -(MAX_BUFFER_ENTRIES + 1))
+      .expire(key, ttlSeconds)
+      .exec();
+
+    // `exec()` resolves to null when the transaction was discarded (e.g. the
+    // connection dropped mid-MULTI) and otherwise to one `[error, reply]`
+    // tuple per queued command. Surface either as a throw so the caller's
+    // existing failure handling is unchanged from the sequential-await
+    // version, where any command rejecting propagated.
+    if (replies === null) {
+      throw new Error("event buffer MULTI discarded");
+    }
+    for (const [err] of replies) {
+      if (err) throw err;
+    }
+
+    const trimmed = Number(replies[1]?.[1] ?? 0);
     if (trimmed > 0) {
       logger.warn("event buffer overflowed — dropped oldest entries", {
         runId,
@@ -53,7 +79,6 @@ export class RedisEventBuffer implements EventBuffer {
         cap: MAX_BUFFER_ENTRIES,
       });
     }
-    await redis.expire(key, ttlSeconds);
   }
 
   async peekLowest(runId: string): Promise<BufferedEvent | null> {

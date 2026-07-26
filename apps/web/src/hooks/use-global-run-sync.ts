@@ -224,7 +224,13 @@ export function useGlobalRunSync() {
     // only for a non-OK response (handled by the reconnect loop).
     const connectOnce = async () => {
       const res = await fetch(
-        `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(applicationId)}&verbose=true`,
+        // Declare the three channels this hook actually dispatches on. Without
+        // it the server fans the whole `run_log` firehose (every log line of
+        // every run in the application) into this stream just for the reader
+        // loop to drop it — and admins/owners got the `debug` level too.
+        // `verbose` is deliberately absent: it only affects `run_log`, which
+        // we no longer subscribe to.
+        `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(applicationId)}&channels=run_update,connection_update,chat_session_update`,
         {
           credentials: "include",
           signal: controller.signal,

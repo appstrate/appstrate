@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, or, desc, sql, isNotNull } from "drizzle-orm";
+import { eq, and, or, ne, desc, sql, isNotNull } from "drizzle-orm";
+import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
-import { extractDependencies } from "@appstrate/core/dependencies";
-import { buildPackageId } from "@appstrate/core/naming";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
@@ -44,30 +43,95 @@ export async function getPackageById(id: string): Promise<Package | null> {
 // Helpers (private)
 // ─────────────────────────────────────────────
 
-/** Fetch package display names from a list of package IDs. */
-/** Find packages that depend on the target package (via manifest dependencies). */
+/**
+ * The three AFPS §4.1 dependency maps on a manifest. Compile-time constants —
+ * they are interpolated as SQL literals below, never user input.
+ */
+const DEPENDENCY_MAPS = ["skills", "mcp_servers", "integrations"] as const;
+type DependencyMap = (typeof DEPENDENCY_MAPS)[number];
+
+/**
+ * SQL for one dependency map of `packages.draft_manifest`, normalized to an
+ * empty object when it is absent or not an object. Both `jsonb_object_keys`
+ * and `jsonb_exists` reject non-object input, and a hand-edited manifest whose
+ * `dependencies.skills` is a string must not take down the catalog read.
+ */
+function dependencyMapSql(map: DependencyMap) {
+  const expr = sql`${packages.draftManifest} -> 'dependencies' -> ${map}::text`;
+  return sql`(case when jsonb_typeof(${expr}) = 'object' then ${expr} else '{}'::jsonb end)`;
+}
+
+/** SQL mirroring {@link getPackageDisplayName}: manifest `display_name` when it is a string, else the id. */
+const displayNameSql = sql<string>`(case
+  when jsonb_typeof(${packages.draftManifest} -> 'display_name') = 'string'
+  then ${packages.draftManifest} ->> 'display_name'
+  else ${packages.id}
+end)`;
+
+/**
+ * Find packages that depend on the target package (via manifest dependencies).
+ *
+ * Evaluated in SQL: the previous implementation pulled EVERY org package's
+ * `draft_manifest` jsonb into the process to answer a boolean question, on
+ * both the item-detail read and the delete pre-check.
+ */
 async function findDependentPackages(
   orgId: string,
   targetPackageId: string,
 ): Promise<{ id: string; display_name: string }[]> {
-  const orgPkgs = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
-    .from(packages)
-    .where(and(scopedWhere(packages, { orgId }), notEphemeralFilter()));
+  const declaresTarget = or(
+    ...DEPENDENCY_MAPS.map(
+      (map) => sql`jsonb_exists(${dependencyMapSql(map)}, ${targetPackageId})`,
+    ),
+  )!;
 
-  const dependents: { id: string; display_name: string }[] = [];
-  for (const pkg of orgPkgs) {
-    if (!pkg.draftManifest || pkg.id === targetPackageId) continue;
-    const m = parseDraftManifest(pkg.draftManifest);
-    const deps = extractDependencies(m);
-    for (const dep of deps) {
-      if (buildPackageId(dep.depScope, dep.depName) === targetPackageId) {
-        dependents.push({ id: pkg.id, display_name: getPackageDisplayName(pkg) });
-        break;
-      }
-    }
+  return db
+    .select({ id: packages.id, display_name: displayNameSql })
+    .from(packages)
+    .where(
+      and(
+        scopedWhere(packages, { orgId }),
+        notEphemeralFilter(),
+        ne(packages.id, targetPackageId),
+        declaresTarget,
+      ),
+    )
+    .orderBy(packages.id);
+}
+
+/**
+ * `used_by_agents` for every package of the org, computed in SQL.
+ *
+ * One row per declared dependency edge (a short package id string) instead of
+ * one full `draft_manifest` jsonb per org package — the counting loop only
+ * ever needed the KEYS of the three dependency maps. Semantics are preserved
+ * edge-for-edge, including a package that declares the same id under two maps
+ * counting twice, and a package counting itself.
+ *
+ * The one behavioral difference is a strict improvement: a malformed manifest
+ * (invalid scoped name, non-string version range) used to make
+ * `extractDependencies` throw and 500 the whole catalog read. Here such a key
+ * is simply counted under an id no package can have, so it matches nothing.
+ */
+async function countDependencyEdges(orgId: string): Promise<Map<string, number>> {
+  const branches = DEPENDENCY_MAPS.map((map) =>
+    db
+      .select({
+        depId: sql<string>`jsonb_object_keys(${dependencyMapSql(map)})`.as("dep_id"),
+      })
+      .from(packages)
+      // Ephemeral shadow packages are transient and never referenced by other
+      // packages, so filtering them out also skips their (empty) dependencies.
+      .where(and(scopedWhere(packages, { orgId }), notEphemeralFilter())),
+  );
+
+  const rows = await unionAll(branches[0]!, branches[1]!, ...branches.slice(2));
+
+  const countMap = new Map<string, number>();
+  for (const row of rows) {
+    countMap.set(row.depId, (countMap.get(row.depId) ?? 0) + 1);
   }
-  return dependents;
+  return countMap;
 }
 
 // ─────────────────────────────────────────────
@@ -221,14 +285,16 @@ export async function listOrgItems(
   const installFilter = opts?.activeOnly
     ? and(isNotNull(applicationPackages.packageId), eq(applicationPackages.enabled, true))
     : or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId));
-  const data = await db
+  // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
+  // projected: the list mapper never reads it, and it is by far the largest
+  // column on the row.
+  const dataQuery = db
     .select({
       id: packages.id,
       orgId: packages.orgId,
       type: packages.type,
       source: packages.source,
       draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
       createdBy: packages.createdBy,
       createdAt: packages.createdAt,
       updatedAt: packages.updatedAt,
@@ -257,22 +323,9 @@ export async function listOrgItems(
       desc(packages.createdAt),
     );
 
-  // Count usage by scanning all org packages' manifests. Ephemeral shadow
-  // packages are transient and never referenced by other packages, so
-  // filtering them out also skips their (empty) dependencies.
-  const countMap = new Map<string, number>();
-  const allOrgPkgs = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
-    .from(packages)
-    .where(and(scopedWhere(packages, { orgId }), notEphemeralFilter()));
-  for (const pkg of allOrgPkgs) {
-    if (!pkg.draftManifest) continue;
-    const deps = extractDependencies(parseDraftManifest(pkg.draftManifest));
-    for (const dep of deps) {
-      const depId = buildPackageId(dep.depScope, dep.depName);
-      countMap.set(depId, (countMap.get(depId) ?? 0) + 1);
-    }
-  }
+  // The catalog page and the usage counts are independent reads over the same
+  // tenant — issued concurrently rather than one after the other.
+  const [data, countMap] = await Promise.all([dataQuery, countDependencyEdges(orgId)]);
 
   return data.map((row) => {
     const m = parseDraftManifest(row.draftManifest);

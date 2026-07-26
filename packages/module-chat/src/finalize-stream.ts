@@ -5,10 +5,10 @@
  * engines and extracted here so the guarantees are unit-testable.
  *
  * The engine's UI-message stream (a Response body) is teed:
- *  - one branch is recorded into the resumable store via `context.run(streamId)`,
- *    whose returned consumer is what we hand to the client. Recording is driven
- *    by the producer independently of the client consumer, so a reloaded client
- *    can reconnect to the still-live tail (`GET /sessions/:id/stream`).
+ *  - one branch feeds the resumable producer via `context.run(streamId)` AND the
+ *    client, as two sub-branches of a second tee. Recording is driven by the
+ *    producer independently of the client, so a reloaded client can reconnect to
+ *    the still-live tail (`GET /sessions/:id/stream`).
  *  - the other branch is drained server-side to extract and persist the assistant
  *    turn. This drain runs in an independent task (not tied to the Response), so
  *    it keeps pulling — driving generation to completion — even if the client
@@ -16,11 +16,20 @@
  *    the run. The task is registered in the in-flight registry so graceful
  *    shutdown can await it.
  *
+ * The connected client is served its OWN branch, never the store read-back.
+ * `context.run()` returns a store reader unconditionally — including to the
+ * producer — so handing that reader to the client would make every nominal chat
+ * turn round-trip through the store, and (on Redis) poll `XRANGE` every 100ms
+ * for the whole turn just to read back bytes this process already holds. The
+ * store read path is for RESUME only: a second tab, or a reconnect after a
+ * disconnect, both of which go through `context.resume()` in `routes.ts`.
+ *
  * Data-safety does NOT depend on the resumable store: persistence is the drain
  * branch. Resume is the live-token-reconnect polish on top.
  */
 
 import type { UIMessage } from "ai";
+import type { ResumableStreamContext } from "assistant-stream/resumable";
 import { logger } from "./logger.ts";
 import { extractAssistantMessages } from "./stream-parse.ts";
 import { trackTurn } from "./inflight.ts";
@@ -44,6 +53,8 @@ export interface FinalizeChatStreamOptions {
   parentId?: string | null;
   /** Best-effort teardown after persistence settles (close MCP, unregister stop, clear active stream). */
   onSettled?: () => void;
+  /** Injection seam for tests — defaults to the process-wide resumable context. */
+  resumableContext?: ResumableStreamContext;
 }
 
 export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promise<Response> {
@@ -55,7 +66,7 @@ export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promi
     return engineResponse;
   }
 
-  const [forStore, forPersist] = sourceBody.tee();
+  const [forRecord, forPersist] = sourceBody.tee();
 
   // Persist the assistant turn when the stream finalizes. Started BEFORE the
   // Response is returned and not tied to it, so a client disconnect cannot skip
@@ -104,19 +115,29 @@ export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promi
   })();
   trackTurn(persistTask);
 
-  // Record the turn's bytes for resume; the returned consumer is the client view.
-  // The producer reads `forStore` into the store regardless of this consumer, so
-  // a client disconnect does not stop recording. If the resumable layer fails for
-  // any reason, fall back to the raw client branch — never break the live turn.
-  let clientStream: ReadableStream<Uint8Array> = forStore;
+  // Split the recording branch once more: `forStore` feeds the resumable
+  // producer, `forClient` IS the response body. The connected client therefore
+  // reads the engine bytes directly — no store round-trip, no poll loop — while
+  // the producer keeps recording regardless of whether the client is still
+  // there, which is what makes a mid-turn reload resumable.
+  const [forStore, forClient] = forRecord.tee();
   try {
-    clientStream = await getResumableContext().run(streamId, () => forStore);
+    // `run()` hands back a store reader even to the producer. We already have the
+    // bytes, so cancel it immediately: left unread it would poll the store for the
+    // whole turn. Resume readers get their own via `context.resume()`.
+    const unusedStoreReader = await (opts.resumableContext ?? getResumableContext()).run(
+      streamId,
+      () => forStore,
+    );
+    void unusedStoreReader.cancel().catch(() => {});
   } catch (err) {
     // Resume unavailable this turn; client still streams + persistence still runs.
+    // Release the unread producer branch so the tee stops buffering it.
     void err;
+    void forStore.cancel().catch(() => {});
   }
 
-  return new Response(clientStream, {
+  return new Response(forClient, {
     status: engineResponse.status,
     statusText: engineResponse.statusText,
     headers: engineResponse.headers,

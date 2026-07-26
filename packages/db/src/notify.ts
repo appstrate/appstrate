@@ -117,14 +117,68 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
   // Create triggers idempotently. Use DO blocks with explicit existence
   // checks instead of DROP TRIGGER IF EXISTS to avoid NOTICE logs on first
   // boot (when the triggers don't exist yet).
+  //
+  // The runs trigger is SPLIT in two — INSERT (unconditional) and UPDATE
+  // (guarded by a WHEN clause) — because a trigger declared for INSERT cannot
+  // reference OLD in its WHEN condition; Postgres rejects such a combined
+  // trigger at CREATE time.
+  //
+  // Why the UPDATE guard exists: the run-event ingestion CAS
+  // (`persistEventAndAdvance`) UPDATEs `runs` once PER INGESTED EVENT, setting
+  // only `last_event_sequence` + `last_heartbeat_at`. Neither appears in the
+  // NOTIFY payload, so every one of those writes broadcast a payload BYTE-FOR-
+  // BYTE identical to the previous one, to every SSE subscriber in the org.
+  // The 30 s runner heartbeat has the same shape.
+  //
+  // The WHEN condition below lists EXACTLY the columns `notify_run_change`
+  // interpolates into the payload, compared with `IS DISTINCT FROM` so a
+  // NULL↔value transition counts as a change. An UPDATE is therefore
+  // suppressed only when the notification it would emit is identical to the
+  // one the previous write already delivered — the fan-out is unchanged for
+  // every payload-visible transition (status, error, timestamps, duration,
+  // ownership, scheduling). `error` is compared in full even though the
+  // payload truncates it to 2 000 chars: comparing the untruncated value can
+  // only make the guard fire MORE often, never less.
+  //
+  // Columns deliberately NOT in the list (a write touching only these no
+  // longer notifies `run_update`): `last_event_sequence`, `last_heartbeat_at`,
+  // `cost`, `token_usage`, `result`, `checkpoint`, `artifacts`,
+  // `sink_closed_at`. None of them is readable from a `run_update` frame —
+  // live cost/usage reach the UI on the dedicated `run_metric` channel, and
+  // the terminal values ride the finalize UPDATE, which also writes `status`
+  // + `completed_at` and therefore still fires.
   await db.execute(drizzleSql`
     DO $$ BEGIN
       IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'runs_notify_trigger') THEN
         DROP TRIGGER runs_notify_trigger ON runs;
       END IF;
-      CREATE TRIGGER runs_notify_trigger
-        AFTER INSERT OR UPDATE ON runs
+      IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'runs_notify_insert_trigger') THEN
+        DROP TRIGGER runs_notify_insert_trigger ON runs;
+      END IF;
+      IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'runs_notify_update_trigger') THEN
+        DROP TRIGGER runs_notify_update_trigger ON runs;
+      END IF;
+      CREATE TRIGGER runs_notify_insert_trigger
+        AFTER INSERT ON runs
         FOR EACH ROW EXECUTE FUNCTION notify_run_change();
+      CREATE TRIGGER runs_notify_update_trigger
+        AFTER UPDATE ON runs
+        FOR EACH ROW
+        WHEN (
+          OLD.id IS DISTINCT FROM NEW.id
+          OR OLD.package_id IS DISTINCT FROM NEW.package_id
+          OR OLD.status IS DISTINCT FROM NEW.status
+          OR OLD.user_id IS DISTINCT FROM NEW.user_id
+          OR OLD.end_user_id IS DISTINCT FROM NEW.end_user_id
+          OR OLD.org_id IS DISTINCT FROM NEW.org_id
+          OR OLD.application_id IS DISTINCT FROM NEW.application_id
+          OR OLD.schedule_id IS DISTINCT FROM NEW.schedule_id
+          OR OLD.error IS DISTINCT FROM NEW.error
+          OR OLD.started_at IS DISTINCT FROM NEW.started_at
+          OR OLD.completed_at IS DISTINCT FROM NEW.completed_at
+          OR OLD.duration IS DISTINCT FROM NEW.duration
+        )
+        EXECUTE FUNCTION notify_run_change();
     END $$;
   `);
 

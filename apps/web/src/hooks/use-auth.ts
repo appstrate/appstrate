@@ -54,9 +54,19 @@ function setAuthenticatedUser(
 }
 
 async function syncAuth() {
-  const result = await authClient.getSession();
+  // `fetchProfile()` takes no argument from the session — `GET /api/profile`
+  // authenticates on the very same cookie `getSession()` reads — so the two
+  // requests are issued together instead of one behind the other. Ordering is
+  // still enforced *after* the fact: `getSession()` stays the sole authority
+  // on whether a user exists, and a profile that failed to load is treated
+  // exactly as before.
+  //
+  // For a visitor with no session both now fail instead of only the first.
+  // That is deliberate and silent: `fetchProfile()` swallows its own failure
+  // and returns null, so nothing reaches an error boundary or a toast, and
+  // the `else` branch below still lands on the login screen.
+  const [result, profile] = await Promise.all([authClient.getSession(), fetchProfile()]);
   if (result.data?.user) {
-    const profile = await fetchProfile();
     if (!profile) {
       await authClient.signOut().catch(() => {});
       clearSession();
@@ -93,6 +103,17 @@ function initAuth() {
   syncAuth().catch(() => {
     clearSession();
   });
+}
+
+/**
+ * Start the session resync at boot rather than on the first `useAuth()`
+ * render. Called from `main.tsx` before `createRoot`, so the session/profile
+ * round-trip overlaps the locale fetch and the first render instead of
+ * queueing behind them. Idempotent — `useAuth()` still calls the same
+ * initializer, which no-ops once this has run.
+ */
+export function startAuthBootstrap(): void {
+  initAuth();
 }
 
 /**

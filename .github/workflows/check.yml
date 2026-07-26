@@ -25,6 +25,18 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/bun-setup
 
+      # Bun's global download cache. Keyed on the lockfile so a dependency bump
+      # re-downloads; `restore-keys` lets an unchanged-majority install still
+      # hit warm tarballs. Deliberately NOT added to the shared bun-setup
+      # composite action — release/publish workflows must keep installing from a
+      # cold, unmediated registry.
+      - name: Cache Bun download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+
       - name: Install dependencies
         run: bun install
 
@@ -32,14 +44,56 @@ jobs:
       - name: Verify lockfile is up to date
         run: git diff --exit-code bun.lock
 
+      # Incremental state for `bun run check`: the turbo task cache plus the
+      # ESLint and Prettier file caches. Both file caches use the `content`
+      # strategy (see the root package.json scripts), which is what makes them
+      # survive a fresh checkout — the default `metadata` strategy keys on mtime
+      # and would miss every file after `actions/checkout`.
+      #
+      # Explicit restore/save split (NOT the monolithic actions/cache): the
+      # monolithic post-step only saves on job SUCCESS, and the run that most
+      # needs a warm lint cache is the push that FIXES a red check.
+      #
+      # The key carries the toolchain + config hash, so a dependency or rule
+      # change starts a fresh lineage instead of trusting stale verdicts.
+      - name: Restore check caches
+        id: check-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: |
+            .turbo/cache
+            .eslintcache
+            node_modules/.cache/prettier
+          key: >-
+            check-${{ runner.os }}-${{ hashFiles('bun.lock', 'eslint.config.mjs',
+            '.prettierrc', 'turbo.json') }}-${{ github.sha }}
+          restore-keys: >-
+            check-${{ runner.os }}-${{ hashFiles('bun.lock', 'eslint.config.mjs',
+            '.prettierrc', 'turbo.json') }}-
+
       - name: Run checks
         run: bun run check
         env:
+          # Keep the turbo cache out of node_modules so the cache path above is
+          # stable across `bun install`.
+          TURBO_CACHE_DIR: .turbo/cache
           BETTER_AUTH_SECRET: ci-dummy-secret
           CONNECTION_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
           UPLOAD_SIGNING_SECRET: ci-dummy-upload-signing-secret
           RUN_TOKEN_SECRET: ci-dummy-run-token-secret
           CONNECT_SESSION_SECRET: ci-dummy-connect-session-secret
+
+      - name: Save check caches
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: |
+            .turbo/cache
+            .eslintcache
+            node_modules/.cache/prettier
+          key: >-
+            check-${{ runner.os }}-${{ hashFiles('bun.lock', 'eslint.config.mjs',
+            '.prettierrc', 'turbo.json') }}-${{ github.sha }}
 
   # `bun run check` above CANNOT catch a missing dependency in a source-only
   # package: the root devDependencies hoist type packages into the shared

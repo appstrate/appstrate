@@ -557,6 +557,129 @@ describe("realtime service (integration)", () => {
     });
   });
 
+  // ── channel subscription filter ─────────────────────────────
+  //
+  // A subscriber may declare the channels it consumes. The global dashboard
+  // stream reads three of the five, so without this the server serialized the
+  // entire `run_log` firehose into a stream that threw every frame away.
+  // Declaring nothing must keep the historical "receive everything" behaviour
+  // so no existing client (CLI, SDK, integrator) loses frames.
+
+  describe("channel filter", () => {
+    it("a subscriber declaring only run_update receives no run_log frames", async () => {
+      const send = mock((_e: RealtimeEvent) => {});
+      const id = "sub-channels-runupdate";
+      trackSubscriber(id);
+
+      addSubscriber({
+        id,
+        filter: {
+          orgId: "org-ch",
+          applicationId: "app-ch",
+          isAdmin: true,
+          channels: new Set(["run_update"]),
+        },
+        send,
+      });
+
+      await pgNotify("run_log_insert", {
+        org_id: "org-ch",
+        application_id: "app-ch",
+        run_id: "exec-ch",
+        level: "info",
+        message: "should not be delivered",
+      });
+      await wait();
+      expect(send).not.toHaveBeenCalled();
+
+      // The declared channel still flows — this is a filter, not a mute.
+      await pgNotify("run_update", {
+        org_id: "org-ch",
+        application_id: "app-ch",
+        id: "exec-ch",
+        status: "running",
+      });
+      await wait();
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0]![0]!.event).toBe("run_update");
+    });
+
+    it("a subscriber declaring NO channels receives every channel (backward compatible)", async () => {
+      const send = mock((_e: RealtimeEvent) => {});
+      const id = "sub-channels-none-declared";
+      trackSubscriber(id);
+
+      addSubscriber({
+        id,
+        filter: { orgId: "org-ch2", applicationId: "app-ch2", isAdmin: true },
+        send,
+      });
+
+      await pgNotify("run_update", {
+        org_id: "org-ch2",
+        application_id: "app-ch2",
+        id: "exec-ch2",
+        status: "running",
+      });
+      await wait();
+      await pgNotify("run_log_insert", {
+        org_id: "org-ch2",
+        application_id: "app-ch2",
+        run_id: "exec-ch2",
+        level: "info",
+        message: "still delivered",
+      });
+      await wait();
+      await pgNotify("run_metric", {
+        org_id: "org-ch2",
+        application_id: "app-ch2",
+        run_id: "exec-ch2",
+        package_id: "pkg-ch2",
+      });
+      await wait();
+
+      const received = send.mock.calls.map((c) => c[0]!.event);
+      expect(received).toContain("run_update");
+      expect(received).toContain("run_log");
+      expect(received).toContain("run_metric");
+    });
+
+    it("filtering one subscriber does not starve another on the same channel", async () => {
+      const filtered = mock((_e: RealtimeEvent) => {});
+      const unfiltered = mock((_e: RealtimeEvent) => {});
+      trackSubscriber("sub-ch-filtered");
+      trackSubscriber("sub-ch-unfiltered");
+
+      addSubscriber({
+        id: "sub-ch-filtered",
+        filter: {
+          orgId: "org-ch3",
+          applicationId: "app-ch3",
+          isAdmin: true,
+          channels: new Set(["run_update"]),
+        },
+        send: filtered,
+      });
+      addSubscriber({
+        id: "sub-ch-unfiltered",
+        filter: { orgId: "org-ch3", applicationId: "app-ch3", isAdmin: true },
+        send: unfiltered,
+      });
+
+      await pgNotify("run_log_insert", {
+        org_id: "org-ch3",
+        application_id: "app-ch3",
+        run_id: "exec-ch3",
+        level: "info",
+        message: "one wants it, one does not",
+      });
+      await wait();
+
+      expect(filtered).not.toHaveBeenCalled();
+      expect(unfiltered).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // ── initRealtime idempotency ────────────────────────────────
 
   describe("initRealtime idempotency", () => {

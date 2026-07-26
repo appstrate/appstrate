@@ -1,12 +1,83 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import {
+  I18N_BOOT_NAMESPACES,
+  I18N_FALLBACK_LANGUAGE,
+  I18N_LANGUAGE_STORAGE_KEY,
+} from "./src/i18n-config.ts";
+
+/** `…/src/locales/<language>/<namespace>.json` */
+const LOCALE_MODULE_RE = /[/\\]src[/\\]locales[/\\]([^/\\]+)[/\\]([^/\\]+)\.json$/;
+
+/**
+ * Emit `modulepreload` hints for the boot locale chunks.
+ *
+ * i18next fetches them through a dynamic import (`i18n.ts` →
+ * `resourcesToBackend`), so the browser only discovers those URLs once the
+ * whole entry graph has downloaded AND executed — a fully serialized
+ * round-trip in front of the first render. Vite's own preload injection is
+ * driven by the static import graph and therefore never sees them.
+ *
+ * This walks the emitted bundle for locale modules, groups their chunk URLs
+ * by language, and injects a small inline script that appends the hints for
+ * the language the visitor actually has. It runs while the head is still
+ * parsing, so the locale chunks download alongside the entry chunk instead of
+ * after it. Language resolution mirrors `i18n.ts`: the `i18nextLng`
+ * localStorage key, falling back to `fr`. An unknown language, a blocked
+ * localStorage, or a missing map entry simply skips the hint — the runtime
+ * import still works, it is just not preloaded.
+ */
+function i18nBootPreload(): Plugin {
+  let base = "/";
+  const bootNamespaces = new Set<string>(I18N_BOOT_NAMESPACES);
+  return {
+    name: "appstrate:i18n-boot-preload",
+    apply: "build",
+    configResolved(config) {
+      base = config.base;
+    },
+    transformIndexHtml: {
+      order: "post",
+      handler(_html, ctx) {
+        if (!ctx.bundle) return;
+
+        const byLanguage: Record<string, string[]> = {};
+        for (const output of Object.values(ctx.bundle)) {
+          if (output.type !== "chunk") continue;
+          const moduleIds: string[] = output.moduleIds ?? Object.keys(output.modules ?? {});
+          for (const moduleId of moduleIds) {
+            const match = LOCALE_MODULE_RE.exec(moduleId);
+            if (!match) continue;
+            const [, language, namespace] = match;
+            if (!bootNamespaces.has(namespace)) continue;
+            (byLanguage[language] ??= []).push(`${base}${output.fileName}`);
+            break;
+          }
+        }
+        if (Object.keys(byLanguage).length === 0) return;
+
+        // `</` is escaped so a filename can never close the script element.
+        const map = JSON.stringify(byLanguage).replace(/</g, "\\u003c");
+        const fallback = JSON.stringify(I18N_FALLBACK_LANGUAGE);
+        const storageKey = JSON.stringify(I18N_LANGUAGE_STORAGE_KEY);
+        return [
+          {
+            tag: "script",
+            injectTo: "head",
+            children: `(function(){var m=${map},f=${fallback},l=f;try{var s=localStorage.getItem(${storageKey});if(s)l=s.split("-")[0]}catch(e){}var u=m[l]||m[f];if(!u)return;for(var i=0;i<u.length;i++){var k=document.createElement("link");k.rel="modulepreload";k.crossOrigin="anonymous";k.href=u[i];document.head.appendChild(k)}})();`,
+          },
+        ];
+      },
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), i18nBootPreload()],
   envDir: "../../",
   resolve: {
     alias: {

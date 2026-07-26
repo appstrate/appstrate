@@ -6,6 +6,8 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./app";
+import { startAuthBootstrap } from "./hooks/use-auth";
+import { primeOrgList } from "./hooks/use-org";
 import { clearChunkReloadFlag, reloadOnceForChunkError } from "./lib/chunk-reload";
 import "./stores/theme-store";
 import "./styles.css";
@@ -31,6 +33,21 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// The first screen needs three server reads that share no data with each
+// other: the Better Auth session, `GET /api/profile` and `GET /api/orgs`. All
+// three authenticate on the session cookie alone, so none of them has to wait
+// for another. They used to run strictly one after the next — the session
+// gated the profile, the profile gated the first render, and the first render
+// was what mounted the org gate that issued the org list.
+//
+// Kicking them here, before `i18nReady` resolves and before React mounts,
+// collapses those three round-trips into one and takes them off the locale
+// fetch's tail. `GET /api/applications` is the only first-screen read with a
+// real data dependency (it needs the selected org id), so what is left is two
+// network levels, not four.
+startAuthBootstrap();
+primeOrgList();
 
 // Wait for the active language's namespaces to load before the first render
 // so the UI never flashes raw translation keys. Render anyway on failure —

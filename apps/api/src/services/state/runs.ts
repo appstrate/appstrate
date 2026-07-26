@@ -42,6 +42,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
+import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import {
   runMetadataSchema,
@@ -1203,20 +1204,25 @@ export async function listRunsWithFilter(
   offset = 0,
   actor: Actor | null = null,
 ): Promise<RunListPage> {
-  const [countRow] = await db.select({ count: count() }).from(runs).where(filter);
-
-  const rows = await db
-    .select(enrichedRunSelect(actor))
-    .from(runs)
-    .leftJoin(profiles, eq(runs.userId, profiles.id))
-    .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
-    .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
-    .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
-    .leftJoin(packages, eq(packages.id, runs.packageId))
-    .where(filter)
-    .orderBy(desc(runs.startedAt))
-    .limit(limit)
-    .offset(offset);
+  // The `total` count and the page share the same filter but are independent
+  // reads — issued concurrently so the endpoint costs one round trip instead
+  // of two serialized ones. Both are tenant-indexed; neither is a seq scan.
+  const [countRows, rows] = await Promise.all([
+    db.select({ count: count() }).from(runs).where(filter),
+    db
+      .select(enrichedRunSelect(actor))
+      .from(runs)
+      .leftJoin(profiles, eq(runs.userId, profiles.id))
+      .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
+      .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
+      .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
+      .leftJoin(packages, eq(packages.id, runs.packageId))
+      .where(filter)
+      .orderBy(desc(runs.startedAt))
+      .limit(limit)
+      .offset(offset),
+  ]);
+  const [countRow] = countRows;
 
   const data = rows.map(mapEnrichedRun);
   const total = countRow?.count ?? 0;
@@ -1307,24 +1313,28 @@ export async function listGlobalRuns(
 
   const filter = and(...conditions)!;
 
-  const [countRow] = await db
-    .select({ count: count() })
-    .from(runs)
-    .leftJoin(packages, eq(packages.id, runs.packageId))
-    .where(filter);
-
-  const rows = await db
-    .select(enrichedRunSelect(actor))
-    .from(runs)
-    .leftJoin(packages, eq(packages.id, runs.packageId))
-    .leftJoin(profiles, eq(runs.userId, profiles.id))
-    .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
-    .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
-    .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
-    .where(filter)
-    .orderBy(desc(runs.startedAt))
-    .limit(limit)
-    .offset(offset);
+  // Same rationale as `listRunsWithFilter`: count and page are independent
+  // reads over one filter, so they go out concurrently.
+  const [countRows, rows] = await Promise.all([
+    db
+      .select({ count: count() })
+      .from(runs)
+      .leftJoin(packages, eq(packages.id, runs.packageId))
+      .where(filter),
+    db
+      .select(enrichedRunSelect(actor))
+      .from(runs)
+      .leftJoin(packages, eq(packages.id, runs.packageId))
+      .leftJoin(profiles, eq(runs.userId, profiles.id))
+      .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
+      .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
+      .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
+      .where(filter)
+      .orderBy(desc(runs.startedAt))
+      .limit(limit)
+      .offset(offset),
+  ]);
+  const [countRow] = countRows;
 
   const data = rows.map(mapEnrichedRun);
   const total = countRow?.count ?? 0;
@@ -1359,12 +1369,13 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
     eq(runs.applicationId, scope.applicationId),
   ];
 
+  // `packages.draftManifest` + `draftContent` (the agent's full prompt) are
+  // consumed ONLY by the inline branch below, so they are deliberately NOT in
+  // this projection: every non-inline detail read — and the `?wait` long-poll,
+  // which calls this twice — would otherwise drag the whole manifest jsonb and
+  // the prompt text over the wire for nothing.
   const [row] = await db
-    .select({
-      ...enrichedRunSelect(actor),
-      packageManifest: packages.draftManifest,
-      packagePrompt: packages.draftContent,
-    })
+    .select(enrichedRunSelect(actor))
     .from(runs)
     .leftJoin(profiles, eq(runs.userId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
@@ -1381,9 +1392,21 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
   // After compaction, draftManifest is `{}` and draftContent is `""` — we
   // normalize both to null so the frontend can show "Details expired".
   const isInline = row.packageEphemeral === true;
-  const manifest = row.packageManifest as Record<string, unknown> | null;
-  const inlineManifest = isInline && manifest && Object.keys(manifest).length > 0 ? manifest : null;
-  const inlinePrompt = isInline && row.packagePrompt ? row.packagePrompt : null;
+  let inlineManifest: Record<string, unknown> | null = null;
+  let inlinePrompt: string | null = null;
+  if (isInline && row.run.packageId) {
+    // Same reachability as the LEFT JOIN this replaces (the run is already
+    // org+app scoped), with the tenant predicate restated on the package read
+    // itself — org-owned shadow row or system package, never another tenant's.
+    const [pkg] = await db
+      .select({ manifest: packages.draftManifest, content: packages.draftContent })
+      .from(packages)
+      .where(and(eq(packages.id, row.run.packageId), orgOrSystemFilter(scope.orgId)))
+      .limit(1);
+    const manifest = pkg?.manifest as Record<string, unknown> | null | undefined;
+    inlineManifest = manifest && Object.keys(manifest).length > 0 ? manifest : null;
+    inlinePrompt = pkg?.content ? pkg.content : null;
+  }
 
   return {
     ...mapEnrichedRun(row),

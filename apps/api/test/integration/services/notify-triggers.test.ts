@@ -48,7 +48,11 @@ describe("NOTIFY triggers (regression)", () => {
   // sensitive (Bun's per-file ordering is not strict alphabetical) which is
   // why CI flaked while local runs sometimes passed.
   afterAll(async () => {
-    await db.execute(sql`DROP TRIGGER IF EXISTS runs_notify_trigger ON runs`);
+    // The runs trigger is split in two — INSERT (unconditional) and UPDATE
+    // (guarded by a WHEN clause). `createNotifyTriggers` already dropped the
+    // pre-split `runs_notify_trigger` name when it installed these.
+    await db.execute(sql`DROP TRIGGER IF EXISTS runs_notify_insert_trigger ON runs`);
+    await db.execute(sql`DROP TRIGGER IF EXISTS runs_notify_update_trigger ON runs`);
     await db.execute(sql`DROP TRIGGER IF EXISTS run_logs_notify_trigger ON run_logs`);
     // Connection trigger drives the connectors-page live badge; drop it too
     // so it does not leak into other suites that fire integration_connections
@@ -91,6 +95,68 @@ describe("NOTIFY triggers (regression)", () => {
     await db.execute(
       (await import("drizzle-orm")).sql`UPDATE runs SET status = 'running' WHERE id = ${run.id}`,
     );
+  });
+
+  // The run-event ingestion CAS UPDATEs `runs` once per ingested event, and
+  // the runner heartbeats every 30 s — both write ONLY `last_event_sequence` /
+  // `last_heartbeat_at`, neither of which appears in the NOTIFY payload. Every
+  // one of those used to broadcast a payload identical to the previous one to
+  // every SSE subscriber in the org. The UPDATE trigger's WHEN clause drops
+  // exactly those, and nothing else.
+  it("notify_run_change skips UPDATEs whose payload would be unchanged, keeps the rest", async () => {
+    const run = await seedRun({
+      packageId: "@notifyorg/trigger-agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      status: "pending",
+    });
+
+    const received: Array<{ id: string; status: string }> = [];
+    await listenClient.listen("run_update", (raw) => {
+      try {
+        const payload = JSON.parse(raw) as {
+          id: string;
+          status: string;
+          operation: "INSERT" | "UPDATE";
+        };
+        if (payload.id !== run.id) return;
+        // This test is about the UPDATE trigger's WHEN clause. The INSERT
+        // trigger is unconditional, and `listenClient` is shared: once any
+        // other test file has registered `run_update`, the connection is
+        // already LISTENing, so the notification `seedRun` above emitted can
+        // be delivered AFTER this handler attaches and be miscounted. Run
+        // alone the channel is fresh and it never arrives — which is exactly
+        // the kind of green that hides an order-dependent test.
+        if (payload.operation === "INSERT") return;
+        received.push({ id: payload.id, status: payload.status });
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // Ingestion-bookkeeping shape: sequence + heartbeat only. Must be silent.
+    for (let i = 1; i <= 5; i++) {
+      await db.execute(
+        sql`UPDATE runs SET last_event_sequence = ${i}, last_heartbeat_at = now() WHERE id = ${run.id}`,
+      );
+    }
+    for (let i = 0; i < 8 && received.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(received).toHaveLength(0);
+
+    // Any payload-visible column must still fire — one notification per
+    // distinct payload, no loss.
+    await db.execute(sql`UPDATE runs SET status = 'running' WHERE id = ${run.id}`);
+    await db.execute(sql`UPDATE runs SET error = 'boom' WHERE id = ${run.id}`);
+    await db.execute(sql`UPDATE runs SET duration = 42 WHERE id = ${run.id}`);
+    await db.execute(sql`UPDATE runs SET completed_at = now() WHERE id = ${run.id}`);
+    for (let i = 0; i < 40 && received.length < 4; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(received).toHaveLength(4);
+    expect(received.every((r) => r.status === "running")).toBe(true);
   });
 
   it("notify_run_log_insert fires on run_logs INSERT", async () => {

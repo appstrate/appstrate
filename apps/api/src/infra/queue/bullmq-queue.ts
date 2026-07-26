@@ -6,7 +6,7 @@
 
 import { Queue, Worker, UnrecoverableError } from "bullmq";
 import type { ConnectionOptions } from "bullmq";
-import { getRedisConnection } from "../../lib/redis.ts";
+import { getRedisQueueConnection } from "../../lib/redis.ts";
 import { logger } from "../../lib/logger.ts";
 import type {
   JobQueue,
@@ -27,7 +27,7 @@ export class BullMQQueue<T> implements JobQueue<T> {
     defaultJobOptions?: JobAddOptions,
   ) {
     this.queue = new Queue<Record<string, unknown>, unknown, string>(name, {
-      connection: getRedisConnection() as unknown as ConnectionOptions,
+      connection: getRedisQueueConnection() as unknown as ConnectionOptions,
       defaultJobOptions: {
         // Bounded retention by default — without it BullMQ keeps every
         // completed/failed job forever and the Redis footprint grows
@@ -100,7 +100,7 @@ export class BullMQQueue<T> implements JobQueue<T> {
         }
       },
       {
-        connection: getRedisConnection() as unknown as ConnectionOptions,
+        connection: getRedisQueueConnection() as unknown as ConnectionOptions,
         ...(opts?.concurrency ? { concurrency: opts.concurrency } : {}),
         ...(opts?.limiter ? { limiter: opts.limiter } : {}),
         ...(opts?.backoffStrategy

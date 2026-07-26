@@ -62,10 +62,10 @@
     "test:e2e": "cd e2e && npx playwright test",
     "test:e2e:api": "cd e2e && npx playwright test --project=api",
     "test:e2e:ui": "cd e2e && npx playwright test --project=ui",
-    "lint": "eslint .",
+    "lint": "eslint . --cache --cache-strategy content",
     "lint:fix": "eslint . --fix && prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
     "format": "prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
-    "format:check": "prettier --check \"apps/*/src/**\" \"packages/*/src/**\"",
+    "format:check": "prettier --check --cache --cache-strategy content \"apps/*/src/**\" \"packages/*/src/**\"",
     "detect:breaking": "bun scripts/detect-breaking-changes.ts",
     "generate:api": "bun scripts/generate-api-types.ts",
     "verify:api-types": "bun scripts/generate-api-types.ts --check",
@@ -114,7 +114,7 @@
     "verify:compose-defaults": "bun scripts/verify-compose-defaults.ts",
     "openapi:baseline": "bun scripts/detect-breaking-changes.ts --update-baseline",
     "openapi:diff": "bun scripts/detect-breaking-changes.ts",
-    "clean": "rm -rf node_modules/.cache .turbo apps/*/dist apps/web/.vite packages/*/dist coverage",
+    "clean": "rm -rf node_modules/.cache .turbo .eslintcache apps/*/dist apps/web/.vite packages/*/dist coverage",
     "prepare": "husky"
   },
   "workspaces": [
