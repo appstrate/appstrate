@@ -46,6 +46,7 @@ import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
+import { createOpenApiSpecRouter } from "./routes/openapi-spec.ts";
 import { buildOpenApiSpec } from "./openapi/index.ts";
 import {
   getModulePublicPaths,
@@ -121,7 +122,8 @@ function getOpenApiSpec() {
     );
   return _openApiSpec;
 }
-app.get("/api/openapi.json", (c) => c.json(getOpenApiSpec()));
+// Serialized once + ETag/304 revalidation — see routes/openapi-spec.ts.
+app.route("/", createOpenApiSpecRouter(getOpenApiSpec));
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
 // Public llms.txt — points AI coding agents at the CLI + OpenAPI entry
