@@ -202,6 +202,16 @@ export async function syncSystemPackagesToDb(
     // drifted `type` / `source` / `orgId` still heals in place. Without this,
     // every boot re-ran 66 UPSERTs (plus an S3 re-upload) to write back
     // byte-identical values.
+    //
+    // CONSEQUENCE, and it is the price of content-addressing: the archive
+    // bytes become the ONLY thing that can invalidate the persisted row. A
+    // change to how this package DERIVES `manifest` / `content` / `files`
+    // from unchanged bytes (a loader or normalization fix in
+    // `@appstrate/core/system-packages`) is therefore NOT picked up by a
+    // redeploy — the hash still matches and the stale derivation survives.
+    // Shipping such a change means bumping the affected system packages'
+    // versions, exactly as issue #928 concluded. Do not "fix" this by
+    // dropping the guard; every boot would go back to 594 no-op round trips.
     if (
       existingVersion &&
       existingVersion.integrity === freshIntegrity &&
