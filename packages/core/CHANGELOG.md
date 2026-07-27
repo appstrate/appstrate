@@ -234,6 +234,16 @@ with no importer anywhere is deleted.
   (`droppedRuntimeTools: []` for a synthesised manifest). It is required rather
   than optional so readers never need a `?? []`.
 
+- **`@appstrate/core/chat-turn-metadata` — `isFinalChatStep` loses its
+  `maxSteps` parameter.** The signature is now `(stepNumber: number) => boolean`
+  and the function reads `CHAT_MAX_STEPS` directly. The parameter defaulted to
+  that same constant and no call site ever passed anything else, in this
+  repository or outside it — an option with one possible value is not
+  flexibility, it is a second place the step ceiling can be stated. Callers
+  passing the constant explicitly drop the argument; callers already relying on
+  the default are unaffected. Landed inside this major precisely because it is a
+  source break on a symbol that shipped in `5.0.0` (see #1010).
+
 ### Removed (BREAKING)
 
 - **The `report` runtime tool is gone.** It was a deprecated compatibility

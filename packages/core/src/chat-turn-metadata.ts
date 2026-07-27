@@ -154,8 +154,8 @@ export function mergeTurnMetadata(
   };
 }
 
-export function isFinalChatStep(stepNumber: number, maxSteps = CHAT_MAX_STEPS): boolean {
-  return stepNumber >= maxSteps - 1;
+export function isFinalChatStep(stepNumber: number): boolean {
+  return stepNumber >= CHAT_MAX_STEPS - 1;
 }
 
 export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata | null {
