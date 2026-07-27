@@ -138,8 +138,14 @@ describe("toProblem (RFC 9457)", () => {
  * These assertions pin the relationship rather than byte-identity: same
  * host and `/errors` root, same slug transform, differing by exactly the
  * namespace segment. Drift in either implementation fails here.
- * `apps/api/test/unit/error-uri-namespaces.test.ts` proves the resulting
- * URI sets never collide.
+ *
+ * Disjointness follows from that relationship, it is not an empirical fact
+ * needing a scan of the platform's catalogue: core's `codeToType` maps
+ * `_` → `-` and nothing else, so a platform URI has exactly ONE segment
+ * under `/errors/`, while `afpsErrorTypeUri` always emits two. A collision
+ * would require a platform error code containing a literal `/`. The pair
+ * below is the one real name overlap between the two catalogues, kept as a
+ * concrete witness that the namespace segment is what keeps them apart.
  */
 describe("toProblem type URI ↔ @appstrate/core namespace relationship", () => {
   const ERRORS_ROOT = "https://docs.appstrate.dev/errors";
@@ -170,6 +176,13 @@ describe("toProblem type URI ↔ @appstrate/core namespace relationship", () => 
         `${ERRORS_ROOT}/afps/${coreTypeUri(code).slice(ERRORS_ROOT.length + 1)}`,
       );
     }
+  });
+
+  it("would collide without the afps/ segment", () => {
+    expect(coreTypeUri("integrity_mismatch")).toBe(`${ERRORS_ROOT}/integrity-mismatch`);
+    expect(afpsErrorTypeUri("INTEGRITY_MISMATCH").toLowerCase()).not.toBe(
+      coreTypeUri("integrity_mismatch"),
+    );
   });
 
   it("applies an identical code→slug transform (underscores to dashes, no case folding)", () => {

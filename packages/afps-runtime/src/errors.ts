@@ -237,8 +237,10 @@ const AFPS_NAMESPACE = "afps";
  *
  * `test/errors.test.ts` asserts both implementations share the host and
  * `/errors` root, apply the same slug transform, and differ by exactly the
- * `afps/` segment. `apps/api/test/unit/error-uri-namespaces.test.ts`
- * asserts the two catalogues never produce a colliding URI.
+ * `afps/` segment. That segment is what makes a collision impossible rather
+ * than merely absent: a platform URI has exactly one path segment after
+ * `/errors/` (no code contains a slash, and the transform never introduces
+ * one), while every URI minted here has two.
  */
 function codeToSlug(code: string): string {
   return code.replace(/_/g, "-");
