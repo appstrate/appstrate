@@ -264,12 +264,17 @@ describe("boolean env vars accept empty string (compose `${VAR:-}` pattern)", ()
 });
 
 // USERCONTENT_URL is the origin agent-authored HTML previews are served from.
-// The preview route reads its PRESENCE as proof of isolation and then serves
-// that HTML as active content in every loading context (`mayServeActiveHtml`),
-// so a value sharing APP_URL's host means untrusted inline script executes on
-// the app's own host. The floor is host inequality — stricter than origin
-// inequality (cookies are host-scoped, so another port/scheme is not
-// separation), and boot must fail rather than silently degrade.
+// Its presence grants no extra execution context — `mayServeActiveHtml` serves
+// active HTML only for a proven iframe load, in every mode. What a value
+// sharing APP_URL's host costs is NOT a stripped response header (the SPA
+// iframe's own `sandbox` attribute survives that, so the document stays
+// opaque-origin): it is a UA that ignores sandboxing entirely, a future
+// app-origin page that frames the preview WITHOUT the attribute (which
+// `frame-ancestors` permits, leaving the response header as the only control),
+// and the storage/cookie/process partition itself. The floor is host
+// inequality — stricter than origin inequality (cookies are host-scoped, so
+// another port/scheme is not separation), and boot must fail rather than
+// silently degrade.
 describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
   let s: Snap;
 

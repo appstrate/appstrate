@@ -34,6 +34,7 @@ import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
 import { createDocumentsRouter, createDocumentPreviewRouter } from "./routes/documents.ts";
 import { createAdminStorageDeletionRouter } from "./routes/admin-storage-deletion.ts";
+import { createSpaFallbackHandler } from "./routes/spa.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
@@ -399,12 +400,11 @@ app.use(
   }),
 );
 
-// SPA fallback — serve index.html with injected app config for all non-asset routes.
-// Read fresh each time: Vite build --watch rewrites index.html with new asset hashes.
-app.get("/*", async (c) => {
-  const raw = await Bun.file("./apps/web/dist/index.html").text();
-  return c.html(raw.replace("</head>", `${buildAppConfigScript()}\n</head>`));
-});
+// SPA fallback — serve index.html with injected app config for all non-asset
+// routes. This is the ONLY response that carries the SPA document, and so the
+// only place the parent-side `frame-src` containment of agent-HTML previews can
+// be attached. Definition + rationale: `routes/spa.ts`.
+app.get("/*", createSpaFallbackHandler(buildAppConfigScript));
 
 // Start server — bind 0.0.0.0 so both IPv4 and IPv6 clients can connect
 export default {

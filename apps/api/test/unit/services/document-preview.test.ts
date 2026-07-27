@@ -77,11 +77,34 @@ describe("preview token", () => {
 describe("buildPreviewCsp", () => {
   it("denies by default and pins frame-ancestors to the app origin", () => {
     const csp = buildPreviewCsp("https://app.example");
-    expect(csp).toContain("default-src 'none'");
-    expect(csp).toContain("connect-src 'none'");
-    expect(csp).toContain("form-action 'none'");
-    expect(csp).toContain("base-uri 'none'");
-    expect(csp).toContain("frame-ancestors https://app.example");
+    for (const copy of [csp.header, csp.meta]) {
+      expect(copy).toContain("default-src 'none'");
+      expect(copy).toContain("connect-src 'none'");
+      expect(copy).toContain("form-action 'none'");
+      expect(copy).toContain("base-uri 'none'");
+      expect(copy).toContain("frame-ancestors https://app.example");
+    }
+  });
+
+  it("sandboxes the header copy into an opaque origin", () => {
+    // The directive that stops agent script from navigating the top-level
+    // browsing context to a real `/login` (GHSA-8f6g-r37m-wg99).
+    expect(buildPreviewCsp("https://app.example").header).toContain("sandbox allow-scripts");
+  });
+
+  it("grants no sandbox token beyond allow-scripts", () => {
+    const { header } = buildPreviewCsp("https://app.example");
+    // `allow-same-origin` would hand the document back a real origin; a popup
+    // to the app's `/login` reopens the phishing chain the sandbox closes.
+    expect(header).not.toContain("allow-same-origin");
+    expect(header).not.toContain("allow-popups");
+    // `allow-top-navigation` is a prefix of `allow-top-navigation-by-user-activation`,
+    // so this single assertion rejects both variants.
+    expect(header).not.toContain("allow-top-navigation");
+  });
+
+  it("keeps sandbox OUT of the meta copy (ignored in a meta context)", () => {
+    expect(buildPreviewCsp("https://app.example").meta).not.toContain("sandbox");
   });
 });
 
@@ -170,21 +193,26 @@ describe("buildInertPreviewCsp", () => {
 });
 
 describe("mayServeActiveHtml", () => {
-  it("keeps agent HTML active in every context once a separate origin isolates it", () => {
-    for (const dest of ["iframe", "document", "empty", "object", null]) {
-      expect(mayServeActiveHtml({ separateOrigin: true, secFetchDest: dest })).toBe(true);
-    }
+  it("is active ONLY for a proven nested-document load", () => {
+    expect(mayServeActiveHtml("iframe")).toBe(true);
   });
 
-  it("same-origin: active ONLY for a proven nested-document load", () => {
-    expect(mayServeActiveHtml({ separateOrigin: false, secFetchDest: "iframe" })).toBe(true);
-  });
-
-  it("same-origin: fails closed on a top-level navigation, a bare fetch, and a missing header", () => {
-    // `document` is the shared-link / new-tab case the whole gate exists for:
-    // there is no sandbox attribute there, so the script would run on APP_URL.
+  it("fails closed on a top-level navigation, a bare fetch, and a missing header", () => {
+    // `document` is the shared-link / new-tab case the whole gate exists for: a
+    // top-level agent document can navigate ITSELF (the sandbox flags only gate
+    // navigating an ancestor), so it can be a fake login form that carries the
+    // typed-in credentials out in a navigation URL. Refusing the render is the
+    // only control over that channel.
     for (const dest of ["document", "empty", "object", "embed", "frame", "", null, "IFRAME"]) {
-      expect(mayServeActiveHtml({ separateOrigin: false, secFetchDest: dest })).toBe(false);
+      expect(mayServeActiveHtml(dest)).toBe(false);
     }
   });
+
+  // NOTE for the next reader: the function used to take `{ separateOrigin,
+  // secFetchDest }` and short-circuit to `true` whenever USERCONTENT_URL was
+  // set — which is what let agent HTML render as an active TOP-LEVEL document,
+  // the render this branch removes. There is deliberately no runtime test for
+  // "a second input was reintroduced": the guard against that is the compile
+  // error every call above would become, and a runtime call passing an extra
+  // argument only demonstrates that JavaScript ignores extra arguments.
 });

@@ -18,6 +18,24 @@
  *    token) never leaks via the Referer header.
  *  - `src` is the server-minted `preview_url` on a cookie-less route hardened
  *    with a strict CSP + injected meta CSP (see `document-preview.ts` on the API).
+ *  - Where this frame may NAVIGATE is bounded by the SPA document's own CSP,
+ *    which the API sends on the `index.html` response: `frame-src <preview
+ *    origin>` and nothing else (`buildSpaCsp()` in `apps/api/src/routes/spa.ts`).
+ *    Neither the `sandbox` attribute nor the preview response's CSP can close
+ *    that channel — a sandboxed navigable may always navigate ITSELF, and
+ *    navigation is covered by no `connect-src`/`form-action`. Verified in Chrome:
+ *    a cross-origin self-navigation out of this frame is blocked with no network
+ *    request to the target, while the initial load still succeeds. What it bounds
+ *    is cross-origin NAVIGATION and nothing more — it is not a general
+ *    exfiltration control (WebRTC/STUN is a named, pre-existing residual: see
+ *    `buildPreviewCsp` on the API). Navigation WITHIN the allowed origin stays
+ *    possible: in `USERCONTENT_URL` mode that origin is nothing but token-bound
+ *    preview bytes, and in the default mode (`frame-src 'self'`) it is the whole
+ *    app origin — still harmless, because the frame is opaque-origin so SameSite
+ *    cookies are not sent, and `frame-src` is re-enforced across a 302 so an open
+ *    redirect cannot launder the navigation back out. **Framing any NEW origin
+ *    from the SPA therefore requires widening `frame-src` first**, or the frame
+ *    will not load.
  *
  * The `pdf` iframe is DELIBERATELY sandboxless — Chrome refuses to render its
  * native PDF viewer inside a sandboxed iframe without `allow-same-origin`, and
@@ -48,6 +66,12 @@ import { client } from "../api/client";
  * in a unit test) so a regression that widens the sandbox is caught: it must stay
  * `"allow-scripts"` and nothing else. Applies ONLY to the html iframe — the pdf
  * iframe is intentionally sandboxless (see file header).
+ *
+ * The server ships the SAME token set on the response's CSP `sandbox` directive
+ * (`buildPreviewCsp()` in `apps/api/src/services/document-preview.ts`). The two
+ * sandboxes INTERSECT — a token granted on only one side is not granted at all —
+ * so widening one alone is dead code, and widening it here while the server keeps
+ * it out (or the reverse) is a silent asymmetry. Move both or neither.
  */
 export const PREVIEW_IFRAME_SANDBOX = "allow-scripts";
 

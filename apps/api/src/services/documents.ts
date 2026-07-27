@@ -542,8 +542,11 @@ export interface DocumentDto {
    * single-document GET (never in list rows, to avoid signing a short-lived
    * token per gallery row). Non-null only for a previewable document. Carries a
    * short-lived signed token (`?t=`); the SPA loads it in an
-   * `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when set,
-   * else on `APP_URL`. Absent (undefined) on list rows.
+   * `sandbox="allow-scripts"` iframe — the ONLY context in which an `html`
+   * document is served as active content (any other load, a top-level
+   * navigation above all, gets inert `text/plain` source, in every mode). On
+   * the `USERCONTENT_URL` origin when set, else on `APP_URL`. Absent
+   * (undefined) on list rows.
    */
   preview_url?: string | null;
   expiresAt: string | null;

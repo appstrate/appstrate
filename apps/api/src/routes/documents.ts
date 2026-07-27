@@ -246,14 +246,23 @@ export function createDocumentsRouter() {
  * previewable document in maximum isolation, branching on its
  * {@link previewKind}:
  *
- *  - `html` — untrusted agent-generated ACTIVE content: a strict CSP header + an
- *    injected parse-time `<meta>` CSP (covers the relative-URL / `srcdoc` bypass
- *    a header alone can miss), COOP `same-origin`, the full `Permissions-Policy`.
- *    Served as ACTIVE html only where execution cannot reach the app session —
- *    on a dedicated `USERCONTENT_URL` origin, or (same-origin mode) inside the
- *    SPA's opaque `sandbox="allow-scripts"` iframe. Any other loading context,
- *    a top-level navigation above all, degrades to inert `text/plain` source.
- *    See {@link mayServeActiveHtml}.
+ *  - `html` — untrusted agent-generated ACTIVE content: a strict CSP header
+ *    whose `sandbox allow-scripts` puts the document in an OPAQUE origin (no
+ *    storage, no cookies, no popups, no navigating an ancestor — but it may
+ *    still navigate ITSELF, see {@link buildPreviewCsp}), plus an injected
+ *    parse-time `<meta>` CSP carrying the same policy minus `sandbox`, which a
+ *    meta context ignores (covers the relative-URL / `srcdoc` bypass a header
+ *    alone can miss), COOP `same-origin`, the full `Permissions-Policy`.
+ *    Served as ACTIVE html ONLY on a proven nested-document load
+ *    (`Sec-Fetch-Dest: iframe`) — in EVERY mode, `USERCONTENT_URL` configured or
+ *    not. A top-level render is uncontainable (the document may navigate itself,
+ *    so an agent-authored fake login exfiltrates by navigation), so every other
+ *    loading context — a top-level navigation above all — degrades to inert
+ *    `text/plain` source. See {@link mayServeActiveHtml}. In the nested frame
+ *    that IS served, that same self-navigation is bounded from the OTHER side:
+ *    the SPA document's own CSP carries `frame-src <preview origin>`
+ *    (`buildSpaCsp()` in `routes/spa.ts`), which blocks every cross-origin
+ *    navigation the frame attempts — nothing this response can carry does that.
  *  - `image` / `pdf` / `text` — INERT content streamed byte-for-byte with a
  *    minimal `default-src 'none'` CSP, `inline` disposition and `nosniff`; text
  *    is always relabelled `text/plain` so no markdown→HTML sniff is possible.
@@ -324,22 +333,24 @@ export function createDocumentPreviewRouter() {
       // read the whole (capped) body, inject the meta CSP as the first child
       // of <head>, serve. Simple + correct over regex streaming.
       //
-      // …but ONLY when this request is a context where executing the script
-      // cannot reach the app's session. In same-origin mode (no
-      // USERCONTENT_URL — the OSS default) that means the SPA's
-      // `sandbox="allow-scripts"` iframe and nothing else; a top-level
-      // navigation to the same absolute `preview_url` would run agent script
-      // on APP_URL itself. See `mayServeActiveHtml`.
+      // …but ONLY on a proven nested-document load — the SPA's
+      // `sandbox="allow-scripts"` iframe and nothing else, in EVERY mode. A
+      // top-level render of an agent-authored document cannot be contained
+      // (it may navigate itself, so the page can BE a fake login and carry the
+      // credentials out in a URL), and a separate USERCONTENT_URL origin does
+      // not change that. See `mayServeActiveHtml`.
       const html = await new Response(stream).text();
-      const active = mayServeActiveHtml({
-        separateOrigin: Boolean(env.USERCONTENT_URL),
-        secFetchDest: c.req.header("Sec-Fetch-Dest") ?? null,
-      });
+      const active = mayServeActiveHtml(c.req.header("Sec-Fetch-Dest") ?? null);
       const commonHeaders = {
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
         "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
         "Cache-Control": "private, no-store",
+        // COOP is processed for TOP-LEVEL documents only, and the active branch
+        // is served exclusively to `Sec-Fetch-Dest: iframe` — so on that branch
+        // the header is simply INERT, neither helping nor hurting. It stays
+        // because the OTHER branch (inert `text/plain` source) IS reachable
+        // top-level, and there it does its normal job.
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Resource-Policy": corp,
         // The representation depends on the request header — say so, even
@@ -350,7 +361,8 @@ export function createDocumentPreviewRouter() {
       if (!active) {
         // Same bytes, relabelled: `text/plain` + `nosniff` means the browser
         // renders the markup as source and never parses it as a document, so
-        // nothing executes in the app origin. `default-src 'none'` on top.
+        // nothing executes and nothing renders that could impersonate a page.
+        // `default-src 'none'` on top.
         return new Response(html, {
           status: 200,
           headers: {
@@ -362,14 +374,18 @@ export function createDocumentPreviewRouter() {
         });
       }
 
+      // Two copies of one policy: the header carries `sandbox allow-scripts`
+      // (opaque origin — no storage, no cookies, no popups, no navigating the
+      // embedding page), the meta copy omits it because `sandbox` is ignored in
+      // a meta context. They are NOT interchangeable — see `buildPreviewCsp`.
       const csp = buildPreviewCsp(appOrigin);
-      const body = injectMetaCsp(html, csp);
+      const body = injectMetaCsp(html, csp.meta);
       return new Response(body, {
         status: 200,
         headers: {
           ...commonHeaders,
           "Content-Type": "text/html; charset=utf-8",
-          "Content-Security-Policy": csp,
+          "Content-Security-Policy": csp.header,
         },
       });
     }
