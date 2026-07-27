@@ -3,26 +3,25 @@
 /**
  * Writers MUST NOT emit non-canonical camelCase keys.
  *
- * Umbrella regression test catching the whole class of writer-leak bugs (e.g.
- * `createOrgItem` writing `displayName` instead of `display_name`). Pins the
- * canonical contract so a future writer that accidentally re-introduces
- * camelCase fails CI before merge.
+ * Umbrella regression test catching the whole class of writer-leak bugs (e.g. a
+ * writer emitting `displayName` instead of `display_name`). Pins the canonical
+ * contract so a future writer that accidentally re-introduces camelCase fails
+ * CI before merge.
  *
  * Coverage:
- *  - `createOrgItem` manifest-mutation logic (`apps/api/src/services/package-items/crud.ts`)
- *    is inlined as a pure helper for each of the 4 package types (the DB-bound
- *    function itself requires too much wiring — DB + auth context — to test in
- *    a packages/core unit test). The inlined helper is byte-for-byte identical
- *    to the production manifest-mutation path (`finalManifest.<key> = …`).
  *  - `writeManifestIntegrations` round-trip (the canonical writer for the
  *    `dependencies.integrations.<id>` object form + the top-level
  *    `integrations` block per AFPS §4.1).
+ *  - The package-create writer (`buildStoredManifest`, the pure core of
+ *    `createOrgItem`) is covered in `apps/api/test/unit/build-stored-manifest.test.ts`
+ *    — against the REAL function, in the package that can import it. A
+ *    hand-copied simulation used to stand in for it here and silently drifted
+ *    from production (it still rewrote `manifest.type`, which issue #987 made
+ *    an error).
  *  - `metadataToManifestPatch` is covered by
  *    `apps/web/src/components/agent-editor/test/utils.test.ts` — already
  *    asserts `displayName: undefined` is emitted alongside canonical
- *    `display_name`. Re-tested here at the JSON level since the patch is
- *    shallow-merged into the manifest and the non-canonical key MUST drop on
- *    serialization.
+ *    `display_name`.
  *
  * Banned non-canonical camelCase keys:
  *   displayName, schemaVersion, fileConstraints, uiHints, propertyOrder,
@@ -31,7 +30,6 @@
 
 import { describe, it, expect } from "bun:test";
 import { parseManifestIntegrations, writeManifestIntegrations } from "../src/dependencies.ts";
-import { AFPS_SCHEMA_URLS } from "../src/validation.ts";
 
 // ─────────────────────────────────────────────
 // Banned-key audit
@@ -70,88 +68,6 @@ function findBannedKeysDeep(value: unknown, basePath = "$"): Violation[] {
   }
   return out;
 }
-
-/**
- * Mirrors the manifest-mutation block in
- * `apps/api/src/services/package-items/crud.ts:95-103` (`createOrgItem`).
- * Pure — no DB, no auth context. Pins the canonical contract: `display_name`
- * (not `displayName`).
- */
-function simulateCreateOrgItem(
-  type: "agent" | "skill" | "mcp-server" | "integration",
-  item: { id: string; name?: string; description?: string },
-  manifest?: Record<string, unknown>,
-): Record<string, unknown> {
-  const finalManifest: Record<string, unknown> = manifest
-    ? { ...manifest }
-    : { version: "1.0.0", name: item.id };
-  finalManifest.$schema = AFPS_SCHEMA_URLS[type];
-  finalManifest.type = type;
-  if (!finalManifest.name) finalManifest.name = item.id;
-  if (item.name) finalManifest.display_name = item.name;
-  if (item.description) finalManifest.description = item.description;
-  return finalManifest;
-}
-
-// ─────────────────────────────────────────────
-// createOrgItem simulation per package type
-// ─────────────────────────────────────────────
-
-describe("createOrgItem writer never emits non-canonical camelCase keys", () => {
-  const TYPES = ["agent", "skill", "mcp-server", "integration"] as const;
-
-  for (const type of TYPES) {
-    it(`creates a ${type} manifest with canonical snake_case keys only`, () => {
-      const m = simulateCreateOrgItem(type, {
-        id: "@acme/test",
-        name: "Test Item",
-        description: "A test item",
-      });
-      // display_name MUST be present, displayName MUST NOT.
-      expect(m.display_name).toBe("Test Item");
-      expect(m).not.toHaveProperty("displayName");
-      const violations = findBannedKeysDeep(m);
-      if (violations.length > 0) {
-        // surface a readable failure message
-        throw new Error(
-          `Banned non-canonical camelCase keys leaked from createOrgItem(${type}): ` +
-            violations.map((v) => `${v.path} (${v.key})`).join(", "),
-        );
-      }
-    });
-
-    it(`createOrgItem(${type}) does not introduce camelCase when input has snake_case`, () => {
-      const m = simulateCreateOrgItem(
-        type,
-        { id: "@acme/test", name: "Test", description: "Desc" },
-        {
-          name: "@acme/test",
-          version: "2.0.0",
-          display_name: "Existing Canonical",
-          schema_version: "0.1",
-          icon_url: "https://example.com/icon.png",
-        },
-      );
-      const violations = findBannedKeysDeep(m);
-      expect(violations).toEqual([]);
-    });
-
-    it(`createOrgItem(${type}) emits canonical display_name from item.name`, () => {
-      // item.name MUST be written as the canonical display_name; the writer
-      // MUST NOT introduce a camelCase displayName. NOTE: writers don't
-      // actively strip non-canonical siblings already present on input — that
-      // happens in the editor path. This test pins what the writer DOES emit.
-      const input: Record<string, unknown> = {
-        name: "@acme/test",
-        version: "1.0.0",
-      };
-      const m = simulateCreateOrgItem(type, { id: "@acme/test", name: "Canonical Label" }, input);
-      // The writer emits canonical display_name; displayName never introduced.
-      expect(m.display_name).toBe("Canonical Label");
-      expect(m).not.toHaveProperty("displayName");
-    });
-  }
-});
 
 // ─────────────────────────────────────────────
 // writeManifestIntegrations round-trip

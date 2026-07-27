@@ -2290,7 +2290,7 @@ export const packagesPaths = {
       requestBody: {
         required: true,
         description:
-          "Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name), or post a JSON body. Parsed by `parsePackageUpload`.",
+          "Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name, and the archive must contain a valid `manifest.json`), or post a JSON body carrying the manifest. Parsed by `parsePackageUpload`.",
         content: {
           "multipart/form-data": {
             schema: {
@@ -2301,7 +2301,7 @@ export const packagesPaths = {
                   type: "string",
                   format: "binary",
                   description:
-                    "Package archive (`.afps` or `.zip`). File name (sans extension) is the kebab-case package id.",
+                    "Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id.",
                 },
               },
             },
@@ -2309,7 +2309,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["id", "content"],
+              required: ["id", "content", "manifest"],
               properties: {
                 id: { type: "string", description: "Kebab-case package id." },
                 content: { type: "string", description: "Primary package file content." },
@@ -2321,11 +2321,11 @@ export const packagesPaths = {
                   type: "string",
                   description: "Package description. Auto-extracted from the manifest if omitted.",
                 },
-                version: { type: "string", description: "Initial semver (optional)." },
                 manifest: {
                   type: "object",
                   additionalProperties: true,
-                  description: "Optional manifest object (stored as-is).",
+                  description:
+                    "Manifest object, validated against the AFPS mcp-server schema and stored as-is.",
                 },
               },
             },

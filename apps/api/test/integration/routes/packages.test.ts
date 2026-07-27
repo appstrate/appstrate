@@ -2017,9 +2017,16 @@ describe("Packages API", () => {
       orgId: string,
       manifest: Record<string, unknown>,
       content = "source prompt",
+      /**
+       * The `packages.type` COLUMN, for the case where it deliberately
+       * DISAGREES with `manifest.type` — the drift the #481
+       * provider→integration migration left in the catalog. Defaults to the
+       * manifest's own type (the aligned, ordinary case).
+       */
+      rowType?: "agent" | "skill" | "integration" | "mcp-server",
     ): Promise<void> {
       const version = manifest.version as string;
-      const type = manifest.type as "agent" | "skill";
+      const type = rowType ?? (manifest.type as "agent" | "skill");
       await seedPackage({
         id: packageId,
         orgId,
@@ -2206,6 +2213,60 @@ describe("Packages API", () => {
       // unrelated to this normalisation. What matters here is that nothing the
       // source declared was changed or lost.
       expect(await draftManifest(targetId)).toMatchObject(expected);
+    });
+
+    // Issue #987 made `createOrgItem` REFUSE a manifest whose `type` disagrees
+    // with the package type instead of silently rewriting it. A fork is the one
+    // caller whose two sources can legitimately disagree — the config comes
+    // from the `packages.type` COLUMN, the manifest from an immutable published
+    // snapshot — so it normalizes explicitly before calling. Without that, the
+    // `type: "provider"` rows the #481 migration left in the catalog would fork
+    // into a 500.
+    it("forks a published manifest whose type drifted from its row (#481 legacy)", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkdrift" });
+      const sourceId = "@forkdrift/legacy-provider";
+      await seedPublishedSource(
+        sourceId,
+        srcCtx.orgId,
+        {
+          name: sourceId,
+          version: "0.1.0",
+          // The pre-#481 vocabulary: a type no schema accepts today, on a row
+          // the migration retyped to `integration`.
+          type: "provider",
+          schema_version: "0.1",
+          display_name: "Legacy Provider",
+          description: "Left behind by the provider→integration migration",
+        },
+        "",
+        "integration",
+      );
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+
+      // 201, NOT a 500 from the new invariant: the drifted source stays forkable.
+      expect(res.status).toBe(201);
+
+      const targetId = "@pkgorg/legacy-provider";
+      const [row] = await db
+        .select({ type: packages.type })
+        .from(packages)
+        .where(eq(packages.id, targetId))
+        .limit(1);
+      expect(row!.type).toBe("integration");
+      // The fork's draft AND its new immutable version row agree with the row
+      // type — previously only the draft got the rewrite, so the version row
+      // (and the ZIP built from the same object) kept `provider`.
+      expect((await draftManifest(targetId)).type).toBe("integration");
+      expect((await versionManifest(targetId)).type).toBe("integration");
+      const zipped = JSON.parse(await artifactManifestText(targetId, "0.1.0")) as {
+        type?: string;
+      };
+      expect(zipped.type).toBe("integration");
     });
   });
 });

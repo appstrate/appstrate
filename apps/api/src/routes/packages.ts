@@ -15,7 +15,7 @@ import { handleImportBundle } from "../services/bundle-import.ts";
 import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
-import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
+import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -106,6 +106,61 @@ async function assertAgentIntegrationScopesValid(
   }
 }
 
+/**
+ * The manifest gate every package write goes through — schema validation, the
+ * route/manifest `type` agreement check, then the integration-scope subset
+ * check — returning the VALIDATED (normalized) manifest callers persist.
+ *
+ * `direction` says where the manifest came from, and both policies key off it:
+ *
+ * - `"author"` — the manifest is in THIS request (create; a PUT supplying
+ *   `manifest`). The `type` gate applies: the route family fixes the package
+ *   type while `validateManifest` dispatches purely on the manifest's own root
+ *   `type`, so without it a wrong-type manifest validates against ITS OWN
+ *   schema and then has `type` rewritten to the route's downstream —
+ *   persisting a manifest no schema ever accepted (issue #987). Retired
+ *   `runtime_tools` ids reject, so a typo or a removed id is reported instead
+ *   of silently stripped.
+ * - `"stored"` — the manifest is already persisted (PUT content-only
+ *   carry-forward; publishing an existing draft). NO `type` gate: stored
+ *   artifacts are tolerated on read (#983), and gating here would make a
+ *   legacy drifted draft permanently un-publishable. Retired ids drop so such
+ *   a draft stays editable and publishable.
+ */
+async function validateManifestForRoute(
+  manifest: unknown,
+  expectedType: PackageType,
+  orgId: string,
+  direction: "author" | "stored",
+): Promise<Record<string, unknown> & { name: string }> {
+  const result = validateManifest(
+    manifest,
+    direction === "stored" ? { retiredRuntimeTools: "drop" } : undefined,
+  );
+  if (!result.valid) {
+    throw validationFailed(manifestErrorsToFieldErrors(result.errors));
+  }
+  // Every AFPS manifest schema requires `name` as a string, so the validated
+  // shape always carries it — callers use it as the package id.
+  const validated = result.manifest as Record<string, unknown> & { name: string };
+
+  // Checked AFTER validation so a missing/unknown `type` keeps producing the
+  // validator's own typed `type:` error rather than a mismatch message.
+  if (direction === "author" && validated.type !== expectedType) {
+    throw validationFailed([
+      {
+        field: "manifest.type",
+        code: "invalid_manifest",
+        title: "Invalid Manifest",
+        message: `expected "${expectedType}", received "${String(validated.type)}"`,
+      },
+    ]);
+  }
+
+  await assertAgentIntegrationScopesValid(validated, orgId);
+  return validated;
+}
+
 // ═══════════════════════════════════════════════
 // Shared helpers for package CRUD routes
 // ═══════════════════════════════════════════════
@@ -167,19 +222,16 @@ interface ParsedUpload {
   content: string;
   normalizedFiles?: Record<string, Uint8Array>;
   /** Full parsed manifest.json from the ZIP — stored as-is (like the registry). */
-  manifest?: Record<string, unknown>;
-  /** User-specified version from JSON body (propagated to manifest default). */
-  version?: string;
+  manifest: Record<string, unknown>;
 }
 
 /** JSON body shape for the non-multipart package upload branch. */
 const jsonUploadSchema = z.object({
   id: z.string().min(1),
   content: z.string().min(1),
-  manifest: z.record(z.string(), z.unknown()).optional(),
+  manifest: z.record(z.string(), z.unknown()),
   name: z.string().optional(),
   description: z.string().optional(),
-  version: z.string().optional(),
 });
 
 /**
@@ -235,23 +287,27 @@ async function parsePackageUpload(
       }
     }
 
-    const content = new TextDecoder().decode(normalizedFiles[contentFile!]!);
+    // No content file is looked up when both `parseOpts` are null (mcp-server,
+    // whose payload is the manifest) — such a package has no primary content.
+    const contentBytes = contentFile ? normalizedFiles[contentFile] : undefined;
+    const content = contentBytes ? new TextDecoder().decode(contentBytes) : "";
 
-    let name: string | undefined;
-    let description: string | undefined;
-
-    // Parse manifest.json from ZIP if present — store as-is (like the registry)
-    let manifest: Record<string, unknown> | undefined;
-    const manifestBytes = normalizedFiles["manifest.json"];
-    if (manifestBytes) {
-      manifest = parseManifestBytesSafe(manifestBytes);
-      if (manifest) {
-        // Extract display fields as fallbacks (not for manifest storage)
-        if (!name && typeof manifest.display_name === "string") name = manifest.display_name;
-        if (!description && typeof manifest.description === "string")
-          description = manifest.description;
-      }
+    // manifest.json is mandatory: it is the only part of the archive the AFPS
+    // schema validates, and tolerating its absence let an unvalidated stub
+    // manifest reach the immutable `package_versions` row (issue #987).
+    if (!normalizedFiles["manifest.json"]) {
+      throw invalidRequest("ZIP must contain manifest.json", "file");
     }
+    let manifest: Record<string, unknown>;
+    try {
+      manifest = parseManifestFromFiles(normalizedFiles);
+    } catch (err) {
+      throw invalidRequest(getErrorMessage(err), "file");
+    }
+
+    // Display fields default to the manifest (not stored back into it)
+    let name = typeof manifest.display_name === "string" ? manifest.display_name : undefined;
+    let description = typeof manifest.description === "string" ? manifest.description : undefined;
 
     // Allow overriding name/description from form fields
     const formName = formData.get("name") as string | null;
@@ -284,7 +340,6 @@ async function parsePackageUpload(
     content: body.content,
     normalizedFiles,
     manifest: body.manifest,
-    version: body.version,
   };
 }
 
@@ -474,13 +529,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       const content = body.content ?? "";
       const sourceCode = body.source_code ?? "";
 
-      // Validate manifest
-      const manifestResult = validateManifest(manifest);
-      if (!manifestResult.valid) {
-        throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
-      }
-      const validatedManifest = manifestResult.manifest;
-      await assertAgentIntegrationScopesValid(validatedManifest as Record<string, unknown>, orgId);
+      const validatedManifest = await validateManifestForRoute(
+        manifest,
+        rcfg.cfg.type,
+        orgId,
+        "author",
+      );
 
       if (rcfg.requireContent && !content.trim()) {
         throw invalidRequest("Content cannot be empty", "content");
@@ -574,7 +628,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       // Create initial version (non-fatal). Snapshot the STORED draft
       // manifest (not the pre-normalization request body): `createOrgItem`
-      // injects `$schema`/`type`/… and the jsonb round-trip reorders keys, so
+      // stamps `$schema`/`name`/… and the jsonb round-trip reorders keys, so
       // snapshotting `validatedManifest` produced a version whose bytes could
       // never match a later rebuild from the draft. That byte drift defeated
       // the publish dedup and, before #896, made every create-then-republish
@@ -613,7 +667,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       return c.json(detail, 201);
     }
 
-    // Skill/Tool create — uses parsePackageUpload (ZIP or JSON body)
+    // Import-only create (mcp-server) — uses parsePackageUpload (ZIP or JSON body)
     const parsed = await parsePackageUpload(c, rcfg.parseOpts);
 
     if (isSystemPackage(parsed.id)) {
@@ -622,17 +676,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    // Validate manifest if present
-    if (parsed.manifest) {
-      const manifestResult = validateManifest(parsed.manifest);
-      if (!manifestResult.valid) {
-        throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
-      }
-      await assertAgentIntegrationScopesValid(
-        manifestResult.manifest as Record<string, unknown>,
-        orgId,
-      );
-    }
+    await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, orgId, "author");
 
     if (rcfg.validateContent) {
       const validation = rcfg.validateContent(parsed.content);
@@ -648,13 +692,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
     }
 
-    // Merge user-specified version into manifest for createOrgItem
-    const effectiveManifest = parsed.manifest
-      ? parsed.manifest
-      : parsed.version
-        ? { version: parsed.version }
-        : undefined;
-
     let item;
     try {
       item = await createOrgItem(
@@ -667,7 +704,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           createdBy: user.id,
         },
         rcfg.cfg,
-        effectiveManifest,
+        parsed.manifest,
       );
     } catch (err) {
       if (err instanceof PackageAlreadyExistsError) {
@@ -839,39 +876,33 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     // A PUT that omits `manifest` is a content-only edit: the stored draft is
     // carried forward untouched. That makes this handler directional per
-    // request, and the direction decides how a retired `runtime_tools` id is
-    // treated (see `validateManifest`'s `retiredRuntimeTools`):
-    //   - manifest SUPPLIED → author input → reject, so a typo or an id the
-    //     platform removed is reported instead of silently stripped;
-    //   - manifest OMITTED → the already-stored draft → drop, so a legacy
-    //     agent naming a since-retired tool stays editable (a content-only
-    //     save must not 400 on a field the request never mentioned).
+    // request — `manifest` SUPPLIED is author input, `manifest` OMITTED is the
+    // already-stored draft — and the direction decides both the `type` gate and
+    // how a retired `runtime_tools` id is treated (see
+    // `validateManifestForRoute`). Concretely, a content-only save must not 400
+    // on fields the request never mentioned.
     const authoredManifest = body.manifest;
     const manifest =
       authoredManifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
     const sourceCode = body.source_code;
 
-    const manifestResult = validateManifest(
-      manifest,
-      authoredManifest ? undefined : { retiredRuntimeTools: "drop" },
-    );
-    if (!manifestResult.valid) {
-      throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
-    }
     // Everything downstream — the persisted row, the after-update hook, the
     // id-immutability check — reads the VALIDATED manifest, never the raw one.
-    // The create path already did (`validatedManifest` in the create handler);
-    // this one persisted the raw shape, so the normalisation validation had
-    // just performed was thrown away on every save. That is what made the
-    // carry-forward case above a permanent no-op instead of a self-healing
-    // write, and let a non-SPA client (CLI, MCP, curl) keep a retired id alive
-    // in the draft indefinitely.
-    const validatedManifest = manifestResult.manifest as Record<string, unknown>;
-    await assertAgentIntegrationScopesValid(validatedManifest, orgId);
+    // The create path already did; this one persisted the raw shape, so the
+    // normalisation validation had just performed was thrown away on every
+    // save. That is what made the carry-forward case above a permanent no-op
+    // instead of a self-healing write, and let a non-SPA client (CLI, MCP,
+    // curl) keep a retired id alive in the draft indefinitely.
+    const validatedManifest = await validateManifestForRoute(
+      manifest,
+      rcfg.cfg.type,
+      orgId,
+      authoredManifest ? "author" : "stored",
+    );
 
     // Ensure ID immutability (all types)
-    const newScopedName = (validatedManifest as { name?: string }).name;
+    const newScopedName = validatedManifest.name;
     if (newScopedName && newScopedName !== itemId) {
       throw invalidRequest("name cannot change", "name");
     }
@@ -1140,21 +1171,14 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // draft that became invalid by any path — this rejects e.g. an
     // `integrations_configuration` entry without a matching declared
     // dependency before it is frozen into an immutable version.
-    // READ direction: the draft is already stored, and a draft written before
-    // a runtime tool was retired must stay publishable. `createVersionFromDraft`
-    // applies the same drop before freezing the snapshot, so the retired id
-    // never reaches the immutable artifact.
-    const manifestResult = validateManifest(item.manifest, { retiredRuntimeTools: "drop" });
-    if (!manifestResult.valid) {
-      throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
-    }
-    // Same integration-scope subset gate the create/update paths apply — a
-    // draft must not be frozen into an immutable version with an
+    // STORED direction: the draft is already persisted, and a draft written
+    // before a runtime tool was retired must stay publishable.
+    // `createVersionFromDraft` applies the same drop before freezing the
+    // snapshot, so the retired id never reaches the immutable artifact. The
+    // integration-scope subset gate the create/update paths apply comes along
+    // with it — a draft must not be frozen into an immutable version with an
     // `integrations_configuration` selection outside the integration catalog.
-    await assertAgentIntegrationScopesValid(
-      manifestResult.manifest as Record<string, unknown>,
-      orgId,
-    );
+    await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored");
 
     // Parse optional version override from request body. The body itself is
     // optional (OpenAPI `requestBody.required: false` — the SPA omits it

@@ -15,6 +15,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`POST /api/packages/mcp-servers` published manifests no schema had ever
+  accepted (#987)** — mcp-server is the only package type whose create reaches
+  the `parsePackageUpload` branch, and that branch skipped validation two ways:
+  a `manifest.json` missing or malformed inside the uploaded archive was
+  swallowed into `undefined` by a non-throwing parser, and `manifest` was
+  optional in the JSON body. Either way `createOrgItem` synthesized a
+  `{version, name, $schema, type}` stub and `createVersionSafe` snapshotted it
+  into `package_versions.manifest` — a published, immutable row failing
+  `mcpServerManifestSchema` on `manifest_version` and `server`. The same
+  corruption was reachable with a perfectly valid manifest of the WRONG type:
+  `validateManifest` dispatches on the manifest's own root `type`, so a `skill`
+  manifest posted to the mcp-server route validated happily and `createOrgItem`
+  then rewrote `type` to the route's type AFTER validation. Manifest validation
+  on create is now unconditional, and one direction-aware gate
+  (`validateManifestForRoute`) rejects a route/manifest type mismatch with a
+  `manifest.type` field error on create and on `PUT` supplying a manifest — the
+  stored direction (`PUT` carry-forward, publishing an existing draft) keeps
+  tolerating drift, because #983 settled that already-persisted artifacts are
+  tolerated on read and a gate there would make a legacy drifted draft
+  permanently un-publishable. The `type` stamping left `createOrgItem` for a
+  pure `buildStoredManifest` that throws on divergence; `forkPackage` — the one
+  caller whose sources can legitimately disagree, reading an immutable
+  published snapshot — keeps the repair, now explicit and logged.
+  **Behavior change for integrators**: an archive without a valid
+  `manifest.json`, or a JSON body without `manifest`, is now a `400` instead of
+  a silently stubbed package, and the JSON body's `version` field is gone (it
+  was only ever read by the fallback that fired when `manifest` was absent).
+
 - **Two contract holes: forks minted un-normalised manifests, stale modules
   booted silently (#974, #973)** — a fork is a READ that MINTS: it copies an
   already-published (immutable, therefore unrepairable) manifest into a brand
@@ -26,9 +54,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   materialises no defaults, leaving publish dedup (#896) untouched. A source
   invalid for any OTHER reason is logged, never rejected: manifests today's
   validator refuses do sit in the catalog — the provider→integration migration
-  (#481) left `type: "provider"` rows behind, and a malformed `manifest.json`
-  uploaded to `POST /api/mcp-servers` still mints an unvalidated stub manifest
-  today — and a gate would make them permanently un-forkable.
+  (#481) left `type: "provider"` rows behind (the write direction that could
+  still mint new ones is closed in #987) — and a gate would make them
+  permanently un-forkable.
 
   The module→platform half of the contract is invisible to `tsc` for an
   out-of-tree module, and it fails silently: core 6.0.0 made
