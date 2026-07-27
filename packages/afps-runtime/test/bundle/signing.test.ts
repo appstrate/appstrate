@@ -9,7 +9,6 @@ import {
   signBundle,
   signChildKey,
   verifyBundleSignature,
-  verifySigstoreSignature,
   readBundleSignature,
   type BundleSignature,
   type TrustRoot,
@@ -338,16 +337,5 @@ describe("readBundleSignature", () => {
     });
     const bundle = await buildBundleFromAfps(zip, emptyPackageCatalog);
     expect(readBundleSignature(bundle)).toBeNull();
-  });
-});
-
-describe("verifySigstoreSignature (stub)", () => {
-  it("always fails with alg_unsupported for now", () => {
-    const r = verifySigstoreSignature(enc("x"), {});
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe("alg_unsupported");
-      expect(r.detail).toContain("Phase 11");
-    }
   });
 });

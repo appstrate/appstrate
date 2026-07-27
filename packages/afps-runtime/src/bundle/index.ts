@@ -108,7 +108,6 @@ export {
   signBundle,
   signChildKey,
   verifyBundleSignature,
-  verifySigstoreSignature,
   readBundleSignature,
   generateKeyPair,
   keyIdFromPublicKey,
