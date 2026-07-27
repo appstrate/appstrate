@@ -415,6 +415,67 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect((row!.draftManifest as Record<string, unknown>).runtime_tools).toEqual(["output"]);
   });
 
+  // ── retired AFPS 1.x dependency keys: import-bundle is the READ direction ──
+  //
+  // `dependencies.tools` (now `mcp_servers`) is inert — no reader has ever read
+  // it — so a package published with it is not broken, just carrying dead
+  // vocabulary. Aborting the whole bundle over it would be gratuitous, and the
+  // source artifact is immutable so there is nothing to repair upstream. Import
+  // succeeds; the warning is how the operator learns a republish is the fix.
+  //
+  // Kills the mutation "stop pushing the retired-dependency-key warning" and
+  // the mutation "reject retired dependency keys unconditionally" (which would
+  // 400 this request and, worse, break every already-published package).
+  it("imports a package carrying a retired dependency key and warns instead of aborting", async () => {
+    const agentId = "@importorg/legacy-dep-keys" as const;
+    const afps = buildAfps({
+      manifest: {
+        name: agentId,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Legacy Dep Keys",
+        author: "tester",
+        dependencies: { tools: { "@appstrate/report": "^1.0.0" } },
+      },
+      content: "Legacy prompt.",
+      type: "agent",
+    });
+
+    const form = new FormData();
+    form.append("file", new Blob([afps]), "legacy-deps.afps");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+    if (res.status !== 201) {
+      throw new Error(`unexpected ${res.status}: ${await res.text()}`);
+    }
+    const body = (await res.json()) as {
+      imported: Array<{ identity: string; status: string }>;
+      warnings: string[];
+    };
+    expect(body.imported).toHaveLength(1);
+    expect(body.imported[0]!.status).toBe("inserted");
+
+    const warning = body.warnings.find((w) => w.includes("dependencies.tools"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain(agentId);
+    expect(warning).toContain("dependencies.mcp_servers");
+
+    // Tolerated means LEFT ALONE — the stored draft keeps the retired key
+    // verbatim, so the import never rewrites a published manifest's bytes.
+    const [row] = await db
+      .select({ draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(eq(packages.id, agentId))
+      .limit(1);
+    expect((row!.draftManifest as Record<string, unknown>).dependencies).toEqual({
+      tools: { "@appstrate/report": "^1.0.0" },
+    });
+  });
+
   it("returns status=reused on a second import of the same bundle", async () => {
     const sourceCtx = await createTestContext({ orgSlug: "srcidem" });
     const { bytes } = await seedAndExportBundle({
