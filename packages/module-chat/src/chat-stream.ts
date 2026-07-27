@@ -174,7 +174,7 @@ export function prepareAiSdkChatStep({
     stepsUsed: stepNumber,
   });
 
-  if (!isFinalChatStep(stepNumber, CHAT_MAX_STEPS)) {
+  if (!isFinalChatStep(stepNumber)) {
     return {
       instructions: [aiSdkCachedSystemMessage(system), aiSdkStepTrailerMessage(budgetNote)],
     };
