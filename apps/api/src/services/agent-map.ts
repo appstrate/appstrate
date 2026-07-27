@@ -13,8 +13,10 @@
  * disagree with the run gate, which is the one thing it must never do.
  *
  * Layout is computed server-side (like LangSmith Fleet's, which hardcodes it):
- * three columns — what triggers the agent on the left, the agent in the middle,
- * what it can do on the right.
+ * three columns — what triggers the agent on the left, what it can do on the
+ * right, and in the middle the agent's own axis, its input above it and its
+ * output below. Two flows crossing on the agent: what it is wired TO runs
+ * horizontally, the data running THROUGH it runs vertically.
  *
  * EVERY node is always emitted, including the empty ones: the card set is the
  * inventory of what an AFPS agent manifest can hold, so an absent skill section
@@ -50,12 +52,18 @@ import { getActor } from "../lib/actor.ts";
 // Wire types
 // ---------------------------------------------------------------------------
 
+/**
+ * NEVER name a type `input`, `output`, `default` or `group`: React Flow reserves
+ * those four for its built-in nodes and its stylesheet dresses
+ * `.react-flow__node-input` with its own border, padding and background, which
+ * drew a second box behind our card.
+ */
 export type AgentMapNodeType =
   | "schedules"
-  | "input"
+  | "agent_input"
   | "agent"
   | "model"
-  | "output"
+  | "agent_output"
   | "toolbox"
   | "skills"
   | "mcp_servers"
@@ -72,7 +80,19 @@ export interface AgentMapEdge {
   id: string;
   source: string;
   target: string;
+  /**
+   * Which side of each card the edge leaves from and arrives at.
+   *
+   * Emitted because the agent card carries two of each: capabilities come and go
+   * horizontally while the contract flows vertically through it, and React Flow
+   * cannot guess which handle an edge meant when a node has several. Layout is
+   * already this service's job, and an anchor is part of a layout.
+   */
+  source_handle: HandleSide;
+  target_handle: HandleSide;
 }
+
+export type HandleSide = "top" | "right" | "bottom" | "left";
 
 /**
  * A readiness failure, routed to the node (and item) it belongs to so the
@@ -107,12 +127,17 @@ export interface AgentMap {
 // ---------------------------------------------------------------------------
 
 /**
- * Column abscissae, read left to right as the run itself: what feeds the agent,
- * the agent, what it can reach out to, and what it hands back. Chosen to leave
- * room for the widest card at 100% zoom; the client calls `fitView` so absolute
- * values only set relative spacing.
+ * Column abscissae. Three columns, and the middle one carries the agent's own
+ * data flow: the input above it, the agent, its output below.
+ *
+ * Input and output used to sit in the outer columns, which put them on the same
+ * footing as a schedule or a skill. They are not peers of those: they are the
+ * agent's own two ends, so they belong on its axis, and the horizontal axis is
+ * left to what the agent is wired TO. Chosen to leave room for the widest card
+ * at 100% zoom; the client calls `fitView` so absolute values only set relative
+ * spacing.
  */
-const COLUMN_X = { input: -560, agent: -140, capability: 240, result: 600 } as const;
+const COLUMN_X = { input: -560, agent: -140, capability: 240 } as const;
 
 /** Vertical breathing room between two stacked cards in the same column. */
 const COLUMN_GAP = 48;
@@ -129,21 +154,35 @@ const CARD_ROW = 44;
  */
 const MAX_VISIBLE_ROWS = 8;
 
+/**
+ * The agent card is prose, not rows: name, description, timeout, then the prompt
+ * clamped to six lines. Measured in the browser at 248px, and near-constant
+ * because of that clamp. It needs its own number now that the card is STACKED
+ * between its input and its output — an item count of 1 predicted 100px, and the
+ * card sat 100px on top of the output card.
+ */
+const AGENT_CARD_HEIGHT = 248;
+
 function estimateHeight(itemCount: number): number {
   // A zero-item card still renders its empty state, which occupies one row.
   const rows = Math.min(Math.max(itemCount, 1), MAX_VISIBLE_ROWS);
   return CARD_HEADER + rows * CARD_ROW;
 }
 
+interface ColumnCard {
+  node: Omit<AgentMapNode, "position">;
+  /** Rows the card lists; drives the height estimate for list cards. */
+  itemCount: number;
+  /** Overrides the estimate for a card that is not a list (the agent's prose). */
+  height?: number;
+}
+
 /**
  * Assign positions to a column's cards, stacked top to bottom and centred on
  * `y = 0` so columns of unequal height stay visually balanced.
  */
-function stackColumn(
-  x: number,
-  cards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }>,
-): AgentMapNode[] {
-  const heights = cards.map((c) => estimateHeight(c.itemCount));
+function stackColumn(x: number, cards: ColumnCard[]): AgentMapNode[] {
+  const heights = cards.map((c) => c.height ?? estimateHeight(c.itemCount));
   const total = heights.reduce((sum, h) => sum + h, 0) + COLUMN_GAP * Math.max(cards.length - 1, 0);
   let y = -total / 2;
   return cards.map((card, i) => {
@@ -349,7 +388,7 @@ export async function buildAgentMap(
   const inputFields = contractFields(agent.manifest.input);
   const outputFields = contractFields(agent.manifest.output);
 
-  const leftCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
+  const leftCards: ColumnCard[] = [
     {
       node: {
         id: "schedules",
@@ -358,15 +397,8 @@ export async function buildAgentMap(
       },
       itemCount: schedules.length,
     },
-    // What a caller hands the agent — an input in the literal sense, so it sits
-    // in the input column next to the two other things that feed a run.
-    {
-      node: { id: "input", type: "input", data: { items: inputFields } },
-      itemCount: inputFields.length,
-    },
     // The model feeds the agent, like a trigger fires it — an input, not a
-    // capability the agent reaches out to. Putting it here also keeps the two
-    // columns from growing lopsided.
+    // capability the agent reaches out to.
     {
       node: {
         id: "model",
@@ -385,13 +417,17 @@ export async function buildAgentMap(
     },
   ];
 
-  // --- Centre column: the agent itself ------------------------------------
+  // --- Centre column: the agent's own axis, input → agent → output ---------
 
-  const centreCards = [
+  const centreCards: ColumnCard[] = [
+    {
+      node: { id: "input", type: "agent_input", data: { items: inputFields } },
+      itemCount: inputFields.length,
+    },
     {
       node: {
         id: "agent",
-        type: "agent" as const,
+        type: "agent",
         data: {
           display_name: agent.manifest.display_name,
           description: agent.manifest.description ?? null,
@@ -406,9 +442,12 @@ export async function buildAgentMap(
           ),
         },
       },
-      // The agent card is prose, not a list; one row keeps it centred against
-      // the tallest neighbouring column.
       itemCount: 1,
+      height: AGENT_CARD_HEIGHT,
+    },
+    {
+      node: { id: "output", type: "agent_output", data: { items: outputFields } },
+      itemCount: outputFields.length,
     },
   ];
 
@@ -455,7 +494,7 @@ export async function buildAgentMap(
     ...RUNTIME_INJECTED_TOOLS.map((tool) => ({ id: tool.id, always: true })),
   ];
 
-  const rightCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
+  const rightCards: ColumnCard[] = [
     {
       node: { id: "toolbox", type: "toolbox", data: { items: toolboxItems } },
       itemCount: toolboxItems.length,
@@ -490,36 +529,45 @@ export async function buildAgentMap(
     },
   ];
 
-  // --- Result column: what the run hands back ------------------------------
-
-  const resultCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
-    {
-      node: { id: "output", type: "output", data: { items: outputFields } },
-      itemCount: outputFields.length,
-    },
-  ];
-
   const nodes = [
     ...stackColumn(COLUMN_X.input, leftCards),
     ...stackColumn(COLUMN_X.agent, centreCards),
     ...stackColumn(COLUMN_X.capability, rightCards),
-    ...stackColumn(COLUMN_X.result, resultCards),
   ];
 
-  // Inputs flow into the agent, capabilities and the result flow out of it.
-  // Direction carries the meaning, so it is derived from the column rather than
-  // stored.
+  // Two flows crossing on the agent, and the handles say which is which:
+  // horizontally, what fires it and what it can reach; vertically, the data
+  // going through it. Direction carries the meaning, so it is derived from the
+  // column rather than stored.
   const edges: AgentMapEdge[] = [
     ...leftCards.map((c) => ({
       id: `${c.node.id}->agent`,
       source: c.node.id,
       target: "agent",
+      source_handle: "right" as const,
+      target_handle: "left" as const,
     })),
-    ...[...rightCards, ...resultCards].map((c) => ({
+    ...rightCards.map((c) => ({
       id: `agent->${c.node.id}`,
       source: "agent",
       target: c.node.id,
+      source_handle: "right" as const,
+      target_handle: "left" as const,
     })),
+    {
+      id: "input->agent",
+      source: "input",
+      target: "agent",
+      source_handle: "bottom",
+      target_handle: "top",
+    },
+    {
+      id: "agent->output",
+      source: "agent",
+      target: "output",
+      source_handle: "bottom",
+      target_handle: "top",
+    },
   ];
 
   return {

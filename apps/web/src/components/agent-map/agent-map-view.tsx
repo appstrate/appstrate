@@ -89,10 +89,14 @@ function useEscape(active: boolean, onEscape: () => void) {
 
 const NODE_TYPES = {
   schedules: SchedulesNode,
-  input: InputNode,
+  // `agent_input` / `agent_output`, never `input` / `output`: React Flow reserves
+  // those names for its built-in nodes and its stylesheet would draw its own box
+  // behind ours (measured — `.react-flow__node-input` sets border + padding +
+  // background). Same trap for `default` and `group`.
+  agent_input: InputNode,
   agent: AgentNode,
   model: ModelNode,
-  output: OutputNode,
+  agent_output: OutputNode,
   toolbox: ToolboxNode,
   skills: SkillsNode,
   mcp_servers: McpServersNode,
@@ -163,6 +167,10 @@ export function AgentMapView({
         id: e.id,
         source: e.source,
         target: e.target,
+        // The agent carries a handle on each of its four sides, so an edge that
+        // does not name the one it means is dropped without a word.
+        sourceHandle: e.source_handle,
+        targetHandle: e.target_handle,
         animated: true,
         style: { strokeDasharray: "4 4" },
       })),

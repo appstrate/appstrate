@@ -41,7 +41,13 @@ interface MapNode {
 interface MapBody {
   agent: { packageId: string; display_name: string; version_ref: string };
   nodes: MapNode[];
-  edges: Array<{ id: string; source: string; target: string }>;
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+    source_handle: string;
+    target_handle: string;
+  }>;
   diagnostics: Array<{
     field: string;
     code: string;
@@ -176,17 +182,34 @@ describe("GET /api/agents/:scope/:name/map", () => {
       expect(edge.source === "agent" || edge.target === "agent").toBe(true);
     }
     const byId = new Map(body.nodes.map((n) => [n.id, n]));
-    const inputX = byId.get("schedules")!.position.x;
-    const agentX = byId.get("agent")!.position.x;
+    const triggerX = byId.get("schedules")!.position.x;
+    const agent = byId.get("agent")!;
     const toolboxX = byId.get("toolbox")!.position.x;
-    expect(inputX).toBeLessThan(agentX);
-    expect(agentX).toBeLessThan(toolboxX);
-    // The result sits past the capabilities: read left to right, the canvas is
-    // the run itself.
-    expect(toolboxX).toBeLessThan(byId.get("output")!.position.x);
-    // Everything that feeds the agent shares one column.
-    expect(byId.get("model")!.position.x).toBe(inputX);
-    expect(byId.get("input")!.position.x).toBe(inputX);
+    // Horizontally: what fires the agent, the agent, what it can reach.
+    expect(triggerX).toBeLessThan(agent.position.x);
+    expect(agent.position.x).toBeLessThan(toolboxX);
+    expect(byId.get("model")!.position.x).toBe(triggerX);
+
+    // Vertically, on the agent's own axis: its input above, its output below.
+    // They are the agent's two ends, not peers of a schedule or a skill.
+    const input = byId.get("input")!;
+    const output = byId.get("output")!;
+    expect(input.position.x).toBe(agent.position.x);
+    expect(output.position.x).toBe(agent.position.x);
+    expect(input.position.y).toBeLessThan(agent.position.y);
+    expect(agent.position.y).toBeLessThan(output.position.y);
+
+    // And the handles say which flow an edge belongs to — without them React
+    // Flow cannot tell which of the agent's four sides an edge meant.
+    const byEdge = new Map(body.edges.map((e) => [e.id, e]));
+    expect(byEdge.get("input->agent")).toMatchObject({
+      source_handle: "bottom",
+      target_handle: "top",
+    });
+    expect(byEdge.get("schedules->agent")).toMatchObject({
+      source_handle: "right",
+      target_handle: "left",
+    });
   });
 
   it("declared integration with no connection → not connected, run-blocking, diagnostic routed to its row", async () => {

@@ -1413,18 +1413,20 @@ export const schemas = {
   AgentMapNode: {
     type: "object",
     description:
-      "One card of the visual map. `position` is computed server-side (three columns: triggers left, agent centre, capabilities right) so every client lays the map out identically. `data` is node-type dependent: list cards carry `items[]`, the `agent` card carries the definition fields.",
+      "One card of the visual map. `position` is computed server-side (three columns: what fires the agent on the left, the agent's own axis `input → agent → output` in the centre, its capabilities on the right) so every client lays the map out identically. `data` is node-type dependent: list cards carry `items[]`, the `agent` card carries the definition fields.",
     required: ["id", "type", "position", "data"],
     properties: {
       id: { type: "string", description: "Stable node id, also the edge endpoint." },
       type: {
         type: "string",
+        description:
+          "Never `input`/`output`/`default`/`group`: React Flow reserves those names for its built-in nodes and styles them, which draws a second box behind the card. Hence `agent_input` / `agent_output`.",
         enum: [
           "schedules",
-          "input",
+          "agent_input",
           "agent",
           "model",
-          "output",
+          "agent_output",
           "toolbox",
           "skills",
           "mcp_servers",
@@ -1460,7 +1462,7 @@ export const schemas = {
   AgentMap: {
     type: "object",
     description:
-      "Read-only visual map of an agent: its manifest projected as positioned nodes and edges, crossed with the installation state (resolved versions, connection status, admin pins, active schedules) and annotated with readiness diagnostics. Empty cards are omitted rather than rendered blank, so the node set varies per agent.",
+      "Read-only visual map of an agent: its manifest projected as positioned nodes and edges, crossed with the installation state (resolved versions, connection status, admin pins, active schedules) and annotated with readiness diagnostics. The node set is FIXED — every card is emitted even when empty, because the card inventory is what an agent manifest can hold and an empty one is where the renderer offers to add the missing piece.",
     required: ["agent", "nodes", "edges", "diagnostics"],
     properties: {
       agent: {
@@ -1481,14 +1483,16 @@ export const schemas = {
       edges: {
         type: "array",
         description:
-          "Directed: input cards point at the agent, capability cards are pointed at by it.",
+          "Directed: trigger cards point at the agent, capability cards are pointed at by it, and the contract flows down through it. The handles are part of the layout — the agent card carries one on each side, so an edge has to name the one it means.",
         items: {
           type: "object",
-          required: ["id", "source", "target"],
+          required: ["id", "source", "target", "source_handle", "target_handle"],
           properties: {
             id: { type: "string" },
             source: { type: "string" },
             target: { type: "string" },
+            source_handle: { type: "string", enum: ["top", "right", "bottom", "left"] },
+            target_handle: { type: "string", enum: ["top", "right", "bottom", "left"] },
           },
         },
       },

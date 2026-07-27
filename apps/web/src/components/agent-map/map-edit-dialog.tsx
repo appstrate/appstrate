@@ -25,7 +25,14 @@ import { Spinner } from "../spinner";
 import { ResourceSection } from "../agent-editor/resource-section";
 import { PromptEditor } from "../agent-editor/prompt-editor";
 import { RuntimeToolsGroup } from "../agent-editor/runtime-tools-group";
-import { caretRange, getResourceEntries, setResourceEntries } from "../agent-editor/utils";
+import { SchemaSection, type SchemaField } from "../agent-editor/schema-section";
+import {
+  caretRange,
+  fieldsToSchema,
+  getResourceEntries,
+  manifestToSchemaFields,
+  setResourceEntries,
+} from "../agent-editor/utils";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useActivateIntegration } from "../../hooks/use-integrations";
@@ -41,7 +48,8 @@ import { LibraryPicker, type LibraryCandidate } from "./library-picker";
  * system-tools checklist the editor uses, which also covers `output` / `log` /
  * `publish_document`.
  */
-export type MapEditKind = "prompt" | "skills" | "integrations" | "runtime_tools";
+export type MapEditKind =
+  "prompt" | "skills" | "integrations" | "runtime_tools" | "input" | "output";
 
 interface MapEditDialogProps {
   kind: MapEditKind | null;
@@ -67,14 +75,15 @@ export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) 
     onClose();
   };
 
-  const title =
-    kind === "prompt"
-      ? t("map.editPrompt")
-      : kind === "skills"
-        ? t("map.addSkill")
-        : kind === "runtime_tools"
-          ? t("map.systemTools")
-          : t("map.addIntegration");
+  const TITLES: Record<MapEditKind, string> = {
+    prompt: "map.editPrompt",
+    skills: "map.addSkill",
+    runtime_tools: "map.systemTools",
+    integrations: "map.addIntegration",
+    input: "map.editInput",
+    output: "map.editOutput",
+  };
+  const title = t(TITLES[kind]);
 
   return (
     <Modal open onClose={closeAndRefresh} title={title} className="sm:max-w-2xl">
@@ -126,6 +135,12 @@ function MapEditForm({
   const [runtimeTools, setRuntimeTools] = useState<string[]>(() =>
     Array.isArray(manifest.runtime_tools) ? (manifest.runtime_tools as string[]) : [],
   );
+  // Schema fields live in local state exactly as in the package editor: a field
+  // being typed has an empty key, and `fieldsToSchema` drops those — persisting
+  // on every keystroke would delete the row you are in the middle of naming.
+  const [schemaFields, setSchemaFields] = useState<SchemaField[]>(() =>
+    kind === "input" || kind === "output" ? (manifestToSchemaFields(manifest)[kind] ?? []) : [],
+  );
   // Catalogue integrations staged for activation-then-declaration on save.
   const [staged, setStaged] = useState<LibraryCandidate[]>([]);
   const [activating, setActivating] = useState(false);
@@ -148,6 +163,13 @@ function MapEditForm({
     if (kind === "runtime_tools") {
       if (runtimeTools.length > 0) next.runtime_tools = runtimeTools;
       else delete next.runtime_tools;
+    }
+    // An emptied schema drops its wrapper rather than persisting `{}`, matching
+    // the package editor — `input: {}` is not the same manifest as no input.
+    if (kind === "input" || kind === "output") {
+      const wrapper = fieldsToSchema(schemaFields, kind);
+      if (wrapper) next[kind] = wrapper;
+      else delete next[kind];
     }
     update.mutate(
       {
@@ -198,6 +220,13 @@ function MapEditForm({
           <PromptEditor value={draftPrompt} onChange={setDraftPrompt} />
         ) : kind === "runtime_tools" ? (
           <RuntimeToolsGroup selected={runtimeTools} onChange={setRuntimeTools} />
+        ) : kind === "input" || kind === "output" ? (
+          <SchemaSection
+            title={kind === "input" ? t("agents:map.input") : t("agents:map.output")}
+            mode={kind}
+            fields={schemaFields}
+            onChange={setSchemaFields}
+          />
         ) : (
           <ResourceSection
             type={kind === "skills" ? "skill" : "integration"}

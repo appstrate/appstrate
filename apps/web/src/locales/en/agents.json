@@ -81,6 +81,8 @@
   "map.addSkill": "Add a skill",
   "map.addMcpServer": "Add an MCP server",
   "map.editPrompt": "Edit the instructions",
+  "map.editInput": "Edit the input",
+  "map.editOutput": "Edit the output",
   "map.concept.schedules.title": "Schedules",
   "map.concept.schedules.body": "A schedule fires the agent on its own, at a fixed time, with nobody clicking. Think of an alarm clock set on the agent: every Monday at 8am, off it goes.\n\nAn agent can have several, or none and only ever run by hand. A schedule can pin a specific version of the agent: when it does, it runs a different definition than the one drawn here, and the card says so.",
   "map.concept.input.title": "Input",

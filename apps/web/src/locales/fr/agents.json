@@ -81,6 +81,8 @@
   "map.addSkill": "Ajouter un skill",
   "map.addMcpServer": "Ajouter un serveur MCP",
   "map.editPrompt": "Modifier les instructions",
+  "map.editInput": "Modifier l'entrée",
+  "map.editOutput": "Modifier la sortie",
   "map.concept.schedules.title": "Planifications",
   "map.concept.schedules.body": "Une planification déclenche l'agent toute seule, à heure fixe, sans que personne clique. C'est un réveille-matin posé sur l'agent : tous les lundis à 8 h, il part.\n\nUn agent peut en avoir plusieurs, ou aucune et n'être lancé qu'à la main. Une planification peut figer une version précise de l'agent : dans ce cas elle n'exécute pas la définition affichée ici, et la carte le signale.",
   "map.concept.input.title": "Entrée",

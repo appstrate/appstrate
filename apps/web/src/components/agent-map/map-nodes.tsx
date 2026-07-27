@@ -147,6 +147,16 @@ function ConceptButton({ concept }: { concept: string }) {
   );
 }
 
+const HANDLE_POSITION = {
+  top: Position.Top,
+  right: Position.Right,
+  bottom: Position.Bottom,
+  left: Position.Left,
+} as const;
+
+/** Which sides a card is wired on. Ids match the server's `*_handle` values. */
+type HandleSide = keyof typeof HANDLE_POSITION;
+
 /**
  * Card shell. Every card is always drawn, even empty, so the set of cards reads
  * as the inventory of what an agent manifest can hold and an empty one says
@@ -157,8 +167,8 @@ function Card({
   concept,
   count,
   children,
-  hasIncoming,
-  hasOutgoing,
+  targets,
+  sources,
   wide,
   action,
   emptyLabel,
@@ -169,8 +179,10 @@ function Card({
   concept: string;
   count?: number;
   children: React.ReactNode;
-  hasIncoming?: boolean;
-  hasOutgoing?: boolean;
+  /** Sides edges arrive on. The agent has two: `left` from its triggers, `top` from its input. */
+  targets?: HandleSide[];
+  /** Sides edges leave from. The agent has two: `right` to its capabilities, `bottom` to its output. */
+  sources?: HandleSide[];
   wide?: boolean;
   action?: CardAction | undefined;
   emptyLabel?: string;
@@ -180,8 +192,26 @@ function Card({
     <div
       className={`border-border bg-card rounded-lg border shadow-sm ${wide ? "w-[340px]" : "w-[300px]"}`}
     >
-      {hasIncoming && <Handle type="target" position={Position.Left} className="!bg-border" />}
-      {hasOutgoing && <Handle type="source" position={Position.Right} className="!bg-border" />}
+      {/* Each handle carries its side as its id: a node with more than one of a
+          kind is ambiguous otherwise, and React Flow silently drops the edge. */}
+      {(targets ?? []).map((side) => (
+        <Handle
+          key={`t-${side}`}
+          id={side}
+          type="target"
+          position={HANDLE_POSITION[side]}
+          className="!bg-border"
+        />
+      ))}
+      {(sources ?? []).map((side) => (
+        <Handle
+          key={`s-${side}`}
+          id={side}
+          type="source"
+          position={HANDLE_POSITION[side]}
+          className="!bg-border"
+        />
+      ))}
       <div className="border-border flex items-center justify-between gap-2 border-b px-3 py-2">
         <span className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
           {title}
@@ -393,7 +423,7 @@ export function SchedulesNode({ data }: NodeProps) {
       title={t("map.schedules")}
       concept="schedules"
       count={list.length}
-      hasOutgoing
+      sources={["right"]}
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptySchedules")}
       // Straight to the create form, agent pre-selected. It used to open a panel
@@ -435,7 +465,14 @@ export function AgentNode({ data }: NodeProps) {
   const facts = [d.timeout ? `${d.timeout}s` : null].filter(Boolean);
 
   return (
-    <Card title={t("map.agent")} concept="agent" hasIncoming hasOutgoing wide action={edit}>
+    <Card
+      title={t("map.agent")}
+      concept="agent"
+      targets={["left", "top"]}
+      sources={["right", "bottom"]}
+      wide
+      action={edit}
+    >
       <div className="space-y-2 px-1 py-0.5">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
@@ -485,7 +522,7 @@ export function ToolboxNode({ data }: NodeProps) {
       title={t("map.toolbox")}
       concept="toolbox"
       count={list.length}
-      hasIncoming
+      targets={["left"]}
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptyToolbox")}
       action={cardAction(data, "onEdit", "integrations", t("map.addIntegration"))}
@@ -530,15 +567,16 @@ export function SkillsNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const list = items<SkillItem>(data);
   const diags = diagnostics(data);
+  const edit = cardAction(data, "onEdit", "skills", t("map.addSkill"));
   return (
     <Card
       title={t("map.skills")}
       concept="skills"
       count={list.length}
-      hasIncoming
+      targets={["left"]}
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptySkills")}
-      action={cardAction(data, "onEdit", "skills", t("map.addSkill"))}
+      action={edit}
     >
       {list.map((item) => (
         <Row
@@ -547,8 +585,12 @@ export function SkillsNode({ data }: NodeProps) {
           label={item.name ?? item.id}
           sublabel={item.declared_version}
           dimmed={!item.resolved}
-          // A declared-but-missing skill has no detail page to link to.
-          {...(item.resolved ? { href: packageDetailPath("skill", item.id) } : {})}
+          // A declared-but-missing skill has no detail page to link to, and
+          // leaving the row inert made the one flagged item on the card the only
+          // thing you could not act on. It goes to the editor instead.
+          {...(item.resolved
+            ? { href: packageDetailPath("skill", item.id) }
+            : { onClick: edit?.onClick })}
           right={<DiagnosticBadge diagnostics={diagnosticsFor(diags, item.id)} />}
         />
       ))}
@@ -567,7 +609,7 @@ export function ModelNode({ data }: NodeProps) {
       title={t("map.model")}
       concept="model"
       // An input card: the model feeds the agent (edge `model->agent`).
-      hasOutgoing
+      sources={["right"]}
       // Model and proxy are per-application settings rather than manifest
       // fields, so this mounts the configuration tab's own picker in a dialog.
       action={choose}
@@ -610,7 +652,7 @@ export function SystemToolsNode({ data }: NodeProps) {
       title={t("map.systemTools")}
       concept="systemTools"
       count={list.length}
-      hasIncoming
+      targets={["left"]}
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptySystemTools")}
       // These are granted in the manifest (`runtime_tools`), so the affordance
@@ -654,14 +696,24 @@ export function SystemToolsNode({ data }: NodeProps) {
 function ContractNode({ data, side }: { data: Record<string, unknown>; side: "input" | "output" }) {
   const { t } = useTranslation("agents");
   const list = items<ContractField>(data);
+  // A schema is one shape you reshape, not a list you append to — hence the
+  // pencil, and rows that open the same field editor the package editor uses.
+  const edit = cardAction(
+    data,
+    "onEdit",
+    side,
+    side === "input" ? t("map.editInput") : t("map.editOutput"),
+    "edit",
+  );
   return (
     <Card
       title={side === "input" ? t("map.input") : t("map.output")}
       concept={side}
       count={list.length}
-      {...(side === "input" ? { hasOutgoing: true } : { hasIncoming: true })}
+      {...(side === "input" ? { sources: ["bottom" as const] } : { targets: ["top" as const] })}
       isEmpty={list.length === 0}
       emptyLabel={side === "input" ? t("map.emptyInput") : t("map.emptyOutput")}
+      action={edit}
     >
       {list.map((field) => (
         <Row
@@ -677,6 +729,7 @@ function ContractNode({ data, side }: { data: Record<string, unknown>; side: "in
           sublabel={[field.type, field.required ? t("map.fieldRequired") : null]
             .filter(Boolean)
             .join(" · ")}
+          onClick={edit?.onClick}
         />
       ))}
     </Card>
@@ -700,7 +753,7 @@ export function McpServersNode({ data }: NodeProps) {
       title={t("map.mcpServers")}
       concept="mcpServers"
       count={list.length}
-      hasIncoming
+      targets={["left"]}
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptyMcpServers")}
     >

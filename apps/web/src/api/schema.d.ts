@@ -4886,7 +4886,7 @@ export interface components {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
             runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
         };
-        /** @description Read-only visual map of an agent: its manifest projected as positioned nodes and edges, crossed with the installation state (resolved versions, connection status, admin pins, active schedules) and annotated with readiness diagnostics. Empty cards are omitted rather than rendered blank, so the node set varies per agent. */
+        /** @description Read-only visual map of an agent: its manifest projected as positioned nodes and edges, crossed with the installation state (resolved versions, connection status, admin pins, active schedules) and annotated with readiness diagnostics. The node set is FIXED — every card is emitted even when empty, because the card inventory is what an agent manifest can hold and an empty one is where the renderer offers to add the missing piece. */
         AgentMap: {
             agent: {
                 packageId: string;
@@ -4897,11 +4897,15 @@ export interface components {
                 source: string;
             };
             nodes: components["schemas"]["AgentMapNode"][];
-            /** @description Directed: input cards point at the agent, capability cards are pointed at by it. */
+            /** @description Directed: trigger cards point at the agent, capability cards are pointed at by it, and the contract flows down through it. The handles are part of the layout — the agent card carries one on each side, so an edge has to name the one it means. */
             edges: {
                 id: string;
                 source: string;
                 target: string;
+                /** @enum {string} */
+                source_handle: "top" | "right" | "bottom" | "left";
+                /** @enum {string} */
+                target_handle: "top" | "right" | "bottom" | "left";
             }[];
             diagnostics: components["schemas"]["AgentMapDiagnostic"][];
         };
@@ -4915,12 +4919,15 @@ export interface components {
             node_id: string | null;
             item_id: string | null;
         };
-        /** @description One card of the visual map. `position` is computed server-side (three columns: triggers left, agent centre, capabilities right) so every client lays the map out identically. `data` is node-type dependent: list cards carry `items[]`, the `agent` card carries the definition fields. */
+        /** @description One card of the visual map. `position` is computed server-side (three columns: what fires the agent on the left, the agent's own axis `input → agent → output` in the centre, its capabilities on the right) so every client lays the map out identically. `data` is node-type dependent: list cards carry `items[]`, the `agent` card carries the definition fields. */
         AgentMapNode: {
             /** @description Stable node id, also the edge endpoint. */
             id: string;
-            /** @enum {string} */
-            type: "schedules" | "input" | "agent" | "model" | "output" | "toolbox" | "skills" | "mcp_servers" | "system_tools";
+            /**
+             * @description Never `input`/`output`/`default`/`group`: React Flow reserves those names for its built-in nodes and styles them, which draws a second box behind the card. Hence `agent_input` / `agent_output`.
+             * @enum {string}
+             */
+            type: "schedules" | "agent_input" | "agent" | "model" | "agent_output" | "toolbox" | "skills" | "mcp_servers" | "system_tools";
             position: {
                 x: number;
                 y: number;
