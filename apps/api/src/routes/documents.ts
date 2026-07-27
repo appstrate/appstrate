@@ -258,7 +258,11 @@ export function createDocumentsRouter() {
  *    not. A top-level render is uncontainable (the document may navigate itself,
  *    so an agent-authored fake login exfiltrates by navigation), so every other
  *    loading context — a top-level navigation above all — degrades to inert
- *    `text/plain` source. See {@link mayServeActiveHtml}.
+ *    `text/plain` source. See {@link mayServeActiveHtml}. In the nested frame
+ *    that IS served, that same self-navigation is bounded from the OTHER side:
+ *    the SPA document's own CSP carries `frame-src <preview origin>`
+ *    (`buildSpaCsp()` in `routes/spa.ts`), which blocks every cross-origin
+ *    navigation the frame attempts — nothing this response can carry does that.
  *  - `image` / `pdf` / `text` — INERT content streamed byte-for-byte with a
  *    minimal `default-src 'none'` CSP, `inline` disposition and `nosniff`; text
  *    is always relabelled `text/plain` so no markdown→HTML sniff is possible.

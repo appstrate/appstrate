@@ -18,6 +18,17 @@
  *    token) never leaks via the Referer header.
  *  - `src` is the server-minted `preview_url` on a cookie-less route hardened
  *    with a strict CSP + injected meta CSP (see `document-preview.ts` on the API).
+ *  - Where this frame may NAVIGATE is bounded by the SPA document's own CSP,
+ *    which the API sends on the `index.html` response: `frame-src <preview
+ *    origin>` and nothing else (`buildSpaCsp()` in `apps/api/src/routes/spa.ts`).
+ *    Neither the `sandbox` attribute nor the preview response's CSP can close
+ *    that channel — a sandboxed navigable may always navigate ITSELF, and
+ *    navigation is covered by no `connect-src`/`form-action`. Verified in Chrome:
+ *    a cross-origin self-navigation out of this frame is blocked with no network
+ *    request to the target, while the initial load still succeeds. Navigation
+ *    WITHIN the preview origin is still possible and is fine — that origin serves
+ *    nothing but token-bound preview bytes. **Framing any NEW origin from the SPA
+ *    therefore requires widening `frame-src` first**, or the frame will not load.
  *
  * The `pdf` iframe is DELIBERATELY sandboxless — Chrome refuses to render its
  * native PDF viewer inside a sandboxed iframe without `allow-same-origin`, and

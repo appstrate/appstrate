@@ -222,9 +222,16 @@ export interface PreviewCsp {
  *
  * Where active HTML IS served — a nested frame, the SPA's preview modal — that
  * same self-navigation freedom means the agent document can replace its OWN
- * frame with an arbitrary page. Constraining that needs a `frame-src` directive
- * on the SPA's own response, not something this policy can do. Tracked as a
- * separate gap.
+ * frame. Nothing THIS policy carries can bound that; the control lives on the
+ * PARENT document, whose CSP `frame-src` names the preview origin and nothing
+ * else (`buildSpaCsp()` in `apps/api/src/routes/spa.ts`). Verified in Chrome
+ * against that exact pair of headers: the frame's attempt to navigate itself to
+ * an outside origin is blocked with NO network request to the target, while its
+ * legitimate initial load still succeeds. What remains possible is navigation
+ * WITHIN the allowed origin — the agent document can replace itself with another
+ * document on the preview origin, which serves nothing but token-bound preview
+ * bytes, i.e. the trust level the frame already had. What is closed is every
+ * CROSS-origin navigation, which was the exfiltration channel.
  *
  * The embedding iframe declares the SAME token set (`PREVIEW_IFRAME_SANDBOX` in
  * `apps/web/src/components/document-preview.tsx`) and the two sandboxes
