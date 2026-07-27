@@ -133,12 +133,13 @@ const documentWithPreviewSchema = {
         "Absolute URL of a hardened, cookie-less preview (short-lived signed token in the " +
         "query). Minted ONLY on this single-document GET — the list rows and the `keep` " +
         "response carry `previewable` instead. Non-null only for a previewable document. " +
-        'Load in a `sandbox="allow-scripts"` iframe: for an `html` document served ' +
-        "same-origin (no `USERCONTENT_URL`) that iframe is the ONLY context in which the " +
-        "markup is served as active HTML — a top-level navigation to the same URL is served " +
-        "as inert `text/plain` source so agent script can never run on the app origin. " +
-        "On the `USERCONTENT_URL` origin when the instance configures a separate preview " +
-        "domain, else same-origin.",
+        'Load in a `sandbox="allow-scripts"` iframe: for an `html` document that iframe is ' +
+        "the ONLY context in which the markup is served as active HTML, whether or not the " +
+        "instance configures a separate `USERCONTENT_URL` preview origin. Any other loading " +
+        "context — a top-level navigation to the same URL above all — is served as inert " +
+        "`text/plain` source, because a top-level agent document can navigate itself and so " +
+        "cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance " +
+        "configures a separate preview domain, else same-origin.",
     },
   },
 } as const;

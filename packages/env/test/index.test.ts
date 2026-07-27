@@ -264,11 +264,11 @@ describe("boolean env vars accept empty string (compose `${VAR:-}` pattern)", ()
 });
 
 // USERCONTENT_URL is the origin agent-authored HTML previews are served from.
-// The preview route reads its PRESENCE as proof of isolation and then serves
-// that HTML as active content in every loading context (`mayServeActiveHtml`),
-// so a value sharing APP_URL's host means untrusted inline script is parsed on
-// the app's own host, with only the response CSP's `sandbox` denying it an
-// origin — a layer a header-stripping proxy or a UA ignoring the directive
+// Its presence grants no extra execution context — `mayServeActiveHtml` serves
+// active HTML only for a proven iframe load, in every mode — but a value
+// sharing APP_URL's host means that (iframed) untrusted inline script is parsed
+// on the app's own host, with only the response CSP's `sandbox` denying it an
+// origin: a layer a header-stripping proxy or a UA ignoring the directive
 // removes. The floor is host inequality — stricter than origin
 // inequality (cookies are host-scoped, so another port/scheme is not
 // separation), and boot must fail rather than silently degrade.

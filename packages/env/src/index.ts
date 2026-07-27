@@ -564,19 +564,20 @@ const envSchema = z
     //
     // ENFORCED (boot fails, loudly): an absolute URL whose HOST differs from
     // `APP_URL`'s — plus https:// in production, the same rule `APP_URL`
-    // carries. This is not stylistic. `mayServeActiveHtml()` treats a
-    // configured value as PROOF of separation and serves agent HTML as ACTIVE
-    // content in EVERY loading context, dropping the same-origin mode's
-    // fail-closed `Sec-Fetch-Dest: iframe` requirement. Copy-paste `APP_URL`
-    // in here and agent-authored inline script (the CSP grants
-    // `script-src 'unsafe-inline'` — the page has to render) is parsed
-    // TOP-LEVEL on the app's own host. The response's CSP `sandbox
-    // allow-scripts` denies that document an origin (no localStorage, no
-    // cookies, no top-level navigation) regardless of host, so this check is
-    // now DEFENCE IN DEPTH, not the sole control — it is what survives a proxy
-    // or CDN that strips response headers, and a UA that ignores the `sandbox`
-    // directive. Kept fail-boot precisely because those two failure modes are
-    // invisible to the route at runtime; presence must never be mistaken for
+    // carries. This is not stylistic, even though the preview route no longer
+    // grants a configured value any behavioural exemption:
+    // `mayServeActiveHtml()` reads the loading context and nothing else, so
+    // agent HTML is ACTIVE only for a proven `Sec-Fetch-Dest: iframe` load in
+    // every mode. What a same-host value costs is the LAST remaining layer.
+    // Agent-authored inline script (the CSP grants `script-src 'unsafe-inline'`
+    // — the page has to render) is parsed inside an iframe on the app's own
+    // host, with only the response's CSP `sandbox allow-scripts` between it and
+    // a real origin. That directive is invisible to the route once the response
+    // leaves: a reverse proxy or CDN that rewrites or strips response headers,
+    // or a UA that ignores `sandbox`, silently removes it and the script is
+    // back on the app's host with its localStorage and non-HttpOnly cookies.
+    // A separate host is the layer that outlives both, which is exactly why it
+    // is fail-boot rather than a warning; presence must never be mistaken for
     // separation.
     //
     // The bar is HOST inequality — deliberately ONE check, sitting between the
@@ -797,11 +798,10 @@ const envSchema = z
     path: ["APP_URL"],
   })
   // The untrusted-preview origin must actually BE a different origin. See the
-  // long note on USERCONTENT_URL above: the preview route reads its presence as
-  // proof of isolation, so a same-host value silently parses agent-authored
-  // inline script top-level on the app's own host — with only the response CSP's
-  // `sandbox` between it and a real origin. Host separation is the layer that
-  // outlives a stripped header or an unenforced sandbox directive.
+  // long note on USERCONTENT_URL above: a same-host value silently parses
+  // agent-authored inline script on the app's own host, with only the response
+  // CSP's `sandbox` between it and a real origin. Host separation is the layer
+  // that outlives a stripped header or an unenforced sandbox directive.
   .refine(
     (env) => {
       if (!env.USERCONTENT_URL) return true;
@@ -813,7 +813,7 @@ const envSchema = z
     },
     {
       message:
-        "USERCONTENT_URL must be a DIFFERENT host than APP_URL — a copy of APP_URL (or the same host on another port/scheme) is not isolation. The document-preview route treats a configured USERCONTENT_URL as proof of separation and then serves agent-authored HTML as ACTIVE content in every loading context, including a top-level navigation. The preview response's CSP `sandbox allow-scripts` already denies that script an origin (no localStorage, no cookies, no top-level navigation) whatever host it is served from, so the separate host is DEFENCE IN DEPTH rather than the only control — it is what still holds when the CSP header never reaches the browser (a reverse proxy or CDN that rewrites or strips response headers) or when the user agent ignores the sandbox directive. Enforced at boot because that residual layer is the one this route cannot verify at runtime. Point it at a separate domain resolving to the same server (ideally a separate registrable domain / eTLD+1, e.g. appstrate-usercontent.example vs app.example.com), or leave it unset to keep the fail-closed same-origin preview mode.",
+        "USERCONTENT_URL must be a DIFFERENT host than APP_URL — a copy of APP_URL (or the same host on another port/scheme) is not isolation. The document-preview route serves agent-authored HTML as ACTIVE content only for a proven iframe load, in every mode, so a configured value buys no extra execution context; what it buys is the isolation of the execution that does happen. The preview response's CSP `sandbox allow-scripts` denies that script an origin (no localStorage, no cookies, no popups) whatever host it is served from, but that directive is gone the moment a reverse proxy or CDN rewrites or strips response headers, or a user agent ignores it — and then untrusted inline script is executing on the app's own host, with the SPA's localStorage and non-HttpOnly cookies. A separate host is the layer that survives both, which is why it is enforced at boot rather than merely recommended: it is the one this route cannot verify at runtime. Point it at a separate domain resolving to the same server (ideally a separate registrable domain / eTLD+1, e.g. appstrate-usercontent.example vs app.example.com), or leave it unset to serve previews same-origin.",
       path: ["USERCONTENT_URL"],
     },
   )
