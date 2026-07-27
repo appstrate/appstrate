@@ -158,22 +158,6 @@ function serializedResultBytes(value: unknown): Uint8Array | null {
 }
 
 /**
- * Does this run result overrun the inline tool-result ceiling? The WRITE side of
- * the spill (the platform's finalize path) asks this so both sides use one
- * threshold and one measurement.
- *
- * The two sides do not measure byte-identical inputs: the writer measures the
- * in-process object, the reader measures the same value after a `jsonb`
- * round-trip (which reorders keys but preserves length). A disagreement is
- * therefore benign in both directions — an unused spill document, or an
- * untruncated payload, never a truncation with no pointer.
- */
-export function runResultExceedsInlineLimit(result: unknown): boolean {
-  const bytes = serializedResultBytes(result);
-  return bytes !== null && bytes.length > RUN_RESULT_INLINE_MAX_BYTES;
-}
-
-/**
  * Truncate an oversized `result` on a terminal run_and_wait payload, replacing
  * it with a usable HEAD that points back at the run holding the whole thing.
  *

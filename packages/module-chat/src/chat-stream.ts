@@ -172,7 +172,6 @@ export function prepareAiSdkChatStep({
   const budgetNote = formatTurnBudgetNote({
     remainingMs: turnDeadlineAt - now,
     stepsUsed: stepNumber,
-    maxSteps: CHAT_MAX_STEPS,
   });
 
   if (!isFinalChatStep(stepNumber, CHAT_MAX_STEPS)) {
@@ -299,9 +298,8 @@ export interface ArmedTurnDeadline {
 export function armTurnDeadline(
   controller: AbortController,
   deadlineAt: number,
-  deadlineMs: number = CHAT_TURN_DEADLINE_MS,
 ): ArmedTurnDeadline {
-  const deadlineReason = new ChatTurnDeadlineError(deadlineMs);
+  const deadlineReason = new ChatTurnDeadlineError(CHAT_TURN_DEADLINE_MS);
   let fired = false;
   const timer = setTimeout(
     () => {
@@ -346,14 +344,11 @@ export function createTurnClosureStream(options: {
   abortReason?: () => unknown;
   /** Turn metadata for the synthesized `finish` chunk (same builder as the nominal path). */
   buildMetadata: (finishReason: ChatTurnFinishReason) => ChatMessageMetadata;
-  /** Ceiling quoted to the user. Defaults to the shared turn deadline. */
-  deadlineMs?: number;
   /** Notice part id (tests pin it). */
   newId?: () => string;
   /** Observability seam — called once when the deadline actually closed the turn. */
   onDeadline?: () => void;
 }): TransformStream<UIMessageChunk, UIMessageChunk> {
-  const deadlineMs = options.deadlineMs ?? CHAT_TURN_DEADLINE_MS;
   const newId = options.newId ?? (() => crypto.randomUUID());
   // A turn that published its own `finish` closed on its own terms; an abort
   // racing in just after it must not overwrite that ending with a truncation
@@ -376,7 +371,10 @@ export function createTurnClosureStream(options: {
       });
       if (!closure.deadlineReached) return;
       options.onDeadline?.();
-      for (const chunk of turnNoticeChunks(newId(), turnDeadlineNoticeText(deadlineMs))) {
+      for (const chunk of turnNoticeChunks(
+        newId(),
+        turnDeadlineNoticeText(CHAT_TURN_DEADLINE_MS),
+      )) {
         controller.enqueue(chunk);
       }
       controller.enqueue({

@@ -104,18 +104,11 @@ export function decideRunAndWaitBudget(
     };
   }
 
-  if (budget.thin) {
-    // The low `deadline.remaining_ms` we want visible in traces: the run WILL
-    // start, but it is racing the turn that hosts it.
-    log.warn("chat run_and_wait launched on a thin turn budget", {
-      engine: ctx.engine,
-      chatSessionId: ctx.chatSessionId ?? null,
-      remainingMs: budget.remainingMs,
-      runBudgetMs: budget.maxMs,
-      safetyMarginMs: CHAT_TURN_SAFETY_MARGIN_MS,
-    });
-  }
-
+  // Past the floor there is exactly one outcome and no middle tier: the launch
+  // is granted, silently. A "tight budget" warn used to sit here, keyed on a
+  // 3-minute threshold nothing derived and nothing consumed — no alert, no
+  // dashboard, no runbook — and it could not have fired on the incident above
+  // this file documents (22 s left is a refusal, not a warn).
   return { launch: true, maxMs: budget.maxMs };
 }
 

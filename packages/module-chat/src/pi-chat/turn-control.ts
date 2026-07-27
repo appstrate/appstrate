@@ -98,11 +98,8 @@ export function createStepCapController(options: {
   modelCallCount: () => number;
   /** Model calls allowed to use tools. Defaults to the shared chat budget. */
   budget?: number;
-  /** Prompt of the closing call. Defaults to the shared final-step directive. */
-  finalStepPrompt?: string;
 }): StepCapController {
   const budget = options.budget ?? CHAT_TOOL_STEP_BUDGET;
-  const finalStepPrompt = options.finalStepPrompt ?? CHAT_FINAL_STEP_SYSTEM_PROMPT;
   let fired = false;
   // Batches spared because one of their results carries a connect offer. Keyed
   // by the shared assistant message so the whole batch is spared, not just the
@@ -133,7 +130,7 @@ export function createStepCapController(options: {
       // Tools are snapshotted per run by the agent loop, so they can only be
       // dropped between runs — which is precisely what this closing call is.
       session.setActiveToolsByName([]);
-      await session.prompt(finalStepPrompt);
+      await session.prompt(CHAT_FINAL_STEP_SYSTEM_PROMPT);
     },
   };
 }
