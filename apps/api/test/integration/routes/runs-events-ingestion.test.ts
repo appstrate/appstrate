@@ -200,6 +200,42 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(logs).toHaveLength(0);
   });
 
+  // The envelope schema is `.strict()`, so every CloudEvents attribute the
+  // runtime emits must be modelled or the whole POST 400s. The runtime now
+  // stamps the OPTIONAL `dataschema` attribute on canonical events — assert
+  // the sink accepts it, and that strictness still rejects anything else.
+  it("accepts an envelope carrying the optional dataschema attribute", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const envelope = {
+      ...buildEnvelope(runId, "log.written", { level: "info", message: "hi" }, 1),
+      dataschema: "https://schemas.afps.dev/v0/events/log.written.schema.json",
+    };
+    const res = await postEvent(runId, envelope);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; outcome: string; sequence: number };
+    expect(body).toMatchObject({ ok: true, outcome: "persisted", sequence: 1 });
+
+    // `dataschema` is envelope metadata — it must not leak into the
+    // reconstructed RunEvent payload written to run_logs.
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs).toHaveLength(1);
+    expect(JSON.stringify(logs[0])).not.toContain("schemas.afps.dev");
+  });
+
+  it("still rejects an unmodelled envelope attribute (strictness preserved)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const envelope = {
+      ...buildEnvelope(runId, "log.written", { level: "info", message: "hi" }, 1),
+      subject: "not-modelled",
+    };
+    const res = await postEvent(runId, envelope);
+
+    expect(res.status).toBe(400);
+  });
+
   it("dedupes replayed webhook-ids — a second POST with the same id returns replay", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
     const envelope = buildEnvelope(

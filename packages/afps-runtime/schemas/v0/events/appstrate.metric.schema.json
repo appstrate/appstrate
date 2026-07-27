@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.appstrate.dev/v0/events/appstrate.metric.schema.json",
+  "$comment": "SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Appstrate",
+  "title": "Appstrate appstrate.metric event data",
+  "description": "CloudEvent `data` payload for `appstrate.metric` — cumulative token usage, cost, and duration reported by the runner. Vendor event, not part of AFPS.",
+  "type": "object",
+  "properties": {
+    "usage": {
+      "description": "Cumulative token counters for the run so far.",
+      "type": "object",
+      "properties": {
+        "input_tokens": {
+          "type": "number"
+        },
+        "output_tokens": {
+          "type": "number"
+        },
+        "cache_creation_input_tokens": {
+          "type": "number"
+        },
+        "cache_read_input_tokens": {
+          "type": "number"
+        }
+      }
+    },
+    "cost": {
+      "description": "Cost in USD attributed to this segment.",
+      "type": "number",
+      "minimum": 0
+    },
+    "durationMs": {
+      "description": "Wall-clock milliseconds covered by this metric.",
+      "type": "number"
+    }
+  },
+  "additionalProperties": {}
+}

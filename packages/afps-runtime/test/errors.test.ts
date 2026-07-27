@@ -15,6 +15,9 @@ import {
 } from "../src/errors.ts";
 import { BundleError } from "../src/bundle/errors.ts";
 import { BundleSignaturePolicyError } from "../src/bundle/signature-policy.ts";
+// devDependency, test-only: the platform's RFC 9457 implementation is the
+// reference the runtime's `type` URIs must match byte for byte.
+import { ApiError } from "@appstrate/core/api-errors";
 
 describe("AfpsRuntimeError taxonomy", () => {
   it("each typed error exposes a stable code + name", () => {
@@ -94,7 +97,7 @@ describe("toProblem (RFC 9457)", () => {
     });
     const problem = toProblem(err);
     expect(problem.code).toBe("AUTHORIZED_URIS_MISMATCH");
-    expect(problem.type).toBe("https://errors.appstrate.dev/AUTHORIZED_URIS_MISMATCH");
+    expect(problem.type).toBe("https://docs.appstrate.dev/errors/AUTHORIZED-URIS-MISMATCH");
     expect(problem.title).toBe("AuthorizedUrisError");
     expect(problem.status).toBe(422);
     expect(problem.detail).toBe("rejected");
@@ -121,6 +124,91 @@ describe("toProblem (RFC 9457)", () => {
     const problem = toProblem("string error");
     expect(problem.detail).toBe("string error");
     expect(problem.status).toBe(500);
+  });
+});
+
+/**
+ * One error code must produce ONE `type` URI no matter which layer raised
+ * it. The runtime duplicates core's two-line `codeToType()` (core is a
+ * devDependency here, not a runtime one — see the rationale in
+ * `src/errors.ts`), so this asserts the two implementations agree byte for
+ * byte across the whole `AfpsErrorCode` union.
+ */
+describe("toProblem type URI ↔ @appstrate/core parity", () => {
+  /** Every member of `AfpsErrorCode`, including both casing families. */
+  const AFPS_ERROR_CODES: readonly string[] = [
+    // BundleErrorCode
+    "ARCHIVE_INVALID",
+    "BUNDLE_JSON_MISSING",
+    "BUNDLE_JSON_INVALID",
+    "RECORD_MISSING",
+    "RECORD_MALFORMED",
+    "RECORD_MISMATCH",
+    "INTEGRITY_MISMATCH",
+    "VERSION_UNSUPPORTED",
+    "LIMITS_EXCEEDED",
+    "MANIFEST_SCHEMA",
+    "DEPENDENCY_UNRESOLVED",
+    "TOOL_BUNDLE_FAILED",
+    // SignaturePolicyReason + unsigned_required (lower_snake family)
+    "signature_invalid",
+    "alg_unsupported",
+    "chain_untrusted",
+    "chain_invalid",
+    "chain_missing",
+    "malformed",
+    "unsigned",
+    "unsigned_required",
+    // Runner / resolver / history taxonomy
+    "RUN_TIMEOUT",
+    "RUN_CANCELLED",
+    "WORKLOAD_EXIT_NONZERO",
+    "AUTHORIZED_URIS_EMPTY",
+    "AUTHORIZED_URIS_MISMATCH",
+    "RESOLVER_MISSING_REQUIRED",
+    "RESOLVER_BODY_REFERENCE_FORBIDDEN",
+    "RESOLVER_BODY_TOO_LARGE",
+    "RESOLVER_BODY_INVALID",
+    "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS",
+    "RESOLVER_PATH_SYMLINK_REFUSED",
+    "RESOLVER_PATH_INVALID",
+    "RESOLVER_URL_BLOCKED",
+    "RESOLVER_REDIRECT_BLOCKED",
+    "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
+    "RUN_HISTORY_FETCH_FAILED",
+    "RUN_HISTORY_BAD_RESPONSE",
+    "CREDENTIAL_RESOLUTION",
+  ];
+
+  /** The URI core would mint for the same code. */
+  function coreTypeUri(code: string): string {
+    return new ApiError({ status: 422, code, title: "t", detail: "d" }).toProblemDetail("req_test")
+      .type;
+  }
+
+  it("produces the identical type URI for every AFPS error code", () => {
+    for (const code of AFPS_ERROR_CODES) {
+      const err = new ResolverError(code as never, "boom");
+      expect(toProblem(err).type).toBe(coreTypeUri(code));
+    }
+  });
+
+  it("uses the canonical docs host — never the unresolvable errors.* subdomain", () => {
+    for (const code of AFPS_ERROR_CODES) {
+      const uri = toProblem(new ResolverError(code as never, "boom")).type;
+      expect(uri.startsWith("https://docs.appstrate.dev/errors/")).toBe(true);
+      expect(uri).not.toContain("errors.appstrate.dev");
+      expect(uri).not.toContain("_");
+    }
+  });
+
+  it("normalises underscores to dashes exactly as core does", () => {
+    expect(toProblem(new RunCancelledError("x")).type).toBe(
+      "https://docs.appstrate.dev/errors/RUN-CANCELLED",
+    );
+    expect(toProblem(new BundleSignaturePolicyError("unsigned_required", "x")).type).toBe(
+      "https://docs.appstrate.dev/errors/unsigned-required",
+    );
   });
 });
 

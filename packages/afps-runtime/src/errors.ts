@@ -199,13 +199,35 @@ export interface ProblemDetails {
   errors?: Record<string, unknown>;
 }
 
+/**
+ * Canonical documentation host for RFC 9457 `type` URIs. ONE error code
+ * must yield ONE URI no matter which layer raised it, so this mirrors
+ * `codeToType()` in `@appstrate/core/api-errors` byte for byte —
+ * including the underscore→dash substitution and the absence of any
+ * case folding.
+ *
+ * The duplication is deliberate. `@appstrate/core` is a devDependency
+ * here, not a runtime one: this package is published, powers the
+ * standalone `afps` CLI, and is deliberately kept to a small portable
+ * dependency set. Importing core's helper would either break every npm
+ * consumer (the module would not be installed) or force core — with
+ * ajv, pino, and the rest — into the runtime closure of a portable AFPS
+ * runtime, inverting the layering. `test/errors.test.ts` asserts the two
+ * implementations produce identical URIs so they cannot drift.
+ */
+const DOCS_BASE = "https://docs.appstrate.dev/errors";
+
+function codeToType(code: string): string {
+  return `${DOCS_BASE}/${code.replace(/_/g, "-")}`;
+}
+
 export function toProblem(
   err: unknown,
   fallback: { type?: string; title?: string; status?: number } = {},
 ): ProblemDetails {
   if (isAfpsError(err)) {
     const out: ProblemDetails = {
-      type: fallback.type ?? `https://errors.appstrate.dev/${err.code}`,
+      type: fallback.type ?? codeToType(err.code),
       title: fallback.title ?? err.name,
       status: fallback.status ?? 422,
       detail: err.message,

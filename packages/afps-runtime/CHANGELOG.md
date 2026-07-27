@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — published JSON Schemas for canonical CloudEvent payloads
+
+- New `@appstrate/afps-runtime/events` exports (`CANONICAL_EVENT_SCHEMAS`,
+  `canonicalEventSchemaUri`, `buildCanonicalEventJsonSchemas`, …). The seven
+  canonical event `data` payloads (`memory.added`, `pinned.set`,
+  `output.emitted`, `log.written`, `appstrate.progress`, `appstrate.error`,
+  `appstrate.metric`) now have Zod definitions that generate committed JSON
+  Schema 2020-12 documents under `schemas/v0/events/` (regenerate with
+  `bun run schemas:generate`, drift-guarded by the test suite).
+- `buildCloudEventEnvelope` stamps the OPTIONAL CloudEvents `dataschema`
+  attribute with the matching versioned schema URI. Additive and
+  non-breaking: no existing attribute changes, and the attribute is omitted
+  for third-party (`@scope/tool.verb`) events and for canonical types whose
+  payload does not actually satisfy the shape.
+- The URIs are not served yet — the documents still have to be published to
+  `schemas.afps.dev/v0/events/` (AFPS-namespaced events) and
+  `schemas.appstrate.dev/v0/events/` (`appstrate.*` vendor events).
+
+### Fixed — one error code, one RFC 9457 `type` URI
+
+- `toProblem()` emitted `https://errors.appstrate.dev/{code}` while the
+  platform emitted `https://docs.appstrate.dev/errors/{code-with-dashes}` for
+  the same concept — two hosts (both unresolvable) and two code spellings.
+  `toProblem()` now uses the canonical docs host and the same
+  underscore→dash normalisation, so a given code yields a single URI
+  regardless of which layer raised it. A parity test asserts byte-identity
+  against `@appstrate/core`'s implementation over the whole `AfpsErrorCode`
+  union.
+
 ### Added — shared tool-result truncation
 
 - `@appstrate/afps-runtime/runner` now exports `truncateToolResult` and
