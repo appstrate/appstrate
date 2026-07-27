@@ -149,7 +149,7 @@ async function runTurn(options: {
   const turnDeadline =
     options.deadlineInMs === undefined
       ? undefined
-      : armTurnDeadline(generation, Date.now() + options.deadlineInMs, CHAT_TURN_DEADLINE_MS);
+      : armTurnDeadline(generation, Date.now() + options.deadlineInMs);
   const stopReason = new Error("stopped by user");
   if (options.stopInMs !== undefined) {
     setTimeout(() => generation.abort(stopReason), options.stopInMs);
@@ -302,7 +302,7 @@ describe("createTurnClosureStream", () => {
 describe("armTurnDeadline", () => {
   it("aborts the turn at the ceiling with a tagged reason", async () => {
     const controller = new AbortController();
-    const armed = armTurnDeadline(controller, Date.now() + 5, CHAT_TURN_DEADLINE_MS);
+    const armed = armTurnDeadline(controller, Date.now() + 5);
 
     await new Promise((r) => setTimeout(r, 40));
 
@@ -315,7 +315,7 @@ describe("armTurnDeadline", () => {
 
   it("does not outlive the turn — disarming cancels the abort", async () => {
     const controller = new AbortController();
-    const armed = armTurnDeadline(controller, Date.now() + 5, CHAT_TURN_DEADLINE_MS);
+    const armed = armTurnDeadline(controller, Date.now() + 5);
     armed.disarm();
 
     await new Promise((r) => setTimeout(r, 40));
@@ -325,7 +325,7 @@ describe("armTurnDeadline", () => {
 
   it("reports an explicit stop as-is (the ceiling never fired)", () => {
     const controller = new AbortController();
-    const armed = armTurnDeadline(controller, Date.now() + 60_000, CHAT_TURN_DEADLINE_MS);
+    const armed = armTurnDeadline(controller, Date.now() + 60_000);
     const stop = new Error("stopped by user");
     controller.abort(stop);
     armed.disarm();

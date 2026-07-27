@@ -101,16 +101,11 @@ export function formatBudgetDuration(ms: number): string {
  * then refuse it. A model arbitrating on the wrong number is worse than one
  * shown no number at all — that is the whole point of A5.
  */
-export function formatTurnBudgetNote(input: {
-  remainingMs: number;
-  stepsUsed: number;
-  maxSteps?: number;
-}): string {
-  const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
+export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: number }): string {
   const launchThreshold = formatBudgetDuration(CHAT_LAUNCH_THRESHOLD_MS);
   return (
     `[turn budget] ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
-    `step ${input.stepsUsed}/${maxSteps}. ` +
+    `step ${input.stepsUsed}/${CHAT_MAX_STEPS}. ` +
     `A run_and_wait launch needs at least ${launchThreshold} left or it is refused; ` +
     `anything not written into your reply before the turn ends is lost.`
   );
