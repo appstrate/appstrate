@@ -21,6 +21,7 @@
  */
 
 import {
+  CHAT_LAUNCH_THRESHOLD_MS,
   CHAT_MIN_RUN_BUDGET_MS,
   CHAT_TURN_SAFETY_MARGIN_MS,
   computeTurnRunBudget,
@@ -92,9 +93,11 @@ export function decideRunAndWaitBudget(
         run_budget_ms: budget.maxMs,
         min_run_budget_ms: CHAT_MIN_RUN_BUDGET_MS,
         message:
-          `No run was launched: only ${formatBudgetDuration(budget.maxMs)} of this turn's ` +
-          `time budget remain, below the ${formatBudgetDuration(CHAT_MIN_RUN_BUDGET_MS)} ` +
-          `minimum a run needs. Nothing was created and nothing was spent — this is not a ` +
+          `No run was launched: this turn has ${formatBudgetDuration(budget.remainingMs)} left, ` +
+          `and a launch needs ${formatBudgetDuration(CHAT_LAUNCH_THRESHOLD_MS)} — the ` +
+          `${formatBudgetDuration(CHAT_MIN_RUN_BUDGET_MS)} a run needs, plus the ` +
+          `${formatBudgetDuration(CHAT_TURN_SAFETY_MARGIN_MS)} reserved for your closing reply. ` +
+          `Nothing was created and nothing was spent — this is not a ` +
           `failure. Summarise the work already done in your reply now, and tell the user to ` +
           `send a message so this run can be relaunched at the start of the next turn.`,
       },

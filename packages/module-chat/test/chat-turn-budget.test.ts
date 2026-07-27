@@ -125,7 +125,16 @@ describe("decideRunAndWaitBudget", () => {
     });
     // Not a failure: nothing that reads like one.
     expect(decision.payload).not.toHaveProperty("error");
-    expect(String(decision.payload.message)).toContain("next turn");
+    const message = String(decision.payload.message);
+    expect(message).toContain("next turn");
+    // The prose must agree with the structured fields AND with the budget note:
+    // it states the turn's real remainder (22s — NOT the post-reserve 0s) and
+    // quotes the threshold the gate applies (2m15s — NOT the bare 1m30s floor).
+    // Both were wrong here while `formatTurnBudgetNote` was already right, which
+    // is why the arithmetic now lives in ONE exported constant.
+    expect(message).toContain("22s left");
+    expect(message).toContain("2m15s");
+    expect(message).not.toMatch(/0s of|only 0s/);
     expect(warnings[0]?.message).toContain("insufficient turn budget");
   });
 });

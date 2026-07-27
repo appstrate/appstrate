@@ -43,6 +43,19 @@ export const CHAT_MIN_RUN_BUDGET_MS = 90_000;
 /** Above the floor but tight enough that the launch deserves a `warn` trace. */
 export const CHAT_THIN_RUN_BUDGET_MS = 3 * 60_000;
 
+/**
+ * Remaining turn time a launch actually requires — THE number every
+ * model-facing message must quote.
+ *
+ * {@link computeTurnRunBudget} spends {@link CHAT_TURN_SAFETY_MARGIN_MS} before
+ * comparing against {@link CHAT_MIN_RUN_BUDGET_MS}, so the bare floor is not the
+ * gate: a message quoting it tells a model with 1m50s left that it may launch,
+ * and the gate then refuses it. Derived once here because the same wrong number
+ * has already been written twice independently (the budget note and the refusal
+ * payload) — two texts restating the arithmetic drift, one constant cannot.
+ */
+export const CHAT_LAUNCH_THRESHOLD_MS = CHAT_MIN_RUN_BUDGET_MS + CHAT_TURN_SAFETY_MARGIN_MS;
+
 /** Time budget a chat turn can still hand to a child call. */
 export interface TurnRunBudget {
   /** Milliseconds left before the turn's own ceiling (never negative). */
@@ -99,7 +112,7 @@ export function formatTurnBudgetNote(input: {
   maxSteps?: number;
 }): string {
   const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
-  const launchThreshold = formatBudgetDuration(CHAT_MIN_RUN_BUDGET_MS + CHAT_TURN_SAFETY_MARGIN_MS);
+  const launchThreshold = formatBudgetDuration(CHAT_LAUNCH_THRESHOLD_MS);
   return (
     `[turn budget] ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
     `step ${input.stepsUsed}/${maxSteps}. ` +
