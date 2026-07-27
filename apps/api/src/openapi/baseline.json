@@ -7805,15 +7805,6 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "metadata_only",
-            "in": "query",
-            "required": false,
-            "description": "When true, resolve each model's protocol family and base URL from the provider registry WITHOUT decrypting its credential. Faster for callers that only need to pick a model (e.g. the chat model picker); a model whose secret is unusable is not filtered and surfaces an error only at inference time.",
-            "schema": {
-              "type": "boolean"
-            }
           }
         ],
         "responses": {
@@ -7864,6 +7855,7 @@
                       "source": "built-in",
                       "enabled": true,
                       "is_default": false,
+                      "needs_reconnection": false,
                       "aliased": false,
                       "credentialId": "pk_abc123",
                       "contextWindow": 128000,
@@ -8062,6 +8054,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The model's stored credential can no longer be used for inference (`model_needs_reconnection`) — see the `needs_reconnection` field on `OrgModel`. Such a model is listed so it can be inspected or detached, but it cannot become the organization default: every run and chat would fail at inference time.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -23060,6 +23062,7 @@
           "modelId",
           "enabled",
           "is_default",
+          "needs_reconnection",
           "aliased",
           "iconUrl",
           "source",
@@ -23115,6 +23118,10 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "needs_reconnection": {
+            "type": "boolean",
+            "description": "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment."
           },
           "aliased": {
             "type": "boolean",
