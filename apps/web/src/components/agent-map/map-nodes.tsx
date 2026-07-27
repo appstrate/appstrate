@@ -13,24 +13,30 @@
  * component-only preserves fast refresh.
  */
 
+import { useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import {
   AlertTriangle,
   Archive,
+  ArrowRightToLine,
   Brain,
   Clock,
   Cpu,
   Globe,
+  Info,
   Lock,
+  Pencil,
   Plug,
   Plus,
   Puzzle,
   Server,
+  Sparkles,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { AgentMapDiagnostic } from "../../hooks/use-agent-map";
 import { packageDetailPath } from "../../lib/package-paths";
+import { Modal } from "../modal";
 import type { MapEditKind } from "./map-edit-dialog";
 import type { MapPanelKind } from "./map-panel-dialog";
 
@@ -66,8 +72,15 @@ function DiagnosticBadge({ diagnostics }: { diagnostics: AgentMapDiagnostic[] })
  * A card's entry point for changing what it shows: either edited in place
  * (`onClick`, opening the shared editor widgets in a dialog) or handed off to
  * the page that owns it (`href`, e.g. schedules).
+ *
+ * `icon` distinguishes the two verbs a header can offer. A card holding a list
+ * you extend (skills, integrations, schedules) gets a plus; a card holding ONE
+ * thing you change (the model, the prompt, the granted tools) gets a pencil —
+ * a plus there promised an addition the dialog does not perform.
  */
-type CardAction = { label: string; onClick: () => void } | { label: string; href: string };
+type CardAction = { label: string; icon?: "plus" | "edit" } & (
+  { onClick: () => void; href?: never } | { href: string; onClick?: never }
+);
 
 // `nodrag nopan` stops a press on a control from panning the canvas or starting
 // a node drag. It is NOT what makes the control clickable — that requires the
@@ -76,28 +89,61 @@ type CardAction = { label: string; onClick: () => void } | { label: string; href
 const ACTION_CLASS = "text-muted-foreground hover:text-foreground nodrag nopan transition-colors";
 
 function CardActionButton({ action }: { action: CardAction }) {
-  if ("href" in action) {
+  const Icon = action.icon === "edit" ? Pencil : Plus;
+  const shared = {
+    title: action.label,
+    "aria-label": action.label,
+    className: ACTION_CLASS,
+  };
+  if (action.href !== undefined) {
     return (
-      <Link
-        to={action.href}
-        title={action.label}
-        aria-label={action.label}
-        className={ACTION_CLASS}
-      >
-        <Plus className="size-3.5" />
+      <Link to={action.href} {...shared}>
+        <Icon className="size-3.5" />
       </Link>
     );
   }
   return (
-    <button
-      type="button"
-      onClick={action.onClick}
-      title={action.label}
-      aria-label={action.label}
-      className={ACTION_CLASS}
-    >
-      <Plus className="size-3.5" />
+    <button type="button" onClick={action.onClick} {...shared}>
+      <Icon className="size-3.5" />
     </button>
+  );
+}
+
+/**
+ * "What is this card even about?" — one dialog per card, explaining the
+ * Appstrate concept it projects rather than the widget.
+ *
+ * The map is most useful to someone still building a model of the platform, and
+ * that reader has no other place to ask what a skill is, or why an integration
+ * is not the same thing as an MCP server. Text lives in i18n under
+ * `map.concept.<id>` so both languages carry it; paragraphs are split on blank
+ * lines so an explanation can breathe.
+ */
+function ConceptButton({ concept }: { concept: string }) {
+  const { t } = useTranslation("agents");
+  const [open, setOpen] = useState(false);
+  const title = t(`map.concept.${concept}.title`);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={t("map.explain", { concept: title })}
+        aria-label={t("map.explain", { concept: title })}
+        className={ACTION_CLASS}
+      >
+        <Info className="size-3.5" />
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} title={title}>
+        <div className="space-y-3 text-sm leading-relaxed">
+          {t(`map.concept.${concept}.body`)
+            .split("\n\n")
+            .map((paragraph) => (
+              <p key={paragraph.slice(0, 24)}>{paragraph}</p>
+            ))}
+        </div>
+      </Modal>
+    </>
   );
 }
 
@@ -108,6 +154,7 @@ function CardActionButton({ action }: { action: CardAction }) {
  */
 function Card({
   title,
+  concept,
   count,
   children,
   hasIncoming,
@@ -118,6 +165,8 @@ function Card({
   isEmpty,
 }: {
   title: string;
+  /** i18n key suffix under `map.concept.` for the header's explanation dialog. */
+  concept: string;
   count?: number;
   children: React.ReactNode;
   hasIncoming?: boolean;
@@ -141,6 +190,7 @@ function Card({
           {count !== undefined && (
             <span className="text-muted-foreground text-[11px]">{count}</span>
           )}
+          <ConceptButton concept={concept} />
           {action && <CardActionButton action={action} />}
         </span>
       </div>
@@ -209,6 +259,33 @@ function Row({
   );
 }
 
+/**
+ * A block of card content that is itself the way to edit what it shows.
+ *
+ * Degrades to a plain `div` when no handler is supplied — a read-only map (system
+ * package, pinned version) must not offer a button that does nothing.
+ */
+function SectionButton({
+  onClick,
+  className,
+  children,
+}: {
+  onClick?: (() => void) | undefined;
+  className: string;
+  children: React.ReactNode;
+}) {
+  if (!onClick) return <div className={className}>{children}</div>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`${className} hover:bg-muted/40 nodrag nopan rounded-md transition-colors`}
+    >
+      {children}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Item shapes
 //
@@ -260,13 +337,17 @@ interface SystemToolItem {
   id: string;
   always: boolean;
 }
+interface ContractField {
+  name: string;
+  title: string | null;
+  type: string | null;
+  required: boolean;
+}
 interface AgentData {
   display_name: string;
   description: string | null;
   prompt: string | null;
   timeout: number | null;
-  has_input_schema: boolean;
-  has_output_schema: boolean;
 }
 
 function items<T>(data: Record<string, unknown>): T[] {
@@ -293,10 +374,11 @@ function cardAction<K extends MapEditKind | MapPanelKind>(
   slot: "onEdit" | "onPanel",
   kind: K,
   label: string,
-): { label: string; onClick: () => void } | undefined {
+  icon: "plus" | "edit" = "plus",
+): { label: string; icon: "plus" | "edit"; onClick: () => void } | undefined {
   const handler = data[slot];
   if (typeof handler !== "function") return undefined;
-  return { label, onClick: () => (handler as (k: K) => void)(kind) };
+  return { label, icon, onClick: () => (handler as (k: K) => void)(kind) };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,12 +391,15 @@ export function SchedulesNode({ data }: NodeProps) {
   return (
     <Card
       title={t("map.schedules")}
+      concept="schedules"
       count={list.length}
       hasOutgoing
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptySchedules")}
-      // The Schedules panel opens right here rather than throwing the reader
-      // onto another tab and back.
+      // Straight to the create form, agent pre-selected. It used to open a panel
+      // that re-listed the schedules this card already shows and offered its own
+      // "add" link — two clicks and a duplicated list to reach the one thing a
+      // plus can mean.
       action={cardAction(data, "onPanel", "schedules", t("map.addSchedule"))}
     >
       {list.map((item) => (
@@ -346,20 +431,11 @@ export function AgentNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const d = data as unknown as AgentData & { diagnostics?: AgentMapDiagnostic[] };
   const diags = diagnostics(data);
-  const facts = [
-    d.timeout ? `${d.timeout}s` : null,
-    d.has_input_schema ? t("map.hasInput") : null,
-    d.has_output_schema ? t("map.hasOutput") : null,
-  ].filter(Boolean);
+  const edit = cardAction(data, "onEdit", "prompt", t("map.editPrompt"), "edit");
+  const facts = [d.timeout ? `${d.timeout}s` : null].filter(Boolean);
 
   return (
-    <Card
-      title={t("map.agent")}
-      hasIncoming
-      hasOutgoing
-      wide
-      action={cardAction(data, "onEdit", "prompt", t("map.editPrompt"))}
-    >
+    <Card title={t("map.agent")} concept="agent" hasIncoming hasOutgoing wide action={edit}>
       <div className="space-y-2 px-1 py-0.5">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
@@ -379,14 +455,21 @@ export function AgentNode({ data }: NodeProps) {
             ))}
           </div>
         )}
-        <div className="border-border border-t pt-2">
+        {/* The prompt is the agent. Clicking the excerpt opens the editor, so
+            the content itself is the affordance and the header pencil is only a
+            second way in — reaching for a small icon to read more of what is
+            right there was the wrong ask. */}
+        <SectionButton
+          onClick={edit?.onClick}
+          className="border-border w-full border-t pt-2 text-left"
+        >
           <div className="text-muted-foreground mb-1 text-[10px] font-semibold uppercase">
             {t("map.instructions")}
           </div>
           <p className="text-muted-foreground line-clamp-6 text-[11px] whitespace-pre-wrap">
             {d.prompt?.trim() || t("map.noPrompt")}
           </p>
-        </div>
+        </SectionButton>
       </div>
     </Card>
   );
@@ -400,6 +483,7 @@ export function ToolboxNode({ data }: NodeProps) {
   return (
     <Card
       title={t("map.toolbox")}
+      concept="toolbox"
       count={list.length}
       hasIncoming
       isEmpty={list.length === 0}
@@ -449,6 +533,7 @@ export function SkillsNode({ data }: NodeProps) {
   return (
     <Card
       title={t("map.skills")}
+      concept="skills"
       count={list.length}
       hasIncoming
       isEmpty={list.length === 0}
@@ -474,14 +559,18 @@ export function SkillsNode({ data }: NodeProps) {
 export function ModelNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const d = data as unknown as ModelData;
+  // One model, changed rather than added — a pencil, and the row itself opens
+  // the same picker so the content is clickable.
+  const choose = cardAction(data, "onPanel", "model", t("map.chooseModel"), "edit");
   return (
     <Card
       title={t("map.model")}
+      concept="model"
       // An input card: the model feeds the agent (edge `model->agent`).
       hasOutgoing
       // Model and proxy are per-application settings rather than manifest
       // fields, so this mounts the configuration tab's own picker in a dialog.
-      action={cardAction(data, "onPanel", "model", t("map.chooseModel"))}
+      action={choose}
     >
       <Row
         icon={<Cpu className="size-3.5" />}
@@ -494,6 +583,7 @@ export function ModelNode({ data }: NodeProps) {
             : t("map.noModelHint")
         }
         dimmed={!d.resolved}
+        onClick={choose?.onClick}
         right={
           d.resolved ? undefined : (
             <span className="text-warning shrink-0" title={t("map.noModelHint")}>
@@ -513,16 +603,19 @@ export function SystemToolsNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const list = items<SystemToolItem>(data);
   const browse = cardAction(data, "onPanel", "memory", t("map.openMemory"));
+  // A checklist you tick, not a list you append to.
+  const grant = cardAction(data, "onEdit", "runtime_tools", t("map.grantSystemTools"), "edit");
   return (
     <Card
       title={t("map.systemTools")}
+      concept="systemTools"
       count={list.length}
       hasIncoming
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptySystemTools")}
       // These are granted in the manifest (`runtime_tools`), so the affordance
       // opens the same checklist the editor uses.
-      action={cardAction(data, "onEdit", "runtime_tools", t("map.grantSystemTools"))}
+      action={grant}
     >
       {list.map((item) => (
         <Row
@@ -530,6 +623,9 @@ export function SystemToolsNode({ data }: NodeProps) {
           icon={<Brain className="size-3.5" />}
           label={t(`map.systemTool.${item.id}`, { defaultValue: item.id })}
           sublabel={item.always ? t("map.toolAlways") : t("map.toolGranted")}
+          // An always-on tool is not in the checklist, so sending its row there
+          // would open a dialog that cannot show it.
+          onClick={item.always ? undefined : grant?.onClick}
         />
       ))}
       {/* What the agent actually remembers is data, not definition — so it is a
@@ -545,6 +641,56 @@ export function SystemToolsNode({ data }: NodeProps) {
   );
 }
 
+/**
+ * The two contract cards: what a caller must hand the agent, what the agent
+ * hands back. Same rendering, opposite ends of the canvas — so one component,
+ * parameterised by side.
+ *
+ * Deliberately NOT merged into the system tools card. The `output` runtime tool
+ * is a mechanism the agent is granted; `output.schema` is the shape its result
+ * must take. An agent can declare the schema without the tool (and the save gate
+ * will refuse it), which is exactly the mismatch a reader needs to see.
+ */
+function ContractNode({ data, side }: { data: Record<string, unknown>; side: "input" | "output" }) {
+  const { t } = useTranslation("agents");
+  const list = items<ContractField>(data);
+  return (
+    <Card
+      title={side === "input" ? t("map.input") : t("map.output")}
+      concept={side}
+      count={list.length}
+      {...(side === "input" ? { hasOutgoing: true } : { hasIncoming: true })}
+      isEmpty={list.length === 0}
+      emptyLabel={side === "input" ? t("map.emptyInput") : t("map.emptyOutput")}
+    >
+      {list.map((field) => (
+        <Row
+          key={field.name}
+          icon={
+            side === "input" ? (
+              <ArrowRightToLine className="size-3.5" />
+            ) : (
+              <Sparkles className="size-3.5" />
+            )
+          }
+          label={field.title ?? field.name}
+          sublabel={[field.type, field.required ? t("map.fieldRequired") : null]
+            .filter(Boolean)
+            .join(" · ")}
+        />
+      ))}
+    </Card>
+  );
+}
+
+export function InputNode({ data }: NodeProps) {
+  return <ContractNode data={data} side="input" />;
+}
+
+export function OutputNode({ data }: NodeProps) {
+  return <ContractNode data={data} side="output" />;
+}
+
 export function McpServersNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const list = items<McpServerItem>(data);
@@ -552,6 +698,7 @@ export function McpServersNode({ data }: NodeProps) {
   return (
     <Card
       title={t("map.mcpServers")}
+      concept="mcpServers"
       count={list.length}
       hasIncoming
       isEmpty={list.length === 0}

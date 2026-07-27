@@ -61,18 +61,7 @@ export function AgentRunsTab({
   );
 }
 
-export function AgentSchedulesTab({
-  packageId,
-  onCreate,
-}: {
-  packageId: string;
-  /**
-   * When provided, the empty state's "add" affordance calls this instead of
-   * navigating to `/schedules/new` — used by the visual map, which creates the
-   * schedule in place with this agent already selected.
-   */
-  onCreate?: () => void;
-}) {
+export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: schedules } = useSchedules(packageId);
@@ -87,13 +76,9 @@ export function AgentSchedulesTab({
     <>
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
-          {onCreate ? (
-            <Button onClick={onCreate}>{t("btn.add")}</Button>
-          ) : (
-            <Button asChild>
-              <Link to="/schedules/new">{t("btn.add")}</Link>
-            </Button>
-          )}
+          <Button asChild>
+            <Link to="/schedules/new">{t("btn.add")}</Link>
+          </Button>
         </EmptyState>
       ) : (
         <div className="space-y-2">

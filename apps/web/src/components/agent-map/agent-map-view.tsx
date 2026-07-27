@@ -31,11 +31,14 @@ import { AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
 import { useAgentMap } from "../../hooks/use-agent-map";
 import { ErrorState, LoadingState } from "../page-states";
 import { MapEditDialog, type MapEditKind } from "./map-edit-dialog";
+import { MapIssuesDialog } from "./map-issues-dialog";
 import { MapPanelDialog, type MapPanelKind } from "./map-panel-dialog";
 import {
   AgentNode,
+  InputNode,
   McpServersNode,
   ModelNode,
+  OutputNode,
   SystemToolsNode,
   SchedulesNode,
   SkillsNode,
@@ -86,8 +89,10 @@ function useEscape(active: boolean, onEscape: () => void) {
 
 const NODE_TYPES = {
   schedules: SchedulesNode,
+  input: InputNode,
   agent: AgentNode,
   model: ModelNode,
+  output: OutputNode,
   toolbox: ToolboxNode,
   skills: SkillsNode,
   mcp_servers: McpServersNode,
@@ -105,6 +110,7 @@ export function AgentMapView({
   const { data, isLoading, error } = useAgentMap(packageId, version);
   const [editKind, setEditKind] = useState<MapEditKind | null>(null);
   const [panelKind, setPanelKind] = useState<MapPanelKind | null>(null);
+  const [issuesOpen, setIssuesOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);
   useEscape(expanded, collapse);
@@ -170,11 +176,6 @@ export function AgentMapView({
   // vanish from the UI — surface them above the canvas instead of dropping them.
   const orphanDiagnostics = data.diagnostics.filter((d) => !d.node_id);
 
-  // Most diagnostics are missing/insufficient connections, and those are fixed on
-  // the Connections tab — so the counter becomes the way there instead of being
-  // a dead label (Fleet's "1 need connection" plays the same role).
-  const connectionIssues = data.diagnostics.filter((d) => d.node_id === "toolbox").length;
-
   return (
     <div
       className={
@@ -190,28 +191,16 @@ export function AgentMapView({
             ? t("map.draftDefinition")
             : t("map.pinnedDefinition", { version: data.agent.version_ref })}
         </span>
-        {data.diagnostics.length > 0 &&
-          (() => {
-            const counter = (
-              <>
-                <AlertTriangle className="size-3.5" />
-                {t("map.issueCount", { count: data.diagnostics.length })}
-              </>
-            );
-            // Clickable only when a connection is involved — that is the panel it
-            // would open.
-            return connectionIssues > 0 ? (
-              <button
-                type="button"
-                onClick={() => setPanelKind("connections")}
-                className="text-warning hover:text-warning/80 flex items-center gap-1 underline-offset-2 hover:underline"
-              >
-                {counter}
-              </button>
-            ) : (
-              <span className="text-warning flex items-center gap-1">{counter}</span>
-            );
-          })()}
+        {data.diagnostics.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setIssuesOpen(true)}
+            className="text-warning hover:text-warning/80 flex items-center gap-1 underline-offset-2 hover:underline"
+          >
+            <AlertTriangle className="size-3.5" />
+            {t("map.issueCount", { count: data.diagnostics.length })}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -259,6 +248,12 @@ export function AgentMapView({
           <FitOnCanvasResize />
         </ReactFlow>
       </div>
+      <MapIssuesDialog
+        diagnostics={issuesOpen ? data.diagnostics : null}
+        onEdit={onEdit}
+        onPanel={onPanel}
+        onClose={() => setIssuesOpen(false)}
+      />
       <MapEditDialog kind={editKind} packageId={packageId} onClose={() => setEditKind(null)} />
       <MapPanelDialog kind={panelKind} packageId={packageId} onClose={() => setPanelKind(null)} />
     </div>

@@ -134,22 +134,27 @@ describe("GET /api/agents/:scope/:name/map", () => {
     // offers to add the missing piece.
     expect(nodeIds(body).sort()).toEqual([
       "agent",
+      "input",
       "mcp_servers",
       "model",
+      "output",
       "schedules",
       "skills",
       "system_tools",
       "toolbox",
     ]);
-    for (const id of ["schedules", "toolbox", "skills", "mcp_servers"]) {
+    for (const id of ["schedules", "toolbox", "skills", "mcp_servers", "input", "output"]) {
       expect(body.nodes.find((n) => n.id === id)!.data.items).toEqual([]);
     }
     expect(body.edges.map((e) => e.id).sort()).toEqual([
       "agent->mcp_servers",
+      // The result flows out of the agent, like a capability it reaches for.
+      "agent->output",
       "agent->skills",
       "agent->system_tools",
       "agent->toolbox",
       // The model is an input: it feeds the agent.
+      "input->agent",
       "model->agent",
       "schedules->agent",
     ]);
@@ -309,6 +314,45 @@ describe("GET /api/agents/:scope/:name/map", () => {
       Record<string, unknown>
     >;
     expect(items.map((i) => i.id)).toEqual(["run_history", "recall_memory"]);
+  });
+
+  it("declared input/output schemas → their own cards, one row per top-level field", async () => {
+    await seedAgentWith(
+      agentManifest({
+        input: {
+          schema: {
+            type: "object",
+            properties: {
+              week: { type: "string", title: "Semaine" },
+              verbose: { type: "boolean" },
+            },
+            required: ["week"],
+          },
+        },
+        output: {
+          schema: { type: "object", properties: { summary: { type: "string" } } },
+        },
+        // `output` the runtime tool is a different thing from `output.schema` the
+        // contract, and declaring a schema is what makes the tool mandatory.
+        runtime_tools: ["output"],
+      }),
+    );
+
+    const body = (await (await getMap()).json()) as MapBody;
+
+    expect(body.nodes.find((n) => n.id === "input")!.data.items).toEqual([
+      { name: "week", title: "Semaine", type: "string", required: true },
+      { name: "verbose", title: null, type: "boolean", required: false },
+    ]);
+    expect(body.nodes.find((n) => n.id === "output")!.data.items).toEqual([
+      { name: "summary", title: null, type: "string", required: false },
+    ]);
+    // The contract cards do NOT absorb the runtime tool: it stays a granted
+    // capability on its own card.
+    const tools = body.nodes.find((n) => n.id === "system_tools")!.data.items as Array<
+      Record<string, unknown>
+    >;
+    expect(tools.map((i) => i.id)).toContain("output");
   });
 
   it("unknown agent → 404", async () => {

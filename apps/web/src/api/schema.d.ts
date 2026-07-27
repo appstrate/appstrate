@@ -4920,7 +4920,7 @@ export interface components {
             /** @description Stable node id, also the edge endpoint. */
             id: string;
             /** @enum {string} */
-            type: "triggers" | "schedules" | "agent" | "toolbox" | "skills" | "mcp_servers";
+            type: "schedules" | "input" | "agent" | "model" | "output" | "toolbox" | "skills" | "mcp_servers" | "system_tools";
             position: {
                 x: number;
                 y: number;

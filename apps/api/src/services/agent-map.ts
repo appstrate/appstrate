@@ -51,7 +51,15 @@ import { getActor } from "../lib/actor.ts";
 // ---------------------------------------------------------------------------
 
 export type AgentMapNodeType =
-  "schedules" | "agent" | "model" | "toolbox" | "skills" | "mcp_servers" | "system_tools";
+  | "schedules"
+  | "input"
+  | "agent"
+  | "model"
+  | "output"
+  | "toolbox"
+  | "skills"
+  | "mcp_servers"
+  | "system_tools";
 
 export interface AgentMapNode {
   id: string;
@@ -99,11 +107,12 @@ export interface AgentMap {
 // ---------------------------------------------------------------------------
 
 /**
- * Column abscissae. Left = inputs, centre = the agent, right = capabilities.
- * Chosen to leave room for the widest card at 100% zoom; the client calls
- * `fitView` so absolute values only set relative spacing.
+ * Column abscissae, read left to right as the run itself: what feeds the agent,
+ * the agent, what it can reach out to, and what it hands back. Chosen to leave
+ * room for the widest card at 100% zoom; the client calls `fitView` so absolute
+ * values only set relative spacing.
  */
-const COLUMN_X = { input: -560, agent: -140, capability: 240 } as const;
+const COLUMN_X = { input: -560, agent: -140, capability: 240, result: 600 } as const;
 
 /** Vertical breathing room between two stacked cards in the same column. */
 const COLUMN_GAP = 48;
@@ -194,6 +203,40 @@ function toDiagnostic(e: ValidationFieldError): AgentMapDiagnostic {
 // schedule, has its own card. When an event-driven trigger exists (inbound mail,
 // inbound webhook), a trigger card can come back with real content.
 // ---------------------------------------------------------------------------
+
+/**
+ * Top-level fields of an AFPS schema wrapper (`input` / `output`), for the two
+ * contract cards.
+ *
+ * These are the agent's INTERFACE — what a caller must hand it, what it hands
+ * back — which is a different thing from the `output` runtime tool listed under
+ * system tools. That tool is the mechanism the agent uses to emit a result; this
+ * is the shape that result must have. An agent can declare neither, either or
+ * both, so both cards render empty rather than disappearing.
+ *
+ * Only the first level is projected: a card is a summary, and nested objects
+ * belong to the schema editor, which the card's action opens.
+ */
+function contractFields(wrapper: { schema?: unknown } | null | undefined) {
+  const schema = wrapper?.schema ? asJSONSchemaObject(wrapper.schema) : null;
+  if (!schema?.properties) return [];
+  const required = new Set(
+    Array.isArray(schema.required) ? schema.required.map((r) => String(r)) : [],
+  );
+  return Object.entries(schema.properties).map(([name, definition]) => {
+    const field = (definition ?? {}) as { type?: unknown; title?: unknown };
+    return {
+      name,
+      title: typeof field.title === "string" ? field.title : null,
+      type: Array.isArray(field.type)
+        ? field.type.map((t) => String(t)).join(" | ")
+        : typeof field.type === "string"
+          ? field.type
+          : null,
+      required: required.has(name),
+    };
+  });
+}
 
 function scheduleCard(schedules: EnrichedSchedule[]) {
   return schedules.map((s) => ({
@@ -303,6 +346,9 @@ export async function buildAgentMap(
   const resolvedModelLabel =
     orgModelList.find((m) => m.id === resolvedModelId)?.label ?? resolvedModelId;
 
+  const inputFields = contractFields(agent.manifest.input);
+  const outputFields = contractFields(agent.manifest.output);
+
   const leftCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
     {
       node: {
@@ -311,6 +357,12 @@ export async function buildAgentMap(
         data: { items: scheduleCard(schedules) },
       },
       itemCount: schedules.length,
+    },
+    // What a caller hands the agent — an input in the literal sense, so it sits
+    // in the input column next to the two other things that feed a run.
+    {
+      node: { id: "input", type: "input", data: { items: inputFields } },
+      itemCount: inputFields.length,
     },
     // The model feeds the agent, like a trigger fires it — an input, not a
     // capability the agent reaches out to. Putting it here also keeps the two
@@ -347,8 +399,8 @@ export async function buildAgentMap(
           timeout: agent.manifest.timeout ?? null,
           modelId: packageConfig.modelId,
           proxyId: packageConfig.proxyId,
-          has_input_schema: !!agent.manifest.input?.schema,
-          has_output_schema: !!agent.manifest.output?.schema,
+          // Input and output each have their own card now; a chip repeating
+          // "has an input schema" next to a card listing its fields is noise.
           has_config_schema: !!(
             configSchema?.properties && Object.keys(configSchema.properties).length > 0
           ),
@@ -438,21 +490,32 @@ export async function buildAgentMap(
     },
   ];
 
+  // --- Result column: what the run hands back ------------------------------
+
+  const resultCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [
+    {
+      node: { id: "output", type: "output", data: { items: outputFields } },
+      itemCount: outputFields.length,
+    },
+  ];
+
   const nodes = [
     ...stackColumn(COLUMN_X.input, leftCards),
     ...stackColumn(COLUMN_X.agent, centreCards),
     ...stackColumn(COLUMN_X.capability, rightCards),
+    ...stackColumn(COLUMN_X.result, resultCards),
   ];
 
-  // Inputs flow into the agent, capabilities flow out of it. Direction carries
-  // the meaning, so it is derived from the column rather than stored.
+  // Inputs flow into the agent, capabilities and the result flow out of it.
+  // Direction carries the meaning, so it is derived from the column rather than
+  // stored.
   const edges: AgentMapEdge[] = [
     ...leftCards.map((c) => ({
       id: `${c.node.id}->agent`,
       source: c.node.id,
       target: "agent",
     })),
-    ...rightCards.map((c) => ({
+    ...[...rightCards, ...resultCards].map((c) => ({
       id: `agent->${c.node.id}`,
       source: "agent",
       target: c.node.id,

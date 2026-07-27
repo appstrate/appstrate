@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The full list behind the header's "N to fix" counter.
+ *
+ * The counter used to open the Connections panel, which only knows about
+ * integrations: a map reporting five problems answered with two rows, and a
+ * missing skill had nowhere to be seen at all. The number and its destination
+ * were describing different sets.
+ *
+ * So the counter opens the diagnostics themselves — every one the readiness gate
+ * raised, verbatim, each with the way to go fix it. Routing is by `node_id`,
+ * which the server already assigns, so a new readiness check lands on the right
+ * destination without a change here.
+ */
+
+import { useTranslation } from "react-i18next";
+import { AlertTriangle } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
+import { Modal } from "../modal";
+import type { AgentMapDiagnostic } from "../../hooks/use-agent-map";
+import type { MapEditKind } from "./map-edit-dialog";
+import type { MapPanelKind } from "./map-panel-dialog";
+
+/** Where a diagnostic gets fixed, by the card that owns it. */
+const DESTINATION: Record<
+  string,
+  { slot: "edit"; kind: MapEditKind } | { slot: "panel"; kind: MapPanelKind }
+> = {
+  agent: { slot: "edit", kind: "prompt" },
+  skills: { slot: "edit", kind: "skills" },
+  toolbox: { slot: "panel", kind: "connections" },
+  model: { slot: "panel", kind: "model" },
+};
+
+export function MapIssuesDialog({
+  diagnostics,
+  onEdit,
+  onPanel,
+  onClose,
+}: {
+  diagnostics: AgentMapDiagnostic[] | null;
+  onEdit: (kind: MapEditKind) => void;
+  onPanel: (kind: MapPanelKind) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation("agents");
+  if (!diagnostics) return null;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t("map.issueCount", { count: diagnostics.length })}
+      className="sm:max-w-2xl"
+    >
+      <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
+        {diagnostics.map((d) => {
+          const destination = d.node_id ? DESTINATION[d.node_id] : undefined;
+          return (
+            <div
+              key={`${d.field}:${d.code}`}
+              className="border-border flex items-start gap-3 rounded-lg border p-3"
+            >
+              <AlertTriangle className="text-warning mt-0.5 size-4 shrink-0" />
+              <div className="min-w-0 flex-1">
+                {d.title && <div className="text-sm font-medium">{d.title}</div>}
+                <div className="text-muted-foreground text-xs">{d.message}</div>
+              </div>
+              {destination && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // The dialogs are mutually exclusive, so this one steps aside
+                    // rather than stacking a second overlay on top of itself.
+                    onClose();
+                    if (destination.slot === "edit") onEdit(destination.kind);
+                    else onPanel(destination.kind);
+                  }}
+                >
+                  {t("map.fixIssue")}
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Modal>
+  );
+}

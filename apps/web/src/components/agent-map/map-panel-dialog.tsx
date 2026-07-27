@@ -21,13 +21,13 @@ import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "../modal";
 import { Spinner } from "../spinner";
 import { AgentConnectionsSection } from "../package-detail/agent-connections-section";
-import { AgentSchedulesTab, AgentMemoryTab } from "../package-detail/agent-tabs";
+import { AgentMemoryTab } from "../package-detail/agent-tabs";
 import { ModelSection } from "../package-detail/agent-configuration-tab";
 import { ModelFormModal } from "../model-form-modal";
 import { ScheduleForm } from "../schedule-form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
-import { useCreateSchedule, useScheduleFormDeps, useSchedules } from "../../hooks/use-schedules";
+import { useCreateSchedule, useScheduleFormDeps } from "../../hooks/use-schedules";
 import { agentMapQueryKeyPrefix } from "../../hooks/use-agent-map";
 
 /** Which existing panel to show. */
@@ -35,45 +35,30 @@ export type MapPanelKind = "connections" | "schedules" | "memory" | "model";
 
 const TITLE_KEY: Record<MapPanelKind, string> = {
   connections: "detail.tabConnections",
-  schedules: "detail.tabSchedules",
+  schedules: "schedule.titleNew",
   memory: "detail.tabMemory",
   model: "map.model",
 };
 
 /**
- * The agent's schedules, and creating one WITHOUT leaving for `/schedules/new`.
+ * Creating a schedule WITHOUT leaving for `/schedules/new`.
  *
  * That page defaults its agent selector to the first agent in the list, which is
  * almost never the one you were looking at — so creating a schedule from an
  * agent's page meant re-picking the agent by hand. Here the agent is pinned: the
  * selector is handed a single option, so `ScheduleForm` (unchanged) cannot offer
- * anything else, and on success we return to the list instead of navigating away.
+ * anything else.
+ *
+ * The form opens straight away. An earlier version showed the schedule list
+ * first, with its own "add" button — but the card that opened this dialog IS
+ * that list, so the panel re-listed what the reader was already looking at and
+ * buried the one action a plus can mean behind a second click.
  */
-function SchedulesPanel({ packageId }: { packageId: string }) {
+function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: () => void }) {
   const { t } = useTranslation(["agents", "common"]);
-  const [creating, setCreating] = useState(false);
   const { data: detail } = usePackageDetail("agent", packageId);
-  const { data: schedules } = useSchedules(packageId);
   const deps = useScheduleFormDeps(packageId);
   const createSchedule = useCreateSchedule(packageId);
-
-  if (!creating) {
-    // The empty state already carries an "add" button (wired through
-    // `onCreate`), so only add ours when the list is non-empty — otherwise the
-    // panel shows two of them.
-    const hasSchedules = (schedules?.length ?? 0) > 0;
-    return (
-      <div className="space-y-3">
-        <AgentSchedulesTab packageId={packageId} onCreate={() => setCreating(true)} />
-        {hasSchedules && (
-          <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
-            <Plus className="mr-1.5 size-3.5" />
-            {t("common:btn.add")}
-          </Button>
-        )}
-      </div>
-    );
-  }
 
   return (
     <ScheduleForm
@@ -93,8 +78,8 @@ function SchedulesPanel({ packageId }: { packageId: string }) {
       agentIntegrations={deps?.agentIntegrations ?? []}
       blockedMessage={deps?.hasFileInputs ? t("agents:schedule.fileInputBlocked") : undefined}
       isPending={createSchedule.isPending}
-      onSubmit={(data) => createSchedule.mutate(data, { onSuccess: () => setCreating(false) })}
-      onCancel={() => setCreating(false)}
+      onSubmit={(data) => createSchedule.mutate(data, { onSuccess: onDone })}
+      onCancel={onDone}
     />
   );
 }
@@ -165,7 +150,9 @@ export function MapPanelDialog({
   return (
     <Modal open onClose={closeAndRefresh} title={t(TITLE_KEY[kind])} className="sm:max-w-3xl">
       <div className="max-h-[70vh] overflow-y-auto">
-        {kind === "schedules" && <SchedulesPanel packageId={packageId} />}
+        {kind === "schedules" && (
+          <NewSchedulePanel packageId={packageId} onDone={closeAndRefresh} />
+        )}
         {kind === "memory" && <AgentMemoryTab packageId={packageId} />}
         {kind === "model" && <ModelPanel packageId={packageId} />}
         {kind === "connections" &&
