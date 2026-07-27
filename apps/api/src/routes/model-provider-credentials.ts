@@ -307,14 +307,14 @@ export function createModelProviderCredentialsRouter() {
   // discovery. For `"probe"` (API-key) providers this is empirical: probes
   // every discovery candidate against the live credential (1-token requests)
   // and persists the ids that answered as `available_model_ids`. For
-  // `mode: "static"` providers (subscription: codex, claude-code) it
-  // issues ZERO upstream calls — it persists the provider's static candidate
-  // set (∩ catalog) instead. Synchronous — the caller gets the resulting
-  // list back. `probed_count` means candidates considered (not necessarily
-  // models live-probed: static providers consider candidates without any
-  // upstream request). Rate-limited (a probe call burns a handful of requests
-  // on the user's own quota), but loose enough for the model form to
-  // revalidate on every open while configuring several models in a row.
+  // `mode: "static"` providers (subscription: codex, claude-code) it is a
+  // no-op that reports the current list: ZERO upstream calls and ZERO writes,
+  // because their served set is derived from (definition, catalog) on every
+  // read — `probed_count` comes back 0. The endpoint is kept rather than
+  // removed so the model form keeps ONE code path for both provider kinds.
+  // Rate-limited (a probe call burns a handful of requests on the user's own
+  // quota), but loose enough for the model form to revalidate on every open
+  // while configuring several models in a row.
   router.post(
     "/:id/refresh-models",
     rateLimit(6),
@@ -330,6 +330,11 @@ export function createModelProviderCredentialsRouter() {
         if (result.outcome === "credential_not_found") {
           throw notFound("Model provider credential not found");
         }
+        // Re-read through the credential DTO rather than echoing
+        // `result.verifiedModelIds`: on a probe round that verified nothing
+        // the previous list is what still stands, and the DTO is the single
+        // place where a static provider's list gets derived. Both provider
+        // kinds therefore answer with exactly what a subsequent GET returns.
         const credential = await getOrgModelProviderCredential(orgId, id);
         return c.json({
           outcome: result.outcome,

@@ -149,3 +149,27 @@ export function resolveDiscoveryCandidates(
 ): string[] {
   return resolveSelection(def.modelDiscoveryCandidates ?? def.featuredModels, catalogKeyOf(def));
 }
+
+/**
+ * Discovery candidates that exist in the resolved catalog — the set a
+ * `mode: "static"` provider's credential can actually serve.
+ *
+ * The intersection mirrors the gate `POST /api/models/seed` applies (catalog
+ * membership), so this list can never offer an id that seeding would then
+ * reject. It is NOT redundant with a {@link CatalogModelSelector}, which is
+ * catalog-derived by construction: an explicit array (codex) can perfectly
+ * well name an id the vendored catalog does not carry yet.
+ *
+ * The probe path deliberately does not use this — an empirically verified id
+ * is served whether or not the catalog knows about it, and the model form
+ * falls back to an id-only entry for such ids.
+ */
+export function resolveCatalogBackedCandidates(
+  def: Pick<
+    ModelProviderDefinition,
+    "providerId" | "catalogProviderId" | "featuredModels" | "modelDiscoveryCandidates"
+  >,
+): string[] {
+  const catalogIds = new Set(listCatalogModels(catalogKeyOf(def)).map((m) => m.id));
+  return resolveDiscoveryCandidates(def).filter((id) => catalogIds.has(id));
+}

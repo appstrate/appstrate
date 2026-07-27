@@ -25,6 +25,7 @@ import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { getModelProvider } from "./registry.ts";
+import { resolveCatalogBackedCandidates } from "./model-selection.ts";
 import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { ModelProviderIdentity } from "@appstrate/core/module";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
@@ -599,6 +600,38 @@ export async function deleteModelProviderCredential(orgId: string, id: string): 
 // ─── Aggregated UI surface (system env-driven + DB) ────────────────────────
 
 /**
+ * The model ids a credential is authorized to serve. Derived for
+ * `mode: "static"` providers, persisted for probe providers.
+ *
+ * `mode: "static"` (subscription: codex, claude-code) — DERIVED, the row is
+ * ignored. The answer is a pure function of (provider definition, vendored
+ * catalog): the platform issues ZERO probes for these providers
+ * (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`), so every credential of
+ * such a provider necessarily resolves to the SAME list — verified in
+ * production, where all five non-null `claude-code` rows carried an identical
+ * array. The column therefore held no per-credential information at all; what
+ * it did hold was a snapshot taken at discovery time and never refreshed,
+ * which is precisely how users kept being offered a two-generations-old model
+ * list long after the provider definition had been corrected. Resolving on
+ * read makes the weekly catalog refresh the correction mechanism.
+ *
+ * Every other provider — PERSISTED verbatim. There the column is genuinely
+ * per-credential: the probe answers against the account's own plan, so two
+ * keys of the same provider legitimately serve different sets and no
+ * platform-side derivation could reproduce that. A null column (discovery
+ * never ran) is an empty list, matching what every caller already coalesced
+ * it to.
+ */
+export function resolveCredentialModelIds(
+  providerId: string,
+  persisted: string[] | null,
+): string[] {
+  const def = getModelProvider(providerId);
+  if (def?.modelDiscovery?.mode === "static") return resolveCatalogBackedCandidates(def);
+  return persisted ?? [];
+}
+
+/**
  * List the aggregated UI view of an organization's model provider credentials.
  *
  * Combines two sources:
@@ -683,7 +716,10 @@ export async function listOrgModelProviderCredentials(
         // tab to fix them; narrowing this flag to the OAuth case would show
         // the blamed credential as healthy, with no Reconnect button.
         needs_reconnection: blob === null || (isOauth && !!blob.needsReconnection),
-        available_model_ids: r.availableModelIds ?? null,
+        // Single read-time resolution point for the whole platform: the seed
+        // gate, the refresh-models response and the credentials list all read
+        // this DTO field, so none of them can observe a stale static list.
+        available_model_ids: resolveCredentialModelIds(r.providerId, r.availableModelIds ?? null),
         created_by: r.createdBy,
         createdAt: toISORequired(r.createdAt),
         updatedAt: toISORequired(r.updatedAt),
