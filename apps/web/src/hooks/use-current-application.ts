@@ -6,8 +6,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { appStore, getCurrentApplicationId } from "../stores/app-store";
 import { useApplications } from "./use-applications";
 import { useAutoSelect } from "./use-auto-select";
-import { useAppConfig } from "./use-app-config";
-import { getEnabledModuleQueryKeys } from "../lib/module-query-keys";
 
 // Re-export non-hook accessor
 export { getCurrentApplicationId };
@@ -18,7 +16,7 @@ export function useCurrentApplicationId(): string | null {
 }
 
 /**
- * Core app-scoped PINNED query-key prefixes — invalidated on app switch.
+ * App-scoped PINNED query-key prefixes — invalidated on app switch.
  * Only the run/schedule/package domains that keep flat legacy keys
  * (`["runs", …]`, etc.) need listing here. Typed-client domains (api-keys,
  * end-users, integrations, notifications, …) embed `X-Application-Id` in their
@@ -26,7 +24,7 @@ export function useCurrentApplicationId(): string | null {
  * key and refetches automatically — they must NOT be listed (their `queryKey[0]`
  * is the method string, never these prefixes).
  */
-const CORE_APP_SCOPED_KEYS = [
+const APP_SCOPED_KEYS = new Set([
   "packages",
   "agents",
   "agent-persistence",
@@ -42,7 +40,7 @@ const CORE_APP_SCOPED_KEYS = [
   "version-detail",
   "package-versions",
   "version-info",
-];
+]);
 
 /**
  * Hook that returns a `switchApp` function.
@@ -50,7 +48,6 @@ const CORE_APP_SCOPED_KEYS = [
  */
 export function useAppSwitcher() {
   const queryClient = useQueryClient();
-  const { features } = useAppConfig();
 
   const switchApp = useCallback(
     (applicationId: string) => {
@@ -59,19 +56,15 @@ export function useAppSwitcher() {
 
       appStore.getState().setId(applicationId);
 
-      // Assemble the invalidation set: core keys + enabled module contributions.
-      const moduleKeys = getEnabledModuleQueryKeys(features);
-      const appScopedKeys = new Set<string>([...CORE_APP_SCOPED_KEYS, ...moduleKeys]);
-
       // Invalidate all app-scoped queries so they refetch with the new X-Application-Id
       queryClient.removeQueries({
         predicate: (q) => {
           const key = q.queryKey[0];
-          return typeof key === "string" && appScopedKeys.has(key);
+          return typeof key === "string" && APP_SCOPED_KEYS.has(key);
         },
       });
     },
-    [queryClient, features],
+    [queryClient],
   );
 
   return { switchApp };

@@ -22,16 +22,6 @@ function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
       runToken: "test-token",
       proxyUrl: "",
     },
-    fetchCredentials: mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "test-123" },
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    ),
     cookieJar: new Map(),
     isReady: () => true,
     fetchFn: mock(

@@ -2,10 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * AFPS bundle signing — Ed25519 detached signatures
- * Phase v1. Sigstore keyless (Phase v2) is stubbed via
- * {@link verifySigstoreSignature} so Phase 11 can swap the
- * implementation without a breaking API change.
+ * AFPS bundle signing — Ed25519 detached signatures (Phase v1).
  *
  * Signature document layout (written as `signature.sig` at the bundle
  * root, alongside `manifest.json`):
@@ -300,26 +297,6 @@ export function readBundleSignature(bundle: Bundle): BundleSignature | null {
   }
   const result = parseSignatureDoc(parsed);
   return result.ok ? result.doc : null;
-}
-
-/**
- * Sigstore keyless verification stub (Phase v2).
- *
- * The runtime reserves this API so Phase 11 can wire in `cosign`-
- * compatible verification (Fulcio cert chain + Rekor inclusion proof)
- * without reshaping the consumer interface. Today it always fails
- * with `alg_unsupported`; consumers that see this reason should fall
- * back to Ed25519 verification or reject the bundle per their policy.
- */
-export function verifySigstoreSignature(
-  _bundleBytes: Uint8Array,
-  _signatureBundle: unknown,
-): VerifySignatureResult {
-  return {
-    ok: false,
-    reason: "alg_unsupported",
-    detail: "Sigstore keyless verification not yet implemented (scheduled for Phase 11)",
-  };
 }
 
 // ─── internals ──────────────────────────────────────────────────────

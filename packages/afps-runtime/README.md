@@ -214,17 +214,14 @@ harness, but a simple golden-file diff is sufficient for L1-L3.
 
 ## Signing model
 
-Artifact signing model:
+Artifacts are signed with **Ed25519 detached signatures**. `signature.sig`
+holds `{ alg, keyId, signature, chain? }`; `verifyBundleSignature` pins trust
+by `keyId + raw publicKey` in a `TrustRoot`. `canonicalBundleDigest` gives a
+re-packing-stable digest (ZIP bytes are not a stable contract).
 
-- **v1 — Ed25519 detached (shipped)**. `signature.sig` holds
-  `{ alg, keyId, signature, chain? }`; verification pins trust by
-  `keyId + raw publicKey` in a `TrustRoot`. `canonicalBundleDigest` gives
-  a re-packing-stable digest (ZIP bytes are not a stable contract).
-
-- **v2 — Sigstore keyless (roadmap)**. `verifySigstoreSignature` is stubbed
-  today and ships in a follow-up release. The runtime accepts both formats
-  during the migration; consumers that see `alg_unsupported` fall back
-  to Ed25519.
+`alg` is `ed25519` today and any other value fails verification with
+`alg_unsupported`. A second format (Sigstore keyless being the likely
+candidate) would be added as a new accepted `alg` if and when it is needed.
 
 Event-transport signing (Standard Webhooks HMAC-SHA256) is orthogonal and
 lives under `@appstrate/afps-runtime/events` — see the signing module for

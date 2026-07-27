@@ -11,14 +11,6 @@ import {
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
-    fetchCredentials: async () => ({
-      credentials: { access_token: "x" },
-      authorizedUris: [],
-      allowAllUris: false,
-      credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
-      credentialFieldName: "access_token",
-    }),
     cookieJar: new Map(),
     isReady: () => true,
     ...overrides,

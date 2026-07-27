@@ -17,7 +17,7 @@ import { describe, it, expect, mock } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
 import { OAuthTokenCache } from "../oauth-token-cache.ts";
 import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
-import type { CredentialsResponse, LlmProxyOauthConfig } from "../helpers.ts";
+import type { LlmProxyOauthConfig } from "../helpers.ts";
 
 const PLATFORM_API = "http://platform-mock:3000";
 const RUN_TOKEN = "run-tok";
@@ -68,16 +68,6 @@ function makeDeps(fetchFn: ReturnType<typeof mock>): AppDeps {
   });
   return {
     config: { platformApiUrl: PLATFORM_API, runToken: RUN_TOKEN },
-    fetchCredentials: mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "stub" },
-        authorizedUris: [],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    ),
     cookieJar: new Map(),
     fetchFn: fetchFn as unknown as typeof fetch,
     isReady: () => true,

@@ -51,7 +51,10 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
           setParseError(null);
         }}
         beforeMount={(monaco) => {
-          monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+          // Monaco 0.56 moved the language-service namespaces up one level:
+          // `monaco.languages.json` became `monaco.json` (same for css, html,
+          // typescript). `monaco.languages` still carries the generic registry.
+          monaco.json.jsonDefaults.setDiagnosticsOptions({
             enableSchemaRequest: false,
             validate: true,
             schemas: [

@@ -34,9 +34,6 @@ const apiCallDeps: ApiCallToolDeps = {
     },
     cookieJar: new Map(),
     fetchFn: unreachableFetch,
-    fetchCredentials: async () => {
-      throw new Error("boot must inject the per-auth credential adapter");
-    },
     reportedAuthFailures: new Set(),
   },
   tokenBudget: new TokenBudget(),

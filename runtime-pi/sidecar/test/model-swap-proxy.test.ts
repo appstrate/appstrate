@@ -9,7 +9,6 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
-import type { CredentialsResponse } from "../helpers.ts";
 
 const SWAP = { alias: "appstrate-medium", real: "deepseek-chat" };
 
@@ -27,16 +26,6 @@ function makeDeps(fetchFn: typeof fetch): AppDeps {
         modelSwap: SWAP,
       },
     },
-    fetchCredentials: mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "x" },
-        authorizedUris: [],
-        allowAllUris: true,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    ),
     cookieJar: new Map(),
     fetchFn,
     isReady: () => true,

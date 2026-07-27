@@ -42,7 +42,6 @@ const integrationCreds = (): CredentialsResponse => ({
 function makeMultipartDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
-    fetchCredentials: mock(async (): Promise<CredentialsResponse> => integrationCreds()),
     cookieJar: new Map(),
     // bun:test `mock()` lacks the `preconnect` member of `typeof fetch`; cast
     // through the same shim the per-test fetchFn overrides use.

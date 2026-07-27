@@ -40,7 +40,7 @@ import { stampChatSessionOnRun } from "./run-reconcile.ts";
 export interface TurnBudgetContext {
   /** Absolute wall-clock instant the turn ends (`turnStart + CHAT_TURN_DEADLINE_MS`). */
   turnDeadlineAt: number;
-  /** Which engine hosts the turn — trace attribution only. */
+  /** Which engine hosts the turn. This field alone is trace attribution only. */
   engine: ChatTurnEngine;
   /**
    * Chat session the turn belongs to. Trace attribution AND the orphan-run link
