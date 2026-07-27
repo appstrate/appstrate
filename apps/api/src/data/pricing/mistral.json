@@ -410,6 +410,33 @@
       "output": 2
     }
   },
+  "mistral-medium-2508": {
+    "label": "Mistral Medium 2508",
+    "contextWindow": 131072,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0.4,
+      "output": 2
+    }
+  },
+  "mistral-medium-2604": {
+    "label": "Mistral Medium 2604",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.5,
+      "output": 7.5
+    }
+  },
   "mistral-medium-3-1-2508": {
     "label": "Mistral Medium 3 1 2508",
     "contextWindow": 131072,
@@ -429,7 +456,8 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "cost": {
       "input": 1.5,
@@ -438,15 +466,16 @@
   },
   "mistral-medium-latest": {
     "label": "Mistral Medium Latest",
-    "contextWindow": 131072,
+    "contextWindow": 262144,
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "cost": {
-      "input": 0.4,
-      "output": 2
+      "input": 1.5,
+      "output": 7.5
     }
   },
   "mistral-small": {

@@ -949,7 +949,7 @@
     "cost": {
       "input": 1.4,
       "output": 4.4,
-      "cacheRead": 0.26
+      "cacheRead": 0.14
     }
   },
   "accounts/fireworks/models/gpt-oss-120b": {
@@ -1586,6 +1586,7 @@
     "maxTokens": null,
     "capabilities": [
       "text",
+      "image",
       "reasoning"
     ],
     "cost": {
@@ -3165,7 +3166,7 @@
     "cost": {
       "input": 1.4,
       "output": 4.4,
-      "cacheRead": 0.26
+      "cacheRead": 0.14
     }
   },
   "gpt-oss-120b": {
@@ -3302,6 +3303,7 @@
     "maxTokens": null,
     "capabilities": [
       "text",
+      "image",
       "reasoning"
     ],
     "cost": {
