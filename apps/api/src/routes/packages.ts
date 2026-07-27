@@ -15,7 +15,7 @@ import { handleImportBundle } from "../services/bundle-import.ts";
 import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
-import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
+import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -167,19 +167,16 @@ interface ParsedUpload {
   content: string;
   normalizedFiles?: Record<string, Uint8Array>;
   /** Full parsed manifest.json from the ZIP — stored as-is (like the registry). */
-  manifest?: Record<string, unknown>;
-  /** User-specified version from JSON body (propagated to manifest default). */
-  version?: string;
+  manifest: Record<string, unknown>;
 }
 
 /** JSON body shape for the non-multipart package upload branch. */
 const jsonUploadSchema = z.object({
   id: z.string().min(1),
   content: z.string().min(1),
-  manifest: z.record(z.string(), z.unknown()).optional(),
+  manifest: z.record(z.string(), z.unknown()),
   name: z.string().optional(),
   description: z.string().optional(),
-  version: z.string().optional(),
 });
 
 /**
@@ -237,21 +234,22 @@ async function parsePackageUpload(
 
     const content = new TextDecoder().decode(normalizedFiles[contentFile!]!);
 
-    let name: string | undefined;
-    let description: string | undefined;
-
-    // Parse manifest.json from ZIP if present — store as-is (like the registry)
-    let manifest: Record<string, unknown> | undefined;
-    const manifestBytes = normalizedFiles["manifest.json"];
-    if (manifestBytes) {
-      manifest = parseManifestBytesSafe(manifestBytes);
-      if (manifest) {
-        // Extract display fields as fallbacks (not for manifest storage)
-        if (!name && typeof manifest.display_name === "string") name = manifest.display_name;
-        if (!description && typeof manifest.description === "string")
-          description = manifest.description;
-      }
+    // manifest.json is mandatory: it is the only part of the archive the AFPS
+    // schema validates, and tolerating its absence let an unvalidated stub
+    // manifest reach the immutable `package_versions` row (issue #987).
+    if (!normalizedFiles["manifest.json"]) {
+      throw invalidRequest("ZIP must contain manifest.json", "file");
     }
+    let manifest: Record<string, unknown>;
+    try {
+      manifest = parseManifestFromFiles(normalizedFiles);
+    } catch (err) {
+      throw invalidRequest(getErrorMessage(err), "file");
+    }
+
+    // Display fields default to the manifest (not stored back into it)
+    let name = typeof manifest.display_name === "string" ? manifest.display_name : undefined;
+    let description = typeof manifest.description === "string" ? manifest.description : undefined;
 
     // Allow overriding name/description from form fields
     const formName = formData.get("name") as string | null;
@@ -284,7 +282,6 @@ async function parsePackageUpload(
     content: body.content,
     normalizedFiles,
     manifest: body.manifest,
-    version: body.version,
   };
 }
 
@@ -613,7 +610,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       return c.json(detail, 201);
     }
 
-    // Skill/Tool create — uses parsePackageUpload (ZIP or JSON body)
+    // Import-only create (mcp-server) — uses parsePackageUpload (ZIP or JSON body)
     const parsed = await parsePackageUpload(c, rcfg.parseOpts);
 
     if (isSystemPackage(parsed.id)) {
@@ -622,17 +619,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    // Validate manifest if present
-    if (parsed.manifest) {
-      const manifestResult = validateManifest(parsed.manifest);
-      if (!manifestResult.valid) {
-        throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
-      }
-      await assertAgentIntegrationScopesValid(
-        manifestResult.manifest as Record<string, unknown>,
-        orgId,
-      );
+    const manifestResult = validateManifest(parsed.manifest);
+    if (!manifestResult.valid) {
+      throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
     }
+    await assertAgentIntegrationScopesValid(
+      manifestResult.manifest as Record<string, unknown>,
+      orgId,
+    );
 
     if (rcfg.validateContent) {
       const validation = rcfg.validateContent(parsed.content);
@@ -648,13 +642,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
     }
 
-    // Merge user-specified version into manifest for createOrgItem
-    const effectiveManifest = parsed.manifest
-      ? parsed.manifest
-      : parsed.version
-        ? { version: parsed.version }
-        : undefined;
-
     let item;
     try {
       item = await createOrgItem(
@@ -667,7 +654,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           createdBy: user.id,
         },
         rcfg.cfg,
-        effectiveManifest,
+        parsed.manifest,
       );
     } catch (err) {
       if (err instanceof PackageAlreadyExistsError) {
