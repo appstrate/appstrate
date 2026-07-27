@@ -8,11 +8,12 @@
  * raw JSON Schema input descriptors and arbitrary async handlers) to the
  * official Model Context Protocol TypeScript SDK.
  *
- * Why a wrapper at all: AFPS tools ship JSON Schema (not Zod) input shapes,
- * and the SDK's high-level `McpServer.registerTool()` only accepts Zod raw
- * shapes — converting JSON Schema → Zod just to convert it back to JSON
- * Schema on the wire is wasteful. The low-level `Server` lets us pass the
- * descriptor through verbatim, which is what `tools/list` carries anyway.
+ * Why a wrapper at all: Appstrate tool definitions ship JSON Schema (not
+ * Zod) input shapes, and the SDK's high-level `McpServer.registerTool()`
+ * only accepts Zod raw shapes — converting JSON Schema → Zod just to convert
+ * it back to JSON Schema on the wire is wasteful. The low-level `Server`
+ * lets us pass the descriptor through verbatim, which is what `tools/list`
+ * carries anyway.
  *
  * What this module exposes:
  *
@@ -271,15 +272,6 @@ export type {
   Resource,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-
-// AFPS bridge — convert spec-shaped tools into MCP definitions without
-// rewriting them. Used by Phase 2 to mount existing AFPS tools through
-// the MCP wire format.
-export {
-  fromAfpsTool,
-  type AfpsContextProvider,
-  type FromAfpsToolOptions,
-} from "./afps-adapter.ts";
 
 // MCP client factories. The agent connects to the sidecar's `/mcp`
 // over Streamable HTTP; the CLI uses the in-process pair already

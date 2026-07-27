@@ -321,7 +321,6 @@
       "name": "@appstrate/mcp-transport",
       "version": "0.0.0",
       "dependencies": {
-        "@afps-spec/types": "^0.1.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
       },
     },
