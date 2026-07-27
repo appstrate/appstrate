@@ -7,69 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `@appstrate/core/chat-turn-metadata` — the chat turn's TIME budget alongside its
-  existing step budget: `CHAT_TURN_DEADLINE_MS`, `CHAT_TURN_SAFETY_MARGIN_MS`,
-  `CHAT_MIN_RUN_BUDGET_MS`, `CHAT_LAUNCH_THRESHOLD_MS`, plus the pure
-  `computeTurnRunBudget()`, `formatBudgetDuration()` and `formatTurnBudgetNote()`.
-  Both chat engines derive a child call's wait from an absolute turn deadline
-  instead of silently taking `RUN_AND_WAIT_MAX_MS` (30 min), which is three times
-  longer than a turn.
-- `@appstrate/core/bearer` — `parseBearer()`, the `Authorization` header parser
-  the module-authoring contract now points `authStrategies()` at: RFC 9110 §11.4
-  makes the auth-scheme a case-insensitive token separated from the credentials
-  by `1*SP`, so a conformant `authorization: bearer ey…` must match, which
-  `startsWith("Bearer ")` rejects. First release carrying the subpath — a module
-  built against an earlier core must parse the header itself.
-- `@appstrate/core/run-and-wait-client` — `RUN_RESULT_INLINE_MAX_BYTES` (32 KB) and
-  `truncateRunAndWaitPayload()`: a run result over the cap is cut to a usable
-  head that points back at the run, whose
-  `runs.result` already holds the whole payload (`getRun` returns it) — no copy is
-  made. `launchRunAndWait` forwards the new `context_documents` argument (inline
-  runs only).
-
-- `@appstrate/core/module` — `CatalogModelSelector`, `ModelIdSelection` and the
-  `isCatalogModelSelector()` narrowing guard: a model provider can declare its
-  model lists as `{ catalogFamilies, generations }` instead of enumerating ids.
-  The platform resolves a selector against its vendored pricing catalog on every
-  read, so a new vendor generation reaches the picker with the weekly catalog
-  refresh and no module edit. Meant for providers that track the vendor's
-  current generation and cannot probe (`claude-code`); an explicit array stays
-  right when the served set is defined outside the catalog (`codex`).
-
-### Changed
-
-- `buildPublishDocumentDef()` — the `publish_document` tool description now leads with what
-  only the tool can do (publish DURING the run, get the durable `document://` URI back) instead
-  of steering agents away from it. The `outputs/` sweep is unconditional and shares the same
-  uploader, so the previous "use this tool only to publish a deliverable that lives elsewhere in
-  the workspace" named the one replaceable case and hid the reason to call it at all. Behaviour
-  and schema are unchanged.
-- `ChatTurnFinishReason` gains `"deadline"` — a turn cut by the engine's
-  wall-clock ceiling is no longer disguised as its last step's provider reason.
-- `ModelProviderDefinition.featuredModels` widens from `readonly string[]` to
-  `ModelIdSelection` (`readonly string[] | CatalogModelSelector`), and
-  `modelDiscoveryCandidates` with it. **Asymmetric for consumers**: a module
-  that only WRITES these fields — every module passing an array — compiles
-  unchanged, since the array arm is unchanged. Code that READS
-  `def.featuredModels` as a `string[]` (mapping, spreading, `.includes()`) stops
-  compiling and must narrow with `isCatalogModelSelector()` first, or resolve
-  the selection platform-side.
-
-### Removed
-
-- `appendFinalStepSystemPrompt()` — the final-step directive is now carried as a
-  separate system block rather than concatenated, leaving this with no importer.
-
 ## [6.0.0] — 2026-07-26
 
 Major release grouping every contract change the repository accumulated after
 `5.0.0` into ONE coordinated break, so consumers pay a single lockstep cycle:
 the `report` runtime tool is retired in favour of published documents,
 `checkUsageAllowed` gains a required argument, two module-contract signatures
-that were optional-but-always-supplied become required, and a set of exports
-with no importer anywhere is deleted.
+that were optional-but-always-supplied become required, a model provider's
+`featuredModels` / `modelDiscoveryCandidates` widen to `ModelIdSelection` and
+break every READER of those fields, `ChatTurnFinishReason` gains a `"deadline"`
+member that breaks exhaustive switches, `isFinalChatStep` loses its `maxSteps`
+parameter, and a set of exports with no importer anywhere is deleted.
 
 > **Release ordering — consumers FIRST, then the tag.** `@appstrate/afps-shared`
 > stays at `^0.3.1` (already published, nothing to release before this).
@@ -144,6 +92,46 @@ with no importer anywhere is deleted.
   selects the OAuth request shape from `apiKey.includes("sk-ant-oat")` alone, so
   a placeholder missing that marker silently emits the api-key shape and
   upstream rejects it. Non-breaking; nothing existing changes meaning.
+
+- `@appstrate/core/chat-turn-metadata` — the chat turn's TIME budget alongside its
+  existing step budget: `CHAT_TURN_DEADLINE_MS`, `CHAT_TURN_SAFETY_MARGIN_MS`,
+  `CHAT_MIN_RUN_BUDGET_MS`, `CHAT_LAUNCH_THRESHOLD_MS`, plus the pure
+  `computeTurnRunBudget()`, `formatBudgetDuration()` and `formatTurnBudgetNote()`.
+  Both chat engines derive a child call's wait from an absolute turn deadline
+  instead of silently taking `RUN_AND_WAIT_MAX_MS` (30 min), which is three times
+  longer than a turn.
+
+- `@appstrate/core/bearer` — `parseBearer()`, the `Authorization` header parser
+  the module-authoring contract now points `authStrategies()` at: RFC 9110 §11.4
+  makes the auth-scheme a case-insensitive token separated from the credentials
+  by `1*SP`, so a conformant `authorization: bearer ey…` must match, which
+  `startsWith("Bearer ")` rejects. First release carrying the subpath — a module
+  built against an earlier core must parse the header itself.
+
+- `@appstrate/core/run-and-wait-client` — `RUN_RESULT_INLINE_MAX_BYTES` (32 KB) and
+  `truncateRunAndWaitPayload()`: a run result over the cap is cut to a usable
+  head that points back at the run, whose
+  `runs.result` already holds the whole payload (`getRun` returns it) — no copy is
+  made. `launchRunAndWait` forwards the new `context_documents` argument (inline
+  runs only).
+
+- `@appstrate/core/module` — `CatalogModelSelector`, `ModelIdSelection` and the
+  `isCatalogModelSelector()` narrowing guard: a model provider can declare its
+  model lists as `{ catalogFamilies, generations }` instead of enumerating ids.
+  The platform resolves a selector against its vendored pricing catalog on every
+  read, so a new vendor generation reaches the picker with the weekly catalog
+  refresh and no module edit. Meant for providers that track the vendor's
+  current generation and cannot probe (`claude-code`); an explicit array stays
+  right when the served set is defined outside the catalog (`codex`).
+
+### Changed
+
+- `buildPublishDocumentDef()` — the `publish_document` tool description now leads with what
+  only the tool can do (publish DURING the run, get the durable `document://` URI back) instead
+  of steering agents away from it. The `outputs/` sweep is unconditional and shares the same
+  uploader, so the previous "use this tool only to publish a deliverable that lives elsewhere in
+  the workspace" named the one replaceable case and hid the reason to call it at all. Behaviour
+  and schema are unchanged.
 
 ### Changed (BREAKING)
 
@@ -250,6 +238,20 @@ with no importer anywhere is deleted.
   the default are unaffected. Landed inside this major precisely because it is a
   source break on a symbol that shipped in `5.0.0` (see #1010).
 
+- `ChatTurnFinishReason` gains `"deadline"` — a turn cut by the engine's
+  wall-clock ceiling is no longer disguised as its last step's provider reason.
+  Breaking for readers: widening the union stops any exhaustive `switch` over it
+  from compiling until the new member is handled.
+
+- `ModelProviderDefinition.featuredModels` widens from `readonly string[]` to
+  `ModelIdSelection` (`readonly string[] | CatalogModelSelector`), and
+  `modelDiscoveryCandidates` with it. **Asymmetric for consumers**: a module
+  that only WRITES these fields — every module passing an array — compiles
+  unchanged, since the array arm is unchanged. Code that READS
+  `def.featuredModels` as a `string[]` (mapping, spreading, `.includes()`) stops
+  compiling and must narrow with `isCatalogModelSelector()` first, or resolve
+  the selection platform-side.
+
 ### Removed (BREAKING)
 
 - **The `report` runtime tool is gone.** It was a deprecated compatibility
@@ -297,6 +299,9 @@ with no importer anywhere is deleted.
   `packageTypeEnum.options` under another name. Use
   `packageTypeEnum.options` (the enum itself is live and re-exported from
   `@afps-spec/schema`).
+
+- `appendFinalStepSystemPrompt()` — the final-step directive is now carried as a
+  separate system block rather than concatenated, leaving this with no importer.
 
 - **`@appstrate/core/semver` — `satisfiesRange()` removed.** No caller.
   `matchVersion`, `isValidRange`, `normalizeVersion`, `compareVersionsDesc`,

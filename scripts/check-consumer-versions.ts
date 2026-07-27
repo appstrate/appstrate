@@ -22,13 +22,29 @@ interface Consumer {
 /**
  * Every repo outside this monorepo that resolves `@appstrate/core` from npm.
  *
- * A repo missing from this list is invisible to the gate and drifts silently:
- * `connect-helper` and `module-claude-code` both did, and `module-claude-code`
- * sat on `^2.19.0` — three majors behind — still declaring
- * `ModelProviderDefinition.oauthWireFormat`, a field core removed in 3.0.0.
- * The rule: if it appears in the monorepo's dependency graph as an npm
- * consumer, it belongs here. Workspace packages inside this repo do NOT (they
- * resolve `workspace:*` and can never drift).
+ * A repo missing from this list is invisible to the gate and drifts silently.
+ * That is not a hypothetical — it is why the list exists: `connect-helper` and
+ * the then-standalone `appstrate/module-claude-code` were both absent, and
+ * `module-claude-code` sat on `^2.19.0` — three majors behind — still
+ * declaring `ModelProviderDefinition.oauthWireFormat`, a field core had
+ * removed in 3.0.0. Nobody noticed until someone read its `package.json` by
+ * hand.
+ *
+ * That anecdote is now history: PR #460 (2026-05-14) moved the module in-tree
+ * as `packages/module-claude-code`, and the standalone repo is dead. It is
+ * therefore NOT in the list below, per rule 3.
+ *
+ * The rule, in three parts:
+ *
+ *   1. A repo OUTSIDE this monorepo that resolves `@appstrate/core` from npm
+ *      belongs here — that is the entire membership test.
+ *   2. A package INSIDE this monorepo never does. It resolves `workspace:*`
+ *      (see `packages/module-claude-code/package.json`) and cannot drift, so
+ *      listing it would gate the publish on a version that does not exist.
+ *   3. A repo absorbed in-tree must be REMOVED here, in the same pass that
+ *      absorbs it. Its default branch keeps whatever range it last published
+ *      forever, and nothing consumes it any more — so leaving it in reports a
+ *      permanent failure that no bump anywhere can clear.
  */
 const CONSUMERS: Consumer[] = [
   {
@@ -40,9 +56,6 @@ const CONSUMERS: Consumer[] = [
   // Published to npm (public package, private source repo) — installed by
   // end users via `npx`, so a stale core range ships to them directly.
   { repo: "appstrate/connect-helper", paths: ["package.json"] },
-  // Standalone module repo: consumes core as a PEER dependency, which is why
-  // peerDependencies is inspected below alongside deps/devDeps.
-  { repo: "appstrate/module-claude-code", paths: ["package.json"] },
 ];
 
 const DEPENDENCY_NAME = "@appstrate/core";
@@ -145,10 +158,13 @@ async function main(): Promise<void> {
         continue;
       }
 
-      // `peerDependencies` is inspected too: a module repo declares core as a
-      // peer (the host platform supplies it), and that range is exactly the
-      // compatibility claim the module makes to operators. Reading only
-      // deps/devDeps let a peer-only consumer drift unchecked.
+      // `peerDependencies` is inspected too: an out-of-tree module repo
+      // declares core as a peer (the host platform supplies it), and that
+      // range is exactly the compatibility claim the module makes to
+      // operators. Reading only deps/devDeps let a peer-only consumer drift
+      // unchecked. No CONSUMERS entry is peer-only today — the one that was
+      // (`module-claude-code`) moved in-tree — but the read stays so the next
+      // out-of-tree module is covered the day it is listed.
       const deps = {
         ...(pkg.dependencies as Record<string, string> | undefined),
         ...(pkg.devDependencies as Record<string, string> | undefined),
