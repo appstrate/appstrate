@@ -245,13 +245,15 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
  * accounting to the agent runtime.
  *
  * NOTHING reads it today — no agent-side resolver, no runner, no test
- * outside `sidecar/test/token-budget-integration.test.ts`. It is emitted
- * for operators and for a future consumer ("X / Y tokens of run budget
- * consumed", structured truncation events). Treat it as informational:
- * the spill decisions it reports are already enforced sidecar-side and
- * logged, so a client that drops `_meta` loses telemetry, not behaviour.
- * Do not make it load-bearing without giving it a real reader — most MCP
- * HTTP clients drop result `_meta` (see `META_DROPPED`).
+ * outside `sidecar/test/token-budget-integration.test.ts`. It is
+ * observable in the sidecar's own tests and logs and nowhere else: the
+ * runner's `callToolResultToPi` (`runner-pi/src/runtime-tools/
+ * mcp-forward.ts`) maps only `content` + `structuredContent` and DROPS
+ * `_meta`, so reaching an agent-side consumer would require forwarding
+ * `_meta` there first. Treat it as informational: the spill decisions it
+ * reports are already enforced sidecar-side and logged, so a client that
+ * drops `_meta` loses telemetry, not behaviour. Do not make it
+ * load-bearing without giving it a real reader.
  *
  * Distinct from {@link UPSTREAM_META_KEY} (which carries upstream
  * `{ status, headers }`) so a CallToolResult can carry both without

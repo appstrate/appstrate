@@ -58,10 +58,12 @@ const chatModule: AppstrateModule = {
   },
 
   createRouter() {
-    // Production runs `init()` before `createRouter()`, so `deps` is populated.
-    // When a caller mounts the router without init (the apps/api test harness,
-    // OSS standalone wiring), fall back to the safe baseline deps (loopback
-    // dispatch, pass-through rate limiter, no chat engine).
+    // The module loader registers a module only after `init()` returns, so in
+    // production `deps` is always populated. The fallback serves the apps/api
+    // test harness, which mounts this router directly: baseline deps (loopback
+    // dispatch, pass-through rate limiter, no chat engine) that also silently
+    // disable the admission gate and document teardown. Removal is tracked in
+    // GitHub issue #989.
     return createChatRouter(deps ?? buildChatPlatformDeps());
   },
 

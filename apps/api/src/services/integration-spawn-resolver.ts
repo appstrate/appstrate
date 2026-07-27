@@ -328,9 +328,10 @@ async function resolveOne(
     // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`. The
     // manifest schema enforces the enum + `required`; we forward the
     // declared value verbatim so the sidecar can pick the right MCP
-    // client transport. Default to `"streamable-http"` only as a defensive
-    // back-compat fallback for any manifest that somehow shipped without
-    // the field.
+    // client transport. `getRemoteSource` already returned null (→ skip,
+    // above) for a non-string `transport`, so this is TYPE NARROWING from
+    // the helper's `string` to the union, not a fallback:
+    // `"streamable-http"` is the normal taken branch.
     //
     // `server.type` is intentionally omitted — the sidecar dispatches on
     // `spec.sourceKind === "remote"`. Carrying `"http"` here would collide

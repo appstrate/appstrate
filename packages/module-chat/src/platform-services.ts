@@ -10,8 +10,8 @@
  *
  *   - `dispatch` re-enters the fully-wired platform Hono app IN-PROCESS (auth +
  *     RBAC still run on the dispatched Request). The loopback `fetch` fallback —
- *     used in OSS/test wiring where `ctx.services.inProcess` is absent — lives
- *     INSIDE this object, so callers never branch on it.
+ *     reachable only from the test harness, which builds deps without an init
+ *     context — lives INSIDE this object, so callers never branch on it.
  *   - `rateLimit` is the platform's authenticated per-route limiter.
  *   - `resolveSubscriptionChatModel` resolves the chosen model row to an
  *     oauth-subscription binding + a fresh access token (or a reconnect signal),
@@ -39,8 +39,8 @@ import type {
 export interface ChatPlatformDeps {
   /**
    * Dispatch a request into the platform. In-process via the wired platform app
-   * when available, else a loopback `fetch` (OSS/tests). The auth pipeline runs
-   * either way.
+   * when available, else a loopback `fetch` (test harness only). The auth
+   * pipeline runs either way.
    */
   dispatch(request: Request): Promise<Response>;
   /** Platform per-route rate limiter factory. */
@@ -104,11 +104,12 @@ export interface ChatPlatformDeps {
  * Build the immutable deps object from the module init context. Called once in
  * `chatModule.init(ctx)`.
  *
- * `ctx` is optional: when the module's router is built WITHOUT `init()` having
- * run (the test harness mounts module routers directly, and OSS standalone
- * wiring may skip init), the deps degrade to the safe baseline — loopback
- * `fetch` dispatch, a pass-through rate limiter, and no subscription support
- * (every provider falls through to the ai-sdk path).
+ * `ctx` is optional for the TEST HARNESS ONLY, which mounts the router
+ * directly: the module loader registers a module only after `init()` returns,
+ * so production always has a context. The no-context deps degrade to loopback
+ * `fetch` dispatch, a pass-through rate limiter, no subscription support (every
+ * provider falls through to the ai-sdk path) and — silently — no admission gate
+ * and no document teardown. Removal is tracked in GitHub issue #989.
  */
 /** Pass-through limiter used when no init context supplied a real one. */
 const passThroughRateLimit: MiddlewareHandler = (_c, next) => next();
@@ -122,7 +123,7 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
     resolveSubscriptionChatModel: (orgId, presetId) =>
       ctx
         ? ctx.services.resolveSubscriptionChatModel(orgId, presetId)
-        : // No init context (test harness / OSS standalone) → no subscription
+        : // No init context (test harness) → no subscription
           // resolution surface; treat every model as a non-subscription (ai-sdk)
           // provider, the same safe baseline this module had before.
           Promise.resolve({ subscription: false }),
@@ -130,18 +131,18 @@ export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps
     resolveChatAttachment: (request) =>
       ctx
         ? ctx.services.resolveChatAttachment(request)
-        : // No init context (test harness / OSS standalone) → no document store
+        : // No init context (test harness) → no document store
           // surface. Text-only turns never reach here; an attachment turn without
           // the platform wired is a genuine misconfiguration.
           Promise.reject(new Error("chat attachments require the platform document service")),
     cleanupSessionDocuments: (chatSessionId, tx) =>
       ctx
         ? ctx.services.cleanupSessionDocuments(chatSessionId, tx)
-        : // No init context (test harness / OSS standalone) → no document store
+        : // No init context (test harness) → no document store
           // surface; session delete proceeds without document teardown (the FK
           // cascade still removes any rows). Safe no-op baseline.
           Promise.resolve(),
-    // No init context (test harness / OSS standalone) → no admission gate wired;
+    // No init context (test harness) → no admission gate wired;
     // allow the turn (null), the same safe baseline as before this seam existed.
     checkUsageAllowed: (args) =>
       ctx ? ctx.services.checkUsageAllowed(args) : Promise.resolve(null),
