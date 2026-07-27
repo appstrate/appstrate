@@ -12,7 +12,10 @@ import { Button } from "@appstrate/ui/components/button";
  *
  * `canSetDefault` lets a surface hide the button on rows that can never become
  * default (e.g. an integration auth with a single eligible client). When the
- * row is neither the default nor settable, nothing renders.
+ * row is neither the default nor settable, nothing renders. `disabled` is the
+ * other half of that choice — the row *is* of a kind that can be the default
+ * but this one currently cannot, which the user is owed an explanation for:
+ * pass `disabledTitle` (same contract as `RunAgentButton`).
  */
 export function DefaultCell({
   isDefault,
@@ -21,6 +24,7 @@ export function DefaultCell({
   onSetDefault,
   canSetDefault = true,
   disabled = false,
+  disabledTitle,
   testId,
 }: {
   isDefault: boolean;
@@ -29,6 +33,7 @@ export function DefaultCell({
   onSetDefault: () => void;
   canSetDefault?: boolean;
   disabled?: boolean;
+  disabledTitle?: string;
   testId?: string;
 }) {
   if (isDefault) {
@@ -41,6 +46,7 @@ export function DefaultCell({
       variant="ghost"
       className="h-7 text-xs"
       disabled={disabled}
+      title={disabled ? disabledTitle : undefined}
       onClick={onSetDefault}
       data-testid={testId}
     >

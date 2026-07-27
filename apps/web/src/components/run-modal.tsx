@@ -9,6 +9,7 @@ import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { useUploadClient } from "../hooks/use-upload";
 import { useModels, useAgentModel } from "../hooks/use-models";
+import { isModelSelectable } from "../lib/model-selectability";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 interface RunModalProps {
@@ -121,8 +122,8 @@ function RunModalForm({
  * the run will use BEFORE triggering. The org default is resolved at run
  * creation, so a default changed mid-session silently applies to the next
  * run — this line makes that visible at trigger time. A stale agent pin
- * (model deleted/disabled) falls back to the org default, matching
- * `resolveModel` server-side.
+ * (model deleted/disabled/on a dead credential) falls back to the org default,
+ * matching `resolveModel` server-side.
  */
 function ResolvedModelHint({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents"]);
@@ -131,11 +132,29 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
 
   if (!orgModels || orgModels.length === 0) return null;
 
-  const pinned = agentModel?.modelId
-    ? orgModels.find((m) => m.id === agentModel.modelId && m.enabled)
+  // Candidates are found WITHOUT the selectability filter, then filtered — so
+  // when the cascade resolves to nothing we still know which model failed it
+  // and can name it, instead of rendering an empty line for a run that is
+  // about to fail with no explanation.
+  const pinnedCandidate = agentModel?.modelId
+    ? orgModels.find((m) => m.id === agentModel.modelId)
     : undefined;
-  const resolved = pinned ?? orgModels.find((m) => m.is_default && m.enabled);
-  if (!resolved) return null;
+  const defaultCandidate = orgModels.find((m) => m.is_default);
+  const pinned =
+    pinnedCandidate && isModelSelectable(pinnedCandidate) ? pinnedCandidate : undefined;
+  const resolved =
+    pinned ??
+    (defaultCandidate && isModelSelectable(defaultCandidate) ? defaultCandidate : undefined);
+
+  if (!resolved) {
+    const dead = defaultCandidate ?? pinnedCandidate;
+    if (!dead) return null;
+    return (
+      <p className="text-destructive text-xs" data-testid="run-resolved-model">
+        {t("input.modelUnavailable", { name: dead.label })}
+      </p>
+    );
+  }
 
   const source = pinned ? t("input.modelSourceAgent") : t("input.modelSourceOrgDefault");
 

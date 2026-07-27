@@ -16,6 +16,8 @@ import { useUploadClient } from "../../hooks/use-upload";
 import { getModelIcon } from "../icons";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
+import { isModelSelectable } from "../../lib/model-selectability";
+import { ModelUnselectableNote } from "../model-availability-badge";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
@@ -79,7 +81,9 @@ function ModelSection({ packageId }: { packageId: string }) {
   if (!orgModels || orgModels.length === 0) return null;
 
   const agentModelId = agentModel?.modelId;
-  const orgDefaultModel = orgModels.find((m) => m.is_default && m.enabled);
+  // Unfiltered on purpose — see the same call in `run-overrides-panel.tsx`:
+  // the inherited default must be named even when it is unusable.
+  const orgDefaultModel = orgModels.find((m) => m.is_default);
 
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">
@@ -94,17 +98,21 @@ function ModelSection({ packageId }: { packageId: string }) {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__inherit__">
-            {orgDefaultModel
-              ? t("models.agent.inherit", { ns: "settings", name: orgDefaultModel.label })
-              : t("models.agent.inheritNoDefault", { ns: "settings" })}
+            <span className="inline-flex items-center gap-1.5">
+              {orgDefaultModel
+                ? t("models.agent.inherit", { ns: "settings", name: orgDefaultModel.label })
+                : t("models.agent.inheritNoDefault", { ns: "settings" })}
+              {orgDefaultModel && <ModelUnselectableNote model={orgDefaultModel} />}
+            </span>
           </SelectItem>
           {orgModels.map((m) => {
             const MIcon = getModelIcon(m, registry ?? []);
             return (
-              <SelectItem key={m.id} value={m.id}>
+              <SelectItem key={m.id} value={m.id} disabled={!isModelSelectable(m)}>
                 <span className="inline-flex items-center gap-1.5">
                   {MIcon && <MIcon className="size-3.5" />}
                   {m.label}
+                  <ModelUnselectableNote model={m} />
                 </span>
               </SelectItem>
             );

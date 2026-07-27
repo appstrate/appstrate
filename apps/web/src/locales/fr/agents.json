@@ -167,6 +167,7 @@
   "input.modelResolved": "Modèle : {{name}} ({{source}})",
   "input.modelSourceAgent": "réglage de l'agent",
   "input.modelSourceOrgDefault": "défaut de l'organisation",
+  "input.modelUnavailable": "Modèle {{name}} indisponible : ses identifiants ne peuvent plus être utilisés pour l'inférence.",
   "schedule.titleNew": "Nouvelle planification",
   "schedule.titleEdit": "Modifier la planification",
   "schedule.name": "Nom (optionnel)",

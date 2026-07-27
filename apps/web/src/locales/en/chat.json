@@ -16,5 +16,6 @@
   "run.status.failed": "Failed",
   "run.status.timeout": "Timed out",
   "run.status.cancelled": "Cancelled",
-  "run.status.done": "Finished"
+  "run.status.done": "Finished",
+  "model.needsReconnection": "Reconnection required"
 }

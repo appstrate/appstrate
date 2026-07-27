@@ -454,6 +454,8 @@
   "models.deleteConfirm": "Delete model \"{{label}}\"?",
   "models.default": "Default",
   "models.disabled": "Disabled",
+  "models.credentialUnavailable": "Credential unavailable",
+  "models.credentialUnavailableHint": "This model's credential can no longer be used for inference — reconnect or replace it in the Model Provider Keys tab.",
   "models.alias": "Managed",
   "models.aliasHidden": "Managed model",
   "models.setDefault": "Set as default",

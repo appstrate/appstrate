@@ -47,6 +47,7 @@ import { Spinner } from "../../components/spinner";
 import { TestResultSpan } from "../../components/test-result-span";
 import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { SourceBadge } from "../../components/source-badge";
+import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
 
 function ModelsList({
@@ -106,6 +107,7 @@ function ModelsList({
                             {t("models.disabled")}
                           </Badge>
                         )}
+                        {m.needs_reconnection && <ModelUnavailableBadge />}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -120,11 +122,19 @@ function ModelsList({
                       </div>
                     </TableCell>
                     <TableCell>
+                      {/* Shown but disabled, not hidden: `PUT /api/models/default`
+                          answers 409 `model_needs_reconnection` for such a row,
+                          and a control that silently vanishes is what made this
+                          state impossible to reason about. Delete stays enabled
+                          below — detaching the model is how the user frees the
+                          credential. */}
                       <DefaultCell
                         isDefault={m.is_default}
                         defaultLabel={t("models.default")}
                         setLabel={t("models.setDefault")}
                         onSetDefault={() => onSetDefault(m)}
+                        disabled={m.needs_reconnection}
+                        disabledTitle={t("models.credentialUnavailableHint")}
                         testId={`set-default-model-${m.id}`}
                       />
                     </TableCell>

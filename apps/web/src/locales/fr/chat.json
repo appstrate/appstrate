@@ -16,5 +16,6 @@
   "run.status.failed": "Échec",
   "run.status.timeout": "Expiré",
   "run.status.cancelled": "Annulé",
-  "run.status.done": "Terminé"
+  "run.status.done": "Terminé",
+  "model.needsReconnection": "Reconnexion requise"
 }

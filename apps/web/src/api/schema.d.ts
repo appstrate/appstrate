@@ -5225,6 +5225,8 @@ export interface components {
             reasoning?: boolean | null;
             enabled: boolean;
             is_default: boolean;
+            /** @description True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. */
+            needs_reconnection: boolean;
             /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
             aliased: boolean;
             /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon. */
@@ -13243,10 +13245,7 @@ export interface operations {
     };
     listModels: {
         parameters: {
-            query?: {
-                /** @description When true, resolve each model's protocol family and base URL from the provider registry WITHOUT decrypting its credential. Faster for callers that only need to pick a model (e.g. the chat model picker); a model whose secret is unusable is not filtered and surfaces an error only at inference time. */
-                metadata_only?: boolean;
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -13281,6 +13280,7 @@ export interface operations {
                      *           "source": "built-in",
                      *           "enabled": true,
                      *           "is_default": false,
+                     *           "needs_reconnection": false,
                      *           "aliased": false,
                      *           "credentialId": "pk_abc123",
                      *           "contextWindow": 128000,
@@ -13403,6 +13403,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The model's stored credential can no longer be used for inference (`model_needs_reconnection`) — see the `needs_reconnection` field on `OrgModel`. Such a model is listed so it can be inspected or detached, but it cannot become the organization default: every run and chat would fail at inference time. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     searchOpenRouterModels: {

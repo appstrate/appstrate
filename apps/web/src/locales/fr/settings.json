@@ -454,6 +454,8 @@
   "models.deleteConfirm": "Supprimer le modèle \"{{label}}\" ?",
   "models.default": "Par défaut",
   "models.disabled": "Inactif",
+  "models.credentialUnavailable": "Identifiants indisponibles",
+  "models.credentialUnavailableHint": "Les identifiants de ce modèle ne peuvent plus être utilisés pour l'inférence — à reconnecter ou à remplacer dans l'onglet Clés de providers de modèles.",
   "models.alias": "Géré",
   "models.aliasHidden": "Modèle géré",
   "models.setDefault": "Définir par défaut",
