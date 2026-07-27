@@ -63,6 +63,14 @@ const CloudEventEnvelopeSchema = z
     time: z.iso.datetime(),
     datacontenttype: z.literal("application/json"),
     data: z.record(z.string(), z.unknown()),
+    // OPTIONAL CloudEvents attribute (§3.1) — the runtime stamps it with
+    // the published JSON Schema URI of the `data` payload for canonical
+    // events, and omits it for third-party ones. The schema is `.strict()`,
+    // so an unmodelled attribute would 400 the whole event: accept it
+    // explicitly. Ingestion does not read it (`envelopeToRunEvent` consumes
+    // `data`/`type`/`time` only) — it is documentation for downstream
+    // consumers, not an input.
+    dataschema: z.string().min(1).optional(),
     sequence: z.number().int().nonnegative(),
   })
   .strict();

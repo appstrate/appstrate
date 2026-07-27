@@ -278,4 +278,22 @@ describe("rateLimitByBearer", () => {
     });
     expect(res2.status).toBe(200);
   });
+
+  it("keys a lowercase `bearer` scheme the same as `Bearer` (RFC 9110 §11.4)", async () => {
+    const app = createApp();
+    app.use("/internal", rateLimitByBearer(1));
+    app.get("/internal", (c) => c.json({ ok: true }));
+
+    const first = await app.request("/internal", {
+      headers: { Authorization: "Bearer exec_333.hmac" },
+    });
+    expect(first.status).toBe(200);
+
+    // Same token, non-canonical scheme — must land in the SAME bucket,
+    // not a fresh `unknown` one that would hand out extra budget.
+    const second = await app.request("/internal", {
+      headers: { Authorization: "bearer exec_333.hmac" },
+    });
+    expect(second.status).toBe(429);
+  });
 });

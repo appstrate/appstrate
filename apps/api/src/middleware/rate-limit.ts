@@ -2,6 +2,7 @@
 
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import type { Context, Next } from "hono";
+import { parseBearer } from "@appstrate/core/bearer";
 import type { AppEnv } from "../types/index.ts";
 import { getRateLimiterFactory } from "../infra/index.ts";
 import { ApiError } from "../lib/errors.ts";
@@ -186,10 +187,7 @@ export const rateLimitMcp = createRateLimitMiddleware({
 export const rateLimitByBearer = createRateLimitMiddleware({
   category: "bearer",
   extractKey: (c) => {
-    const auth = c.req.header("Authorization") ?? "";
-    const token = auth.startsWith("Bearer ")
-      ? (auth.slice(7).split(".")[0] ?? "unknown")
-      : "unknown";
+    const token = parseBearer(c.req.header("Authorization"))?.split(".")[0] ?? "unknown";
     return `internal:${limiterPath(c)}:${token}`;
   },
   emitHeaders: false,

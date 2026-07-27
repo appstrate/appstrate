@@ -58,7 +58,12 @@ export const parameters = {
     in: "header" as const,
     required: false,
     description:
-      "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours.",
+      "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, " +
+      "scoped to the organization and application: a repeat with the same body replays the original response with " +
+      "`Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate " +
+      "is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that " +
+      "do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the " +
+      "“Idempotency” section of the API description).",
     schema: { type: "string", maxLength: 255 },
   },
   SseAppId: {

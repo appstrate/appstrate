@@ -139,8 +139,13 @@ export interface AppstrateModule {
    * core auth are skipped.
    *
    * Strategies MUST return `null` fast when the request does not match their
-   * signature (e.g. a JWT strategy should return `null` for anything not
-   * starting with `Bearer ey...`). A strategy that claims every request would
+   * signature (e.g. a JWT strategy should return `null` for any bearer token
+   * not starting with `ey...`). Parse the header with an RFC 9110 §11.4
+   * conformant parser — never `startsWith("Bearer ")`, which rejects the
+   * case-insensitive auth-scheme the RFC mandates. `parseBearer` from
+   * `@appstrate/core/bearer` does this, but the subpath first ships in core
+   * **6.0.0**; on an earlier core, parse the header yourself. A strategy that
+   * claims every request would
    * shadow core API key auth — this is author discipline, not a framework
    * guarantee. See `apps/api/src/modules/README.md` for the full contract.
    */

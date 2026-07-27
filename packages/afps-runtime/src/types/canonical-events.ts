@@ -152,6 +152,43 @@ export const CANONICAL_EVENT_TYPES = [
 
 const CANONICAL_TYPE_SET: ReadonlySet<string> = new Set<string>(CANONICAL_EVENT_TYPES);
 
+/** Optional AFPS scope dimension — absent, or one of the two values. */
+function isValidScope(value: unknown): boolean {
+  return value === undefined || value === "actor" || value === "shared";
+}
+
+/**
+ * A JSON object: not `null`, not an array. Mirrors JSON Schema's
+ * `type: "object"`, which excludes both.
+ */
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A number the wire can actually carry. `NaN` and `±Infinity` are
+ * `number`s in JS, but `JSON.stringify` turns them into `null` — which
+ * fails the published `type: "number"` constraint. An event carrying one
+ * is therefore NOT canonical, even though an in-memory JSON Schema
+ * validator (ajv) would accept the pre-serialization value.
+ */
+function isWireNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * Counters constrained by `appstrate.metric`'s published `usage`
+ * sub-schema. Asserted at compile time to be exactly `keyof TokenUsage`
+ * (see the `_…Parity` tuple in `../events/canonical-event-schemas.ts`),
+ * so a counter added to the interface cannot escape this check.
+ */
+export const TOKEN_USAGE_COUNTERS = [
+  "input_tokens",
+  "output_tokens",
+  "cache_creation_input_tokens",
+  "cache_read_input_tokens",
+] as const;
+
 /**
  * True when the event's `type` is one of the canonical strings AND its
  * payload satisfies the canonical shape. Returns `false` for tampered
@@ -160,6 +197,26 @@ const CANONICAL_TYPE_SET: ReadonlySet<string> = new Set<string>(CANONICAL_EVENT_
  * ill-formed event.
  *
  * Performs **structural** checks only — no deep clone, no mutation.
+ *
+ * ## Relationship to the published payload schemas
+ *
+ * This guard is the gate `buildCloudEventEnvelope` uses to decide whether
+ * to stamp the CloudEvents `dataschema` attribute, so it MUST NOT accept
+ * anything the schema at that URI would reject. It therefore mirrors every
+ * constraint in `../events/canonical-event-schemas.ts` field for field —
+ * including the ones a reader might dismiss as cosmetic (`data` on
+ * `appstrate.progress`/`error` must be an object; each `usage` counter and
+ * `durationMs` on `appstrate.metric` must be a number).
+ *
+ * The one deliberate asymmetry is non-finite numbers: the guard rejects
+ * them (see {@link isWireNumber}) where an in-memory ajv run would accept
+ * them. That direction is safe — rejecting more than the schema only costs
+ * an omitted OPTIONAL attribute — and it matches what survives
+ * serialization. The shared fixture corpus
+ * (`test/fixtures/canonical-event-corpus.ts`) pins the equality on every
+ * other constrained field, and a coverage assertion derived from the
+ * generated JSON Schema documents fails if a new constrained field appears
+ * without a fixture exercising it.
  */
 export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent {
   if (!CANONICAL_TYPE_SET.has(event.type)) return false;
@@ -167,19 +224,19 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
     case "memory.added": {
       const e = event as Record<string, unknown>;
       if (typeof e.content !== "string") return false;
-      // Optional scope: when present must be "actor" | "shared".
-      if (e.scope !== undefined && e.scope !== "actor" && e.scope !== "shared") return false;
-      return true;
+      return isValidScope(e.scope);
     }
     case "pinned.set": {
       const e = event as Record<string, unknown>;
       if (typeof e.key !== "string" || e.key.length === 0) return false;
-      if (!("content" in e)) return false;
-      if (e.scope !== undefined && e.scope !== "actor" && e.scope !== "shared") return false;
-      return true;
+      // `content` is `required` in the published schema. An explicit
+      // `undefined` is dropped by `JSON.stringify`, so it is absent on the
+      // wire — `!== undefined`, not `"content" in e`.
+      if (e.content === undefined) return false;
+      return isValidScope(e.scope);
     }
     case "output.emitted":
-      return "data" in event;
+      return (event as Record<string, unknown>).data !== undefined;
     case "log.written": {
       const e = event as Record<string, unknown>;
       return (
@@ -188,18 +245,27 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
       );
     }
     case "appstrate.progress":
-    case "appstrate.error":
-      return typeof (event as Record<string, unknown>).message === "string";
+    case "appstrate.error": {
+      const e = event as Record<string, unknown>;
+      if (typeof e.message !== "string") return false;
+      // Optional structured context: `Record<string, unknown>` in the
+      // schema, so an array / null / scalar is a violation.
+      if (e.data !== undefined && !isJsonObject(e.data)) return false;
+      return true;
+    }
     case "appstrate.metric": {
       const e = event as Record<string, unknown>;
-      // usage and cost are both optional, but when present must be valid:
-      // usage = plain object, cost = non-negative finite number.
+      // usage, cost and durationMs are all optional; when present each
+      // must match the published payload schema exactly.
       if (e.usage !== undefined) {
-        if (e.usage === null || typeof e.usage !== "object" || Array.isArray(e.usage)) return false;
+        if (!isJsonObject(e.usage)) return false;
+        for (const counter of TOKEN_USAGE_COUNTERS) {
+          const value = e.usage[counter];
+          if (value !== undefined && !isWireNumber(value)) return false;
+        }
       }
-      if (e.cost !== undefined) {
-        if (typeof e.cost !== "number" || !Number.isFinite(e.cost) || e.cost < 0) return false;
-      }
+      if (e.cost !== undefined && (!isWireNumber(e.cost) || e.cost < 0)) return false;
+      if (e.durationMs !== undefined && !isWireNumber(e.durationMs)) return false;
       return true;
     }
     default:

@@ -6,7 +6,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { paginatedRunsKeys } from "../lib/query-keys";
-import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
+import type { EnrichedRun, ListEnvelope, RunStatus } from "@appstrate/shared-types";
 
 export type RunKindFilter = "all" | "package" | "inline";
 
@@ -15,7 +15,12 @@ interface UsePaginatedRunsOptions {
   scheduleId?: string;
   user?: "me";
   kind?: RunKindFilter;
-  status?: string;
+  /**
+   * `RunStatus`, not `string`: `GET /api/runs` now rejects a value outside the
+   * enum with a 400 instead of quietly returning every status, so a typo here
+   * has to be a compile error rather than a runtime surprise.
+   */
+  status?: RunStatus;
   limit: number;
   offset: number;
 }

@@ -10,10 +10,17 @@
  * `type` mirrors the RunEvent `type` verbatim — e.g. `memory.added`,
  * `pinned.set`, or any third-party `@scope/tool.verb`.
  *
- * Specification: see AFPS spec §8 and CloudEvents 1.0.
+ * Canonical events additionally carry `dataschema`, a stable versioned
+ * URI pointing at the published JSON Schema for their `data` payload, so
+ * a consumer can validate the payload without reading Appstrate source.
+ * The schemas themselves live in `./canonical-event-schemas.ts`.
+ *
+ * Specification: CloudEvents 1.0 (`dataschema` is §3.1, OPTIONAL).
  */
 
 import type { RunEvent } from "@afps-spec/types";
+import { isCanonicalRunEvent } from "../types/canonical-events.ts";
+import { canonicalEventSchemaUri } from "./canonical-event-schemas.ts";
 
 export interface CloudEventEnvelope {
   specversion: "1.0";
@@ -24,6 +31,12 @@ export interface CloudEventEnvelope {
   time: string; // RFC 3339
   datacontenttype: "application/json";
   data: Record<string, unknown>;
+  /**
+   * OPTIONAL CloudEvents 1.0 attribute (§3.1) identifying the JSON
+   * Schema `data` adheres to. Present only for canonical events whose
+   * payload actually validates — see {@link buildCloudEventEnvelope}.
+   */
+  dataschema?: string;
   /**
    * Non-standard CloudEvents extension attribute
    * (https://github.com/cloudevents/spec/blob/main/cloudevents/extensions/sequence.md)
@@ -55,6 +68,22 @@ export function buildCloudEventEnvelope(opts: BuildEnvelopeOptions): CloudEventE
     if (!ENVELOPE_KEYS.has(key)) data[key] = value;
   }
 
+  // `dataschema` is an assertion about `data`, so it is emitted only when
+  // the payload genuinely satisfies the canonical shape. A third-party
+  // `@scope/tool.verb` event (unknown payload) and a tampered canonical
+  // event (e.g. `memory.added` without a string `content`) both fall
+  // through without the attribute rather than pointing at a schema they
+  // would fail. Omission is conformant — the attribute is OPTIONAL.
+  //
+  // `isCanonicalRunEvent` is a deliberate SUBSET of the published schemas:
+  // it mirrors every constraint they express and additionally rejects
+  // non-finite numbers, which `JSON.stringify` would turn into `null`.
+  // Rejecting more than the schema is always safe (it only omits an
+  // OPTIONAL attribute); accepting more would not be, so the two are kept
+  // in lockstep by `test/fixtures/canonical-event-corpus.ts` plus a
+  // coverage check derived from the generated JSON Schema documents.
+  const dataschema = isCanonicalRunEvent(event) ? canonicalEventSchemaUri(event.type) : undefined;
+
   return {
     specversion: "1.0",
     type: event.type,
@@ -63,6 +92,7 @@ export function buildCloudEventEnvelope(opts: BuildEnvelopeOptions): CloudEventE
     time: new Date(nowMs).toISOString(),
     datacontenttype: "application/json",
     data,
+    ...(dataschema === undefined ? {} : { dataschema }),
     sequence,
   };
 }

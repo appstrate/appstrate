@@ -140,6 +140,8 @@ export {
   CredentialResolutionError,
   isAfpsError,
   toProblem,
+  afpsErrorTypeUri,
+  AFPS_ERROR_CODES,
   type AfpsError,
   type AfpsErrorCode,
   type ProblemDetails,

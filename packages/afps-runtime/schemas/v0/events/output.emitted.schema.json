@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.afps.dev/v0/events/output.emitted.schema.json",
+  "$comment": "SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Appstrate",
+  "title": "AFPS output.emitted event data",
+  "description": "CloudEvent `data` payload for `output.emitted` — the structured run output emitted by the AFPS `output()` tool (@afps/output).",
+  "type": "object",
+  "properties": {
+    "data": {
+      "description": "Structured run output. Replace-on-emit — last write wins."
+    }
+  },
+  "required": [
+    "data"
+  ],
+  "additionalProperties": {}
+}

@@ -35,10 +35,10 @@ describe("apiVersion middleware", () => {
   it("respects Appstrate-Version header override", async () => {
     const app = createApp();
     const res = await app.request("/test", {
-      headers: { "Appstrate-Version": "2026-03-21" },
+      headers: { "Appstrate-Version": CURRENT_API_VERSION },
     });
     expect(res.status).toBe(200);
-    expect(res.headers.get("Appstrate-Version")).toBe("2026-03-21");
+    expect(res.headers.get("Appstrate-Version")).toBe(CURRENT_API_VERSION);
   });
 
   it("rejects invalid date format with 400", async () => {
@@ -57,15 +57,70 @@ describe("apiVersion middleware", () => {
       headers: { "Appstrate-Version": "2020-01-01" },
     });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { code: string };
+    const body = (await res.json()) as { code: string; param: string };
     expect(body.code).toBe("unsupported_api_version");
+    expect(body.param).toBe("Appstrate-Version");
   });
 
   it("uses org-pinned version when available", async () => {
-    const app = createApp(async () => "2026-03-21");
+    const app = createApp(async () => CURRENT_API_VERSION);
     const res = await app.request("/test");
     expect(res.status).toBe(200);
-    expect(res.headers.get("Appstrate-Version")).toBe("2026-03-21");
+    expect(res.headers.get("Appstrate-Version")).toBe(CURRENT_API_VERSION);
+    const body = (await res.json()) as { version: string };
+    expect(body.version).toBe(CURRENT_API_VERSION);
+  });
+
+  it("rejects a well-formed but unsupported org pin with 400 instead of downgrading", async () => {
+    // The org asked to be frozen on a version the server no longer serves.
+    // Answering with CURRENT_API_VERSION would deliver a possibly-breaking API
+    // under the guise of the pinned one, with nothing in the response saying so.
+    const app = createApp(async () => "2020-01-01");
+    const res = await app.request("/test");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string; param?: string; detail: string };
+    expect(body.code).toBe("unsupported_api_version");
+    expect(body.detail).toContain("2020-01-01");
+    // No `param`: the convention (`@appstrate/core/api-errors`, mirroring
+    // Stripe) is that `param` names the REQUEST parameter at fault so a client
+    // can attach the message to the offending input. The pin is server-stored
+    // state and this request sent no parameter at all — naming one would point
+    // a consumer at a field that does not exist. The header path (above) keeps
+    // its `param` precisely because there the caller did send the value.
+    expect(body.param).toBeUndefined();
+    // The response must not claim to be serving anything.
+    expect(res.headers.get("Appstrate-Version")).toBeNull();
+  });
+
+  it("rejects a malformed org pin with the same error as an unsupported one", async () => {
+    // Deliberately not distinguished from the well-formed-but-dropped case:
+    // both are unreadable server state to the caller, with the same remedy.
+    const app = createApp(async () => "not-a-date");
+    const res = await app.request("/test");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string; param?: string };
+    expect(body.code).toBe("unsupported_api_version");
+    expect(body.param).toBeUndefined();
+  });
+
+  it("header takes priority over org-pinned version", async () => {
+    const app = createApp(async () => CURRENT_API_VERSION);
+    const res = await app.request("/test", {
+      headers: { "Appstrate-Version": CURRENT_API_VERSION },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Appstrate-Version")).toBe(CURRENT_API_VERSION);
+  });
+
+  it("header wins even when the org pin is unsupported", async () => {
+    // The header path short-circuits the pin lookup entirely: an org stuck on
+    // a dead pin can still be reached by a client that names a live version.
+    const app = createApp(async () => "2020-01-01");
+    const res = await app.request("/test", {
+      headers: { "Appstrate-Version": CURRENT_API_VERSION },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Appstrate-Version")).toBe(CURRENT_API_VERSION);
   });
 
   it("falls back to current version when org has no pinned version", async () => {
@@ -73,15 +128,15 @@ describe("apiVersion middleware", () => {
     const res = await app.request("/test");
     expect(res.status).toBe(200);
     expect(res.headers.get("Appstrate-Version")).toBe(CURRENT_API_VERSION);
+    const body = (await res.json()) as { version: string };
+    expect(body.version).toBe(CURRENT_API_VERSION);
   });
 
-  it("header takes priority over org-pinned version", async () => {
-    const app = createApp(async () => "2026-03-21");
-    const res = await app.request("/test", {
-      headers: { "Appstrate-Version": "2026-03-21" },
-    });
+  it("falls back to current version when no resolver is wired at all", async () => {
+    const app = createApp();
+    const res = await app.request("/test");
     expect(res.status).toBe(200);
-    expect(res.headers.get("Appstrate-Version")).toBe("2026-03-21");
+    expect(res.headers.get("Appstrate-Version")).toBe(CURRENT_API_VERSION);
   });
 
   it("sets apiVersion in context for route handlers", async () => {

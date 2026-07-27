@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.afps.dev/v0/events/pinned.set.schema.json",
+  "$comment": "SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Appstrate",
+  "title": "AFPS pinned.set event data",
+  "description": "CloudEvent `data` payload for `pinned.set` — an upsert-by-key into a named pinned slot emitted by the AFPS `pin()` tool (@afps/pin). Last-write-wins per (scope, key).",
+  "type": "object",
+  "properties": {
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Pinned slot identifier. \"checkpoint\" is reserved for the carry-over slot."
+    },
+    "content": {
+      "description": "Arbitrary JSON value stored under the pinned slot."
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "actor",
+        "shared"
+      ],
+      "description": "AFPS persistence scope. Absent MUST be read as \"actor\" (per-actor isolation), never as \"shared\"."
+    }
+  },
+  "required": [
+    "key",
+    "content"
+  ],
+  "additionalProperties": {}
+}

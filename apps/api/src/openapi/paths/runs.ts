@@ -700,7 +700,7 @@ export const runsPaths = {
           in: "query",
           schema: { type: "string", enum: ["me"] },
           description:
-            "Filter runs by user. `me` returns only the current user's runs. Omit for all org runs.",
+            "Filter runs by user. `me` is the only accepted value and returns only the current user's runs. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org.",
         },
         {
           name: "limit",
@@ -712,8 +712,19 @@ export const runsPaths = {
           name: "kind",
           in: "query",
           schema: { type: "string", enum: ["all", "package", "inline"] },
+          description:
+            "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
         },
-        { name: "status", in: "query", schema: { type: "string" } },
+        {
+          name: "status",
+          in: "query",
+          schema: {
+            type: "string",
+            enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
+          },
+          description:
+            "Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
+        },
         { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
         { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
       ],
@@ -744,7 +755,7 @@ export const runsPaths = {
           },
         },
         "400": {
-          description: "Invalid query parameter (e.g. malformed date)",
+          description: "Invalid query parameter (unknown `user` value, malformed date, …)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1289,6 +1300,12 @@ export const runsPaths = {
                 time: { type: "string", format: "date-time" },
                 datacontenttype: { const: "application/json" },
                 data: { type: "object" },
+                dataschema: {
+                  type: "string",
+                  format: "uri",
+                  description:
+                    "OPTIONAL CloudEvents attribute identifying the JSON Schema the `data` payload adheres to. Emitted for canonical event types (e.g. `https://schemas.afps.dev/v0/events/memory.added.schema.json`); absent for third-party `@scope/tool.verb` events.",
+                },
                 sequence: { type: "integer", minimum: 0 },
               },
             },

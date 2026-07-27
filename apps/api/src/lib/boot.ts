@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
+import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
+import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
@@ -239,6 +241,13 @@ export async function bootBackground(): Promise<void> {
   // Reconcile the loaded system packages into the DB + S3.
   await syncSystemPackagesToDb().catch((err) => {
     logger.warn("Could not sync system packages", {
+      error: getErrorMessage(err),
+    });
+  });
+
+  // Surface orgs whose stored API-version pin this build cannot serve.
+  await warnOnUnserveableApiVersionPins().catch((err) => {
+    logger.warn("Could not check organization API version pins", {
       error: getErrorMessage(err),
     });
   });
@@ -587,6 +596,50 @@ function warnOnTrustProxyMisconfig(trustProxy: string, nodeEnv: string): void {
   // runs with TRUST_PROXY=true don't colour the logs red.
   if (nodeEnv === "production") logger.error(msg);
   else logger.info(msg);
+}
+
+/**
+ * Boot-time audit of stored org API-version pins.
+ *
+ * `middleware/api-version.ts` 400s on a pin this build cannot serve, and it is
+ * mounted on `*` — so an org holding an unserveable value fails EVERY org-scoped
+ * route, with the only trace being that org's own 400s. Nothing else notices:
+ * the platform boots clean, health checks pass, other tenants are unaffected.
+ *
+ * Two things can put such a value in the table, and neither is visible in the
+ * code alone. A version dropped from `SUPPORTED_VERSIONS` without the backfill
+ * its docblock mandates; or a historical `PUT /api/orgs/:orgId/settings` from
+ * before that route validated `api_version` (it took a bare `z.string()`, and
+ * the field is declared writable in the OpenAPI spec, so a hand-rolled client
+ * could persist anything). This check covers both.
+ *
+ * Deliberately a LOG, not a migration and not a fail-fast:
+ *   - A migration would repoint the rows, which is a silent write to tenant
+ *     configuration on a hypothesis. It would also fix today's rows once and
+ *     leave the next dropped version unguarded; this fires on every boot.
+ *   - Aborting boot would convert one tenant's misconfiguration into a
+ *     platform-wide outage — strictly worse than the fault it reports.
+ *
+ * Emitted at `error` for the same reason as `warnOnTrustProxyMisconfig`: the
+ * deployment most likely to hit this is the one running `LOG_LEVEL=error`, and
+ * the remedy (one `PUT` per named org) is only actionable if the ids are in the
+ * line. Silent on a healthy instance — zero rows, zero output.
+ */
+async function warnOnUnserveableApiVersionPins(): Promise<void> {
+  const supported = listSupportedVersions();
+  const offenders = await listOrgsWithUnsupportedApiVersion(supported);
+  if (offenders.length === 0) return;
+
+  logger.error(
+    `${offenders.length} organization(s) are pinned to an API version this build cannot serve. ` +
+      `Every org-scoped route will answer 400 unsupported_api_version for them until the pin is ` +
+      `repaired (PUT /api/orgs/:orgId/settings with a supported api_version).`,
+    {
+      supportedVersions: supported,
+      currentVersion: CURRENT_API_VERSION,
+      orgs: offenders.map((o) => ({ orgId: o.id, pinnedVersion: o.apiVersion })),
+    },
+  );
 }
 
 /**

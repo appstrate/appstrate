@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — published JSON Schemas for canonical CloudEvent payloads
+
+- New `@appstrate/afps-runtime/events` exports (`CANONICAL_EVENT_SCHEMAS`,
+  `canonicalEventSchemaUri`, `buildCanonicalEventJsonSchemas`, …). The seven
+  canonical event `data` payloads (`memory.added`, `pinned.set`,
+  `output.emitted`, `log.written`, `appstrate.progress`, `appstrate.error`,
+  `appstrate.metric`) now have Zod definitions that generate committed JSON
+  Schema 2020-12 documents under `schemas/v0/events/` (regenerate with
+  `bun run schemas:generate`, drift-guarded by the test suite).
+- `buildCloudEventEnvelope` stamps the OPTIONAL CloudEvents `dataschema`
+  attribute with the matching versioned schema URI. Additive and
+  non-breaking: no existing attribute changes, and the attribute is omitted
+  for third-party (`@scope/tool.verb`) events and for canonical types whose
+  payload does not actually satisfy the shape.
+- The URIs are not served yet — the documents still have to be published to
+  `schemas.afps.dev/v0/events/` (AFPS-namespaced events) and
+  `schemas.appstrate.dev/v0/events/` (`appstrate.*` vendor events).
+
+### Fixed — RFC 9457 `type` URIs moved to the canonical docs host
+
+- `toProblem()` emitted `https://errors.appstrate.dev/{code}` while the
+  platform emitted `https://docs.appstrate.dev/errors/{code-with-dashes}` for
+  the same concept — two hosts (both unresolvable) and two code spellings.
+  Runtime errors now resolve under the canonical docs host, in their own
+  namespace: `https://docs.appstrate.dev/errors/afps/{code-with-dashes}`.
+- The `afps/` segment is load-bearing. The two catalogues overlap on names
+  that mean different things — `INTEGRITY_MISMATCH` here is an SRI mismatch
+  over stored bytes, the platform's `integrity_mismatch` is a 409 "version
+  already exists with different content" — and renaming a code on either
+  side would be a wire-breaking change. The namespace makes the collision
+  structurally impossible instead of merely documented.
+- New exports on `@appstrate/afps-runtime/errors`: `afpsErrorTypeUri(code)`
+  and `AFPS_ERROR_CODES` (exhaustive over `AfpsErrorCode` at compile time).
+
 ### Added — shared tool-result truncation
 
 - `@appstrate/afps-runtime/runner` now exports `truncateToolResult` and
