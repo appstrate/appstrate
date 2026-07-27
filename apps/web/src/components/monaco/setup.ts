@@ -15,9 +15,14 @@
  */
 import * as monaco from "monaco-editor";
 import { loader } from "@monaco-editor/react";
-import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import JsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
-import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+// The worker specifiers below look truncated next to the `monaco-editor/esm/vs/…`
+// form every Monaco tutorial shows — they are not. Since 0.56 the package's
+// `exports` map is `"./*": "./esm/vs/*.js"`, so it prefixes `esm/vs/` itself and
+// spelling it out resolves to `esm/vs/esm/vs/…` and fails the build. The bare
+// `monaco-editor` import above stays the documented full-feature entry point.
+import EditorWorker from "monaco-editor/editor/editor.worker?worker";
+import JsonWorker from "monaco-editor/language/json/json.worker?worker";
+import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 
 self.MonacoEnvironment = {
   getWorker(_workerId: string, label: string): Worker {
