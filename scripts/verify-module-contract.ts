@@ -434,8 +434,7 @@ if (problems.length === 0) {
   console.log(
     `✅ module contract clean — ${audited} entries audited across 4 surfaces ` +
       `(${Object.keys(LEDGER).length} AppstrateModule, ${Object.keys(HOOK_LEDGER).length} hooks, ` +
-      `${Object.keys(EVENT_LEDGER).length} events, ${Object.keys(SERVICE_LEDGER).length} services), ` +
-      `no drift.`,
+      `${Object.keys(EVENT_LEDGER).length} events, ${Object.keys(SERVICE_LEDGER).length} services), no drift.`,
   );
 }
 

@@ -30,8 +30,8 @@ import type { OrchestratorRegistration } from "./platform-types.ts";
 
 /**
  * The `@appstrate/core` version this build ships — the platform half of the
- * module contract, exported so the loader can compare it against the range a
- * module declares (see {@link ModuleManifest.core_version}).
+ * module contract, exported so the loader can compare it against the
+ * `@appstrate/core` range a module declares in its own `package.json`.
  *
  * Hardcoded rather than read from `package.json`: core is consumed over npm by
  * external repos where an ESM JSON import is a portability hazard (import
@@ -50,26 +50,6 @@ export interface ModuleManifest {
   version: string;
   /** Module IDs this module depends on (loaded first). */
   dependencies?: string[];
-  /**
-   * Semver RANGE naming the `@appstrate/core` major this module was built
-   * against (e.g. `"^6.0.0"`). The platform loader checks it against
-   * {@link CORE_VERSION} at boot: a range this core does not satisfy is logged
-   * (`MODULE_CONTRACT_ENFORCE=warn`, the shipped default) or refuses the boot
-   * (`MODULE_CONTRACT_ENFORCE=fail`, the intended end state once every module
-   * can declare the published major).
-   *
-   * Why it exists: the module→platform direction of the contract is invisible
-   * to `tsc` for an out-of-tree module. `PlatformServices.checkUsageAllowed`
-   * gained a REQUIRED `subscription` flag in core 6.0.0 — a 5.x-era caller
-   * omitting it does not error, it silently reports a subscription turn as
-   * platform-funded (issue #973).
-   *
-   * Optional on purpose: requiring it would break every existing module. When
-   * absent the loader falls back to the `@appstrate/core` range declared in the
-   * module's own `package.json`, and when that is unresolvable too it warns and
-   * loads the module anyway — an unknown range is a blind spot, not a fault.
-   */
-  core_version?: string;
 }
 
 /**

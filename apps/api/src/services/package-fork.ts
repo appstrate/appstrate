@@ -148,10 +148,18 @@ async function forkWithConfig(
   // a source manifest invalid for any other reason (missing `type` /
   // `schema_version`, a null/array jsonb column) would otherwise mint a fresh
   // draft row, version row and ZIP unnoticed. Rejecting is not an option:
-  // drifted catalog entries exist in production (#928) and a gate here would
-  // make them permanently un-forkable — the fork is a READ of an immutable,
-  // unrepairable artifact. So the operator gets a log line, and the fork
-  // proceeds.
+  // manifests today's validator refuses DO sit in the catalog, and a gate here
+  // would make them permanently un-forkable — the fork is a READ of an
+  // immutable, unrepairable artifact. Two sources, both real:
+  //   - the provider→integration migration (#481, shipped in beta.17) left
+  //     `type: "provider"` manifests behind; they were repaired by a one-off
+  //     backfill script that no longer exists in this repo;
+  //   - `POST /api/mcp-servers` can still MINT one today: a malformed
+  //     `manifest.json` makes `parseManifestBytesSafe` return undefined, so
+  //     `routes/packages.ts` skips its `if (parsed.manifest)` validation
+  //     entirely and `createOrgItem` synthesizes a `{version, name, type}` stub
+  //     that `createVersionSafe` then writes into `package_versions.manifest`.
+  // So the operator gets a log line, and the fork proceeds.
   const validation = validateManifest(updatedManifest, { retiredRuntimeTools: "drop" });
   if (!validation.valid) {
     logger.warn("forking an invalid published manifest", {

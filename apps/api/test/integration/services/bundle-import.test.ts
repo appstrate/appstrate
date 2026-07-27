@@ -29,7 +29,6 @@ import {
   readOrBuildBundle,
   reconstructPackageZip,
 } from "../../../src/services/bundle-import.ts";
-import { postInstallPackage } from "../../../src/services/post-install-package.ts";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -271,46 +270,15 @@ describe("detectBundleConflicts", () => {
 // foreign org's package. These regressions FAIL against the pre-fix code.
 
 // ---------------------------------------------------------------------------
-// Issue #974 — `postInstallPackage` re-reads `manifest.json` out of the raw ZIP
-// bytes and persists THAT object into `packages` / `package_versions`. Both of
-// today's callers validate the same bytes upstream (`parsePackageZip`), so the
-// gate is a backstop: it holds the invariant "a stored manifest was validated
-// at least once" for any future caller that skips the parser.
+// Issue #974 — an invalid manifest is rejected UPSTREAM of the persistence
+// path: `parsePackageZip` validates the same bytes `postInstallPackage` would
+// later re-read, on both of its callers. This pins that the rejection lands
+// before anything is written, and that the aborted import leaves no row behind.
 // ---------------------------------------------------------------------------
 
-describe("postInstallPackage — manifest gate", () => {
+describe("bundle import — upstream manifest rejection + rollback", () => {
   beforeEach(async () => {
     await truncateAll();
-  });
-
-  it("throws on a manifest that fails schema validation, persisting no version", async () => {
-    const ctx = await createTestContext({ orgSlug: "gateorg" });
-    const packageId = "@gateorg/broken";
-    // `type` is the AFPS discriminator — without it no schema can be dispatched.
-    const manifest = { name: packageId, version: "1.0.0", display_name: "Broken" };
-    const files: Record<string, Uint8Array> = {
-      "manifest.json": enc(JSON.stringify(manifest, null, 2)),
-      "prompt.md": enc("Prompt."),
-    };
-
-    const err = await postInstallPackage({
-      packageType: "agent",
-      packageId,
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-      content: "Prompt.",
-      files,
-      zipBuffer: Buffer.from(buildRawAfps(manifest, "Prompt.")),
-    }).catch((e: unknown) => e);
-
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("invalid manifest");
-
-    const versions = await db
-      .select({ id: packageVersions.id })
-      .from(packageVersions)
-      .where(eq(packageVersions.packageId, packageId));
-    expect(versions).toHaveLength(0);
   });
 
   it("leaves neither a packages row nor a version row when a bundle carries an invalid manifest", async () => {
@@ -335,8 +303,7 @@ describe("postInstallPackage — manifest gate", () => {
     ).catch((e: unknown) => e);
 
     // `parsePackageZip` rejects the reconstructed archive before the ownership
-    // claim, so the import never reaches the gate — and, either way, aborts
-    // before a row exists.
+    // claim, so the import aborts before a row exists.
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(400);
 

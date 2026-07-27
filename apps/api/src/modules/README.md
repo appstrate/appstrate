@@ -68,13 +68,9 @@ const myModule: AppstrateModule = {
 export default myModule;
 ```
 
-An **out-of-tree** module (its own repo, `@appstrate/core` from npm) should also declare the core major it was built against:
+An **out-of-tree** module (its own repo, `@appstrate/core` from npm) declares nothing extra: put `@appstrate/core` in its `package.json` like any dependency, and the platform reads the range from there.
 
-```ts
-manifest: { id: "my-feature", name: "My Feature", version: "1.0.0", core_version: "^6.0.0" },
-```
-
-The loader checks that range against the platform's `CORE_VERSION` at boot. It exists because the module→platform direction is invisible to `tsc`: a stale module calling a platform service whose signature moved (core 6.0.0 made `checkUsageAllowed`'s `subscription` flag required) fails **silently**, not loudly (issue #973). When the field is absent the loader falls back to the `@appstrate/core` range in the module's own `package.json`, and warns when neither is resolvable. In-tree modules (`workspace:*`) are exempt — `tsc` already gates them.
+The loader checks that range against the platform's `CORE_VERSION` at boot. It exists because the module→platform direction is invisible to `tsc`: a stale module calling a platform service whose signature moved (core 6.0.0 made `checkUsageAllowed`'s `subscription` flag required) fails **silently**, not loudly (issue #973). When no range is resolvable the loader warns and boots anyway. In-tree modules (`workspace:*`) are exempt — `tsc` already gates them.
 
 A mismatch logs a warning and boots (`MODULE_CONTRACT_ENFORCE=warn`, the default) — only until the `afps-shared → core@6.0.0 on npm → module bump + republish` chain has run, because the platform builds core 6.0.0 while npm still serves 5.0.0 and no out-of-tree module can declare `^6.0.0` yet. The intended end state is `MODULE_CONTRACT_ENFORCE=fail`, which refuses to boot naming the module and both versions; operators who have completed that lockstep should set it today.
 

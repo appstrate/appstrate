@@ -156,57 +156,23 @@ async function readPackageJson(path: string | null): Promise<PackageJsonDeps | n
  * Read the `@appstrate/core` range an npm-loaded module declares in its own
  * `package.json`.
  *
- * The module's OWN manifest is asked for first: a package that exports
- * `./package.json` (or a path specifier) lands straight on the package root.
- * The entry-file walk below is the fallback for the majority of npm packages,
- * which export no such subpath — and it can land on the wrong file: a module
- * whose entry sits in `dist/` next to a `{"type":"module"}` marker stops at
- * that marker, finds no `@appstrate/core` key and silently reports "unknown".
+ * `<specifier>/package.json` is the ONLY lookup, and it needs no fallback: Bun
+ * resolves that subpath past any `exports` map — verified against the 64 direct
+ * dependencies of this repo and against an `exports` explicitly declaring
+ * `"./package.json": null`. Node's stricter enforcement is not a case to
+ * defend, because this file only ever runs under Bun (`apps/api` is private and
+ * is never published to a Node consumer).
  *
- * Best-effort by design: an unresolvable specifier, an unreadable file or a
- * missing entry all mean "unknown", never a crash — this guard must not be the
- * thing that stops a working module from booting.
+ * Best-effort by design: an unresolvable specifier or an unreadable file means
+ * "unknown", never a crash — this guard must not be the thing that stops a
+ * working module from booting.
  *
  * Exported for tests: this is the branch a real npm module's boot verdict comes
  * from, and it is unreachable through the instance-loading entry point.
  */
 export async function _coreRangeFromPackageJson(specifier: string): Promise<string | null> {
   const own = await readPackageJson(tryResolve(`${specifier}/package.json`));
-  if (own) return coreRangeOf(own);
-
-  const entry = tryResolve(specifier);
-  if (entry === null) return null;
-  let dir = dirname(entry);
-  // Bounded walk: a package root is a handful of levels above its entry file
-  // at most, and an unbounded loop would climb out of the repo.
-  for (let depth = 0; depth < 10; depth++) {
-    const pkg = await readPackageJson(join(dir, "package.json"));
-    if (pkg) return coreRangeOf(pkg);
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
-/**
- * Resolve the `@appstrate/core` range a module declares, in precedence order:
- * a built-in module (in-tree by construction), then the manifest field, then
- * the module's own package.json for an npm specifier.
- *
- * Built-in FIRST, not the manifest: a built-in compiles against the very core
- * it runs on, so `tsc` is its gate. Reading its manifest first would let a
- * `core_version` copy-pasted from the authoring README (a plain string nothing
- * validates) fail the boot of a module that is correct by construction.
- */
-async function resolveDeclaredCoreRange(
-  mod: AppstrateModule,
-  specifier: string | null,
-): Promise<string | null> {
-  if (specifier !== null && getBuiltinModules().has(specifier)) return "workspace:*";
-  if (mod.manifest.core_version) return mod.manifest.core_version;
-  if (specifier === null) return null; // instance-loaded: the manifest is the only source
-  return _coreRangeFromPackageJson(specifier);
+  return own ? coreRangeOf(own) : null;
 }
 
 /**
@@ -235,7 +201,16 @@ async function enforceCoreVersionContract(
   specifier: string | null,
 ): Promise<void> {
   const id = mod.manifest.id;
-  const declared = await resolveDeclaredCoreRange(mod, specifier);
+  // A built-in short-circuits to the workspace protocol: it compiles against
+  // the very core it runs on, so `tsc` is its gate and there is nothing for a
+  // semver check to add. No specifier at all (instance-loaded) means there is
+  // no package.json to read, hence no declared range.
+  const declared =
+    specifier === null
+      ? null
+      : getBuiltinModules().has(specifier)
+        ? "workspace:*"
+        : await _coreRangeFromPackageJson(specifier);
 
   if (declared !== null && IN_TREE_RANGE_PREFIXES.some((p) => declared.startsWith(p))) {
     logger.debug("Module resolves @appstrate/core from the workspace, skipping version gate", {
@@ -315,9 +290,9 @@ export async function loadModulesFromInstances(
     logger.debug("Modules already initialized, skipping");
     return;
   }
-  // Same gate as the specifier path — a pre-resolved instance still carries its
-  // manifest, and the guard must not be something the entry point decides.
-  // There is no specifier here, so `manifest.core_version` is the only source.
+  // Same gate as the specifier path — the guard must not be something the entry
+  // point decides. With no specifier there is no package.json to read, so the
+  // verdict here can only ever be the "unverified" warning.
   for (const mod of modules) await enforceCoreVersionContract(mod, null);
   await initSortedModules(modules, ctx);
 }

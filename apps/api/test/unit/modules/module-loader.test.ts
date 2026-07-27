@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { CORE_VERSION } from "@appstrate/core/module";
+import { logger } from "../../../src/lib/logger.ts";
 import {
   _coreRangeFromPackageJson,
+  loadModules,
   loadModulesFromInstances,
   getModules,
   getModulePublicPaths,
@@ -51,6 +53,25 @@ function mockModule(id: string, overrides: Partial<AppstrateModule> = {}): Appst
     async init() {},
     ...overrides,
   };
+}
+
+/**
+ * Write a fixture package under `root` and return the specifier pointing at it
+ * — an absolute path, which Bun resolves syntactically (no `node_modules`
+ * lookup, which would resolve relative to this file rather than to `root`).
+ */
+async function writeFixturePackage(
+  root: string,
+  name: string,
+  pkg: Record<string, unknown>,
+  extraFiles: Record<string, string> = {},
+): Promise<string> {
+  const dir = join(root, name);
+  await Bun.write(join(dir, "package.json"), JSON.stringify(pkg));
+  for (const [rel, body] of Object.entries(extraFiles)) {
+    await Bun.write(join(dir, rel), body);
+  }
+  return dir;
 }
 
 function mockCtx(): ModuleInitContext {
@@ -128,11 +149,53 @@ describe("module-loader", () => {
    * `checkUsageAllowed.subscription` required — a 5.x caller omitting it reads
    * a subscription turn as platform-funded). Ranges are derived from
    * `CORE_VERSION` so the expectations survive the next major bump.
+   *
+   * Driven through `loadModules()` against real on-disk packages, because that
+   * is the only entry point that can gate anything: the declared range comes
+   * from the module's own `package.json`, and an instance-loaded module carries
+   * no specifier to read one from.
    */
   describe("core version contract", () => {
     const currentRange = `^${CORE_VERSION}`;
     const staleRange = `^${Number(CORE_VERSION.split(".")[0]) - 1}.0.0`;
     const originalEnforce = process.env.MODULE_CONTRACT_ENFORCE;
+    let root: string;
+
+    beforeEach(async () => {
+      root = await mkdtemp(join(tmpdir(), "appstrate-module-contract-"));
+    });
+
+    afterEach(async () => {
+      await rm(root, { recursive: true, force: true });
+      if (originalEnforce === undefined) delete process.env.MODULE_CONTRACT_ENFORCE;
+      else process.env.MODULE_CONTRACT_ENFORCE = originalEnforce;
+      _resetCacheForTesting();
+    });
+
+    /**
+     * A loadable module package: a `package.json` declaring `range` (omitted
+     * when null) plus an entry file default-exporting the module contract.
+     * Each test gets a fresh `root`, so two fixtures sharing an id are still
+     * distinct paths and never collide in the import cache.
+     */
+    async function moduleFixture(id: string, range: string | null): Promise<string> {
+      const quoted = JSON.stringify(id);
+      return writeFixturePackage(
+        root,
+        id,
+        {
+          name: id,
+          type: "module",
+          main: "index.js",
+          ...(range === null ? {} : { dependencies: { "@appstrate/core": range } }),
+        },
+        {
+          "index.js":
+            `export default { manifest: { id: ${quoted}, name: ${quoted}, version: "1.0.0" }, ` +
+            `init: async () => {} };`,
+        },
+      );
+    }
 
     /**
      * Opt into the strict policy. `warn` ships as the default only until the
@@ -144,18 +207,9 @@ describe("module-loader", () => {
       _resetCacheForTesting();
     }
 
-    afterEach(() => {
-      if (originalEnforce === undefined) delete process.env.MODULE_CONTRACT_ENFORCE;
-      else process.env.MODULE_CONTRACT_ENFORCE = originalEnforce;
-      _resetCacheForTesting();
-    });
-
     it("refuses a module whose declared core range excludes the running core", async () => {
       enforceFail();
-      const mod = mockModule("stale", {
-        manifest: { id: "stale", name: "stale", version: "1.0.0", core_version: staleRange },
-      });
-      const promise = loadModulesFromInstances([mod], mockCtx());
+      const promise = loadModules([await moduleFixture("stale", staleRange)], mockCtx());
       // Both versions must appear: the operator has to see what the module
       // wants AND what this platform ships to know which side to bump.
       await expect(promise).rejects.toThrow(staleRange);
@@ -164,55 +218,51 @@ describe("module-loader", () => {
 
     it("names the running core version in the failure", async () => {
       enforceFail();
-      const mod = mockModule("stale", {
-        manifest: { id: "stale", name: "stale", version: "1.0.0", core_version: staleRange },
-      });
-      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(CORE_VERSION);
+      const promise = loadModules([await moduleFixture("stale", staleRange)], mockCtx());
+      await expect(promise).rejects.toThrow(CORE_VERSION);
     });
 
     it("loads a module whose declared range is satisfied by the running core", async () => {
-      const mod = mockModule("current", {
-        manifest: { id: "current", name: "current", version: "1.0.0", core_version: currentRange },
-      });
-      await loadModulesFromInstances([mod], mockCtx());
-      expect(getModules().get("current")).toBe(mod);
+      await loadModules([await moduleFixture("current", currentRange)], mockCtx());
+      expect(getModules().has("current")).toBe(true);
     });
 
-    it("loads a module that declares no range (unknown is a blind spot, not a fault)", async () => {
-      const mod = mockModule("undeclared");
-      await loadModulesFromInstances([mod], mockCtx());
-      expect(getModules().get("undeclared")).toBe(mod);
+    it("loads a module that declares no range, warning that nothing was verified", async () => {
+      const warn = spyOn(logger, "warn");
+      try {
+        await loadModules([await moduleFixture("undeclared", null)], mockCtx());
+        expect(getModules().has("undeclared")).toBe(true);
+        // Unknown is a blind spot, not a fault — but the operator must be told
+        // it IS a blind spot, otherwise a silent load reads as a green verdict.
+        const warned = warn.mock.calls.some(([msg]) =>
+          String(msg).includes("version contract unverified"),
+        );
+        expect(warned).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("loads an in-tree module (workspace protocol is gated by tsc, not semver)", async () => {
-      const mod = mockModule("in-tree", {
-        manifest: { id: "in-tree", name: "in-tree", version: "1.0.0", core_version: "workspace:*" },
-      });
-      await loadModulesFromInstances([mod], mockCtx());
-      expect(getModules().get("in-tree")).toBe(mod);
+      await loadModules([await moduleFixture("in-tree", "workspace:*")], mockCtx());
+      expect(getModules().has("in-tree")).toBe(true);
     });
 
     it("boots despite a mismatch under the shipped default (warn)", async () => {
       // No env set: the default must stay `warn` while npm still serves core
       // 5.0.0 and no out-of-tree module can declare `^6.0.0` yet. Flip this to
       // `fail` only together with the env schema default.
-      const mod = mockModule("stale", {
-        manifest: { id: "stale", name: "stale", version: "1.0.0", core_version: staleRange },
-      });
-      await loadModulesFromInstances([mod], mockCtx());
-      expect(getModules().get("stale")).toBe(mod);
+      await loadModules([await moduleFixture("stale", staleRange)], mockCtx());
+      expect(getModules().has("stale")).toBe(true);
     });
   });
 
   /**
-   * The `package.json` branch — where a REAL npm module's boot verdict comes
-   * from, and unreachable through every test above (`loadModulesFromInstances`
-   * passes no specifier, so those exercise `manifest.core_version` only).
-   *
-   * Fixtures are absolute paths, which Bun resolves syntactically. That covers
-   * dep-kind precedence and the "read the module's OWN package.json" rule; it
-   * cannot reproduce a bare specifier's `node_modules` lookup, because
-   * resolution is relative to `module-loader.ts`, not to a temp directory.
+   * The range lookup itself, unit-tested on fixture packages: dep-kind
+   * precedence and the "read the module's OWN package.json" rule. Absolute-path
+   * specifiers cannot reproduce a bare specifier's `node_modules` lookup,
+   * because resolution is relative to `module-loader.ts`, not to a temp
+   * directory.
    */
   describe("_coreRangeFromPackageJson", () => {
     let root: string;
@@ -224,19 +274,11 @@ describe("module-loader", () => {
       await rm(root, { recursive: true, force: true });
     });
 
-    /** Write a fixture package and return the specifier pointing at it. */
-    async function fixture(
+    const fixture = (
       name: string,
       pkg: Record<string, unknown>,
       extraFiles: Record<string, string> = {},
-    ): Promise<string> {
-      const dir = join(root, name);
-      await Bun.write(join(dir, "package.json"), JSON.stringify(pkg));
-      for (const [rel, body] of Object.entries(extraFiles)) {
-        await Bun.write(join(dir, rel), body);
-      }
-      return dir;
-    }
+    ) => writeFixturePackage(root, name, pkg, extraFiles);
 
     it("prefers dependencies, then peerDependencies, then devDependencies", async () => {
       const all = await fixture("all", {
@@ -256,11 +298,11 @@ describe("module-loader", () => {
     });
 
     it("reads the module's own package.json, not a `dist/package.json` type marker", async () => {
-      // The marker is the real-world trap: a published module's entry sits in
-      // `dist/` beside `{"type":"module"}`, so walking up from the ENTRY finds
-      // a package.json with no `@appstrate/core` key and reports "unknown".
-      // Resolving `<specifier>/package.json` first is what makes the module's
-      // own declaration win, whatever the entry layout.
+      // A published module's entry commonly sits in `dist/` beside a
+      // `{"type":"module"}` marker — a second package.json with no
+      // `@appstrate/core` key. Resolving `<specifier>/package.json` lands on
+      // the package root whatever the entry layout, so the module's own
+      // declaration wins and the marker is never consulted.
       const dir = await fixture(
         "dist-marker",
         { main: "dist/index.js", dependencies: { "@appstrate/core": "^6.0.0" } },
