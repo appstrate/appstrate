@@ -422,7 +422,11 @@ export const packagesPaths = {
       operationId: "listSkills",
       tags: ["Packages"],
       summary: "List skills",
-      description: "List all skills (system + org) in the organization.",
+      description:
+        "List the skills available to the current application (`X-Application-Id`): system " +
+        "packages, plus organization packages installed in this application. Organization " +
+        "packages that exist but are not installed here are NOT returned — for the " +
+        "organization-wide catalogue with per-application install state, use `GET /api/library`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -887,7 +891,12 @@ export const packagesPaths = {
       operationId: "listAgentPackages",
       tags: ["Packages"],
       summary: "List agent packages",
-      description: "List all agent packages (system + org) in the organization.",
+      description:
+        "List the agent packages available to the current application (`X-Application-Id`): " +
+        "system packages, plus organization packages installed in this application. " +
+        "Organization packages that exist but are not installed here are NOT returned — for " +
+        "the organization-wide catalogue with per-application install state, use " +
+        "`GET /api/library`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -1665,7 +1674,12 @@ export const packagesPaths = {
       operationId: "listIntegrationPackages",
       tags: ["Packages"],
       summary: "List integration packages",
-      description: "List all integration packages (system + org) in the organization.",
+      description:
+        "List the integration packages available to the current application " +
+        "(`X-Application-Id`): system packages, plus organization packages installed in this " +
+        "application. Organization packages that exist but are not installed here are NOT " +
+        "returned — for the organization-wide catalogue with per-application install state, " +
+        "use `GET /api/library`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -2245,7 +2259,12 @@ export const packagesPaths = {
       operationId: "listMcpServerPackages",
       tags: ["Packages"],
       summary: "List MCP-server packages",
-      description: "List all MCP-server packages (system + org) in the organization.",
+      description:
+        "List the MCP-server packages available to the current application " +
+        "(`X-Application-Id`): system packages, plus organization packages installed in this " +
+        "application. Organization packages that exist but are not installed here are NOT " +
+        "returned — for the organization-wide catalogue with per-application install state, " +
+        "use `GET /api/library`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

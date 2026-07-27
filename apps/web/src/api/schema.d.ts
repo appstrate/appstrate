@@ -2840,7 +2840,7 @@ export interface paths {
         };
         /**
          * List agent packages
-         * @description List all agent packages (system + org) in the organization.
+         * @description List the agent packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
          */
         get: operations["listAgentPackages"];
         put?: never;
@@ -3068,7 +3068,7 @@ export interface paths {
         };
         /**
          * List integration packages
-         * @description List all integration packages (system + org) in the organization.
+         * @description List the integration packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
          */
         get: operations["listIntegrationPackages"];
         put?: never;
@@ -3236,7 +3236,7 @@ export interface paths {
         };
         /**
          * List MCP-server packages
-         * @description List all MCP-server packages (system + org) in the organization.
+         * @description List the MCP-server packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
          */
         get: operations["listMcpServerPackages"];
         put?: never;
@@ -3404,7 +3404,7 @@ export interface paths {
         };
         /**
          * List skills
-         * @description List all skills (system + org) in the organization.
+         * @description List the skills available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
          */
         get: operations["listSkills"];
         put?: never;
@@ -5890,7 +5890,7 @@ export interface components {
         PackageScope: string;
         /** @description Package name */
         PackageName: string;
-        /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+        /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
         PackageActiveFilter: "true";
     };
     requestBodies: never;
@@ -14917,7 +14917,7 @@ export interface operations {
     listAgentPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -15711,7 +15711,7 @@ export interface operations {
     listIntegrationPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -16270,7 +16270,7 @@ export interface operations {
     listMcpServerPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -16841,7 +16841,7 @@ export interface operations {
     listSkills: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
