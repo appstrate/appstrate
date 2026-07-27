@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Wrench, Plug } from "lucide-react";
@@ -34,23 +34,11 @@ const TYPE_PRESENTATION: Record<
 export function ItemTab({
   type = "skill",
   readOnly = false,
-  actionsMap,
-  filterIds,
-  headerContent,
-  extraActions: externalActions,
-  emptyExtraActions,
-  title: externalTitle,
 }: {
   /** Package type to list. Defaults to "skill" to preserve existing callers. */
   type?: BrowseType;
   /** When true, hides the "create" editor link (browse-only surface). */
   readOnly?: boolean;
-  actionsMap?: Map<string, ReactNode>;
-  filterIds?: Set<string>;
-  headerContent?: ReactNode;
-  extraActions?: ReactNode;
-  emptyExtraActions?: ReactNode;
-  title?: string;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { data: rawItems, isLoading } = usePackageList(type);
@@ -58,16 +46,14 @@ export function ItemTab({
 
   const presentation = TYPE_PRESENTATION[type];
   const typeLabel = t(presentation.typeKey);
-  const title = externalTitle ?? t(presentation.titleKey);
-  const filtered = filterIds ? rawItems?.filter((item) => filterIds.has(item.id)) : rawItems;
-  const items: CardItem[] | undefined = filtered?.map((item) => ({
+  const title = t(presentation.titleKey);
+  const items: CardItem[] | undefined = rawItems?.map((item) => ({
     id: item.id,
     displayName: item.name || item.id,
     description: item.description,
     type,
     source: item.source,
     usedByAgents: item.used_by_agents,
-    actions: actionsMap?.get(item.id),
     autoInstalled: item.auto_installed,
   }));
 
@@ -82,7 +68,6 @@ export function ItemTab({
         emptyIcon={presentation.emptyIcon}
         extraActions={
           <>
-            {externalActions}
             <Button variant="outline" onClick={() => setImportOpen(true)}>
               {t("nav.import", { ns: "common" })}
             </Button>
@@ -93,8 +78,6 @@ export function ItemTab({
             )}
           </>
         }
-        emptyExtraActions={emptyExtraActions}
-        headerContent={headerContent}
         title={title}
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
