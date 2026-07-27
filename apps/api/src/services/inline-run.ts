@@ -21,7 +21,12 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import type { InlineRunBody, InlineRunPreflightResult } from "./inline-run-preflight.ts";
-import { collectMountedDocumentIds, type ParsedInput } from "./input-parser.ts";
+import {
+  collectMountedDocumentIds,
+  mapWithConcurrency,
+  DOC_STREAM_CONCURRENCY,
+  type ParsedInput,
+} from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -32,8 +37,9 @@ import {
   parseDocumentUri,
 } from "@appstrate/core/document-uri";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
-import { invalidRequest, validationFailed } from "../lib/errors.ts";
+import { documentCountExceeded, invalidRequest, validationFailed } from "../lib/errors.ts";
 import { appendRunLog } from "./state/runs.ts";
+import { getEnv } from "@appstrate/env";
 
 export type { InlineRunBody };
 
@@ -372,6 +378,22 @@ export function normalizeContextDocumentUris(value: unknown): string[] {
  * unreadable document is refused here and would be refused again by the consume
  * path.
  *
+ * ACCEPTED TRADE-OFF (deliberate, not an oversight): prompt text becomes a mount
+ * primitive where it used to be inert, so prompt injection can now cause a mount
+ * — but only WITHIN the set the calling actor may already read, since every
+ * candidate still clears the container ACL. Authorization is unchanged; the blast
+ * radius of injected prompt text widens by one class of side effect. The
+ * `context_documents_auto_repaired` run log is the instrumentation that keeps
+ * that visible.
+ *
+ * COST CONTROL: the candidate list comes from free-form model text, so it is
+ * attacker-shaped — a ~200 KB prompt can name thousands of distinct ids. It is
+ * therefore capped at `RUN_MAX_DOCUMENTS` BEFORE any probe runs (the same ceiling
+ * `parseRequestInput` enforces on the mount, just moved ahead of the I/O), and
+ * the surviving probes run at `DOC_STREAM_CONCURRENCY` — the same bound the
+ * document streaming uses, and a strictly cheaper unit of work than the streams
+ * it precedes.
+ *
  * Returns the `document://` URIs to mount (possibly empty).
  */
 export async function resolvePromptDocumentsForContext(params: {
@@ -383,7 +405,19 @@ export async function resolvePromptDocumentsForContext(params: {
   const uncovered = uncoveredPromptDocumentIds(params.prompt, params.input, params.inputSchema);
   if (uncovered.length === 0) return [];
 
-  const readable = await Promise.all(uncovered.map((id) => params.canRead(id)));
+  // Cap FIRST: an over-cap prompt can never produce a legal run (the mount would
+  // reject it anyway), so probing it would spend the queries for nothing.
+  const maxDocuments = getEnv().RUN_MAX_DOCUMENTS;
+  if (uncovered.length > maxDocuments) {
+    throw documentCountExceeded(
+      `The run prompt references ${uncovered.length} document:// URIs; a run may carry at most ` +
+        `${maxDocuments} input documents`,
+    );
+  }
+
+  const readable = await mapWithConcurrency(uncovered, DOC_STREAM_CONCURRENCY, (id) =>
+    params.canRead(id),
+  );
   const unresolvable = uncovered.filter((_, i) => !readable[i]);
   if (unresolvable.length > 0) throw promptDocumentsNotMountedError(unresolvable);
   return uncovered.map(documentUri);

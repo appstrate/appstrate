@@ -34,13 +34,22 @@ export const RUN_RESULT_INLINE_MAX_BYTES = 32 * 1024;
 /**
  * Name of the `agent_output` document the platform writes when a run's `result`
  * overruns {@link RUN_RESULT_INLINE_MAX_BYTES} — the full payload, so the
- * truncated tool result can point at it. Deliberately platform-namespaced: the
- * match below is by name, and a generic `run-result.json` could collide with a
- * file an agent published itself.
+ * truncated tool result can point at it.
+ *
+ * The spill is located BY NAME below, so the name must be unforgeable — and
+ * namespacing alone does not achieve that: the agent-output dedup key is
+ * `(run_id, sha256, name)`, so an agent-published decoy and the genuine spill
+ * would coexist. The guarantee comes from the publish boundary instead:
+ * `routes/runs-events.ts` REFUSES this name from an agent (400). Without that
+ * refusal an agent could publish a decoy, then exhaust its own output budget so
+ * the genuine spill is rejected — the spill is best-effort by design — and the
+ * orchestrating model would read agent-substituted content as the authoritative
+ * result while `runs.result` held something else.
  *
  * Written by `apps/api/src/services/documents.ts` (`spillRunResultDocument`),
- * read here. The constant lives in core because both sides must agree and core
- * is the only package both import — core itself never touches storage.
+ * refused at publish by `apps/api/src/routes/runs-events.ts`, read here. The
+ * constant lives in core because all three must agree and core is the only
+ * package they all import — core itself never touches storage.
  */
 export const RUN_RESULT_SPILL_DOCUMENT_NAME = "appstrate-run-result.json";
 

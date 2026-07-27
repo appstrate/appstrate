@@ -74,6 +74,34 @@ export function runNoticeMessageId(runId: string): string {
   return `run_notice_${runId}`;
 }
 
+/** Display ceiling for a document name inside the notice. */
+const NOTICE_NAME_MAX_CHARS = 80;
+
+/**
+ * Render an agent-chosen document name safely inside the notice.
+ *
+ * The name is UNTRUSTED: a sub-agent processing injected third-party content
+ * picks it, and `sanitizeFilename` only strips path separators and control
+ * characters (truncating at 255), so arbitrary prose survives. This notice is
+ * persisted with `role: "assistant"` and replayed to the model on the next
+ * turn, so an unquoted name would let a file name become text the orchestrator
+ * reads back as its OWN prior statement — prompt injection with the assistant's
+ * authority. Document names already reach the model through `run_and_wait`'s
+ * `documents` list, but that is a tool result, not the assistant channel.
+ *
+ * Two defences: a hard length cap well under `sanitizeFilename`'s 255, and a
+ * code span. Backticks in the name are stripped rather than escaped — a name is
+ * a label here, not markup, and stripping cannot be undone by nesting.
+ */
+function renderNoticeName(name: string): string {
+  const flattened = name.replace(/[`\r\n]+/g, " ").trim();
+  const clipped =
+    flattened.length > NOTICE_NAME_MAX_CHARS
+      ? `${flattened.slice(0, NOTICE_NAME_MAX_CHARS - 1)}…`
+      : flattened;
+  return `\`${clipped || "document"}\``;
+}
+
 /**
  * The user-facing notice (French — this product's UI language, matching
  * `turnDeadlineNoticeText`). States that the run finished after its turn, names
@@ -87,7 +115,7 @@ export function runNoticeText(input: {
 }): string {
   const href = buildRunPageHref(input.packageId ?? undefined, input.runId);
   const lines = input.documents.map(
-    (doc) => `- ${doc.name} (${doc.size} o) — \`${documentUri(doc.id)}\``,
+    (doc) => `- ${renderNoticeName(doc.name)} (${doc.size} o) — \`${documentUri(doc.id)}\``,
   );
   const label = href ? `[\`${input.runId}\`](${href})` : `\`${input.runId}\``;
   return (

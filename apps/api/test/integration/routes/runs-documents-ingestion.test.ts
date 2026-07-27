@@ -17,6 +17,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, documents, organizations } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
+import { RUN_RESULT_SPILL_DOCUMENT_NAME } from "@appstrate/core/run-and-wait-client";
 import { sign } from "@appstrate/afps-runtime/events";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { getTestApp } from "../../helpers/app.ts";
@@ -126,6 +127,25 @@ describe("POST /api/runs/:runId/documents — agent-output ingestion", () => {
     expect(row!.orgId).toBe(ctx.orgId);
     expect(row!.size).toBe(bytes.byteLength);
     expect(await orgBytesUsed(ctx.orgId)).toBe(bytes.byteLength);
+  });
+
+  it("refuses the reserved run-result spill name: 400, nothing stored", async () => {
+    // `truncateRunAndWaitPayload` locates the platform's oversized-result spill
+    // BY NAME. If an agent could publish under that name it would plant a decoy
+    // the orchestrating model then reads as the authoritative run result — the
+    // dedup key is (run_id, sha256, name), so a decoy would simply coexist with
+    // the real spill rather than collide with it.
+    const runId = await seedRun(ctx);
+    const bytes = new TextEncoder().encode('{"not":"the real result"}');
+    const res = await postDoc(
+      runId,
+      docHeaders(RUN_SECRET, RUN_RESULT_SPILL_DOCUMENT_NAME, "application/json"),
+      bytes,
+    );
+
+    expect(res.status).toBe(400);
+    const rows = await db.select().from(documents).where(eq(documents.runId, runId));
+    expect(rows).toHaveLength(0);
   });
 
   it("dedups an identical (sha256, name) re-publish: 200, existing row, single count", async () => {

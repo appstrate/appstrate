@@ -22,6 +22,8 @@ import { collectMountedDocumentIds } from "../../src/services/input-parser.ts";
 import { ApiError } from "../../src/lib/errors.ts";
 import { isFileField, asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import type { AgentManifest } from "../../src/types/index.ts";
+import { getEnv } from "@appstrate/env";
+import { DOC_STREAM_CONCURRENCY } from "../../src/services/input-parser.ts";
 
 const DOC_A_ID = "doc_aaaaaaaa";
 const DOC_B_ID = "doc_bbbbbbbb";
@@ -244,5 +246,55 @@ describe("resolvePromptDocumentsForContext (auto-repair)", () => {
     const message = (caught as ApiError).fieldErrors?.[0]?.message ?? "";
     expect(message).toContain(DOC_B);
     expect(message).not.toContain(DOC_A);
+  });
+});
+
+describe("resolvePromptDocumentsForContext — cost control", () => {
+  // The candidate list comes from free-form model text, so it is attacker-shaped:
+  // a ~200 KB prompt can name thousands of distinct ids. Probing them would spend
+  // one DB query each BEFORE the mount-time cap could reject the run anyway.
+  it("rejects an over-cap prompt without issuing a single ACL probe", async () => {
+    const max = getEnv().RUN_MAX_DOCUMENTS;
+    const prompt = Array.from(
+      { length: max + 1 },
+      (_, i) => `document://doc_${String(i).padStart(12, "0")}`,
+    ).join(" ");
+    let probes = 0;
+
+    await expect(
+      resolvePromptDocumentsForContext({
+        prompt,
+        input: null,
+        inputSchema: undefined,
+        canRead: async () => {
+          probes++;
+          return true;
+        },
+      }),
+    ).rejects.toThrow();
+    expect(probes).toBe(0);
+  });
+
+  it("resolves a batch larger than the probe concurrency bound", async () => {
+    const count = DOC_STREAM_CONCURRENCY * 3;
+    const ids = Array.from({ length: count }, (_, i) => `doc_${String(i).padStart(12, "0")}`);
+    let inFlight = 0;
+    let peak = 0;
+
+    const uris = await resolvePromptDocumentsForContext({
+      prompt: ids.map((id) => `document://${id}`).join(" "),
+      input: null,
+      inputSchema: undefined,
+      canRead: async () => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await Promise.resolve();
+        inFlight--;
+        return true;
+      },
+    });
+
+    expect(uris).toHaveLength(count);
+    expect(peak).toBeLessThanOrEqual(DOC_STREAM_CONCURRENCY);
   });
 });
