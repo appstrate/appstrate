@@ -146,6 +146,7 @@
   "run.usageCacheCreation": "Tokens de création de cache",
   "run.usageCacheRead": "Tokens de lecture de cache",
   "run.usageLive": "En direct",
+  "run.usageTokensCumulative": "Total consommé sur l'ensemble des tours de l'exécution — ce n'est pas la taille du contexte actuel.",
   "import.title": "Importer un package",
   "import.dropText": "Glissez un fichier AFPS, AFPS-bundle ou ZIP ici",
   "import.dropHint": "ou cliquez pour parcourir",

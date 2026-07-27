@@ -39,3 +39,29 @@ export function accumulateTokenUsage(total: TokenUsage, addition: TokenUsage): v
   total.cache_read_input_tokens =
     (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
 }
+
+/**
+ * Symmetric read of {@link accumulateTokenUsage} — the single number that
+ * describes a {@link TokenUsage} record. Sums all four buckets, treating an
+ * absent field as zero.
+ *
+ * It exists because `input_tokens` is NET of cache by construction: the
+ * normalisation at the adapter boundary carves `cache_read` and
+ * `cache_creation` back out of the provider's total prompt count (see
+ * `docs/architecture/RUN_COST.md`). A two-bucket `input + output` sum
+ * therefore under-reports — severely so — whenever prompt caching is active,
+ * and silently disagrees with the cost figure, which prices all four.
+ *
+ * The result is a CUMULATIVE spend total across every turn of a run or
+ * session, not a live gauge of the current context window: a cached prompt
+ * re-read on ten turns contributes ten times. Do not present it as
+ * "context used".
+ */
+export function totalTokens(usage: TokenUsage): number {
+  return (
+    (usage.input_tokens ?? 0) +
+    (usage.output_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0)
+  );
+}
