@@ -65,7 +65,13 @@ describe("importOAuthModelProviderConnection", () => {
 
     expect(result.providerId).toBe(TEST_OAUTH_PROVIDER_ID);
     expect(result.credentialId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(Array.isArray(result.availableModelIds)).toBe(true);
+    // `test-oauth` is probe-validated, and nothing has been probed yet — the
+    // honest answer is "nothing discovered", not the provider's featured
+    // subset. It is also what a GET of this credential reports until the
+    // model form runs discovery. (The static/subscription half of the
+    // contract, plus the equality with the GET surface, is exercised at the
+    // route level in `routes/model-providers-oauth-pair-redeem.test.ts`.)
+    expect(result.availableModelIds).toEqual([]);
 
     const [row] = await db
       .select()

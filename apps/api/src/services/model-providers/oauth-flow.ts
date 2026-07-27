@@ -27,10 +27,10 @@ import {
   createOAuthCredential,
   dedupeCredentialLabel,
   findMissingIdentityClaims,
+  resolveCredentialModelIds,
   type CreateOAuthCredentialInput,
 } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
-import { resolveFeaturedModels } from "./model-selection.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
@@ -115,15 +115,36 @@ export async function importOAuthModelProviderConnection(
     ...(email ? { email } : {}),
   });
 
-  // No discovery probe here on purpose. The served model set is resolved
-  // empirically at config time — the model form (and the manual "Refresh
-  // models" button) probe the live credential and persist
-  // `available_model_ids` then. Probing at import too would double the
-  // quota burst on connect for a list that's re-fetched anyway.
+  // Report the credential's SERVABLE set, through the one accessor every read
+  // path uses — not the narrower `featuredModels` subset this used to echo.
+  // The helper prints this list in its terminal summary while the dashboard
+  // renders `available_model_ids` off a GET of the very same credential;
+  // sourcing them from two different resolutions made the two surfaces
+  // disagree by construction on every connection (3 ids vs 7-8), even with
+  // both lists perfectly current. Users read that as a bug, and it is one —
+  // in the reporting. The invariant is: this value equals what a subsequent
+  // GET returns.
+  //
+  // Still no discovery probe here, and the accessor's answer splits by
+  // provider kind:
+  //   - `modelDiscovery: { mode: "static" }` — derived from (definition ∩
+  //     catalog), zero upstream calls. Already final at import time, and it
+  //     tracks the catalog afterwards instead of freezing. Nothing is
+  //     persisted for these (Phase 2), so the null column below is not a gap.
+  //     Both OAuth providers registered today (claude-code, codex) are of
+  //     this kind — the pairing flow exists for subscription sign-ins, which
+  //     `docs/architecture/SUBSCRIPTION_COMPLIANCE.md` forbids probing at all.
+  //   - probe providers — the persisted column, which is necessarily null on
+  //     a row created microseconds ago: the model form (and the manual
+  //     "Refresh models" button) probe the live credential and write it then.
+  //     `[]` is the honest answer ("nothing discovered yet") and is exactly
+  //     what the dashboard shows until discovery runs. No such provider can
+  //     reach this function today, but the contract admits one; probing here
+  //     would double the quota burst on connect for a list re-fetched anyway.
   return {
     credentialId,
     providerId: input.providerId,
     email,
-    availableModelIds: resolveFeaturedModels(config),
+    availableModelIds: resolveCredentialModelIds(input.providerId, null),
   };
 }
