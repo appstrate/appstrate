@@ -32,7 +32,7 @@ import {
   applyInjectedCredentialHeader,
   isBlockedUrl,
   matchesAuthorizedUri,
-  normalizeAuthScheme,
+  normalizeAuthSchemeTemplates,
   substituteVars,
   findUnresolvedPlaceholders,
   resolveAndCheckHost,
@@ -267,7 +267,15 @@ function bodyReferencesCredential(
 export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Promise<ApiCallResult> {
   const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
     deps;
-  const { integrationId, targetUrl, method, callerHeaders, body, substituteBody } = args;
+  const { integrationId, targetUrl, method, body, substituteBody } = args;
+
+  // Repair `Bearer{{token}}` → `Bearer {{token}}` on the caller TEMPLATES,
+  // once, before any substitution runs. Doing it on the resolved value (what
+  // this used to do, #988) corrupted every raw secret whose first bytes spell
+  // a scheme name. Every downstream read — the credential-reference scan, the
+  // fail-fast placeholder pre-check, and each `doUpstreamRequest` attempt —
+  // goes through this repaired copy so they can never disagree.
+  const callerHeaders = normalizeAuthSchemeTemplates(args.callerHeaders);
 
   // 1. Validate integrationId format (defence in depth — callers should
   //    have already done this, but cheap to repeat).
@@ -461,7 +469,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
     // Server-side credential injection (Authorization, X-Api-Key, …).
     applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
-    normalizeAuthScheme(resolvedHeaders);
     // Re-inject sticky cookies for the integration.
     const storedCookies = cookieJar.get(integrationId);
     if (storedCookies && storedCookies.length) {

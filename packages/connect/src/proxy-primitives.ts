@@ -153,30 +153,43 @@ export function applyInjectedCredentialHeaderToHeaders(
 }
 
 /**
- * Normalise malformed `Authorization` / `Proxy-Authorization` schemes in
- * place: `Bearertoken` → `Bearer token`. LLMs sometimes concatenate the
- * scheme and the placeholder without a space (`Bearer{{access_token}}`)
- * which substitution expands to `Bearertoken…` — upstreams reject that
- * with 401. Applied in both entrypoints so the fix is always on.
+ * Repair a malformed `Authorization` / `Proxy-Authorization` scheme in a
+ * caller **template**, before substitution: `Bearer{{access_token}}` →
+ * `Bearer {{access_token}}`. LLMs writing the free-form `api_call` headers
+ * surface sometimes concatenate the scheme and the placeholder without a
+ * space, which substitution would expand to `Bearerghp_…` — a hard 401
+ * upstream.
+ *
+ * The repair is anchored on `{{`, so it fires only on the authoring defect
+ * it exists for. Running it on the *resolved* value instead (which is what
+ * this used to do, issue #988) matched any secret whose first bytes happen
+ * to spell a scheme name — `tokenlive_sk_123` became `token live_sk_123`,
+ * silently corrupting a valid credential into a 401 that looked like the
+ * user's fault. A template can never be a secret, so there is no such
+ * false positive here.
+ *
+ * Returns the value unchanged for every header name other than the two
+ * auth headers, so callers can pipe every header through it.
  */
-export function normalizeAuthScheme(headers: Record<string, string>): void {
-  for (const key of Object.keys(headers)) {
-    const lower = key.toLowerCase();
-    if (lower !== "authorization" && lower !== "proxy-authorization") continue;
-    headers[key] = headers[key]!.replace(/^(Bearer|Basic|Token)(?=[^\s])/i, "$1 ");
-  }
+export function normalizeAuthSchemeTemplate(headerName: string, rawValue: string): string {
+  const lower = headerName.toLowerCase();
+  if (lower !== "authorization" && lower !== "proxy-authorization") return rawValue;
+  return rawValue.replace(/^(Bearer|Basic|Token)(?=\{\{)/i, "$1 ");
 }
 
 /**
- * Same as {@link normalizeAuthScheme} for a `Headers` instance.
+ * {@link normalizeAuthSchemeTemplate} over a whole header-template record.
+ * Returns a new record — the caller's input is never mutated, so the
+ * unrepaired templates stay available if a caller needs to echo them.
  */
-export function normalizeAuthSchemeOnHeaders(headers: Headers): void {
-  headers.forEach((value, key) => {
-    const lower = key.toLowerCase();
-    if (lower !== "authorization" && lower !== "proxy-authorization") return;
-    const fixed = value.replace(/^(Bearer|Basic|Token)(?=[^\s])/i, "$1 ");
-    if (fixed !== value) headers.set(key, fixed);
-  });
+export function normalizeAuthSchemeTemplates(
+  headers: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    out[key] = normalizeAuthSchemeTemplate(key, value);
+  }
+  return out;
 }
 
 /**

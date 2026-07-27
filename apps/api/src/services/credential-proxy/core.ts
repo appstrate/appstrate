@@ -30,7 +30,7 @@ import {
   findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
   applyInjectedCredentialHeaderToHeaders,
-  normalizeAuthSchemeOnHeaders,
+  normalizeAuthSchemeTemplate,
 } from "@appstrate/connect";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
@@ -331,19 +331,22 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const sensitiveHeaderNames = new Set<string>();
   const headers = new Headers();
   for (const [k, v] of Object.entries(input.headers ?? {})) {
-    const substituted = substituteVars(v, fields);
+    // Repair `Bearer{{token}}` → `Bearer {{token}}` on the TEMPLATE, never on
+    // the resolved value: a raw secret starting with a scheme name must reach
+    // the upstream byte-identical (#988).
+    const template = normalizeAuthSchemeTemplate(k, v);
+    const substituted = substituteVars(template, fields);
     const unresolved = findUnresolvedPlaceholders(substituted);
     if (unresolved.length > 0) {
       throw new ProxySubstitutionError(
         `Unresolved placeholders in header "${k}": {{${unresolved.join(",")}}}`,
       );
     }
-    if (substituted !== v) sensitiveHeaderNames.add(k);
+    if (substituted !== template) sensitiveHeaderNames.add(k);
     headers.set(k, substituted);
   }
   applyInjectedCredentialHeaderToHeaders(headers, resolved);
   if (resolved.credentialHeaderName) sensitiveHeaderNames.add(resolved.credentialHeaderName);
-  normalizeAuthSchemeOnHeaders(headers);
 
   // Body substitution (opt-in; body may be bytes). Bun's global fetch
   // accepts string / Uint8Array / ReadableStream directly.
@@ -470,7 +473,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
           sensitiveHeaderNames.add(refreshed.credentialHeaderName);
         }
         applyInjectedCredentialHeaderToHeaders(headers, refreshed);
-        normalizeAuthSchemeOnHeaders(headers);
         res = await performFetch({
           ...fetchInit,
           headers,
