@@ -36,16 +36,6 @@ import type { CredentialsResponse } from "../helpers.ts";
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
-    fetchCredentials: mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "test-123" },
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    ),
     cookieJar: new Map(),
     // bun:test Mock lacks fetch.preconnect — cross-lib friction with DOM `typeof fetch`.
     fetchFn: mock(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
@@ -126,7 +116,6 @@ async function buildTestApp(opts: {
     config: opts.deps.config,
     cookieJar: opts.deps.cookieJar,
     fetchFn: opts.deps.fetchFn ?? fetch,
-    fetchCredentials: opts.deps.fetchCredentials,
     reportedAuthFailures: new Set<string>(),
   };
   // The credential-proxy core (token-budget / blob spillover) is exercised
@@ -138,8 +127,8 @@ async function buildTestApp(opts: {
       {
         namespace: "test",
         integrationId: "@test/integ",
-        fetchCredentials: opts.deps.fetchCredentials,
-        refreshCredentials: opts.deps.fetchCredentials,
+        fetchCredentials: defaultFetchCredentials,
+        refreshCredentials: defaultFetchCredentials,
       },
     ],
     { proxyDeps, blobStore, tokenBudget: opts.tokenBudget },

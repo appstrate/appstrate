@@ -142,19 +142,16 @@ export interface ApiCallFailure {
 
 export type ApiCallResult = ApiCallSuccess | ApiCallFailure;
 
-export interface ApiCallDeps {
+/**
+ * The integration-agnostic half of {@link ApiCallDeps}: everything the
+ * credential-proxy core needs that is scoped to the RUN rather than to one
+ * integration. Built once per sidecar (`buildSidecarRuntimeDeps`) and shared;
+ * the credential pair is layered on per integration at tool-build time.
+ */
+export interface ApiCallBaseDeps {
   config: SidecarConfig;
   cookieJar: Map<string, string[]>;
   fetchFn: typeof fetch;
-  fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
-  /**
-   * Force a refresh on a mid-run 401. Resolves to the fresh credentials when
-   * the token was actually rotated (the caller replays the request once), or
-   * `null` when it was not — on a terminal failure the platform `/refresh`
-   * already flagged the connection `needsReconnection`, so the caller must NOT
-   * retry with a stale token.
-   */
-  refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse | null>;
   /**
    * Set tracking which integrations already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
@@ -167,6 +164,18 @@ export interface ApiCallDeps {
    * Production callers omit it (system resolver via `node:dns`).
    */
   resolveHost?: HostResolver;
+}
+
+export interface ApiCallDeps extends ApiCallBaseDeps {
+  fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
+  /**
+   * Force a refresh on a mid-run 401. Resolves to the fresh credentials when
+   * the token was actually rotated (the caller replays the request once), or
+   * `null` when it was not — on a terminal failure the platform `/refresh`
+   * already flagged the connection `needsReconnection`, so the caller must NOT
+   * retry with a stale token.
+   */
+  refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse | null>;
 }
 
 /**

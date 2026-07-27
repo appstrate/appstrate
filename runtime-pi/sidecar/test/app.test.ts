@@ -14,22 +14,12 @@
 
 import { describe, it, expect, mock, spyOn } from "bun:test";
 import { createApp, SIDECAR_IDLE_TIMEOUT_SECONDS, type AppDeps } from "../app.ts";
-import type { CredentialsResponse, LlmProxyConfig } from "../helpers.ts";
+import type { LlmProxyConfig } from "../helpers.ts";
 import { logger } from "../logger.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
-    fetchCredentials: mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "test-123" },
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    ),
     cookieJar: new Map(),
     fetchFn: mock(
       async () =>

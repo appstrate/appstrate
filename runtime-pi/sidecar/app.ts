@@ -4,7 +4,7 @@ import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
 import { mountMcp, validateMcpHostHeader } from "./mcp.ts";
 import { RuntimeEventJournal } from "./runtime-event-journal.ts";
-import type { ApiCallDeps } from "./credential-proxy.ts";
+import type { ApiCallBaseDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
@@ -16,7 +16,6 @@ import {
   readPositiveIntEnv,
   readRequestBodyBounded,
   type SidecarConfig,
-  type CredentialsResponse,
   type LlmProxyOauthConfig,
   type ModelSwap,
 } from "./helpers.ts";
@@ -54,8 +53,6 @@ export const SIDECAR_IDLE_TIMEOUT_SECONDS = 255;
 
 export interface AppDeps {
   config: SidecarConfig;
-  fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
-  refreshCredentials?: NonNullable<ApiCallDeps["refreshCredentials"]>;
   cookieJar: Map<string, string[]>;
   fetchFn?: typeof fetch; // default: global fetch — injectable for tests
   isReady?: () => boolean; // default: () => true — controls /health
@@ -455,7 +452,13 @@ export interface SidecarRuntimeDeps {
   blobStore: BlobStore;
   tokenBudget: TokenBudget;
   apiCallLimit: LimitFunction;
-  proxyDeps: ApiCallDeps;
+  /**
+   * Run-scoped credential-proxy deps WITHOUT the credential pair — each
+   * integration's `fetchCredentials` / `refreshCredentials` are layered on
+   * per tool by `mountMcp` / `createApiCallToolDefs` from the integration's
+   * live credentials source.
+   */
+  proxyDeps: ApiCallBaseDeps;
 }
 
 /**
@@ -507,12 +510,10 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
   const apiCallLimit: LimitFunction = pLimit(
     readPositiveIntEnv("SIDECAR_API_CALL_CONCURRENCY", DEFAULT_API_CALL_CONCURRENCY),
   );
-  const proxyDeps: ApiCallDeps = {
+  const proxyDeps: ApiCallBaseDeps = {
     config: deps.config,
     cookieJar: deps.cookieJar,
     fetchFn,
-    fetchCredentials: deps.fetchCredentials,
-    ...(deps.refreshCredentials ? { refreshCredentials: deps.refreshCredentials } : {}),
     reportedAuthFailures: new Set<string>(),
   };
   return { blobStore, tokenBudget, apiCallLimit, proxyDeps };

@@ -38,7 +38,6 @@ const integrationCreds = (token = "tok-abc"): CredentialsResponse => ({
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
-    fetchCredentials: mock(async (): Promise<CredentialsResponse> => integrationCreds()),
     cookieJar: new Map(),
     fetchFn: mock(
       async () =>

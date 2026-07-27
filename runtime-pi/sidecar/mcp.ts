@@ -106,7 +106,12 @@ function decodeStrictBase64(s: string): Uint8Array | "invalid" {
   }
 }
 import type { BlobStore } from "./blob-store.ts";
-import { executeApiCall, type ApiCallDeps, type ApiCallRequestBody } from "./credential-proxy.ts";
+import {
+  executeApiCall,
+  type ApiCallBaseDeps,
+  type ApiCallDeps,
+  type ApiCallRequestBody,
+} from "./credential-proxy.ts";
 import {
   UPSTREAM_META_KEY,
   buildPreflightUpstreamMeta,
@@ -1752,7 +1757,7 @@ export interface ApiCallIntegrationConfig {
  * spawned/remote integration tools.
  */
 export interface ApiCallToolDeps {
-  proxyDeps: ApiCallDeps;
+  proxyDeps: ApiCallBaseDeps;
   blobStore?: BlobStore;
   tokenBudget: TokenBudget;
   apiCallLimit?: LimitFunction;
@@ -1839,9 +1844,10 @@ export interface MountMcpOptions {
    * {@link executeApiCall} directly with structured args; `run_history`
    * and `recall_memory` use `proxyDeps.fetchFn` + `proxyDeps.config` to
    * reach the platform upstream. Required: there is no longer a legacy
-   * HTTP-route fallback.
+   * HTTP-route fallback. The per-integration credential pair is layered
+   * on top of these by `makeApiCallTool`.
    */
-  proxyDeps: ApiCallDeps;
+  proxyDeps: ApiCallBaseDeps;
   /**
    * Run-scoped token budget. Every tool output is run through the
    * budget tracker before being delivered to the agent; dense JSON that
