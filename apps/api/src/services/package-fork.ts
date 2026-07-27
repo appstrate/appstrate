@@ -150,15 +150,13 @@ async function forkWithConfig(
   // draft row, version row and ZIP unnoticed. Rejecting is not an option:
   // manifests today's validator refuses DO sit in the catalog, and a gate here
   // would make them permanently un-forkable — the fork is a READ of an
-  // immutable, unrepairable artifact. Two sources, both real:
-  //   - the provider→integration migration (#481, shipped in beta.17) left
-  //     `type: "provider"` manifests behind; they were repaired by a one-off
-  //     backfill script that no longer exists in this repo;
-  //   - `POST /api/mcp-servers` can still MINT one today: a malformed
-  //     `manifest.json` makes `parseManifestBytesSafe` return undefined, so
-  //     `routes/packages.ts` skips its `if (parsed.manifest)` validation
-  //     entirely and `createOrgItem` synthesizes a `{version, name, type}` stub
-  //     that `createVersionSafe` then writes into `package_versions.manifest`.
+  // immutable, unrepairable artifact. One source remains, and it is legacy
+  // only: the provider→integration migration (#481, shipped in beta.17) left
+  // `type: "provider"` manifests behind, repaired at the time by a one-off
+  // backfill script no longer in this repo. #987 closed the write direction —
+  // every create path now validates author input unconditionally and 400s — so
+  // no NEW invalid manifest enters the catalog; this fork is the one path that
+  // still propagates the legacy ones, which is the price of staying forkable.
   // So the operator gets a log line, and the fork proceeds.
   const validation = validateManifest(updatedManifest, { retiredRuntimeTools: "drop" });
   if (!validation.valid) {

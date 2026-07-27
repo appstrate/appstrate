@@ -628,7 +628,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       // Create initial version (non-fatal). Snapshot the STORED draft
       // manifest (not the pre-normalization request body): `createOrgItem`
-      // injects `$schema`/`type`/… and the jsonb round-trip reorders keys, so
+      // stamps `$schema`/`name`/… and the jsonb round-trip reorders keys, so
       // snapshotting `validatedManifest` produced a version whose bytes could
       // never match a later rebuild from the draft. That byte drift defeated
       // the publish dedup and, before #896, made every create-then-republish
