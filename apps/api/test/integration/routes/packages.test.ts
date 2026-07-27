@@ -18,7 +18,14 @@ import {
 } from "../../../src/services/integration-client-registry.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
-import { auditEvents, packages, packageDistTags } from "@appstrate/db/schema";
+import {
+  buildMinimalZip,
+  uploadPackageZip,
+  downloadVersionZip,
+  unzipAndNormalize,
+} from "../../../src/services/package-storage.ts";
+import { computeIntegrity } from "@appstrate/core/integrity";
+import { auditEvents, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
 
@@ -1987,6 +1994,177 @@ describe("Packages API", () => {
       // No operation envelope.
       expect(body.packageId).toBeUndefined();
       expect(body.type).toBeUndefined();
+    });
+  });
+
+  // ═══════════════════════════════════════════════
+  // Issue #974 — a fork is a READ that MINTS: it copies an already-published
+  // (immutable, unrepairable) manifest into a brand new version row + ZIP.
+  // The normalisation therefore has to happen ONCE, before the draft row is
+  // written, so the three sinks — draft row, draft storage files, published
+  // version (row + ZIP) — can never disagree.
+  // ═══════════════════════════════════════════════
+
+  describe("POST fork — published manifest normalisation", () => {
+    /**
+     * Seed a PUBLISHED source package in another org WITHOUT going through the
+     * API: the write direction rejects a retired `runtime_tools` id, so the
+     * legacy state a fork must cope with can only be produced by writing the
+     * row + artifact directly.
+     */
+    async function seedPublishedSource(
+      packageId: string,
+      orgId: string,
+      manifest: Record<string, unknown>,
+      content = "source prompt",
+    ): Promise<void> {
+      const version = manifest.version as string;
+      await seedPackage({
+        id: packageId,
+        orgId,
+        type: "agent",
+        draftManifest: manifest,
+        draftContent: content,
+      });
+      const zip = buildMinimalZip(manifest, content);
+      await uploadPackageZip(packageId, version, zip);
+      const row = await seedPackageVersion({
+        packageId,
+        version,
+        manifest,
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      await db.insert(packageDistTags).values({ packageId, tag: "latest", versionId: row.id });
+    }
+
+    async function versionManifest(packageId: string): Promise<Record<string, unknown>> {
+      const [row] = await db
+        .select({ manifest: packageVersions.manifest })
+        .from(packageVersions)
+        .where(eq(packageVersions.packageId, packageId))
+        .limit(1);
+      return row!.manifest as Record<string, unknown>;
+    }
+
+    async function draftManifest(packageId: string): Promise<Record<string, unknown>> {
+      const [row] = await db
+        .select({ draftManifest: packages.draftManifest })
+        .from(packages)
+        .where(eq(packages.id, packageId))
+        .limit(1);
+      return row!.draftManifest as Record<string, unknown>;
+    }
+
+    /** Raw `manifest.json` text out of the published artifact — the bytes a
+     *  pinned run reads, which the DB row alone cannot prove. */
+    async function artifactManifestText(packageId: string, version: string): Promise<string> {
+      const zip = await downloadVersionZip(packageId, version);
+      expect(zip).not.toBeNull();
+      const entries = unzipAndNormalize(zip!);
+      return new TextDecoder().decode(entries["manifest.json"]!);
+    }
+
+    it("drops a retired runtime tool from all three fork sinks", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkret" });
+      const sourceId = "@forkret/legacy-agent";
+      await seedPublishedSource(sourceId, srcCtx.orgId, {
+        name: sourceId,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Legacy Tool Agent",
+        description: "Published before `report` was retired",
+        runtime_tools: ["output", "report"],
+      });
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(201);
+
+      const targetId = "@pkgorg/legacy-agent";
+      // 1. the new catalog row
+      expect((await versionManifest(targetId)).runtime_tools).toEqual(["output"]);
+      // 2. the fork's draft — leave the retired id here and the fork's first
+      //    re-publish regraves it into yet another immutable artifact.
+      expect((await draftManifest(targetId)).runtime_tools).toEqual(["output"]);
+      // 3. the immutable artifact — a normalised row over a stale ZIP still
+      //    ships the retired id to every runner that downloads the bundle.
+      const zipped = JSON.parse(await artifactManifestText(targetId, "0.1.0")) as {
+        runtime_tools?: string[];
+      };
+      expect(zipped.runtime_tools).toEqual(["output"]);
+    });
+
+    it("removes the runtime_tools key entirely when every tool was retired", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkret2" });
+      const sourceId = "@forkret2/all-retired";
+      await seedPublishedSource(sourceId, srcCtx.orgId, {
+        name: sourceId,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "All Retired",
+        description: "Its only runtime tool no longer exists",
+        runtime_tools: ["report"],
+      });
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(201);
+
+      // ABSENT, not `[]`: absent and `[]` parse to the same agent but are
+      // different bytes, and the editor spells "no runtime tools" as absent.
+      // Emitting `[]` here would give one manifest two integrity hashes.
+      const targetId = "@pkgorg/all-retired";
+      expect(await versionManifest(targetId)).not.toHaveProperty("runtime_tools");
+      expect(await draftManifest(targetId)).not.toHaveProperty("runtime_tools");
+      const zipped = JSON.parse(await artifactManifestText(targetId, "0.1.0")) as Record<
+        string,
+        unknown
+      >;
+      expect(zipped).not.toHaveProperty("runtime_tools");
+    });
+
+    it("forks a clean manifest byte-for-byte — nothing reordered, nothing defaulted", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkclean" });
+      const sourceId = "@forkclean/clean-agent";
+      await seedPublishedSource(sourceId, srcCtx.orgId, {
+        name: sourceId,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Clean Agent",
+        description: "Nothing to drop",
+        runtime_tools: ["output", "log"],
+      });
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(201);
+
+      // The dropper is structural, so a source with nothing to drop must
+      // serialise to the source manifest with ONLY `name` swapped — same keys,
+      // same order, no schema defaults materialised. A Zod re-parse here would
+      // reorder to schema order and defeat publish dedup (#896). Compared
+      // against the STORED source manifest (not the literal above) because
+      // jsonb does not preserve authoring key order.
+      const targetId = "@pkgorg/clean-agent";
+      const expected = JSON.stringify(
+        { ...(await versionManifest(sourceId)), name: targetId },
+        null,
+        2,
+      );
+      expect(await artifactManifestText(targetId, "0.1.0")).toBe(expected);
     });
   });
 });

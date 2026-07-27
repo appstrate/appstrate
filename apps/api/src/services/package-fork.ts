@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
-import type { PackageType } from "@appstrate/core/validation";
+import { dropRetiredRuntimeTools, type PackageType } from "@appstrate/core/validation";
+import { logger } from "../lib/logger.ts";
 
 import { zipArtifact } from "@appstrate/core/zip";
 import { getPackageById, createOrgItem } from "./package-items/crud.ts";
@@ -79,7 +80,6 @@ async function forkWithConfig(
     .select({
       version: packageVersions.version,
       manifest: packageVersions.manifest,
-      integrity: packageVersions.integrity,
     })
     .from(packageVersions)
     .where(eq(packageVersions.id, latestVersionId))
@@ -109,7 +109,35 @@ async function forkWithConfig(
 
   // Build manifest from the published version snapshot, update name
   const versionManifest = asRecord(versionRow.manifest);
-  const updatedManifest = { ...versionManifest, name: targetId };
+
+  // Normalise ONCE, here, because a fork is a read that MINTS. It reads a
+  // manifest that is already published — immutable by construction, so a
+  // `runtime_tools` id the platform retired after that publish can never be
+  // repaired at the source — and turns it into a brand new immutable artifact.
+  // Rejecting would make every legacy agent permanently un-forkable (the same
+  // reason `createVersionFromDraft` drops rather than fails); carrying the id
+  // forward verbatim would regrave the retired legacy into a version row + ZIP
+  // minted today. The drop is structural (no Zod re-parse): key order, unknown
+  // fields and absent defaults survive byte-for-byte, so a source with nothing
+  // to drop forks to the exact same bytes and publish dedup (#896) is
+  // unaffected.
+  //
+  // BEFORE `createOrgItem`, not later: this one object feeds all three sinks —
+  // the draft row, the draft storage files, and the published version (row +
+  // ZIP). Normalising only the version would leave the retired id in the fork's
+  // draft, and the fork's first re-publish would mint it right back.
+  const { manifest: updatedManifest, dropped: droppedRuntimeTools } = dropRetiredRuntimeTools({
+    ...versionManifest,
+    name: targetId,
+  });
+  if (droppedRuntimeTools.length > 0) {
+    logger.info("dropped retired runtime tools from forked manifest", {
+      sourcePackageId,
+      packageId: targetId,
+      version: versionRow.version,
+      dropped: droppedRuntimeTools,
+    });
+  }
 
   // Create the fork package (draft)
   const newPkg = await createOrgItem(
