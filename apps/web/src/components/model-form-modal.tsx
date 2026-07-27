@@ -31,6 +31,14 @@ import { Check, ChevronsUpDown, KeyRound, Plug, X } from "lucide-react";
 import { type OpenRouterModel, type OrgModelInfo } from "../hooks/use-models";
 import type { ModelCost } from "@appstrate/core/module";
 import { CapabilitiesSection } from "./model-form/capabilities-section";
+import {
+  COST_FIELD_NAMES,
+  costFromFields,
+  costToFields,
+  normalizeCost,
+  parseRate,
+  type CostFields,
+} from "./model-form/cost-fields";
 import { useOpenRouterSearch } from "./model-form/use-open-router-search";
 import {
   useModelProviderCredentials,
@@ -90,6 +98,10 @@ interface ModelFormFields {
   contextWindow: string;
   maxTokens: string;
   reasoning: boolean;
+  costInput: string;
+  costOutput: string;
+  costCacheRead: string;
+  costCacheWrite: string;
 }
 
 function OpenRouterCombobox({
@@ -227,7 +239,11 @@ function ModelFormBody({
   // User-driven provider/model overrides — `null` means "follow auto-detect".
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
-  const [cost, setCost] = useState<ModelCost | null>(null);
+  // Effective pricing shown in the pricing section. Seeded from the row being
+  // edited (that value is already catalog-resolved server-side, so it displays
+  // whether it came from the catalog or from a stored override) and `null` when
+  // the model resolves to no pricing at all — the case the section calls out.
+  const [cost, setCost] = useState<ModelCost | null>(() => normalizeCost(model?.cost));
   /**
    * True once the user explicitly edits cost (or imports an OpenRouter cost
    * different from the catalog). Cost lives outside RHF, so we track its
@@ -248,10 +264,13 @@ function ModelFormBody({
   const setProviderId = (id: string) => setProviderOverride(id);
   const setSelectedModelId = (id: string) => setModelOverride(id);
 
+  const initialCostFields = costToFields(normalizeCost(model?.cost));
+
   const {
     register,
     handleSubmit,
     control,
+    getValues,
     setValue,
     setError,
     clearErrors,
@@ -270,6 +289,10 @@ function ModelFormBody({
       contextWindow: model?.contextWindow?.toString() ?? "",
       maxTokens: model?.maxTokens?.toString() ?? "",
       reasoning: model?.reasoning ?? false,
+      costInput: initialCostFields.input,
+      costOutput: initialCostFields.output,
+      costCacheRead: initialCostFields.cacheRead,
+      costCacheWrite: initialCostFields.cacheWrite,
     },
   });
 
@@ -433,6 +456,21 @@ function ModelFormBody({
     return verifiedIds.map((id) => byId.get(id) ?? { id, label: id, featured: false });
   }, [selectedProvider, isOauthProvider, probeResult, credentialId]);
 
+  /**
+   * Mirror a resolved cost into the pricing inputs. Raw `setValue` (no
+   * `shouldDirty`) on purpose: a rate merely DISPLAYED from a catalog preset
+   * must stay non-dirty, so `costEdited` — the flag that makes the submit path
+   * persist an `org_models.cost` override — is only ever raised by a real edit.
+   */
+  const showCost = (next: ModelCost | null) => {
+    const fields = costToFields(next);
+    setValue("costInput", fields.input);
+    setValue("costOutput", fields.output);
+    setValue("costCacheRead", fields.cacheRead);
+    setValue("costCacheWrite", fields.cacheWrite);
+    setCost(next);
+  };
+
   const resetModelFields = () => {
     setValue("label", "");
     setValue("modelId", "");
@@ -441,7 +479,8 @@ function ModelFormBody({
     setValue("contextWindow", "");
     setValue("maxTokens", "");
     setValue("reasoning", false);
-    setCost(null);
+    clearErrors(["costInput", "costOutput", "costCacheRead", "costCacheWrite"]);
+    showCost(null);
     setCostEdited(false);
   };
 
@@ -487,18 +526,56 @@ function ModelFormBody({
     setValue("reasoning", caps.includes("reasoning"));
     // Display the catalog cost in the UI without flagging it as "edited".
     // Server-side `resolveCatalogDefaults` will resolve it on read, so we
-    // intentionally omit it from the POST payload.
-    setCost(
-      preset.cost
-        ? {
-            input: preset.cost.input ?? 0,
-            output: preset.cost.output ?? 0,
-            cacheRead: preset.cost.cacheRead ?? 0,
-            cacheWrite: preset.cost.cacheWrite ?? 0,
-          }
-        : null,
-    );
+    // intentionally omit it from the POST payload. A rate the catalog does not
+    // carry is left EMPTY — the previous `?? 0` made "no cache rate" (very
+    // common: 0 of 51 mistral entries have one) indistinguishable from "free",
+    // and any later edit would have frozen that fabricated 0 as an override.
+    showCost(normalizeCost(preset.cost));
     setCostEdited(false);
+  };
+
+  /** The four rates as currently typed, with one bucket overridden. */
+  const costFieldsWith = (bucket: keyof CostFields, value: string): CostFields => ({
+    input: getValues("costInput"),
+    output: getValues("costOutput"),
+    cacheRead: getValues("costCacheRead"),
+    cacheWrite: getValues("costCacheWrite"),
+    [bucket]: value,
+  });
+
+  /** True when the user has typed SOMETHING in the pricing section. */
+  const anyRateFilled = () =>
+    Object.values(COST_FIELD_NAMES).some((name) => getValues(name).trim() !== "");
+
+  /**
+   * `register` for one rate, plus the mirror into the `cost` state the submit
+   * path reads. Editing ANY rate raises `costEdited` — that flag is what turns
+   * the value into a persisted `org_models.cost` override; without it the
+   * server keeps resolving from the catalog on every read (so weekly catalog
+   * refreshes still propagate to untouched rows).
+   */
+  const registerRate = (bucket: keyof CostFields, required: boolean) => {
+    const name = COST_FIELD_NAMES[bucket];
+    const reg = register(name, {
+      validate: (v: string) => {
+        if (!parseRate(v).ok) return t("models.form.costInvalid");
+        // `input` + `output` are mandatory together (the API's `modelCostSchema`
+        // requires both). Leaving one blank while the other carries a rate is a
+        // half-priced model, not an "unpriced" one — refuse it rather than
+        // silently substituting a 0.
+        if (required && v.trim() === "" && anyRateFilled())
+          return t("models.form.costBaseRequired");
+        return undefined;
+      },
+    });
+    return {
+      ...reg,
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+        setCost(costFromFields(costFieldsWith(bucket, e.target.value)));
+        setCostEdited(true);
+        return reg.onChange(e);
+      },
+    };
   };
 
   const onFormSubmit = handleSubmit((data) => {
@@ -567,6 +644,40 @@ function ModelFormBody({
       ...(costEdited && cost ? { cost } : {}),
     });
   });
+
+  /**
+   * One rate input. A plain render function, not a nested component — defining
+   * a component inside another breaks the `static-components` lint rule and
+   * remounts the input on every keystroke.
+   */
+  const renderRateField = (
+    bucket: keyof CostFields,
+    labelText: string,
+    placeholder: string,
+    required: boolean,
+  ) => {
+    const name = COST_FIELD_NAMES[bucket];
+    const id = `mdl-${name}`;
+    return (
+      <div key={name} className="space-y-2">
+        <Label htmlFor={id}>{labelText}</Label>
+        <Input
+          id={id}
+          type="number"
+          min="0"
+          step="any"
+          inputMode="decimal"
+          {...registerRate(bucket, required)}
+          placeholder={placeholder}
+          aria-invalid={showError(name) ? true : undefined}
+          className={cn(showError(name) && "border-destructive")}
+        />
+        {showError(name) && errors[name]?.message && (
+          <div className="text-destructive text-sm">{errors[name].message}</div>
+        )}
+      </div>
+    );
+  };
 
   const title = model ? t("models.form.editTitle") : t("models.form.title");
 
@@ -861,8 +972,9 @@ function ModelFormBody({
                 setValue("inputText", m.input?.includes("text") !== false, { shouldDirty: true });
                 setValue("inputImage", m.input?.includes("image") ?? false, { shouldDirty: true });
                 setValue("reasoning", m.reasoning ?? false, { shouldDirty: true });
-                setCost(m.cost ?? null);
-                setCostEdited(m.cost != null);
+                const imported = normalizeCost(m.cost);
+                showCost(imported);
+                setCostEdited(imported != null);
               }}
             />
           </div>
@@ -1018,6 +1130,33 @@ function ModelFormBody({
             onInputImageChange={(v) => setValue("inputImage", v)}
             onReasoningChange={(v) => setValue("reasoning", v)}
           />
+        )}
+
+        {/* Pricing — the only in-product way to price a model the vendored
+            catalog does not cover. `resolveCatalogDefaults` returns `{}` for an
+            unmapped provider, an unknown model id, or an entry LiteLLM dropped
+            for lacking pricing, and the run cost then reads as a confident $0.
+            Shown on EVERY path, presets included: catalog coverage of the two
+            cache rates is partial (0 of 51 mistral entries carry a `cacheRead`)
+            and drifts with each weekly refresh. */}
+        {modelId.trim().length > 0 && (
+          <div className="mt-2 space-y-4 border-t pt-4">
+            <Label className="text-muted-foreground text-sm font-medium">
+              {t("models.form.pricing")}
+            </Label>
+            {cost === null && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-sm text-amber-700 dark:text-amber-300">
+                {t("models.form.pricingMissing")}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              {renderRateField("input", t("models.form.costInput"), "3", true)}
+              {renderRateField("output", t("models.form.costOutput"), "15", true)}
+              {renderRateField("cacheRead", t("models.form.costCacheRead"), "0.3", false)}
+              {renderRateField("cacheWrite", t("models.form.costCacheWrite"), "3.75", false)}
+            </div>
+            <div className="text-muted-foreground text-sm">{t("models.form.pricingHint")}</div>
+          </div>
         )}
       </form>
     </Modal>
