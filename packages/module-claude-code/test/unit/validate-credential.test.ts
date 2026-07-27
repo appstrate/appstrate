@@ -2,7 +2,8 @@
 
 import { describe, it, expect } from "bun:test";
 import claudeCodeModule from "../../src/index.ts";
-import type { CredentialValidationResult } from "@appstrate/core/module";
+import { isCatalogModelSelector } from "@appstrate/core/module";
+import type { CatalogModelSelector, CredentialValidationResult } from "@appstrate/core/module";
 
 const def = (claudeCodeModule.modelProviders?.() ?? [])[0]!;
 
@@ -15,12 +16,24 @@ function validate(args: {
 }
 
 describe("claude-code discovery candidates", () => {
-  it("declares static modelDiscovery with candidates ⊇ featuredModels", () => {
+  it("declares static modelDiscovery with catalog-derived selectors", () => {
+    // Both lists are `CatalogModelSelector`s resolved platform-side against
+    // the vendored anthropic catalog (this package has no catalog, so the
+    // resolved ids are asserted in the API suite). What is checkable here is
+    // the declaration: same families in both, more generations for the
+    // candidate list so a plan lagging the current release keeps its model.
     expect(def.modelDiscovery?.mode).toBe("static");
+    expect(isCatalogModelSelector(def.featuredModels)).toBe(true);
     expect(def.modelDiscoveryCandidates).toBeDefined();
-    for (const id of def.featuredModels) {
-      expect(def.modelDiscoveryCandidates!).toContain(id);
-    }
+    expect(isCatalogModelSelector(def.modelDiscoveryCandidates!)).toBe(true);
+
+    const featured = def.featuredModels as CatalogModelSelector;
+    const candidates = def.modelDiscoveryCandidates as CatalogModelSelector;
+    // Same families in both, so no family can be featurable but undiscoverable
+    // (or the reverse) — `claude-fable` was exactly that when a `limit` on the
+    // featured selector truncated the round-robin's last slot.
+    expect(candidates.catalogFamilies).toEqual(featured.catalogFamilies);
+    expect(candidates.generations).toBeGreaterThan(featured.generations);
   });
 });
 

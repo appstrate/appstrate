@@ -136,9 +136,11 @@ async function handlePairRedeem(c: Context<AppEnv>) {
   // Deliberate operation-result shape (NOT the bare credential resource —
   // flow-completion exception to the strict rule, #657): the helper's bearer
   // is single-use and consumed by this request, so it cannot follow up with a
-  // GET, and `availableModelIds` is registry-derived operation info (the
-  // provider's featuredModels) that is not part of the credential resource.
-  // The dashboard gets the created credential via GET /pairing/:id polling.
+  // GET. `availableModelIds` is a convenience projection of the credential's
+  // own servable set, resolved through the same accessor the credentials list
+  // uses — the helper's terminal summary and the dashboard must not be able
+  // to print two different lists for one connection. The dashboard gets the
+  // created credential via GET /pairing/:id polling.
   return c.json(result);
 }
 

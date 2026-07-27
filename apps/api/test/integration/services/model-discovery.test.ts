@@ -11,6 +11,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { modelProviderCredentials } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
@@ -188,7 +191,10 @@ describe("discoverAvailableModels", () => {
     // Aborted on the first candidate — no further probes burned.
     expect(calls).toEqual(["m-featured"]);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids ?? null).toBeNull();
+    // `[]`, not null: the DTO resolves through `resolveCredentialModelIds`,
+    // which coalesces a never-written column to an empty list. What matters
+    // is that the failed round wrote nothing.
+    expect(info?.available_model_ids).toEqual([]);
   });
 
   it("keeps the previous list when nothing verifies (network incident ≠ empty plan)", async () => {
@@ -231,31 +237,69 @@ describe("discoverAvailableModels", () => {
 
   // --- Offline providers (subscription: codex, claude-code) ---
 
-  it("offline provider: persists static candidates (∩ catalog) with NO probe call", async () => {
+  /** A prober that fails the test if the discovery path touches the network. */
+  function forbiddenProber(): { deps: ModelDiscoveryDeps; calls: () => number } {
+    let probeCalls = 0;
+    return {
+      calls: () => probeCalls,
+      deps: {
+        sleep: async () => {},
+        probe: async () => {
+          probeCalls++;
+          throw new Error("offline discovery must not probe the network");
+        },
+      },
+    };
+  }
+
+  it("offline provider: resolves static candidates (∩ catalog) with NO probe call", async () => {
     const cred = await seedOrgModelProviderOAuth({
       orgId: ctx.org.id,
       providerId: OFFLINE_PROVIDER_ID,
     });
-    // A probe dep that MUST NOT be invoked — proves the platform issues
-    // zero network calls validating a subscription credential's models.
-    let probeCalls = 0;
-    const deps: ModelDiscoveryDeps = {
-      sleep: async () => {},
-      probe: async () => {
-        probeCalls++;
-        throw new Error("offline discovery must not probe the network");
-      },
-    };
+    // Proves the platform issues zero network calls validating a
+    // subscription credential's models.
+    const { deps, calls } = forbiddenProber();
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
-    expect(probeCalls).toBe(0);
+    expect(calls()).toBe(0);
     expect(result.outcome).toBe("ok");
-    expect(result.persisted).toBe(true);
-    // "m-uncatalogued" is filtered out (not in the catalog); the rest persist
-    // in declaration order.
+    // Nothing is written — the list is derived on every read instead.
+    expect(result.persisted).toBe(false);
+    // Zero upstream requests were spent, so nothing was "probed".
+    expect(result.probedCount).toBe(0);
+    // "m-uncatalogued" is filtered out (not in the catalog); the rest come
+    // back in declaration order.
     expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
+  });
+
+  it("offline provider: leaves the row untouched and overrides a stale persisted array", async () => {
+    const cred = await seedOrgModelProviderOAuth({
+      orgId: ctx.org.id,
+      providerId: OFFLINE_PROVIDER_ID,
+    });
+    // Simulate a pre-migration row: a snapshot written by the old code path,
+    // now two generations behind the definition. It must neither be returned
+    // nor rewritten — the derived list simply wins.
+    await db
+      .update(modelProviderCredentials)
+      .set({ availableModelIds: ["m-ancient"] })
+      .where(eq(modelProviderCredentials.id, cred.id));
+
+    const { deps } = forbiddenProber();
+    const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
+
+    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
+    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
+    expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
+    // The column itself is still the stale value — discovery wrote nothing.
+    const [row] = await db
+      .select({ ids: modelProviderCredentials.availableModelIds })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, cred.id));
+    expect(row?.ids).toEqual(["m-ancient"]);
   });
 });

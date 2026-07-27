@@ -26,6 +26,7 @@ import {
   type CatalogDefaults,
 } from "../services/org-models.ts";
 import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
+import { resolveFeaturedModels } from "../services/model-providers/model-selection.ts";
 import { checkAliasInvariants, type AliasInvariantViolation } from "@appstrate/core/model-swap";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
@@ -340,14 +341,16 @@ export function createModelsRouter() {
     const catalogKey = registry.catalogProviderId ?? creds.providerId;
     const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
     // Foreign-catalog (subscription OAuth) gate: a model is seedable when
-    // it's in the static featured list OR empirically verified against
-    // this credential by the discovery probe (`available_model_ids`) —
-    // the probe knows the account's plan, the static list doesn't.
+    // it's in the featured list OR in the credential's servable set
+    // (`available_model_ids`) — probe-verified for API-key providers (the
+    // probe knows the account's plan, the featured list doesn't), derived
+    // from the catalog for static providers. Reading it off the credential
+    // DTO is what keeps the gate from consulting a stale persisted copy.
     const credentialInfo = registry.catalogProviderId
       ? await getOrgModelProviderCredential(orgId, data.credentialId)
       : undefined;
     const allowedSet = new Set([
-      ...registry.featuredModels,
+      ...resolveFeaturedModels(registry),
       ...(credentialInfo?.available_model_ids ?? []),
     ]);
     const models: Array<CatalogModelEntry & { id: string }> = [];

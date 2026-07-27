@@ -126,12 +126,21 @@ are now **offline**:
   not proof of liveness.
 
 - **Model discovery** (`POST /api/model-provider-credentials/:id/refresh-models`):
-  for offline providers the platform persists the provider's static
-  `modelDiscoveryCandidates` (∩ catalog) as `available_model_ids` **without
-  probing** any candidate. Real per-model availability surfaces at the first
-  agent run, not via a platform-side request
+  for a `modelDiscovery: { mode: "static" }` provider the platform probes no
+  candidate **and writes nothing**. The served set is the provider's
+  `modelDiscoveryCandidates` (∩ catalog), resolved on every read by
+  `resolveCredentialModelIds`
+  (`apps/api/src/services/model-providers/credentials.ts`); the endpoint is a
+  truthful no-op that reports the current list
   (`apps/api/src/services/model-providers/model-discovery.ts` →
-  `persistStaticCandidates`).
+  `discoverAvailableModels`, static branch). Not persisting is the point:
+  with no probe the answer is a pure function of (provider definition,
+  vendored catalog) and therefore identical for every credential of the
+  provider, so a stored copy would hold no per-credential information and
+  could only fall behind — which is how connections kept offering a model list
+  two generations old. `available_model_ids` is written by the probe path only.
+  Real per-model availability still surfaces at the first agent run, not via a
+  platform-side request.
 
 The `validateCredential` hook + `credentialValidation` flag are provider-agnostic
 core contracts (`packages/core/src/module.ts`): the platform asks "does this

@@ -18,6 +18,7 @@ import {
   registerModelProviders,
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
+import { resolveFeaturedModels } from "../../../src/services/model-providers/model-selection.ts";
 import coreProvidersModule from "../../../src/modules/core-providers/index.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
@@ -94,7 +95,7 @@ describe("runtime registry composition", () => {
 
   it("model ids are unique within each provider", () => {
     for (const cfg of listModelProviders()) {
-      const ids = [...cfg.featuredModels];
+      const ids = resolveFeaturedModels(cfg);
       expect(new Set(ids).size).toBe(ids.length);
     }
   });

@@ -80,11 +80,17 @@ const LITELLM_TO_OURS: Record<string, string> = {
  * moving set of models. The weekly diff on this snapshot is the review
  * signal for that curation (new subscription models, deprecations).
  * No Anthropic equivalent exists — LiteLLM carries no claude-
- * subscription provider, so the claude-code module's curation stays
- * manual.
+ * subscription provider, but claude-code needs none: it declares a
+ * catalog selector and re-derives from anthropic.json on every read.
  *
  * Snapshots land in `apps/api/src/data/subscription-watch/<name>.json`
- * as a sorted id array. Nothing imports them at runtime.
+ * as a sorted id array. Nothing imports them at RUNTIME; the blocking
+ * drift gate (`apps/api/test/unit/services/curated-model-drift.test.ts`)
+ * reads them at test time, unioned with the pricing catalog, because
+ * most subscription-specific ids appear in no pricing catalog at all.
+ * The snapshot is a lagging third-party feed, never an authority: the
+ * vendor's own doc decides, and disagreements are recorded in
+ * `subscription-watch/reviewed.json`.
  */
 const SUBSCRIPTION_WATCH: readonly string[] = ["chatgpt"];
 const WATCH_DIR = resolve(REPO_ROOT, "apps/api/src/data/subscription-watch");

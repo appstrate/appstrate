@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Model discovery — determine which models a credential serves and persist
- * them on the credential row (`available_model_ids`).
+ * Model discovery — determine which models a credential serves.
  *
  * Two strategies, chosen by the provider definition's `modelDiscovery` field:
  *
  *   - `{ mode: "static" }` (subscription providers: codex, claude-code) — the
- *     platform issues ZERO API calls. It persists the provider's static
- *     `modelDiscoveryCandidates` (∩ catalog) directly. Spending a user's
+ *     platform issues ZERO API calls AND writes nothing. Spending a user's
  *     subscription quota to enumerate models would contradict the
  *     compliance posture (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`):
  *     all subscription inference runs through the Pi engine (pi-ai emits
  *     the provider's request shape) at run time, never a platform-side
  *     request. Real per-model availability is validated at first run.
+ *     Because no probe ever runs, the served set is a pure function of
+ *     (definition, catalog) — identical for every credential of the provider
+ *     — so it is resolved on read by `resolveCredentialModelIds` instead of
+ *     being copied into `available_model_ids`, where it could only rot.
+ *     Discovery is then a truthful no-op: it reports the current list.
  *
  *   - probe (default, when `modelDiscovery` is omitted — API-key providers) —
  *     empirical: a 1-token inference request per candidate, persisting the ids
@@ -38,6 +41,8 @@
  * (`routes/models.ts` gates a model-add against it). A run where nothing
  * verified does not persist either: an all-failure round is
  * indistinguishable from a network incident, so the previous list stands.
+ * That column is written by the probe path ONLY — read it through
+ * `resolveCredentialModelIds`, never directly.
  */
 
 import { eq, and } from "drizzle-orm";
@@ -46,8 +51,8 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import type { TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
+import { resolveCatalogBackedCandidates, resolveDiscoveryCandidates } from "./model-selection.ts";
 import { testModelConfig } from "../org-models.ts";
-import { listCatalogModels } from "../pricing-catalog.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Pause before the single 429 retry. */
@@ -66,9 +71,16 @@ export interface ModelDiscoveryResult {
   outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates" | "credential_not_found";
   /** Ids that answered 2xx, in candidate order. Empty unless `ok`. */
   verifiedModelIds: string[];
-  /** Candidates probed (after dedupe + cap). */
+  /**
+   * Candidates probed (after dedupe + cap). Always 0 for `mode: "static"`
+   * providers — they consider candidates without any upstream request.
+   */
   probedCount: number;
-  /** True when the verified list was written to the credential row. */
+  /**
+   * True when the verified list was written to the credential row. Always
+   * false for `mode: "static"` providers: their list is derived on read, so
+   * there is nothing to store.
+   */
   persisted: boolean;
 }
 
@@ -92,18 +104,8 @@ const defaultDeps: ModelDiscoveryDeps = {
 };
 
 /**
- * Persist the static `modelDiscoveryCandidates` (∩ resolved catalog) for a
- * `{ mode: "static" }` provider, with NO network call. Used for subscription
- * providers whose tokens must never be spent on a platform-side probe. The
- * catalog intersection mirrors the `/seed` route's gate (catalog membership),
- * so the persisted list is exactly the set a user can actually seed. An empty
- * candidate list is a no-op that leaves any previous list untouched.
- */
-/**
- * Persist the verified ids onto the credential and return the standard `ok`
- * result. Shared by both discovery paths (static candidate intersection and
- * network probe) — the org-scoped UPDATE and the result shape are identical;
- * only the surrounding log line differs, so each caller logs its own.
+ * Persist the probe-verified ids onto the credential and return the standard
+ * `ok` result. Probe path only — `mode: "static"` providers never reach here.
  */
 async function persistVerifiedModels(
   orgId: string,
@@ -120,40 +122,6 @@ async function persistVerifiedModels(
   return { outcome: "ok", verifiedModelIds: verified, probedCount, persisted: true };
 }
 
-async function persistStaticCandidates(
-  orgId: string,
-  credentialId: string,
-  providerId: string,
-  def: NonNullable<ReturnType<typeof getModelProvider>>,
-): Promise<ModelDiscoveryResult> {
-  const catalogKey = def.catalogProviderId ?? providerId;
-  const catalogIds = new Set(listCatalogModels(catalogKey).map((m) => m.id));
-  const candidates = [...new Set(def.modelDiscoveryCandidates ?? def.featuredModels ?? [])];
-  const verified = candidates.filter((id) => catalogIds.has(id));
-
-  if (verified.length === 0) {
-    logger.warn("static model discovery resolved no catalog-backed candidates — keeping list", {
-      credentialId,
-      providerId,
-      candidateCount: candidates.length,
-    });
-    return {
-      outcome: "nothing_verified",
-      verifiedModelIds: [],
-      probedCount: candidates.length,
-      persisted: false,
-    };
-  }
-
-  logger.info("static model discovery persisted catalog-backed candidates", {
-    credentialId,
-    providerId,
-    verifiedCount: verified.length,
-    candidateCount: candidates.length,
-  });
-  return persistVerifiedModels(orgId, credentialId, verified, candidates.length);
-}
-
 /**
  * Probe every discovery candidate of `credentialId` and persist the ids
  * that answered. The first candidate runs alone as an auth gate (a dead
@@ -162,8 +130,8 @@ async function persistStaticCandidates(
  * burst — keeps it polite to the subscription backend's rate limits
  * while cutting wall-clock from O(n) sequential round-trips to ~O(n/4).
  *
- * `mode: "static"` providers skip probing entirely — see
- * {@link persistStaticCandidates}.
+ * `mode: "static"` providers skip probing entirely and write nothing — see
+ * the module header.
  */
 export async function discoverAvailableModels(
   orgId: string,
@@ -181,22 +149,31 @@ export async function discoverAvailableModels(
   }
   const def = getModelProvider(creds.providerId);
 
-  // Static-discovery providers (subscription: codex, claude-code) — persist the
-  // static candidate list (∩ catalog) WITHOUT any network probe. The
-  // platform never spends a subscription request to enumerate models; real
-  // per-model availability is validated at the first agent run (Pi engine). The
-  // catalog intersection keeps `available_model_ids` aligned with what the
-  // `/seed` route can actually accept (it gates seeding on catalog
-  // membership), so a candidate absent from the catalog isn't persisted as
-  // "available" only to be rejected at seed time.
+  // Static-discovery providers (subscription: codex, claude-code) — resolve
+  // the served list and write NOTHING. No network probe (the platform never
+  // spends a subscription request to enumerate models; real per-model
+  // availability is validated at the first agent run on the Pi engine) and no
+  // row update either: the result is the same pure function of (definition,
+  // catalog) that every read path already evaluates, so persisting it would
+  // create a second copy whose only distinguishing property is being older.
+  // `probedCount: 0` — zero upstream requests were spent. The endpoint stays
+  // a valid no-op rather than a lie or a 404: callers (the model form) get
+  // the current list back exactly as before.
   if (def?.modelDiscovery?.mode === "static") {
-    return persistStaticCandidates(orgId, credentialId, creds.providerId, def);
+    const served = resolveCatalogBackedCandidates(def);
+    return {
+      // `no_candidates` on empty, same meaning as on the probe path: the
+      // provider resolved no candidate at all. Nothing is at stake in the
+      // distinction any more (there is no previous list to protect), but the
+      // outcome should stay honest about an empty answer.
+      outcome: served.length > 0 ? "ok" : "no_candidates",
+      verifiedModelIds: served,
+      probedCount: 0,
+      persisted: false,
+    };
   }
 
-  const candidates = [...new Set(def?.modelDiscoveryCandidates ?? def?.featuredModels ?? [])].slice(
-    0,
-    MAX_CANDIDATES,
-  );
+  const candidates = (def ? resolveDiscoveryCandidates(def) : []).slice(0, MAX_CANDIDATES);
   if (candidates.length === 0) {
     return { outcome: "no_candidates", verifiedModelIds: [], probedCount: 0, persisted: false };
   }

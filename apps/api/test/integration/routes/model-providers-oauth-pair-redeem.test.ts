@@ -8,12 +8,15 @@
  * the canonical-path-specific contract:
  *   - The canonical path successfully redeems a fresh pairing token.
  *   - The canonical path does NOT emit any deprecation header.
+ *   - The redeem response reports the SAME model list a GET of the created
+ *     credential reports (the helper's terminal summary vs the dashboard).
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
 const app = getTestApp();
 
@@ -99,5 +102,107 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(410);
+  });
+});
+
+/**
+ * The two surfaces that report a connection's models must agree.
+ *
+ * `@appstrate/connect-helper` prints `availableModelIds` from this response
+ * ("✓ Connected. Models available: …") and can print nothing else — its
+ * pairing bearer is single-use and already consumed. The dashboard then shows
+ * `available_model_ids` from `GET /api/model-provider-credentials`. When the
+ * redeem echoed `featuredModels` (a deliberately narrow 3-id subset) instead
+ * of the credential's servable set, the two disagreed on EVERY connection,
+ * with both lists perfectly up to date — a reporting bug no data fix could
+ * close. The assertions below therefore compare the two surfaces to each
+ * other, never to a hardcoded list: the invariant is the equality itself.
+ *
+ * Runs against the REAL `claude-code` definition (a `modelDiscovery: { mode:
+ * "static" }` provider, like every OAuth provider shipped today) — a synthetic
+ * stand-in would keep passing while the shipped list rots.
+ */
+describe("POST /api/model-providers-oauth/pair/redeem — reported model list", () => {
+  let ctx: TestContext;
+
+  beforeAll(() => {
+    // Seed the canonical baseline rather than hand-registering `claude-code`.
+    // The root preload (`test/setup/preload.ts`) discovers every
+    // `packages/module-*` workspace package independently of the test `MODULES`
+    // env var — which only gates the production loader — so the baseline
+    // already carries the real definition. Hand-registering it would throw
+    // "already registered" as soon as any earlier file in the shared `bun test`
+    // process re-seeded; guarding that with an `if (!getModelProvider(...))`
+    // only turned the registration into dead code that never ran, and left the
+    // block seeding no baseline at all when an earlier file had emptied the
+    // registry.
+    seedTestModelProviders();
+  });
+
+  afterAll(() => {
+    // `bun test` shares one process and the registry rejects duplicate ids —
+    // restore the canonical baseline for the next file.
+    seedTestModelProviders();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext();
+  });
+
+  it("reports exactly what a GET of the created credential reports", async () => {
+    const pairing = await mintPairing(ctx, "claude-code");
+    const redeem = await app.request("/api/model-providers-oauth/pair/redeem", {
+      method: "POST",
+      headers: bearerHeaders(pairing.token),
+      body: JSON.stringify({
+        providerId: "claude-code",
+        accessToken: "sk-ant-oat-fake",
+        refreshToken: "sk-ant-ort-fake",
+        expiresAt: Date.now() + 3600_000,
+      }),
+    });
+    expect(redeem.status).toBe(200);
+    const redeemed = (await redeem.json()) as {
+      credentialId: string;
+      availableModelIds: string[];
+    };
+
+    const list = await app.request("/api/model-provider-credentials", {
+      headers: authHeaders(ctx),
+    });
+    expect(list.status).toBe(200);
+    const { data } = (await list.json()) as {
+      data: { id: string; available_model_ids?: string[] | null }[];
+    };
+    const credential = data.find((c) => c.id === redeemed.credentialId);
+    expect(credential).toBeDefined();
+
+    // The invariant: one connection, one answer. Order included — the head of
+    // the list is the current generation and both surfaces must agree on it.
+    expect(redeemed.availableModelIds).toEqual(credential!.available_model_ids ?? []);
+    // …and it is a real list, so the equality above cannot pass vacuously by
+    // both surfaces resolving to nothing.
+    expect(redeemed.availableModelIds.length).toBeGreaterThan(0);
+  });
+
+  it("pins the regression: the list carries the current Anthropic generation", async () => {
+    // What started this work: the helper announced `claude-opus-4-*` months
+    // after `claude-opus-5` shipped, because the redeem echoed a hand-curated
+    // subset instead of the catalog-derived servable set.
+    const pairing = await mintPairing(ctx, "claude-code");
+    const redeem = await app.request("/api/model-providers-oauth/pair/redeem", {
+      method: "POST",
+      headers: bearerHeaders(pairing.token),
+      body: JSON.stringify({
+        providerId: "claude-code",
+        accessToken: "sk-ant-oat-fake",
+        refreshToken: "sk-ant-ort-fake",
+        expiresAt: Date.now() + 3600_000,
+      }),
+    });
+    expect(redeem.status).toBe(200);
+    const { availableModelIds } = (await redeem.json()) as { availableModelIds: string[] };
+    expect(availableModelIds).toContain("claude-opus-5");
   });
 });
