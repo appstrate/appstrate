@@ -479,11 +479,7 @@ export async function handleChatStream(
   const pinnedAppId = c.req.header("x-application-id");
   const phaseAStart = Date.now();
   const [models, applicationId] = await Promise.all([
-    // metadata_only (skip credential decrypt) is safe only when an explicit
-    // model is pinned — that id came from the filtered picker, so it's reachable.
-    // Without a pin we resolve the org default from the full filtered list, so a
-    // dead-credential default is dropped rather than picked → inference error.
-    listModels(origin, inferenceHeaders, platformFetch, { metadataOnly: Boolean(modelId) }),
+    listModels(origin, inferenceHeaders, platformFetch),
     pinnedAppId
       ? Promise.resolve(pinnedAppId)
       : resolveDefaultApplicationId(origin, headers, orgId, platformFetch),

@@ -12,7 +12,11 @@ import { Button } from "@appstrate/ui/components/button";
  *
  * `canSetDefault` lets a surface hide the button on rows that can never become
  * default (e.g. an integration auth with a single eligible client). When the
- * row is neither the default nor settable, nothing renders.
+ * row is neither the default nor settable, nothing renders. `disabled` is the
+ * other half of that choice — the row *is* of a kind that can be the default
+ * but this one currently cannot. The reason belongs elsewhere in the row: the
+ * button carries `disabled:pointer-events-none`, so it is not a hover target
+ * and a `title` on it would never surface.
  */
 export function DefaultCell({
   isDefault,

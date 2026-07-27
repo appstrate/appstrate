@@ -22,6 +22,7 @@ import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
+import { isModelSelectable } from "../lib/model-selectability";
 import { primaryDisplayFile, companionDisplayFile } from "../lib/package-files";
 import { AlertTriangle } from "lucide-react";
 
@@ -119,7 +120,7 @@ function ModelRequiredAlert() {
   const { t } = useTranslation(["settings", "agents"]);
   const { data: models } = useModels();
 
-  const hasAnyModel = models?.some((m) => m.is_default && m.enabled);
+  const hasAnyModel = models?.some((m) => m.is_default && isModelSelectable(m));
   if (hasAnyModel || hasAnyModel === undefined) return null;
 
   return (

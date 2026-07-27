@@ -1155,6 +1155,7 @@ export const schemas = {
       "modelId",
       "enabled",
       "is_default",
+      "needs_reconnection",
       "aliased",
       "iconUrl",
       "source",
@@ -1195,6 +1196,11 @@ export const schemas = {
       reasoning: { type: ["boolean", "null"] },
       enabled: { type: "boolean" },
       is_default: { type: "boolean" },
+      needs_reconnection: {
+        type: "boolean",
+        description:
+          "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment.",
+      },
       aliased: {
         type: "boolean",
         description:

@@ -28,6 +28,7 @@ const base: OrgModelInfo = {
   cost: { input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 },
   enabled: true,
   is_default: false,
+  needs_reconnection: false,
   aliased: false,
   iconUrl: null,
   source: "built-in",
@@ -72,6 +73,16 @@ describe("projectAliasedModel", () => {
     expect(json).not.toContain("deepseek");
     expect(json).not.toContain("deepseek-chat");
     expect(json).not.toContain("api.deepseek.com");
+  });
+
+  it("preserves needs_reconnection on an aliased model", () => {
+    // An availability bit, not part of the backing: it names no provider,
+    // endpoint or upstream id. An aliased DB row can sit on a dead OAuth
+    // credential, and the operator surface needs to know why it is unusable.
+    const out = projectAliasedModel({ ...base, aliased: true, needs_reconnection: true });
+    expect(out.needs_reconnection).toBe(true);
+    expect(out.providerId).toBeNull(); // backing still hidden
+    expect(out.baseUrl).toBeNull();
   });
 
   it("preserves a declared iconUrl on an aliased model", () => {

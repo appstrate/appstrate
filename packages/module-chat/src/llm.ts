@@ -16,6 +16,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
+import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
 
 const LLM_PROXY_PATH = "/api/llm-proxy";
@@ -31,25 +32,20 @@ export interface OrgModel {
   enabled?: boolean;
   /** snake_case to match the `/api/models` wire field — camelCase silently never matches. */
   is_default?: boolean;
+  /**
+   * The model's credential can no longer serve inference (revoked OAuth refresh
+   * token, or a stored blob that no longer decrypts). Same snake_case wire
+   * convention as {@link is_default}.
+   */
+  needs_reconnection?: boolean;
 }
 
 export async function listModels(
   origin: string,
   headers: Record<string, string>,
   platformFetch: typeof fetch,
-  opts?: { metadataOnly?: boolean },
 ): Promise<OrgModel[]> {
-  // `metadata_only` skips the per-model credential decrypt + reachability filter
-  // — faster, but it also stops dropping models whose credential is dead
-  // (needs-reconnection). Safe ONLY when the caller will match an explicit,
-  // user-picked id (that id came from the browser's filtered picker, so it is
-  // already reachable). For DEFAULT resolution (no explicit id) we must use the
-  // full filtered list, or a dead org-default would be picked and fail at
-  // inference. The caller passes `metadataOnly` accordingly.
-  const url = opts?.metadataOnly
-    ? `${origin}/api/models?metadata_only=true`
-    : `${origin}/api/models`;
-  const res = await platformFetch(url, { headers });
+  const res = await platformFetch(`${origin}/api/models`, { headers });
   if (!res.ok) throw badGateway(`/api/models returned ${res.status}`);
   // `/api/models` answers with the Stripe-canonical list envelope
   // `{ object: "list", data, hasMore }` (apps/api `listResponse`, and the
@@ -64,16 +60,33 @@ export async function listModels(
 
 export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   // `enabled` is opt-out: a missing flag counts as enabled.
-  const pool = models.filter((m) => m.enabled !== false && CHAT_USABLE_FAMILIES.has(m.apiShape));
-  if (pool.length === 0 && models.some((m) => m.enabled !== false)) {
+  const usable = models.filter((m) => m.enabled !== false && CHAT_USABLE_FAMILIES.has(m.apiShape));
+  if (usable.length === 0 && models.some((m) => m.enabled !== false)) {
     throw invalidRequest(
       "Aucun modèle utilisable par le chat n'est configuré. Connectez un modèle par clé API (Anthropic, OpenAI, Mistral) ou un abonnement Claude Code dans Settings → Models.",
     );
   }
+  // Liveness is the second gate, on top of enabled + chat-usable family:
+  // without it a gone-dead org default would be picked and fail deep inside
+  // the provider with an opaque error. The picker (`ui/`) renders those rows
+  // instead of hiding them — same predicate, different answer to give.
+  const pool = usable.filter(isModelLive);
   const chosen = modelId
     ? pool.find((m) => m.id === modelId || m.modelId === modelId)
     : (pool.find((m) => m.is_default) ?? pool[0]);
   if (!chosen) {
+    // A dead model is one the user HAS: neither "configure a model" (the
+    // family fallback above) nor "not an enabled model" (below) names the fix.
+    // Covers both the explicitly pinned dead id and the all-models-dead case,
+    // where `usable` is non-empty but `pool` is not.
+    const dead = modelId
+      ? usable.some((m) => m.id === modelId || m.modelId === modelId)
+      : usable.length > 0;
+    if (dead) {
+      throw invalidRequest(
+        "Le modèle sélectionné ne peut plus servir l'inférence : sa connexion doit être rétablie dans Settings → Models.",
+      );
+    }
     throw invalidRequest(
       modelId
         ? `Model "${modelId}" is not an enabled model on this instance.`

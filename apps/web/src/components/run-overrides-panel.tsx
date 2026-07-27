@@ -15,6 +15,8 @@ import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { useUploadClient } from "../hooks/use-upload";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useModels } from "../hooks/use-models";
+import { isModelSelectable } from "../lib/model-selectability";
+import { ModelUnselectableNote } from "./model-availability-badge";
 import { useProxies } from "../hooks/use-proxies";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
 import { getModelIcon } from "./icons";
@@ -165,7 +167,11 @@ export function RunOverridesPanel({
     }
   };
 
-  const orgDefaultModel = orgModels?.find((m) => m.is_default && m.enabled);
+  // No selectability filter: "inherit" must keep naming the org default even
+  // when that default is unusable — an unlabelled "inherit" row would hide the
+  // very thing the run is about to fail on. The label carries the reason
+  // instead (ModelUnselectableNote below).
+  const orgDefaultModel = orgModels?.find((m) => m.is_default);
   const orgDefaultProxy = orgProxies?.find((p) => p.is_default && p.enabled);
 
   const modelSelectValue = value.model_id_override ?? persistedModelId ?? INHERIT;
@@ -181,21 +187,28 @@ export function RunOverridesPanel({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              {/* "Inherit" stays selectable even when the default is dead: it
+                  is the absence of an override, so disabling it would trap a
+                  user who wants to clear one. */}
               <SelectItem value={INHERIT}>
-                {orgDefaultModel
-                  ? t("run.overrides.modelInheritWithDefault", {
-                      ns: "agents",
-                      name: orgDefaultModel.label,
-                    })
-                  : t("run.overrides.modelInherit", { ns: "agents" })}
+                <span className="inline-flex items-center gap-1.5">
+                  {orgDefaultModel
+                    ? t("run.overrides.modelInheritWithDefault", {
+                        ns: "agents",
+                        name: orgDefaultModel.label,
+                      })
+                    : t("run.overrides.modelInherit", { ns: "agents" })}
+                  {orgDefaultModel && <ModelUnselectableNote model={orgDefaultModel} />}
+                </span>
               </SelectItem>
               {orgModels.map((m) => {
                 const MIcon = getModelIcon(m, registry ?? []);
                 return (
-                  <SelectItem key={m.id} value={m.id}>
+                  <SelectItem key={m.id} value={m.id} disabled={!isModelSelectable(m)}>
                     <span className="inline-flex items-center gap-1.5">
                       {MIcon && <MIcon className="size-3.5" />}
                       {m.label}
+                      <ModelUnselectableNote model={m} />
                     </span>
                   </SelectItem>
                 );

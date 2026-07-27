@@ -8,16 +8,12 @@ import { lookupCatalogModel } from "./pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
-import { notFound } from "../lib/errors.ts";
+import { conflict, notFound } from "../lib/errors.ts";
 import { checkEgressUrl, egressGuardedFetch } from "../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
-import {
-  loadInferenceCredentials,
-  loadCredentialRow,
-  loadCredentialMetadata,
-} from "./model-providers/credentials.ts";
+import { loadInferenceCredentials, loadCredentialMetadata } from "./model-providers/credentials.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
   getResolvedModel,
@@ -114,6 +110,15 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     label: model.label,
     enabled: model.enabled,
     is_default: model.is_default,
+    // Availability signal, NOT part of the backing — it names no provider,
+    // endpoint or upstream id, so it fingerprints nothing (unlike the
+    // capability/cost fields nulled below). Kept public because an alias can
+    // itself go dead: a DB row may be `aliased` while pointing at a real stored
+    // credential, and hiding the flag would put that alias right back in the
+    // state this projection's caller must be able to act on — listed, unusable,
+    // unexplained. (System/env aliases resolve from `SYSTEM_PROVIDER_KEYS`, a
+    // static key that never goes stale, so for them it is always false.)
+    needs_reconnection: model.needs_reconnection,
     aliased: model.aliased,
     // Deliberate public display icon — chosen on the alias, decoupled from the
     // backing provider, so it carries no fingerprint. Safe to surface.
@@ -141,10 +146,7 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
 
 // --- List (system + DB) ---
 
-export async function listOrgModels(
-  orgId: string,
-  opts?: { metadataOnly?: boolean },
-): Promise<OrgModelInfo[]> {
+export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
   const rows = await db.select().from(orgModels).where(scopedWhere(orgModels, { orgId }));
   // The default is an org-level pointer: when set, exactly that id is the
@@ -153,44 +155,58 @@ export async function listOrgModels(
   const now = toISORequired(new Date());
 
   // Resolve apiShape/providerId/baseUrl per row (the DB row no longer stores
-  // them — they derive from the credential's `providerId`). Two modes:
-  //   - default: decrypt each credential (`loadInferenceCredentials`); a row
-  //     with an unreachable credential (deleted upstream, dead OAuth, decrypt
-  //     failure) is dropped — surfacing it would confuse the UI.
-  //   - metadataOnly: resolve from the registry WITHOUT touching the secret
-  //     (`loadCredentialMetadata`). Skips the decrypt for callers that only need
-  //     the protocol family (e.g. the chat model picker); the real secret is
-  //     resolved later at inference time. A row whose credential/provider is
-  //     gone is still dropped. mapRow below reads only providerId/apiShape/
-  //     baseUrl, so both resolvers feed it the same shape.
+  // them — they derive from the credential's `providerId`) plus the credential's
+  // liveness, through ONE predicate for every row:
+  //
+  //   `loadInferenceCredentials(...) === null`
+  //
+  // That was the old DROP predicate; it is now the FLAG predicate — the exact
+  // same test, so no new semantics: a row that used to disappear now appears
+  // flagged. Applied to api-key rows too, not just oauth2 ones: an api-key blob
+  // that no longer decrypts (a key rotation that retired a kid still in use, DB
+  // corruption) is just as dead as a revoked refresh token, and listing it as
+  // healthy would only move the failure to inference time. One decrypt per model
+  // per call — exactly what the pre-flag default path already did.
+  //
+  // A live probe is also authoritative for the display fields (it resolves the
+  // base URL through `effectiveBaseUrl`), so it is tried FIRST and the
+  // registry-metadata query only runs on the rare dead path. `null` metadata
+  // (credential row gone, or a `providerId` with no registry entry) STILL drops
+  // the row — with no provider there is nothing to render. Recovering those rows
+  // is out of scope for this fix.
   const credByRow = new Map<
     string,
-    { providerId: string; apiShape: ModelApiShape; baseUrl: string }
+    {
+      providerId: string;
+      apiShape: ModelApiShape;
+      baseUrl: string;
+      needsReconnection: boolean;
+    }
   >();
   await Promise.all(
     rows.map(async (r) => {
-      const creds = opts?.metadataOnly
-        ? await loadCredentialMetadata(r.credentialId, orgId)
-        : await loadInferenceCredentials(orgId, r.credentialId);
-      if (!creds) return;
-      // `metadataOnly` skips the decrypt, so it cannot see the OAuth blob's
-      // `needsReconnection` flag — a dead OAuth credential would otherwise
-      // leak into the model picker as a selectable (but unusable) model.
-      // Route OAuth rows through the decrypt gate (`loadInferenceCredentials`
-      // returns null for dead credentials), matching the default listing.
-      // api-key credentials can never be "dead", so they skip this probe.
-      if (opts?.metadataOnly && getModelProvider(creds.providerId)?.authMode === "oauth2") {
-        const live = await loadInferenceCredentials(orgId, r.credentialId);
-        if (!live) return;
+      const live = await loadInferenceCredentials(orgId, r.credentialId);
+      if (live) {
+        credByRow.set(r.id, {
+          providerId: live.providerId,
+          apiShape: live.apiShape,
+          baseUrl: live.baseUrl,
+          needsReconnection: false,
+        });
+        return;
       }
-      credByRow.set(r.id, creds);
+      const meta = await loadCredentialMetadata(r.credentialId, orgId);
+      if (!meta) return;
+      credByRow.set(r.id, { ...meta, needsReconnection: true });
     }),
   );
-  const reachableRows = rows.filter((r) => credByRow.has(r.id));
+  // "renderable", not "reachable": a dead-credential row is kept (flagged) —
+  // only a row with no resolvable provider is dropped.
+  const renderableRows = rows.filter((r) => credByRow.has(r.id));
 
-  return mergeSystemAndDb<ModelDefinition, (typeof reachableRows)[number], OrgModelInfo>({
+  return mergeSystemAndDb<ModelDefinition, (typeof renderableRows)[number], OrgModelInfo>({
     system,
-    rows: reachableRows,
+    rows: renderableRows,
     mapSystem: (id, def): OrgModelInfo => ({
       id,
       ...resolveModelMetadata(
@@ -205,6 +221,9 @@ export async function listOrgModels(
       modelId: def.modelId,
       enabled: def.enabled !== false,
       is_default: pointer !== null ? id === pointer : def.isDefault === true,
+      // System (env) models read their key from `SYSTEM_PROVIDER_KEYS` — no
+      // stored blob to be revoked or to stop decrypting, so never "dead".
+      needs_reconnection: false,
       aliased: def.aliased === true,
       iconUrl: def.iconUrl ?? null,
       source: "built-in",
@@ -229,6 +248,7 @@ export async function listOrgModels(
         modelId: row.modelId,
         enabled: row.enabled,
         is_default: pointer !== null && row.id === pointer,
+        needs_reconnection: creds.needsReconnection,
         aliased: row.aliased,
         // DB custom models declare no icon — the client resolves it from the
         // (visible) apiShape/baseUrl. Aliases live in env, never this table.
@@ -246,8 +266,9 @@ export async function listOrgModels(
 /**
  * Fetch a single org model by id, projected through the exact same serializer
  * as {@link listOrgModels} (so a mutation's return shape matches `GET`/list
- * byte-for-byte). Returns `undefined` when the id is unknown or its backing
- * credential is unreachable (the row is then absent from the list too).
+ * byte-for-byte). Returns `undefined` when the id is unknown or its credential
+ * row/provider is gone (the row is then absent from the list too). A dead
+ * credential is NOT such a case — it resolves, flagged `needs_reconnection`.
  *
  * Used by the create/update handlers to return the full resource instead of an
  * id-only stub (issue #646). Deliberately re-runs `listOrgModels` rather than
@@ -261,10 +282,10 @@ export async function getOrgModel(orgId: string, id: string): Promise<OrgModelIn
 
 /**
  * Raw custom-model row fetch — NO credential resolution, NO reachability
- * filtering. {@link getOrgModel} deliberately drops rows whose backing
- * credential is unreachable, which makes it unusable as the *pre-state* read
- * for update-time invariant checks (a row must be inspectable even when its
- * credential is dead). Exposes exactly the fields the update-time invariants
+ * filtering. {@link getOrgModel} still drops rows whose credential row/provider
+ * is gone, which makes it unusable as the *pre-state* read for update-time
+ * invariant checks (a row must be inspectable whatever its credential's
+ * state). Exposes exactly the fields the update-time invariants
  * need: alias fields, plus the stored modelId + token-budget overrides (the
  * effective-state `maxTokens < contextWindow` check). System (env) models are
  * not rows — callers gate on `isSystemModel` first.
@@ -508,6 +529,20 @@ export async function seedOrgModelsForCredential(
  * per-row flag flip — so there is nothing to keep transactionally consistent.
  */
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
+  // A model on a dead credential is now LISTED rather than silently dropped
+  // (so it can be inspected and detached), which also puts it within a
+  // client's reach here. Refuse it: the pointer feeds every run and chat, and
+  // resolution of a dead model fails at inference time. The check lives in this
+  // service — NOT in `createDefaultPointer`, which is shared byte-for-byte with
+  // `org-proxies` and must stay generic. `modelNeedsReconnection` is the single
+  // predicate (system ids, unknown rows and non-UUIDs all answer false, so the
+  // pointer helper below still owns the 404).
+  if (modelDbId !== null && (await modelNeedsReconnection(orgId, modelDbId))) {
+    throw conflict(
+      "model_needs_reconnection",
+      "This model's provider credential must be reconnected before it can be the default model. Reconnect the credential, or pick another model.",
+    );
+  }
   // Validate the target before storing it (mirrors the integration set-default
   // guard). A system id is trusted via the registry; a custom id must be a row
   // the org owns.
@@ -771,13 +806,28 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
 /**
  * Disambiguate the `loadModel(...) === null` result for an org (DB) model: is it
- * null because the model is missing/disabled, or because its OAuth credential is
- * flagged `needsReconnection` (which `loadInferenceCredentials` treats as dead)?
+ * null because the model is missing/disabled, or because its stored credential
+ * can no longer serve inference — an OAuth credential flagged
+ * `needsReconnection`, or (either auth mode) a blob that no longer decrypts?
  *
- * Returns `true` only for the second case — an enabled DB model whose OAuth
- * credential needs reconnection — so a caller can surface an actionable
- * "reconnect" instead of a misleading "not found / not enabled". System models
- * and non-UUID ids are never reconnection cases (`false`).
+ * Returns `true` only for that second case, so a caller can surface an
+ * actionable "reconnect" instead of a misleading "not found / not enabled".
+ *
+ * Scope, precisely — `true` requires ALL of: an existing DB row (system models
+ * and non-UUID ids answer `false`), that is `enabled`, whose credential fails
+ * {@link loadInferenceCredentials} AND still resolves through
+ * {@link loadCredentialMetadata}. That last conjunct is what keeps this aligned
+ * with what {@link listOrgModels} actually RENDERS as dead: a row whose
+ * credential row is gone, or whose `providerId` has no registry entry (its
+ * provider module was dropped from `MODULES`), is not listed at all — and its
+ * credential is fine, so "reconnect it" would be advice that fixes nothing
+ * about a row the client cannot even see. The fix there is to restore the
+ * provider.
+ *
+ * One divergence from the list is deliberate: a DISABLED row on a dead
+ * credential is flagged by the list (which flags regardless of `enabled`) but
+ * answers `false` here. It is inert either way — `resolveModel` cascades past
+ * it — and the actionable advice for it is "enable it", not "reconnect".
  */
 export async function modelNeedsReconnection(orgId: string, modelDbId: string): Promise<boolean> {
   if (isSystemModel(modelDbId)) return false;
@@ -796,8 +846,10 @@ export async function modelNeedsReconnection(orgId: string, modelDbId: string): 
   }
   if (!row || !row.enabled || !row.credentialId) return false;
 
-  const cred = await loadCredentialRow(row.credentialId, orgId);
-  return !!cred && cred.blob.kind === "oauth" && !!cred.blob.needsReconnection;
+  // The list's two tests, in its order: dead for inference, but still
+  // renderable. See the doc block for why the second one is not redundant.
+  if ((await loadInferenceCredentials(orgId, row.credentialId)) !== null) return false;
+  return (await loadCredentialMetadata(row.credentialId, orgId)) !== null;
 }
 
 /**
@@ -988,8 +1040,24 @@ export async function testModelConfig(config: {
 /** Test a saved model by ID (loads from DB/system registry then delegates to testModelConfig). */
 export async function testModelConnection(orgId: string, modelDbId: string): Promise<TestResult> {
   const model = await loadModel(orgId, modelDbId);
-  if (!model)
+  if (!model) {
+    // A dead-credential model is LISTED (flagged) while `loadModel` still
+    // refuses it, and the settings table offers "Test" on every listed row —
+    // so this is reached with the row on screen in front of the user. Answer
+    // with the surface's normal failed result: the route turns only
+    // `MODEL_NOT_FOUND` into a 404, and "Model not found" is the one thing
+    // that is demonstrably untrue here.
+    if (await modelNeedsReconnection(orgId, modelDbId)) {
+      return {
+        ok: false,
+        latency: 0,
+        error: "NEEDS_RECONNECTION",
+        message:
+          "This model's provider credential must be reconnected before it can be tested. Reconnect it in the Model Provider Keys tab.",
+      };
+    }
     return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
+  }
 
   return testModelConfig(model);
 }

@@ -56,8 +56,10 @@ export interface SubscriptionChatModel {
  * Outcome of resolving the chosen model row for a chat turn.
  *   - `{ subscription: false }` — an API-key / unknown provider → the chat's
  *     generic ai-sdk (llm-proxy) path handles it.
- *   - `{ subscription: true, needsReconnection: true }` — an oauth2 model whose
- *     credential is dead → the chat surfaces a reconnect prompt.
+ *   - `{ subscription: true, needsReconnection: true }` — a model whose stored
+ *     credential is dead (oauth flagged needs-reconnection, or a stored secret
+ *     that no longer decrypts) → the chat surfaces a reconnect prompt. Nothing
+ *     is resolvable either way, so this is purely which error the user sees.
  *   - `{ subscription: true, model }` — an oauth2 model with a fresh token → the
  *     Pi subscription chat engine drives it.
  */

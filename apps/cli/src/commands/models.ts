@@ -45,6 +45,9 @@ export async function modelsListCommand(opts: ModelsListOptions): Promise<void> 
       const suffixes: string[] = [];
       if (m.isDefault) suffixes.push("default");
       if (!m.enabled) suffixes.push("disabled");
+      // Listed, but the resolver refuses it — say so here, since this listing
+      // is what the resolver's error tells the user to consult.
+      if (m.needs_reconnection === true) suffixes.push("needs-reconnection");
       if (!PROXY_SUPPORTED_APIS.has(m.apiShape)) suffixes.push("proxy-unsupported");
       const suffix = suffixes.length > 0 ? ` [${suffixes.join(", ")}]` : "";
       process.stdout.write(`  ${m.id.padEnd(36)}  ${m.apiShape.padEnd(24)}  ${m.label}${suffix}\n`);

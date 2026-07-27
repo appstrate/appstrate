@@ -15,6 +15,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A model provider credential could become impossible to delete** —
+  `GET /api/models` dropped every model whose credential could no longer serve
+  inference (a revoked OAuth refresh token, or a stored secret that no longer
+  decrypts). Since `org_models.credential_id` is `ON DELETE RESTRICT`, that
+  produced a deadlock seen in production: the model was invisible in the UI, so
+  it could not be detached, so its credential answered 409 `credential_in_use`
+  forever. Such a model is now LISTED with a new `needs_reconnection` field on
+  `OrgModel`, marked in the models table and in every picker, and still
+  deletable — detaching it is what frees the credential. The write and runtime
+  paths stay fail-closed: it cannot be selected in a picker, cannot become the
+  organization default (409 `model_needs_reconnection`), is refused by the chat
+  model resolver, and still resolves to null for inference. The `metadata_only`
+  query parameter on `GET /api/models` is removed: a row must be decrypted to
+  know its liveness, so the parameter no longer skipped any work.
+
 - **A raw credential starting with a scheme name was silently corrupted before
   it reached the upstream (#988)** — `normalizeAuthScheme` ran on the RESOLVED
   `Authorization` value, after credential injection, so its

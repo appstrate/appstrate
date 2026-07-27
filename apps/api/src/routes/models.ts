@@ -191,13 +191,7 @@ export function createModelsRouter() {
   // GET /api/models — list all models (system + DB)
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
-    // `metadata_only`: resolve protocol family/baseUrl from the registry without
-    // decrypting each model's credential. For callers that only need to pick a
-    // model row (e.g. the chat picker), not to call inference. Rows with a gone
-    // credential/provider are still dropped, but a model whose secret is unusable
-    // (dead OAuth) is NOT filtered here — it surfaces and errors at inference.
-    const metadataOnly = c.req.query("metadata_only") === "true";
-    const models = await listOrgModels(orgId, { metadataOnly });
+    const models = await listOrgModels(orgId);
     // Strip the backing of any model alias before it reaches the dashboard user
     // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
     //
@@ -239,11 +233,14 @@ export function createModelsRouter() {
       }
       // Reachability gate — MUST run on both the explicit-label and the
       // derive-label paths, before the insert. `loadInferenceCredentials`
-      // returns null for a dead credential (OAuth in needs_reconnection,
-      // missing row, unresolvable baseUrl); the list serializer filters
-      // models bound to such credentials, so inserting first would 500 on
-      // the bare-resource re-projection below and leave a phantom row the
-      // caller can't see.
+      // returns null for a dead credential (OAuth in needs_reconnection, a
+      // blob that no longer decrypts, missing row, unresolvable baseUrl).
+      // Two things depend on it: everything below reads `creds` (alias
+      // invariants, the catalog defaults the token-budget check is measured
+      // against) and cannot be established without it; and `needs_reconnection`
+      // exists to explain a model that WENT dead, not to license minting one
+      // dead on arrival — such a row could never run, and could not even
+      // become the org default.
       const creds = await loadInferenceCredentials(orgId, credentialId);
       if (!creds) {
         throw invalidRequest(
@@ -601,12 +598,12 @@ export function createModelsRouter() {
         "credentialId",
       );
     }
-    // Reachability gate (same as POST) — re-pointing a model to a dead
-    // credential (needs_reconnection OAuth) would let the UPDATE succeed,
-    // then the bare-resource re-projection below 404s because the list
-    // serializer filters models bound to unreachable credentials — a
-    // misleading "Model not found" after a write that DID land. Reject
-    // before the write instead.
+    // Reachability gate (same as POST) — re-pointing a model AT a credential
+    // that can no longer serve inference is a deliberate move into a broken
+    // state: the row would come back flagged `needs_reconnection`, refuse to
+    // become the org default, and fail every run. Reject before the write.
+    // `newCreds` is also what the alias invariants and the catalog defaults
+    // below are established against.
     let newCreds: Awaited<ReturnType<typeof loadInferenceCredentials>> = null;
     if (data.credentialId) {
       newCreds = await loadInferenceCredentials(orgId, data.credentialId);
