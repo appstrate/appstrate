@@ -263,12 +263,19 @@ function clientErrorMessage(error: unknown): string {
 /** An armed turn ceiling: how the turn aborted, and how to cancel the timer. */
 export interface ArmedTurnDeadline {
   /**
-   * The turn's abort reason. Read this instead of `signal.reason`: Bun 1.3 can
-   * garbage-collect a reason object whose only holder was the timer callback
-   * that aborted with it, leaving `signal.reason` `undefined` a tick later. A
-   * collected reason would silently downgrade the ceiling to an untagged stop —
-   * exactly the silent ending this path exists to prevent — so the ceiling's own
-   * error is retained here and returned once it has fired.
+   * The turn's abort reason. Read this instead of `signal.reason`.
+   *
+   * Bun 1.3.11 does not keep a strong reference to an abort reason: whenever
+   * nothing ELSE holds the object, `signal.reason` reads back `undefined` a tick
+   * later. It is NOT specific to timers or to forced GC — a plain synchronous
+   * `controller.abort(new Error(…))` loses it just the same, and Node keeps it in
+   * every case. (Same family as oven-sh/bun#16748, which fixed a JSAbortSignal
+   * being collected too early because Bun bypasses EventTarget's listeners.)
+   *
+   * A collected reason would silently downgrade the ceiling to an untagged stop
+   * — exactly the silent ending this path exists to prevent — so the ceiling
+   * retains its own error and returns it once it has fired. Retaining the object
+   * is also the workaround: a reason someone still holds survives.
    */
   abortReason(): unknown;
   /** Cancel the timer. MUST be called on every exit path of the turn. */
