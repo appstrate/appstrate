@@ -8,9 +8,17 @@
  * (`claude-code` derives BOTH its lists from the vendored anthropic catalog),
  * and `docs/architecture/SUBSCRIPTION_COMPLIANCE.md` forbids any upstream
  * probe that could correct a mistake here. So the ordering, the dated-alias
- * rejection and the round-robin are pinned explicitly, plus the real outcome
- * that motivated the work: `claude-code` must surface the current Anthropic
- * generation without anyone editing a list.
+ * rejection and the round-robin are pinned explicitly.
+ *
+ * WHERE each kind of assertion lives, deliberately split:
+ *
+ *   - EXACT output (ordered id lists) is pinned only against the SYNTHETIC
+ *     catalog registered below, which this file owns.
+ *   - The real anthropic catalog is asserted on INVARIANTS only — one id per
+ *     declared family, fable present, no dated alias, candidates ⊇ featured.
+ *     `src/data/pricing/*.json` is rewritten weekly by a bot; pinning ids
+ *     there would make a new Anthropic generation — the exact event this whole
+ *     derivation exists to absorb with no code change — fail CI.
  *
  * The id GRAMMAR (`parseModelId` / `compareVersions`) is pinned here too, at
  * the bottom. It is exported because the CI drift gate
@@ -29,7 +37,9 @@ import {
 } from "../../../src/services/model-providers/model-selection.ts";
 import { registerCatalog } from "../../../src/services/pricing-catalog.ts";
 import claudeCodeModule from "@appstrate/module-claude-code";
+import { isCatalogModelSelector } from "@appstrate/core/module";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
+import anthropicPricing from "../../../src/data/pricing/anthropic.json" with { type: "json" };
 
 const ENTRY: CatalogModelEntry = {
   label: "synthetic",
@@ -169,6 +179,20 @@ describe("resolveDiscoveryCandidates", () => {
     ).toEqual(["explicit-a", "explicit-b"]);
   });
 
+  it("carries `generations` deep per family, still round-robin", () => {
+    // The exact shape claude-code declares — featured 1 generation wide across
+    // its families, candidates 3 deep — pinned here, on data this file owns.
+    // Pinning the same output against the vendored anthropic catalog would
+    // make the weekly refresh PR red for doing exactly what it is for.
+    expect(
+      resolveDiscoveryCandidates({
+        providerId: SYNTHETIC_PROVIDER,
+        featuredModels: { catalogFamilies: ["syn-alpha", "syn-beta"], generations: 1 },
+        modelDiscoveryCandidates: { catalogFamilies: ["syn-alpha", "syn-beta"], generations: 3 },
+      }),
+    ).toEqual(["syn-alpha-5", "syn-beta-3", "syn-alpha-4-8", "syn-beta-2", "syn-alpha-4-5"]);
+  });
+
   it("resolves against `catalogProviderId` when the provider has no own catalog", () => {
     expect(
       resolveDiscoveryCandidates({
@@ -180,44 +204,89 @@ describe("resolveDiscoveryCandidates", () => {
   });
 });
 
+/**
+ * Newest `claude-opus-*` id the vendored catalog carries, computed by scanning
+ * the JSON directly — deliberately NOT via `parseModelId` / the resolver, which
+ * are the things under test here. Ten lines of duplicated parsing buy an
+ * oracle that cannot agree with the implementation by construction.
+ *
+ * Kept narrow on purpose: only the canonical `claude-opus-<n>[-<n>…]` shape,
+ * with any 6+-digit segment (a dated alias) excluded.
+ */
+function newestOpusInCatalog(): string {
+  const ranked = Object.keys(anthropicPricing)
+    .filter((id) => /^claude-opus(-\d+)+$/.test(id) && !/-\d{6,}(?:-|$)/.test(id))
+    .map((id) => ({ id, version: id.slice("claude-opus-".length).split("-").map(Number) }))
+    .sort((a, b) => {
+      for (let i = 0; i < Math.max(a.version.length, b.version.length); i++) {
+        const diff = (b.version[i] ?? 0) - (a.version[i] ?? 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    });
+  return ranked[0]!.id;
+}
+
 describe("claude-code against the vendored anthropic catalog", () => {
   const claudeCode = (claudeCodeModule.modelProviders?.() ?? [])[0]!;
+  const declaredFamilies = isCatalogModelSelector(claudeCode.featuredModels)
+    ? claudeCode.featuredModels.catalogFamilies
+    : [];
 
-  it("features the current Anthropic generation (the rot this fixes)", () => {
+  it("declares a catalog selector, not a hand-written array", () => {
+    // The premise of every assertion below: if this ever regresses to an
+    // array, the list starts rotting again and the invariants stop meaning
+    // anything.
+    expect(isCatalogModelSelector(claudeCode.featuredModels)).toBe(true);
+    expect(declaredFamilies.length).toBeGreaterThan(1);
+  });
+
+  it("features the newest opus the catalog carries (the rot this fixes)", () => {
     // The hand-curated list topped out at `claude-opus-4-7` months after
-    // anthropic.json gained `claude-opus-5` / `claude-sonnet-5`. Deriving
-    // makes that class of drift impossible.
-    const featured = resolveFeaturedModels(claudeCode);
-    expect(featured).toContain("claude-opus-5");
-    expect(featured).toContain("claude-sonnet-5");
+    // anthropic.json gained `claude-opus-5`. The pin is "whatever the catalog
+    // currently tops out at", computed independently above, so the weekly
+    // catalog refresh promotes the next generation instead of turning red.
+    expect(resolveFeaturedModels(claudeCode)).toContain(newestOpusInCatalog());
   });
 
   it("features every declared family, one current model each", () => {
-    // Four families × `generations: 1` = four ids, and no cap on top. An
-    // earlier `limit: 3` truncated the round-robin's fourth slot, which made
+    // N families × `generations: 1` = N ids, and no cap on top. An earlier
+    // `limit: 3` truncated the round-robin's fourth slot, which made
     // `claude-fable` structurally unfeaturable — a family that could never
-    // surface a model no matter what Anthropic shipped.
-    expect(resolveFeaturedModels(claudeCode)).toEqual([
-      "claude-opus-5",
-      "claude-sonnet-5",
-      "claude-haiku-4-5",
-      "claude-fable-5",
-    ]);
+    // surface a model no matter what Anthropic shipped. Asserting the SHAPE
+    // (one id per family, in declaration order) rather than the exact ids
+    // keeps that regression pinned across catalog bumps; the exact ordered
+    // output is pinned above against the synthetic catalog this file owns.
+    const featured = resolveFeaturedModels(claudeCode);
+    expect(featured).toHaveLength(declaredFamilies.length);
+    declaredFamilies.forEach((family, i) => {
+      expect(featured[i]).toMatch(new RegExp(`^${family}-\\d`));
+    });
+    expect(featured.some((id) => id.startsWith("claude-fable-"))).toBe(true);
   });
 
-  it("carries three generations per family into discovery candidates", () => {
+  it("carries several generations into discovery candidates, covering featured", () => {
     const candidates = resolveDiscoveryCandidates(claudeCode);
-    // Newest of each family leads (round-robin), previous generations follow.
-    expect(candidates.slice(0, 2)).toEqual(["claude-opus-5", "claude-sonnet-5"]);
-    expect(candidates).toContain("claude-opus-4-8");
-    expect(candidates).toContain("claude-sonnet-4-6");
     // Candidates are a superset of featured — a user's plan may serve a
     // previous generation only.
     for (const id of resolveFeaturedModels(claudeCode)) {
       expect(candidates).toContain(id);
     }
-    // No dated alias ever reaches `available_model_ids`.
-    expect(candidates.every((id) => !/-\d{6,}$/.test(id))).toBe(true);
+    // At least one family reaches back past its current generation: that
+    // back-catalog is the entire reason candidates exist as a separate list.
+    const deepest = Math.max(
+      ...declaredFamilies.map((f) => candidates.filter((id) => id.startsWith(`${f}-`)).length),
+    );
+    expect(deepest).toBeGreaterThan(1);
+  });
+
+  it("never surfaces a dated alias in either list", () => {
+    // anthropic.json carries a snapshot alias next to nearly every canonical
+    // id (`claude-opus-4-1-20250805`); none may reach the picker or
+    // `available_model_ids`.
+    const dated = (id: string) => /-\d{6,}$/.test(id);
+    expect(resolveFeaturedModels(claudeCode).some(dated)).toBe(false);
+    expect(resolveDiscoveryCandidates(claudeCode).some(dated)).toBe(false);
   });
 });
 

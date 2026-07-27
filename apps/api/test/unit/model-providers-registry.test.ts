@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll, spyOn } from "bun:test";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
+import { logger } from "../../src/lib/logger.ts";
 import {
   getModelProvider,
   isOAuthModelProvider,
@@ -134,12 +135,12 @@ describe("model-providers runtime registry", () => {
    * The boot check (`validateCatalogReferences`) is the only thing standing
    * between a mistyped model list and a model picker that silently shows
    * nothing. It resolves the selection first, which means "resolved to
-   * nothing" needs one arm per selection shape — an empty ARRAY is a
-   * deliberate declaration (openrouter, openai-compatible), an empty SELECTOR
-   * is always a mistake. The selector arm was missing: resolution returns `[]`
-   * for an unknown catalog instead of throwing, so the pre-existing
-   * `length > 0 && !catalogExists` guard could never fire for a selector and
-   * both cases below registered silently.
+   * nothing" needs one arm per selection shape — and the two selector arms
+   * carry DIFFERENT severities on purpose, pinned below: a missing catalog is
+   * a source-code declaration error (throws, and registration runs inside
+   * `bootCritical()` so that is a process exit), while a selector matching
+   * nothing in an EXISTING catalog is reachable from the weekly bot refresh of
+   * `src/data/pricing/*.json` and must never be able to take the API down.
    */
   describe("catalog reference validation", () => {
     const CATALOG = "test-registry-catalog";
@@ -171,20 +172,37 @@ describe("model-providers runtime registry", () => {
             featuredModels: { catalogFamilies: ["claude-opus"], generations: 1 },
           }),
         ),
-      ).toThrow(/"does-not-exist".*no such catalog is registered/s);
+      ).toThrow(/no such catalog is registered.*"does-not-exist"/s);
     });
 
-    it("throws on a family name that matches nothing (the typo case)", () => {
-      // One extra `s` used to cost nothing at boot and show the user an empty
-      // picker. The message must name the families so the typo is visible.
-      expect(() =>
+    it("registers and logs, never throws, on a family that matches nothing", () => {
+      // One extra `s` — but the same shape occurs when the vendor renames a
+      // family under the weekly catalog refresh. Throwing would crash-loop the
+      // whole API on a third party's release notes, so this arm is an alarm,
+      // not a gate. The log must name the provider and the families so the
+      // cause is readable without a repro.
+      const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+      try {
         registerModelProvider(
           fakeDef("selector-typo", {
             catalogProviderId: CATALOG,
             featuredModels: { catalogFamilies: ["claude-opuss"], generations: 1 },
           }),
-        ),
-      ).toThrow(/"selector-typo".*"claude-opuss".*resolves to no model/s);
+        );
+        expect(getModelProvider("selector-typo")).not.toBeNull();
+        const logged = errorSpy.mock.calls.some(
+          ([msg, fields]) =>
+            String(msg).includes("catalog selector matched nothing") &&
+            (fields as { providerId?: string })?.providerId === "selector-typo" &&
+            (fields as { catalogProviderId?: string })?.catalogProviderId === CATALOG &&
+            (fields as { catalogFamilies?: string[] })?.catalogFamilies?.includes(
+              "claude-opuss",
+            ) === true,
+        );
+        expect(logged).toBe(true);
+      } finally {
+        errorSpy.mockRestore();
+      }
     });
 
     it("still accepts a deliberately empty array with no catalog", () => {

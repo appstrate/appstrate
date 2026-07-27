@@ -45,6 +45,12 @@
  *   subscription.** It is a decision record, not a mute button — adding an id
  *   without checking the doc defeats the whole mechanism.
  *
+ * The file is a ratchet by nature (an excused id is never re-examined, and one
+ * below the current floor is unreachable by `findDrift` forever), so one test
+ * pushes back the other way: every excused id must still be OBSERVED in some
+ * vendored source. An excuse for a model the vendor has retired is a claim
+ * nothing can falsify any more, and it must be deleted rather than inherited.
+ *
  * Seeded 2026-07-27 against https://learn.chatgpt.com/docs/models (Codex with
  * ChatGPT sign-in). The doc's set is exactly recommended `5.6 Sol/Terra/Luna`,
  * `5.5`, `5.3 Codex Spark` plus other-available `5.4`, `5.4 Mini` — i.e.
@@ -322,6 +328,37 @@ describe("curated subscription lists vs the vendored catalog", () => {
     // `claude-code` declares a CatalogModelSelector: it re-derives on every
     // read, so there is no curation to fall behind and no gate to apply.
     expect(ids).not.toContain("claude-code");
+  });
+
+  it("keeps reviewed.json free of ids no source observes any more", () => {
+    // Without this, `reviewed.json` is a one-way ratchet: an excused id is
+    // never looked at again, and one below the current floor is unreachable by
+    // `findDrift` forever — so a vendor RETIRING a model leaves its excuse
+    // sitting there as an unfalsifiable claim about a model that no longer
+    // exists. Requiring every excused id to still be observed somewhere
+    // (catalog ∪ watch snapshot) forces the cleanup the ratchet otherwise
+    // defers indefinitely, and it is the only pressure on the inert entries
+    // (`gpt-5.2`, the `5.1-codex-*` pair) the header calls out.
+    const stale: string[] = [];
+    for (const [providerId, ids] of Object.entries(reviewed)) {
+      const def = listModelProviders().find((d) => d.providerId === providerId);
+      if (!def) {
+        stale.push(`${providerId}: * (no such model provider is registered)`);
+        continue;
+      }
+      const observed = new Set(observedIds(def));
+      for (const id of ids) if (!observed.has(id)) stale.push(`${providerId}: ${id}`);
+    }
+    expect(
+      stale.length === 0
+        ? ""
+        : [
+            `reviewed.json excuses ids that no vendored source observes any more: ${stale.join(", ")}.`,
+            `An excuse is a decision about a model the vendor ships; once the model is gone from both`,
+            `the pricing catalog and the subscription-watch snapshot, the entry is dead weight —`,
+            `delete it from apps/api/src/data/subscription-watch/reviewed.json.`,
+          ].join("\n"),
+    ).toBe("");
   });
 
   it("reports drift when the catalog moves ahead of the curated list", () => {

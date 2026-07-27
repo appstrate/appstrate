@@ -24,10 +24,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   made. `launchRunAndWait` forwards the new `context_documents` argument (inline
   runs only).
 
+- `@appstrate/core/module` — `CatalogModelSelector`, `ModelIdSelection` and the
+  `isCatalogModelSelector()` narrowing guard: a model provider can declare its
+  model lists as `{ catalogFamilies, generations }` instead of enumerating ids.
+  The platform resolves a selector against its vendored pricing catalog on every
+  read, so a new vendor generation reaches the picker with the weekly catalog
+  refresh and no module edit. Meant for providers that track the vendor's
+  current generation and cannot probe (`claude-code`); an explicit array stays
+  right when the served set is defined outside the catalog (`codex`).
+
 ### Changed
 
 - `ChatTurnFinishReason` gains `"deadline"` — a turn cut by the engine's
   wall-clock ceiling is no longer disguised as its last step's provider reason.
+- `ModelProviderDefinition.featuredModels` widens from `readonly string[]` to
+  `ModelIdSelection` (`readonly string[] | CatalogModelSelector`), and
+  `modelDiscoveryCandidates` with it. **Asymmetric for consumers**: a module
+  that only WRITES these fields — every module passing an array — compiles
+  unchanged, since the array arm is unchanged. Code that READS
+  `def.featuredModels` as a `string[]` (mapping, spreading, `.includes()`) stops
+  compiling and must narrow with `isCatalogModelSelector()` first, or resolve
+  the selection platform-side.
 
 ### Removed
 

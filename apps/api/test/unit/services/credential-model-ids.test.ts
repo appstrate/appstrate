@@ -126,13 +126,18 @@ describe("resolveCredentialModelIds — claude-code regression", () => {
     // picker and the seed gate read, so users were offered `claude-opus-4-*`
     // months after Anthropic shipped `claude-opus-5` and after the provider
     // definition had already been corrected.
-    const resolved = resolveCredentialModelIds("claude-code", ["claude-opus-4-7"]);
-    expect(resolved).toContain("claude-opus-5");
+    const stale = "claude-opus-4-7";
+    const resolved = resolveCredentialModelIds("claude-code", [stale]);
     // The persisted array is not merely widened, it is discarded: the head of
-    // the derived list is the newest generation, not what the row happened to
-    // record. (`claude-opus-4-7` still appears further down — it is a real
-    // catalog member, just no longer the only thing on offer.)
-    expect(resolved).not.toEqual(["claude-opus-4-7"]);
-    expect(resolved[0]).toBe("claude-opus-5");
+    // the derived list is the opus family's CURRENT generation, not what the
+    // row happened to record. Asserted as a property, not as a specific id —
+    // `src/data/pricing/anthropic.json` is refreshed weekly by a bot, and
+    // "the featured list leads with the newest opus the catalog carries" is
+    // pinned against an independent scan of that JSON in
+    // `model-selection.test.ts`.
+    expect(resolved).not.toEqual([stale]);
+    expect(resolved.length).toBeGreaterThan(1);
+    expect(resolved[0]).toMatch(/^claude-opus-\d/);
+    expect(resolved[0]).not.toBe(stale);
   });
 });

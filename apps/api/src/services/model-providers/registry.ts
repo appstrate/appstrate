@@ -27,6 +27,7 @@
 
 import { isCatalogModelSelector } from "@appstrate/core/module";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
+import { logger } from "../../lib/logger.ts";
 import { hasCatalog, lookupCatalogModel } from "../pricing-catalog.ts";
 import { resolveFeaturedModels } from "./model-selection.ts";
 
@@ -61,29 +62,39 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
 }
 
 /**
- * Loud boot-time check that every id declared in `featuredModels` exists
- * in the resolved catalog (`catalogProviderId ?? providerId`). The
- * vendored pricing catalog is the single source of truth for per-model
- * metadata — a typo or stale id here would silently render with
- * `contextWindow: 0` and `cost: null`, so we fail fast.
+ * Boot-time check that every id declared in `featuredModels` exists in the
+ * resolved catalog (`catalogProviderId ?? providerId`). The vendored pricing
+ * catalog is the single source of truth for per-model metadata — a typo or
+ * stale id here would silently render with `contextWindow: 0` and
+ * `cost: null`.
  *
  * Providers with no own catalog AND no `catalogProviderId` are allowed
  * IFF `featuredModels` is empty (openrouter, openai-compatible).
  *
- * The check runs on RESOLVED ids, which needs one arm per selection shape,
- * because "resolved to nothing" means opposite things on the two arms:
+ * The check runs on RESOLVED ids, so "resolved to nothing" needs one arm per
+ * selection shape — and the severity of the two failures is DELIBERATELY
+ * ASYMMETRIC, because their causes are:
  *
  *   - EMPTY ARRAY — a deliberate declaration ("this provider features
  *     nothing": openrouter is live-search, openai-compatible is Custom-only).
- *     Allowed, with or without a catalog.
- *   - SELECTOR resolving to nothing — always a misconfiguration. A selector is
- *     a claim that the catalog carries these families; producing zero ids means
- *     the catalog key is wrong or every family name is (a typo in
- *     `claude-opuss` costs nothing at boot and shows the user an empty picker).
- *     Resolving BEFORE this check is also what made the missing-catalog arm
- *     unreachable for selectors — `resolveSelection` returns `[]` for an
- *     unknown catalog rather than throwing, so `length > 0 && !catalogExists`
- *     could never fire. This arm is that gate, restated in selector terms.
+ *     Allowed, with or without a catalog. Silent.
+ *   - SELECTOR over a catalog that does NOT EXIST — THROWS. `catalogProviderId`
+ *     is source code and the catalog set is source code; no data refresh can
+ *     produce this, only a bad declaration a human just wrote. Failing at
+ *     registration is also the only way to reach this case at all: resolution
+ *     returns `[]` for an unknown catalog rather than throwing, so the
+ *     `length > 0 && !catalogExists` guard below can never fire for a selector.
+ *   - SELECTOR over an EXISTING catalog resolving to nothing — LOGS, does not
+ *     throw. Still a misconfiguration (a family name is wrong, or the vendor
+ *     renamed one), but the input that produces it is machine-refreshed:
+ *     `src/data/pricing/*.json` is rewritten weekly by a bot PR, and Anthropic
+ *     publishes a second naming convention (`claude-3-5-sonnet-latest`) the
+ *     family matcher does not match. Registration happens inside
+ *     `bootCritical()`, which `index.ts` awaits with no `try` — so throwing
+ *     here would turn one upstream family rename into a crash-loop of the whole
+ *     API, every feature down, not just the model picker. An empty picker is a
+ *     bad day; an outage triggered by a third party's release notes is not a
+ *     trade we make. The `logger.error` is the alarm.
  *
  * Registration therefore requires the catalog to already be registered —
  * production catalogs are registered at `pricing-catalog.ts` import time, and
@@ -95,13 +106,20 @@ function validateCatalogReferences(def: ModelProviderDefinition): void {
   const featured = resolveFeaturedModels(def);
 
   if (isCatalogModelSelector(def.featuredModels) && featured.length === 0) {
-    throw new Error(
-      `Model provider ${JSON.stringify(def.providerId)} declares a featuredModels catalog ` +
-        `selector over families [${def.featuredModels.catalogFamilies.map((f) => JSON.stringify(f)).join(", ")}] ` +
-        `that resolves to no model in the ${JSON.stringify(catalogKey)} catalog` +
-        `${catalogExists ? "" : " (no such catalog is registered)"}. ` +
-        `Fix the catalogProviderId or the family names — a selector that matches ` +
-        `nothing leaves the model picker empty.`,
+    if (!catalogExists) {
+      throw new Error(
+        `Model provider ${JSON.stringify(def.providerId)} declares a featuredModels catalog ` +
+          `selector but no such catalog is registered: ${JSON.stringify(catalogKey)}. ` +
+          `Fix catalogProviderId — the catalog set is source code, not refreshed data.`,
+      );
+    }
+    logger.error(
+      "model provider features no model — catalog selector matched nothing, picker will be empty",
+      {
+        providerId: def.providerId,
+        catalogProviderId: catalogKey,
+        catalogFamilies: def.featuredModels.catalogFamilies,
+      },
     );
   }
 
