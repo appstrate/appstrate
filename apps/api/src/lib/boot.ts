@@ -588,3 +588,51 @@ function warnOnTrustProxyMisconfig(trustProxy: string, nodeEnv: string): void {
   if (nodeEnv === "production") logger.error(msg);
   else logger.info(msg);
 }
+
+/**
+ * Boot-time reachability probe for `USERCONTENT_URL` (issue #1001).
+ *
+ * The platform *signs* preview URLs (`services/documents.ts` → `mintPreviewUrl`)
+ * but never fetches them — so if `USERCONTENT_URL` is set to a host the browser
+ * cannot reach, every `preview_url` this instance mints is dead with zero
+ * server-side trace. This probe fires ONE unauthenticated GET at the preview
+ * route on that origin and, unless it gets the expected `401` (route exists and
+ * enforces the preview token — the healthy case), emits a single `error`-level
+ * line naming the URL and observed status.
+ *
+ * Never fatal, never awaited, never blocks readiness: it is kicked off
+ * fire-and-forget from `index.ts` AFTER `markServerReady()` so it can't race the
+ * boot gate (which 503s every route until ready — a mid-boot probe against a
+ * hairpin route would see that 503 instead of the real 401 and false-positive on
+ * every boot). Only runs when `USERCONTENT_URL` is defined.
+ */
+export async function probeUsercontentReachability(): Promise<void> {
+  const env = (await import("@appstrate/env")).getEnv();
+  if (!env.USERCONTENT_URL) return; // only meaningful when the origin is configured
+  // Replicate `mintPreviewUrl`'s slash-trim so we probe the exact base we sign.
+  let base = env.USERCONTENT_URL;
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  const url = `${base}/preview/documents/_probe`;
+  let status: number | null = null;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "manual",
+      signal: AbortSignal.timeout(3000),
+    });
+    status = res.status;
+  } catch {
+    // Timeout / connection refused / DNS failure — treated as "not 401".
+    status = null;
+  }
+  if (status === 401) return; // route reached AND enforcing auth → healthy, stay silent
+  logger.error(
+    `USERCONTENT_URL preview probe did not return 401 (got ${status ?? "no response"}). ` +
+      `Every preview_url this instance signs points at ${base} — if that host is unrouted, all ` +
+      `document previews are dead with no server-side trace. NOTE: this probe reaches the host from ` +
+      `INSIDE the container network; a failure here can be a false positive when hairpin-NAT / ` +
+      `split-horizon DNS prevents the container from reaching its own public hostname while browsers ` +
+      `reach it fine. Verify a preview actually fails before acting.`,
+    { url, status },
+  );
+}
