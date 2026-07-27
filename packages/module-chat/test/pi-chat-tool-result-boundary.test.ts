@@ -12,8 +12,8 @@
  * producer functions and asserts the REAL consumer functions — a change to the
  * result shape on either side fails here.
  *
- * Fixtures are the payloads observed on the wire (chat session
- * `chs_f9d3d9fc39284c9e81543ab5f1903930` and its neighbours), not invented ones.
+ * Fixtures are the payload shapes observed on the wire, not invented ones (the
+ * identifiers themselves are anonymised).
  */
 
 import { describe, expect, it } from "bun:test";
@@ -43,16 +43,15 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
     const result = withTurnBudgetNote(toPiToolResult({ id: "run_1" }), BUDGET);
 
     // The hazard this whole file guards: the payload is no longer the only text
-    // part, so joining the parts and parsing the concatenation yields a string.
+    // part of the model channel.
     expect(result.content).toHaveLength(2);
     expect(result.content[1]?.text).toStartWith("[turn budget]");
-    expect(() => JSON.parse(result.content.map((p) => p.text).join(""))).toThrow();
   });
 
   it("reads a succeeded run_and_wait result", () => {
     const payload = {
-      id: "run_65305695-9e33-4e69-8e04-b87615e63c09",
-      packageId: "@inline/r-e2f3b9ab-8554-496d-acae-819b420134b1",
+      id: "run_11111111-1111-4111-8111-111111111111",
+      packageId: "@inline/r-11111111-1111-4111-8111-111111111112",
       status: "success",
       done: true,
       result: { output: { done: true } },
@@ -66,8 +65,8 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
 
   it("reads a cancelled run_and_wait result", () => {
     const payload = {
-      id: "run_eb16d791-9326-4ce3-a415-8e22e168db1e",
-      packageId: "@inline/r-7c2527d3-ad78-4c81-be27-9de36616c047",
+      id: "run_22222222-2222-4222-8222-222222222221",
+      packageId: "@inline/r-22222222-2222-4222-8222-222222222222",
       status: "cancelled",
       done: true,
       error: "Cancelled by user",
@@ -77,8 +76,11 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
     expect(extractRunId(result)).toBe(payload.id);
     expect(extractRunStatus(result)).toBe("cancelled");
     // A cancellation carries a non-empty `error`, which `isErrorPayload` treats
-    // as a failure — the card renders red. Recorded as the current behaviour,
-    // not endorsed: a user-requested stop is not a tool error.
+    // as a failure. This phase is inert in the card once a run id exists:
+    // `StatusIcon` ignores `phase` whenever the run has a status, and the
+    // destructive styling + error line are gated on `!runId && phase ===
+    // "error"`. The card reads the run's own `cancelled` status and shows the
+    // muted "Annulé" line.
     expect(deriveToolPhase(complete(result))).toBe("error");
   });
 
@@ -88,8 +90,8 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
     const envelope = {
       status: 201,
       body: {
-        id: "run_4c5ae2f5-ccc5-4238-9066-85df25b739c5",
-        packageId: "@pierre-cabriere/compteur",
+        id: "run_33333333-3333-4333-8333-333333333333",
+        packageId: "@acme/compteur",
         status: "pending",
       },
     };

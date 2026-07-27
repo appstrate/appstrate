@@ -38,12 +38,14 @@ function isTextPart(value: unknown): value is { type: "text"; text: string } {
  *
  * A content array may carry text parts that are NOT part of the payload: the Pi
  * engine appends a model-facing `[turn budget] …` line to every tool result, so
- * the joined text is `{"id":"run_…"}[turn budget] …` — not JSON. Joining first
- * still matters (a payload can arrive split across consecutive chunks), so we
- * join, and only when that fails fall back to the first part that parses on its
- * own. Without this the payload reads as a string, and every consumer built on
- * `asRecord` (run id/status for the run card, the error-shape checks behind
- * `deriveToolPhase`) silently degrades — a failed call would read as a success.
+ * the payload is no longer the only text part and the concatenation
+ * `{"id":"run_…"}[turn budget] …` is not JSON. Hence the rule for an array: the
+ * first text part that parses on its own wins — producers put the payload in
+ * one block, anything after it is prose. When no part parses, the joined text
+ * is returned, so a plain-text result still reads verbatim. Without this the
+ * payload reads as a string, and every consumer built on `asRecord` (run
+ * id/status for the run card, the error-shape checks behind `deriveToolPhase`)
+ * silently degrades — a failed call would read as a success.
  */
 export function unwrapResult(value: unknown, depth = 0): unknown {
   if (depth > 8 || value == null) return value;
@@ -61,18 +63,15 @@ export function unwrapResult(value: unknown, depth = 0): unknown {
   }
 
   if (Array.isArray(value)) {
-    // MCP content array of text parts → concat the text and parse.
+    // MCP content array of text parts → the first part that is a payload on its
+    // own, else the joined text (no payload here, just prose).
     const texts = value.filter(isTextPart).map((p) => p.text);
     if (texts.length > 0) {
-      const joined = unwrapResult(texts.join(""), depth + 1);
-      // A string back means the concatenation isn't JSON — either the payload
-      // sits in one part next to appended prose, or there is no payload at all.
-      if (typeof joined !== "string") return joined;
       for (const text of texts) {
         const part = unwrapResult(text, depth + 1);
         if (typeof part === "object" && part !== null) return part;
       }
-      return joined;
+      return texts.join("");
     }
     if (value.length === 1) return unwrapResult(value[0], depth + 1);
     return value;

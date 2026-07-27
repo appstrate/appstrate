@@ -42,7 +42,7 @@ describe("unwrapResult — envelope peeling", () => {
   });
 });
 
-describe("unwrapResult — trailing non-JSON text parts", () => {
+describe("unwrapResult — payload among several text parts", () => {
   // The Pi engine appends this model-facing line to every tool result.
   const budgetNote =
     "[turn budget] 7m44s left in this turn, step 1/16. " +
@@ -65,11 +65,12 @@ describe("unwrapResult — trailing non-JSON text parts", () => {
     expect(unwrapResult(mcp)).toEqual(runPayload);
   });
 
-  it("still reassembles a payload split across consecutive chunks", () => {
-    const json = JSON.stringify(runPayload);
+  it("recovers the payload when a prose part precedes it", () => {
+    // `mcpResultToPi` renders non-text MCP blocks as text (`[image …]`), so the
+    // payload is not always the first text part.
     const parts = [
-      { type: "text", text: json.slice(0, 20) },
-      { type: "text", text: json.slice(20) },
+      { type: "text", text: "[image image/png]" },
+      { type: "text", text: JSON.stringify(runPayload) },
     ];
     expect(unwrapResult(parts)).toEqual(runPayload);
   });

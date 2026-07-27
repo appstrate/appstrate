@@ -246,7 +246,7 @@ describe("turn budget shown to the model (A5)", () => {
     expect(formatTurnBudgetNote({ remainingMs: 22_000, stepsUsed: 12 })).toContain("22s left");
   });
 
-  it("rides the Pi engine's tool results, leaving the UI channel untouched", () => {
+  it("appends to the model channel of a Pi tool result, leaving `details` as-is", () => {
     const result = withTurnBudgetNote(
       { content: [{ type: "text", text: '{"id":"run_1"}' }], details: { id: "run_1" } },
       { deadlineAt: NOW + 90_000, stepCount: () => 5, now: () => NOW },
@@ -257,7 +257,9 @@ describe("turn budget shown to the model (A5)", () => {
     expect(result.content[0]).toEqual({ type: "text", text: '{"id":"run_1"}' });
     expect(result.content[1]?.text).toContain("1m30s left");
     expect(result.content[1]?.text).toContain("step 5/16");
-    // `details` is the UI channel — it must not gain agent-facing chatter.
+    // `details` keeps the pre-note payload. That protects no UI: the UI parses
+    // `content` — the very channel the note is appended to — and nothing
+    // currently reads `details`.
     expect(result.details).toEqual({ id: "run_1" });
   });
 });
