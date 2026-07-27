@@ -18,6 +18,7 @@
 
 import type { Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
+import { parseBearer } from "@appstrate/core/bearer";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
@@ -164,9 +165,8 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     }
 
     // Try Bearer API key
-    const authHeader = c.req.header("Authorization");
-    if (authHeader?.startsWith("Bearer ask_")) {
-      const rawKey = authHeader.slice(7); // "Bearer ".length
+    const rawKey = parseBearer(c.req.header("Authorization"));
+    if (rawKey?.startsWith("ask_")) {
       const keyInfo = await validateApiKey(rawKey);
       if (!keyInfo) {
         throw unauthorized("Invalid or expired API key");
@@ -387,7 +387,7 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   // and 401 there.
   if (path === "/api/model-providers-oauth/pair/redeem" && headers) {
     const auth = headers.get("authorization") ?? headers.get("Authorization");
-    if (auth?.startsWith("Bearer appp_")) return true;
+    if (parseBearer(auth)?.startsWith("appp_")) return true;
   }
   return false;
 }

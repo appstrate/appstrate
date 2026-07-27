@@ -22,15 +22,17 @@
  *   and emit with `endUser` populated. Core's strict end-user filter kicks
  *   in automatically.
  *
- * Fast no-match path: return `null` immediately unless the header starts
- * with `Bearer ey`. Any JWT is candidate for verification, but anything
- * shorter / non-JWT is not.
+ * Fast no-match path: return `null` immediately unless the header carries a
+ * bearer token starting with `ey`. Any JWT is candidate for verification, but
+ * anything shorter / non-JWT is not. The `bearer` scheme itself matches
+ * case-insensitively (RFC 9110 §11.4) via `parseBearer`.
  */
 
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as authUsers, organizationMembers } from "@appstrate/db/schema";
 import type { AuthStrategy, AuthResolution } from "@appstrate/core/module";
+import { parseBearer } from "@appstrate/core/bearer";
 import type { OrgRole } from "../../../types/index.ts";
 import { logger } from "../../../lib/logger.ts";
 import { verifyEndUserAccessToken, type AccessTokenClaims } from "../services/enduser-token.ts";
@@ -46,10 +48,9 @@ export const oidcAuthStrategy: AuthStrategy = {
 
   async authenticate({ headers, request }): Promise<AuthResolution | null> {
     const authHeader = headers.get("authorization") ?? headers.get("Authorization");
-    if (!authHeader) return null;
-    if (!authHeader.startsWith("Bearer ey")) return null;
+    const token = parseBearer(authHeader);
+    if (!token?.startsWith("ey")) return null;
 
-    const token = authHeader.slice(7);
     const claims = await verifyEndUserAccessToken(token);
     if (!claims) return null;
 

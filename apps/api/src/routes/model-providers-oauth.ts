@@ -3,6 +3,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
+import { parseBearer } from "@appstrate/core/bearer";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -87,13 +88,13 @@ const importBody = z.object({
  */
 async function handlePairRedeem(c: Context<AppEnv>) {
   const authHeader = c.req.header("authorization") ?? c.req.header("Authorization");
-  if (!authHeader?.startsWith("Bearer appp_")) {
+  const token = parseBearer(authHeader);
+  if (!token?.startsWith("appp_")) {
     throw unauthorized(
       "POST /api/model-providers-oauth/pair/redeem requires a pairing-token bearer (Authorization: Bearer appp_…)",
     );
   }
 
-  const token = authHeader.slice(7);
   const fromIp = getClientIp(c);
   const consumed = await consumePairing(token, fromIp === "unknown" ? undefined : fromIp);
 

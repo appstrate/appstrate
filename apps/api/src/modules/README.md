@@ -262,15 +262,20 @@ A strategy is a plain object implementing `AuthStrategy` from `@appstrate/core/m
 
 ```ts
 import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
+import { parseBearer } from "@appstrate/core/bearer";
 
 const jwtStrategy: AuthStrategy = {
   id: "my-jwt",
   async authenticate({ headers, method, path }) {
-    const auth = headers.get("authorization") ?? "";
+    // Always parse the header with `parseBearer` — never
+    // `auth.startsWith("Bearer ")`. RFC 9110 §11.4 makes the auth-scheme a
+    // case-insensitive token separated from the credentials by `1*SP`, so a
+    // conformant `authorization: bearer ey…` must match too.
+    const token = parseBearer(headers.get("authorization"));
     // Fast no-match path — return null immediately for anything not ours
-    if (!auth.startsWith("Bearer ey")) return null;
+    if (!token?.startsWith("ey")) return null;
 
-    const payload = await verifyJwt(auth.slice(7));
+    const payload = await verifyJwt(token);
     if (!payload) return null;
 
     return {

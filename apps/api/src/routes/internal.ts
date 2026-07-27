@@ -8,6 +8,7 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, packageVersions, runs } from "@appstrate/db/schema";
 import { sql } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
+import { parseBearer } from "@appstrate/core/bearer";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
@@ -92,14 +93,9 @@ async function verifyRunToken(c: Context): Promise<{
     > | null;
   };
 }> {
-  const authHeader = c.req.header("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    throw unauthorized("Missing run token");
-  }
-
-  const rawToken = authHeader.slice(7);
+  const rawToken = parseBearer(c.req.header("Authorization"));
   if (!rawToken) {
-    throw unauthorized("Invalid run token");
+    throw unauthorized("Missing run token");
   }
 
   // Verify HMAC signature before DB lookup

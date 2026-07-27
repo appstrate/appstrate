@@ -40,6 +40,14 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AuthStrategy, AuthResolution } from "@appstrate/core/module";
 
 export const CHAT_LOOPBACK_AUTH_METHOD = "chat-loopback";
+/**
+ * Deliberately NOT parsed with `parseBearer` (@appstrate/core/bearer), unlike
+ * every externally-reachable bearer surface on the platform. RFC 6750 scheme
+ * tolerance exists for third-party clients; this header is minted and verified
+ * in this one file against a boot-local secret, so no external client ever
+ * constructs it. Accepting a lowercase scheme here would widen an internal
+ * auth surface for zero conformance benefit — leave the byte-exact match.
+ */
 const PREFIX = "Bearer chatloop_";
 const TOKEN_TTL_MS = 60_000;
 

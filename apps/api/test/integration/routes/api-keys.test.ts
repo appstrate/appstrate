@@ -341,4 +341,36 @@ describe("API Keys API", () => {
       expect(res.status).toBe(204);
     });
   });
+
+  // RFC 9110 §11.4: the auth-scheme is a case-insensitive token separated
+  // from the credentials by `1*SP`. The auth pipeline's API-key branch used
+  // to sniff `startsWith("Bearer ask_")`, so a conformant client sending
+  // `authorization: bearer ask_…` got an undiagnosable 401.
+  describe("API key auth accepts a non-canonical bearer scheme", () => {
+    it.each(["bearer", "BEARER", "BeArEr"])("authenticates with %s", async (scheme) => {
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/orgs", {
+        headers: { Authorization: `${scheme} ${apiKey.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it("tolerates more than one SP between scheme and token", async () => {
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/orgs", {
+        headers: { Authorization: `Bearer   ${apiKey.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+    });
+  });
 });
