@@ -1,0 +1,667 @@
+{
+  "map_version": 1,
+  "shape": "sequence",
+  "source": {
+    "package_id": "@default/compta-gmail-harvest",
+    "version": "1.2.0",
+    "integrity": null,
+    "files": [
+      "prompt.md",
+      "skills/@default/compta-references/SKILL.md",
+      "skills/@default/compta-references/references/gmail-harvest-rules.md",
+      "skills/@default/compta-references/references/fiscal-year.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — carte écrite à la main, sans agent cartographe",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Relève les factures PDF d'une boîte Gmail sur la fenêtre d'un trimestre fiscal et les dépose à plat dans l'Inbox Drive, avec dédup par label Gmail et par empreinte md5, puis marque les messages traités.",
+  "steps": [
+    {
+      "id": "s1",
+      "kind": "step",
+      "group": "Préambule",
+      "label": "Lire les règles de référence du skill avant tout",
+      "parent": null,
+      "detail": "Le prompt délègue explicitement l'autorité aux fichiers de références du skill : requête Gmail, sélection des pièces jointes, dédup, nommage et dépôt, calcul de la fenêtre fiscale.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [7, 9],
+        "quote": "Les règles de ce fichier font foi — ce prompt n'en est que l'orchestration."
+      },
+      "confidence": 0.99
+    },
+
+    {
+      "id": "s2",
+      "kind": "decision",
+      "group": "1. Déterminer la fenêtre",
+      "label": "`since` ET `until` sont-ils tous deux fournis ?",
+      "parent": null,
+      "detail": "Les deux bornes explicites priment sur le trimestre. Le manifeste confirme la règle côté entrée : « Override le trimestre si fournie avec 'until' ».",
+      "refs": ["agent_input:since", "agent_input:until"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [17, 17],
+        "quote": "Si `since` ET `until` sont fournis → utilise-les directement (`after:since`, `before:until`, `before` exclusif)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s3",
+      "kind": "step",
+      "group": "1. Déterminer la fenêtre",
+      "label": "Utiliser les bornes explicites (`before` exclusif)",
+      "parent": null,
+      "detail": "Aucune conversion : les valeurs d'entrée deviennent directement les opérateurs Gmail `after:` / `before:`.",
+      "refs": ["agent_input:since", "agent_input:until"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [17, 17],
+        "quote": "utilise-les directement (`after:since`, `before:until`, `before` exclusif)"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s4",
+      "kind": "step",
+      "group": "1. Déterminer la fenêtre",
+      "label": "Calculer les bornes du trimestre fiscal (défaut : trimestre courant)",
+      "parent": null,
+      "detail": "Année fiscale Tractr du 1er septembre au 31 août. Q3 = mars-avr-mai, nommé par l'année calendaire du dernier mois. Ex. `2026-Q3` → `after:2026/03/01 before:2026/06/01`. La formule de conversion date → trimestre fait foi dans la référence, pas dans le prompt.",
+      "refs": ["agent_input:trimestre", "skills:@default/compta-references"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/fiscal-year.md",
+        "lines": [33, 37],
+        "quote": "Mois 3, 4, 5     (Mars-Mai)  → Q3, annee fiscale = annee_courante-1 - annee_courante"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "s5",
+      "kind": "step",
+      "group": "1. Déterminer la fenêtre",
+      "label": "Reporter la fenêtre retenue dans `output.window`",
+      "parent": null,
+      "detail": "Renseigne `trimestre`, `after`, `before` de l'enveloppe de sortie. Ce n'est pas encore l'émission finale : le champ est rempli en cours de route.",
+      "refs": ["agent_output:window"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [20, 20],
+        "quote": "Reporte la fenêtre retenue dans `output.window`."
+      },
+      "confidence": 0.99
+    },
+
+    {
+      "id": "s6",
+      "kind": "tool_call",
+      "group": "2. Label et index d'empreintes",
+      "label": "Vérifier le label `processed_label`, le créer s'il manque, récupérer son `id`",
+      "parent": null,
+      "detail": "`users.labels.list` puis `users.labels.create` si absent. L'`id` est nécessaire pour labelliser en fin de traitement. En `dry_run`, la création du label reste permise.",
+      "refs": ["toolbox:@appstrate/gmail", "config:processed_label"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [23, 24],
+        "quote": "Vérifie l'existence du label `processed_label` (config, défaut `compta/importé`) côté Gmail ; crée-le s'il manque."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s7",
+      "kind": "tool_call",
+      "group": "2. Label et index d'empreintes",
+      "label": "Lister une fois la racine de l'Inbox et construire l'ensemble `md5_connus`",
+      "parent": null,
+      "detail": "Lecture seule, vaut aussi en `dry_run`. Requête `files?q='INBOX_ID' in parents and trashed=false&fields=files(id,name,md5Checksum,size)`, paginée. Les fichiers sans empreinte sont ignorés.",
+      "refs": ["toolbox:@tractr/google-drive", "config:drive_inbox_folder_id"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [74, 77],
+        "quote": "Au début du run (lecture seule, vaut aussi en `dry_run`), lister une fois les fichiers déjà présents à la racine de l'Inbox avec leur empreinte"
+      },
+      "confidence": 0.96
+    },
+
+    {
+      "id": "s8",
+      "kind": "step",
+      "group": "3. Chercher les messages",
+      "label": "Construire la requête Gmail (fenêtre + `-label:compta/importé`)",
+      "parent": null,
+      "detail": "`has:attachment filename:pdf (facture OR invoice OR reçu OR receipt OR billing OR \"payment\" OR statement) after:… before:… -label:compta/importé`. Le `-label:` est la première couche de dédup, par message.",
+      "refs": ["skills:@default/compta-references", "config:processed_label"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [19, 19],
+        "quote": "has:attachment filename:pdf (facture OR invoice OR reçu OR receipt OR billing OR \"payment\" OR statement) after:YYYY/MM/DD before:YYYY/MM/DD -label:compta/importé"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s9",
+      "kind": "tool_call",
+      "group": "3. Chercher les messages",
+      "label": "Lister tous les messages, toutes les pages (`pageToken`)",
+      "parent": null,
+      "detail": "La pagination est prescrite deux fois, dans le prompt et dans la référence : traiter toutes les pages, pas seulement la première.",
+      "refs": ["toolbox:@appstrate/gmail"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [31, 31],
+        "quote": "Liste **toutes les pages** (pagination par `pageToken`)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s10",
+      "kind": "decision",
+      "group": "3. Chercher les messages",
+      "label": "`max_messages` > 0 ?",
+      "parent": null,
+      "detail": "Plafond prudentiel d'entrée, 0 = pas de plafond.",
+      "refs": ["agent_input:max_messages"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [31, 32],
+        "quote": "Si `max_messages` > 0, arrête-toi à ce nombre de messages"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s11",
+      "kind": "step",
+      "group": "3. Chercher les messages",
+      "label": "S'arrêter au plafond et le signaler dans le résumé",
+      "parent": null,
+      "detail": "Interdiction explicite de présenter un run tronqué comme complet.",
+      "refs": ["agent_output:summary"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [32, 32],
+        "quote": "et signale-le dans le résumé (ne prétends pas avoir tout traité)"
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "s12",
+      "kind": "loop",
+      "group": "4. Pour chaque message",
+      "label": "Pour chaque message",
+      "parent": null,
+      "detail": "Boucle externe. Une itération traite un message : lecture, sélection des pièces jointes, dépôt des PDF retenus, pose du label.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [34, 34],
+        "quote": "### 4. Pour chaque message"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s12.1",
+      "kind": "tool_call",
+      "group": "4. Pour chaque message",
+      "label": "Récupérer le message complet et la liste des pièces jointes",
+      "parent": "s12",
+      "detail": "Expéditeur, sujet, date, et `attachmentId` de chaque pièce jointe.",
+      "refs": ["toolbox:@appstrate/gmail"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [35, 35],
+        "quote": "Récupère le message complet (expéditeur, sujet, date, et la liste des pièces jointes avec leur `attachmentId`)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s12.2",
+      "kind": "decision",
+      "group": "4. Pour chaque message",
+      "label": "Le message contient-il un couple Stripe `Invoice-*` + `Receipt-*` ?",
+      "parent": "s12",
+      "detail": "Première règle de sélection, appliquée avant les autres. Se reconnaît au sujet « Your receipt from X » / « Votre reçu de X » et à la présence des deux PDF. Vendeurs observés : Loom, Anthropic, Miro, Intercom.",
+      "refs": [],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [33, 35],
+        "quote": "le mail contient **deux PDF** : `Invoice-XXXX.pdf` **et** `Receipt-XXXX.pdf`."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "s12.3",
+      "kind": "step",
+      "group": "4. Pour chaque message",
+      "label": "Garder le `Invoice-*` seul, mettre le `Receipt-*` dans `skipped`",
+      "parent": "s12",
+      "detail": "L'`Invoice` est la pièce fiscale ; le `Receipt` du même couple est du doublon.",
+      "refs": ["agent_output:skipped"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [36, 36],
+        "quote": "**Garder UNIQUEMENT le `Invoice-*.pdf`** (pièce fiscale). Ignorer le `Receipt-*.pdf`."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s12.4",
+      "kind": "decision",
+      "group": "4. Pour chaque message",
+      "label": "Le PDF est-il du bruit évident (CGU, contrat signé, onboarding) ?",
+      "parent": "s12",
+      "detail": "Motifs listés : `terms*.pdf`, `cgu*.pdf`, `conditions*.pdf`, `* Client Copy.pdf`, `*signed*.pdf`, mails de signature Nitro/DocuSign, « your login data », « setting up your account », « webhook », confirmations d'inscription.",
+      "refs": [],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [42, 47],
+        "quote": "**Bruit à NE PAS déposer** (sauter, lister dans `skipped`)"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "s12.5",
+      "kind": "step",
+      "group": "4. Pour chaque message",
+      "label": "Écarter la pièce jointe (entrée dans `skipped`)",
+      "parent": "s12",
+      "detail": "Aucun téléchargement, aucun md5 calculé pour une pièce écartée à la sélection.",
+      "refs": ["agent_output:skipped"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [39, 39],
+        "quote": "bruit (CGU, contrats signés, onboarding/technique) → `skipped`."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s12.6",
+      "kind": "step",
+      "group": "4. Pour chaque message",
+      "label": "Retenir le PDF — dans le doute, déposer",
+      "parent": "s12",
+      "detail": "Le triage est délibérément minimal : un PDF ambigu mais plausible part quand même dans l'Inbox, `compta-inbox` lit le contenu et l'enverra en `_needs-review/` si ce n'en est pas une. Un PDF intitulé « reçu » est retenu s'il est le seul document de la dépense.",
+      "refs": [],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [49, 50],
+        "quote": "Règle de décision rapide quand un PDF est ambigu : **dans le doute, déposer**"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s12.7",
+      "kind": "loop",
+      "group": "4. Pour chaque message",
+      "label": "Pour chaque PDF retenu",
+      "parent": "s12",
+      "detail": "Boucle interne, sur les seules pièces jointes retenues par la sélection. C'est ici que se font le téléchargement, la dédup par contenu et l'upload.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [41, 41],
+        "quote": "Pour chaque PDF retenu : télécharge la pièce jointe, **calcule son md5** (`md5sum`)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s12.7.1",
+      "kind": "tool_call",
+      "group": "4. Pour chaque message",
+      "label": "Télécharger la pièce jointe",
+      "parent": "s12.7",
+      "detail": "Téléchargement local, préalable obligatoire au calcul de l'empreinte.",
+      "refs": ["toolbox:@appstrate/gmail"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [41, 41],
+        "quote": "télécharge la pièce jointe"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s12.7.2",
+      "kind": "step",
+      "group": "4. Pour chaque message",
+      "label": "Calculer le md5 du fichier (`md5sum`)",
+      "parent": "s12.7",
+      "detail": "C'est exactement le `md5Checksum` que Drive recalculera à l'upload, d'où la comparabilité avec l'index de l'Inbox.",
+      "refs": [],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [78, 79],
+        "quote": "`md5sum <fichier>` en bash — c'est exactement le `md5Checksum` que Drive recalcule à l'upload."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s12.7.3",
+      "kind": "decision",
+      "group": "4. Pour chaque message",
+      "label": "Le md5 est-il déjà connu (Inbox, ou déjà déposé plus tôt dans ce run) ?",
+      "parent": "s12.7",
+      "detail": "Deuxième couche de dédup, par contenu. Elle attrape la même facture arrivée par plusieurs mails (envoi direct + transfert `dt@`/`admin@`, renvoi par un portail), que le label Gmail ne voit pas.",
+      "refs": [],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [80, 81],
+        "quote": "**Si ce md5 est déjà dans `md5_connus`** (déjà dans l'Inbox) **ou déjà déposé plus tôt dans ce run** → **ne pas uploader**."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s12.7.4",
+      "kind": "step",
+      "group": "4. Pour chaque message",
+      "label": "Ne pas uploader ; ajouter à `skipped` (doublon de contenu)",
+      "parent": "s12.7",
+      "detail": "Raison normalisée : « doublon contenu (md5 déjà présent dans l'Inbox) ».",
+      "refs": ["agent_output:skipped"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [81, 81],
+        "quote": "Ajouter la pièce à `skipped`, raison `\"doublon contenu (md5 déjà présent dans l'Inbox)\"`."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s12.7.5",
+      "kind": "decision",
+      "group": "4. Pour chaque message",
+      "label": "Un fichier de même nom existe-t-il déjà, à contenu différent ?",
+      "parent": "s12.7",
+      "detail": "Le cas « même nom, même contenu » ne peut pas se présenter ici : il a été écarté à l'étape précédente par la dédup md5.",
+      "refs": [],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [96, 98],
+        "quote": "En cas de collision de **nom** avec un fichier déjà présent à la racine de l'Inbox **alors que le contenu diffère**"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "s12.7.6",
+      "kind": "step",
+      "group": "4. Pour chaque message",
+      "label": "Préfixer par la date du mail : `YYYY-MM-DD-<nom_origine>.pdf`",
+      "parent": "s12.7",
+      "detail": "Renommage minimal de collision, à ne pas confondre avec les conventions de nommage finales, qui restent le travail de `compta-inbox`.",
+      "refs": [],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [98, 98],
+        "quote": "préfixer par la date du mail : `YYYY-MM-DD-<nom_origine>.pdf`"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s12.7.7",
+      "kind": "tool_call",
+      "group": "4. Pour chaque message",
+      "label": "Uploader à la racine de l'Inbox Drive",
+      "parent": "s12.7",
+      "detail": "Upload resumable REST v3, à plat, aucun sous-dossier : `compta-inbox` attend les fichiers à la racine. Le prompt et la référence nomment tous deux l'intégration `@tractr/google-drive`.",
+      "refs": ["toolbox:@tractr/google-drive", "config:drive_inbox_folder_id"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [100, 100],
+        "quote": "Upload via l'intégration `@tractr/google-drive` (REST v3, voir son `INTEGRATION.md` — upload resumable)."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s12.7.8",
+      "kind": "step",
+      "group": "4. Pour chaque message",
+      "label": "Ajouter le md5 à `md5_connus` pour la suite du run",
+      "parent": "s12.7",
+      "detail": "Ce qui rend la dédup effective à l'intérieur d'un même run, pas seulement contre l'état initial de l'Inbox.",
+      "refs": [],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/gmail-harvest-rules.md",
+        "lines": [82, 82],
+        "quote": "puis **ajouter ce md5 à `md5_connus`** pour la suite du run."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s12.7.9",
+      "kind": "step",
+      "group": "4. Pour chaque message",
+      "label": "Ajouter obligatoirement une entrée à `harvested`",
+      "parent": "s12.7",
+      "detail": "`message_id`, `attachment_filename`, `uploaded_name`, `drive_file_id`, `reason`. Sans le `drive_file_id`, le dépôt n'est pas traçable.",
+      "refs": ["agent_output:harvested"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [47, 49],
+        "quote": "**ajoute obligatoirement une entrée à `harvested`** (`message_id`, `attachment_filename`, `uploaded_name`, `drive_file_id`, `reason`)"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s12.8",
+      "kind": "tool_call",
+      "group": "4. Pour chaque message",
+      "label": "Appliquer le label `processed_label` au message traité",
+      "parent": "s12",
+      "detail": "`users.messages.modify` avec `addLabelIds`. Le label se pose même si toutes les pièces du message étaient des doublons de contenu : le mail est « traité », inutile de le rescanner.",
+      "refs": ["toolbox:@appstrate/gmail", "config:processed_label"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [50, 51],
+        "quote": "Une fois le message traité avec succès (hors `dry_run`), **applique le label** `processed_label` au message"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "g7",
+      "kind": "guard",
+      "group": "4. Pour chaque message",
+      "label": "Échec sur un message : consigner dans `erreurs` et continuer",
+      "parent": "s12",
+      "detail": "Politique d'erreur locale à la boucle : non bloquante, elle ne s'insère à aucun point précis de la séquence mais couvre toute l'itération.",
+      "refs": ["agent_output:erreurs"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [53, 53],
+        "quote": "Si une étape échoue sur un message, consigne-le dans `erreurs` et continue avec les suivants (non bloquant)."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "s13",
+      "kind": "step",
+      "group": "5. Mode dry_run",
+      "label": "En `dry_run`, produire `dry_run_plan`",
+      "parent": null,
+      "detail": "Liste markdown, par message, des PDF retenus et écartés avec la raison. `harvested`, `skipped` et `stats` sont renseignés comme un plan. Sans téléchargement le md5 n'est pas calculable : les doublons sont signalés comme *probables* par comparaison nom + taille, avec la mention « confirmé par md5 au run réel ».",
+      "refs": ["agent_input:dry_run", "agent_output:dry_run_plan"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [57, 61],
+        "quote": "Produis dans `dry_run_plan` la liste markdown des dépôts et labels qui *seraient* effectués"
+      },
+      "confidence": 0.96
+    },
+
+    {
+      "id": "s14",
+      "kind": "emit",
+      "group": "6. Sortie",
+      "label": "Rendre la sortie : `summary`, `window`, `harvested`, `skipped`, `stats`, `erreurs`",
+      "parent": null,
+      "detail": "Le prompt décrit le contenu attendu de l'enveloppe de sortie sans jamais nommer l'outil `output` : il l'invoque par son effet (« Renseigne … »). Même schéma que le faux positif `wiki-brain` documenté au §4.5 du brief.",
+      "refs": ["system_tools:output"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [63, 66],
+        "quote": "Renseigne `summary` (…), `window`, `harvested`, `skipped`, `stats`, et `erreurs`."
+      },
+      "confidence": 0.92
+    },
+
+    {
+      "id": "g1",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Périmètre : pièces jointes PDF uniquement, aucun lien, aucun portail",
+      "parent": null,
+      "detail": "Les factures accessibles seulement par un lien « téléchargez votre facture » sont explicitement hors périmètre v1, avec un volume reconnu comme non négligeable.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [72, 73],
+        "quote": "**Périmètre** : pièces jointes PDF uniquement. Ne suis aucun lien « télécharger votre facture », ne te connecte à aucun portail"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g2",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Idempotence : jamais deux fois le même mail, ni le même contenu",
+      "parent": null,
+      "detail": "Deux couches complémentaires : le label déduplique par message, le md5 par contenu. La dédup sémantique (même facture, octets différents) est explicitement laissée à `compta-inbox`.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [74, 76],
+        "quote": "**Idempotence** : ne dépose jamais deux fois le même mail (label) **ni le même contenu** (dédup md5"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g3",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "En `dry_run` : aucun téléchargement vers Drive, aucun upload, aucun label posé",
+      "parent": null,
+      "detail": "Ce garde n'est pas une étape mais un mode : il neutralise les effets de bord de s12.7.1, s12.7.7 et s12.8 tout en laissant s1 à s9 s'exécuter. Le format v1 n'a pas de champ pour exprimer cette portée (voir README, limite 3).",
+      "refs": ["agent_input:dry_run"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [56, 57],
+        "quote": "effectue les étapes 1–3 **en lecture seule** — aucune pièce jointe téléchargée vers Drive, aucun upload, aucun label posé"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "g4",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Réconciliation obligatoire des compteurs et des tableaux",
+      "parent": null,
+      "detail": "`len(harvested) == stats.pdfs_harvested` et `len(skipped) == stats.pdfs_skipped`. Contrainte de cohérence sur la sortie, vérifiable après coup.",
+      "refs": ["agent_output:stats", "agent_output:harvested"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [68, 69],
+        "quote": "les chiffres de `stats` doivent se réconcilier avec les tableaux (`len(harvested) == stats.pdfs_harvested`"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g5",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Mails transférés : traiter comme les directs, le vendeur réel est dans le PDF",
+      "parent": null,
+      "detail": "Le `From` peut être un alias interne (`dt@`, `admin@`, `pm@`, `olivier@`…tractr.net) : c'est le transitaire, pas le vendeur.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [77, 78],
+        "quote": "le `From` peut être un alias interne (`dt@`, `admin@`…tractr.net) ; traite-les comme les directs, le vendeur réel est dans le PDF"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g6",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Ne pas renommer selon les conventions finales, ne router vers aucun trimestre",
+      "parent": null,
+      "detail": "Frontière de responsabilité avec l'agent aval `compta-inbox`, répétée trois fois dans le prompt (lignes 4, 5 et 79).",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [79, 79],
+        "quote": "Ne renomme pas selon les conventions finales de facture et ne route vers aucun trimestre : `compta-inbox` s'en charge."
+      },
+      "confidence": 0.99
+    }
+  ],
+  "edges": [
+    { "from": "s1", "to": "s2", "condition": null },
+    { "from": "s2", "to": "s3", "condition": "`since` et `until` fournis" },
+    { "from": "s2", "to": "s4", "condition": "sinon" },
+    { "from": "s3", "to": "s5", "condition": null },
+    { "from": "s4", "to": "s5", "condition": null },
+    { "from": "s5", "to": "s6", "condition": null },
+    { "from": "s6", "to": "s7", "condition": null },
+    { "from": "s7", "to": "s8", "condition": null },
+    { "from": "s8", "to": "s9", "condition": null },
+    { "from": "s9", "to": "s10", "condition": null },
+    { "from": "s10", "to": "s11", "condition": "`max_messages` > 0" },
+    { "from": "s10", "to": "s12", "condition": "pas de plafond" },
+    { "from": "s11", "to": "s12", "condition": null },
+    { "from": "s12", "to": "s13", "condition": null },
+    { "from": "s13", "to": "s14", "condition": null },
+
+    { "from": "s12.1", "to": "s12.2", "condition": null },
+    { "from": "s12.2", "to": "s12.3", "condition": "oui, couple Stripe" },
+    { "from": "s12.2", "to": "s12.4", "condition": "non" },
+    { "from": "s12.3", "to": "s12.7", "condition": null },
+    { "from": "s12.4", "to": "s12.5", "condition": "oui, bruit évident" },
+    { "from": "s12.4", "to": "s12.6", "condition": "non" },
+    { "from": "s12.6", "to": "s12.7", "condition": null },
+    { "from": "s12.7", "to": "s12.8", "condition": null },
+
+    { "from": "s12.7.1", "to": "s12.7.2", "condition": null },
+    { "from": "s12.7.2", "to": "s12.7.3", "condition": null },
+    { "from": "s12.7.3", "to": "s12.7.4", "condition": "md5 déjà connu" },
+    { "from": "s12.7.3", "to": "s12.7.5", "condition": "md5 inconnu" },
+    { "from": "s12.7.5", "to": "s12.7.6", "condition": "collision de nom" },
+    { "from": "s12.7.5", "to": "s12.7.7", "condition": "pas de collision" },
+    { "from": "s12.7.6", "to": "s12.7.7", "condition": null },
+    { "from": "s12.7.7", "to": "s12.7.8", "condition": null },
+    { "from": "s12.7.8", "to": "s12.7.9", "condition": null }
+  ],
+  "gaps": [
+    {
+      "kind": "ambiguous_condition",
+      "message": "Le label est posé « une fois le message traité avec succès » (prompt.md:50), mais l'échec est déclaré non bloquant (prompt.md:53). Rien ne dit si un message dont un seul PDF sur trois a échoué à l'upload compte comme traité. Si le label est posé, le PDF manquant ne sera jamais rattrapé, le run suivant excluant le message.",
+      "related_steps": ["s12.8", "g7"]
+    },
+    {
+      "kind": "nondeterministic_truncation",
+      "message": "`max_messages` plafonne le nombre de messages sans définir l'ordre de troncature (plus récents ? plus anciens ? ordre de l'API ?). Deux runs plafonnés sur la même fenêtre peuvent traiter des ensembles différents, et rien ne garantit que la suite sera reprise au run suivant.",
+      "related_steps": ["s10", "s11"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "La règle de collision de nom préfixe par la date du mail. Deux pièces jointes de même nom et de contenus différents provenant du *même* message produiraient le même préfixe, donc la même collision non résolue.",
+      "related_steps": ["s12.7.6"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "La sélection Stripe suppose un couple `Invoice-*` + `Receipt-*`. Rien ne dit quoi faire si le mail Stripe ne contient que le `Receipt-*` (cas plausible), alors que la règle 2 le retiendrait et que la règle 1 est prioritaire.",
+      "related_steps": ["s12.2", "s12.3"]
+    },
+    {
+      "kind": "unused_capability",
+      "message": "Le manifeste accorde les outils système `log` et `pin` ; ni le prompt ni les références ne disent quand les utiliser. Aucune étape de cette carte ne les référence.",
+      "related_steps": []
+    }
+  ],
+  "overall_confidence": 0.96
+}

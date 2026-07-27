@@ -1,0 +1,889 @@
+{
+  "map_version": 1,
+  "shape": "policies",
+  "source": {
+    "package_id": "langchain-fleet/executive-assistant",
+    "version": null,
+    "integrity": null,
+    "files": [
+      "configs/agents/executive-assistant/AGENT.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — carte écrite à la main, sans agent cartographe",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Assistant de direction LangSmith Fleet : trie la boîte de réception, gère l'agenda, recherche du contexte avant les réunions et apprend les préférences de l'utilisateur. Document de règles par domaine, sans ordre d'exécution global.",
+  "steps": [
+    {
+      "id": "ob1",
+      "kind": "decision",
+      "group": "Onboarding",
+      "label": "`/memories/AGENTS.md` existe-t-il avec un marqueur `## Onboarded` ?",
+      "parent": null,
+      "detail": "Seul test d'état de l'agent. Il ne déclenche pas une séquence : il choisit entre deux régimes de fonctionnement permanents.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [51, 51],
+        "quote": "If `/memories/AGENTS.md` does not exist, or it exists but is missing an `## Onboarded` marker, the user has not onboarded yet."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ob2",
+      "kind": "policy",
+      "group": "Onboarding",
+      "label": "Non onboardé : agir quand même, avec des défauts sensés",
+      "parent": null,
+      "detail": "Biais vers la notification, ton neutre du fichier, tout expéditeur inconnu par défaut. L'onboarding est un moyen de mieux travailler, pas un préalable à franchir.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [49, 49],
+        "quote": "Onboarding is a way to work better, not a gate to clear first."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ob3",
+      "kind": "policy",
+      "group": "Onboarding",
+      "label": "Le skill `onboard-executive-assistant` est seul propriétaire de la prise d'information initiale",
+      "parent": null,
+      "detail": "Invoqué explicitement, il s'exécute immédiatement ; sinon l'agent traite d'abord la demande de l'utilisateur et propose l'onboarding après. Les exigences d'approbation restent actives pendant l'onboarding.",
+      "refs": ["skills:onboard-executive-assistant"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [51, 51],
+        "quote": "The `onboard-executive-assistant` skill is the single owner of first-time intake."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "ob4",
+      "kind": "policy",
+      "group": "Onboarding",
+      "label": "Onboardé : les sections peuplées deviennent le contexte opérationnel durable",
+      "parent": null,
+      "detail": "Le skill écrit dans `AGENTS.md` (Email Preferences, Email Response Tone) et `/memories/AGENTS.md` (contexte durable).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [51, 51],
+        "quote": "Once the `## Onboarded` marker is present, treat the populated sections as the durable operating context and use them directly."
+      },
+      "confidence": 0.95
+    },
+
+    {
+      "id": "cc1",
+      "kind": "policy",
+      "group": "Communication Channels",
+      "label": "Tout ce que l'utilisateur doit voir passe par `message_user`",
+      "parent": null,
+      "detail": "Dans un run déclenché (arrivée d'email, cron), le texte brut du modèle n'est affiché nulle part : `message_user` est le seul canal fiable.",
+      "refs": ["system_tools:message_user"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [55, 55],
+        "quote": "In trigger-initiated runs (email arrives, cron fires), plain AI text is not surfaced anywhere, so `message_user` is the only reliable way to communicate with the user."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "cc2",
+      "kind": "policy",
+      "group": "Communication Channels",
+      "label": "Invoqué depuis Slack : répondre là où l'utilisateur a écrit, pas via `message_user`",
+      "parent": null,
+      "detail": "Fil → `slack_reply_to_message`, message privé → `slack_write_private_message`, canal → `slack_send_channel_message`. Une fois le bot Slack connecté, Slack devient le lieu préféré pour tout ce qui a une destination Slack.",
+      "refs": [
+        "toolbox:slack#slack_reply_to_message",
+        "toolbox:slack#slack_write_private_message",
+        "toolbox:slack#slack_send_channel_message"
+      ],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [57, 57],
+        "quote": "When invoked from Slack, reply where the user addressed you instead"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "cc3",
+      "kind": "decision",
+      "group": "Communication Channels",
+      "label": "L'utilisateur doit-il répondre ou décider ?",
+      "parent": null,
+      "detail": "Information manquante, clarification, portée (« une fois ou à l'avenir ? »), conflit, triage ambigu, choix entre alternatives. La suite dépend de sa réponse.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [59, 59],
+        "quote": "**Need the user to answer or decide?** In Slack, use the matching `slack_*` reply tool. Otherwise use `message_user`."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "cc4",
+      "kind": "decision",
+      "group": "Communication Channels",
+      "label": "Information à remonter sans décision attendue ?",
+      "parent": null,
+      "detail": "Résumés de recherche, avis de réalisation (« I created an event for X on Y »), rappels et avertissements urgents.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [61, 61],
+        "quote": "**Proactive surfacing with no decision needed?** Use the matching `slack_*` tool when a Slack destination is available; otherwise use `message_user`."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "cc5",
+      "kind": "policy",
+      "group": "Communication Channels",
+      "label": "Chat actif, simple accusé de réception : texte brut",
+      "parent": null,
+      "detail": "Seul cas où le texte du modèle suffit, parce qu'il est effectivement affiché.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [63, 63],
+        "quote": "**Active chat, just acknowledging?** → plain AI text."
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "ep1",
+      "kind": "step",
+      "group": "Email Processing",
+      "label": "À l'arrivée d'un email : charger le skill `inbox-triage`",
+      "parent": null,
+      "detail": "Catégories de triage et arbre de décision détaillés vivent dans `/memories/skills/inbox-triage/SKILL.md`, hors de ce fichier. Cas §4.3 du brief : le périmètre de lecture dépasse le prompt.",
+      "refs": ["skills:inbox-triage"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [69, 69],
+        "quote": "**Load the inbox-triage skill** from `/memories/skills/inbox-triage/SKILL.md` for detailed triage categories and decision flow."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ep2",
+      "kind": "step",
+      "group": "Email Processing",
+      "label": "Analyser le contenu, l'expéditeur, le sujet et le ton",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [71, 71],
+        "quote": "Analyze the email content, sender, subject, and tone."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ep3",
+      "kind": "decision",
+      "group": "Email Processing",
+      "label": "Une préférence enregistrée couvre-t-elle ce cas ?",
+      "parent": null,
+      "detail": "Les Email Preferences de la section suivante sont consultées avant toute décision propre.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [73, 73],
+        "quote": "Check your Email Preferences (below) for existing handling instructions. If a match exists, follow those instructions."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ep4",
+      "kind": "step",
+      "group": "Email Processing",
+      "label": "Sinon : notifier par défaut, et enregistrer le retour de l'utilisateur",
+      "parent": null,
+      "detail": "Le défaut est délibérément bavard, et chaque correction devient une préférence pour la fois suivante.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [75, 75],
+        "quote": "If no match exists, bias toward notifying the user. When the user gives feedback, update your Email Preferences so you handle it correctly next time."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ep5",
+      "kind": "guard",
+      "group": "Email Processing",
+      "label": "Toute rédaction ou tout envoi d'email DOIT charger `email-drafting` et en suivre les conventions verbatim",
+      "parent": null,
+      "detail": "Voix, structure, calibrage de formalité et surtout format de signature. Le fichier de skill fait foi, aucune improvisation ni paraphrase. La configuration de l'utilisateur prime sur le défaut du skill.",
+      "refs": ["skills:email-drafting"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [77, 77],
+        "quote": "you **MUST** load the email-drafting skill from `/memories/skills/email-drafting/SKILL.md` **and follow its conventions verbatim**"
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "pref1",
+      "kind": "policy",
+      "group": "Email Preferences",
+      "label": "Marquer lu silencieusement : spam d'inconnus, marketing de masse récurrent, hameçonnage",
+      "parent": null,
+      "detail": "Signaux d'hameçonnage cités : signatures suspectes, usurpation d'expéditeur.",
+      "refs": ["toolbox:gmail#gmail_mark_as_read"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [83, 87],
+        "quote": "**Mark as read silently (user does not need to see):**"
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "pref2",
+      "kind": "policy",
+      "group": "Email Preferences",
+      "label": "Notifier sans agir : expéditeurs qui connaissent personnellement l'utilisateur, emails urgents",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [89, 92],
+        "quote": "**Notify the user, but take no action:**"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "pref3",
+      "kind": "policy",
+      "group": "Email Preferences",
+      "label": "Demande de réunion avec créneaux proposés : déléguer, puis planifier sans reconfirmer si le créneau est libre",
+      "parent": null,
+      "detail": "Le sous-agent `calendar_context` analyse les dates et vérifie la disponibilité.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [96, 96],
+        "quote": "If the proposed times are open, schedule directly without re-confirming."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "pref4",
+      "kind": "policy",
+      "group": "Email Preferences",
+      "label": "Demande de réunion sans créneau : déléguer, puis notifier les disponibilités",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [98, 98],
+        "quote": "delegate to the `calendar_context` subagent, then notify the user with availability options"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "pref5",
+      "kind": "policy",
+      "group": "Email Preferences",
+      "label": "Email lié à une réunion à venir ou à un fil actif : rechercher le contexte et résumer dans la notification",
+      "parent": null,
+      "detail": "Renvoie au Research Protocol pour le périmètre et les règles de confidentialité.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [100, 100],
+        "quote": "proactively research context (see Research Protocol below) and include a brief summary when notifying the user"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "pref6",
+      "kind": "policy",
+      "group": "Email Preferences",
+      "label": "Email avec échéance ou action : scan de doublon d'abord, création ensuite, notification dans tous les cas",
+      "parent": null,
+      "detail": "Le scan de doublon est délégué même si la décision de créer n'est pas encore prise. Si un doublon existe, la création est sautée mais l'information est quand même remontée.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [102, 102],
+        "quote": "always delegate a duplicate scan to the `calendar_context` subagent first (even if you haven't decided yet whether to create an event)"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "pref7",
+      "kind": "policy",
+      "group": "Email Preferences",
+      "label": "Tout email important est toujours remonté, sur le canal choisi selon Communication Channels",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [104, 104],
+        "quote": "**Any important email** — always surface it to the user. Pick the channel per **Communication Channels**."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "pref8",
+      "kind": "policy",
+      "group": "Email Response Tone",
+      "label": "Ton : bref, direct, poli, formalité calibrée au destinataire",
+      "parent": null,
+      "detail": "Formel pour l'externe et le commercial, naturel entre collègues, chaleureux pour les contacts personnels.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [108, 110],
+        "quote": "Match formality to context: formal for external/sales, natural for colleagues, warm for personal contacts"
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "cal1",
+      "kind": "policy",
+      "group": "Calendar Event Intelligence",
+      "label": "Ne jamais demander avant de créer : décider, créer, puis notifier",
+      "parent": null,
+      "detail": "S'applique à ce qui mérite un événement : échéance, réunion, engagement personnel, anniversaire, vol.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [114, 114],
+        "quote": "**Never ask the user first; decide, create, then notify.**"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "cal2",
+      "kind": "step",
+      "group": "Calendar Event Intelligence",
+      "label": "Scanner les doublons, puis créer l'événement",
+      "parent": null,
+      "detail": "Ordre imposé, seule prescription d'ordre du document en dehors de l'Email Processing.",
+      "refs": ["toolbox:google_calendar#google_calendar_create_event"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [118, 118],
+        "quote": "Scan for duplicates (see Duplicate prevention below), then create the calendar event."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "cal3",
+      "kind": "tool_call",
+      "group": "Calendar Event Intelligence",
+      "label": "Notifier l'événement créé avec `message_user`",
+      "parent": null,
+      "detail": null,
+      "refs": ["system_tools:message_user"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [120, 120],
+        "quote": "Once the event is created, notify the user with `message_user` (\"I created an event for X on Y\")."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "cal4",
+      "kind": "policy",
+      "group": "Calendar Event Intelligence",
+      "label": "Politique de rappel par type d'événement (table de décision à cinq entrées)",
+      "parent": null,
+      "detail": "Échéance à action requise → rappel ~1 semaine avant, second rappel optionnel la veille pour les enjeux élevés. Réunion, appel, 1:1 → à l'heure proposée, la réunion est son propre rappel. Anniversaire → événement journée entière, sans anticipation. Vol → événement à l'heure de départ + rappel d'enregistrement ~3 h avant. Engagement personnel → à l'heure exacte.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [126, 132],
+        "quote": "| Event type | Examples | Reminder policy |"
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "cal5",
+      "kind": "policy",
+      "group": "Calendar Event Intelligence",
+      "label": "Principe : un rappel n'aide que s'il laisse le temps d'agir",
+      "parent": null,
+      "detail": "Les événements triviaux n'ont pas besoin d'anticipation, les échéances à action requise ont besoin de marge. Le retour passé de l'utilisateur dans `/memories/AGENTS.md` surcharge les défauts du tableau.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [134, 134],
+        "quote": "The principle: a reminder only helps if it fires with enough lead time for the user to act."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "cal6",
+      "kind": "policy",
+      "group": "Calendar Event Intelligence",
+      "label": "Contestation du timing : corriger l'événement sans en laisser deux, puis persister la préférence",
+      "parent": null,
+      "detail": "Supprimer et recréer, ou créer au nouvel horaire, mais jamais laisser les deux en place. La règle est écrite dans `/memories/AGENTS.md` pour s'appliquer automatiquement au même type d'événement.",
+      "refs": [
+        "toolbox:google_calendar#google_calendar_update_event",
+        "toolbox:google_calendar#google_calendar_delete_event"
+      ],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [140, 142],
+        "quote": "either delete and recreate, or create a new one at the revised time; do not leave both in place"
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "cal7",
+      "kind": "guard",
+      "group": "Calendar Event Intelligence",
+      "label": "Avant toute création d'événement, déléguer un scan de doublon à `calendar_context`",
+      "parent": null,
+      "detail": "Lui fournir la date cible, le type d'événement et des mots-clés sémantiques. C'est le sous-agent qui détermine la fenêtre de scan, appelle `google_calendar_list_events_for_date` sur chaque date et juge la duplication sémantique. Ne pas coder la fenêtre en dur en déléguant.",
+      "refs": ["toolbox:google_calendar#google_calendar_list_events_for_date"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [146, 146],
+        "quote": "Before creating any calendar event, delegate a duplicate scan to the `calendar_context` subagent."
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "mem1",
+      "kind": "policy",
+      "group": "Durable vs. Transient State",
+      "label": "Durable, à écrire en mémoire : VIP, règles d'ignorance, heures de réunion, signature, délais de rappel, périmètre de recherche",
+      "parent": null,
+      "detail": "Ces règles s'appliquent indéfiniment.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [152, 152],
+        "quote": "**Durable** — write to memory. VIP senders, always-ignore rules, preferred meeting hours, default sign-off style, preferred reminder lead times, research scope preferences."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "mem2",
+      "kind": "policy",
+      "group": "Durable vs. Transient State",
+      "label": "Transitoire, à ne pas persister : « hold everything for an hour », « out sick today »",
+      "parent": null,
+      "detail": "Accuser réception et agir, mais ne rien écrire : ces instructions expirent.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [154, 154],
+        "quote": "**Transient** — acknowledge and act on, do NOT persist."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "mem3",
+      "kind": "decision",
+      "group": "Durable vs. Transient State",
+      "label": "« Cette règle s'appliquerait-elle encore le mois prochain ? »",
+      "parent": null,
+      "detail": "Oui → durable, non → transitoire. Dans le doute, ne pas écrire : l'utilisateur peut toujours réapprendre une règle, mais le bruit dans `/memories/AGENTS.md` dégrade le comportement futur.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [156, 156],
+        "quote": "**The test**: \"Would this rule still apply next month?\" — Yes → durable; No → transient."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "mem4",
+      "kind": "policy",
+      "group": "Durable vs. Transient State",
+      "label": "Préférence exprimée en cours de tâche : demander « juste cette fois ou à l'avenir ? » avant de persister",
+      "parent": null,
+      "detail": "Le changement s'applique au tour courant dans tous les cas ; seule la persistance attend la confirmation. Signal de déclenchement : une instruction qui pourrait être une préférence permanente mais qui est formulée dans l'instant.",
+      "refs": ["system_tools:message_user"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [160, 160],
+        "quote": "First ask the user \"Just for this one, or going forward?\" … Apply the change to the current turn regardless."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "mem5",
+      "kind": "policy",
+      "group": "Durable vs. Transient State",
+      "label": "Persister le déclencheur exact nommé, jamais une catégorie",
+      "parent": null,
+      "detail": "Adresse, domaine, motif de sujet ou formule exacte. « Don't show me DevWeekly » devient une règle sur `devweekly`/`substack`, pas sur « les newsletters en général ». Généraliser seulement si l'utilisateur demande explicitement une règle plus large.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [166, 166],
+        "quote": "reference the *specific trigger* the user named — sender email, domain, subject pattern, or the exact phrase they used. Do not generalize to a category."
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "arch1",
+      "kind": "policy",
+      "group": "Archiving Workflow",
+      "label": "Avant d'archiver : montrer l'email et demander confirmation, un par un",
+      "parent": null,
+      "detail": "Expéditeur, sujet, date et bref résumé du corps. Contraste net avec Calendar Event Intelligence, qui interdit de demander avant de créer.",
+      "refs": ["toolbox:gmail#gmail_archive_email"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [174, 174],
+        "quote": "always show the user the email content first … before asking if they want to archive it. Go one at a time"
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "fab1",
+      "kind": "guard",
+      "group": "Fabrication Avoidance",
+      "label": "Ne jamais inventer un fait dans un email rédigé au nom de l'utilisateur",
+      "parent": null,
+      "detail": "Prix, dates, chiffres, noms de personnes ou d'entreprises, conditions commerciales. Un brouillon avec un marqueur explicite (`[pricing]`, `[date]`) signalé à l'utilisateur est acceptable ; un email *envoyé* contenant des chiffres inventés ne l'est pas.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [178, 178],
+        "quote": "never include specific facts you were not told — prices, dates, numbers, names of people or companies, deal terms"
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "res1",
+      "kind": "policy",
+      "group": "Research Protocol",
+      "label": "Rechercher : réunions externes, entrants importants d'inconnus, sujets où le contexte aide",
+      "parent": null,
+      "detail": "Clients, prospects, entretiens, démos, synchronisations inter-entreprises.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [186, 188],
+        "quote": "External meetings (clients, prospects, interviews, demos, cross-company syncs)"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "res2",
+      "kind": "policy",
+      "group": "Research Protocol",
+      "label": "Ne pas rechercher : réunions internes, blocs personnels, récurrences de routine, contexte déjà évident",
+      "parent": null,
+      "detail": "Règle d'abstention explicite, symétrique de la précédente.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [192, 195],
+        "quote": "Internal team meetings (standups, 1:1s with known colleagues)"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "res3",
+      "kind": "tool_call",
+      "group": "Research Protocol",
+      "label": "Personnes : `tavily_linkedin_search` avec « [Nom] [Société] »",
+      "parent": null,
+      "detail": "Rôle, parcours, activité récente.",
+      "refs": ["toolbox:tavily#tavily_linkedin_search"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [199, 199],
+        "quote": "**People**: Use `tavily_linkedin_search` — query \"\\[Person name\\] \\[Company name\\]\" for role, background, and recent activity."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "res4",
+      "kind": "tool_call",
+      "group": "Research Protocol",
+      "label": "Sociétés et sujets : `tavily_web_search`",
+      "parent": null,
+      "detail": "« [Société] recent news », « [Société] updates [année courante] », ou le contexte sectoriel du sujet.",
+      "refs": ["toolbox:tavily#tavily_web_search"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [200, 201],
+        "quote": "**Companies**: Use `tavily_web_search` — query \"\\[Company name\\] recent news\""
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "sec1",
+      "kind": "guard",
+      "group": "Privacy & Security Rules",
+      "label": "Aucun contenu privé dans une requête sortante",
+      "parent": null,
+      "detail": "Ni le contenu des emails, ni les détails d'agenda, ni les notes internes. Les requêtes ne contiennent que des noms publics de personnes, de sociétés ou de sujets.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [205, 205],
+        "quote": "**Never include the user's private email content, calendar details, or internal notes in any outbound research query.**"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "sec2",
+      "kind": "guard",
+      "group": "Privacy & Security Rules",
+      "label": "Ne jamais partager les résultats de recherche à l'extérieur",
+      "parent": null,
+      "detail": "La recherche n'est remontée qu'à l'utilisateur.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [206, 206],
+        "quote": "**Never share research findings externally.** Research is only surfaced to the user."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "sec3",
+      "kind": "guard",
+      "group": "Privacy & Security Rules",
+      "label": "Aucun titre de réunion, liste de participants ou ordre du jour dans une requête",
+      "parent": null,
+      "detail": "N'extraire que les entités publiques (nom de personne, nom de société) avant de chercher.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [207, 207],
+        "quote": "**Never include internal meeting titles, attendee lists, or agenda details in search queries.**"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "sec4",
+      "kind": "guard",
+      "group": "Privacy & Security Rules",
+      "label": "Ne transmettre email et agenda à aucun outil autre que ceux d'email et d'agenda",
+      "parent": null,
+      "detail": "Interdiction de circulation de données entre familles d'outils.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [208, 208],
+        "quote": "**Never send email content or calendar data to any tool other than the email/calendar tools themselves.**"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "sec5",
+      "kind": "guard",
+      "group": "Privacy & Security Rules",
+      "label": "Dans le doute sur la sûreté d'une information : ne pas l'utiliser, demander",
+      "parent": null,
+      "detail": "Défaut sûr explicite, qui ferme les quatre règles précédentes.",
+      "refs": ["system_tools:message_user"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [209, 209],
+        "quote": "If you are unsure whether a piece of information is safe to use in a search query, do not use it — ask the user first."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "sub1",
+      "kind": "tool_call",
+      "group": "Subagent",
+      "label": "Déléguer à `calendar_context` : analyse de dates, disponibilité, détection de doublons",
+      "parent": null,
+      "detail": "Analyse d'expressions naturelles (« next Tuesday at 2pm »), consultations d'agenda, scans de plage pour des événements sémantiquement équivalents. Il choisit lui-même sa fenêtre selon le type d'événement : lui fournir la date cible, le type et des mots-clés, sans fenêtre en dur. Obligatoire pour tout traitement d'email lié à une réunion et avant toute création d'événement. Aucun type du vocabulaire ne décrit une délégation à un sous-agent : `tool_call` est le moins mauvais (voir README, limite 1).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [226, 226],
+        "quote": "`calendar_context` — Delegate date parsing, calendar availability checks, and duplicate event detection."
+      },
+      "confidence": 0.93
+    },
+
+    {
+      "id": "ig1",
+      "kind": "policy",
+      "group": "Important Guidelines",
+      "label": "Biais vers la notification en cas d'incertitude",
+      "parent": null,
+      "detail": "Mieux vaut trop communiquer que mal traiter en silence. Répète ep4 depuis une autre section.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [230, 230],
+        "quote": "**Bias toward notifying.** If you're uncertain how to handle an email, notify the user."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ig2",
+      "kind": "policy",
+      "group": "Important Guidelines",
+      "label": "Apprendre des corrections et des refus d'appel d'outil, sous réserve des règles durable/transitoire",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [232, 232],
+        "quote": "When the user corrects you, rejects a tool call, or gives guidance, update your Email Preferences and behavior for the future"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ig3",
+      "kind": "policy",
+      "group": "Important Guidelines",
+      "label": "Réunion refusée pour cause d'occupation : créer un blocage `[Blocked]` sur ce créneau",
+      "parent": null,
+      "detail": "Empêche les conflits futurs sur un créneau que l'agenda montrerait libre.",
+      "refs": ["toolbox:google_calendar#google_calendar_create_event"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [234, 234],
+        "quote": "If the user declines a meeting because they're busy, create a `[Blocked]` calendar hold for that time"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ig4",
+      "kind": "policy",
+      "group": "Important Guidelines",
+      "label": "Si la recherche ne donne rien d'utile, le dire",
+      "parent": null,
+      "detail": "Ne pas inventer de contexte. Recoupe fab1 depuis une autre section.",
+      "refs": ["toolbox:tavily#tavily_web_search"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [236, 236],
+        "quote": "**Don't fabricate context.** If research returns nothing useful, say so."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ig5",
+      "kind": "policy",
+      "group": "Important Guidelines",
+      "label": "Rester lisible : brief ou notification absorbable en 30 secondes",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [238, 238],
+        "quote": "**Keep it scannable.** … the user should be able to absorb it in 30 seconds or less."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ig6",
+      "kind": "policy",
+      "group": "Important Guidelines",
+      "label": "Confirmer les détails d'une réunion avant création, mais ne rien demander pour les rappels et événements personnels",
+      "parent": null,
+      "detail": "Date, heure, durée, participants pour les réunions avec invités, sauf créneaux proposés manifestement libres. Échéances, anniversaires, vols : décider, créer, notifier.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [240, 240],
+        "quote": "**Confirm meeting details; don't ask before creating reminders.**"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "ig7",
+      "kind": "guard",
+      "group": "Important Guidelines",
+      "label": "Aucun doublon d'événement : juger la duplication sémantique, pas seulement la date",
+      "parent": null,
+      "detail": "Lire titres, descriptions et contexte des événements existants ; même échéance, même sujet, même réunion formulée autrement comptent comme doublons. Si un doublon existe, sauter la création mais remonter quand même l'information. Troisième formulation de la même règle, après pref6 et cal7.",
+      "refs": ["toolbox:google_calendar#google_calendar_list_events_for_date"],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [242, 242],
+        "quote": "**No duplicate calendar events.** Before creating a calendar event, always check the calendar for that date first"
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "cap1",
+      "kind": "policy",
+      "group": "Capabilities",
+      "label": "Les dates d'email sont manipulées au format `dd-mm-yyyy`",
+      "parent": null,
+      "detail": "Seule contrainte de format du document, glissée dans l'inventaire des capacités.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/executive-assistant/AGENT.md",
+        "lines": [215, 215],
+        "quote": "Dates are handled in `dd-mm-yyyy` format."
+      },
+      "confidence": 0.94
+    }
+  ],
+  "edges": [
+    { "from": "ob1", "to": "ob2", "condition": "pas de marqueur `## Onboarded`" },
+    { "from": "ob1", "to": "ob4", "condition": "marqueur présent" },
+
+    { "from": "ep1", "to": "ep2", "condition": null },
+    { "from": "ep2", "to": "ep3", "condition": null },
+    { "from": "ep3", "to": "ep4", "condition": "aucune préférence ne correspond" },
+
+    { "from": "cal2", "to": "cal3", "condition": null }
+  ],
+  "gaps": [
+    {
+      "kind": "declared_trigger_without_rule",
+      "message": "La carte de dépendances déclare un cron quotidien « Daily calendar and email brief » (AGENT.md:15) et la fiche produit en fait un argument de vente (AGENT.md:22). Le prompt système ne décrit nulle part ce qu'est ce brief : ni contenu, ni format, ni destinataire, ni comportement si l'agenda est vide. La seule mention d'un run cron est incidente (AGENT.md:55), pour dire que le texte brut n'y est pas affiché.",
+      "related_steps": ["cc1"]
+    },
+    {
+      "kind": "conflicting_policies",
+      "message": "Archiving Workflow impose de montrer et de demander avant chaque archivage (AGENT.md:174), alors que les Email Preferences prescrivent de marquer lu silencieusement le spam et le marketing (AGENT.md:83-87) et que Calendar Event Intelligence interdit de demander avant d'agir (AGENT.md:114). Rien ne dit quelle règle l'emporte pour un email de spam qui mériterait l'archivage.",
+      "related_steps": ["arch1", "pref1", "cal1"]
+    },
+    {
+      "kind": "duplicated_rule",
+      "message": "La prévention des doublons d'agenda est écrite trois fois, dans trois sections, avec des acteurs différents : déléguée au sous-agent (AGENT.md:102 et 146) et faite en direct via `google_calendar_list_events_for_date` (AGENT.md:242). Rien ne dit si la vérification directe remplace la délégation ou s'ajoute à elle.",
+      "related_steps": ["pref6", "cal7", "ig7"]
+    },
+    {
+      "kind": "unspecified_error_path",
+      "message": "Aucune règle ne couvre l'échec d'un outil : quota Gmail dépassé, Slack déconnecté, recherche Tavily en erreur, `calendar_context` sans réponse. Le document dit seulement quoi faire quand une recherche ne trouve rien (AGENT.md:236), pas quand elle échoue.",
+      "related_steps": []
+    },
+    {
+      "kind": "external_authority",
+      "message": "Deux skills font autorité sur des décisions absentes de ce fichier : `inbox-triage` porte les catégories de triage et l'arbre de décision, `email-drafting` porte toutes les conventions de rédaction. Une carte tirée du seul prompt système cartographie une coquille sur ces deux points.",
+      "related_steps": ["ep1", "ep5"]
+    }
+  ],
+  "overall_confidence": 0.95
+}
