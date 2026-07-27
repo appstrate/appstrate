@@ -49,7 +49,15 @@ import { LibraryPicker, type LibraryCandidate } from "./library-picker";
  * `publish_document`.
  */
 export type MapEditKind =
-  "prompt" | "skills" | "integrations" | "runtime_tools" | "input" | "output";
+  "prompt" | "skills" | "integrations" | "runtime_tools" | "input" | "output" | "config";
+
+/**
+ * The three AFPS schema wrappers (§3.4), which share one field editor. Kept as a
+ * guard rather than a repeated union so adding a fourth touches one line.
+ */
+function isSchemaKind(kind: MapEditKind): kind is "input" | "output" | "config" {
+  return kind === "input" || kind === "output" || kind === "config";
+}
 
 interface MapEditDialogProps {
   kind: MapEditKind | null;
@@ -82,6 +90,7 @@ export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) 
     integrations: "map.addIntegration",
     input: "map.editInput",
     output: "map.editOutput",
+    config: "map.editConfigSchema",
   };
   const title = t(TITLES[kind]);
 
@@ -139,7 +148,7 @@ function MapEditForm({
   // being typed has an empty key, and `fieldsToSchema` drops those — persisting
   // on every keystroke would delete the row you are in the middle of naming.
   const [schemaFields, setSchemaFields] = useState<SchemaField[]>(() =>
-    kind === "input" || kind === "output" ? (manifestToSchemaFields(manifest)[kind] ?? []) : [],
+    isSchemaKind(kind) ? (manifestToSchemaFields(manifest)[kind] ?? []) : [],
   );
   // Catalogue integrations staged for activation-then-declaration on save.
   const [staged, setStaged] = useState<LibraryCandidate[]>([]);
@@ -166,7 +175,7 @@ function MapEditForm({
     }
     // An emptied schema drops its wrapper rather than persisting `{}`, matching
     // the package editor — `input: {}` is not the same manifest as no input.
-    if (kind === "input" || kind === "output") {
+    if (isSchemaKind(kind)) {
       const wrapper = fieldsToSchema(schemaFields, kind);
       if (wrapper) next[kind] = wrapper;
       else delete next[kind];
@@ -220,9 +229,9 @@ function MapEditForm({
           <PromptEditor value={draftPrompt} onChange={setDraftPrompt} />
         ) : kind === "runtime_tools" ? (
           <RuntimeToolsGroup selected={runtimeTools} onChange={setRuntimeTools} />
-        ) : kind === "input" || kind === "output" ? (
+        ) : isSchemaKind(kind) ? (
           <SchemaSection
-            title={kind === "input" ? t("agents:map.input") : t("agents:map.output")}
+            title={t(`agents:map.${kind}`)}
             mode={kind}
             fields={schemaFields}
             onChange={setSchemaFields}

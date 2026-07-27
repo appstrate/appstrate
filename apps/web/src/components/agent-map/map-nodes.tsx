@@ -754,7 +754,13 @@ export function ConfigNode({ data }: NodeProps) {
   const { t } = useTranslation("agents");
   const list = items<ConfigItem>(data);
   const diags = diagnostics(data);
-  const edit = cardAction(data, "onPanel", "config", t("map.editConfig"), "edit");
+  // Two different things, so two entry points. The header edits the DECLARED
+  // settings (the manifest's `config.schema`), like the input and output cards
+  // do; a row sets its VALUE for this application. An empty card only has the
+  // first — offering the values form with no field to fill was a dialog that
+  // could do nothing, which is what an empty card must never open onto.
+  const declare = cardAction(data, "onEdit", "config", t("map.editConfigSchema"), "edit");
+  const setValues = cardAction(data, "onPanel", "config", t("map.editConfig"), "edit");
   return (
     <Card
       title={t("map.config")}
@@ -763,7 +769,7 @@ export function ConfigNode({ data }: NodeProps) {
       sources={["right"]}
       isEmpty={list.length === 0}
       emptyLabel={t("map.emptyConfig")}
-      action={edit}
+      action={declare}
     >
       {list.map((field) => (
         <Row
@@ -774,7 +780,7 @@ export function ConfigNode({ data }: NodeProps) {
           // there is no value to show yet.
           sublabel={field.value ?? t("map.configUnset")}
           dimmed={field.value === null}
-          onClick={edit?.onClick}
+          onClick={setValues?.onClick}
           right={<DiagnosticBadge diagnostics={diagnosticsFor(diags, field.name)} />}
         />
       ))}
