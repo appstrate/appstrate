@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `buildPublishDocumentDef()` — the `publish_document` tool description now leads with what
+  only the tool can do (publish DURING the run, get the durable `document://` URI back) instead
+  of steering agents away from it. The `outputs/` sweep is unconditional and shares the same
+  uploader, so the previous "use this tool only to publish a deliverable that lives elsewhere in
+  the workspace" named the one replaceable case and hid the reason to call it at all. Behaviour
+  and schema are unchanged.
 - `ChatTurnFinishReason` gains `"deadline"` — a turn cut by the engine's
   wall-clock ceiling is no longer disguised as its last step's provider reason.
 - `ModelProviderDefinition.featuredModels` widens from `readonly string[]` to
