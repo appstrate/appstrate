@@ -43,6 +43,7 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import { corruptCredentialBlob } from "../../helpers/seed.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
@@ -458,6 +459,44 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(oauth!.id).toBe(imported.credentialId);
       expect(oauth!.oauth_email).toBe("user@example.com");
       expect(oauth!.needs_reconnection).toBe(false);
+    });
+
+    it("flags a credential whose blob no longer decrypts, in either auth mode", async () => {
+      // The models tab badges such a credential's models "unavailable" and
+      // sends the user here to reconnect or replace it. Before this, the flag
+      // was OAuth-only and read off the decrypted blob — so an undecryptable
+      // blob (`blob === null`, hence `isOauth === false`) rendered as a
+      // perfectly healthy credential with no Reconnect button.
+      const ctx = await createTestContext({ orgSlug: "agg-list-corrupt" });
+      const apiKeyId = await createApiKeyCredential({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        label: "OpenAI",
+        providerId: "openai",
+        apiKey: PLAINTEXT,
+      });
+      const oauthId = await createOAuthCredential({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        label: "Subscription",
+        providerId: TEST_OAUTH,
+        accessToken: "a",
+        refreshToken: "r",
+        expiresAt: null,
+      });
+      await corruptCredentialBlob(apiKeyId);
+      await corruptCredentialBlob(oauthId);
+
+      const list = await listOrgModelProviderCredentials(ctx.orgId);
+      expect(list.find((k) => k.id === apiKeyId)!.needs_reconnection).toBe(true);
+      const oauth = list.find((k) => k.id === oauthId)!;
+      expect(oauth.needs_reconnection).toBe(true);
+      // `authMode` comes from the registry, not the blob, so the Reconnect
+      // button (gated on authMode === "oauth2" && needs_reconnection) shows.
+      expect(oauth.authMode).toBe("oauth2");
+      // Same verdict as the inference path, which is what the model list flags on.
+      expect(await loadInferenceCredentials(ctx.orgId, apiKeyId)).toBeNull();
+      expect(await loadInferenceCredentials(ctx.orgId, oauthId)).toBeNull();
     });
   });
 

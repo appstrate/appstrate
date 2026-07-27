@@ -676,7 +676,13 @@ export async function listOrgModelProviderCredentials(
         authMode: cfg?.authMode ?? "api_key",
         providerId: r.providerId,
         oauth_email: isOauth ? (blob.email ?? null) : null,
-        needs_reconnection: isOauth ? !!blob.needsReconnection : false,
+        // Dead for inference, by either route: an OAuth blob flagged for
+        // re-consent, or (either auth mode) a blob that no longer decrypts —
+        // `blob === null`, which also makes `isOauth` false. The model list
+        // badges its rows on the same two cases and points the user at THIS
+        // tab to fix them; narrowing this flag to the OAuth case would show
+        // the blamed credential as healthy, with no Reconnect button.
+        needs_reconnection: blob === null || (isOauth && !!blob.needsReconnection),
         available_model_ids: r.availableModelIds ?? null,
         created_by: r.createdBy,
         createdAt: toISORequired(r.createdAt),

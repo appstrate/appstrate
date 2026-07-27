@@ -16,7 +16,7 @@ import {
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import { orgModels, organizations } from "@appstrate/db/schema";
+import { modelProviderCredentials, orgModels, organizations } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { listCatalogModels } from "../../../src/services/pricing-catalog.ts";
@@ -804,6 +804,143 @@ describe("Models API", () => {
 
       expect(res.status).toBe(204);
       expect(await res.text()).toBe("");
+    });
+  });
+
+  /**
+   * The production deadlock, walked end to end over HTTP.
+   *
+   * `listOrgModels` used to DROP a model whose credential could no longer serve
+   * inference, while `org_models.credential_id` (ON DELETE RESTRICT) kept that
+   * credential undeletable: the model was invisible, so it could not be
+   * detached, so the credential could not be deleted. The service-level tests
+   * pin the serializer; only these pin the sequence a user actually performs —
+   * in particular the final credential DELETE, without which a future
+   * reachability guard on `DELETE /api/models/:id` would reinstate the
+   * deadlock with the whole suite green.
+   */
+  describe("dead credential — end-to-end recovery over HTTP", () => {
+    /** A `needsReconnection` OAuth credential with one enabled model bound to it. */
+    async function seedDeadPair(label: string) {
+      const cred = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: `${label} credential`,
+        needsReconnection: true,
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: cred.id,
+        label,
+        modelId: "gpt-4o",
+        enabled: true,
+      });
+      return { cred, model };
+    }
+
+    it("lists the dead model, detaches it, then deletes the credential (204, not 409 credential_in_use)", async () => {
+      const { cred, model } = await seedDeadPair("Dead model");
+
+      // 1. It surfaces on GET — through the real serializer + alias projection.
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      expect(list.status).toBe(200);
+      const listed = ((await list.json()) as any).data.find((m: any) => m.id === model.id);
+      expect(listed).toBeDefined();
+      expect(listed.needs_reconnection).toBe(true);
+
+      // 2. …so it can be detached,
+      const delModel = await app.request(`/api/models/${model.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(delModel.status).toBe(204);
+
+      // 3. …which releases the FK. This is the 409 the user could never escape.
+      const delCred = await app.request(`/api/model-provider-credentials/${cred.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(delCred.status).toBe(204);
+    });
+
+    it("refuses a dead model as the org default — 409 model_needs_reconnection", async () => {
+      const { model } = await seedDeadPair("Dead default candidate");
+
+      const res = await app.request("/api/models/default", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: model.id }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as any).code).toBe("model_needs_reconnection");
+
+      const [org] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(org!.defaultModelId).toBeNull();
+    });
+
+    it("still accepts a model whose credential's providerId is unregistered", async () => {
+      // NOT a 409: the credential is healthy — its provider module was dropped
+      // from `MODULES`, which is why the model is absent from GET /api/models
+      // in the first place. "Reconnect this credential" would be misdirection
+      // about a row the client cannot even see; the fix is to restore the
+      // module. So this behaves exactly as it did before the flag existed.
+      const { cred, model } = await seedDeadPair("Orphaned provider");
+      await db
+        .update(modelProviderCredentials)
+        .set({ providerId: "@gone/provider" })
+        .where(eq(modelProviderCredentials.id, cred.id));
+
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      expect(((await list.json()) as any).data.find((m: any) => m.id === model.id)).toBeUndefined();
+
+      const res = await app.request("/api/models/default", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: model.id }),
+      });
+      // 204, not 200: the write lands, but the handler re-reads the list to
+      // echo the effective default and the row is not in it. Pre-existing
+      // shape, unchanged by this branch — the assertion of record is the
+      // stored pointer below.
+      expect(res.status).toBe(204);
+
+      const [org] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(org!.defaultModelId).toBe(model.id);
+    });
+
+    it("answers the Test action with a failed result, not a 404, on a dead model", async () => {
+      // The settings table renders "Test" on every listed row, dead ones
+      // included — a 404 "Model not found" about a row on screen is the wrong
+      // answer. Same envelope the client already renders for a failed probe.
+      const { model } = await seedDeadPair("Dead test target");
+
+      const res = await app.request(`/api/models/${model.id}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.ok).toBe(false);
+      expect(body.error).toBe("NEEDS_RECONNECTION");
+      expect(body.message).toContain("reconnected");
+    });
+
+    it("still 404s the Test action for a model id that does not exist", async () => {
+      const res = await app.request(`/api/models/${crypto.randomUUID()}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(404);
     });
   });
 

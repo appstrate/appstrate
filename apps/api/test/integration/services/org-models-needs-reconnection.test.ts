@@ -29,6 +29,7 @@ import { ApiError } from "../../../src/lib/errors.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
+  corruptCredentialBlob,
   seedOrgModel,
   seedOrgModelProviderKey,
   seedOrgModelProviderOAuth,
@@ -75,24 +76,6 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
       enabled: true,
     });
     return { cred, model };
-  }
-
-  /**
-   * Make a stored credential undecryptable the way production would: a key
-   * rotation retires a kid rows still reference, or the bytes are damaged. The
-   * envelope stays syntactically valid (`v1:<kid>:<base64>`, real kid, longer
-   * than IV+tag) and only the ciphertext is flipped, so it fails GCM
-   * authentication exactly as a wrong key does. `decryptBlob` swallows that into
-   * `null` — nothing must throw out of the read paths.
-   */
-  async function corruptBlob(credentialId: string, envelope: string) {
-    const [version, kid, payload] = envelope.split(":");
-    const packed = Buffer.from(payload!, "base64");
-    packed[packed.length - 1] = packed[packed.length - 1]! ^ 0xff;
-    await db
-      .update(modelProviderCredentials)
-      .set({ credentialsEncrypted: `${version}:${kid}:${packed.toString("base64")}` })
-      .where(eq(modelProviderCredentials.id, credentialId));
   }
 
   it("lists a model whose OAuth credential needs reconnection, flagged", async () => {
@@ -143,7 +126,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
 
   it("flags an api-key model whose stored blob no longer decrypts", async () => {
     const { cred, model } = await seedApiKeyModel();
-    await corruptBlob(cred.id, cred.credentialsEncrypted);
+    await corruptCredentialBlob(cred.id);
 
     const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
     // Listed (so it can be detached/deleted) but never presented as usable.
@@ -168,6 +151,14 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
 
     const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
     expect(listed).toBeUndefined();
+
+    // …and the predicate agrees with the list on this row. The credential is
+    // healthy — only its provider module is gone — so answering `true` here
+    // would 409 `PUT /api/models/default` with "reconnect this credential",
+    // advice that fixes nothing, about a row the client cannot even see. The
+    // fix is to restore the module; until then this behaves as it did before
+    // the flag existed.
+    expect(await modelNeedsReconnection(ctx.orgId, model.id)).toBe(false);
   });
 
   it("refuses to make a dead model the org default (409 model_needs_reconnection)", async () => {
@@ -194,7 +185,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     // 200: the list badged the model dead while the setter happily pointed the
     // org default at it. Pin that the two surfaces agree.
     const { cred, model } = await seedApiKeyModel();
-    await corruptBlob(cred.id, cred.credentialsEncrypted);
+    await corruptCredentialBlob(cred.id);
 
     let thrown: unknown;
     try {
@@ -216,6 +207,14 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     // Disabled: `loadModel` is null for the row regardless of its credential,
     // so "needs reconnection" must stay false — the caller's answer is
     // "not enabled", not "go reconnect".
+    //
+    // This is the one place the predicate deliberately diverges from the list,
+    // which flags a dead-credential row regardless of `enabled`. Both are
+    // right for their surface: the badge explains why a row the user is
+    // looking at is unusable, while a disabled model is inert either way
+    // (`resolveModel` cascades past it) and the step that unblocks it is
+    // "enable it", not "reconnect the credential". Not an oversight — do not
+    // "fix" this to true.
     const { cred } = await seedOAuthModel(true);
     const disabled = await seedOrgModel({
       orgId: ctx.orgId,

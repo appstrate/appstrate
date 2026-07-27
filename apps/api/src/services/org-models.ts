@@ -806,20 +806,28 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
 /**
  * Disambiguate the `loadModel(...) === null` result for an org (DB) model: is it
- * null because the model is missing/disabled, or because its credential can no
- * longer serve inference at all — an OAuth credential flagged
- * `needsReconnection`, a stored blob that no longer decrypts, or a
- * provider/base-URL that no longer resolves?
+ * null because the model is missing/disabled, or because its stored credential
+ * can no longer serve inference — an OAuth credential flagged
+ * `needsReconnection`, or (either auth mode) a blob that no longer decrypts?
  *
- * Returns `true` only for the second case — an enabled DB model with a dead
- * credential — so a caller can surface an actionable "reconnect" instead of a
- * misleading "not found / not enabled". System models and non-UUID ids are never
- * reconnection cases (`false`).
+ * Returns `true` only for that second case, so a caller can surface an
+ * actionable "reconnect" instead of a misleading "not found / not enabled".
  *
- * The liveness test is deliberately the SAME call {@link listOrgModels} flags
- * `needs_reconnection` with, so the read surface (the badge) and the write
- * surface (the 409 in {@link setDefaultModel}) can never disagree about whether
- * a given model is dead.
+ * Scope, precisely — `true` requires ALL of: an existing DB row (system models
+ * and non-UUID ids answer `false`), that is `enabled`, whose credential fails
+ * {@link loadInferenceCredentials} AND still resolves through
+ * {@link loadCredentialMetadata}. That last conjunct is what keeps this aligned
+ * with what {@link listOrgModels} actually RENDERS as dead: a row whose
+ * credential row is gone, or whose `providerId` has no registry entry (its
+ * provider module was dropped from `MODULES`), is not listed at all — and its
+ * credential is fine, so "reconnect it" would be advice that fixes nothing
+ * about a row the client cannot even see. The fix there is to restore the
+ * provider.
+ *
+ * One divergence from the list is deliberate: a DISABLED row on a dead
+ * credential is flagged by the list (which flags regardless of `enabled`) but
+ * answers `false` here. It is inert either way — `resolveModel` cascades past
+ * it — and the actionable advice for it is "enable it", not "reconnect".
  */
 export async function modelNeedsReconnection(orgId: string, modelDbId: string): Promise<boolean> {
   if (isSystemModel(modelDbId)) return false;
@@ -838,7 +846,10 @@ export async function modelNeedsReconnection(orgId: string, modelDbId: string): 
   }
   if (!row || !row.enabled || !row.credentialId) return false;
 
-  return (await loadInferenceCredentials(orgId, row.credentialId)) === null;
+  // The list's two tests, in its order: dead for inference, but still
+  // renderable. See the doc block for why the second one is not redundant.
+  if ((await loadInferenceCredentials(orgId, row.credentialId)) !== null) return false;
+  return (await loadCredentialMetadata(row.credentialId, orgId)) !== null;
 }
 
 /**
@@ -1029,8 +1040,24 @@ export async function testModelConfig(config: {
 /** Test a saved model by ID (loads from DB/system registry then delegates to testModelConfig). */
 export async function testModelConnection(orgId: string, modelDbId: string): Promise<TestResult> {
   const model = await loadModel(orgId, modelDbId);
-  if (!model)
+  if (!model) {
+    // A dead-credential model is LISTED (flagged) while `loadModel` still
+    // refuses it, and the settings table offers "Test" on every listed row —
+    // so this is reached with the row on screen in front of the user. Answer
+    // with the surface's normal failed result: the route turns only
+    // `MODEL_NOT_FOUND` into a 404, and "Model not found" is the one thing
+    // that is demonstrably untrue here.
+    if (await modelNeedsReconnection(orgId, modelDbId)) {
+      return {
+        ok: false,
+        latency: 0,
+        error: "NEEDS_RECONNECTION",
+        message:
+          "This model's provider credential must be reconnected before it can be tested. Reconnect it in the Model Provider Keys tab.",
+      };
+    }
     return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
+  }
 
   return testModelConfig(model);
 }
