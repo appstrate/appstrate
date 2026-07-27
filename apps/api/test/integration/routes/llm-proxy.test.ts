@@ -803,7 +803,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
 });
 
 // CRIT-07 — `X-Run-Id` is caller-supplied and feeds `llm_usage.run_id` →
-// `computeRunCost` → `runs.cost`. Pre-fix the header was persisted verbatim,
+// `computeRunSpend` → `runs.cost`. Pre-fix the header was persisted verbatim,
 // so any principal holding `llm-proxy:call` could inflate the cost of ANY run
 // whose id it knew — including another tenant's. The fix validates the run
 // against the principal's org + application BEFORE the upstream call.

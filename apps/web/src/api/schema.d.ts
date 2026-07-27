@@ -5486,6 +5486,11 @@ export interface components {
             model_source: string | null;
             /** @description Run cost in dollars */
             cost: number | null;
+            /**
+             * @description How much of `cost` is backed by real per-token rates. `priced`: every token bucket that carried usage had a rate, so the figure is complete. `partial`: part of the consumption (cached input) had no rate and was priced at zero, so the figure is a FLOOR, not the full amount. `unpriced`: no rates were available for the model at all — a `cost` of 0 alongside this value means "not priced", NOT "free"; do not bill or display it as zero spend. `null` on runs finalized before this field existed and on runs that produced no usage rows; never read `null` as `priced`.
+             * @enum {string|null}
+             */
+            cost_pricing_status: "priced" | "partial" | "unpriced" | null;
             /** @description End-user ID (eu_ prefix) if executed on behalf of an end-user */
             endUserId: string | null;
             /** @description API key ID that triggered the run (null for dashboard/schedule runs) */

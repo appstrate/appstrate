@@ -235,6 +235,7 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     completed_at: row.completedAt?.toISOString() ?? null,
     duration: row.duration,
     cost: row.cost,
+    cost_pricing_status: row.costPricingStatus,
     runNumber: row.runNumber,
     token_usage: row.tokenUsage,
     version_label: row.versionLabel,
@@ -731,7 +732,7 @@ export async function recordRunDegradedIntegration(
  * SQL boolean — is this ledger row something OTHER than the runner mirror of a
  * proxy-metered run? The single expression of the no-double-count rule, applied
  * by EVERY read of the ledger: the aggregate `runs.cost` read
- * ({@link computeRunCost}) and the module-facing cursor read
+ * ({@link computeRunSpend}) and the module-facing cursor read
  * ({@link listLlmUsage} / {@link getSettledFrontierId}).
  *
  * A remote-origin run whose inference flows through the system llm-proxy gets
@@ -764,20 +765,45 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
   )
 )`;
 
+/** A run's attributable spend and how much of it is backed by real rates. */
+export interface RunSpend {
+  /** Total attributable spend in USD. */
+  costUsd: number;
+  /**
+   * Provenance of {@link costUsd} — the WORST of the contributing rows'
+   * statuses. `null` when no contributing row carries one, never coerced to
+   * `priced`.
+   */
+  pricingStatus: PricingStatus | null;
+}
+
 /**
- * Compute the total attributable spend for a run from the unified
- * `llm_usage` ledger (proxy + runner rows). Called by `finalizeRun` to
- * cache the canonical `runs.cost` value at terminal time. This is the
- * SINGLE read path for aggregate run cost — no caller should SUM the
- * ledger directly. `credential_proxy_usage` is intentionally NOT summed:
- * it holds no cost. When the first metered integration ships, route its
- * rows through `llm_usage` with a new `source` enum value (e.g.
- * `credential_proxy`) — that keeps the single ledger invariant and
- * avoids adding a redundant SUM here.
+ * Compute a run's total attributable spend from the unified `llm_usage` ledger
+ * (proxy + runner rows), TOGETHER with the pricing provenance of that number.
+ * Called by `finalizeRun` to cache the canonical `runs.cost` +
+ * `runs.cost_pricing_status` at terminal time. This is the SINGLE read path for
+ * aggregate run cost — no caller should SUM the ledger directly.
+ * `credential_proxy_usage` is intentionally NOT summed: it holds no cost. When
+ * the first metered integration ships, route its rows through `llm_usage` with
+ * a new `source` enum value (e.g. `credential_proxy`) — that keeps the single
+ * ledger invariant and avoids adding a redundant SUM here.
  *
- * One scalar SUM over the `(run_id)` index — cheap even on long runs.
- * The runner mirror of a proxy-metered run is excluded via the shared
- * {@link notRunnerMirrorSql} predicate.
+ * Cost and status are ONE query, not two, and that is a correctness property
+ * rather than an optimisation: a status computed over a different row set than
+ * the cost it qualifies could mark a number `priced` on the strength of a row
+ * that number does not contain. Sharing the `WHERE` makes the two structurally
+ * inseparable. (It is also cheaper — one scan over the `(run_id)` index on a
+ * path that runs at every finalize and at every throttled metric broadcast.)
+ *
+ * The runner mirror of a proxy-metered run is excluded from both aggregates via
+ * the shared {@link notRunnerMirrorSql} predicate.
+ *
+ * The run-level verdict is the worst of the contributing rows — any `unpriced`
+ * ⟹ unpriced, else any `partial` ⟹ partial, else `priced` — because it is
+ * consumed as a confidence claim about the displayed total: one unpriced call
+ * is enough to make that total an undercount, and averaging or majority-voting
+ * would hide it. `null` when no row carries a status at all (a run finalized
+ * before the column existed, or one that produced no ledger rows).
  *
  * `orgId` is mandatory: `llm_usage.run_id` alone is caller-suppliable on the
  * proxy path (`X-Run-Id`), so the aggregate must be structurally inseparable
@@ -786,43 +812,10 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
  * `(run_id, org_id) → runs(id, org_id)` enforces the same invariant at the
  * DB level for new rows; this filter covers any pre-constraint legacy rows.
  */
-export async function computeRunCost(runId: string, orgId: string): Promise<number> {
-  const [llm] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
-    })
-    .from(llmUsage)
-    .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, orgId), notRunnerMirrorSql));
-
-  return Number(llm?.total ?? 0);
-}
-
-/**
- * Run-level pricing provenance — the companion of {@link computeRunCost}, over
- * EXACTLY the same rows (same tenant filter, same {@link notRunnerMirrorSql}
- * exclusion). A status computed over a different row set than the cost it
- * qualifies would be its own bug: it could mark a number `priced` on the
- * strength of a row that number does not contain.
- *
- * A run may mix per-call proxy rows with one cumulative runner row, so the
- * run-level verdict is the WORST of them — any `unpriced` ⟹ unpriced, else any
- * `partial` ⟹ partial, else `priced`. Worst-of, because the value is consumed as
- * a confidence claim about the displayed total: one unpriced call is enough to
- * make that total an undercount, and averaging or majority-voting would hide it.
- *
- * `null` when no row of the run carries a status at all — a run finalized before
- * the column existed, or one that produced no ledger rows. Never coerced to
- * `priced`.
- *
- * Two `bool_or`s in one scan rather than a second query: the aggregate is read
- * on the finalize hot path, next to `computeRunCost`.
- */
-export async function computeRunPricingStatus(
-  runId: string,
-  orgId: string,
-): Promise<PricingStatus | null> {
+export async function computeRunSpend(runId: string, orgId: string): Promise<RunSpend> {
   const [row] = await db
     .select({
+      total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
       anyUnpriced: sql<boolean | null>`bool_or(${llmUsage.pricingStatus} = 'unpriced')`,
       anyPartial: sql<boolean | null>`bool_or(${llmUsage.pricingStatus} = 'partial')`,
       anyStatus: sql<boolean | null>`bool_or(${llmUsage.pricingStatus} IS NOT NULL)`,
@@ -830,10 +823,16 @@ export async function computeRunPricingStatus(
     .from(llmUsage)
     .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, orgId), notRunnerMirrorSql));
 
-  if (!row?.anyStatus) return null;
-  if (row.anyUnpriced) return "unpriced";
-  if (row.anyPartial) return "partial";
-  return "priced";
+  return {
+    costUsd: Number(row?.total ?? 0),
+    pricingStatus: !row?.anyStatus
+      ? null
+      : row.anyUnpriced
+        ? "unpriced"
+        : row.anyPartial
+          ? "partial"
+          : "priced",
+  };
 }
 
 /**
@@ -1627,6 +1626,7 @@ export async function listLlmUsage(args: {
       runId: llmUsage.runId,
       chatSessionId: llmUsage.chatSessionId,
       credentialSource: llmUsage.credentialSource,
+      pricingStatus: llmUsage.pricingStatus,
       settled: settledSql,
     })
     .from(llmUsage)
@@ -1649,6 +1649,7 @@ export async function listLlmUsage(args: {
     contextType: r.runId ? "run" : r.chatSessionId ? "chat" : null,
     contextId: r.runId ?? r.chatSessionId ?? null,
     credentialSource: r.credentialSource,
+    pricingStatus: r.pricingStatus,
     settled: r.settled,
   }));
 }

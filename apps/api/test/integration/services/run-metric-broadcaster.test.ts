@@ -294,6 +294,95 @@ describe("run-metric-broadcaster (integration)", () => {
     expect(row?.cost).toBeNull();
   });
 
+  // ── pricing provenance rides with the number ────────────────
+  //
+  // Without it the UI has only `cost_so_far` to go on, so a RUNNING run on a
+  // model the platform cannot price streams a confident `$0.0000` for its
+  // whole duration and only admits the truth at finalize.
+
+  describe("cost_pricing_status", () => {
+    it("carries the run's worst verdict on the SSE frame", async () => {
+      const send = mock((_e: RealtimeEvent) => {});
+      const subId = "sub-unpriced";
+      trackSubscriber(subId);
+      addSubscriber({
+        id: subId,
+        filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+        send,
+      });
+
+      // The shape the issue is about: real tokens, zero recorded cost, and a
+      // ledger that KNOWS the zero is an absence of pricing.
+      await db.insert(llmUsage).values({
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        inputTokens: 100,
+        outputTokens: 50,
+        costUsd: 0,
+        pricingStatus: "unpriced",
+      });
+
+      scheduleRunMetricBroadcast(runId);
+      await wait(50);
+
+      expect(send).toHaveBeenCalledTimes(1);
+      const evt = send.mock.calls[0]![0]!;
+      expect(eventData(evt, "run_metric").costSoFar).toBe(0);
+      expect(eventData(evt, "run_metric").costPricingStatus).toBe("unpriced");
+    });
+
+    it("is null on the frame when no ledger row carries a verdict", async () => {
+      const send = mock((_e: RealtimeEvent) => {});
+      const subId = "sub-no-verdict";
+      trackSubscriber(subId);
+      addSubscriber({
+        id: subId,
+        filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+        send,
+      });
+
+      await db.insert(llmUsage).values({
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0.001,
+      });
+
+      scheduleRunMetricBroadcast(runId);
+      await wait(50);
+
+      expect(eventData(send.mock.calls[0]![0]!, "run_metric").costPricingStatus).toBeNull();
+    });
+
+    it("is persisted with the cost, so a mid-run refresh keeps the caveat", async () => {
+      await db.insert(llmUsage).values({
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        inputTokens: 200,
+        outputTokens: 50,
+        costUsd: 0.0123,
+        pricingStatus: "partial",
+      });
+
+      scheduleRunMetricBroadcast(runId);
+      await wait(50);
+
+      const [row] = await db
+        .select({ cost: runs.cost, status: runs.costPricingStatus })
+        .from(runs)
+        .where(eq(runs.id, runId))
+        .limit(1);
+      expect(row?.cost).toBeCloseTo(0.0123, 5);
+      // A persisted amount without its persisted caveat is the same lie in a
+      // different place — the pair is written together or not at all.
+      expect(row?.status).toBe("partial");
+    });
+  });
+
   // ── CRIT-07 — the mid-run ledger SUM is org-scoped ──────────
   //
   // `llm_usage.run_id` is caller-suppliable on the proxy path (`X-Run-Id`),
@@ -452,10 +541,10 @@ describe("run-metric-broadcaster (integration)", () => {
     });
   });
 
-  it("live cost excludes the remote-run mirror row exactly like computeRunCost", async () => {
+  it("live cost excludes the remote-run mirror row exactly like computeRunSpend", async () => {
     // A remote-origin run on the system llm-proxy records BOTH per-call proxy
     // rows and the runner's cumulative NULL-credential mirror row covering the
-    // same spend. `computeRunCost` drops the mirror when proxy rows exist; the
+    // same spend. `computeRunSpend` drops the mirror when proxy rows exist; the
     // broadcaster must show the same value mid-run. Regression for the drifted
     // local SUM that double-counted here (proxy + mirror) until finalize.
     const send = mock((_e: RealtimeEvent) => {});

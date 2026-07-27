@@ -565,6 +565,7 @@ export const schemas = {
       "completed_at",
       "duration",
       "cost",
+      "cost_pricing_status",
       "runNumber",
       "token_usage",
       "version_label",
@@ -706,6 +707,12 @@ export const schemas = {
           "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override.",
       },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
+      cost_pricing_status: {
+        type: ["string", "null"],
+        enum: ["priced", "partial", "unpriced", null],
+        description:
+          'How much of `cost` is backed by real per-token rates. `priced`: every token bucket that carried usage had a rate, so the figure is complete. `partial`: part of the consumption (cached input) had no rate and was priced at zero, so the figure is a FLOOR, not the full amount. `unpriced`: no rates were available for the model at all — a `cost` of 0 alongside this value means "not priced", NOT "free"; do not bill or display it as zero spend. `null` on runs finalized before this field existed and on runs that produced no usage rows; never read `null` as `priced`.',
+      },
       endUserId: {
         type: ["string", "null"],
         description: "End-user ID (eu_ prefix) if executed on behalf of an end-user",

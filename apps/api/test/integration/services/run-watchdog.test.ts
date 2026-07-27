@@ -206,7 +206,7 @@ describe("run watchdog — unified stall detection", () => {
   // out runs are not counted". Verifies the existing convergence:
   // metric events that arrived BEFORE the container crashed have
   // already written `llm_usage` rows; the watchdog's call to
-  // `finalizeRun` reads `computeRunCost` from that ledger and
+  // `finalizeRun` reads `computeRunSpend` from that ledger and
   // persists `runs.cost` on the failed terminal status, so the
   // `onRunStatusChange` broadcast carries the right value even
   // when the container never posted /finalize itself.

@@ -104,7 +104,7 @@ function numberOrUndefined(v: unknown): number | undefined {
  *
  * A token bucket is priced as `count × rate`, so a negative count reported by a
  * misbehaving upstream would produce a NEGATIVE `cost_usd`: it would *reduce*
- * the run's cost (`computeRunCost` SUMs the ledger) and, on a system-credential
+ * the run's cost (`computeRunSpend` SUMs the ledger) and, on a system-credential
  * row, the corresponding debit. Nothing downstream re-checks the sign (there is
  * no CHECK on `llm_usage.cost_usd`), so the floor is applied here, at the single
  * point where wire numbers enter the accounting path. Every adapter reads token

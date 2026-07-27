@@ -657,6 +657,52 @@ describe("Runs API", () => {
       expect(body.status).toBe("success");
     });
 
+    // #1025: a run the platform could not price finalizes with `cost = NULL`
+    // and `cost_pricing_status = 'unpriced'`. Both facts must cross the wire —
+    // the number alone lets every consumer (SPA included) render a confident
+    // `$0.0000` for spend nobody could compute.
+    it("exposes cost_pricing_status alongside cost", async () => {
+      await seedAgent({ id: "@runorg/unpriced-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/unpriced-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        cost: null,
+        costPricingStatus: "unpriced",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        cost: number | null;
+        cost_pricing_status: string | null;
+      };
+      expect(body.cost).toBeNull();
+      expect(body.cost_pricing_status).toBe("unpriced");
+    });
+
+    it("emits cost_pricing_status as null on a run that carries no verdict", async () => {
+      // The field is REQUIRED on the wire (declared in the Run schema's
+      // `required`), so it must be present-and-null, never absent.
+      await seedAgent({ id: "@runorg/plain-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/plain-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        cost: 0.25,
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body).toHaveProperty("cost_pricing_status");
+      expect(body.cost_pricing_status).toBeNull();
+    });
+
     it("returns 404 for non-existent run", async () => {
       const res = await app.request("/api/runs/exec_nonexistent", {
         headers: authHeaders(ctx),

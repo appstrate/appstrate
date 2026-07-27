@@ -30,6 +30,7 @@ import { RunInfoTab } from "../components/run-info-tab";
 import { RunDocumentsTab } from "../components/run-documents-tab";
 import { invalidateOrgStorage } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
+import { RunCostReadout } from "../components/run-cost-readout";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { RunArtifactsBanner } from "../components/run-artifacts-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
@@ -177,12 +178,18 @@ export function RunDetailPage() {
         // `cost_so_far` instead. The next terminal-status invalidation
         // refetches the canonical row so this in-cache shadow is
         // bounded by the run's lifetime.
+        //
+        // The provenance is patched WITH the number, never separately: a
+        // live `cost` paired with the stale (or absent) status of the
+        // previous read is how a run nothing could price ends up showing a
+        // confident $0.0000 for its whole duration.
         qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) => {
           if (!prev) return prev;
           return {
             ...prev,
             token_usage: metric.tokenUsage ?? prev.token_usage,
             cost: metric.costSoFar,
+            cost_pricing_status: metric.costPricingStatus,
           };
         });
       },
@@ -349,7 +356,11 @@ export function RunDetailPage() {
                   </Tooltip>
                 </TooltipProvider>
                 <span aria-hidden>·</span>
-                <span className="text-foreground font-medium">${(run.cost ?? 0).toFixed(4)}</span>
+                <RunCostReadout
+                  cost={run.cost}
+                  pricingStatus={run.cost_pricing_status}
+                  className="text-foreground font-medium"
+                />
               </div>
             );
           })()}

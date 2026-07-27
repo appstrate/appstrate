@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import type { PricingStatus } from "../pricing-status.ts";
 import { runStatusEnum, llmUsageSourceEnum, runOriginEnum, credentialSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
@@ -65,25 +66,20 @@ export type RunArtifactsSummary = {
 };
 
 /**
- * How much of a recorded `cost_usd` is backed by real per-token rates.
- *
- * `cost_usd = 0` alone is unattributable: it may be a genuinely free
- * subscription-backed model, a model the platform simply failed to price, or a
- * call whose cached fraction was priced at zero because the rate was absent.
- * This vocabulary is what makes the three distinguishable in SQL. The values
- * mirror `TokenPricingStatus` (`@appstrate/afps-runtime/runner`, where the
- * classifier lives); declared locally so the schema package takes no dependency
- * on the runtime — the same posture as that helper's local `TokenCost`.
- *
- * NULL always means "written before this column existed", never "priced".
+ * Pricing provenance of a recorded `cost_usd` — see {@link PricingStatus}. Both
+ * the type and its literal tuple live in the import-free `../pricing-status.ts`
+ * so the browser bundle can build the SSE Zod enum from the same source the
+ * columns below are typed against; re-exported here because this is where the
+ * two columns that carry it are declared.
  */
-export type PricingStatus = "priced" | "partial" | "unpriced";
+export type { PricingStatus };
 
 /**
  * Snapshot of the per-1M-token USD rates a run was launched with, persisted on
  * `runs.model_cost`. Structurally identical to `@appstrate/core`'s `ModelCost`
- * (and validated on read with its `modelCostSchema`); declared locally for the
- * same no-dependency reason as {@link PricingStatus}.
+ * (and validated on read with its `modelCostSchema`); declared locally so the
+ * schema package takes no dependency on the runtime — the same posture as
+ * `TokenCost` in `@appstrate/afps-runtime/runner`.
  */
 export type RunModelCost = {
   input: number;

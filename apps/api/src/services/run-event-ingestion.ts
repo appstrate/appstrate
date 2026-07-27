@@ -39,7 +39,7 @@ import {
   recordDocumentPartialPublication,
 } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
-import { updateRun, appendRunLog, computeRunCost, computeRunPricingStatus } from "./state/runs.ts";
+import { updateRun, appendRunLog, computeRunSpend } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -488,11 +488,12 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   }
 
   // Cost and its provenance are read together, AFTER the barrier above so both
-  // see the run's terminal runner row, and over the same rows (see
-  // `computeRunPricingStatus`). Caching only the number would leave the UI
-  // rendering a confident `$0.0000` for a run nothing could price.
-  const cost = await computeRunCost(run.id, run.orgId);
-  const costPricingStatus = await computeRunPricingStatus(run.id, run.orgId);
+  // see the run's terminal runner row. Caching only the number would leave the
+  // UI rendering a confident `$0.0000` for a run nothing could price.
+  const { costUsd: cost, pricingStatus: costPricingStatus } = await computeRunSpend(
+    run.id,
+    run.orgId,
+  );
   const now = new Date();
   const packageEphemeral = isInlineShadowPackageId(run.packageId);
   // Wall-clock duration as the authoritative value. Runners (PiRunner,

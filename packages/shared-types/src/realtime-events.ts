@@ -22,6 +22,7 @@ import { tokenUsageSchema } from "@appstrate/core/token-usage";
 // bundled into the SPA and a value import from `@appstrate/db/schema` drags
 // drizzle-orm + the whole table schema into the browser.
 import { runStatusValues } from "@appstrate/db/run-status";
+import { pricingStatusValues } from "@appstrate/db/pricing-status";
 import type { RunWireDto } from "./index.ts";
 
 /** `run_update` — emitted by the `notify_run_change` trigger (13 fields). */
@@ -75,6 +76,13 @@ export const runMetricEventSchema = z.object({
   // canonical token-usage schema rather than redefining it.
   tokenUsage: tokenUsageSchema.nullable(),
   costSoFar: z.number(),
+  /**
+   * Provenance of `costSoFar`. Required (the single producer always emits it)
+   * but nullable — `null` means no ledger row of the run carries a status, and
+   * must NOT be read as `"priced"`. Without this field a live run on a model
+   * the platform cannot price streams a confident `$0.0000`.
+   */
+  costPricingStatus: z.enum(pricingStatusValues).nullable(),
 });
 export type RunMetricEvent = z.infer<typeof runMetricEventSchema>;
 
