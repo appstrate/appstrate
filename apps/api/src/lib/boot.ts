@@ -613,18 +613,14 @@ export async function probeUsercontentReachability(): Promise<void> {
   let base = env.USERCONTENT_URL;
   while (base.endsWith("/")) base = base.slice(0, -1);
   const url = `${base}/preview/documents/_probe`;
-  let status: number | null = null;
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      redirect: "manual",
-      signal: AbortSignal.timeout(3000),
-    });
-    status = res.status;
-  } catch {
+  const status: number | null = await fetch(url, {
+    method: "GET",
+    redirect: "manual",
+    signal: AbortSignal.timeout(3000),
+  })
+    .then((res) => res.status)
     // Timeout / connection refused / DNS failure — treated as "not 401".
-    status = null;
-  }
+    .catch(() => null);
   if (status === 401) return; // route reached AND enforcing auth → healthy, stay silent
   logger.error(
     `USERCONTENT_URL preview probe did not return 401 (got ${status ?? "no response"}). ` +

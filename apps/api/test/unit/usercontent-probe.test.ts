@@ -84,15 +84,18 @@ describe("probeUsercontentReachability", () => {
   it("stays silent when the probe returns 401 (route reached, auth enforced)", async () => {
     process.env.USERCONTENT_URL = UC;
     _resetCacheForTesting();
-    let probedUrl: string | null = null;
+    // Collected in an array (not a narrowed `let`): it doubles as the
+    // "exactly one request" assertion and keeps the closure write visible to
+    // TypeScript's control-flow analysis.
+    const probed: string[] = [];
     mockFetch(async (input) => {
-      probedUrl = typeof input === "string" ? input : input.toString();
+      probed.push(typeof input === "string" ? input : input.toString());
       return new Response(null, { status: 401 });
     });
 
     await probeUsercontentReachability();
 
-    expect(probedUrl).toBe(PROBE_URL);
+    expect(probed).toEqual([PROBE_URL]);
     expect(errorSpy).toHaveBeenCalledTimes(0);
   });
 
