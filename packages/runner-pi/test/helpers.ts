@@ -36,11 +36,29 @@ export interface FakeSession extends BridgeableSession, PromptableSession {
   aborts: number;
   /** Test hook: drives what the session does during a `prompt()` turn. */
   onPrompt?: (message: string) => void | Promise<void>;
+  /** Every `setActiveToolsByName()` argument, in order (raw, pre-resolution). */
+  setActiveToolsCalls: string[][];
+  /**
+   * Ordered trace of the two calls that must happen in sequence — a
+   * `"set_active_tools"` entry followed by `"prompt"` proves the tool set was
+   * narrowed BEFORE the corrective turn went out.
+   */
+  callLog: Array<"set_active_tools" | "prompt">;
+  /** Tools the agent may call on the next turn, after registry resolution. */
+  activeTools: string[];
 }
 
-export function createFakeSession(): FakeSession {
+/**
+ * @param opts.toolRegistry names the SDK tool registry resolves. Mirrors
+ *   production: the four Pi built-ins plus the `output` runtime tool that
+ *   `runtime-pi/mcp/direct.ts` registers verbatim under `tool.name`. Pass a
+ *   registry WITHOUT `"output"` to reproduce the (defended) case where the
+ *   runner was configured with a terminal tool the SDK never resolved.
+ */
+export function createFakeSession(opts: { toolRegistry?: string[] } = {}): FakeSession {
   const listeners: Array<(event: unknown) => void> = [];
   const messages: unknown[] = [];
+  const toolRegistry = new Set(opts.toolRegistry ?? ["read", "bash", "edit", "write", "output"]);
   const session: FakeSession = {
     subscribe(cb) {
       listeners.push(cb);
@@ -48,8 +66,24 @@ export function createFakeSession(): FakeSession {
     state: { messages },
     prompts: [],
     aborts: 0,
+    setActiveToolsCalls: [],
+    callLog: [],
+    activeTools: [...toolRegistry],
+    getActiveToolNames() {
+      return [...session.activeTools];
+    },
+    setActiveToolsByName(toolNames: string[]) {
+      session.setActiveToolsCalls.push([...toolNames]);
+      session.callLog.push("set_active_tools");
+      // Same semantics as the SDK's `AgentSession.setActiveToolsByName`:
+      // unknown names are silently dropped, so restricting to a name the
+      // registry does not hold leaves the turn with ZERO tools. A fake that
+      // accepted every name would make the regression test vacuous.
+      session.activeTools = toolNames.filter((name) => toolRegistry.has(name));
+    },
     async prompt(message: string) {
       session.prompts.push(message);
+      session.callLog.push("prompt");
       await session.onPrompt?.(message);
     },
     emit(event) {

@@ -542,6 +542,18 @@ const OUTPUT_REPROMPT_INSTRUCTION =
 /** Minimal Pi SDK session surface needed to issue the corrective turn. */
 export interface PromptableSession {
   prompt(message: string): Promise<unknown>;
+  /**
+   * Names of the tools the agent could actually call on its last turn
+   * (SDK: `agent.state.tools`). Used as the resolvability probe before
+   * narrowing the tool set — see {@link maybeRepromptForOutput}.
+   */
+  getActiveToolNames(): string[];
+  /**
+   * Narrow the tool set for the next turn. The SDK resolves each name against
+   * its tool registry and SILENTLY DROPS the ones it cannot find, so an
+   * unresolvable name yields a tool-less turn rather than an error.
+   */
+  setActiveToolsByName(toolNames: string[]): void;
 }
 
 /**
@@ -561,7 +573,16 @@ export interface PromptableSession {
  * instruction to call `output` from work it has already done, another turn is
  * spent without a hypothesis.
  *
- * Guards (all four must pass):
+ * The corrective turn is narrowed to `output` alone
+ * (`setActiveToolsByName([...])`) — the "do not call any other tool" clause of
+ * {@link OUTPUT_REPROMPT_INSTRUCTION} is a request the model may ignore, the
+ * tool set is not. Intentional behaviour change: on this turn the agent can no
+ * longer research, run bash, read/edit/write files, publish documents, write
+ * memory or call any integration — it can only emit the structured result it
+ * already owes. Narrowing is itself guarded (guard 5) because the SDK ignores
+ * unknown tool names silently.
+ *
+ * Guards (five must pass; the fifth gates the narrowing, not the turn):
  *  1. `output` is wired as a terminal tool — mirrors `runtime-pi/entrypoint.ts`,
  *     which passes `terminalTools: ["output"]` only when the agent declared the
  *     `output` runtime tool. Without it there is no output contract to enforce.
@@ -573,6 +594,9 @@ export interface PromptableSession {
  *  4. the last assistant turn is not a terminal failure — a session that ended
  *     on a provider error or a provider-side abort cannot answer, so the extra
  *     round-trip would only add cost to an already-failed run.
+ *  5. (narrowing only) `output` is in `session.getActiveToolNames()` — proof
+ *     that the SDK registry resolves that exact name. When it does not, the
+ *     corrective turn goes out UNRESTRICTED rather than tool-less.
  *
  * Emits an `appstrate.progress` breadcrumb at `warn` level carrying
  * `data.event = "output_reprompt"` BEFORE the retry — the same event channel
@@ -617,6 +641,31 @@ export async function maybeRepromptForOutput(opts: {
       level: "warn",
     })
     .catch(() => {});
+
+  // Make the "call `output`, nothing else" contract mechanical. Prompt text
+  // alone left the whole tool surface live on the corrective turn (built-in
+  // `read`/`bash`/`edit`/`write` plus every registered runtime + integration
+  // extension), so a drifting model could burn a second research loop on a turn
+  // that exists only to emit a result it already has.
+  //
+  // Conditional because `setActiveToolsByName` resolves names against the SDK
+  // tool registry and silently DROPS the misses (`AgentSession` — registry
+  // `get()` miss = tool skipped, no throw): narrowing to an `output` the
+  // registry does not hold would hand the turn ZERO tools and guarantee the
+  // failure this whole function exists to prevent. `getActiveToolNames()` is
+  // the honest probe — those names come out of the SAME registry lookup
+  // (`agent.state.tools`, only populated on a registry hit), so `output`
+  // appearing there proves the narrowing resolves. `terminalTools` cannot
+  // substitute: it only says how the RUNNER was configured, not what the SDK
+  // registry ended up holding.
+  //
+  // Narrowing also rebuilds the base system prompt from the resource loader,
+  // which re-reads the loader's `systemPrompt` (the agent prompt this runner
+  // passes to `DefaultResourceLoader` above) — the agent's own instructions
+  // survive; only the tool section of the prompt shrinks.
+  if (session.getActiveToolNames().includes(OUTPUT_TERMINAL_TOOL)) {
+    session.setActiveToolsByName([OUTPUT_TERMINAL_TOOL]);
+  }
 
   const race = opts.race ?? (<T>(promise: Promise<T>): Promise<T> => promise);
   await race(session.prompt(OUTPUT_REPROMPT_INSTRUCTION));

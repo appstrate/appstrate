@@ -217,6 +217,81 @@ describe("maybeRepromptForOutput — guards", () => {
   });
 });
 
+describe("maybeRepromptForOutput — corrective turn is restricted to `output`", () => {
+  it("exposes ONLY `output` on the corrective turn, and narrows before prompting", async () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+
+    endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
+
+    const reprompted = await maybeRepromptForOutput({
+      session,
+      bridge,
+      terminalTools: ["output"],
+      sink,
+      runId: RUN_ID,
+    });
+
+    expect(reprompted).toBe(true);
+    // The prompt text asks for "no other tool"; the tool set enforces it.
+    expect(session.setActiveToolsCalls).toEqual([["output"]]);
+    expect(session.activeTools).toEqual(["output"]);
+    // Ordering matters: narrowing after the prompt would be a no-op for the
+    // very turn it is meant to constrain.
+    expect(session.callLog).toEqual(["set_active_tools", "prompt"]);
+    expect(session.prompts).toHaveLength(1);
+  });
+
+  it("does NOT narrow — and never issues a tool-less turn — when the SDK registry has no `output`", async () => {
+    const sink = createInternalCapture();
+    // `terminalTools` says the runner was configured with `output`, but the SDK
+    // registry never resolved that name. `setActiveToolsByName(["output"])`
+    // would silently produce ZERO tools, so the turn must go out unrestricted
+    // and let the platform's finalize-time validation stay the fallback.
+    const session = createFakeSession({ toolRegistry: ["read", "bash", "edit", "write"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+
+    endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
+
+    const reprompted = await maybeRepromptForOutput({
+      session,
+      bridge,
+      terminalTools: ["output"],
+      sink,
+      runId: RUN_ID,
+    });
+
+    expect(reprompted).toBe(true);
+    expect(session.setActiveToolsCalls).toEqual([]);
+    expect(session.activeTools).toEqual(["read", "bash", "edit", "write"]);
+    expect(session.callLog).toEqual(["prompt"]);
+    expect(session.prompts).toHaveLength(1);
+    expect(repromptEvents(sink.events)).toHaveLength(1);
+  });
+
+  it("leaves the tool set untouched when a guard declines the corrective turn", async () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+
+    callOutput(session);
+    endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
+
+    const reprompted = await maybeRepromptForOutput({
+      session,
+      bridge,
+      terminalTools: ["output"],
+      sink,
+      runId: RUN_ID,
+    });
+
+    expect(reprompted).toBe(false);
+    expect(session.setActiveToolsCalls).toEqual([]);
+    expect(session.activeTools).toEqual(["read", "bash", "edit", "write", "output"]);
+  });
+});
+
 describe("PiRunner.run — missing-output re-prompt end to end", () => {
   it("issues one corrective turn and finalizes the run when the retry delivers output", async () => {
     const sink = createCaptureSink();
