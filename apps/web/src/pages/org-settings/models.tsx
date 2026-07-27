@@ -125,16 +125,15 @@ function ModelsList({
                       {/* Shown but disabled, not hidden: `PUT /api/models/default`
                           answers 409 `model_needs_reconnection` for such a row,
                           and a control that silently vanishes is what made this
-                          state impossible to reason about. Delete stays enabled
-                          below — detaching the model is how the user frees the
-                          credential. */}
+                          state impossible to reason about. The why is on the
+                          row's `ModelUnavailableBadge` (first cell), whose
+                          `title` sits on a hoverable element. */}
                       <DefaultCell
                         isDefault={m.is_default}
                         defaultLabel={t("models.default")}
                         setLabel={t("models.setDefault")}
                         onSetDefault={() => onSetDefault(m)}
                         disabled={m.needs_reconnection}
-                        disabledTitle={t("models.credentialUnavailableHint")}
                         testId={`set-default-model-${m.id}`}
                       />
                     </TableCell>
@@ -294,8 +293,14 @@ function CredentialsSection({
                     </TableCell>
                     <TableCell>
                       {pk.needs_reconnection ? (
+                        // The flag also fires on a stored secret that no longer
+                        // decrypts, which reaches api-key credentials — where
+                        // the fix is to re-enter the key (Edit), not to
+                        // reconnect an account.
                         <Badge variant="destructive">
-                          {t("credentials.oauth.needsReconnection")}
+                          {isOauth
+                            ? t("credentials.oauth.needsReconnection")
+                            : t("models.credentialUnavailable")}
                         </Badge>
                       ) : pk.source === "built-in" ? (
                         <span className="text-muted-foreground text-xs">{t("source.builtIn")}</span>

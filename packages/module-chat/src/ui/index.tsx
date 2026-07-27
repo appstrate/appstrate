@@ -43,6 +43,7 @@ import type {
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
+import { isModelLive } from "../model-liveness.ts";
 import {
   loadHistory,
   markSessionRead,
@@ -147,7 +148,7 @@ export function ChatPage({
       // whose credential went dead is listed (the picker marks it, unpickable)
       // but must not be kept as the stored selection nor adopted as the
       // fallback — the server would reject it on the next send.
-      const live = list.filter((m) => !m.needs_reconnection);
+      const live = list.filter(isModelLive);
       const cur = getSelectedModel();
       if (cur && live.some((m) => m.id === cur)) return;
       setSelectedModel((live.find((m) => m.is_default) ?? live[0])?.id ?? null);

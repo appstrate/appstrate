@@ -322,6 +322,57 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     expect(apiKey).not.toContain("sk-ant-oat");
   });
 
+  it("rejects a requested preset whose credential is dead, naming the real reason", async () => {
+    // `GET /api/models` now LISTS such a preset instead of hiding it, so the
+    // id resolves — without the liveness gate the run would reach the
+    // llm-proxy and die there. "No preset matches" would be a lie: it exists.
+    await expect(
+      resolvePresetModel({
+        profileName: "default",
+        modelId: "preset_dead",
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        orgId: "org_1",
+        presetsLoader: async () => [
+          makePreset({
+            id: "preset_dead",
+            apiShape: "openai-completions",
+            needs_reconnection: true,
+          }),
+        ],
+      }),
+    ).rejects.toThrow(/can no longer be used for inference/);
+  });
+
+  it("rejects a dead org default rather than reporting no default is set", async () => {
+    await expect(
+      resolvePresetModel({
+        profileName: "default",
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        orgId: "org_1",
+        presetsLoader: async () => [
+          makePreset({
+            id: "preset_dead_default",
+            apiShape: "openai-completions",
+            needs_reconnection: true,
+          }),
+        ],
+      }),
+    ).rejects.toThrow(/preset_dead_default.*can no longer be used/);
+  });
+
+  it("treats an absent needs_reconnection as live (older instance)", async () => {
+    const { model } = await resolvePresetModel({
+      profileName: "default",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      orgId: "org_1",
+      presetsLoader: async () => [PRESET_OPENAI],
+    });
+    expect(model.id).toBe("preset_openai");
+  });
+
   it("rejects unsupported protocols with an actionable hint", async () => {
     await expect(
       resolvePresetModel({

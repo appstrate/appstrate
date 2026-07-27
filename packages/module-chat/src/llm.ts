@@ -16,6 +16,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
+import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
 
 const LLM_PROXY_PATH = "/api/llm-proxy";
@@ -65,12 +66,11 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
       "Aucun modèle utilisable par le chat n'est configuré. Connectez un modèle par clé API (Anthropic, OpenAI, Mistral) ou un abonnement Claude Code dans Settings → Models.",
     );
   }
-  // `/api/models` LISTS a model whose credential can no longer serve inference
-  // instead of dropping it (the row has to stay visible for the user to
-  // reconnect or delete it), so the liveness gate lives here: without it a
-  // gone-dead org default would be picked and fail deep inside the provider
-  // with an opaque error.
-  const pool = usable.filter((m) => m.needs_reconnection !== true);
+  // Liveness is the second gate, on top of enabled + chat-usable family:
+  // without it a gone-dead org default would be picked and fail deep inside
+  // the provider with an opaque error. The picker (`ui/`) renders those rows
+  // instead of hiding them — same predicate, different answer to give.
+  const pool = usable.filter(isModelLive);
   const chosen = modelId
     ? pool.find((m) => m.id === modelId || m.modelId === modelId)
     : (pool.find((m) => m.is_default) ?? pool[0]);

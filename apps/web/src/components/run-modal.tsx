@@ -133,9 +133,8 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
   if (!orgModels || orgModels.length === 0) return null;
 
   // Candidates are found WITHOUT the selectability filter, then filtered — so
-  // when the cascade resolves to nothing we still know which model failed it
-  // and can name it, instead of rendering an empty line for a run that is
-  // about to fail with no explanation.
+  // when the cascade resolves to nothing we still know which model failed it,
+  // instead of rendering an empty line for a run that is about to fail.
   const pinnedCandidate = agentModel?.modelId
     ? orgModels.find((m) => m.id === agentModel.modelId)
     : undefined;
@@ -147,7 +146,10 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
     (defaultCandidate && isModelSelectable(defaultCandidate) ? defaultCandidate : undefined);
 
   if (!resolved) {
-    const dead = defaultCandidate ?? pinnedCandidate;
+    // Only a dead credential earns a line. A merely disabled candidate renders
+    // nothing, as before — the message names the credential as the cause and
+    // would be a false statement for a healthy model that is switched off.
+    const dead = [defaultCandidate, pinnedCandidate].find((m) => m?.needs_reconnection);
     if (!dead) return null;
     return (
       <p className="text-destructive text-xs" data-testid="run-resolved-model">

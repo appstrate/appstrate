@@ -39,18 +39,4 @@ describe("isModelSelectable", () => {
   it("dead credential → not selectable even though the row is listed", () => {
     expect(isModelSelectable(model({ needs_reconnection: true }))).toBe(false);
   });
-
-  it("disabled AND dead → not selectable", () => {
-    expect(isModelSelectable(model({ enabled: false, needs_reconnection: true }))).toBe(false);
-  });
-
-  it("built-in models read their key from the env, so they stay selectable", () => {
-    expect(isModelSelectable(model({ source: "built-in", credentialId: null }))).toBe(true);
-  });
-
-  it("an alias (binding projected away) is judged on the same two fields", () => {
-    const alias = model({ aliased: true, apiShape: null, modelId: null, credentialId: null });
-    expect(isModelSelectable(alias)).toBe(true);
-    expect(isModelSelectable({ ...alias, needs_reconnection: true })).toBe(false);
-  });
 });

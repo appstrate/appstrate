@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import type { OrgModelOption } from "./models-data.ts";
+import { isModelLive } from "../model-liveness.ts";
 import { useChatHost } from "./runtime-context.ts";
 
 /** Group/button label for a managed model — provider-neutral, binding not exposed. */
@@ -88,7 +89,7 @@ export function ModelSelect({ models, selectedId, onSelect }: Props) {
                 // inference. Shown (so the model doesn't just vanish, and the
                 // user learns what to fix) but not pickable — the server's
                 // `pickModel` refuses it anyway.
-                const dead = m.needs_reconnection === true;
+                const dead = !isModelLive(m);
                 return (
                   <button
                     key={m.id}

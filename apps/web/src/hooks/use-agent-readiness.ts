@@ -8,15 +8,24 @@ import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validati
 import { isModelSelectable } from "../lib/model-selectability";
 
 /**
- * A pin the org can no longer see (row deleted, or its credential/provider
- * gone so `GET /api/models` drops it) is not a failure here — the server falls
- * through to the org default for exactly that case. Only a pin that IS listed
- * and is unusable counts as "no model from the pin".
+ * Will a run get a model? Mirrors the server cascade (`resolveModel`): the
+ * agent pin wins when it is usable, otherwise the org default is tried.
+ *
+ * A pin alone is NOT enough — a pinned model on a dead credential resolves to
+ * null server-side, so counting it would green-light a run that cannot reach
+ * any inference endpoint. An unusable pin is not fatal either: `resolveModel`
+ * falls through to the org default, whether the pin is unusable or absent from
+ * the list entirely (row deleted, or its provider gone).
+ *
+ * Exported for its unit test — the hook below is the only production caller.
  */
-function isPinUsable(orgModels: OrgModelInfo[], agentModelId?: string | null): boolean {
-  if (!agentModelId) return false;
-  const pinned = orgModels.find((m) => m.id === agentModelId);
-  return pinned ? isModelSelectable(pinned) : false;
+export function resolvesToUsableModel(
+  orgModels: OrgModelInfo[],
+  agentModelId?: string | null,
+): boolean {
+  const pinned = agentModelId ? orgModels.find((m) => m.id === agentModelId) : undefined;
+  if (pinned && isModelSelectable(pinned)) return true;
+  return orgModels.some((m) => m.is_default && isModelSelectable(m));
 }
 
 export function useAgentReadiness(
@@ -37,16 +46,8 @@ export function useAgentReadiness(
       hasConfigSchema: !!(
         configSchema?.properties && Object.keys(configSchema.properties).length > 0
       ),
-      // Mirrors the server cascade (`resolveModel`): the agent pin wins when
-      // it is usable, otherwise the org default is tried. A pin alone is NOT
-      // enough — a pinned model on a dead credential resolves to null server
-      // side, so counting it as "has a model" would green-light a run that
-      // cannot reach any inference endpoint.
-      hasModel:
-        orgModels !== undefined
-          ? isPinUsable(orgModels, agentModelId) ||
-            orgModels.some((m) => m.is_default && isModelSelectable(m))
-          : true,
+      // Unknown catalog (still loading) is optimistic — don't flash "no model".
+      hasModel: orgModels !== undefined ? resolvesToUsableModel(orgModels, agentModelId) : true,
       hasPrompt: detail ? !isPromptEmpty(detail.prompt ?? "") : false,
       hasRequiredSkills: detail
         ? findMissingDependencies(
