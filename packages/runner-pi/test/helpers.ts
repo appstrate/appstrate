@@ -51,9 +51,9 @@ export interface FakeSession extends BridgeableSession, PromptableSession {
 /**
  * @param opts.toolRegistry names the SDK tool registry resolves. Mirrors
  *   production: the four Pi built-ins plus the `output` runtime tool that
- *   `runtime-pi/mcp/direct.ts` registers verbatim under `tool.name`. Pass a
- *   registry WITHOUT `"output"` to reproduce the (defended) case where the
- *   runner was configured with a terminal tool the SDK never resolved.
+ *   `runtime-pi/mcp/direct.ts` registers verbatim under `tool.name`. Drop
+ *   `"output"` (or `"read"`) from it to reproduce the defended cases where a
+ *   name the corrective turn asks for is one the SDK never resolved.
  */
 export function createFakeSession(opts: { toolRegistry?: string[] } = {}): FakeSession {
   const listeners: Array<(event: unknown) => void> = [];
@@ -75,10 +75,9 @@ export function createFakeSession(opts: { toolRegistry?: string[] } = {}): FakeS
     setActiveToolsByName(toolNames: string[]) {
       session.setActiveToolsCalls.push([...toolNames]);
       session.callLog.push("set_active_tools");
-      // Same semantics as the SDK's `AgentSession.setActiveToolsByName`:
-      // unknown names are silently dropped, so restricting to a name the
-      // registry does not hold leaves the turn with ZERO tools. A fake that
-      // accepted every name would make the regression test vacuous.
+      // Silent-drop semantics, per the SDK contract documented on
+      // `PromptableSession.setActiveToolsByName`. A fake that accepted every
+      // name would make the narrowing tests vacuous.
       session.activeTools = toolNames.filter((name) => toolRegistry.has(name));
     },
     async prompt(message: string) {

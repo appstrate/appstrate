@@ -217,8 +217,8 @@ describe("maybeRepromptForOutput — guards", () => {
   });
 });
 
-describe("maybeRepromptForOutput — corrective turn is restricted to `output`", () => {
-  it("exposes ONLY `output` on the corrective turn, and narrows before prompting", async () => {
+describe("maybeRepromptForOutput — corrective turn is restricted to `output` + `read`", () => {
+  it("exposes ONLY `output` and `read` on the corrective turn, and narrows before prompting", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
@@ -235,20 +235,69 @@ describe("maybeRepromptForOutput — corrective turn is restricted to `output`",
 
     expect(reprompted).toBe(true);
     // The prompt text asks for "no other tool"; the tool set enforces it.
-    expect(session.setActiveToolsCalls).toEqual([["output"]]);
-    expect(session.activeTools).toEqual(["output"]);
+    // `read` stays so the model can recover a report it wrote to `outputs/`
+    // and that auto-compaction has since summarised out of its context.
+    expect(session.setActiveToolsCalls).toEqual([["output", "read"]]);
+    expect(session.activeTools).toEqual(["output", "read"]);
     // Ordering matters: narrowing after the prompt would be a no-op for the
     // very turn it is meant to constrain.
     expect(session.callLog).toEqual(["set_active_tools", "prompt"]);
     expect(session.prompts).toHaveLength(1);
   });
 
+  it("tells the model it may re-read its own files — never forbids the one tool it grants", async () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+
+    endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
+
+    await maybeRepromptForOutput({
+      session,
+      bridge,
+      terminalTools: ["output"],
+      sink,
+      runId: RUN_ID,
+    });
+
+    const instruction = session.prompts[0] ?? "";
+    // Model-facing text must match the tool set it is issued with.
+    expect(instruction).toContain("`read`");
+    expect(instruction).toContain("`outputs/`");
+    // The pre-`read` clause, which forbade exactly what the turn now grants.
+    expect(instruction).not.toContain("do not call any other tool, and do not reply");
+  });
+
+  it("degrades to `output` alone when the SDK registry has no `read`", async () => {
+    const sink = createInternalCapture();
+    // `read` is a best-effort addition: the SDK would silently drop it anyway,
+    // but asking for a name that cannot resolve hides which tools the turn
+    // really got. Narrowing must still happen — `output` is what matters.
+    const session = createFakeSession({ toolRegistry: ["bash", "edit", "write", "output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+
+    endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
+
+    const reprompted = await maybeRepromptForOutput({
+      session,
+      bridge,
+      terminalTools: ["output"],
+      sink,
+      runId: RUN_ID,
+    });
+
+    expect(reprompted).toBe(true);
+    expect(session.setActiveToolsCalls).toEqual([["output"]]);
+    expect(session.activeTools).toEqual(["output"]);
+    expect(session.callLog).toEqual(["set_active_tools", "prompt"]);
+  });
+
   it("does NOT narrow — and never issues a tool-less turn — when the SDK registry has no `output`", async () => {
     const sink = createInternalCapture();
     // `terminalTools` says the runner was configured with `output`, but the SDK
-    // registry never resolved that name. `setActiveToolsByName(["output"])`
-    // would silently produce ZERO tools, so the turn must go out unrestricted
-    // and let the platform's finalize-time validation stay the fallback.
+    // registry never resolved that name. Narrowing would leave only `read` (or
+    // nothing), so the turn must go out unrestricted and let the platform's
+    // finalize-time validation stay the fallback.
     const session = createFakeSession({ toolRegistry: ["read", "bash", "edit", "write"] });
     const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
 

@@ -522,36 +522,62 @@ const OUTPUT_TERMINAL_TOOL = "output";
 
 /**
  * `run_logs` event name carried in the re-prompt breadcrumb's `data`, so
- * operators can measure how often models drift off the output contract
+ * operators can measure output-contract drift
  * (`SELECT count(*) FROM run_logs WHERE data->>'event' = 'output_reprompt'`).
  */
 const OUTPUT_REPROMPT_EVENT = "output_reprompt";
 
 /**
- * The single corrective turn. Deliberately narrow: call `output` from what
- * you already have — no new research, no other tool — so the extra turn costs
- * one completion, not another research loop.
+ * The only tools the corrective turn may use.
+ *
+ * `output` is the point of the turn. `read` is there because the findings may
+ * no longer be in context: this platform tells agents a deliverable belongs in
+ * the run's `outputs/` directory (`@appstrate/core/run-and-wait-client`), and
+ * Pi auto-compaction (on unless `MODEL_COMPACTION_ENABLED=false`, see
+ * {@link derivePiCompactionSettings}) can summarise the detailed history away
+ * before the loop settles — leaving a model whose report is on disk but not in
+ * context to fabricate the required fields. `read` recovers work already done
+ * and already paid for; it is not research.
+ *
+ * Everything else stays out: no `bash`, no `edit`/`write`, no
+ * `publish_document`, no memory write, no integration tool.
  */
+const OUTPUT_REPROMPT_TOOLS = [OUTPUT_TERMINAL_TOOL, "read"];
+
+/** Model-facing text for the corrective turn — must match {@link OUTPUT_REPROMPT_TOOLS}. */
 const OUTPUT_REPROMPT_INSTRUCTION =
   "You ended your turn without calling the `output` tool. This agent declares an " +
   "output schema, so the run cannot be delivered until `output` is called exactly " +
   "once with all required fields. Call `output` NOW, using only the work you have " +
-  "already done in this session. Do not run any further research, do not call any " +
-  "other tool, and do not reply with plain text.";
+  "already done in this session. You may use `read` to re-open files you wrote " +
+  "yourself (your `outputs/` directory) if their contents are no longer in " +
+  "context; do not call any other tool, do not research anything new, and do not " +
+  "reply with plain text.";
 
 /** Minimal Pi SDK session surface needed to issue the corrective turn. */
 export interface PromptableSession {
   prompt(message: string): Promise<unknown>;
   /**
-   * Names of the tools the agent could actually call on its last turn
-   * (SDK: `agent.state.tools`). Used as the resolvability probe before
-   * narrowing the tool set — see {@link maybeRepromptForOutput}.
+   * Tools the agent could actually call on its last turn — the same registry
+   * lookup {@link PromptableSession.setActiveToolsByName} performs, so it is
+   * the honest probe for what a narrowing would resolve.
    */
   getActiveToolNames(): string[];
   /**
-   * Narrow the tool set for the next turn. The SDK resolves each name against
-   * its tool registry and SILENTLY DROPS the ones it cannot find, so an
-   * unresolvable name yields a tool-less turn rather than an error.
+   * Narrow the tool set for the next turn. SDK contract (`pi-coding-agent`
+   * `core/agent-session.js:562-581`), stated once and relied on by every caller:
+   *  - unresolvable names are **silently dropped**, no throw — a list that
+   *    resolves to nothing yields a TOOL-LESS turn, so callers must probe with
+   *    {@link PromptableSession.getActiveToolNames} rather than trust their own
+   *    configuration.
+   *  - it also rebuilds `agent.state.systemPrompt` from the resource loader:
+   *    the agent's own instructions survive, only the tool section shrinks.
+   *  - cost: rewriting both blocks invalidates the Anthropic prompt-cache
+   *    prefix (prefix-based over tools → system → messages; breakpoints sit on
+   *    the system block and the LAST tool definition — `pi-ai`
+   *    `providers/anthropic.js:672,926`), so the next turn re-reads the whole
+   *    session at full input price. Accepted: a fabricated or absent `output`
+   *    fails the entire run.
    */
   setActiveToolsByName(toolNames: string[]): void;
 }
@@ -562,51 +588,43 @@ export interface PromptableSession {
  *
  * Why here and not at finalize: the platform only discovers the missing
  * `output` when it validates the terminal `RunResult`
- * (`services/run-event-ingestion.ts`), long after the container is gone and
- * the agent's context has been destroyed — the answer existed in the model's
- * head and was thrown away after being fully paid for. The runner is the only
- * place where the session is still alive. The platform-side validation stays
- * exactly as it is; it is now the safety net rather than the first line of
- * defence.
+ * (`services/run-event-ingestion.ts`) — container gone, context destroyed, run
+ * fully paid for. The runner is the only place where the session is still
+ * alive; the platform-side validation is unchanged and becomes the safety net.
  *
- * Exactly one attempt, never a loop: if the model ignores an explicit
- * instruction to call `output` from work it has already done, another turn is
- * spent without a hypothesis.
+ * Exactly one attempt, never a loop: a model that ignores an explicit
+ * instruction to call `output` from work it has already done gets no second
+ * hypothesis.
  *
- * The corrective turn is narrowed to `output` alone
- * (`setActiveToolsByName([...])`) — the "do not call any other tool" clause of
- * {@link OUTPUT_REPROMPT_INSTRUCTION} is a request the model may ignore, the
- * tool set is not. Intentional behaviour change: on this turn the agent can no
- * longer research, run bash, read/edit/write files, publish documents, write
- * memory or call any integration — it can only emit the structured result it
- * already owes. Narrowing is itself guarded (guard 5) because the SDK ignores
- * unknown tool names silently.
+ * The turn is narrowed to {@link OUTPUT_REPROMPT_TOOLS} — the prompt's "no
+ * other tool" clause is a request the model may ignore, the tool set is not.
+ * Intentional behaviour change: everything that constant excludes becomes
+ * uncallable for this turn.
  *
- * Guards (five must pass; the fifth gates the narrowing, not the turn):
+ * Guards (the first four decide the turn; the fifth only shapes the narrowing):
  *  1. `output` is wired as a terminal tool — mirrors `runtime-pi/entrypoint.ts`,
- *     which passes `terminalTools: ["output"]` only when the agent declared the
- *     `output` runtime tool. Without it there is no output contract to enforce.
+ *     which passes it only when the agent declared the `output` runtime tool.
+ *     Without it there is no output contract to enforce.
  *  2. no terminal tool completed — a successful `output` means the run is
  *     already semantically done (and the SDK loop was aborted early).
- *  3. the run was not cancelled / timed out — `signal` here is the runner's
- *     combined controller (user cancel + timeout watchdog). A dead run must not
- *     be resurrected for one more LLM call.
+ *  3. the run was not cancelled / timed out — `signal` is the runner's combined
+ *     controller (user cancel + watchdog); a dead run is not resurrected.
  *  4. the last assistant turn is not a terminal failure — a session that ended
- *     on a provider error or a provider-side abort cannot answer, so the extra
- *     round-trip would only add cost to an already-failed run.
- *  5. (narrowing only) `output` is in `session.getActiveToolNames()` — proof
- *     that the SDK registry resolves that exact name. When it does not, the
- *     corrective turn goes out UNRESTRICTED rather than tool-less.
+ *     on a provider error or abort cannot answer, so the round-trip would only
+ *     add cost to an already-failed run.
+ *  5. (narrowing only) request just the {@link OUTPUT_REPROMPT_TOOLS} the
+ *     registry resolves, per the silent-drop contract on
+ *     {@link PromptableSession.setActiveToolsByName}: no `output` → no
+ *     narrowing at all (unrestricted beats tool-less); no `read` → `output`
+ *     alone.
  *
- * Emits an `appstrate.progress` breadcrumb at `warn` level carrying
- * `data.event = "output_reprompt"` BEFORE the retry — the same event channel
- * every other runner-side lifecycle signal uses (see `runtime-ready.ts`), so
- * the drift is measurable in `run_logs` without a second reporting path. Sink
- * failures are swallowed: losing the breadcrumb must never cost the run its
- * corrective turn.
+ * Emits a warn-level `appstrate.progress` breadcrumb carrying
+ * `data.event = "output_reprompt"` BEFORE the retry — the channel every other
+ * runner-side lifecycle signal uses (`runtime-ready.ts`), so drift is
+ * measurable in `run_logs` without a second reporting path. Sink failures are
+ * swallowed: losing the breadcrumb must never cost the run its turn.
  *
- * Exported for unit testing — the production caller is
- * `PiRunner.executeSession`.
+ * Exported for unit testing; the production caller is `PiRunner.executeSession`.
  *
  * @returns `true` when the corrective turn was issued, `false` when a guard
  *   declined it.
@@ -642,29 +660,12 @@ export async function maybeRepromptForOutput(opts: {
     })
     .catch(() => {});
 
-  // Make the "call `output`, nothing else" contract mechanical. Prompt text
-  // alone left the whole tool surface live on the corrective turn (built-in
-  // `read`/`bash`/`edit`/`write` plus every registered runtime + integration
-  // extension), so a drifting model could burn a second research loop on a turn
-  // that exists only to emit a result it already has.
-  //
-  // Conditional because `setActiveToolsByName` resolves names against the SDK
-  // tool registry and silently DROPS the misses (`AgentSession` — registry
-  // `get()` miss = tool skipped, no throw): narrowing to an `output` the
-  // registry does not hold would hand the turn ZERO tools and guarantee the
-  // failure this whole function exists to prevent. `getActiveToolNames()` is
-  // the honest probe — those names come out of the SAME registry lookup
-  // (`agent.state.tools`, only populated on a registry hit), so `output`
-  // appearing there proves the narrowing resolves. `terminalTools` cannot
-  // substitute: it only says how the RUNNER was configured, not what the SDK
-  // registry ended up holding.
-  //
-  // Narrowing also rebuilds the base system prompt from the resource loader,
-  // which re-reads the loader's `systemPrompt` (the agent prompt this runner
-  // passes to `DefaultResourceLoader` above) — the agent's own instructions
-  // survive; only the tool section of the prompt shrinks.
-  if (session.getActiveToolNames().includes(OUTPUT_TERMINAL_TOOL)) {
-    session.setActiveToolsByName([OUTPUT_TERMINAL_TOOL]);
+  // Make the "call `output`, nothing else" contract mechanical — prompt text
+  // alone left the whole tool surface live. Filtered through the registry
+  // probe, never `terminalTools` (runner config, not SDK truth).
+  const resolvable = new Set(session.getActiveToolNames());
+  if (resolvable.has(OUTPUT_TERMINAL_TOOL)) {
+    session.setActiveToolsByName(OUTPUT_REPROMPT_TOOLS.filter((name) => resolvable.has(name)));
   }
 
   const race = opts.race ?? (<T>(promise: Promise<T>): Promise<T> => promise);
