@@ -35,6 +35,15 @@ function isTextPart(value: unknown): value is { type: "text"; text: string } {
  * Peel the runtime/bridge envelopes off a tool result, returning the inner
  * payload (parsed when it arrives as a JSON string). Depth-bounded so a
  * pathological structure can't loop.
+ *
+ * A content array may carry text parts that are NOT part of the payload: the Pi
+ * engine appends a model-facing `[turn budget] …` line to every tool result, so
+ * the joined text is `{"id":"run_…"}[turn budget] …` — not JSON. Joining first
+ * still matters (a payload can arrive split across consecutive chunks), so we
+ * join, and only when that fails fall back to the first part that parses on its
+ * own. Without this the payload reads as a string, and every consumer built on
+ * `asRecord` (run id/status for the run card, the error-shape checks behind
+ * `deriveToolPhase`) silently degrades — a failed call would read as a success.
  */
 export function unwrapResult(value: unknown, depth = 0): unknown {
   if (depth > 8 || value == null) return value;
@@ -54,7 +63,17 @@ export function unwrapResult(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) {
     // MCP content array of text parts → concat the text and parse.
     const texts = value.filter(isTextPart).map((p) => p.text);
-    if (texts.length > 0) return unwrapResult(texts.join(""), depth + 1);
+    if (texts.length > 0) {
+      const joined = unwrapResult(texts.join(""), depth + 1);
+      // A string back means the concatenation isn't JSON — either the payload
+      // sits in one part next to appended prose, or there is no payload at all.
+      if (typeof joined !== "string") return joined;
+      for (const text of texts) {
+        const part = unwrapResult(text, depth + 1);
+        if (typeof part === "object" && part !== null) return part;
+      }
+      return joined;
+    }
     if (value.length === 1) return unwrapResult(value[0], depth + 1);
     return value;
   }

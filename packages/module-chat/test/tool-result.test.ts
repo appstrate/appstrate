@@ -42,6 +42,65 @@ describe("unwrapResult — envelope peeling", () => {
   });
 });
 
+describe("unwrapResult — trailing non-JSON text parts", () => {
+  // The Pi engine appends this model-facing line to every tool result.
+  const budgetNote =
+    "[turn budget] 7m44s left in this turn, step 1/16. " +
+    "A run_and_wait launch needs at least 2m left or it is refused; " +
+    "anything not written into your reply before the turn ends is lost.";
+  const runPayload = {
+    id: "run_da46b621",
+    packageId: "@appstrate/inbox-triage",
+    status: "success",
+    done: true,
+  };
+
+  it("recovers the payload when a turn-budget note follows it", () => {
+    const mcp = {
+      content: [
+        { type: "text", text: JSON.stringify(runPayload) },
+        { type: "text", text: budgetNote },
+      ],
+    };
+    expect(unwrapResult(mcp)).toEqual(runPayload);
+  });
+
+  it("still reassembles a payload split across consecutive chunks", () => {
+    const json = JSON.stringify(runPayload);
+    const parts = [
+      { type: "text", text: json.slice(0, 20) },
+      { type: "text", text: json.slice(20) },
+    ];
+    expect(unwrapResult(parts)).toEqual(runPayload);
+  });
+
+  it("returns the joined text when no part carries a payload", () => {
+    const parts = [
+      { type: "text", text: "all done. " },
+      { type: "text", text: budgetNote },
+    ];
+    expect(unwrapResult(parts)).toBe(`all done. ${budgetNote}`);
+  });
+
+  it("leaves a content array with no text parts unchanged", () => {
+    const parts = [
+      { type: "image", data: "…" },
+      { type: "image", data: "…" },
+    ];
+    expect(unwrapResult(parts)).toEqual(parts);
+  });
+
+  it("a failing payload followed by the note still reads as an error", () => {
+    const enveloped = {
+      content: [
+        { type: "text", text: JSON.stringify({ status: 502, error: "upstream unavailable" }) },
+        { type: "text", text: budgetNote },
+      ],
+    };
+    expect(deriveToolPhase({ status: { type: "complete" }, result: enveloped })).toBe("error");
+  });
+});
+
 describe("deriveToolPhase", () => {
   it("running status → running", () => {
     expect(deriveToolPhase({ status: { type: "running" }, result: undefined })).toBe("running");
