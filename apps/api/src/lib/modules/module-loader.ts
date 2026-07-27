@@ -183,12 +183,10 @@ export async function _coreRangeFromPackageJson(specifier: string): Promise<stri
  * `subscription` flag in core 6.0.0, and a 5.x-era caller that omits it does
  * not error — it silently reports a subscription turn as platform-funded.
  *
- * A declared-but-unsatisfied range is a warning by default
- * (`MODULE_CONTRACT_ENFORCE=warn`) and fatal under `fail`. `warn` ships as the
- * default only because the release chain has not run: this platform builds core
- * 6.0.0 while npm still serves 5.0.0, so no out-of-tree module can declare
- * `^6.0.0` yet. `fail` is the intended end state — the mispricing that actually
- * matters is already blocked fail-closed inside `checkUsageAllowed`.
+ * A declared-but-unsatisfied range is fatal by default and downgraded to a log
+ * line under `MODULE_CONTRACT_ENFORCE=warn` — booting anyway stays a defensible
+ * operator choice because the mispricing that actually matters is already
+ * blocked fail-closed inside `checkUsageAllowed`.
  *
  * KNOWN LIMITATION, documented rather than worked around: were `CORE_VERSION`
  * ever a prerelease (`7.0.0-beta.1`), every module declaring the recommended
@@ -231,16 +229,26 @@ async function enforceCoreVersionContract(
   // candidate, so a null result means the range excludes it.
   if (matchVersion([CORE_VERSION], declared) !== null) return;
 
-  const message =
+  // Both branches state the same mismatch and the same risk; only the remedy
+  // differs. Under `warn` the operator has ALREADY opted in, so telling them to
+  // set the var they just set would read as a wrong instruction — the log says
+  // what is being accepted instead.
+  const mismatch =
     `Module "${id}" was built against ${CORE_PACKAGE} ${declared}, but this platform ships ` +
-    `${CORE_VERSION}. Republish the module against ${CORE_VERSION}, or set ` +
-    `MODULE_CONTRACT_ENFORCE=warn to boot anyway (a stale module can call a platform service ` +
-    `whose signature moved under it — silently, without an error).`;
+    `${CORE_VERSION}. Republish the module against ${CORE_VERSION}.`;
+  const risk =
+    "a stale module can call a platform service whose signature moved under it — silently, " +
+    "without an error";
   if (getEnv().MODULE_CONTRACT_ENFORCE === "warn") {
-    logger.warn(message, { id, declared, coreVersion: CORE_VERSION });
+    logger.warn(
+      `${mismatch} Booting anyway because MODULE_CONTRACT_ENFORCE=warn — accepting that ${risk}.`,
+      { id, declared, coreVersion: CORE_VERSION },
+    );
     return;
   }
-  throw new Error(message);
+  throw new Error(
+    `${mismatch} Set MODULE_CONTRACT_ENFORCE=warn to boot anyway, accepting that ${risk}.`,
+  );
 }
 
 // ---------------------------------------------------------------------------
