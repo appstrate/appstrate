@@ -5,6 +5,11 @@
  *
  * Resolution order: `Appstrate-Version` header > org settings > CURRENT_API_VERSION.
  * Sets `c.set("apiVersion")` and the `Appstrate-Version` response header on every request.
+ *
+ * An explicitly requested version that cannot be served is a 400 — from the
+ * header AND from the org pin. Neither ever falls back to CURRENT_API_VERSION;
+ * a silent downgrade would deliver a different API than the one the caller or
+ * the org asked to be frozen on. Only the absence of any pin falls back.
  */
 
 import type { Context, Next } from "hono";
@@ -49,7 +54,31 @@ export function apiVersion(
       const orgId = c.get("orgId");
       if (orgId && getOrgApiVersion) {
         const pinned = await getOrgApiVersion(orgId, c);
-        if (pinned && isVersionSupported(pinned)) {
+        if (pinned) {
+          // A pin the server cannot serve is an error, never a silent
+          // downgrade: falling back to CURRENT_API_VERSION would hand the org
+          // a different (potentially breaking) API than the one it asked to be
+          // frozen on, with nothing in the response saying so.
+          //
+          // Malformed pins ("garbage") and well-formed-but-dropped pins
+          // ("2020-01-01") deliberately produce the SAME error. Unlike the
+          // header path — where the caller typed the value and can be told
+          // precisely what is wrong with their input — a pin is server-stored
+          // state the caller cannot see or change. Both cases mean the same
+          // thing to them ("this org's pinned version cannot be served") and
+          // have the same remedy (an org admin re-pins the setting), so the
+          // extra format/support distinction would be noise. `isVersionSupported`
+          // already rejects malformed values, since they can never be members
+          // of SUPPORTED_VERSIONS.
+          if (!isVersionSupported(pinned)) {
+            throw new ApiError({
+              status: 400,
+              code: "unsupported_api_version",
+              title: "Unsupported API Version",
+              detail: `The organization is pinned to API version "${pinned}", which is not supported. Current version: ${CURRENT_API_VERSION}.`,
+              param: "settings.api_version",
+            });
+          }
           version = pinned;
         }
       }

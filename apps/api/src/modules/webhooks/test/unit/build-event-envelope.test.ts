@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { buildEventEnvelope } from "../../service.ts";
+import { CURRENT_API_VERSION } from "../../../../lib/api-versions.ts";
 
 describe("buildEventEnvelope", () => {
   it("builds a valid event envelope in full mode", () => {
@@ -24,6 +25,19 @@ describe("buildEventEnvelope", () => {
     const data = payload.data as { object: Record<string, unknown> };
     expect(data.object.result).toBe("output data");
     expect(data.object.input).toBe("input data");
+  });
+
+  it("stamps the envelope with the registry's current API version", () => {
+    // Asserted against CURRENT_API_VERSION, never a literal: the envelope used
+    // to hardcode the date, which silently drifted from the registry. Comparing
+    // to the constant means a version bump cannot leave this payload stale.
+    const { payload } = buildEventEnvelope({
+      eventType: "run.success",
+      run: { id: "run_123", status: "success" },
+      payloadMode: "full",
+    });
+
+    expect(payload.apiVersion).toBe(CURRENT_API_VERSION);
   });
 
   it("strips result and input in summary mode", () => {

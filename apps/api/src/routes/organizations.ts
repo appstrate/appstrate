@@ -25,6 +25,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { CURRENT_API_VERSION, isVersionSupported } from "../lib/api-versions.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
@@ -530,6 +531,26 @@ router.put("/:orgId/settings", async (c) => {
   await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to update settings");
 
   const data = await readJsonBody(c, orgSettingsSchema.partial());
+
+  // Write-side counterpart of the read-side check in `middleware/api-version.ts`.
+  // That middleware is mounted on `*` and 400s on a pin it cannot serve — this
+  // route included. So persisting an unsupported `api_version` would lock the
+  // org out of every authed endpoint, including the request needed to undo it,
+  // and the SPA never sends the `Appstrate-Version` header that would bypass
+  // the pin. Rejecting on write keeps the unserveable state unreachable.
+  //
+  // The check lives here rather than as a `.refine()` on `orgSettingsSchema`:
+  // that schema is exported from `@appstrate/core`, the published OSS package,
+  // which must not learn this app's version registry.
+  if (data.api_version !== undefined && !isVersionSupported(data.api_version)) {
+    throw new ApiError({
+      status: 400,
+      code: "unsupported_api_version",
+      title: "Unsupported API Version",
+      detail: `API version "${data.api_version}" is not supported. Current version: ${CURRENT_API_VERSION}.`,
+      param: "api_version",
+    });
+  }
 
   const settings = await updateOrgSettings(orgId, data);
   await recordAuditFromContext(c, {

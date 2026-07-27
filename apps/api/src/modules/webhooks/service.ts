@@ -10,6 +10,7 @@ import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { notFound, invalidRequest, ApiError } from "../../lib/errors.ts";
+import { CURRENT_API_VERSION } from "../../lib/api-versions.ts";
 import type {
   WebhookInfo,
   WebhookCreateResponse,
@@ -528,7 +529,7 @@ export function buildEventEnvelope(params: {
       id: eventId,
       object: "event",
       type: params.eventType,
-      apiVersion: "2026-03-21",
+      apiVersion: CURRENT_API_VERSION,
       created: now,
       data: { object: execObj },
     },

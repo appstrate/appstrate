@@ -338,6 +338,117 @@ describe("Organizations API", () => {
     });
   });
 
+  describe("PUT /api/orgs/:orgId/settings — api_version", () => {
+    // `apiVersion` middleware is mounted on `*` and 400s on a pin it cannot
+    // serve, so an unsupported value persisted here would lock the org out of
+    // every authed route — including this one. The write path must make that
+    // state unreachable.
+
+    it("rejects a well-formed but unsupported api_version and leaves settings untouched", async () => {
+      const ctx = await createTestContext();
+      const before = await getOrgSettings(ctx.orgId);
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ api_version: "2020-01-01" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; param: string };
+      expect(body.code).toBe("unsupported_api_version");
+      expect(body.param).toBe("api_version");
+
+      // The stored row, not just the response: a 400 that still wrote would
+      // brick the org exactly the same way.
+      expect(await getOrgSettings(ctx.orgId)).toEqual(before);
+    });
+
+    it("rejects a malformed api_version and leaves settings untouched", async () => {
+      const ctx = await createTestContext();
+      const before = await getOrgSettings(ctx.orgId);
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ api_version: "not-a-date" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; param: string };
+      expect(body.code).toBe("unsupported_api_version");
+      expect(body.param).toBe("api_version");
+
+      expect(await getOrgSettings(ctx.orgId)).toEqual(before);
+    });
+
+    it("does not discard the other settings fields sent alongside a bad api_version", async () => {
+      // The whole body is rejected — a partial write would leave the caller
+      // guessing which half landed.
+      const ctx = await createTestContext();
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ api_version: "2020-01-01", dashboard_sso_enabled: true }),
+      });
+
+      expect(res.status).toBe(400);
+      const settings = await getOrgSettings(ctx.orgId);
+      expect(settings.dashboard_sso_enabled).not.toBe(true);
+    });
+
+    it("accepts a supported api_version", async () => {
+      const ctx = await createTestContext();
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ api_version: CURRENT_API_VERSION }),
+      });
+
+      expect(res.status).toBe(200);
+      const settings = await getOrgSettings(ctx.orgId);
+      expect(settings.api_version).toBe(CURRENT_API_VERSION);
+    });
+
+    it("leaves the org fully usable after a rejected write (self-brick regression)", async () => {
+      // The test that actually pins the fix: before the write-path guard, the
+      // rejected value above would have been persisted and every subsequent
+      // request — including the PUT needed to undo it — would 400.
+      const ctx = await createTestContext();
+
+      // Pin the org first, so the middleware's org-pin branch is actually
+      // exercised below rather than the no-pin fallback.
+      const pin = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ api_version: CURRENT_API_VERSION }),
+      });
+      expect(pin.status).toBe(200);
+
+      const bad = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ api_version: "2020-01-01" }),
+      });
+      expect(bad.status).toBe(400);
+
+      // A plain read on an unrelated route still resolves a serveable version.
+      const list = await app.request("/api/orgs", { headers: { Cookie: ctx.cookie } });
+      expect(list.status).toBe(200);
+      expect(list.headers.get("Appstrate-Version")).toBe(CURRENT_API_VERSION);
+
+      // And the settings route itself is still reachable — the recovery path.
+      const recover = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ dashboard_sso_enabled: true }),
+      });
+      expect(recover.status).toBe(200);
+    });
+  });
+
   describe("POST /api/orgs/:orgId/members", () => {
     it("creates an invitation even for an existing user (no silent direct-add)", async () => {
       const ctx = await createTestContext({ orgSlug: "memberorg" });
