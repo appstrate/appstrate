@@ -269,6 +269,57 @@ describe("detectBundleConflicts", () => {
 // (the TOCTOU: both pass the read-only preflight) or silently "reuses" a
 // foreign org's package. These regressions FAIL against the pre-fix code.
 
+// ---------------------------------------------------------------------------
+// Issue #974 — an invalid manifest is rejected UPSTREAM of the persistence
+// path: `parsePackageZip` validates the same bytes `postInstallPackage` would
+// later re-read, on both of its callers. This pins that the rejection lands
+// before anything is written, and that the aborted import leaves no row behind.
+// ---------------------------------------------------------------------------
+
+describe("bundle import — upstream manifest rejection + rollback", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("leaves neither a packages row nor a version row when a bundle carries an invalid manifest", async () => {
+    const ctx = await createTestContext({ orgSlug: "gateorgb" });
+    const packageId = "@gateorgb/badbundle";
+    const identity = `${packageId}@1.0.0` as const;
+    const files = new Map<string, Uint8Array>([
+      ["manifest.json", enc(JSON.stringify({ name: packageId, version: "1.0.0" }, null, 2))],
+      ["prompt.md", enc("Prompt.")],
+    ]);
+    const bundle: Bundle = {
+      bundleFormatVersion: "1.0",
+      root: identity,
+      packages: new Map([[identity, pkgFromFiles(files, identity)]]),
+      integrity: "sha256-abc",
+    };
+
+    const err = await importBundle(
+      bundle,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      ctx.user.id,
+    ).catch((e: unknown) => e);
+
+    // `parsePackageZip` rejects the reconstructed archive before the ownership
+    // claim, so the import aborts before a row exists.
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
+
+    const rows = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, packageId));
+    expect(rows).toHaveLength(0);
+    const versions = await db
+      .select({ id: packageVersions.id })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, packageId));
+    expect(versions).toHaveLength(0);
+  });
+});
+
 describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
   const PKG = "@raceorg/agent";
 

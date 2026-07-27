@@ -57,6 +57,7 @@ export async function postInstallPackage(params: {
   const { packageType, packageId, orgId, userId, content, files, zipBuffer } = params;
 
   const manifest = parseManifestFromFiles(files);
+
   const declaredVersion = manifest.version as string | undefined;
 
   // Determine version: explicit override > manifest version > error
@@ -98,6 +99,23 @@ export async function postInstallPackage(params: {
   // caller (e.g. bundle import) aborts rather than committing a `packages`
   // row with no version (an un-runnable orphan). `createVersionAndUpload`
   // already cleans up its uploaded ZIP on DB failure before re-throwing.
+  //
+  // Persist `manifest` — the object parsed out of `files` — NEVER a
+  // validator-normalised copy of it. Unlike `createVersionFromDraft`, this path
+  // does not build the artifact: the `zipBuffer` is caller-supplied, its integrity IS
+  // the version's identity (a bundle reassembled by `reconstructPackageZip`, or
+  // the ZIP the user uploaded), so a normalised manifest cannot be reflected in
+  // the bytes. Writing the Zod output into the DB column alone would make the
+  // row diverge from the ZIP — and pinned runs read the manifest FROM the ZIP,
+  // so the divergence would be silent.
+  //
+  // ONE caller breaks the "`files` and `zipBuffer` carry the same manifest"
+  // assumption: the skill-only-ZIP fallback (`routes/packages.ts`, the
+  // `handleImport(c, parsed, buffer, …)` call on the `/import` routes) passes
+  // the ORIGINAL upload, which by construction has no `manifest.json` — that
+  // absence is what triggered the fallback — while `files` carries the manifest
+  // synthesized from `SKILL.md`. There the stored row is the only manifest
+  // there is; nothing diverges because the ZIP declares none.
   await createVersionAndUpload({
     packageId,
     version,

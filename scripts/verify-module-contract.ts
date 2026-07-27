@@ -37,11 +37,19 @@
  *   transfer; the rationale for each of these lives in the JSDoc on the member
  *   itself, not duplicated here.
  *
+ * This script is about contract SHAPE only. The other dimension — the core
+ * VERSION each module compiles against — is covered elsewhere:
+ * `scripts/check-consumer-versions.ts` at core publish time (it reads every
+ * consumer repo over the GitHub API, so it also works where the sibling repos
+ * are not checked out) and the module loader's boot gate at runtime (#973).
+ *
  * Private repos absent in CI (cloud) never cause failure: the ledger records
  * their expected ownership, and the scanner only *adds* drift when a present
  * module declares a member the ledger did not expect.
  *
- * Override via env: `MODULE_CONTRACT_POLICY=warn|fail|off`.
+ * Override via env: `MODULE_CONTRACT_POLICY=warn|fail|off` — a dev/CI knob on
+ * THIS script, not to be confused with the runtime boot gate
+ * `MODULE_CONTRACT_ENFORCE=fail|warn` (see `docs/ENV.md`).
  */
 
 import type {

@@ -13,7 +13,10 @@ import type {
   AuthStrategy,
   ModulePermissionContribution,
 } from "@appstrate/core/module";
+import { CORE_VERSION } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { isValidRange, matchVersion } from "@appstrate/core/semver";
+import { getEnv } from "@appstrate/env";
 import {
   CORE_RESOURCE_NAMES,
   setModulePermissionsProvider,
@@ -79,6 +82,167 @@ async function resolveSpecifier(specifier: string): Promise<{
   return import(/* webpackIgnore: true */ specifier);
 }
 
+/**
+ * Import one module specifier and return its exported module object. Any
+ * failure (unresolvable specifier, missing `manifest.id`) is fatal — all
+ * declared modules are required.
+ */
+async function importModule(specifier: string): Promise<AppstrateModule> {
+  try {
+    const raw = await resolveSpecifier(specifier);
+    // Support both default export and named `appstrateModule` export
+    const mod = (raw.default ?? raw.appstrateModule) as AppstrateModule | undefined;
+    if (!mod?.manifest?.id) {
+      throw new Error(`Module "${specifier}" is missing manifest.id`);
+    }
+    return mod;
+  } catch (err) {
+    throw new Error(`Module "${specifier}" could not be loaded: ${getErrorMessage(err)}`, {
+      cause: err,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Core-version contract guard (issue #973)
+// ---------------------------------------------------------------------------
+
+const CORE_PACKAGE = "@appstrate/core";
+
+/**
+ * Dependency protocols that mean "resolved from this workspace, not npm". Such
+ * a module compiles against the very core it will run on, so `tsc` already
+ * gates it — there is nothing for a semver check to add.
+ */
+const IN_TREE_RANGE_PREFIXES = ["workspace:", "link:", "file:"];
+
+interface PackageJsonDeps {
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}
+
+/** The `@appstrate/core` range one package.json declares, in dep-kind precedence order. */
+function coreRangeOf(pkg: PackageJsonDeps): string | null {
+  return (
+    pkg.dependencies?.[CORE_PACKAGE] ??
+    pkg.peerDependencies?.[CORE_PACKAGE] ??
+    pkg.devDependencies?.[CORE_PACKAGE] ??
+    null
+  );
+}
+
+/** Absolute path a specifier resolves to, or null when it resolves to nothing. */
+function tryResolve(specifier: string): string | null {
+  try {
+    return fileURLToPath(import.meta.resolve(specifier));
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a package.json off disk. Null when absent or unparsable. */
+async function readPackageJson(path: string | null): Promise<PackageJsonDeps | null> {
+  if (path === null) return null;
+  try {
+    const file = Bun.file(path);
+    return (await file.exists()) ? ((await file.json()) as PackageJsonDeps) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the `@appstrate/core` range an npm-loaded module declares in its own
+ * `package.json`.
+ *
+ * `<specifier>/package.json` is the ONLY lookup, and it needs no fallback: Bun
+ * resolves that subpath past any `exports` map — verified against the 64 direct
+ * dependencies of this repo and against an `exports` explicitly declaring
+ * `"./package.json": null`. Node's stricter enforcement is not a case to
+ * defend, because this file only ever runs under Bun (`apps/api` is private and
+ * is never published to a Node consumer).
+ *
+ * Best-effort by design: an unresolvable specifier or an unreadable file means
+ * "unknown", never a crash — this guard must not be the thing that stops a
+ * working module from booting.
+ *
+ * Exported for tests: this is the branch a real npm module's boot verdict comes
+ * from, and it is unreachable through the instance-loading entry point.
+ */
+export async function _coreRangeFromPackageJson(specifier: string): Promise<string | null> {
+  const own = await readPackageJson(tryResolve(`${specifier}/package.json`));
+  return own ? coreRangeOf(own) : null;
+}
+
+/**
+ * Boot guard on the module→platform direction of the contract (#973).
+ *
+ * `tsc` cannot see an out-of-tree module, and the platform's `PlatformServices`
+ * surface changes shape between majors: `checkUsageAllowed` gained a REQUIRED
+ * `subscription` flag in core 6.0.0, and a 5.x-era caller that omits it does
+ * not error — it silently reports a subscription turn as platform-funded.
+ *
+ * A declared-but-unsatisfied range is a warning by default
+ * (`MODULE_CONTRACT_ENFORCE=warn`) and fatal under `fail`. `warn` ships as the
+ * default only because the release chain has not run: this platform builds core
+ * 6.0.0 while npm still serves 5.0.0, so no out-of-tree module can declare
+ * `^6.0.0` yet. `fail` is the intended end state — the mispricing that actually
+ * matters is already blocked fail-closed inside `checkUsageAllowed`.
+ *
+ * KNOWN LIMITATION, documented rather than worked around: were `CORE_VERSION`
+ * ever a prerelease (`7.0.0-beta.1`), every module declaring the recommended
+ * `^7.0.0` would fail this check at once — semver excludes prereleases from
+ * ranges by default. Core has never published one, and the fix would mean
+ * widening a core helper's API for a case that does not exist.
+ */
+async function enforceCoreVersionContract(
+  mod: AppstrateModule,
+  specifier: string | null,
+): Promise<void> {
+  const id = mod.manifest.id;
+  // A built-in short-circuits to the workspace protocol: it compiles against
+  // the very core it runs on, so `tsc` is its gate and there is nothing for a
+  // semver check to add. No specifier at all (instance-loaded) means there is
+  // no package.json to read, hence no declared range.
+  const declared =
+    specifier === null
+      ? null
+      : getBuiltinModules().has(specifier)
+        ? "workspace:*"
+        : await _coreRangeFromPackageJson(specifier);
+
+  if (declared !== null && IN_TREE_RANGE_PREFIXES.some((p) => declared.startsWith(p))) {
+    logger.debug("Module resolves @appstrate/core from the workspace, skipping version gate", {
+      id,
+      declared,
+    });
+    return;
+  }
+  if (declared === null || !isValidRange(declared)) {
+    logger.warn("Module declares no usable @appstrate/core range — version contract unverified", {
+      id,
+      declared,
+      coreVersion: CORE_VERSION,
+    });
+    return;
+  }
+  // `matchVersion` is the satisfies check: the running core is the only
+  // candidate, so a null result means the range excludes it.
+  if (matchVersion([CORE_VERSION], declared) !== null) return;
+
+  const message =
+    `Module "${id}" was built against ${CORE_PACKAGE} ${declared}, but this platform ships ` +
+    `${CORE_VERSION}. Republish the module against ${CORE_VERSION}, or set ` +
+    `MODULE_CONTRACT_ENFORCE=warn to boot anyway (a stale module can call a platform service ` +
+    `whose signature moved under it — silently, without an error).`;
+  if (getEnv().MODULE_CONTRACT_ENFORCE === "warn") {
+    logger.warn(message, { id, declared, coreVersion: CORE_VERSION });
+    return;
+  }
+  throw new Error(message);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -103,19 +267,12 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
   // Phase 1: Resolve all modules via dynamic import (built-in path first, then npm specifier)
   const resolved: AppstrateModule[] = [];
   for (const specifier of specifiers) {
-    try {
-      const raw = await resolveSpecifier(specifier);
-      // Support both default export and named `appstrateModule` export
-      const mod = (raw.default ?? raw.appstrateModule) as AppstrateModule | undefined;
-      if (!mod?.manifest?.id) {
-        throw new Error(`Module "${specifier}" is missing manifest.id`);
-      }
-      resolved.push(mod);
-    } catch (err) {
-      throw new Error(`Module "${specifier}" could not be loaded: ${getErrorMessage(err)}`, {
-        cause: err,
-      });
-    }
+    const mod = await importModule(specifier);
+    // Version gate lives outside `importModule`: a core-version mismatch is not
+    // an import failure, and its message already names the module — wrapping it
+    // in "could not be loaded" would say it twice.
+    await enforceCoreVersionContract(mod, specifier);
+    resolved.push(mod);
   }
 
   await initSortedModules(resolved, ctx);
@@ -133,6 +290,10 @@ export async function loadModulesFromInstances(
     logger.debug("Modules already initialized, skipping");
     return;
   }
+  // Same gate as the specifier path — the guard must not be something the entry
+  // point decides. With no specifier there is no package.json to read, so the
+  // verdict here can only ever be the "unverified" warning.
+  for (const mod of modules) await enforceCoreVersionContract(mod, null);
   await initSortedModules(modules, ctx);
 }
 

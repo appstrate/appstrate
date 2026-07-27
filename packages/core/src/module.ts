@@ -28,6 +28,18 @@ import type { OrchestratorRegistration } from "./platform-types.ts";
 // Module contract
 // ---------------------------------------------------------------------------
 
+/**
+ * The `@appstrate/core` version this build ships — the platform half of the
+ * module contract, exported so the loader can compare it against the
+ * `@appstrate/core` range a module declares in its own `package.json`.
+ *
+ * Hardcoded rather than read from `package.json`: core is consumed over npm by
+ * external repos where an ESM JSON import is a portability hazard (import
+ * attributes, bundler support). `packages/core/test/core-version.test.ts`
+ * asserts it equals the published `version` field, so it cannot drift.
+ */
+export const CORE_VERSION = "6.0.0";
+
 /** Metadata describing a module. */
 export interface ModuleManifest {
   /** Unique identifier (e.g. "webhooks", "oidc"). */

@@ -15,6 +15,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Two contract holes: forks minted un-normalised manifests, stale modules
+  booted silently (#974, #973)** — a fork is a READ that MINTS: it copies an
+  already-published (immutable, therefore unrepairable) manifest into a brand
+  new draft row, draft files, version row and ZIP. It copied verbatim, so a
+  `runtime_tools` id the platform has since retired was regraved into an
+  artifact minted today. The manifest is now normalised ONCE, before the draft
+  row is written, so the four sinks can never disagree; the drop is structural
+  (no Zod re-parse), so a source with nothing to drop keeps its key order and
+  materialises no defaults, leaving publish dedup (#896) untouched. A source
+  invalid for any OTHER reason is logged, never rejected: manifests today's
+  validator refuses do sit in the catalog — the provider→integration migration
+  (#481) left `type: "provider"` rows behind, and a malformed `manifest.json`
+  uploaded to `POST /api/mcp-servers` still mints an unvalidated stub manifest
+  today — and a gate would make them permanently un-forkable.
+
+  The module→platform half of the contract is invisible to `tsc` for an
+  out-of-tree module, and it fails silently: core 6.0.0 made
+  `checkUsageAllowed`'s `subscription` flag required, and a 5.x caller omitting
+  it reports a subscription turn as platform-funded. The loader now reads the
+  `@appstrate/core` range from a module's own `package.json` and checks it
+  against the platform's `CORE_VERSION` at boot. **Operator-facing**: the new `MODULE_CONTRACT_ENFORCE`
+  var defaults to `warn` (log the mismatch, boot anyway) — only because this
+  build ships core 6.0.0 while npm still serves 5.0.0, so no out-of-tree module
+  can declare `^6.0.0` yet. The intended end state is `fail`; set
+  `MODULE_CONTRACT_ENFORCE=fail` once every module you load has been
+  republished against the published major.
+
 - **Self-host: hosted connect portal broken out of the box (#905)** — no
   distribution path ever provisioned `CONNECT_SESSION_SECRET`: the installer
   didn't generate it and no compose template forwarded it, so the integration

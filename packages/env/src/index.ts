@@ -370,6 +370,20 @@ const envSchema = z
     // coalesces to unset, i.e. the default set, per the compose `${VAR:-}`
     // pattern).
     MODULES: z.string().default("oidc,webhooks,mcp,core-providers,@appstrate/module-chat"),
+    // Boot policy when a loaded module declares an `@appstrate/core` range this
+    // platform's `CORE_VERSION` does not satisfy (issue #973):
+    //   - `warn` (default) — log the mismatch and boot anyway.
+    //   - `fail` — refuse to boot, naming the module and both versions.
+    // `warn` ships as the default only because the release chain has not run
+    // yet: the platform builds core 6.0.0 while npm still serves 5.0.0, so
+    // every out-of-tree module (cloud pins `^5.0.0`) would fail a `fail` gate
+    // for a bump it cannot make. The intended end state is `fail`, once
+    // `afps-shared → core@6.0.0 on npm → module bump + republish` has run — an
+    // operator who has already done that lockstep should set
+    // `MODULE_CONTRACT_ENFORCE=fail` today. The accepted risk meanwhile is a
+    // stale module calling a platform service whose signature moved under it,
+    // which fails silently rather than loudly.
+    MODULE_CONTRACT_ENFORCE: z.enum(["fail", "warn"]).default("warn"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),

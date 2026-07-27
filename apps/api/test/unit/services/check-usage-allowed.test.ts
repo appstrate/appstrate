@@ -243,4 +243,38 @@ describe("checkUsageAllowed", () => {
     expect(result).toEqual({ code: "subscription_suspended", message: "Suspended", status: 402 });
     expect(calls).toHaveLength(1);
   });
+
+  it("rejects a caller that omits `subscription` (module built against core < 6.0.0)", async () => {
+    // Fail-closed: the flag became required in core 6.0.0. Defaulting it would
+    // read a subscription turn as platform-funded — silent mispricing. Only an
+    // out-of-tree stale module can reach this (in-tree callers are typechecked,
+    // hence the cast).
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+
+    await expect(
+      checkUsageAllowed({
+        orgId: "org_1",
+        presetId: SYSTEM_PRESET,
+        sessionId: "chs_stale",
+      } as never),
+    ).rejects.toThrow("`subscription` is required");
+    // The turn is denied BEFORE the admission hook sees a fabricated fact.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("still returns null for a stale caller in OSS mode (no hook prices the turn)", async () => {
+    // The guard above exists to keep a fabricated fact out of an admission
+    // hook — so with no hook loaded there is nothing to protect, and a stale
+    // caller must keep getting the `null` OSS always gave it rather than a 500.
+    await loadModulesFromInstances([], fakeInitCtx());
+
+    await expect(
+      checkUsageAllowed({
+        orgId: "org_1",
+        presetId: SYSTEM_PRESET,
+        sessionId: "chs_oss",
+      } as never),
+    ).resolves.toBeNull();
+  });
 });
