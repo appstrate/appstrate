@@ -2089,6 +2089,13 @@
                     "type": "object",
                     "description": "Per-run config overrides validated against manifest.config.schema (AJV)."
                   },
+                  "context_documents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "`document://doc_xxx` URIs to mount read-only into the run's `documents/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_documents` input field for them, so they go through the same ACL, byte/count caps and `document_links` chaining as any other document input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_documents` is rejected with a `400` — the name is reserved."
+                  },
                   "modelId": {
                     "type": ["string", "null"]
                   },
@@ -2330,6 +2337,13 @@
                   },
                   "config": {
                     "type": "object"
+                  },
+                  "context_documents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_documents` name collision, never mounted."
                   },
                   "modelId": {
                     "type": ["string", "null"]
@@ -2954,6 +2968,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": false,
                 "required": ["source", "applicationId"],
                 "properties": {
                   "source": {
@@ -2961,6 +2976,7 @@
                     "oneOf": [
                       {
                         "type": "object",
+                        "additionalProperties": false,
                         "required": ["kind", "manifest", "prompt"],
                         "properties": {
                           "kind": {
@@ -2981,6 +2997,7 @@
                       },
                       {
                         "type": "object",
+                        "additionalProperties": false,
                         "required": ["kind", "packageId"],
                         "properties": {
                           "kind": {
@@ -4021,7 +4038,7 @@
         "operationId": "streamAllRuns",
         "tags": ["Realtime"],
         "summary": "SSE: all run status changes",
-        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
+        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.",
         "parameters": [
           {
             "$ref": "#/components/parameters/SseOrgId"
@@ -4034,6 +4051,9 @@
           },
           {
             "$ref": "#/components/parameters/Verbose"
+          },
+          {
+            "$ref": "#/components/parameters/SseChannels"
           }
         ],
         "responses": {
@@ -4061,7 +4081,7 @@
         "operationId": "streamRun",
         "tags": ["Realtime"],
         "summary": "SSE: single run events",
-        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
+        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.",
         "parameters": [
           {
             "name": "id",
@@ -4082,6 +4102,9 @@
           },
           {
             "$ref": "#/components/parameters/Verbose"
+          },
+          {
+            "$ref": "#/components/parameters/SseChannels"
           }
         ],
         "responses": {
@@ -4109,7 +4132,7 @@
         "operationId": "streamAgentRuns",
         "tags": ["Realtime"],
         "summary": "SSE: agent run changes",
-        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.",
+        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.",
         "parameters": [
           {
             "name": "packageId",
@@ -4131,6 +4154,9 @@
           },
           {
             "$ref": "#/components/parameters/Verbose"
+          },
+          {
+            "$ref": "#/components/parameters/SseChannels"
           }
         ],
         "responses": {
@@ -12834,11 +12860,30 @@
         "operationId": "getOpenApiSpec",
         "tags": ["Meta"],
         "summary": "OpenAPI specification",
-        "description": "Returns the OpenAPI 3.1 specification as JSON.",
+        "description": "Returns the OpenAPI 3.1 specification as JSON. The response carries a strong `ETag` that is stable for the lifetime of the deployment — send it back as `If-None-Match` to revalidate a cached copy and get a `304 Not Modified` instead of the full document.",
         "security": [],
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Entity-tag of a cached copy. A match yields `304 Not Modified`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OpenAPI spec",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity-tag of the served specification.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -12850,6 +12895,17 @@
                     "title": "Appstrate API",
                     "version": "2026-03-21"
                   }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Cached copy is still current (`If-None-Match` matched). No body.",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity-tag of the served specification.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -16496,7 +16552,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name), or post a JSON body. Parsed by `parsePackageUpload`.",
+          "description": "Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name, and the archive must contain a valid `manifest.json`), or post a JSON body carrying the manifest. Parsed by `parsePackageUpload`.",
           "content": {
             "multipart/form-data": {
               "schema": {
@@ -16506,7 +16562,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "Package archive (`.afps` or `.zip`). File name (sans extension) is the kebab-case package id."
+                    "description": "Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id."
                   }
                 }
               }
@@ -16514,7 +16570,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["id", "content"],
+                "required": ["id", "content", "manifest"],
                 "properties": {
                   "id": {
                     "type": "string",
@@ -16532,14 +16588,10 @@
                     "type": "string",
                     "description": "Package description. Auto-extracted from the manifest if omitted."
                   },
-                  "version": {
-                    "type": "string",
-                    "description": "Initial semver (optional)."
-                  },
                   "manifest": {
                     "type": "object",
                     "additionalProperties": true,
-                    "description": "Optional manifest object (stored as-is)."
+                    "description": "Manifest object, validated against the AFPS mcp-server schema and stored as-is."
                   }
                 }
               }
@@ -21274,6 +21326,16 @@
         "schema": {
           "type": "boolean",
           "default": false
+        }
+      },
+      "SseChannels": {
+        "name": "channels",
+        "in": "query",
+        "required": false,
+        "description": "Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). Omit to receive every channel (default, unchanged behaviour). Unknown names are ignored; if nothing is recognised the stream falls back to every channel. Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it.",
+        "schema": {
+          "type": "string",
+          "example": "run_update,connection_update"
         }
       },
       "AppstrateUser": {
