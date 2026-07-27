@@ -37,6 +37,7 @@ import { createTestContext, type TestContext } from "../../../apps/api/test/help
 import { handleChatStream, type ChatEnv } from "../src/chat-stream.ts";
 import { mintSessionId } from "../src/session-id.ts";
 import { buildChatPlatformDeps } from "../src/platform-services.ts";
+import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { SYSTEM_PROMPT } from "../src/prompt.ts";
 
 /**
@@ -237,9 +238,9 @@ describe("handleChatStream (ai-sdk path)", () => {
 
   async function postChat(sessionId: string): Promise<Response> {
     const { dispatch, capture } = scriptedDispatch();
-    // buildChatPlatformDeps() with no init ctx → loopback baseline; override
-    // dispatch with the scripted one (init would otherwise supply in-process).
-    const deps = { ...buildChatPlatformDeps(), dispatch };
+    // Real platform deps (the same context `init()` gets), with dispatch
+    // overridden by the scripted one so no request leaves this process.
+    const deps = { ...buildChatPlatformDeps(buildModuleInitContext()), dispatch };
     const app = buildApp(deps);
     const res = await app.request("/api/chat", {
       method: "POST",

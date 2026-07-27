@@ -104,47 +104,25 @@ export interface ChatPlatformDeps {
  * Build the immutable deps object from the module init context. Called once in
  * `chatModule.init(ctx)`.
  *
- * `ctx` is optional for the TEST HARNESS ONLY, which mounts the router
- * directly: the module loader registers a module only after `init()` returns,
- * so production always has a context. The no-context deps degrade to loopback
- * `fetch` dispatch, a pass-through rate limiter, no subscription support (every
- * provider falls through to the ai-sdk path) and — silently — no admission gate
- * and no document teardown. Removal is tracked in GitHub issue #989.
+ * `ctx` is REQUIRED. It used to be optional, for the apps/api test harness,
+ * which mounted this router without ever running `init()`. That fallback
+ * silently degraded two post-incident guards — the #968/#971 admission gate
+ * (fail-open `null`) and the #965 document teardown (no-op) — so any test that
+ * believed it exercised them exercised nothing (issue #989). The harness now
+ * runs the real `init()` pipeline, so nothing needs the degraded baseline and
+ * a missing context can no longer be mistaken for a working one.
  */
-/** Pass-through limiter used when no init context supplied a real one. */
-const passThroughRateLimit: MiddlewareHandler = (_c, next) => next();
-
-export function buildChatPlatformDeps(ctx?: ModuleInitContext): ChatPlatformDeps {
-  const inProcess = ctx?.services.inProcess ?? null;
+export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps {
+  const inProcess = ctx.services.inProcess ?? null;
   return {
     dispatch: (request) => (inProcess ? inProcess.dispatch(request) : fetch(request)),
-    rateLimit: (maxPerMinute) =>
-      ctx ? ctx.services.http.rateLimit(maxPerMinute) : passThroughRateLimit,
+    rateLimit: (maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute),
     resolveSubscriptionChatModel: (orgId, presetId) =>
-      ctx
-        ? ctx.services.resolveSubscriptionChatModel(orgId, presetId)
-        : // No init context (test harness) → no subscription
-          // resolution surface; treat every model as a non-subscription (ai-sdk)
-          // provider, the same safe baseline this module had before.
-          Promise.resolve({ subscription: false }),
-    recordChatUsage: (record) => (ctx ? ctx.services.recordChatUsage(record) : Promise.resolve()),
-    resolveChatAttachment: (request) =>
-      ctx
-        ? ctx.services.resolveChatAttachment(request)
-        : // No init context (test harness) → no document store
-          // surface. Text-only turns never reach here; an attachment turn without
-          // the platform wired is a genuine misconfiguration.
-          Promise.reject(new Error("chat attachments require the platform document service")),
+      ctx.services.resolveSubscriptionChatModel(orgId, presetId),
+    recordChatUsage: (record) => ctx.services.recordChatUsage(record),
+    resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
     cleanupSessionDocuments: (chatSessionId, tx) =>
-      ctx
-        ? ctx.services.cleanupSessionDocuments(chatSessionId, tx)
-        : // No init context (test harness) → no document store
-          // surface; session delete proceeds without document teardown (the FK
-          // cascade still removes any rows). Safe no-op baseline.
-          Promise.resolve(),
-    // No init context (test harness) → no admission gate wired;
-    // allow the turn (null), the same safe baseline as before this seam existed.
-    checkUsageAllowed: (args) =>
-      ctx ? ctx.services.checkUsageAllowed(args) : Promise.resolve(null),
+      ctx.services.cleanupSessionDocuments(chatSessionId, tx),
+    checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
   };
 }

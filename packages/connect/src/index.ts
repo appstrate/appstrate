@@ -44,8 +44,8 @@ export {
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
-  normalizeAuthScheme,
-  normalizeAuthSchemeOnHeaders,
+  normalizeAuthSchemeTemplate,
+  normalizeAuthSchemeTemplates,
 } from "./proxy-primitives.ts";
 export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 

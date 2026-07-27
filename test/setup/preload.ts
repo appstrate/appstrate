@@ -357,11 +357,29 @@ for (const { dir: moduleDir, entry: indexFile } of moduleEntries) {
 // cast needed at this layer. Subsequent `getTestApp({ modules })` calls
 // reuse this singleton so strategy tests and E2E OAuth flow tests see a
 // coherent auth surface with no double-initialization cost.
-const { collectModuleContributions, emitEvent } =
+const { collectModuleContributions, emitEvent, loadModulesFromInstances } =
   await import("../../apps/api/src/lib/modules/module-loader.ts");
 const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/src/auth.ts");
 const contributions = collectModuleContributions(importedModules);
 createAuth(contributions.betterAuthPlugins as Parameters<typeof createAuth>[0]);
+
+// Phase 3: run each module's `init(ctx)` — the same topo-sorted pipeline
+// production uses, via the entry point that exists for exactly this
+// (`loadModulesFromInstances`, "for tests"). The harness used to skip it and
+// call `createRouter()` straight off the discovered module (issue #989), so
+// every module served requests against whatever degraded baseline its
+// no-context fallback supplied — for chat that meant the #968/#971 admission
+// gate answering `null` (fail-open) and the #965 document teardown resolving
+// to a no-op. Tests believed they exercised two post-incident guards that
+// were not wired at all, and would have kept passing if either were deleted.
+//
+// Order matters: this must run AFTER `createAuth()` (a module's `init` may
+// call into the auth singleton, as OIDC's instance-client provisioning does)
+// and BEFORE any `getTestApp()` call, which is why it lives in the preload
+// rather than in the app helper — `getTestApp()` is synchronous and hundreds
+// of call sites depend on that.
+const { buildModuleInitContext } = await import("../../apps/api/src/lib/modules/registry.ts");
+await loadModulesFromInstances(importedModules, buildModuleInitContext());
 
 // Mirror the production post-bootstrap wiring (boot.ts) so the bootstrap
 // after-hook does the same provisioning under test as it does in prod.

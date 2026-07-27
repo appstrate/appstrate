@@ -23,16 +23,14 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
           headers: { "Content-Type": "application/json" },
         }),
     ) as unknown as typeof fetch,
-    fetchCredentials: mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "tok-123" },
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    ),
+    fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "tok-123" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    })),
     reportedAuthFailures: new Set<string>(),
     // Deterministic public answer so the SSRF DNS-rebind layer never
     // does real DNS in tests. Rebind-specific tests override this.
@@ -135,6 +133,81 @@ describe("executeApiCall — happy path", () => {
   });
 });
 
+describe("executeApiCall — auth-scheme template repair (#988)", () => {
+  /** Credentials that put a RAW secret in `Authorization` (no prefix). */
+  function rawSecretDeps(secret: string, fetchFn: ReturnType<typeof mock>) {
+    return makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { api_key: secret },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialFieldName: "api_key",
+      })),
+    });
+  }
+
+  function sentAuthHeader(fetchFn: ReturnType<typeof mock>): string | undefined {
+    const init = fetchFn.mock.calls[0]![1] as RequestInit & { headers: Record<string, string> };
+    return init.headers["Authorization"];
+  }
+
+  // These three values are exactly what the old resolved-value regex
+  // corrupted: it injected a space mid-token and the upstream answered 401.
+  for (const secret of ["basically_a_key_123", "tokenlive_sk_123", "bearerXYZ"]) {
+    it(`forwards the raw secret "${secret}" byte-identical`, async () => {
+      const fetchFn = mock(async () => new Response("{}", { status: 200 }));
+      const result = await executeApiCall(
+        {
+          integrationId: "gmail",
+          targetUrl: "https://api.example.com/x",
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        rawSecretDeps(secret, fetchFn),
+      );
+      expect(result.ok).toBe(true);
+      expect(sentAuthHeader(fetchFn)).toBe(secret);
+    });
+  }
+
+  it("leaves a bare {{placeholder}} resolving to a scheme-prefixed secret untouched", async () => {
+    const fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        // Caller-supplied header wins over the server injection, so this is
+        // the model-written path from `CREDENTIAL_PROXY_INPUT_SCHEMA`.
+        callerHeaders: { Authorization: "{{api_key}}" },
+        body: { kind: "none" },
+      },
+      rawSecretDeps("tokenlive_sk_123", fetchFn),
+    );
+    expect(result.ok).toBe(true);
+    expect(sentAuthHeader(fetchFn)).toBe("tokenlive_sk_123");
+  });
+
+  it("still repairs the authoring defect it exists for: Bearer{{access_token}}", async () => {
+    const fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: { Authorization: "Bearer{{access_token}}" },
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+    );
+    expect(result.ok).toBe(true);
+    expect(sentAuthHeader(fetchFn)).toBe("Bearer tok-123");
+  });
+});
+
 describe("executeApiCall — 401 retry path", () => {
   it("refreshes credentials and replays the buffered request once", async () => {
     let callCount = 0;
@@ -151,16 +224,14 @@ describe("executeApiCall — 401 retry path", () => {
         headers: { "Content-Type": "application/json" },
       });
     });
-    const refreshCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "tok-fresh" },
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    );
+    const refreshCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "tok-fresh" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    }));
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       refreshCredentials,
@@ -221,16 +292,14 @@ describe("executeApiCall — 401 retry path", () => {
       if (target.startsWith("https://api.example.com")) upstreamCalls += 1;
       return new Response("expired", { status: 401 });
     });
-    const refreshCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "tok-fresh" },
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    );
+    const refreshCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "tok-fresh" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    }));
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       refreshCredentials,
@@ -471,19 +540,17 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
       }
       return new Response("ok", { status: 200 });
     });
-    const fetchCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "secret-token" },
-        // The follower only validates the initial URL — the destination
-        // origin is whatever the attacker-controlled redirect points at.
-        // We rely on cross-origin header stripping for defence in depth.
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: true,
-        credentialHeaderName: "X-Api-Key",
-        credentialHeaderPrefix: "",
-        credentialFieldName: "access_token",
-      }),
-    );
+    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "secret-token" },
+      // The follower only validates the initial URL — the destination
+      // origin is whatever the attacker-controlled redirect points at.
+      // We rely on cross-origin header stripping for defence in depth.
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: true,
+      credentialHeaderName: "X-Api-Key",
+      credentialHeaderPrefix: "",
+      credentialFieldName: "access_token",
+    }));
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       fetchCredentials,
@@ -780,16 +847,14 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       });
       // allowAllUris: true to prove the SSRF gate fires even without
       // an allowlist refusing the target.
-      const fetchCredentials = mock(
-        async (): Promise<CredentialsResponse> => ({
-          credentials: { access_token: "tok" },
-          authorizedUris: null,
-          allowAllUris: true,
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer",
-          credentialFieldName: "access_token",
-        }),
-      );
+      const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok" },
+        authorizedUris: null,
+        allowAllUris: true,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialFieldName: "access_token",
+      }));
       const deps = makeDeps({
         fetchFn: fetchFn as unknown as typeof fetch,
         fetchCredentials,
@@ -870,16 +935,14 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       }
       return new Response("payload", { status: 200 });
     });
-    const fetchCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "dbx-token" },
-        authorizedUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    );
+    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "dbx-token" },
+      authorizedUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    }));
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       fetchCredentials,
@@ -920,16 +983,14 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       }
       return new Response("ok", { status: 200 });
     });
-    const fetchCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "secret" },
-        authorizedUris: null,
-        allowAllUris: true,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    );
+    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "secret" },
+      authorizedUris: null,
+      allowAllUris: true,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    }));
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       fetchCredentials,
@@ -1155,16 +1216,14 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
       }
       return new Response("ok", { status: 200 });
     });
-    const refreshCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "tok-fresh" },
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    );
+    const refreshCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "tok-fresh" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    }));
     const deps = makeDeps({
       fetchFn: fetchFn as unknown as typeof fetch,
       refreshCredentials,
@@ -1306,16 +1365,14 @@ describe("executeApiCall — debug diagnostic envelope (#404)", () => {
   });
 
   it("labels authMode 'none' and urlPolicy 'allow_all' when no header is injected", async () => {
-    const fetchCredentials = mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: {},
-        authorizedUris: null,
-        allowAllUris: true,
-        // No credentialHeaderName → no server-side injection (authMode "none").
-        // credentialFieldName is always populated server-side regardless.
-        credentialFieldName: "access_token",
-      }),
-    );
+    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: {},
+      authorizedUris: null,
+      allowAllUris: true,
+      // No credentialHeaderName → no server-side injection (authMode "none").
+      // credentialFieldName is always populated server-side regardless.
+      credentialFieldName: "access_token",
+    }));
     const records = await captureLogs("debug", async () => {
       const r = await call(makeDeps({ fetchCredentials }));
       expect(r.ok).toBe(true);
@@ -1341,27 +1398,23 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
       deps,
     );
 
-  const ssrfGuardCreds = mock(
-    async (): Promise<CredentialsResponse> => ({
-      credentials: { access_token: "tok" },
-      authorizedUris: null,
-      allowAllUris: false,
-      credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
-      credentialFieldName: "access_token",
-    }),
-  );
+  const ssrfGuardCreds = mock(async (): Promise<CredentialsResponse> => ({
+    credentials: { access_token: "tok" },
+    authorizedUris: null,
+    allowAllUris: false,
+    credentialHeaderName: "Authorization",
+    credentialHeaderPrefix: "Bearer",
+    credentialFieldName: "access_token",
+  }));
 
-  const allowAllCreds = mock(
-    async (): Promise<CredentialsResponse> => ({
-      credentials: { access_token: "tok" },
-      authorizedUris: null,
-      allowAllUris: true,
-      credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
-      credentialFieldName: "access_token",
-    }),
-  );
+  const allowAllCreds = mock(async (): Promise<CredentialsResponse> => ({
+    credentials: { access_token: "tok" },
+    authorizedUris: null,
+    allowAllUris: true,
+    credentialHeaderName: "Authorization",
+    credentialHeaderPrefix: "Bearer",
+    credentialFieldName: "access_token",
+  }));
 
   for (const [label, fetchCredentials] of [
     ["ssrf_guard (no allowlist)", ssrfGuardCreds],
@@ -1453,16 +1506,14 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const result = await call(
       makeDeps({
         fetchFn: fetchFn as unknown as typeof fetch,
-        fetchCredentials: mock(
-          async (): Promise<CredentialsResponse> => ({
-            credentials: { access_token: "tok" },
-            authorizedUris: ["https://intranet.corp.example/**"],
-            allowAllUris: false,
-            credentialHeaderName: "Authorization",
-            credentialHeaderPrefix: "Bearer",
-            credentialFieldName: "access_token",
-          }),
-        ),
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "tok" },
+          authorizedUris: ["https://intranet.corp.example/**"],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
+        })),
         resolveHost: async () => ["10.0.0.5"],
       }),
       "https://intranet.corp.example/api/x",
@@ -1483,16 +1534,14 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
       const result = await call(
         makeDeps({
           fetchFn: fetchFn as unknown as typeof fetch,
-          fetchCredentials: mock(
-            async (): Promise<CredentialsResponse> => ({
-              credentials: { access_token: "tok" },
-              authorizedUris: [pattern],
-              allowAllUris: false,
-              credentialHeaderName: "Authorization",
-              credentialHeaderPrefix: "Bearer",
-              credentialFieldName: "access_token",
-            }),
-          ),
+          fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+            credentials: { access_token: "tok" },
+            authorizedUris: [pattern],
+            allowAllUris: false,
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Bearer",
+            credentialFieldName: "access_token",
+          })),
           resolveHost: async () => ["169.254.169.254"],
         }),
         "https://rebind.example.com/x",
@@ -1511,16 +1560,14 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const result = await call(
       makeDeps({
         fetchFn: fetchFn as unknown as typeof fetch,
-        fetchCredentials: mock(
-          async (): Promise<CredentialsResponse> => ({
-            credentials: { access_token: "tok" },
-            authorizedUris: ["https://**"],
-            allowAllUris: false,
-            credentialHeaderName: "Authorization",
-            credentialHeaderPrefix: "Bearer",
-            credentialFieldName: "access_token",
-          }),
-        ),
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "tok" },
+          authorizedUris: ["https://**"],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
+        })),
         resolveHost: async () => ["203.0.113.7"],
       }),
       "https://anything.example.net/x",
@@ -1535,16 +1582,14 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const resolveHost = mock(async () => ["203.0.113.7"]);
     const result = await call(
       makeDeps({
-        fetchCredentials: mock(
-          async (): Promise<CredentialsResponse> => ({
-            credentials: { access_token: "tok" },
-            authorizedUris: ["https://**"],
-            allowAllUris: false,
-            credentialHeaderName: "Authorization",
-            credentialHeaderPrefix: "Bearer",
-            credentialFieldName: "access_token",
-          }),
-        ),
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "tok" },
+          authorizedUris: ["https://**"],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer",
+          credentialFieldName: "access_token",
+        })),
         resolveHost,
       }),
       "https://169.254.169.254/latest/meta-data",

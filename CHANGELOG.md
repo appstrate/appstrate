@@ -15,6 +15,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A raw credential starting with a scheme name was silently corrupted before
+  it reached the upstream (#988)** — `normalizeAuthScheme` ran on the RESOLVED
+  `Authorization` value, after credential injection, so its
+  `/^(Bearer|Basic|Token)(?=[^\s])/i` matched any secret whose first bytes spell
+  a scheme name and injected a space mid-token: `basically_a_key_123` went out
+  as `basic ally_a_key_123`, `tokenlive_sk_123` as `token live_sk_123`. The
+  upstream answered 401 and nothing logged the rewrite, so a platform-side
+  mutation looked like the user's credential being invalid. Two live paths could
+  put a bare secret there: an integration declaring `credential_header_name:
+"Authorization"` with no prefix, and a model writing `Authorization:
+"{{api_key}}"` through the free-form `api_call` headers surface. The repair
+  now runs on the caller TEMPLATE before substitution, anchored on `{{`
+  (`Bearer{{access_token}}` → `Bearer {{access_token}}`), which covers the
+  authoring defect it exists for with no false positives — a template is never a
+  secret. The post-injection pass is gone from both entrypoints; it could never
+  have repaired the declarative path anyway, since
+  `buildInjectedCredentialHeader` builds `${prefix} ${token}` itself and so
+  always had its space. There, the pass could only ever corrupt.
+
+- **63 system packages shipped fixes production never served (#928)** —
+  production logged 63 `level:50` "System package content changed without a
+  version bump" errors at every boot since beta.39. The guard is correct — it
+  refuses to overwrite a published, immutable version — and the consequence was
+  that source changes to those packages were inert in production, including
+  #907 (clickup/gmail/github MCP tool-policy sync) and #927
+  (`clickup_download_task_attachment`): both shipped, neither ever live. Which
+  packages drifted was measured, not inferred: `zipArtifact` is deterministic
+  (sorted keys, fixed mtime), so each committed archive must still equal its
+  bytes at the commit that minted its version. Byte-comparing all 66 gives 63
+  drifted and 3 clean, and the 3 clean ones are exactly the 3 production does
+  not report. Each of the 63 gets a patch bump, so `syncCanonical` (highest
+  semver) makes the corrected content canonical on the next boot. Nothing is
+  destroyed: the immutable `1.0.0` rows stay for anything pinned to them, and
+  the sync prunes no versions. **Note for operators**: an install that pinned an
+  explicit `version_id` keeps resolving the old row until re-pinned; installs
+  that never pinned (`version_id` NULL, the default) pick up the new version
+  automatically.
+
+- **The test harness ran two post-incident guards as no-ops (#989)** — the
+  harness called `mod.createRouter?.()` straight off each discovered module, so
+  `init(ctx)` never ran and modules with a no-context fallback served every test
+  request against a degraded baseline. For chat that meant the #968/#971
+  admission gate answering `null` (fail-open) and the #965 document teardown
+  resolving to a no-op, so any test that believed it exercised either guard
+  exercised nothing and would have stayed green if the guard were deleted.
+  Production was never affected — `_modules.set(...)` runs only after
+  `await mod.init(ctx)` returns, and `registerModuleRoutes` iterates `_modules`
+  exclusively. The preload now runs the same topo-sorted init pipeline as
+  production, and with the harness at parity the chat fallback has no remaining
+  consumer: `buildChatPlatformDeps(ctx)` takes a required context and
+  `createRouter()` throws instead of serving a baseline that looks like it
+  works.
+
 - **`POST /api/packages/mcp-servers` published manifests no schema had ever
   accepted (#987)** — mcp-server is the only package type whose create reaches
   the `parsePackageUpload` branch, and that branch skipped validation two ways:

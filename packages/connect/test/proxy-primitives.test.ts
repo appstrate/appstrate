@@ -17,8 +17,8 @@ import {
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
-  normalizeAuthScheme,
-  normalizeAuthSchemeOnHeaders,
+  normalizeAuthSchemeTemplate,
+  normalizeAuthSchemeTemplates,
 } from "../src/proxy-primitives.ts";
 
 describe("substituteVars", () => {
@@ -273,52 +273,84 @@ describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
   });
 });
 
-describe("normalizeAuthScheme", () => {
-  it("adds a space after Bearer when missing", () => {
-    const headers = { Authorization: "Bearertoken" };
-    normalizeAuthScheme(headers);
-    expect(headers).toEqual({ Authorization: "Bearer token" });
+describe("normalizeAuthSchemeTemplate", () => {
+  it("adds a space between the scheme and a placeholder", () => {
+    expect(normalizeAuthSchemeTemplate("Authorization", "Bearer{{access_token}}")).toBe(
+      "Bearer {{access_token}}",
+    );
   });
 
   it("handles Basic and Token schemes", () => {
-    const h1 = { Authorization: "Basicdeadbeef" };
-    normalizeAuthScheme(h1);
-    expect(h1).toEqual({ Authorization: "Basic deadbeef" });
-
-    const h2 = { Authorization: "Tokenabc" };
-    normalizeAuthScheme(h2);
-    expect(h2).toEqual({ Authorization: "Token abc" });
+    expect(normalizeAuthSchemeTemplate("Authorization", "Basic{{creds}}")).toBe("Basic {{creds}}");
+    expect(normalizeAuthSchemeTemplate("Authorization", "Token{{api_key}}")).toBe(
+      "Token {{api_key}}",
+    );
   });
 
-  it("leaves well-formed schemes untouched", () => {
-    const headers = { Authorization: "Bearer abc" };
-    normalizeAuthScheme(headers);
-    expect(headers).toEqual({ Authorization: "Bearer abc" });
+  it("is case-insensitive on the scheme and preserves the caller's casing", () => {
+    expect(normalizeAuthSchemeTemplate("Authorization", "bearer{{access_token}}")).toBe(
+      "bearer {{access_token}}",
+    );
+  });
+
+  it("leaves well-formed templates untouched", () => {
+    expect(normalizeAuthSchemeTemplate("Authorization", "Bearer {{access_token}}")).toBe(
+      "Bearer {{access_token}}",
+    );
   });
 
   it("normalises Proxy-Authorization too", () => {
-    const headers = { "Proxy-Authorization": "Basicabc" };
-    normalizeAuthScheme(headers);
-    expect(headers).toEqual({ "Proxy-Authorization": "Basic abc" });
+    expect(normalizeAuthSchemeTemplate("Proxy-Authorization", "Basic{{creds}}")).toBe(
+      "Basic {{creds}}",
+    );
+  });
+
+  it("matches the header name case-insensitively", () => {
+    expect(normalizeAuthSchemeTemplate("authorization", "Bearer{{t}}")).toBe("Bearer {{t}}");
   });
 
   it("leaves non-auth headers untouched", () => {
-    const headers = { "X-Custom": "Bearertoken" };
-    normalizeAuthScheme(headers);
-    expect(headers).toEqual({ "X-Custom": "Bearertoken" });
+    expect(normalizeAuthSchemeTemplate("X-Custom", "Bearer{{t}}")).toBe("Bearer{{t}}");
+  });
+
+  // ─── #988 regressions ────────────────────────────────────────────────
+  // The repair is anchored on `{{`, so a literal secret can never be
+  // rewritten. These are the exact values that the old resolved-value
+  // regex corrupted into a 401.
+  it("does not touch a raw secret that starts with a scheme name", () => {
+    expect(normalizeAuthSchemeTemplate("Authorization", "basically_a_key_123")).toBe(
+      "basically_a_key_123",
+    );
+    expect(normalizeAuthSchemeTemplate("Authorization", "tokenlive_sk_123")).toBe(
+      "tokenlive_sk_123",
+    );
+    expect(normalizeAuthSchemeTemplate("Authorization", "bearerXYZ")).toBe("bearerXYZ");
+  });
+
+  it("does not touch a bare placeholder resolving to a scheme-prefixed secret", () => {
+    expect(normalizeAuthSchemeTemplate("Authorization", "{{api_key}}")).toBe("{{api_key}}");
   });
 });
 
-describe("normalizeAuthSchemeOnHeaders (Headers instance)", () => {
-  it("adds a space after Bearer on a Headers instance", () => {
-    const headers = new Headers({ Authorization: "Bearertoken" });
-    normalizeAuthSchemeOnHeaders(headers);
-    expect(headers.get("authorization")).toBe("Bearer token");
+describe("normalizeAuthSchemeTemplates (record)", () => {
+  it("repairs auth headers and passes the rest through", () => {
+    expect(
+      normalizeAuthSchemeTemplates({
+        Authorization: "Bearer{{access_token}}",
+        "X-Custom": "Bearer{{t}}",
+        Accept: "application/json",
+      }),
+    ).toEqual({
+      Authorization: "Bearer {{access_token}}",
+      "X-Custom": "Bearer{{t}}",
+      Accept: "application/json",
+    });
   });
 
-  it("leaves well-formed schemes untouched", () => {
-    const headers = new Headers({ Authorization: "Bearer abc" });
-    normalizeAuthSchemeOnHeaders(headers);
-    expect(headers.get("authorization")).toBe("Bearer abc");
+  it("does not mutate the caller's record", () => {
+    const input = { Authorization: "Bearer{{access_token}}" };
+    const out = normalizeAuthSchemeTemplates(input);
+    expect(input).toEqual({ Authorization: "Bearer{{access_token}}" });
+    expect(out).toEqual({ Authorization: "Bearer {{access_token}}" });
   });
 });

@@ -225,7 +225,7 @@ export {
   filterHeaders,
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
-  normalizeAuthScheme,
+  normalizeAuthSchemeTemplates,
 } from "@appstrate/connect/proxy-primitives";
 
 // `matchesAuthorizedUri` (`(url, patterns[])` allowlist check, AFPS spec

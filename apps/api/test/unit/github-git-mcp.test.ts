@@ -21,7 +21,20 @@ import { mkdtemp, rm, mkdir, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
+// Resolved, not hard-coded: the source directory carries the package version
+// in its name, so a static `…-1.0.0/server/index.ts` import breaks on every
+// version bump (it did, on the #928 drift bump). Pick whichever
+// `mcp-server-github-git-*` directory exists — the builder guarantees exactly
+// one per published version, and this suite tests the code, not the version.
+const { readdir } = await import("node:fs/promises");
+const SOURCES = join(import.meta.dir, "../../../../scripts/system-packages");
+const serverDir = (await readdir(SOURCES))
+  .filter((d) => d.startsWith("mcp-server-github-git-"))
+  .sort()
+  .at(-1);
+if (!serverDir) throw new Error("no mcp-server-github-git-* source directory found");
+
+const {
   resolveInWorkspace,
   assertSafeRefArg,
   handleRequest,
@@ -30,7 +43,7 @@ import {
   checkoutBranchTool,
   pushTool,
   classifyGitError,
-} from "../../../../scripts/system-packages/mcp-server-github-git-1.0.0/server/index.ts";
+} = await import(join(SOURCES, serverDir, "server/index.ts"));
 
 // ───────────────────────── resolveInWorkspace ─────────────────────────
 
