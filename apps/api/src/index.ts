@@ -58,6 +58,7 @@ import {
 } from "./lib/modules/module-loader.ts";
 import { ApiError, notFound } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
+import { idempotencyGuard } from "./middleware/idempotency-guard.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
@@ -244,6 +245,12 @@ app.use("*", async (c, next) => {
   if (!c.get("user")) return next();
   return apiVersionMiddleware(c, next);
 });
+
+// `Idempotency-Key` honesty guard — refuse the header on mutating routes that
+// do not honour it, rather than ignoring it. Mounted last in the pipeline so
+// auth/org/app failures still answer 401/403 first, and before every router
+// below so it covers all of `routes/` and the module routers.
+app.use("*", idempotencyGuard());
 
 // Boot phase 1 — migrations, modules, auth, fail-fast config validation.
 // Everything the route table's shape depends on. Phase 2 is kicked off after

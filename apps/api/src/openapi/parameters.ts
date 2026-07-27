@@ -58,7 +58,9 @@ export const parameters = {
     in: "header" as const,
     required: false,
     description:
-      "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours.",
+      "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. " +
+      "Only the operations that declare this parameter honour it — sending it to any other mutating operation is refused with " +
+      "`400 idempotency_not_supported` rather than silently ignored. Safe methods (GET/HEAD/OPTIONS) ignore it.",
     schema: { type: "string", maxLength: 255 },
   },
   SseAppId: {

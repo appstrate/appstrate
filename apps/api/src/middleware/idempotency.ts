@@ -20,15 +20,45 @@ import {
 const MAX_KEY_LENGTH = 255;
 
 /**
+ * Marker stamped on every middleware instance returned by `idempotency()`.
+ *
+ * This is what makes the mount site the single source of truth for "which
+ * operations honour `Idempotency-Key`". Hono exposes the full set of matched
+ * routes (and their handlers) to any middleware via `matchedRoutes()`, so
+ * `idempotencyGuard` can ask the router directly — "is an idempotency-aware
+ * handler part of this request's chain?" — instead of consulting a
+ * hand-maintained list that could drift away from the mounts.
+ *
+ * A symbol property rather than `handler.name`: names survive neither
+ * wrapping nor minification, a property does.
+ */
+const IDEMPOTENCY_AWARE = Symbol.for("appstrate.idempotencyAware");
+
+/**
+ * True when `handler` is a middleware produced by `idempotency()` — i.e. the
+ * route it is mounted on genuinely de-duplicates on `Idempotency-Key`.
+ */
+export function isIdempotencyAware(handler: unknown): boolean {
+  return (
+    typeof handler === "function" &&
+    (handler as unknown as Record<symbol, unknown>)[IDEMPOTENCY_AWARE] === true
+  );
+}
+
+/**
  * Idempotency middleware factory. Apply to POST routes that create resources.
  *
  * If `Idempotency-Key` header is absent, the request proceeds normally (opt-in).
+ *
+ * Mounting this middleware is also what *declares* the route as supporting the
+ * header: `idempotencyGuard` rejects the header on every other mutating route,
+ * and a drift test asserts the mount set matches the OpenAPI declarations.
  *
  * Note: control characters in headers are rejected at the HTTP layer (Request constructor),
  * so we only need to validate length here.
  */
 export function idempotency() {
-  return async (c: Context<AppEnv>, next: Next) => {
+  const middleware = async (c: Context<AppEnv>, next: Next) => {
     const key = c.req.header("Idempotency-Key");
     if (!key) return next();
 
@@ -131,4 +161,7 @@ export function idempotency() {
       bodyHash,
     });
   };
+
+  Object.defineProperty(middleware, IDEMPOTENCY_AWARE, { value: true });
+  return middleware;
 }
