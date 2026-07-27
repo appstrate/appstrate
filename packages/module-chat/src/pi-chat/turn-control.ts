@@ -1,108 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Turn-control primitives for the Pi subscription chat engine: what ends a turn,
- * and what the user is told about it.
+ * Step-cap control for the Pi subscription chat engine — the ONE guard that is
+ * genuinely Pi-specific.
  *
- * Two guards live here, both deliberately pure/injectable so they are unit
- * testable without a live model or a container:
+ * **Step cap ("early-stopping generate").** `CHAT_MAX_STEPS` used to be reported
+ * by this engine and never enforced. {@link createStepCapController} enforces it
+ * the way the ai-sdk engine does (`prepareAiSdkChatStep`): stop the tool loop at
+ * `CHAT_TOOL_STEP_BUDGET`, then issue exactly ONE more model call WITHOUT tools
+ * carrying `CHAT_FINAL_STEP_SYSTEM_PROMPT`, so the user gets a synthesis of the
+ * work already done instead of a truncated tool call. It is deliberately
+ * pure/injectable so it is unit testable without a live model or a container.
  *
- *  1. **Deadline vs explicit stop.** The engine folds a user stop and its
- *     wall-clock ceiling into a single `AbortController`. Tagging the deadline
- *     with {@link ChatTurnDeadlineError} is what lets the finish path tell them
- *     apart — a user stop is a normal ending (the user already knows), a
- *     deadline is a truncation the user must be told about, in a REAL text part
- *     (`text-start`/`text-delta`/`text-end`). An `error` chunk would not do:
- *     error chunks are transient and never become persisted message parts,
- *     which is exactly how a 10-minute turn once ended as an empty message.
- *
- *  2. **Step cap ("early-stopping generate").** `CHAT_MAX_STEPS` used to be
- *     reported by this engine and never enforced. {@link createStepCapController}
- *     enforces it the way the ai-sdk engine does (`prepareAiSdkChatStep`): stop
- *     the tool loop at `CHAT_TOOL_STEP_BUDGET`, then issue exactly ONE more
- *     model call WITHOUT tools carrying `CHAT_FINAL_STEP_SYSTEM_PROMPT`, so the
- *     user gets a synthesis of the work already done instead of a truncated
- *     tool call.
+ * The other guard that used to live here — deadline vs explicit stop, and the
+ * user-facing notice a deadline owes the user — is engine-neutral (both engines
+ * enforce the same ceiling and close the turn the same way) and now lives in
+ * `../turn-closure.ts`.
  */
 
-import type { UIMessageChunk } from "ai";
 import {
   CHAT_FINAL_STEP_SYSTEM_PROMPT,
   CHAT_TOOL_STEP_BUDGET,
-  type ChatTurnFinishReason,
 } from "@appstrate/core/chat-turn-metadata";
-
-/**
- * Abort reason marking the engine's wall-clock ceiling (as opposed to the user
- * pressing stop). Carries a structural brand as well as the class identity so
- * the check survives a duplicated module instance.
- */
-export class ChatTurnDeadlineError extends Error {
-  readonly chatTurnDeadline = true;
-
-  constructor(deadlineMs: number) {
-    super(`chat turn deadline (${deadlineMs} ms)`);
-    this.name = "ChatTurnDeadlineError";
-  }
-}
-
-/** Whether an abort reason is the turn deadline (and not an explicit stop). */
-export function isChatTurnDeadline(reason: unknown): boolean {
-  if (reason instanceof ChatTurnDeadlineError) return true;
-  return (
-    typeof reason === "object" &&
-    reason !== null &&
-    (reason as { chatTurnDeadline?: unknown }).chatTurnDeadline === true
-  );
-}
-
-/**
- * Decide how a turn closes: the finish reason to publish, and whether the
- * deadline notice must be written.
- *
- * A genuine engine failure wins over the deadline — an errored turn ALWAYS
- * surfaces its error (the engine's standing invariant), and claiming "time
- * limit" would hide the real cause.
- */
-export function resolveTurnClosure(input: {
-  aborted: boolean;
-  abortReason: unknown;
-  finishReason: ChatTurnFinishReason;
-}): { finishReason: ChatTurnFinishReason; deadlineReached: boolean } {
-  const deadlineReached =
-    input.aborted && isChatTurnDeadline(input.abortReason) && input.finishReason !== "error";
-  return {
-    finishReason: deadlineReached ? "deadline" : input.finishReason,
-    deadlineReached,
-  };
-}
-
-/**
- * User-facing notice for a turn cut by the deadline (French — this product's UI
- * language). Says what happened, that launched runs survive the turn, and how
- * to pick their results back up.
- */
-export function turnDeadlineNoticeText(deadlineMs: number): string {
-  const minutes = Math.max(1, Math.round(deadlineMs / 60_000));
-  return (
-    `⏱️ Ce tour a atteint sa limite de temps (${minutes} minutes) et a été interrompu ici.\n\n` +
-    `Les runs déjà lancés ne sont pas annulés : ils continuent de s'exécuter en arrière-plan. ` +
-    `Envoyez-moi un message pour que je récupère leurs résultats et reprenne le travail où il s'est arrêté.`
-  );
-}
-
-/**
- * A standalone text part written directly into the UI message stream. Unlike an
- * `error` chunk this becomes a persisted message part, so a reloaded
- * conversation still shows it.
- */
-export function turnNoticeChunks(id: string, text: string): UIMessageChunk[] {
-  return [
-    { type: "text-start", id },
-    { type: "text-delta", id, delta: text },
-    { type: "text-end", id },
-  ];
-}
 
 /** Partial override returned by pi-agent-core's `afterToolCall` hook. */
 export interface AfterToolCallOverride {
@@ -115,6 +34,35 @@ export interface AfterToolCallOverride {
    * because the budget is evaluated per batch, not per call.
    */
   terminate?: boolean;
+}
+
+/**
+ * Whether a finalized tool result carries a `connectOffer` — the typed payload
+ * the chat's connect card renders its button from.
+ *
+ * It matters here because pi-agent-core rebuilds a tool result as exactly
+ * `{content, details, terminate}` whenever `afterToolCall` returns a TRUTHY
+ * override (`agent-loop.js:408-415`), dropping every other field. `details` is
+ * redacted, so nothing falls back: terminating through this hook on a batch
+ * carrying an offer would strip the connect URL and leave the user a dead end
+ * at the exact moment the turn closes. `mcp-tools.ts` states that contract.
+ *
+ * `shouldStopAfterTurn` would stop the loop without rewriting any result, but
+ * it is unreachable from an `AgentSession`: `Agent.createLoopConfig` forwards
+ * `beforeToolCall`/`afterToolCall` only (`agent.js:288-289`), never that hook.
+ * So the offer's batch is let through untouched and the cap fires on the next
+ * one — at most one extra tool step, in a rare case.
+ */
+function carriesConnectOffer(context: unknown): boolean {
+  const result = (context as { result?: unknown } | null | undefined)?.result;
+  if (typeof result !== "object" || result === null) return false;
+  return (result as { connectOffer?: unknown }).connectOffer != null;
+}
+
+/** Batch identity: every tool call finalized in one batch shares its assistant message. */
+function batchKey(context: unknown): object | undefined {
+  const message = (context as { assistantMessage?: unknown } | null | undefined)?.assistantMessage;
+  return typeof message === "object" && message !== null ? message : undefined;
 }
 
 /** The slice of the Pi `AgentSession` the step cap drives. */
@@ -156,6 +104,11 @@ export function createStepCapController(options: {
   const budget = options.budget ?? CHAT_TOOL_STEP_BUDGET;
   const finalStepPrompt = options.finalStepPrompt ?? CHAT_FINAL_STEP_SYSTEM_PROMPT;
   let fired = false;
+  // Batches spared because one of their results carries a connect offer. Keyed
+  // by the shared assistant message so the whole batch is spared, not just the
+  // one call — `terminate` is only honoured when EVERY result in the batch sets
+  // it, so a split decision would leave `fired` true with the loop still running.
+  const sparedBatches = new WeakSet<object>();
 
   return {
     attach(session) {
@@ -165,6 +118,12 @@ export function createStepCapController(options: {
       session.agent.afterToolCall = async (context, signal) => {
         const override = await inner?.(context, signal);
         if (options.modelCallCount() < budget) return override;
+        // See `carriesConnectOffer`: terminating through this hook rebuilds the
+        // result and silently drops the offer, leaving the user a connect card
+        // with no URL. Spare the batch and cap on the next one.
+        const batch = batchKey(context);
+        if (carriesConnectOffer(context) && batch) sparedBatches.add(batch);
+        if (batch && sparedBatches.has(batch)) return override;
         fired = true;
         return { ...override, terminate: true };
       };

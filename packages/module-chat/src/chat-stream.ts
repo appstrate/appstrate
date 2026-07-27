@@ -21,9 +21,12 @@ import type { Context } from "hono";
 import {
   streamText,
   convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
   isStepCount,
   type FinishReason,
   type UIMessage,
+  type UIMessageChunk,
 } from "ai";
 import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
@@ -54,8 +57,15 @@ import {
   formatTurnBudgetNote,
   isFinalChatStep,
   mergeTurnMetadata,
-  type AppstrateTurnMetadata,
+  type ChatMessageMetadata,
+  type ChatTurnFinishReason,
 } from "@appstrate/core/chat-turn-metadata";
+import {
+  ChatTurnDeadlineError,
+  resolveTurnClosure,
+  turnDeadlineNoticeText,
+  turnNoticeChunks,
+} from "./turn-closure.ts";
 
 /**
  * RFC 9457 `401` returned when the chosen subscription model's oauth credential
@@ -248,6 +258,121 @@ function clientErrorMessage(error: unknown): string {
   if (!trimmed)
     return "Le modèle a échoué (erreur inconnue). Vérifiez la configuration des modèles de l'organisation.";
   return `Le modèle a échoué : ${trimmed.length > 400 ? `${trimmed.slice(0, 400)}…` : trimmed}`;
+}
+
+/** An armed turn ceiling: how the turn aborted, and how to cancel the timer. */
+export interface ArmedTurnDeadline {
+  /**
+   * The turn's abort reason. Read this instead of `signal.reason`: Bun 1.3 can
+   * garbage-collect a reason object whose only holder was the timer callback
+   * that aborted with it, leaving `signal.reason` `undefined` a tick later. A
+   * collected reason would silently downgrade the ceiling to an untagged stop —
+   * exactly the silent ending this path exists to prevent — so the ceiling's own
+   * error is retained here and returned once it has fired.
+   */
+  abortReason(): unknown;
+  /** Cancel the timer. MUST be called on every exit path of the turn. */
+  disarm(): void;
+}
+
+/**
+ * Arm a turn's wall-clock ceiling on an existing abort controller.
+ *
+ * The abort reason is TAGGED ({@link ChatTurnDeadlineError}) so the finish path
+ * can tell a ceiling apart from an explicit user stop. An armed timer that
+ * outlived its turn would abort a controller that no longer belongs to anything
+ * and keep the process awake for the rest of the ceiling — hence {@link
+ * ArmedTurnDeadline.disarm}.
+ */
+export function armTurnDeadline(
+  controller: AbortController,
+  deadlineAt: number,
+  deadlineMs: number = CHAT_TURN_DEADLINE_MS,
+): ArmedTurnDeadline {
+  const deadlineReason = new ChatTurnDeadlineError(deadlineMs);
+  let fired = false;
+  const timer = setTimeout(
+    () => {
+      fired = true;
+      controller.abort(deadlineReason);
+    },
+    Math.max(0, deadlineAt - Date.now()),
+  );
+  return {
+    abortReason: () => (fired ? deadlineReason : controller.signal.reason),
+    disarm: () => clearTimeout(timer),
+  };
+}
+
+/**
+ * Closes a deadline-killed ai-sdk turn the way the Pi engine closes one.
+ *
+ * The ceiling is enforced by aborting the turn's `generation` controller, and
+ * ai@7 answers an abort by emitting an `abort` chunk and closing the stream —
+ * it publishes NO `finish` part, so `messageMetadata` is never invoked and the
+ * turn would otherwise end with neither an explanation nor any metadata. That
+ * is the audited failure mode: an assistant message with ZERO parts.
+ *
+ * This passthrough sits between `toUIMessageStream()` and the writer, so the
+ * appended chunks are ordered in-band (a `flush` runs after the source closes
+ * and before the merged stream ends). It writes:
+ *
+ *  - a REAL text part (`turnNoticeChunks`) — an `error` chunk is transient and
+ *    never becomes a persisted message part, so it is invisible on reload;
+ *  - the `finish` chunk the SDK skipped, carrying `finishReason: "deadline"`.
+ *
+ * The precedence rule is NOT re-derived here: {@link resolveTurnClosure} owns
+ * it, so a genuine engine error still wins over the deadline.
+ */
+export function createTurnClosureStream(options: {
+  /** The turn's generation signal — aborted by the deadline timer or an explicit stop. */
+  signal: AbortSignal;
+  /**
+   * Why the turn aborted. Supplied rather than read off `signal.reason` — see
+   * {@link ArmedTurnDeadline.abortReason}. Defaults to `signal.reason`.
+   */
+  abortReason?: () => unknown;
+  /** Turn metadata for the synthesized `finish` chunk (same builder as the nominal path). */
+  buildMetadata: (finishReason: ChatTurnFinishReason) => ChatMessageMetadata;
+  /** Ceiling quoted to the user. Defaults to the shared turn deadline. */
+  deadlineMs?: number;
+  /** Notice part id (tests pin it). */
+  newId?: () => string;
+  /** Observability seam — called once when the deadline actually closed the turn. */
+  onDeadline?: () => void;
+}): TransformStream<UIMessageChunk, UIMessageChunk> {
+  const deadlineMs = options.deadlineMs ?? CHAT_TURN_DEADLINE_MS;
+  const newId = options.newId ?? (() => crypto.randomUUID());
+  // A turn that published its own `finish` closed on its own terms; an abort
+  // racing in just after it must not overwrite that ending with a truncation
+  // notice for work that in fact completed.
+  let sawFinish = false;
+  let sawError = false;
+  return new TransformStream<UIMessageChunk, UIMessageChunk>({
+    transform(chunk, controller) {
+      if (chunk.type === "finish") sawFinish = true;
+      if (chunk.type === "error") sawError = true;
+      controller.enqueue(chunk);
+    },
+    flush(controller) {
+      const closure = resolveTurnClosure({
+        aborted: !sawFinish && options.signal.aborted,
+        abortReason: options.abortReason ? options.abortReason() : options.signal.reason,
+        // An aborted stream publishes no finish part, so the only finish reason
+        // observable at this point is the failure the SDK streamed inline.
+        finishReason: sawError ? "error" : "unknown",
+      });
+      if (!closure.deadlineReached) return;
+      options.onDeadline?.();
+      for (const chunk of turnNoticeChunks(newId(), turnDeadlineNoticeText(deadlineMs))) {
+        controller.enqueue(chunk);
+      }
+      controller.enqueue({
+        type: "finish",
+        messageMetadata: options.buildMetadata(closure.finishReason),
+      });
+    },
+  });
 }
 
 export async function handleChatStream(
@@ -532,6 +657,19 @@ export async function handleChatStream(
   const generation = new AbortController();
   registerStopController(streamId, generation);
 
+  // The turn's wall-clock ceiling, ARMED (the ai-sdk path arms it just before
+  // `streamText`; the Pi engine owns its own timer). `turnDeadlineAt` was
+  // already handed to every child call as their budget — without a timer here
+  // nothing would end the turn at that instant, so a `run_and_wait` refused for
+  // being past the deadline had no turn-ending event to follow it: the run kept
+  // going with nowhere to be announced, and every remaining step answered
+  // "relaunch next turn" forever. The abort is TAGGED so the finish path can
+  // tell it apart from an explicit stop (see `resolveTurnClosure`).
+  let armedDeadline: ArmedTurnDeadline | undefined;
+  const clearDeadline = (): void => {
+    armedDeadline?.disarm();
+  };
+
   // Tee the engine stream into a resumable producer (decoupled from the client)
   // and persist the assistant turn when it finalizes — both run to completion
   // regardless of the client; the persist task is tracked for graceful shutdown.
@@ -546,6 +684,7 @@ export async function handleChatStream(
           ? (assistant, parentId) => persistAssistantMessage(sessionId, assistant, parentId)
           : undefined,
       onSettled: () => {
+        clearDeadline();
         unregisterStopController(streamId);
         // Fire-and-forget teardown — swallow rejections so a failed DB update or
         // MCP close can't surface as an unhandled rejection.
@@ -559,6 +698,7 @@ export async function handleChatStream(
   // stop controller, clear the in-flight marker (else the session is stuck
   // "generating" with a dead stream id), and close MCP.
   const failCleanup = async () => {
+    clearDeadline();
     unregisterStopController(streamId);
     if (sessionId) await clearActiveStream(sessionId, streamId).catch(() => {});
     await closeMcp();
@@ -640,6 +780,14 @@ export async function handleChatStream(
     const modelMessages = await convertToModelMessages(messagesWithAttachmentsAsText(messages), {
       tools: mcp ? mcp.tools : undefined,
     });
+
+    // Arm the ceiling. Only on this path: the Pi engine owns (and clears) its
+    // own timer, so arming here too would double it. Cleared by `clearDeadline`
+    // on every exit — `finalize`'s `onSettled` on the nominal path, `failCleanup`
+    // on the failure paths — so it never outlives the turn.
+    const turnDeadline = armTurnDeadline(generation, turnDeadlineAt);
+    armedDeadline = turnDeadline;
+
     const result = streamText({
       model,
       // System rides via the canonical `instructions` field as a cache-controlled
@@ -715,32 +863,64 @@ export async function handleChatStream(
       },
     });
 
+    // ONE metadata builder for both the nominal `finish` part and the one the
+    // closure stream synthesizes when the deadline fired (ai@7 publishes no
+    // `finish` on an abort) — so a deadline-killed turn reports the same step
+    // counters as any other, with `finishReason: "deadline"`.
+    const buildTurnMetadata = (finishReason: ChatTurnFinishReason): ChatMessageMetadata =>
+      mergeTurnMetadata(undefined, {
+        engine: "ai-sdk",
+        finishReason,
+        stepCount: completedSteps,
+        maxSteps: CHAT_MAX_STEPS,
+        toolStepBudget: CHAT_TOOL_STEP_BUDGET,
+        toolStepBudgetReached,
+        maxStepsReached: completedSteps >= CHAT_MAX_STEPS,
+        ...(lastToolName ? { lastToolName } : {}),
+      });
+
     // NOTE: no client-disconnect → closeMcp listener. Generation now outlives the
     // connection (resumable producer), so MCP must stay open until the stream
     // finalizes; `finalize` closes it once persistence completes.
-    // Surface the real failure to the client (AI SDK masks errors otherwise).
-    return await finalize(
-      result.toUIMessageStreamResponse({
-        onError: clientErrorMessage,
-        // Emit a real assistant message id in the stream so the client and the
-        // server-side persist agree on it (and never collide on an empty id).
-        generateMessageId: () => crypto.randomUUID(),
-        messageMetadata: ({ part }) => {
-          if (part.type !== "finish") return undefined;
-          const turn: AppstrateTurnMetadata = {
-            engine: "ai-sdk",
-            finishReason: part.finishReason ?? aiSdkFinishReason,
-            stepCount: completedSteps,
-            maxSteps: CHAT_MAX_STEPS,
-            toolStepBudget: CHAT_TOOL_STEP_BUDGET,
-            toolStepBudgetReached,
-            maxStepsReached: completedSteps >= CHAT_MAX_STEPS,
-            ...(lastToolName ? { lastToolName } : {}),
-          };
-          return mergeTurnMetadata(undefined, turn);
-        },
-      }),
-    );
+    //
+    // The result no longer goes straight to `toUIMessageStreamResponse`: it is
+    // merged into a `createUIMessageStream` so the deadline notice can be
+    // appended as a REAL text part. `toUIMessageStreamResponse` is exactly
+    // `createUIMessageStreamResponse({ stream: toUIMessageStream(...) })`, so
+    // the nominal wire output is unchanged.
+    const uiStream = createUIMessageStream({
+      onError: clientErrorMessage,
+      execute: ({ writer }) => {
+        writer.merge(
+          result
+            .toUIMessageStream({
+              // Surface the real failure to the client (AI SDK masks errors otherwise).
+              onError: clientErrorMessage,
+              // Emit a real assistant message id in the stream so the client and the
+              // server-side persist agree on it (and never collide on an empty id).
+              generateMessageId: () => crypto.randomUUID(),
+              messageMetadata: ({ part }) =>
+                part.type === "finish"
+                  ? buildTurnMetadata(part.finishReason ?? aiSdkFinishReason)
+                  : undefined,
+            })
+            .pipeThrough(
+              createTurnClosureStream({
+                signal: generation.signal,
+                abortReason: () => turnDeadline.abortReason(),
+                buildMetadata: buildTurnMetadata,
+                onDeadline: () =>
+                  logger.warn("chat turn deadline reached", {
+                    chatSessionId: meteringSessionId,
+                    steps: completedSteps,
+                    deadlineMs: CHAT_TURN_DEADLINE_MS,
+                  }),
+              }),
+            ),
+        );
+      },
+    });
+    return await finalize(createUIMessageStreamResponse({ stream: uiStream }));
   } catch (err) {
     await failCleanup();
     throw err;

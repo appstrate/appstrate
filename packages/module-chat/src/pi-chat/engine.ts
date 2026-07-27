@@ -44,14 +44,13 @@ import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
 import { acquirePiChatSlot, chatCapacityResponse, releaseOnClose } from "./concurrency.ts";
+import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {
   ChatTurnDeadlineError,
-  createStepCapController,
   resolveTurnClosure,
   turnDeadlineNoticeText,
   turnNoticeChunks,
-  type PiChatSession,
-} from "./turn-control.ts";
+} from "../turn-closure.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to

@@ -7,15 +7,17 @@ import {
   CHAT_TOOL_STEP_BUDGET,
 } from "@appstrate/core/chat-turn-metadata";
 import {
-  ChatTurnDeadlineError,
   createStepCapController,
+  type AfterToolCallOverride,
+  type PiChatToolLoopSession,
+} from "../src/pi-chat/turn-control.ts";
+import {
+  ChatTurnDeadlineError,
   isChatTurnDeadline,
   resolveTurnClosure,
   turnDeadlineNoticeText,
   turnNoticeChunks,
-  type AfterToolCallOverride,
-  type PiChatToolLoopSession,
-} from "../src/pi-chat/turn-control.ts";
+} from "../src/turn-closure.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 
 const TEN_MINUTES = 10 * 60_000;
