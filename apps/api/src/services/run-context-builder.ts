@@ -20,6 +20,7 @@ import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
+import type { ModelCost } from "@appstrate/core/module";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
@@ -113,6 +114,7 @@ export async function buildRunContext(params: {
   proxyLabel: string | null;
   modelLabel: string | null;
   modelSource: string | null;
+  modelCost: ModelCost | null;
 }> {
   const { runId, agent, orgId, applicationId, actor, input, files } = params;
 
@@ -193,6 +195,14 @@ export async function buildRunContext(params: {
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
   const modelSource = modelResult.isSystemModel ? "system" : "org";
+  // The rates the run LAUNCHES with — the same object `buildRuntimePiEnv`
+  // serialises into `MODEL_COST`. Persisted on `runs.model_cost` so the runner's
+  // ledger row can be classified server-side: the container reports the cost, so
+  // only a platform-side snapshot can say whether that number was backed by real
+  // rates. `null` when the model resolved to none (catalog miss + no
+  // `org_models.cost` override) — which is exactly the run whose `$0.00` would
+  // otherwise read as "free".
+  const modelCost = modelResult.cost ?? null;
 
   // Step 3: resolve the persisted version display fields.
   let versionLabel: string | null = params.overrideVersionLabel ?? null;
@@ -261,5 +271,6 @@ export async function buildRunContext(params: {
     proxyLabel,
     modelLabel,
     modelSource,
+    modelCost,
   };
 }

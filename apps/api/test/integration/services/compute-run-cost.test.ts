@@ -17,7 +17,8 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
-import { computeRunCost } from "../../../src/services/state/runs.ts";
+import { computeRunCost, computeRunPricingStatus } from "../../../src/services/state/runs.ts";
+import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 
 describe("computeRunCost — remote-run mirror exclusion", () => {
   let ctx: TestContext;
@@ -49,6 +50,7 @@ describe("computeRunCost — remote-run mirror exclusion", () => {
       inputTokens: 10,
       outputTokens: 10,
       costUsd: 0.01,
+      pricingStatus: "priced" as const,
       requestId: "req_runcost_1",
     });
     await recordLlmUsage({
@@ -59,6 +61,7 @@ describe("computeRunCost — remote-run mirror exclusion", () => {
       inputTokens: 10,
       outputTokens: 10,
       costUsd: 0.01,
+      pricingStatus: "priced" as const,
       requestId: "req_runcost_2",
     });
     await recordLlmUsage(
@@ -70,6 +73,7 @@ describe("computeRunCost — remote-run mirror exclusion", () => {
         inputTokens: 20,
         outputTokens: 20,
         costUsd: 0.02,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -90,6 +94,7 @@ describe("computeRunCost — remote-run mirror exclusion", () => {
       inputTokens: 10,
       outputTokens: 10,
       costUsd: 0.01,
+      pricingStatus: "priced" as const,
       requestId: "req_runcost_platform",
     });
     await recordLlmUsage(
@@ -101,6 +106,7 @@ describe("computeRunCost — remote-run mirror exclusion", () => {
         inputTokens: 20,
         outputTokens: 20,
         costUsd: 0.03,
+        pricingStatus: "priced" as const,
         durationMs: 1,
       },
       { onConflict: "runner-monotonic" },
@@ -122,6 +128,7 @@ describe("computeRunCost — remote-run mirror exclusion", () => {
         inputTokens: 20,
         outputTokens: 20,
         costUsd: 0.05,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -139,6 +146,7 @@ describe("computeRunCost — remote-run mirror exclusion", () => {
       inputTokens: 10,
       outputTokens: 10,
       costUsd: 0.012,
+      pricingStatus: "priced" as const,
       requestId: "req_runcost_p1",
     });
     await recordLlmUsage({
@@ -149,6 +157,7 @@ describe("computeRunCost — remote-run mirror exclusion", () => {
       inputTokens: 10,
       outputTokens: 10,
       costUsd: 0.008,
+      pricingStatus: "priced" as const,
       requestId: "req_runcost_p2",
     });
 
@@ -158,5 +167,107 @@ describe("computeRunCost — remote-run mirror exclusion", () => {
   it("returns 0 for a run with no ledger rows", async () => {
     const run = await seedTestRun();
     expect(await computeRunCost(run.id, ctx.orgId)).toBe(0);
+  });
+});
+
+/**
+ * `computeRunPricingStatus` — the companion read that qualifies the number
+ * above. It must aggregate the WORST verdict over EXACTLY the rows
+ * `computeRunCost` sums: a status computed over a different row set could mark
+ * a total `priced` on the strength of a row that total does not contain.
+ */
+describe("computeRunPricingStatus — worst-of over the same rows as the cost", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "runstatus" });
+    await seedAgent({ id: "@runstatus/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+  });
+
+  async function seedTestRun() {
+    return seedRun({
+      packageId: "@runstatus/agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "success",
+    });
+  }
+
+  async function proxyRow(runId: string, pricingStatus: TokenPricingStatus | null) {
+    await recordLlmUsage({
+      source: "proxy",
+      orgId: ctx.orgId,
+      runId,
+      credentialSource: "system",
+      inputTokens: 10,
+      outputTokens: 10,
+      costUsd: 0.01,
+      pricingStatus,
+      requestId: `req_status_${crypto.randomUUID()}`,
+    });
+  }
+
+  it("any unpriced row wins", async () => {
+    const run = await seedTestRun();
+    await proxyRow(run.id, "priced");
+    await proxyRow(run.id, "partial");
+    await proxyRow(run.id, "unpriced");
+    expect(await computeRunPricingStatus(run.id, ctx.orgId)).toBe("unpriced");
+  });
+
+  it("partial wins over priced", async () => {
+    const run = await seedTestRun();
+    await proxyRow(run.id, "priced");
+    await proxyRow(run.id, "partial");
+    expect(await computeRunPricingStatus(run.id, ctx.orgId)).toBe("partial");
+  });
+
+  it("all priced → priced", async () => {
+    const run = await seedTestRun();
+    await proxyRow(run.id, "priced");
+    await proxyRow(run.id, "priced");
+    expect(await computeRunPricingStatus(run.id, ctx.orgId)).toBe("priced");
+  });
+
+  it("no rows, or rows carrying no verdict → null (never coerced to priced)", async () => {
+    const empty = await seedTestRun();
+    expect(await computeRunPricingStatus(empty.id, ctx.orgId)).toBeNull();
+
+    const unstamped = await seedTestRun();
+    await proxyRow(unstamped.id, null);
+    expect(await computeRunPricingStatus(unstamped.id, ctx.orgId)).toBeNull();
+  });
+
+  it("ignores the excluded remote runner mirror — same filter as the cost", async () => {
+    // The mirror duplicates spend already covered by the proxy rows, so it is
+    // invisible to `computeRunCost`; its verdict must be invisible here too,
+    // or a run would be flagged on a row nobody billed.
+    const run = await seedTestRun();
+    await proxyRow(run.id, "priced");
+    await recordLlmUsage(
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId: run.id,
+        credentialSource: null, // remote mirror
+        inputTokens: 20,
+        outputTokens: 20,
+        costUsd: 0.02,
+        pricingStatus: "unpriced",
+      },
+      { onConflict: "runner-monotonic" },
+    );
+
+    expect(await computeRunPricingStatus(run.id, ctx.orgId)).toBe("priced");
+    expect(await computeRunCost(run.id, ctx.orgId)).toBeCloseTo(0.01, 10);
+  });
+
+  it("is tenant-scoped like the cost: another org's id yields null", async () => {
+    const run = await seedTestRun();
+    await proxyRow(run.id, "unpriced");
+    expect(
+      await computeRunPricingStatus(run.id, "00000000-0000-4000-a000-000000000009"),
+    ).toBeNull();
   });
 });

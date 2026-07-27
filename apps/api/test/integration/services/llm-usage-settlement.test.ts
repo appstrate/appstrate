@@ -168,6 +168,7 @@ async function settledRunWithLateSnapshot(
     inputTokens: 100,
     outputTokens: 50,
     costUsd: 2,
+    pricingStatus: "priced" as const,
   };
   await recordLlmUsage(stored, { onConflict: "runner-monotonic" });
   await synthesisedFinalize(runId);
@@ -232,6 +233,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 100,
         outputTokens: 50,
         costUsd: 5,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -266,6 +268,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 400,
         outputTokens: 200,
         costUsd: 9,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -356,6 +359,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
       inputTokens: 100,
       outputTokens: 50,
       costUsd: 3,
+      pricingStatus: "priced" as const,
     };
     await recordLlmUsage(entry, { onConflict: "runner-monotonic" });
     await synthesisedFinalize(runId);
@@ -391,6 +395,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         outputTokens: 50,
         cacheWriteTokens: 10,
         costUsd: 2,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -406,6 +411,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         outputTokens: 50,
         cacheWriteTokens: 30,
         costUsd: 2,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -510,6 +516,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 100,
         outputTokens: 50,
         costUsd: 5,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -522,6 +529,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 400,
         outputTokens: 200,
         costUsd: 9,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -582,6 +590,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 100,
         outputTokens: 50,
         costUsd: 3,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -668,6 +677,7 @@ describe("llm_usage durable retry — runner rows are never deferred", () => {
           inputTokens: 10,
           outputTokens: 5,
           costUsd: 0.5,
+          pricingStatus: "priced" as const,
         },
         { executor: failingExecutor, onConflict: "runner-monotonic" },
       ),
@@ -696,6 +706,7 @@ describe("llm_usage durable retry — runner rows are never deferred", () => {
         inputTokens: 10,
         outputTokens: 5,
         costUsd: 0.5,
+        pricingStatus: "priced" as const,
         requestId,
       },
       { executor: failingExecutor, onConflict: "proxy-idempotent" },
@@ -756,6 +767,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
         runId,
         credentialSource: "system",
         costUsd: 0.4,
+        pricingStatus: "priced" as const,
         requestId: "req_mirror_1",
       },
       {
@@ -764,6 +776,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
         runId,
         credentialSource: "system",
         costUsd: 0.6,
+        pricingStatus: "priced" as const,
         requestId: "req_mirror_2",
       },
       { source: "runner", orgId: ctx.orgId, runId, credentialSource: null, costUsd: 1.0 },

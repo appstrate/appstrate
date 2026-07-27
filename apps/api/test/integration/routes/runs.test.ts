@@ -511,6 +511,15 @@ describe("Runs API", () => {
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id!));
       expect(row!.modelLabel).toBe("Echo Default GPT");
       expect(row!.modelSource).toBe("org");
+      // Kickoff pricing snapshot (issue #1025 §C) — the platform-side fact the
+      // run's runner ledger row is classified against, resolved here from the
+      // vendored catalog (the org_models row carries no `cost` override). The
+      // RATES are catalog content and refresh weekly; what this pins is that a
+      // priced model reaches the row with a usable rate table at all.
+      expect(row!.modelCost).toMatchObject({
+        input: expect.any(Number),
+        output: expect.any(Number),
+      });
 
       // The trigger leaves an audit trail (run.triggered, actor = the caller).
       const auditRows = await db

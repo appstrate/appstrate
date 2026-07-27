@@ -493,3 +493,74 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
     expect(entry.requestId?.startsWith(UNPARSED_USAGE_REQUEST_ID_PREFIX)).toBe(true);
   });
 });
+
+/**
+ * Pricing provenance on the proxy row (issue #1025 §B). `cost_usd = 0` is
+ * unattributable on its own; these pin which of the three verdicts each shape
+ * of (rates × usage) produces, and — critically — that the PARSE gap and the
+ * PRICING gap stay independent: the `usage-unparsed:` marker lives on
+ * `request_id`, so `pricing_status` keeps answering only "did the platform have
+ * rates for this model".
+ */
+describe("recordProxyUsage — pricing provenance", () => {
+  async function entryFor(
+    resolved: Partial<ResolvedModel>,
+    usage: UpstreamUsage | null,
+  ): Promise<LlmUsageEntry> {
+    const written: LlmUsageEntry[] = [];
+    await recordProxyUsage(
+      {
+        principal: { kind: "jwt_user", userId: "u1", orgId: `org_${crypto.randomUUID()}` },
+        runId: null,
+        chatSessionId: null,
+        presetId: `preset_${crypto.randomUUID()}`,
+        resolved: {
+          modelId: "gpt-4o",
+          apiShape: "openai-completions",
+          ...resolved,
+        } as ResolvedModel,
+        usage,
+        durationMs: 10,
+      },
+      async (entry) => {
+        written.push(entry);
+      },
+    );
+    return written[0]!;
+  }
+
+  it("stamps `priced` when every bucket that carried tokens had a rate", async () => {
+    const entry = await entryFor(
+      { cost: { input: 3, output: 15, cacheRead: 0.3 } },
+      { inputTokens: 100, outputTokens: 50, cacheReadTokens: 20 },
+    );
+    expect(entry.pricingStatus).toBe("priced");
+  });
+
+  it("stamps `unpriced` when the model resolved no rates at all — the $0 is an absence", async () => {
+    const entry = await entryFor({ cost: null }, { inputTokens: 1000, outputTokens: 1000 });
+    expect(entry.pricingStatus).toBe("unpriced");
+    expect(entry.costUsd).toBe(0);
+  });
+
+  it("stamps `partial` when cached tokens were reported with no cache-read rate", async () => {
+    const entry = await entryFor(
+      { cost: { input: 3, output: 15 } },
+      { inputTokens: 100, outputTokens: 50, cacheReadTokens: 900 },
+    );
+    expect(entry.pricingStatus).toBe("partial");
+  });
+
+  it("keeps the parse gap and the pricing gap separable on an unparseable-usage row", async () => {
+    // Same zero-token row, two different models: the marker on `request_id`
+    // reports the parse failure in BOTH, while `pricing_status` reports only
+    // whether rates existed. Folding one into the other would lose a signal.
+    const priced = await entryFor({ cost: { input: 3, output: 15 } }, null);
+    expect(priced.requestId?.startsWith(UNPARSED_USAGE_REQUEST_ID_PREFIX)).toBe(true);
+    expect(priced.pricingStatus).toBe("priced");
+
+    const unpriced = await entryFor({ cost: null }, null);
+    expect(unpriced.requestId?.startsWith(UNPARSED_USAGE_REQUEST_ID_PREFIX)).toBe(true);
+    expect(unpriced.pricingStatus).toBe("unpriced");
+  });
+});

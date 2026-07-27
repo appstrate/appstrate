@@ -39,7 +39,7 @@ import {
   recordDocumentPartialPublication,
 } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
-import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
+import { updateRun, appendRunLog, computeRunCost, computeRunPricingStatus } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -126,6 +126,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       startedAt: runs.startedAt,
       versionRef: runs.versionRef,
       modelSource: runs.modelSource,
+      modelCost: runs.modelCost,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -478,12 +479,20 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         cost: terminalCost,
         usage: validatedUsage,
         modelSource: run.modelSource,
+        // Same kickoff snapshot the metric path uses, so the terminal write
+        // classifies identically to every snapshot before it.
+        modelCost: run.modelCost,
       },
       { required: true },
     );
   }
 
+  // Cost and its provenance are read together, AFTER the barrier above so both
+  // see the run's terminal runner row, and over the same rows (see
+  // `computeRunPricingStatus`). Caching only the number would leave the UI
+  // rendering a confident `$0.0000` for a run nothing could price.
   const cost = await computeRunCost(run.id, run.orgId);
+  const costPricingStatus = await computeRunPricingStatus(run.id, run.orgId);
   const now = new Date();
   const packageEphemeral = isInlineShadowPackageId(run.packageId);
   // Wall-clock duration as the authoritative value. Runners (PiRunner,
@@ -533,6 +542,12 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         completedAt: now,
         duration: resolvedDurationMs,
         cost: cost > 0 ? cost : null,
+        // Written even when `cost` is nulled above: a zero cost with an
+        // `unpriced` verdict is the whole point — the absence of a number and
+        // the absence of PRICING are different facts, and only the second one
+        // is a platform gap. Left untouched (NULL) when no ledger row of this
+        // run carries a status.
+        ...(costPricingStatus !== null ? { costPricingStatus } : {}),
         sinkClosedAt: now,
         // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
         // sidecar `run_history` tool. The unified `package_persistence`
@@ -982,6 +997,7 @@ async function persistEventAndAdvance(
     await persistRunEvent(tx, scope, run.id, event, {
       writeLedger: true,
       modelSource: run.modelSource,
+      modelCost: run.modelCost,
     });
 
     // No runner emits `run.started`, so flip status → running on the

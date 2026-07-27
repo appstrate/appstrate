@@ -20,6 +20,7 @@ import { installPackage } from "../../../src/services/application-packages.ts";
 import { PersistingEventSink } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import { _resetRunMetricBroadcasterForTests } from "../../../src/services/run-metric-broadcaster.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
+import type { ModelCost } from "@appstrate/core/module";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
 import { runLogs, llmUsage, runs } from "@appstrate/db/schema";
@@ -280,6 +281,96 @@ describe("PersistingEventSink", () => {
     // The token snapshot still lands on runs.tokenUsage even without ledger.
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
     expect(runRow?.tokenUsage).toMatchObject({ input_tokens: 10, output_tokens: 5 });
+  });
+
+  // Pricing provenance of the RUNNER row (issue #1025 §C). The container
+  // computes the cost it reports, so the verdict is derived here from the
+  // platform's own kickoff snapshot (`runs.model_cost` → `opts.modelCost`),
+  // never from the container.
+  describe("runner row pricing provenance", () => {
+    function ledgerSink(opts: { modelSource: string | null; modelCost: ModelCost | null }) {
+      return new PersistingEventSink({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        runId,
+        writeLedger: true,
+        modelSource: opts.modelSource,
+        modelCost: opts.modelCost,
+      });
+    }
+
+    async function runnerRow() {
+      const [row] = await db
+        .select()
+        .from(llmUsage)
+        .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+      return row;
+    }
+
+    it("platform run whose model resolved NO pricing → `unpriced`, not a silent $0", async () => {
+      const sink = ledgerSink({ modelSource: "system", modelCost: null });
+      await sink.handle(
+        event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0 }),
+      );
+
+      const row = await runnerRow();
+      expect(row!.costUsd).toBe(0);
+      expect(row!.pricingStatus).toBe("unpriced");
+    });
+
+    it("platform run with rates → `priced`", async () => {
+      const sink = ledgerSink({ modelSource: "org", modelCost: { input: 3, output: 15 } });
+      await sink.handle(
+        event("appstrate.metric", {
+          usage: { input_tokens: 900, output_tokens: 300 },
+          cost: 0.007,
+        }),
+      );
+
+      expect((await runnerRow())!.pricingStatus).toBe("priced");
+    });
+
+    it("platform run that read cache with no cache-read rate → `partial`", async () => {
+      const sink = ledgerSink({ modelSource: "system", modelCost: { input: 3, output: 15 } });
+      await sink.handle(
+        event("appstrate.metric", {
+          usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 4000 },
+          cost: 0.001,
+        }),
+      );
+
+      expect((await runnerRow())!.pricingStatus).toBe("partial");
+    });
+
+    it("remote run (model_source NULL) → NULL status, never `unpriced`", async () => {
+      // A NULL model source IS the remote-run signature (it resolved no
+      // platform model — the same fact `notRunnerMirrorSql` keys on). Its
+      // inference was accounted elsewhere; stamping a platform pricing gap on
+      // it would mislabel every remote run.
+      const sink = ledgerSink({ modelSource: null, modelCost: null });
+      await sink.handle(
+        event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0.02 }),
+      );
+
+      const row = await runnerRow();
+      expect(row!.credentialSource).toBeNull();
+      expect(row!.pricingStatus).toBeNull();
+    });
+
+    it("a run with tokens but NO reported cost still gets a marked row", async () => {
+      // `writeRunnerLedgerRow` only skips events with neither usage nor cost —
+      // this row lands at cost 0, and it is exactly the one the status exists
+      // to qualify.
+      const sink = ledgerSink({ modelSource: "system", modelCost: null });
+      await sink.handle(
+        event("appstrate.metric", { usage: { input_tokens: 42, output_tokens: 7 } }),
+      );
+
+      const row = await runnerRow();
+      expect(row).toBeDefined();
+      expect(row!.costUsd).toBe(0);
+      expect(row!.inputTokens).toBe(42);
+      expect(row!.pricingStatus).toBe("unpriced");
+    });
   });
 
   it("finalize is a no-op on the persisting sink", async () => {

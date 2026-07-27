@@ -35,6 +35,7 @@ import {
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
+  type PricingStatus,
 } from "@appstrate/db/schema";
 import { extractDocumentIds } from "@appstrate/core/document-uri";
 import { getEnv } from "@appstrate/env";
@@ -53,7 +54,7 @@ import { ApiError, conflict, invalidRequest } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedDocuments } from "../documents.ts";
 import { normalizeScope } from "@appstrate/core/naming";
-import type { LlmUsageLedgerRow } from "@appstrate/core/module";
+import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 import type {
   RunWireDto,
@@ -404,6 +405,13 @@ interface CreateRunParams {
   proxyLabel?: string;
   modelLabel?: string;
   modelSource?: string;
+  /**
+   * Per-1M-token rates the run is launched with (the `MODEL_COST` the container
+   * receives). Persisted so the runner's ledger row — whose `cost` the container
+   * computes — is classified against a platform-side fact rather than the
+   * container's word. Absent/null = the model resolved no pricing.
+   */
+  modelCost?: ModelCost | null;
   apiKeyId?: string;
   /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
   agentScope?: string | null;
@@ -535,6 +543,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       proxyLabel: params.proxyLabel,
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
+      modelCost: params.modelCost ?? null,
       applicationId: scope.applicationId,
       apiKeyId: params.apiKeyId,
       runNumber,
@@ -786,6 +795,45 @@ export async function computeRunCost(runId: string, orgId: string): Promise<numb
     .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, orgId), notRunnerMirrorSql));
 
   return Number(llm?.total ?? 0);
+}
+
+/**
+ * Run-level pricing provenance — the companion of {@link computeRunCost}, over
+ * EXACTLY the same rows (same tenant filter, same {@link notRunnerMirrorSql}
+ * exclusion). A status computed over a different row set than the cost it
+ * qualifies would be its own bug: it could mark a number `priced` on the
+ * strength of a row that number does not contain.
+ *
+ * A run may mix per-call proxy rows with one cumulative runner row, so the
+ * run-level verdict is the WORST of them — any `unpriced` ⟹ unpriced, else any
+ * `partial` ⟹ partial, else `priced`. Worst-of, because the value is consumed as
+ * a confidence claim about the displayed total: one unpriced call is enough to
+ * make that total an undercount, and averaging or majority-voting would hide it.
+ *
+ * `null` when no row of the run carries a status at all — a run finalized before
+ * the column existed, or one that produced no ledger rows. Never coerced to
+ * `priced`.
+ *
+ * Two `bool_or`s in one scan rather than a second query: the aggregate is read
+ * on the finalize hot path, next to `computeRunCost`.
+ */
+export async function computeRunPricingStatus(
+  runId: string,
+  orgId: string,
+): Promise<PricingStatus | null> {
+  const [row] = await db
+    .select({
+      anyUnpriced: sql<boolean | null>`bool_or(${llmUsage.pricingStatus} = 'unpriced')`,
+      anyPartial: sql<boolean | null>`bool_or(${llmUsage.pricingStatus} = 'partial')`,
+      anyStatus: sql<boolean | null>`bool_or(${llmUsage.pricingStatus} IS NOT NULL)`,
+    })
+    .from(llmUsage)
+    .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, orgId), notRunnerMirrorSql));
+
+  if (!row?.anyStatus) return null;
+  if (row.anyUnpriced) return "unpriced";
+  if (row.anyPartial) return "partial";
+  return "priced";
 }
 
 /**

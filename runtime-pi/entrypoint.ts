@@ -126,6 +126,16 @@ function buildInContainerBundle(prompt: string): Bundle {
  * to exit with — `null` when the caller may not exit (non-fatal emitError).
  * Only pass error messages already destined for the sink — never secrets.
  */
+/**
+ * One pino-shaped JSON line on stdout — the shape every structured diagnostic
+ * in this file already uses (`{"level":…,"event":…,…}`), captured by the
+ * platform's container log buffer and surfaced on the run's audit trail.
+ * Factored out so a new caller cannot invent a second shape.
+ */
+function logLine(level: "warn" | "error", event: string, data?: Record<string, unknown>): void {
+  process.stdout.write(`${JSON.stringify({ level, event, ...(data ?? {}) })}\n`);
+}
+
 function lastResortStderr(exitCode: number | null, reason: string, cause?: unknown): void {
   try {
     const line =
@@ -160,6 +170,15 @@ try {
     lastResortStderr(1, "env validation failed", err);
   }
   process.exit(1);
+}
+
+// Non-fatal env diagnostics (`env.warnings`) — emitted the moment parsing
+// SUCCEEDS, before anything else runs, so a degraded-but-valid configuration is
+// visible at the top of the run's log. The fatal channel above is untouched:
+// these are conditions the run can legitimately proceed under (today: no
+// `MODEL_COST`, i.e. every cost this run reports will be 0).
+for (const warning of env.warnings) {
+  logLine("warn", "runtime_env_warning", { warning });
 }
 
 // Zero-knowledge, part 1 (part 2 is `delete process.env.SIDECAR_URL` below):
@@ -512,14 +531,8 @@ const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
       url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
       headers: { Host: "sidecar" },
       logger: {
-        warn: (msg, data) =>
-          process.stdout.write(
-            `${JSON.stringify({ level: "warn", event: msg, ...(data ?? {}) })}\n`,
-          ),
-        error: (msg, data) =>
-          process.stdout.write(
-            `${JSON.stringify({ level: "error", event: msg, ...(data ?? {}) })}\n`,
-          ),
+        warn: (msg, data) => logLine("warn", msg, data),
+        error: (msg, data) => logLine("error", msg, data),
       },
     })
   : undefined;
@@ -559,20 +572,13 @@ if (sidecarUrl) {
           baseMs: 50,
           capMs: 1_000,
           onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
-            // pino-shaped JSON line — stdout is captured by the platform's
-            // container log buffer, so this lands on the same audit trail
-            // operators use for run diagnostics.
-            process.stdout.write(
-              `${JSON.stringify({
-                level: "warn",
-                event: "mcp_connect_retry",
-                url,
-                attempt,
-                delayMs,
-                errorCode: errorCode ?? null,
-                error: error instanceof Error ? error.message : String(error),
-              })}\n`,
-            );
+            logLine("warn", "mcp_connect_retry", {
+              url,
+              attempt,
+              delayMs,
+              errorCode: errorCode ?? null,
+              error: error instanceof Error ? error.message : String(error),
+            });
           },
         },
       });
@@ -868,10 +874,7 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
     emit: (event) => {
       void bridgedSink.handle(event as RunEvent);
     },
-    logWarn: (message, data) =>
-      process.stdout.write(
-        `${JSON.stringify({ level: "warn", event: message, ...(data ?? {}) })}\n`,
-      ),
+    logWarn: (message, data) => logLine("warn", message, data),
   }).catch((err) => {
     // sweepOutputs collects per-file failures itself; this guards the scan
     // itself so a sweep fault can never abort finalize.

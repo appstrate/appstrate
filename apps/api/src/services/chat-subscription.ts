@@ -25,6 +25,7 @@ import type { UsageRejection } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeTokenCost } from "@appstrate/afps-runtime/runner";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
+import { resolvePricingStatus } from "./pricing-provenance.ts";
 import { loadModel, modelNeedsReconnection } from "./org-models.ts";
 import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
@@ -151,6 +152,29 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
     record.cacheWriteTokens === undefined || record.cacheWriteTokens === null
       ? null
       : Math.max(0, record.cacheWriteTokens);
+  // The four buckets as the shared helpers consume them — built once and reused
+  // for both the cost and its provenance so the two can never describe
+  // different numbers.
+  const usage = {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    cache_read_input_tokens: cacheReadTokens ?? 0,
+    cache_creation_input_tokens: cacheWriteTokens ?? 0,
+  };
+  // NOT a "subscription models are free" carve-out: a subscription preset
+  // (codex → openai, claude-code → anthropic) resolves its rates through
+  // `catalogProviderId`, so `record.cost` is non-null and the turn classifies
+  // `priced`. That price is an imputed API-equivalent, deliberately — the org
+  // spends its own subscription, and the platform still records what the same
+  // consumption would have cost. `unpriced` on such a turn would be a bug, not
+  // a truth: it would mark a row the platform CAN price as unpriceable.
+  const pricingStatus = resolvePricingStatus({
+    orgId: record.orgId,
+    model: record.presetId,
+    usage,
+    cost: record.cost,
+    context: { source: "chat", chatSessionId: record.chatSessionId, realModel: record.modelId },
+  });
   try {
     await recordLlmUsageReliably(
       {
@@ -166,15 +190,8 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         outputTokens,
         cacheReadTokens,
         cacheWriteTokens,
-        costUsd: computeTokenCost(
-          {
-            input_tokens: inputTokens,
-            output_tokens: outputTokens,
-            cache_read_input_tokens: cacheReadTokens ?? 0,
-            cache_creation_input_tokens: cacheWriteTokens ?? 0,
-          },
-          record.cost,
-        ),
+        costUsd: computeTokenCost(usage, record.cost),
+        pricingStatus,
         durationMs: record.durationMs,
         // Stable across durable retries; the partial unique index makes an
         // uncertain post-commit acknowledgement idempotent.
