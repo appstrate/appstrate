@@ -6,7 +6,7 @@ import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
-import { bootCritical, bootBackground } from "./lib/boot.ts";
+import { bootCritical, bootBackground, probeUsercontentReachability } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
 import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
@@ -431,6 +431,10 @@ void bootBackground()
   .then(() => {
     markServerReady();
     logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
+    // Fire-and-forget reachability probe for USERCONTENT_URL (issue #1001).
+    // Never awaited, never fatal; runs after readiness so it can't race the
+    // boot gate's 503-until-ready window against a hairpin route.
+    void probeUsercontentReachability();
   })
   .catch((err: unknown) => {
     logger.error("Boot failed — exiting", {
