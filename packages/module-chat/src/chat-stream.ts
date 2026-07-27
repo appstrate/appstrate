@@ -265,17 +265,22 @@ export interface ArmedTurnDeadline {
   /**
    * The turn's abort reason. Read this instead of `signal.reason`.
    *
-   * Bun 1.3.11 does not keep a strong reference to an abort reason: whenever
-   * nothing ELSE holds the object, `signal.reason` reads back `undefined` a tick
-   * later. It is NOT specific to timers or to forced GC — a plain synchronous
-   * `controller.abort(new Error(…))` loses it just the same, and Node keeps it in
-   * every case. (Same family as oven-sh/bun#16748, which fixed a JSAbortSignal
-   * being collected too early because Bun bypasses EventTarget's listeners.)
+   * UPSTREAM BUG, already fixed — oven-sh/bun#34636, fixed by oven-sh/bun#32747
+   * ("AbortSignal: emit write barrier when storing abort reason", commit
+   * b4e9605). `AbortSignal::markAborted` stored the reason without a GC write
+   * barrier, so a concurrent collector that had already scanned the signal
+   * wrapper could collect the reason while the signal itself stayed alive:
+   * `signal.aborted` true, `signal.reason` `undefined`.
    *
-   * A collected reason would silently downgrade the ceiling to an untagged stop
-   * — exactly the silent ending this path exists to prevent — so the ceiling
-   * retains its own error and returns it once it has fired. Retaining the object
-   * is also the workaround: a reason someone still holds survives.
+   * Reproduced here on Bun 1.3.11 with a plain synchronous
+   * `controller.abort(new Error(…))` — it is NOT specific to timers or to forced
+   * GC, the trigger is simply that nothing else holds the object. Node keeps it
+   * in every case. A collected reason would silently downgrade the ceiling to an
+   * untagged stop — exactly the silent ending this path exists to prevent.
+   *
+   * The fix landed after v1.3.14, so it is not in the version this repo pins.
+   * REMOVE THIS ACCESSOR (and read `signal.reason` directly) once the toolchain
+   * moves past the first release containing #32747.
    */
   abortReason(): unknown;
   /** Cancel the timer. MUST be called on every exit path of the turn. */
