@@ -32,17 +32,6 @@ export interface ConnectContext {
   authKey: string;
   /** Reconnect / scope-upgrade target. Absent on a fresh connect. */
   connectionId?: string;
-  /**
-   * Does the identity driving this connect hold `integrations:install`?
-   *
-   * Connecting a credential is a PERSONAL act (`integrations:connect`, granted
-   * to members); activating an integration is a TENANT-WIDE one
-   * (`integrations:install`, admin-only). The persist layer auto-activates on
-   * connect only when this is `true`, so the convenience never GRANTS a
-   * capability the actor lacks. Resolved by the route from the authenticated
-   * context — never inferred in the service layer. Absent = `false`.
-   */
-  mayActivate?: boolean;
 }
 
 /** Options for the interactive `begin` step (OAuth2 authorize URL). */
@@ -125,12 +114,6 @@ export function connectionTarget(ctx: ConnectContext): PersistTarget {
         // zero rows instead of overwriting an unrelated connection.
         packageId: ctx.integrationId,
         authKey: ctx.authKey,
-        mayActivate: ctx.mayActivate === true,
       }
-    : {
-        kind: "insert",
-        scope: ctx.scope,
-        actor: ctx.actor,
-        mayActivate: ctx.mayActivate === true,
-      };
+    : { kind: "insert", scope: ctx.scope, actor: ctx.actor };
 }

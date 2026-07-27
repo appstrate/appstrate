@@ -71,18 +71,6 @@ export interface OAuthStateRecord {
      * INSERT.
      */
     connectionId?: string;
-    /**
-     * Did the caller who STARTED this flow hold `integrations:install`?
-     *
-     * The callback is stateless — it has no session, so it cannot resolve the
-     * caller's permissions. The decision is therefore taken at initiate time
-     * (where the authenticated context exists) and carried here, inside the
-     * server-side state record, so it cannot be forged by the browser.
-     * Consumed by the connection writer to decide whether connecting may also
-     * ACTIVATE the integration application-wide (an admin-only operation).
-     * Absent = no, always.
-     */
-    mayActivate?: boolean;
   };
 }
 

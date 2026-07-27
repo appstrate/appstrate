@@ -227,27 +227,6 @@ async function assertConnectionCreationAllowed(
 }
 
 /**
- * May THIS caller activate an integration application-wide?
- *
- * Connecting a credential is a personal act (`integrations:connect`, granted to
- * members and to end-users via the hosted portal). Activating an integration
- * installs it for every actor and every agent in the application — an
- * admin-only act (`integrations:install`, absent from `MEMBER_PERMISSIONS`).
- * Auto-activation on connect is a convenience for someone who could have
- * clicked "Activate" themselves; it must never GRANT the capability.
- *
- * Read from the resolved request permissions — the same set `requirePermission`
- * enforces with — so an API key limited to `integrations:connect` is correctly
- * refused even when its creator is an owner. End-users are excluded explicitly:
- * they are not org members, hold no org role, and must never mutate what the
- * application has installed. Absent context (no permission set) → `false`.
- */
-function callerMayActivateIntegrations(c: import("hono").Context<AppEnv>): boolean {
-  if (c.get("endUser")) return false;
-  return c.get("permissions")?.has("integrations:install") ?? false;
-}
-
-/**
  * Guard a client-supplied reconnect target (`connection_id`) against IDOR: the
  * connect flows honor an arbitrary connection id to renew a credential in
  * place, so before that id is trusted we must confirm it is a connection the
@@ -367,9 +346,6 @@ export function createIntegrationsRouter() {
           actor: result.actor,
           integrationId: result.packageId,
           authKey: result.authKey,
-          // No session on this route — the capability was decided at initiate
-          // time and rode the server-side OAuth state record here.
-          mayActivate: result.mayActivate === true,
           ...(result.connectionId ? { connectionId: result.connectionId } : {}),
         },
         { kind: "oauth2-result", result },
@@ -640,7 +616,6 @@ export function createIntegrationsRouter() {
             actor,
             integrationId: packageId,
             authKey,
-            mayActivate: callerMayActivateIntegrations(c),
             ...(body.connection_id ? { connectionId: body.connection_id } : {}),
           },
           { kind: "fields", credentials: body.credentials },
@@ -720,9 +695,6 @@ export function createIntegrationsRouter() {
           actor,
           integrationId: packageId,
           authKey,
-          // Decided here, while the request is authenticated; the strategy
-          // stores it in the OAuth state for the stateless callback.
-          mayActivate: callerMayActivateIntegrations(c),
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
         },
         {
@@ -764,10 +736,6 @@ export function createIntegrationsRouter() {
         ...(actor.type === "user" ? { user_id: actor.id } : { end_user_id: actor.id }),
         package_id: packageId,
         auth_key: authKey,
-        // Capability snapshot of the MINTER, signed into the token: the hosted
-        // surface is unauthenticated, so whoever opens the link inherits this
-        // decision rather than one derived from their own (absent) session.
-        ...(callerMayActivateIntegrations(c) ? { may_activate: true } : {}),
         ...(body.connection_id ? { connection_id: body.connection_id } : {}),
         ...(body.scopes ? { scopes: body.scopes } : {}),
         ...(body.force_account_select ? { force_account_select: true } : {}),
@@ -838,9 +806,6 @@ export function createIntegrationsRouter() {
             actor,
             integrationId: claims.package_id,
             authKey: claims.auth_key,
-            // Carried from the signed token (minter's capability) into the
-            // OAuth state — this request has no session of its own.
-            mayActivate: claims.may_activate === true,
             ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
           },
           { scopes, forceAccountSelect: claims.force_account_select ?? false },
@@ -909,10 +874,6 @@ export function createIntegrationsRouter() {
           actor,
           integrationId: claims.package_id,
           authKey: claims.auth_key,
-          // Same signed capability snapshot as the OAuth branch above. The page
-          // cookie is minted from the original token, so this survives the
-          // token → cookie hop without ever being client-supplied.
-          mayActivate: claims.may_activate === true,
           ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
         },
         { kind: "fields", credentials: body.credentials },

@@ -54,12 +54,17 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toMatch(/BEFORE launching the next step/);
   });
 
-  it("keeps the no-retry rule on integration_not_active (activation is admin-only)", () => {
-    // Auto-activation on connect requires `integrations:install`, which members
-    // and end-users lack — for them the 412 still reproduces, and a retry or a
-    // second connect flow can never clear it.
+  it("routes integration_not_active to activation, never to a retry", () => {
+    // Retrying the run or re-running the connect flow can never clear a 412:
+    // connecting is personal, activating is application-wide. Activation IS
+    // reachable (`activateIntegration` is in the platform's operation surface),
+    // and RBAC decides who may call it — an admin fixes it in one step, a member
+    // gets a 403 and is told to ask one. Nothing in the chat pre-computes that
+    // right: quoting the operation instead of asserting the outcome is what
+    // keeps this honest for both roles.
     expect(SYSTEM_PROMPT).toContain("integration_not_active");
     expect(SYSTEM_PROMPT).toMatch(/do NOT re-run and do NOT restart the connect flow/);
+    expect(SYSTEM_PROMPT).toContain("activateIntegration");
     expect(SYSTEM_PROMPT).toMatch(/administrator must activate/);
   });
 

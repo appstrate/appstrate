@@ -143,13 +143,6 @@ export interface InitiateIntegrationOAuthInput {
    */
   connectionId?: string;
   /**
-   * Whether the caller starting this flow may activate the integration
-   * application-wide (holds `integrations:install`). Carried into the OAuth
-   * state so the stateless callback can honour it without re-resolving
-   * permissions it does not have. Absent = no.
-   */
-  mayActivate?: boolean;
-  /**
    * Optional discovery hook injection (testing seam). Production callers omit
    * it; the default fetches `${issuer}/.well-known/openid-configuration`.
    */
@@ -250,7 +243,6 @@ export async function initiateIntegrationOAuth(
       clientSecret: input.clientSecret,
       ...(input.clientRef ? { clientRef: input.clientRef } : {}),
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-      ...(input.mayActivate ? { mayActivate: true } : {}),
     },
   };
   await store.set(state, record, OAUTH_STATE_TTL_SECONDS);
@@ -307,12 +299,6 @@ export interface IntegrationOAuthCallbackResult {
    * token refresh resolves the same client credentials.
    */
   clientRef?: string;
-  /**
-   * Pass-through of the initiate-time capability decision: may the identity
-   * that started this flow activate the integration application-wide? The
-   * persist layer treats an absent value as `false` (fails closed).
-   */
-  mayActivate?: boolean;
 }
 
 /**
@@ -395,6 +381,5 @@ export async function handleIntegrationOAuthCallback(
     tokenResponse: tokenData,
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),
     ...(integration.clientRef ? { clientRef: integration.clientRef } : {}),
-    ...(integration.mayActivate ? { mayActivate: true } : {}),
   };
 }

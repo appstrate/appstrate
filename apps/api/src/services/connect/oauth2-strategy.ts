@@ -132,10 +132,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       applicationId: ctx.scope.applicationId,
       actor: ctx.actor,
       forceAccountSelect: opts.forceAccountSelect ?? false,
-      // Capture the caller's activation authority NOW (the request is
-      // authenticated) and carry it in the server-side state record — the
-      // callback that performs the write has no session to resolve it from.
-      ...(ctx.mayActivate === true ? { mayActivate: true } : {}),
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
     });
     return { redirectUrl: result.authUrl, state: result.state };
@@ -338,10 +334,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       scopesGranted: result.scopesGranted,
       expiresAt: result.expiresAt ? new Date(result.expiresAt) : null,
       actor: ctx.actor,
-      // The stateless callback has no session: the authority to activate was
-      // decided at initiate time and travelled inside the signed OAuth state
-      // (`result.mayActivate`), which the callback route puts on `ctx`.
-      mayActivate: ctx.mayActivate === true,
       ...(result.connectionId ? { connectionId: result.connectionId } : {}),
       ...(result.clientRef ? { clientRef: result.clientRef } : {}),
     });

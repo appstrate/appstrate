@@ -77,7 +77,6 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       identityClaims: { ...identityClaims, ...identity.identityClaims },
       expiresAt: expiresAt ? new Date(expiresAt) : null,
       actor: ctx.actor,
-      mayActivate: ctx.mayActivate === true,
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
     });
   }
