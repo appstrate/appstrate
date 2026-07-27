@@ -1423,6 +1423,7 @@ export const schemas = {
           "Never `input`/`output`/`default`/`group`: React Flow reserves those names for its built-in nodes and styles them, which draws a second box behind the card. Hence `agent_input` / `agent_output`.",
         enum: [
           "schedules",
+          "config",
           "agent_input",
           "agent",
           "model",

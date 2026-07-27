@@ -60,6 +60,7 @@ import { getActor } from "../lib/actor.ts";
  */
 export type AgentMapNodeType =
   | "schedules"
+  | "config"
   | "agent_input"
   | "agent"
   | "model"
@@ -207,9 +208,12 @@ function stackColumn(x: number, cards: ColumnCard[]): AgentMapNode[] {
  * dropped.
  */
 function routeDiagnostic(field: string): { nodeId: string | null; itemId: string | null } {
-  if (field === "prompt" || field === "config" || field.startsWith("config.")) {
-    return { nodeId: "agent", itemId: null };
-  }
+  if (field === "prompt") return { nodeId: "agent", itemId: null };
+  // Config has its own card now, so a bad value lands on the exact setting
+  // instead of being lumped onto the agent card with the empty-prompt error.
+  if (field === "config") return { nodeId: "config", itemId: null };
+  const configKey = field.match(/^config\.(.+)$/);
+  if (configKey) return { nodeId: "config", itemId: configKey[1]! };
   const skill = field.match(/^dependencies\.skills\.(.+)$/);
   if (skill) return { nodeId: "skills", itemId: skill[1]! };
   const integration = field.match(/^integrations\.(.+)$/);
@@ -256,13 +260,28 @@ function toDiagnostic(e: ValidationFieldError): AgentMapDiagnostic {
  * Only the first level is projected: a card is a summary, and nested objects
  * belong to the schema editor, which the card's action opens.
  */
-function contractFields(wrapper: { schema?: unknown } | null | undefined) {
+function contractFields(
+  wrapper: { schema?: unknown; property_order?: unknown } | null | undefined,
+) {
   const schema = wrapper?.schema ? asJSONSchemaObject(wrapper.schema) : null;
   if (!schema?.properties) return [];
   const required = new Set(
     Array.isArray(schema.required) ? schema.required.map((r) => String(r)) : [],
   );
-  return Object.entries(schema.properties).map(([name, definition]) => {
+  // AFPS §3.4 `property_order` is the author's intended order, and it is the ONLY
+  // thing that can carry it: manifests are stored as `jsonb`, which normalises
+  // key order (shortest first, then bytewise), so `Object.entries` hands back
+  // "seuil" before "destinataire" no matter how the manifest was written.
+  // Unlisted fields keep whatever order the storage gives, after the listed ones.
+  const order = Array.isArray(wrapper?.property_order)
+    ? wrapper.property_order.map((k) => String(k))
+    : [];
+  const rank = (name: string) => {
+    const i = order.indexOf(name);
+    return i === -1 ? order.length : i;
+  };
+  const entries = Object.entries(schema.properties).sort(([a], [b]) => rank(a) - rank(b));
+  return entries.map(([name, definition]) => {
     const field = (definition ?? {}) as { type?: unknown; title?: unknown };
     return {
       name,
@@ -275,6 +294,22 @@ function contractFields(wrapper: { schema?: unknown } | null | undefined) {
       required: required.has(name),
     };
   });
+}
+
+/**
+ * One-line rendering of a config value for the card.
+ *
+ * `null` means "not set" and stays null so the renderer can say so in the
+ * reader's language rather than printing the word. Objects and arrays are
+ * compacted and clipped: a card row is a summary, and the full value belongs to
+ * the settings form the row opens.
+ */
+function serialiseConfigValue(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  const json = JSON.stringify(value);
+  return json.length > 60 ? `${json.slice(0, 57)}…` : json;
 }
 
 function scheduleCard(schedules: EnrichedSchedule[]) {
@@ -414,6 +449,25 @@ export async function buildAgentMap(
         },
       },
       itemCount: 1,
+    },
+    // Settings, not a flow: `config` is fixed once per installation, where
+    // `input` is handed over at every run. That is why it sits beside the model
+    // — also a per-application setting — rather than on the agent's axis.
+    {
+      node: {
+        id: "config",
+        type: "config",
+        data: {
+          items: contractFields(agent.manifest.config).map((field) => ({
+            ...field,
+            // The declared shape is only half of it: what makes a config card
+            // worth reading is the value this application actually runs with,
+            // defaults already merged in.
+            value: serialiseConfigValue(effectiveConfig[field.name]),
+          })),
+        },
+      },
+      itemCount: Object.keys(configSchema?.properties ?? {}).length,
     },
   ];
 

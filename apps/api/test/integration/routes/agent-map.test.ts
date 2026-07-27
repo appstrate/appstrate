@@ -140,6 +140,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
     // offers to add the missing piece.
     expect(nodeIds(body).sort()).toEqual([
       "agent",
+      "config",
       "input",
       "mcp_servers",
       "model",
@@ -149,7 +150,15 @@ describe("GET /api/agents/:scope/:name/map", () => {
       "system_tools",
       "toolbox",
     ]);
-    for (const id of ["schedules", "toolbox", "skills", "mcp_servers", "input", "output"]) {
+    for (const id of [
+      "schedules",
+      "toolbox",
+      "skills",
+      "mcp_servers",
+      "input",
+      "output",
+      "config",
+    ]) {
       expect(body.nodes.find((n) => n.id === id)!.data.items).toEqual([]);
     }
     expect(body.edges.map((e) => e.id).sort()).toEqual([
@@ -159,6 +168,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
       "agent->skills",
       "agent->system_tools",
       "agent->toolbox",
+      "config->agent",
       // The model is an input: it feeds the agent.
       "input->agent",
       "model->agent",
@@ -380,6 +390,48 @@ describe("GET /api/agents/:scope/:name/map", () => {
       Record<string, unknown>
     >;
     expect(tools.map((i) => i.id)).toContain("output");
+  });
+
+  it("config card carries the effective value, and a bad setting routes to its row", async () => {
+    await seedAgentWith(
+      agentManifest({
+        config: {
+          schema: {
+            type: "object",
+            required: ["destinataire"],
+            properties: {
+              destinataire: { type: "string", title: "Destinataire" },
+              seuil: { type: "number", default: 5 },
+            },
+          },
+          // Without this the card would list "seuil" first: manifests live in a
+          // `jsonb` column, which reorders keys by length. AFPS §3.4 carries the
+          // author's order precisely because storage cannot.
+          property_order: ["destinataire", "seuil"],
+        },
+      }),
+    );
+
+    const body = (await (await getMap()).json()) as MapBody;
+
+    const items = body.nodes.find((n) => n.id === "config")!.data.items as Array<
+      Record<string, unknown>
+    >;
+    expect(items).toEqual([
+      // Never set on this installation: null rather than a rendered word, so the
+      // client says "not set" in the reader's own language.
+      { name: "destinataire", title: "Destinataire", type: "string", required: true, value: null },
+      // Not set either, but the schema default applies — so the map shows what a
+      // run would actually use, not what the manifest literally stores.
+      { name: "seuil", title: null, type: "number", required: false, value: "5" },
+    ]);
+
+    // A required setting left empty blocks the run, and that diagnostic belongs
+    // on the setting itself rather than lumped onto the agent card.
+    const diag = body.diagnostics.find((d) => d.field === "config.destinataire");
+    expect(diag).toBeDefined();
+    expect(diag!.node_id).toBe("config");
+    expect(diag!.item_id).toBe("destinataire");
   });
 
   it("unknown agent → 404", async () => {

@@ -30,6 +30,7 @@ import {
   Plus,
   Puzzle,
   Server,
+  SlidersHorizontal,
   Sparkles,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -372,6 +373,10 @@ interface ContractField {
   title: string | null;
   type: string | null;
   required: boolean;
+}
+interface ConfigItem extends ContractField {
+  /** Effective value for this application, defaults merged in. Null = unset. */
+  value: string | null;
 }
 interface AgentData {
   display_name: string;
@@ -730,6 +735,47 @@ function ContractNode({ data, side }: { data: Record<string, unknown>; side: "in
             .filter(Boolean)
             .join(" · ")}
           onClick={edit?.onClick}
+        />
+      ))}
+    </Card>
+  );
+}
+
+/**
+ * Per-installation settings: the `config` schema, each row carrying the value
+ * this application actually runs with.
+ *
+ * Not on the agent's vertical axis, and deliberately so. `input` is handed over
+ * at every run, `config` is set once for this installation — same AFPS shape,
+ * different lifetime. Its neighbour is the model, the other per-application
+ * setting, not the contract.
+ */
+export function ConfigNode({ data }: NodeProps) {
+  const { t } = useTranslation("agents");
+  const list = items<ConfigItem>(data);
+  const diags = diagnostics(data);
+  const edit = cardAction(data, "onPanel", "config", t("map.editConfig"), "edit");
+  return (
+    <Card
+      title={t("map.config")}
+      concept="config"
+      count={list.length}
+      sources={["right"]}
+      isEmpty={list.length === 0}
+      emptyLabel={t("map.emptyConfig")}
+      action={edit}
+    >
+      {list.map((field) => (
+        <Row
+          key={field.name}
+          icon={<SlidersHorizontal className="size-3.5" />}
+          label={field.title ?? field.name}
+          // The value is the point of this card; the type only matters when
+          // there is no value to show yet.
+          sublabel={field.value ?? t("map.configUnset")}
+          dimmed={field.value === null}
+          onClick={edit?.onClick}
+          right={<DiagnosticBadge diagnostics={diagnosticsFor(diags, field.name)} />}
         />
       ))}
     </Card>

@@ -22,7 +22,8 @@ import { Modal } from "../modal";
 import { Spinner } from "../spinner";
 import { AgentConnectionsSection } from "../package-detail/agent-connections-section";
 import { AgentMemoryTab } from "../package-detail/agent-tabs";
-import { ModelSection } from "../package-detail/agent-configuration-tab";
+import { ConfigSection, ModelSection } from "../package-detail/agent-configuration-tab";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 import { ModelFormModal } from "../model-form-modal";
 import { ScheduleForm } from "../schedule-form";
 import { usePackageDetail } from "../../hooks/use-packages";
@@ -31,13 +32,14 @@ import { useCreateSchedule, useScheduleFormDeps } from "../../hooks/use-schedule
 import { agentMapQueryKeyPrefix } from "../../hooks/use-agent-map";
 
 /** Which existing panel to show. */
-export type MapPanelKind = "connections" | "schedules" | "memory" | "model";
+export type MapPanelKind = "connections" | "schedules" | "memory" | "model" | "config";
 
 const TITLE_KEY: Record<MapPanelKind, string> = {
   connections: "detail.tabConnections",
   schedules: "schedule.titleNew",
   memory: "detail.tabMemory",
   model: "map.model",
+  config: "map.editConfig",
 };
 
 /**
@@ -121,6 +123,31 @@ function ModelPanel({ packageId }: { packageId: string }) {
   );
 }
 
+/**
+ * The per-installation settings form.
+ *
+ * `ConfigSection` renders `null` when the agent declares no config schema, and
+ * an agent with no settings has an empty card that should say so rather than
+ * open a blank dialog.
+ */
+function ConfigPanel({ packageId }: { packageId: string }) {
+  const { t } = useTranslation("agents");
+  const { data: detail } = usePackageDetail("agent", packageId);
+  const schema = detail?.config?.schema ? asJSONSchemaObject(detail.config.schema) : null;
+
+  if (!detail) {
+    return (
+      <div className="flex justify-center py-8">
+        <Spinner />
+      </div>
+    );
+  }
+  if (!schema?.properties || Object.keys(schema.properties).length === 0) {
+    return <p className="text-muted-foreground text-sm">{t("map.emptyConfig")}</p>;
+  }
+  return <ConfigSection packageId={packageId} schema={schema} />;
+}
+
 export function MapPanelDialog({
   kind,
   packageId,
@@ -154,6 +181,7 @@ export function MapPanelDialog({
           <NewSchedulePanel packageId={packageId} onDone={closeAndRefresh} />
         )}
         {kind === "memory" && <AgentMemoryTab packageId={packageId} />}
+        {kind === "config" && <ConfigPanel packageId={packageId} />}
         {kind === "model" && <ModelPanel packageId={packageId} />}
         {kind === "connections" &&
           (detail ? (

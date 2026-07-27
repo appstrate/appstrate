@@ -23,7 +23,8 @@ import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 
 // ─── Config Section ─────────────────────────────────────────────────
 
-function ConfigSection({
+/** Exported so the visual map can mount the same settings form in a dialog. */
+export function ConfigSection({
   packageId,
   schema,
   isHistorical,

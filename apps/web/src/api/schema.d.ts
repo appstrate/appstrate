@@ -4927,7 +4927,7 @@ export interface components {
              * @description Never `input`/`output`/`default`/`group`: React Flow reserves those names for its built-in nodes and styles them, which draws a second box behind the card. Hence `agent_input` / `agent_output`.
              * @enum {string}
              */
-            type: "schedules" | "agent_input" | "agent" | "model" | "agent_output" | "toolbox" | "skills" | "mcp_servers" | "system_tools";
+            type: "schedules" | "config" | "agent_input" | "agent" | "model" | "agent_output" | "toolbox" | "skills" | "mcp_servers" | "system_tools";
             position: {
                 x: number;
                 y: number;

@@ -35,6 +35,7 @@ import { MapIssuesDialog } from "./map-issues-dialog";
 import { MapPanelDialog, type MapPanelKind } from "./map-panel-dialog";
 import {
   AgentNode,
+  ConfigNode,
   InputNode,
   McpServersNode,
   ModelNode,
@@ -89,6 +90,7 @@ function useEscape(active: boolean, onEscape: () => void) {
 
 const NODE_TYPES = {
   schedules: SchedulesNode,
+  config: ConfigNode,
   // `agent_input` / `agent_output`, never `input` / `output`: React Flow reserves
   // those names for its built-in nodes and its stylesheet would draw its own box
   // behind ours (measured — `.react-flow__node-input` sets border + padding +
